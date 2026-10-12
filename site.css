@@ -1,0 +1,17 @@
+.preview-section, .start-cards, .closing-note, .site-footer { max-width: 1320px; margin: auto; padding: 3rem; }
+.preview-section { padding-top: 0; }
+.preview-heading { max-width: 720px; }
+.preview-section img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 20px 60px #233c3410; }
+.start-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2.5rem; padding-top: 1rem; }
+.start-cards article { border-top: 1px solid var(--line); padding-top: 1.5rem; }
+.start-cards h2 { font-size: 1.6rem; }
+.start-cards p:not(.eyebrow) { font-size: .94rem; }
+.start-cards a { font-size: .87rem; font-weight: 600; }
+.closing-note { border-top: 1px solid var(--line); }
+.closing-note p { max-width: 800px; }
+.site-footer { display: flex; justify-content: space-between; gap: 1.5rem; border-top: 1px solid var(--line); font-size: .8rem; }
+.site-footer nav { display: flex; flex-wrap: wrap; gap: 1.4rem; }
+.prose { max-width: 880px; margin: auto; padding: 3rem; }
+.prose h1 { font-size: clamp(2.8rem, 6vw, 4rem); }
+.prose h2 { font-size: 1.5rem; margin-top: 2.5rem; }
+@media (max-width: 760px) { .preview-section, .start-cards, .closing-note, .site-footer, .prose { padding: 1.5rem; } .start-cards { grid-template-columns: 1fr; gap: 1.5rem; } .site-footer { flex-direction: column; } }

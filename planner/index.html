@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Home studio · Floorplan planner</title>
+  <link rel="stylesheet" href="./editor.css">
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="./" aria-label="Home studio"><span class="brand-mark" aria-hidden="true">⌂</span><span>Home<span class="brand-light">studio</span><small>FLOORPLAN PLANNER</small></span></a>
+    <div class="project-heading"><label class="sr-only" for="project-title">Project title</label><input id="project-title" value="Untitled home" maxlength="120" aria-label="Project title"><span id="save-status" class="save-status">Local draft</span></div>
+    <nav class="file-actions" aria-label="Project actions">
+      <button id="new-project" class="quiet">New project</button><button id="open-project" class="quiet">Open JSON</button><button id="export-project" class="quiet">Export JSON <span aria-hidden="true">↗</span></button><button id="build-project" class="primary">Build &amp; install</button>
+    </nav>
+    <input id="file-input" type="file" accept=".json,application/json" hidden>
+  </header>
+  <main class="workspace">
+    <aside class="left-panel" aria-label="Floor and drawing tools">
+      <section class="floor-section">
+        <div class="section-heading"><h2>Your floors</h2><button id="add-floor" class="icon-button" aria-label="Add floor" title="Add floor">+</button></div>
+        <div id="floor-list" class="floor-list"></div>
+      </section>
+      <section class="tool-section">
+        <div class="section-heading"><h2>Design tools</h2><span class="unit-badge">METERS</span></div>
+        <div class="tools" role="group" aria-label="Drawing tools">
+          <button data-tool="select" aria-pressed="true"><span class="tool-symbol" aria-hidden="true">↖</span><span>Select / move</span><kbd>V</kbd></button>
+          <button data-tool="room" aria-pressed="false"><span class="tool-symbol" aria-hidden="true">▱</span><span>Draw room</span><kbd>R</kbd></button>
+          <button data-tool="wall" aria-pressed="false"><span class="tool-symbol" aria-hidden="true">╱</span><span>Draw wall</span><kbd>W</kbd></button>
+          <button data-tool="door" aria-pressed="false"><span class="tool-symbol" aria-hidden="true">◴</span><span>Add door</span><kbd>D</kbd></button>
+          <button data-tool="window" aria-pressed="false"><span class="tool-symbol" aria-hidden="true">⊟</span><span>Add window</span><kbd>N</kbd></button>
+          <button data-tool="item" aria-pressed="false"><span class="tool-symbol" aria-hidden="true">▣</span><span>Place item</span><kbd>I</kbd></button>
+        </div>
+        <label class="item-type-label" for="place-type">Item to place</label><select id="place-type"><option value="furniture">Furniture</option><option value="lamp">Lamp</option><option value="chandelier">Ceiling light</option><option value="tv">TV / display</option><option value="appliance">Appliance</option><option value="switch">Switch</option><option value="outlet">Outlet</option><option value="sensor">Sensor</option></select>
+      </section>
+      <section class="object-section"><div class="section-heading"><h2>On this floor</h2><span id="object-count" class="muted">0</span></div><div id="object-list" class="object-list"></div></section>
+      <div class="sidebar-footer"><a href="./guide.html" target="_blank" rel="noopener">Drawing guide with screenshots <span aria-hidden="true">↗</span></a><button id="help-button" class="text-button">Quick start &amp; shortcuts</button><span>Drafts stay in this browser. Export to keep a copy.</span></div>
+    </aside>
+    <section class="studio" aria-label="Drawing workspace">
+      <div class="studio-topbar"><div class="view-tabs" role="tablist" aria-label="Workspace view"><button id="plan-tab" role="tab" aria-selected="true" aria-controls="plan-view">Plan <span>2D</span></button><button id="preview-tab" role="tab" aria-selected="false" aria-controls="preview-view">Preview <span>3D</span></button></div><div class="history-controls"><button id="undo" class="icon-button" title="Undo (⌘/Ctrl Z)" aria-label="Undo">↶</button><button id="redo" class="icon-button" title="Redo (⌘/Ctrl Shift Z)" aria-label="Redo">↷</button><span class="separator"></span><button id="fit-view" class="quiet small">Fit view <span aria-hidden="true">⌖</span></button></div></div>
+      <div class="canvas-shell">
+        <div id="plan-view" class="view-panel" role="tabpanel" aria-labelledby="plan-tab"><canvas id="plan-canvas" tabindex="0" aria-label="Metric floor plan. Draw with pointer tools or use Add room by dimensions for keyboard input. Select objects from the On this floor list to edit precise coordinates."></canvas></div>
+        <div id="preview-view" class="view-panel" role="tabpanel" aria-labelledby="preview-tab" hidden><canvas id="preview-canvas" tabindex="0" aria-label="3D preview. Drag to orbit, scroll to zoom. Arrow keys orbit, plus and minus zoom."></canvas><div id="preview-error" class="preview-error" hidden></div><label class="all-floors"><input id="all-floors" type="checkbox"> Show all floors</label><span class="preview-note">Real wall openings · geometry preview</span></div>
+        <div id="empty-state" class="empty-state"><span class="empty-symbol" aria-hidden="true">⌂</span><p class="eyebrow">A PLACE TO BEGIN</p><h1>Make room for your home.</h1><p>Start with a room, add its walls, then bring<br>your devices into the picture.</p><button id="start-room" class="primary">Draw your first room <span aria-hidden="true">↗</span></button><button id="load-demo" class="text-button">Explore a fictional demo</button><small>No address, account, or upload required.</small></div>
+        <div id="tool-hint" class="tool-hint">Select a shape to edit. Space + drag to pan.</div>
+        <div class="canvas-bottom"><div class="canvas-caption"><span class="live-dot"></span><span id="floor-caption">Ground floor</span></div><div class="canvas-controls"><label id="snap-label"><input id="snap" type="checkbox" checked> Snap 0.25 m</label><span class="separator"></span><button id="zoom-out" class="icon-button" aria-label="Zoom out">−</button><output id="zoom-value" aria-label="Zoom level">100%</output><button id="zoom-in" class="icon-button" aria-label="Zoom in">+</button></div></div>
+      </div>
+      <div class="statusbar"><span id="status" role="status" aria-live="polite">Ready to make something yours.</span><span id="pointer-position" aria-hidden="true">x 0.00 · z 0.00 m</span></div>
+    </section>
+    <aside class="inspector" aria-label="Selection properties"><div class="inspector-head"><span class="eyebrow">THE DETAILS</span><h2 id="inspector-title">Floor settings</h2><p id="inspector-subtitle">A good plan starts with the basics.</p></div><div id="inspector-body"></div></aside>
+  </main>
+  <dialog id="help-dialog"><button class="dialog-close icon-button" data-close="help-dialog" aria-label="Close quick start">×</button><p class="eyebrow">FROM BLANK PAGE TO HOME</p><h2>Draw your first home.</h2><p>New to floorplans? <a href="./guide.html" target="_blank" rel="noopener">Follow the illustrated two-room tutorial</a>. Each step shows what to click and what you should see. This website works in your browser; no Python or installation is needed.</p><ol class="steps"><li><strong>Draw the rooms.</strong><p>Drag a rectangle on the metric plan, or add a room by dimensions in Floor settings. Edit its polygon points for other shapes. Rooms define floor areas only.</p></li><li><strong>Give them walls.</strong><p>Select a room and choose Build wall outline, or draw individual wall segments. Exact shared walls are reused. Walls stay separate when rooms move.</p></li><li><strong>Open up the space.</strong><p>Choose Add door or Add window, then click a wall. Adjust width, distance from wall start, sill, and head in the inspector. These are actual holes in the 3D walls.</p></li><li><strong>Make it your own.</strong><p>Place items, add more floors, inspect the 3D preview, and export JSON when ready. Entity IDs are optional notes for a later integration; leave them blank for a drawing.</p></li></ol><p class="tip">V select · R room · W wall · D door · N window · I item<br>Space / Shift + drag to pan · scroll to zoom · Delete to remove<br>⌘ / Ctrl Z undo · ⌘ / Ctrl Shift Z redo · Escape cancel</p><p class="fine-print">Local drafts belong to this browser profile and website origin. Export JSON for a portable backup. This planner does not connect to or control Home Assistant. <a href="./publishing.html" target="_blank" rel="noopener">Saving, sharing and next steps ↗</a></p><button class="primary" data-close="help-dialog">Start designing</button></dialog>
+  <dialog id="build-dialog">
+    <button class="dialog-close icon-button" data-close="build-dialog" aria-label="Close build instructions">×</button>
+    <p class="eyebrow">KEEP YOUR WORK</p>
+    <h2>Export your plan. Know the next steps.</h2>
+    <p>This public site lets you draw, preview in 3D, and save an editable JSON project. The generic Home Assistant compiler and installer are not included in this initial public release. The planner does not connect to or control Home Assistant.</p>
+    <div id="build-validation" class="callout"></div>
+    <ol class="steps compact">
+      <li><strong>Save a portable draft.</strong><p>Download project.json and keep it somewhere you can find again. This file contains your drawing and any entity IDs you entered. It is not an installed dashboard.</p><button id="build-export" class="primary">Export project.json</button></li>
+      <li><strong>Reopen or share the drawing.</strong><p>Choose Open JSON to continue later or on another computer. Someone with your JSON file can open their own copy in this planner. Export a backup before replacing a draft.</p></li>
+      <li><strong>Read what comes next.</strong><p>Building a separate viewer or installing a Home Assistant integration needs additional tools and instructions. Neither action happens when you export.</p><a href="./publishing.html" target="_blank" rel="noopener">Saving, sharing and Home Assistant next steps ↗</a></li>
+    </ol>
+    <details>
+      <summary>Optional: developer build from a full source checkout</summary>
+      <p>This command is only for maintainers who already have the full development repository, its dependencies, and installation instructions. Those files are not part of this public site or its static download.</p>
+      <p>In that checkout, create <code>.local-artifacts/my-home/</code> and place the exported <code>project.json</code> there. Run the command from the repository folder:</p>
+      <pre><code>python3 scripts/build-planner-project.py --project .local-artifacts/my-home/project.json --output dist/my-home --ha-package</code></pre>
+      <button id="copy-command" class="quiet small">Copy command</button>
+      <p>Building produces files; installing them is a separate task. This command cannot run inside the browser and is not a setup step for using this planner.</p>
+    </details>
+  </dialog>
+  <script type="module" src="./editor.js"></script>
+</body>
+</html>

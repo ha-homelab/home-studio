@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Save, reopen and share a Home studio drawing, and understand what this public planner includes before planning a Home Assistant integration.">
+  <title>Saving, sharing and next steps · Home studio</title>
+  <link rel="stylesheet" href="./guide.css">
+</head>
+<body>
+  <a class="skip-link" href="#next-steps">Skip to next steps</a>
+  <header class="site-header">
+    <a class="wordmark" href="./">Home<span>studio</span><small>YOUR NEXT STEPS</small></a>
+    <a class="button button-small" href="./">Start drawing <span aria-hidden="true">→</span></a>
+  </header>
+  <main id="next-steps">
+    <section class="hero" aria-labelledby="page-title">
+      <p class="eyebrow">A DRAWING YOU CAN KEEP</p>
+      <h1 id="page-title">Save your plan.<br>Make it yours.</h1>
+      <p class="lead">Draw and preview your home on this website. Export a JSON file to keep an editable copy you can reopen or share.</p>
+      <p>No account, Python or installation is needed to use the hosted planner. Your draft stays in this browser. Export downloads a copy without removing the draft; your project is not automatically published or synced to another device.</p>
+      <div class="hero-actions"><a class="button" href="./">Start drawing <span aria-hidden="true">→</span></a><a class="text-link" href="./guide.html">Follow the illustrated lesson</a></div>
+    </section>
+    <div class="guide-layout">
+      <nav class="contents" aria-label="Next steps contents">
+        <p class="eyebrow">AFTER YOUR FIRST DRAWING</p>
+        <ol>
+          <li><a href="#backup">Keep a backup</a></li>
+          <li><a href="#share">Share a copy</a></li>
+          <li><a href="#home-assistant">Understand Home Assistant support</a></li>
+        </ol>
+        <a class="contents-extra" href="#local-copy">Optional local copy</a>
+      </nav>
+      <div class="lesson-body">
+        <section class="step" id="backup" aria-labelledby="backup-title">
+          <p class="step-label">01 · KEEP AN EDITABLE COPY</p>
+          <h2 id="backup-title">Export before you leave</h2>
+          <ol class="instructions">
+            <li>In the planner, choose <strong>Export JSON</strong>. Your browser downloads <strong>project.json</strong>.</li>
+            <li>Move the file from Downloads to a folder you will remember. Rename it to describe the version, such as <strong>my-home-first-draft.json</strong>.</li>
+            <li>To check the backup, choose <strong>Open JSON</strong> and select that file. Confirm that the rooms and items look right in Plan 2D and Preview 3D.</li>
+          </ol>
+          <p>The file stores the editable project: floors, room shapes, walls, openings, items and any entity IDs you entered. Exporting does not create a separate website, a 3D model download or a Home Assistant package.</p>
+          <aside class="note"><strong>Autosave is a working draft:</strong> it belongs to this browser and website address. Clearing site data, switching browsers or using a private window can leave you without that draft. Keep exported versions before large changes and before opening a different project.</aside>
+        </section>
+        <section class="step" id="privacy" aria-labelledby="privacy-title">
+          <h2 id="privacy-title">Where your drawing lives</h2>
+          <p>Your drawing is saved in this browser profile. It is not uploaded. Browser storage belongs to the website origin; other project pages under the same ha-homelab.github.io origin share that storage boundary. A different browser, device or domain has a separate draft.</p>
+          <p>Home studio adds no analytics, advertising or project sync. GitHub serves the static website and logs visitor IP addresses for security; see <a href="https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages#data-collection">GitHub's hosting notice</a>. Do not enter passwords or tokens in your project.</p>
+        </section>
+        <section class="step" id="share" aria-labelledby="share-title">
+          <p class="step-label">02 · LET SOMEONE OPEN THEIR OWN COPY</p>
+          <h2 id="share-title">Share the drawing file</h2>
+          <p>Send your exported JSON file and the link to this planner to someone you choose. They can select <strong>Open JSON</strong> and explore their own editable copy. Their edits do not change your draft; they can export a new version to send back.</p>
+          <p>A link to this website opens the planner, not your saved home. There is no account, shared project link or live collaboration in this release.</p>
+          <p>Before sharing a file, review its room names, item notes and entity IDs. An exported project contains the details you entered. Keep a private backup of the original.</p>
+        </section>
+        <section class="step" id="home-assistant" aria-labelledby="home-assistant-title">
+          <p class="step-label">03 · WHAT THIS RELEASE INCLUDES</p>
+          <h2 id="home-assistant-title">Home Assistant is a separate next step</h2>
+          <p><strong>This planner does not connect to or control Home Assistant.</strong> Entering an entity ID records a mapping in the drawing only. Leave those fields blank if you are planning the geometry.</p>
+          <dl class="distinctions">
+            <div><dt>Available here</dt><dd>Draw rooms and walls, add openings and items, preview in 3D, and export or reopen an editable JSON draft.</dd></div>
+            <div><dt>Not included</dt><dd>The generic Home Assistant compiler, a downloadable integration package, installation tools and a workflow for publishing a separate viewer.</dd></div>
+          </dl>
+          <p>The <strong>Build &amp; install</strong> dialog explains these limits and gives you another export button. Its collapsed developer command applies only to a full development checkout that already includes the separate tools. Downloading this public site's files does not provide that checkout.</p>
+          <p>For now, keep the JSON project as your editable source. A Home Assistant installation requires separately supplied tools and instructions that support this project format. This website does not currently provide a complete installation path or promise a release date for one.</p>
+        </section>
+        <section class="next-section" id="local-copy" aria-labelledby="local-title">
+          <h2 id="local-title">Optional: use a local copy</h2>
+          <details>
+            <summary>For developers who already have the static site files</summary>
+            <div class="detail-body">
+              <p>The hosted planner needs no setup. If you already have a downloaded copy, keep its <code>planner/</code> and <code>vendor/</code> folders together. From the folder containing them, serve the files with a local web server. With Python 3 installed, you can run:</p>
+              <pre><code>python3 -m http.server 8099 --bind 127.0.0.1</code></pre>
+              <p>Open <a href="http://127.0.0.1:8099/planner/">http://127.0.0.1:8099/planner/</a> and keep the terminal running while you draw. Double-clicking index.html is not supported.</p>
+              <p>Use Export JSON and Open JSON to move your drawing between the hosted and local copies; their browser storage is separate. Serving the static files locally does not add the compiler or Home Assistant installer.</p>
+            </div>
+          </details>
+        </section>
+        <footer class="lesson-footer">
+          <h2>Continue your drawing</h2>
+          <p>Keep a saved copy, then explore the next room or a different layout.</p>
+          <a class="button" href="./">Back to Home studio <span aria-hidden="true">→</span></a>
+          <p class="small"><a href="./guide.html">Drawing guide with screenshots</a> <span aria-hidden="true">·</span> <a href="#page-title">Back to the top ↑</a></p>
+        </footer>
+      </div>
+    </div>
+  </main>
+</body>
+</html>
