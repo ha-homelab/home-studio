@@ -37,6 +37,55 @@ try{items=validateInventoryItems(items)}catch(e){items=[];setEditorStatus('Store
 const inventoryNodes=new Map(),objectsById=new Map();
 let renderer,scene,camera,objectGroup,root,hemisphere,sun,ground,grid,homeView=null,radius=planRadius,azimuth=.57,polar=.48,target=new THREE.Vector3(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]),clipping=new THREE.Plane(new THREE.Vector3(0,-1,0),20),renderCount=0;
 function invalidateShadows(){scene?.traverse(o=>{if(o.shadow){o.shadow.autoUpdate=false;o.shadow.needsUpdate=true}})}
+// Intersect wall sides with the visible top, including the current cutaway.
+// Ignore coplanar face triangles so their triangulation never becomes a diagonal.
+function wallTopSegments(meshes,limit){
+  const segments=new Map(),epsilon=1e-6;
+  const key=p=>p.map(v=>Math.round(v/epsilon)).join(',');
+  for(const mesh of meshes){
+    if(mesh.kind!=='walls')continue;
+    let bottom=Infinity,top=-Infinity;
+    for(const p of mesh.vertices){bottom=Math.min(bottom,p[1]);top=Math.max(top,p[1]);}
+    const height=Math.min(top,limit);
+    if(height<=bottom+epsilon)continue;
+    for(let i=0;i<mesh.indices.length;i+=3){
+      const triangle=mesh.indices.slice(i,i+3).map(index=>mesh.vertices[index]);
+      if(triangle.every(p=>Math.abs(p[1]-height)<epsilon))continue;
+      const points=new Map();
+      for(let j=0;j<3;j++){
+        const a=triangle[j],b=triangle[(j+1)%3],da=a[1]-height,db=b[1]-height;
+        if(Math.abs(da)<epsilon){const p=[a[0],height,a[2]];points.set(key(p),p);}
+        if((da < -epsilon && db > epsilon)||(da > epsilon && db < -epsilon)){
+          const t=da/(da-db),p=[a[0]+t*(b[0]-a[0]),height,a[2]+t*(b[2]-a[2])];points.set(key(p),p);
+        }
+      }
+      if(points.size!==2)continue;
+      const pair=[...points.values()];
+      segments.set(pair.map(key).sort().join('|'),pair);
+    }
+  }
+  return [...segments.values()];
+}
+let wallTopOutline,wallTopHeight;
+function updateWallTopOutline(){
+  if(!root||wallTopHeight===clipping.constant)return;
+  wallTopHeight=clipping.constant;
+  if(wallTopOutline){wallTopOutline.traverse(o=>{o.geometry?.dispose();o.material?.dispose()});root.remove(wallTopOutline);}
+  const edges=[],halo=[];
+  for(const [a,b] of wallTopSegments(model.meshes,wallTopHeight)){
+    const dx=b[0]-a[0],dz=b[2]-a[2],length=Math.hypot(dx,dz);
+    if(length<1e-6)continue;
+    const nx=-dz/length*.025,nz=dx/length*.025,y=a[1]+.006;
+    edges.push(a[0],y,a[2],b[0],y,b[2]);
+    const p=[a[0]+nx,y,a[2]+nz],q=[b[0]+nx,y,b[2]+nz],r=[b[0]-nx,y,b[2]-nz],s=[a[0]-nx,y,a[2]-nz];
+    halo.push(...p,...q,...r,...p,...r,...s);
+  }
+  const geometry=positions=>new THREE.BufferGeometry().setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+  wallTopOutline=new THREE.Group();wallTopOutline.name='Visible wall tops';
+  wallTopOutline.add(new THREE.Mesh(geometry(halo),new THREE.MeshBasicMaterial({color:0x45ddca,transparent:true,opacity:.18,depthWrite:false,toneMapped:false,side:THREE.DoubleSide})));
+  wallTopOutline.add(new THREE.LineSegments(geometry(edges),new THREE.LineBasicMaterial({color:0x77f3df,transparent:true,opacity:.9,depthWrite:false,toneMapped:false})));
+  root.add(wallTopOutline);
+}
 try{
 scene=new THREE.Scene();scene.background=new THREE.Color('#e7e8df');camera=new THREE.PerspectiveCamera(42,1,.1,Math.max(150,planRadius*5));
 renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.localClippingEnabled=true;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.95;$('view3d').prepend(renderer.domElement);
@@ -47,7 +96,7 @@ for(const m of model.meshes){const geometry=new THREE.BufferGeometry();geometry.
 ground=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(60,planRadius*2),Math.max(65,planRadius*2)),new THREE.MeshStandardMaterial({color:'#dfe3d8',roughness:1}));ground.rotation.x=-Math.PI/2;ground.position.set(planCenter[0],-1.97,planCenter[1]);ground.receiveShadow=true;scene.add(ground);grid=new THREE.GridHelper(44,44,0xc0cabe,0xd0d7cb);grid.position.set(planCenter[0],-1.96,planCenter[1]);scene.add(grid);
 renderer.domElement.addEventListener('webglcontextrestored',()=>{invalidateShadows();render()});
 function updateEditorCamera(){camera.position.set(target.x+radius*Math.sin(polar)*Math.sin(azimuth),target.y+radius*Math.cos(polar),target.z+radius*Math.sin(polar)*Math.cos(azimuth));camera.lookAt(target)}
-function render(){if(homeView?.active){homeView.render();return}updateEditorCamera();renderer.render(scene,camera);renderCount++}window.renderModel=render;
+function render(){updateWallTopOutline();if(homeView?.active){homeView.render();return}updateEditorCamera();renderer.render(scene,camera);renderCount++}window.renderModel=render;
 let viewSize='';const resize=()=>{const b=$(homeView?.active?'homeStage':'view3d').getBoundingClientRect(),size=[homeView?.active,b.width,b.height].join();if(b.width&&b.height&&size!==viewSize){viewSize=size;renderer.setSize(b.width,b.height,false);camera.aspect=b.width/b.height;camera.updateProjectionMatrix();render()}};window.resizeModel=resize;const observer=new ResizeObserver(resize);observer.observe($('view3d'));observer.observe($('homeStage'));
 let drag=null;renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());renderer.domElement.addEventListener('pointerdown',e=>{if(homeView?.active)return;drag={x:e.clientX,y:e.clientY,button:e.button};renderer.domElement.setPointerCapture(e.pointerId)});renderer.domElement.addEventListener('pointermove',e=>{if(homeView?.active||!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(drag.button===2||e.shiftKey){const scale=radius*.0018;target.x-=dx*scale*Math.cos(azimuth);target.z+=dx*scale*Math.sin(azimuth);target.x-=dy*scale*Math.sin(azimuth);target.z-=dy*scale*Math.cos(azimuth)}else{azimuth-=dx*.006;polar=Math.max(.02,Math.min(1.46,polar+dy*.006))}drag.x=e.clientX;drag.y=e.clientY;render()});renderer.domElement.addEventListener('pointerup',()=>drag=null);renderer.domElement.addEventListener('pointercancel',()=>drag=null);renderer.domElement.addEventListener('wheel',e=>{if(homeView?.active)return;e.preventDefault();radius=Math.max(3,Math.min(Math.max(65,planRadius*2),radius*Math.exp(e.deltaY*.001)));render()},{passive:false});
 $('resetView').onclick=()=>{$('focusRoom').value='';target.set(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]);radius=planRadius;azimuth=.57;polar=.48;render()};$('topView').onclick=()=>{if($('focusRoom').value)focusRoom($('focusRoom').value);else{target.set(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]);radius=planRadius*.91}polar=.001;azimuth=0;render()};$('zoomIn').onclick=()=>{radius=Math.max(3,radius/1.15);render()};$('zoomOut').onclick=()=>{radius=Math.min(Math.max(65,planRadius*2),radius*1.15);render()};

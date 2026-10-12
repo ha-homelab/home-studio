@@ -103,3 +103,19 @@ exports, backups, credentials, or photos merely to make a public build pass.
 
 The shared code is [MIT licensed](../LICENSE). Preserve the bundled
 [Three.js notices](../vendor/THREE-LICENSE.txt) when redistributing it.
+
+## Visible wall-top outlines
+
+The viewer derives a turquoise outline from wall geometry at the current visible
+height. In the home view this follows the low wall cutaway; the editor follows
+its cutaway setting or each wall's actual top. Door openings remain open, and
+lintels above the cut do not produce floating lines. Horizontal face diagonals
+are excluded. The model data and downloadable geometry are unchanged.
+
+`wallTopSegments` intersects wall triangles only when the clipping height changes.
+Coincident segments are deduplicated. One batched line layer and one narrow,
+transparent ribbon provide the bright edge and soft halo without bloom, new
+lights, polling, or additional animation. Both layers use normal depth testing;
+they do not show through objects. Old GPU buffers and materials are disposed
+when the visible height changes. Run `node scripts/test-wall-tops.cjs` to check
+cutaway/full-height boundaries, rotated walls, low walls, and doorway gaps.
