@@ -195,7 +195,7 @@
             <li>Check both rooms, the door, the window and the table. Open Preview 3D once more.</li>
           </ol>
           <figure>
-            <a href="./guide-assets/07-export.jpg" target="_blank" rel="noopener" aria-label="Open full-size screenshot of the export and next steps dialog"><img width="1280" height="720" src="./guide-assets/07-export.jpg" alt="The current Build and install dialog offers Export project.json, explains how to reopen or share the drawing, and states that the Home Assistant compiler and installer are not included." loading="lazy"></a>
+            <a href="./guide-assets/07-export.jpg" target="_blank" rel="noopener" aria-label="Open full-size screenshot of the export and next steps dialog"><img width="1280" height="720" src="./guide-assets/07-export.jpg" alt="The Build and install dialog offers a project.json export, the complete toolkit download, installation instructions and a copyable build command." loading="lazy"></a>
             <figcaption><span>07</span> Build &amp; install also offers Export project.json and explains the public site's limits. Save this lesson with that button or Export JSON at the top, then use Open JSON to check your copy.</figcaption>
           </figure>
           <p class="check"><strong>Finished:</strong> your downloaded file reopens as <strong>two rooms, seven walls, two openings and one item</strong>, and the 3D preview matches your drawing.</p>
@@ -264,7 +264,7 @@
               <dl class="distinctions">
                 <div><dt>Save / export</dt><dd>Keeps your editable drawing in a JSON file. Use Open JSON to continue it in Home studio.</dd></div>
                 <div><dt>Preview</dt><dd>Shows your drawing in 3D inside this browser. It does not publish a separate viewer or connect to Home Assistant.</dd></div>
-                <div><dt>Build / install</dt><dd>Requires separate developer tools and an installation workflow. The generic Home Assistant compiler and installer are not included in this initial public site.</dd></div>
+                <div><dt>Build / install</dt><dd>Download the complete toolkit to use the local compiler and Home Assistant installer. The browser editor exports your drawing; follow the installation guide to build and install it.</dd></div>
               </dl>
               <p>The <strong>Build &amp; install</strong> dialog explains these limits and offers another export button. You can finish this lesson and keep using the planner without a source repository or command line.</p>
               <p>You can leave all Entity ID fields empty for a geometry-only plan. For a real device later, use its exact Home Assistant entity ID and test it in your own installation. Entering an ID in Home studio records a mapping; the planner itself does not connect to or control devices.</p>
@@ -298,7 +298,7 @@
           </details>
           <details>
             <summary>Optional: run a downloaded copy locally</summary>
-            <div class="detail-body"><p>This is only for developers or people who already have the static site files. Keep the <code>planner/</code> and <code>vendor/</code> folders together. Open a terminal in the folder containing them and, if Python 3 is installed, run:</p><pre><code>python3 -m http.server 8099 --bind 127.0.0.1</code></pre><p>Then open <a href="http://127.0.0.1:8099/planner/" target="_blank" rel="noopener">http://127.0.0.1:8099/planner/ ↗</a>. Keep the terminal running. Double-clicking index.html is not supported. The hosted site needs none of these steps.</p><p>Localhost, 127.0.0.1 and the hosted site have separate browser storage. Export JSON before switching addresses, then use Open JSON in the other copy. Running this static site locally does not add the Home Assistant compiler or installer.</p></div>
+            <div class="detail-body"><p>The <a href="../install.html">complete toolkit download</a> includes this planner, its compiler and the Home Assistant installer. Keep the extracted folders together. To open the planner locally, open a terminal in the extracted toolkit folder and, if Python 3 is installed, run:</p><pre><code>python3 -m http.server 8099 --bind 127.0.0.1</code></pre><p>Then open <a href="http://127.0.0.1:8099/planner/" target="_blank" rel="noopener">http://127.0.0.1:8099/planner/ ↗</a>. Keep the terminal running. Double-clicking index.html is not supported. The hosted planner needs none of these steps.</p><p>Localhost, 127.0.0.1 and the hosted site have separate browser storage. Export JSON before switching addresses, then use Open JSON in the other copy. Opening the planner does not run the compiler or install anything in Home Assistant. When your drawing is ready, follow <a href="../install.html">Build and install your home</a>.</p></div>
           </details>
         </section>
 
