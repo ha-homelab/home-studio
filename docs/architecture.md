@@ -103,3 +103,5 @@ exports, backups, credentials, or photos merely to make a public build pass.
 
 The shared code is [MIT licensed](../LICENSE). Preserve the bundled
 [Three.js notices](../vendor/THREE-LICENSE.txt) when redistributing it.
+
+Optional module diagnostics carry their original `module_expires_at_ms`, `module_snapshot_at_ms` and `module_fresh_count` alongside bounded text. The host forwards these values only for explicitly configured sensors. The viewer rejects missing or invalid metadata, expires text at the original deadline (at most two seconds after its source snapshot), and prevents repeated states or a backward wall clock from renewing it. Room activity is independent of this display-only data.

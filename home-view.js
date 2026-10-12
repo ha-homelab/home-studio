@@ -45,7 +45,7 @@ homeView = (() => {
   }
   function inspectActivitySource(item){
     if(!item||!bridge||!haConnected)return;
-    if(receiverSpec(item)){moduleItem=item;updateModuleDialog();$('moduleDialog').showModal();}
+    if(receiverSpec(item)){moduleItem=item;$('moduleDialog').showModal();updateModuleDialog();}
     else if(haStates[item.entity_id])bridge.postMessage({type:'more_info',entity_id:item.entity_id});
   }
   function refreshActivity(){
@@ -331,7 +331,7 @@ homeView = (() => {
     $('homeEmpty').hidden=total>0;
     $('homeFeedback').textContent=[...errors.values()].at(-1)||(!renderer ? 'The 3D view is unavailable in this browser. Use the device cards to control your lights.' : '');
     $('homeFeedback').hidden=!$('homeFeedback').textContent;
-    if($('moduleDialog').open)updateModuleDialog();
+    if(moduleItem)updateModuleDialog();
     // Run the clock only through warm-up, including its transition to zero.
     clearTimeout(countdownTimer);
     if((active||$('curtainDialog').open)&&points.some(p=>isCover(p.item)&&curtainStateFor(p.item).seconds>0))countdownTimer=setTimeout(()=>{refreshControls();window.renderModel?.();},1000);
@@ -401,7 +401,14 @@ homeView = (() => {
   $('curtainPosition').oninput=()=>{curtainDirty=true;$('curtainPercent').textContent=$('curtainPosition').value+'%';};
   for(const [id,action] of [['curtainPower','power_on'],['curtainOpen','open_cover'],['curtainClose','close_cover'],['curtainStop','stop_cover'],['curtainApply','set_cover_position']])$(id).onclick=()=>curtainCommand(action);
   $('curtainDetails').onclick=()=>{if(curtainItem){bridge?.postMessage({type:'more_info',entity_id:curtainItem.entity_id});$('curtainDialog').close();}};
+  // Advance the receipt clock monotonically even if wall time moves backward.
+  // Repeated states, dialog reopening and rerenders cannot restart a lease.
+  let moduleWall=Date.now(),moduleMono=performance.now(),moduleTimer;
+  const moduleLeases=new Map();
   function updateModuleDialog(){
+    clearTimeout(moduleTimer);moduleTimer=null;
+    const mono=performance.now();
+    moduleWall=Math.max(Date.now(),moduleWall+mono-moduleMono);moduleMono=mono;
     const item=items.find(item=>item.id===moduleItem?.id),spec=item&&receiverSpec(item);
     const same=spec&&spec.entity_id===item.entity_id&&spec.room===item.room;
     const unavailable=!item?'Receiver removed from plan':!same?'Receiver binding changed':null;
@@ -409,9 +416,31 @@ homeView = (() => {
     $('moduleTitle').textContent=item?.name||moduleItem?.name||'Receiver';
     $('moduleActivity').textContent=unavailable||activityText[receiverState(item)]||activityText.unknown;
     const info=entity&&!entity.restored&&!['unknown','unavailable'].includes(entity.state)?entity.modules:null;
-    $('moduleSummary').textContent=!haConnected?'Disconnected':unavailable||info?.summary||'Algorithm diagnostics unavailable';
-    $('moduleDetails').textContent=info?.details||'No current algorithm data. Room activity is shown separately.';
+    let expiry=info?.expires_at_ms;
+    const snapshot=info?.snapshot_at_ms,count=info?.fresh_count,last=moduleLeases.get(spec?.modules_sensor);
+    const valid=Number.isSafeInteger(expiry)&&Number.isSafeInteger(snapshot)&&snapshot>0&&
+      Number.isInteger(count)&&count>=0&&count<=64&&snapshot<=moduleWall+250&&
+      expiry>snapshot&&expiry<=snapshot+2000&&expiry<=moduleWall+2000;
+    if(valid&&entity?.state==='experimental'){
+      // Counts only fall within one source snapshot as outputs expire. Keep
+      // one watermark per receiver; replay cannot reintroduce expired outputs.
+      if(last&&(snapshot<last.snapshot||snapshot===last.snapshot&&count>last.count))expiry=0;
+      else{
+        if(last&&snapshot===last.snapshot&&count===last.count)expiry=Math.min(expiry,last.expiry);
+        moduleLeases.set(spec.modules_sensor,{snapshot,count,expiry});
+      }
+    }
+    const fresh=entity?.state==='experimental'&&valid&&expiry>moduleWall;
+    const summary=entity?.state==='experimental'?!valid?'Algorithm diagnostics unavailable':!fresh?'Algorithm diagnostics expired':info.summary:
+      entity?.state==='stale'?'Algorithm diagnostics expired':null;
+    $('moduleSummary').textContent=!haConnected?'Disconnected':unavailable||summary||'Algorithm diagnostics unavailable';
+    $('moduleDetails').textContent=fresh?info.details:'No current algorithm data. Room activity is shown separately.';
+    if(fresh&&$('moduleDialog').open)moduleTimer=setTimeout(updateModuleDialog,expiry-moduleWall);
   }
+  $('moduleDialog').addEventListener('close',()=>{if(!$('moduleDialog').open){clearTimeout(moduleTimer);moduleTimer=null;}});
+  document.addEventListener('visibilitychange',()=>{if(moduleItem)updateModuleDialog();});
+  window.addEventListener('pageshow',()=>{if(moduleItem)updateModuleDialog();});
+  window.addEventListener('pagehide',()=>{clearTimeout(moduleTimer);moduleTimer=null;});
   function dismissOnBackdrop(dialog){
     const outside=e=>{const r=dialog.getBoundingClientRect();return e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom;};
     let pressed=false;

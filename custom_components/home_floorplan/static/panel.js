@@ -157,7 +157,7 @@ class HomeFloorplanPanel extends HTMLElement {
         // Forward only display attributes; credentials and unrelated metadata stay in HA.
         ...projectRoomActivity(id, state, attributes, this.roomActivity?.has(id)),
         ...projectAssumedZoneActivity(id, state, attributes, this.assumedActivity),
-        ...(this.moduleEntities?.has(id) ? {modules:{summary:typeof attributes.module_summary==='string'?attributes.module_summary.slice(0,200):'',details:typeof attributes.module_details==='string'?attributes.module_details.slice(0,16000):''}} : {}),
+        ...(this.moduleEntities?.has(id) ? {modules:{summary:typeof attributes.module_summary==='string'?attributes.module_summary.slice(0,200):'',details:typeof attributes.module_details==='string'?attributes.module_details.slice(0,16000):'',...Object.fromEntries(['expires_at_ms','snapshot_at_ms','fresh_count'].map(key=>[key,Number.isSafeInteger(attributes['module_'+key])&&attributes['module_'+key]>=(key==='fresh_count'?0:1)?attributes['module_'+key]:null]))}} : {}),
         ...(id === 'sun.sun' ? {sun:{elevation:attributes.elevation}} : {}),
         ...(cover ? {cover:{current_position:attributes.current_position,supported_features:attributes.supported_features,restored:attributes.restored,last_known:this.curtains.memory[id],position_checked_at:this.curtains.checks?.[id],guard:guardId,power_on_at:powerOnAt,boot_seconds:this.curtains.boot_seconds}} : {}),
         ...(id.startsWith('light.') ? {light:Object.fromEntries(
