@@ -6,7 +6,7 @@
   <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <meta name="description" content="Save, reopen and share a Home studio drawing, and understand what this public planner includes before planning a Home Assistant integration.">
+  <meta name="description" content="Save and share your Home studio drawing, then use the complete local toolkit to build a viewer and install it in Home Assistant.">
   <title>Saving, sharing and next steps · Home studio</title>
   <link rel="stylesheet" href="./guide.css">
 </head>
@@ -30,7 +30,7 @@
         <ol>
           <li><a href="#backup">Keep a backup</a></li>
           <li><a href="#share">Share a copy</a></li>
-          <li><a href="#home-assistant">Understand Home Assistant support</a></li>
+          <li><a href="#home-assistant">Build for Home Assistant</a></li>
         </ol>
         <a class="contents-extra" href="#local-copy">Optional local copy</a>
       </nav>
@@ -59,25 +59,26 @@
           <p>Before sharing a file, review its room names, item notes and entity IDs. An exported project contains the details you entered. Keep a private backup of the original.</p>
         </section>
         <section class="step" id="home-assistant" aria-labelledby="home-assistant-title">
-          <p class="step-label">03 · WHAT THIS RELEASE INCLUDES</p>
-          <h2 id="home-assistant-title">Home Assistant is a separate next step</h2>
-          <p><strong>This planner does not connect to or control Home Assistant.</strong> Entering an entity ID records a mapping in the drawing only. Leave those fields blank if you are planning the geometry.</p>
+          <p class="step-label">03 · FROM DRAWING TO INSTALLED PANEL</p>
+          <h2 id="home-assistant-title">Take your plan into Home Assistant</h2>
+          <p>The complete public toolkit includes a local compiler, a Home Assistant integration, and its installer. Keep your exported JSON, <a href="https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip">download the complete ZIP</a>, and follow the <a href="../install.html">installation guide</a>.</p>
           <dl class="distinctions">
-            <div><dt>Available here</dt><dd>Draw rooms and walls, add openings and items, preview in 3D, and export or reopen an editable JSON draft.</dd></div>
-            <div><dt>Not included</dt><dd>The generic Home Assistant compiler, a downloadable integration package, installation tools and a workflow for publishing a separate viewer.</dd></div>
+            <div><dt>In the browser</dt><dd>Draw, preview, and save editable JSON. Entering an entity ID records a mapping; this editor does not connect to or control Home Assistant.</dd></div>
+            <div><dt>On your computer</dt><dd>Python 3.10+ builds your private viewer, model exports, and installation archive. The compiler and installer need no extra Python packages.</dd></div>
+            <div><dt>In Home Assistant</dt><dd>Install the component, add its YAML entry, check configuration, and restart. Administrators can open 3D Home and link items to their own entities.</dd></div>
           </dl>
-          <p>The <strong>Build &amp; install</strong> dialog explains these limits and gives you another export button. Its collapsed developer command applies only to a full development checkout that already includes the separate tools. Downloading this public site's files does not provide that checkout.</p>
-          <p>For now, keep the JSON project as your editable source. A Home Assistant installation requires separately supplied tools and instructions that support this project format. This website does not currently provide a complete installation path or promise a release date for one.</p>
+          <p>The <strong>Build &amp; install</strong> dialog provides the export and build command. The guide covers local installation, Home Assistant OS file transfer, backups, and updates. These steps run outside the browser and do not need a Home Assistant token.</p>
+          <a class="button" href="../install.html">Build and install your home <span aria-hidden="true">→</span></a>
         </section>
         <section class="next-section" id="local-copy" aria-labelledby="local-title">
           <h2 id="local-title">Optional: use a local copy</h2>
           <details>
-            <summary>For developers who already have the static site files</summary>
+            <summary>Use the downloaded toolkit's editor offline</summary>
             <div class="detail-body">
-              <p>The hosted planner needs no setup. If you already have a downloaded copy, keep its <code>planner/</code> and <code>vendor/</code> folders together. From the folder containing them, serve the files with a local web server. With Python 3 installed, you can run:</p>
+              <p>The hosted planner needs no setup. To use a downloaded copy, extract the <a href="https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip">complete ZIP</a> and keep its folders together. From the extracted toolkit folder, run:</p>
               <pre><code>python3 -m http.server 8099 --bind 127.0.0.1</code></pre>
               <p>Open <a href="http://127.0.0.1:8099/planner/">http://127.0.0.1:8099/planner/</a> and keep the terminal running while you draw. Double-clicking index.html is not supported.</p>
-              <p>Use Export JSON and Open JSON to move your drawing between the hosted and local copies; their browser storage is separate. Serving the static files locally does not add the compiler or Home Assistant installer.</p>
+              <p>Use Export JSON and Open JSON to move your drawing between the hosted and local copies; their browser storage is separate. The toolkit also includes the compiler and installer; run those separately in your terminal when you follow the <a href="../install.html">installation guide</a>.</p>
             </div>
           </details>
         </section>

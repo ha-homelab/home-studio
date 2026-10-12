@@ -1,0 +1,60 @@
+<section id="homeView" aria-label="Home controls" hidden>
+  <div class="home-layout">
+    <section class="home-map" aria-label="Interactive floor plan">
+      <div class="home-map-tools">
+        <label for="homeRoom">View</label><select id="homeRoom"><option value="">Whole floor</option></select>
+        <div class="home-zoom" role="group" aria-label="Plan zoom"><button id="homeZoomOut" aria-label="Zoom out">−</button><button id="homeZoomReset" aria-label="Reset zoom and pan">100%</button><button id="homeZoomIn" aria-label="Zoom in">+</button></div>
+        <button id="homeOtherFloor">__OTHER_TITLE__</button>
+        <button id="homeToggleControls" aria-controls="homeControls" aria-expanded="true">Hide controls</button>
+        <button id="homeToggleActivity" aria-controls="homeActivity" aria-expanded="false">Activity</button>
+        <span id="homeConnection" role="status">Connecting…</span><button id="editLayout">Edit layout</button>
+      </div>
+      <section id="homeActivity" aria-label="Room activity" hidden>
+        <div class="activity-navigation"><button id="homeActivityAll" aria-pressed="true">Whole floor</button><div id="homeActivityRooms" aria-label="Focus a room"></div></div>
+        <p id="homeActivitySummary" role="status"></p>
+        <div id="homeActivitySources" aria-label="Sources for selected room"></div>
+        <p class="activity-hint">No detection does not mean an empty room. Signal coverage is not yet calibrated. Show on plan locates the device, not a person.</p>
+      </section>
+      <details id="homeSignals" hidden>
+        <summary>Signal activity <span id="homeSignalStatus" role="status">No fresh signal data</span></summary>
+        <div class="signal-options"><label><input id="homeSignalToggle" type="checkbox" checked> Show blue zones</label><button id="homeSignalAll" aria-pressed="true">All regions</button><div id="homeSignalRegions" role="group" aria-label="Focus a signal region"></div></div>
+        <p id="homeSignalReason"></p>
+        <p>Blue regions and bars show recent signal changes, not measured people. New activity restores brightness; each highlight fades over 15 seconds from its observation. Region cards stay visible when you focus the map. Geometry is approximate; a quiet signal does not mean an empty room.</p>
+      </details>
+      <div id="homeStage"><div id="homeLabels"></div><div id="homeMotion" aria-hidden="true"></div><div id="homeMarkers"></div><div id="homeCameras"></div></div>
+      <p id="homeFeedback" role="status" aria-live="polite" hidden></p>
+    </section>
+    <section id="homeControls" class="home-controls" aria-label="Bound devices">
+      <div class="home-controls-heading"><h2>Lights & activity</h2><p id="homeSummary"></p></div>
+      <div id="homeDeviceList"></div>
+      <p id="homeEmpty" hidden>No devices are linked in this view. Use Edit layout to link an existing Home Assistant entity.</p>
+    </section>
+  </div>
+  <img id="tvPreview" alt="Current TV picture" width="480" height="270" hidden>
+  <dialog id="moduleDialog" aria-labelledby="moduleTitle">
+    <form method="dialog"><button class="curtain-dismiss" aria-label="Close receiver diagnostics">×</button></form>
+    <h2 id="moduleTitle"></h2>
+    <h3>Room sensing</h3><p id="moduleActivity" role="status"></p>
+    <h3>Algorithm diagnostics</h3><p id="moduleSummary" role="status"></p>
+    <details><summary>Technical details</summary><pre id="moduleDetails"></pre></details>
+  </dialog>
+  <dialog id="curtainDialog" aria-labelledby="curtainTitle">
+    <form method="dialog"><button class="curtain-dismiss" aria-label="Close curtain controls">×</button></form>
+    <h2 id="curtainTitle"></h2><p id="curtainStatus" role="status"></p>
+    <p id="curtainAccuracy" role="status"></p>
+    <button id="curtainPower">Power on guard · wait 50s</button>
+    <div class="curtain-actions"><button id="curtainClose">Close</button><button id="curtainStop">Stop</button><button id="curtainOpen">Open</button></div>
+    <label for="curtainPosition">Open <output id="curtainPercent">—</output></label>
+    <input id="curtainPosition" type="range" min="0" max="100" step="1">
+    <button id="curtainApply">Set position</button><button id="curtainDetails">More details</button>
+    <details id="curtainRecovery">
+      <summary>Check position after power loss</summary>
+      <p>A connected motor can still have an inaccurate travel reference. HA may repeat an old percentage after reconnecting.</p>
+      <ol><li>When the room can safely be fully opened or closed, choose Open or Close above and watch the curtain reach the endpoint. Stop remains available.</li><li>Check the other endpoint, then at least two partial positions using Set position. Compare the real curtain with the HA-reported percentage; small endpoint differences are kept as reported.</li><li>If a partial target fails, leave power on and try a deliberate full endpoint movement before checking again.</li></ol>
+      <p>No movement starts by opening this guide or recording a check.</p>
+      <label><input id="curtainChecked" type="checkbox"><span>I physically checked both endpoints and at least two partial positions.</span></label>
+      <button id="curtainRecordCheck">Record my check</button>
+    </details>
+    <p id="curtainError" role="alert" hidden></p>
+  </dialog>
+</section>
