@@ -9,7 +9,7 @@ import shutil
 from urllib.parse import unquote, urlsplit
 
 SITE_FILES = (
-    'index.html', 'site.css', 'privacy.html', '404.html', '.nojekyll',
+    'index.html', 'site.css', 'privacy.html', 'install.html', '404.html', '.nojekyll',
     'planner/index.html', 'planner/editor.css', 'planner/editor.js',
     'planner/model.js', 'planner/guide.html', 'planner/guide.css',
     'planner/publishing.html', 'planner/guide-assets/practice-home.json',
@@ -19,7 +19,20 @@ SITE_FILES = (
     'planner/guide-assets/07-export.jpg',
     'vendor/three.module.min.js', 'vendor/THREE-LICENSE.txt',
 )
-REPO_FILES = ('README.md', '.gitignore', 'scripts/validate-site.py', '.github/workflows/pages.yml')
+REPO_FILES = ('README.md', 'LICENSE', '.gitignore', 'scripts/validate-site.py', '.github/workflows/pages.yml',
+              '.github/workflows/package.yml', 'docs/architecture.md',
+              'scripts/build-planner-project.py', 'scripts/install-home-assistant.py',
+              'scripts/test-install-home-assistant.py', 'scripts/test-public-package.py',
+              'planner/project.py', 'planner/example-home.json', 'geometry.py', 'exporters.py',
+              'viewer.template.html', 'viewer.js', 'home-view.html', 'home-view.css',
+              'curtain-state.js', 'motion-state.js', 'tv-screen.js', 'camera-preview.js',
+              'assumed-zone-view.js', 'home-view.js', 'light-state.js', 'room-lighting.js',
+              'custom_components/home_floorplan/__init__.py',
+              'custom_components/home_floorplan/site.py',
+              'custom_components/home_floorplan/validation.py',
+              'custom_components/home_floorplan/curtains.py',
+              'custom_components/home_floorplan/manifest.json',
+              'custom_components/home_floorplan/static/panel.js')
 # Supplementary tripwires, not a substitute for reviewing source and image pixels.
 PRIVATE = re.compile(r'\bunit\d{3}\b|/Users/|-----BEGIN .*PRIVATE KEY|'
                      r'\b(?:192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3})\b', re.I)
@@ -61,7 +74,7 @@ def validate(root):
         # The validator intentionally contains its own private-pattern tripwires.
         if relative != 'scripts/validate-site.py' and PRIVATE.search(text):
             raise ValueError(f'Private-data tripwire in {relative}')
-        if path.suffix == '.html':
+        if path.suffix == '.html' and relative in SITE_FILES:
             parser = Links()
             parser.feed(text)
             documents[relative] = parser

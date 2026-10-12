@@ -1,0 +1,22 @@
+name: Validate complete package
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Check published sources and website
+        run: python3 scripts/validate-site.py
+      - name: Test archive validation, installation, backup and rollback
+        run: python3 scripts/test-install-home-assistant.py
+      - name: Build and install a fictional home in an isolated directory
+        run: python3 scripts/test-public-package.py

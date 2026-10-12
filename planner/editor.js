@@ -3,7 +3,7 @@ import { LIMITS, ITEM_TYPES, clone, round, distance, signedArea, pointInPolygon,
 
 const $ = id => document.getElementById(id);
 const STORAGE_KEY = 'home-studio.project.v1';
-const BUILD_COMMAND = 'python3 scripts/build-planner-project.py --project .local-artifacts/my-home/project.json --output dist/my-home --ha-package';
+const BUILD_COMMAND = 'python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package';
 const LABELS = { furniture: 'Furniture', lamp: 'Lamp', chandelier: 'Ceiling light', tv: 'TV / display', appliance: 'Appliance', switch: 'Switch', outlet: 'Outlet', sensor: 'Sensor' };
 const COLORS = { floor: '#e7dac2', tile: '#e0e8df', deck: '#d8dfbe', furniture: '#96aca6', lamp: '#d9ae68', chandelier: '#d9ae68', tv: '#677d89', appliance: '#a1abb0', switch: '#b4c39d', outlet: '#b4c39d', sensor: '#c4b09a' };
 const HINTS = { select: 'Drag a shape to move, or empty space to pan.', room: 'Drag a rectangle to create a room. Add walls separately.', wall: 'Drag from one wall endpoint to the other.', door: 'Click a wall to cut a door opening.', window: 'Click a wall to cut a window opening.', item: 'Click to place your item. Refine its position in the inspector.' };

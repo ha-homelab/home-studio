@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Take your Home studio drawing into Home Assistant: download the complete toolkit, build locally, preview, install, and link your devices.">
+  <title>From drawing to Home Assistant · Home studio</title>
+  <link rel="stylesheet" href="./planner/guide.css">
+</head>
+<body>
+  <a class="skip-link" href="#installation">Skip to installation</a>
+  <header class="site-header">
+    <a class="wordmark" href="./">Home<span>studio</span><small>YOUR HOME, CONNECTED</small></a>
+    <a class="button button-small" href="./planner/">Open the editor <span aria-hidden="true">→</span></a>
+  </header>
+  <main id="installation">
+    <section class="hero">
+      <p class="eyebrow">FROM YOUR DRAWING TO YOUR DASHBOARD</p>
+      <h1>Bring your plan<br>into Home Assistant.</h1>
+      <p class="lead">Draw in your browser. Build on your computer. Install a private 3D panel in your own Home Assistant.</p>
+      <p>The complete public toolkit includes the editor, compiler, integration, and local installer. You need Python 3.10 or newer on the computer that builds the package, and an existing Home Assistant installation with administrator access.</p>
+      <div class="hero-actions"><a class="button" href="https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip">Download the complete ZIP <span aria-hidden="true">↓</span></a><a class="text-link" href="./planner/guide.html">Start with the illustrated drawing guide</a></div>
+      <p class="small">The website saves a browser draft; it does not connect to Home Assistant. The commands below run in your terminal. No HA URL or token is sent to this website or to the installer.</p>
+    </section>
+    <div class="guide-layout">
+      <nav class="contents" aria-label="Installation contents">
+        <p class="eyebrow">THE COMPLETE PATH</p>
+        <ol>
+          <li><a href="#export">Export your drawing</a></li>
+          <li><a href="#download">Get the toolkit</a></li>
+          <li><a href="#build">Build and preview</a></li>
+          <li><a href="#install">Install the files</a></li>
+          <li><a href="#enable">Enable the panel</a></li>
+          <li><a href="#devices">Link your devices</a></li>
+        </ol>
+        <a class="contents-extra" href="#haos">Home Assistant OS / Samba</a>
+        <a class="contents-extra" href="#updates">Updates and backups</a>
+        <a class="contents-extra" href="#help">If something goes wrong</a>
+        <a class="contents-extra" href="#private-projects">Using the core privately</a>
+      </nav>
+      <div class="lesson-body">
+        <section class="step" id="export">
+          <p class="step-label">01 · KEEP YOUR EDITABLE SOURCE</p>
+          <h2>Export your drawing</h2>
+          <ol class="instructions">
+            <li>Open <a href="./planner/">Home studio</a>. Draw your rooms and walls, add openings, and check each floor in <strong>Preview 3D</strong>.</li>
+            <li>Choose <strong>Build &amp; install</strong> and review any validation message. You can export an unfinished draft, but the compiler needs a valid project.</li>
+            <li>Choose <strong>Export project.json</strong>. Move the downloaded file to a private folder you can find again.</li>
+          </ol>
+          <p>Keep this JSON file when you build or install. It is the editable source for future geometry changes. Entity IDs can stay blank until you link devices inside Home Assistant.</p>
+          <figure><a href="./planner/guide.html#preview"><img src="./planner/guide-assets/06-preview.jpg" width="1280" height="720" alt="A fictional two-room project checked in the editor's 3D preview before export."></a><figcaption><span>CHECK YOUR PLAN</span>Use the 3D preview to inspect walls and openings before making an installation package.</figcaption></figure>
+        </section>
+        <section class="step" id="download">
+          <p class="step-label">02 · A COMPLETE LOCAL TOOLKIT</p>
+          <h2>Download and open the toolkit</h2>
+          <ol class="instructions">
+            <li><a href="https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip">Download the complete repository ZIP</a> and extract it. Open the resulting <code>home-studio-main</code> folder.</li>
+            <li>Open a terminal in that folder. You should see <code>scripts</code>, <code>planner</code>, and <code>custom_components</code> alongside <code>README.md</code>.</li>
+            <li>Run <code>python3 --version</code>. If needed, install Python 3.10 or newer from <a href="https://www.python.org/downloads/">python.org</a>. The compiler and installer use the standard library; no <code>pip install</code> step is needed.</li>
+          </ol>
+          <p>On Windows, your command may be <code>py -3</code>; use that wherever this guide says <code>python3</code>. Replace example paths with real paths on your computer, and put quotes around a path containing spaces. A downloaded website page by itself is not the complete toolkit.</p>
+        </section>
+        <section class="step" id="build">
+          <p class="step-label">03 · MAKE YOUR VIEWER AND PACKAGE</p>
+          <h2>Build, then take a look</h2>
+          <p>From the toolkit folder, run this command with the path to your exported project:</p>
+          <pre><code>python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package</code></pre>
+          <p>The compiler writes your viewer and floor exports to <code>dist/my-home</code>, including <code>home-floorplan.tar.gz</code> for Home Assistant. Use an empty output folder or one created by an earlier build. Keep the editable project outside that output folder.</p>
+          <p>Preview the result with a local web server:</p>
+          <pre><code>python3 -m http.server 8099 --bind 127.0.0.1 --directory dist/my-home</code></pre>
+          <p>Open <a href="http://127.0.0.1:8099/">http://127.0.0.1:8099/</a>, choose a floor, and check its layout. Keep the terminal open while viewing; press Ctrl+C when finished. This preview does not control devices.</p>
+          <aside class="note"><strong>Keep your home private.</strong> The generated viewer and archive contain your plan and any entity bindings. The server above is bound to your own computer. Do not upload a real home build to a public repository or website.</aside>
+        </section>
+        <section class="step" id="install">
+          <p class="step-label">04 · CHOOSE YOUR FILE ACCESS</p>
+          <h2>Install into the right config folder</h2>
+          <p>If Python runs on a host with direct access to Home Assistant's config directory, use the local installer below. This is the directory containing <code>configuration.yaml</code>; for a container it is the host directory mounted as <code>/config</code>.</p>
+          <p>If you use <strong>Home Assistant OS</strong> and only access HA through a browser or file share, follow the <a href="#haos">Samba copy route</a> instead. The installer expects a local filesystem path, not an HA address or token.</p>
+          <h3>First, validate without changing files</h3>
+          <pre><code>python3 scripts/install-home-assistant.py dist/my-home/home-floorplan.tar.gz --config /path/to/ha/config --dry-run</code></pre>
+          <p>Check the printed destination and site name. The config directory must already exist, and its path must not pass through a symlink. A successful dry run creates or changes no files.</p>
+          <h3>Then install</h3>
+          <pre><code>python3 scripts/install-home-assistant.py dist/my-home/home-floorplan.tar.gz --config /path/to/ha/config</code></pre>
+          <p>The installer places the complete component under <code>custom_components/home_floorplan</code>. It does not edit YAML, restart HA, or change saved placements. Continue to <a href="#enable">enable the panel</a>.</p>
+          <aside class="note"><strong>Already installed?</strong> An existing component is protected by default. Follow <a href="#updates">Updates and backups</a>: validate with <code>--replace</code>, stop Home Assistant Core, then perform the replacement with the same flag.</aside>
+          <h3 id="haos">Home Assistant OS: validate locally, copy over Samba</h3>
+          <ol class="instructions">
+            <li>Build on your computer using the steps above. Create an empty folder named <code>ha-transfer</code> inside the toolkit folder.</li>
+            <li>Validate and unpack through the installer into that local folder:
+              <pre><code>python3 scripts/install-home-assistant.py dist/my-home/home-floorplan.tar.gz --config ha-transfer --dry-run
+python3 scripts/install-home-assistant.py dist/my-home/home-floorplan.tar.gz --config ha-transfer</code></pre>
+              <p>This prepares files for transfer; it has not installed anything on your HA machine.</p></li>
+            <li>Use the official <a href="https://www.home-assistant.io/common-tasks/os/#installing-and-using-the-samba-app">Samba share instructions</a> to open HA's <code>config</code> share in your computer's file manager. Use your own share credentials there.</li>
+            <li>Before replacing an existing component, back up HA and stop Core through a console or management connection that can start it again. On the HAOS command line, use <code>ha core stop</code>. Keep that connection available.</li>
+            <li>If <code>config/custom_components/home_floorplan</code> exists, move that entire old folder into a dated folder under <code>config/.home-studio-backups</code>. Keep the backup outside <code>custom_components</code>.</li>
+            <li>Copy the complete <code>ha-transfer/custom_components/home_floorplan</code> folder to <code>config/custom_components/home_floorplan</code> on the share. Create <code>custom_components</code> if needed. Do not merge new files into the old component; wait for the entire copy to finish.</li>
+          </ol>
+          <p>Leave <code>.storage</code> and unrelated components alone. If a copy fails, remove the incomplete new component and put the retained old folder back before starting Core. File-manager transfers do not have the local installer's automatic rollback.</p>
+        </section>
+        <section class="step" id="enable">
+          <p class="step-label">05 · ONE YAML ENTRY</p>
+          <h2>Enable 3D Home</h2>
+          <p>Open your HA <code>configuration.yaml</code>. Add this entry at the top level, with no spaces before its name:</p>
+          <pre><code>home_floorplan: {}</code></pre>
+          <p>If <code>home_floorplan:</code> already exists, keep that entry and merge any changes there; do not add a second key. Check the configuration before starting or restarting Core. HAOS provides <code>ha core check</code>; a running HA also has a YAML configuration check in its tools. See the <a href="https://www.home-assistant.io/common-tasks/os/#configuration-check">official configuration-check instructions</a>.</p>
+          <p>After a successful check, start Core if you stopped it, or restart it if it is running. On the HAOS command line use <code>ha core start</code> or <code>ha core restart</code>, respectively. Other installations use their normal host or container controls.</p>
+          <p>Sign in to Home Assistant with an <strong>administrator</strong> account, refresh the browser, and open <strong>3D Home</strong> in the sidebar. The panel uses your existing HA login.</p>
+        </section>
+        <section class="step" id="devices">
+          <p class="step-label">06 · CONNECT YOUR OWN ENTITIES</p>
+          <h2>Make the plan respond to your home</h2>
+          <ol class="instructions">
+            <li>In <strong>3D Home</strong>, choose <strong>Edit layout</strong>, then <strong>Plan &amp; placement</strong>.</li>
+            <li>Select or place an item and set its <strong>Home Assistant entity_id</strong> to an actual entity from your HA installation. Use the suggested entities where available.</li>
+            <li>Wait for <strong>Saved in Home Assistant</strong> before leaving the panel. These saved placements belong to HA, separately from the hosted editor's browser draft.</li>
+            <li>Return to <strong>Home view</strong>. Check a known light or switch with an intentional click and confirm its state in HA.</li>
+          </ol>
+          <p>Entity IDs entered in the browser editor become initial mappings; the editor itself never controls those devices. Missing or unavailable entities remain disabled. The generic panel supports its documented entity controls; placing a TV or sensor does not activate specialized TV capture, camera, or RF sensing adapters.</p>
+        </section>
+        <section class="next-section" id="updates">
+          <h2>Updates and backups</h2>
+          <p>Keep your project JSON and project ID, make a Home Assistant backup, then build the revised package. Validate the replacement while HA is still available:</p>
+          <pre><code>python3 scripts/install-home-assistant.py dist/my-home/home-floorplan.tar.gz --config /path/to/ha/config --replace --dry-run</code></pre>
+          <p>Stop Home Assistant Core using your host or console connection, then run:</p>
+          <pre><code>python3 scripts/install-home-assistant.py dist/my-home/home-floorplan.tar.gz --config /path/to/ha/config --replace</code></pre>
+          <p>Keep the printed timestamped backup path under <code>.home-studio-backups</code>. The installer retains the old component and rolls back if the directory swap fails. Check configuration and start Core again. Saved <code>.storage</code> data is preserved; if changed rooms make an old layout incompatible, follow the panel's recovery prompts.</p>
+          <p>To restore a retained component, stop Core, move the current component aside, and move the backup folder back to <code>custom_components/home_floorplan</code>. Check configuration before starting. This restores component files, not the whole HA installation or an earlier copy of saved placements.</p>
+        </section>
+        <section class="help-section" id="help">
+          <h2>If something goes wrong</h2>
+          <details><summary>Python or a script cannot be found</summary><div class="detail-body"><p>Check the Python version and your terminal's current folder. Run the commands from the extracted toolkit folder that contains <code>scripts</code>. On Windows, try <code>py -3 --version</code>. The browser cannot run the Python commands.</p></div></details>
+          <details><summary>The compiler rejects my project or output folder</summary><div class="detail-body"><p>Read the field named in the error and correct it in the editor. Export again. An unrelated nonempty output directory is protected; choose a new empty output path. Do not put the source JSON inside the replaceable output folder.</p></div></details>
+          <details><summary>The installer rejects a path or archive</summary><div class="detail-body"><p>Use the actual config directory, with no symlink in its path. Rebuild the archive from the toolkit instead of manually editing it. The installer refuses unsafe paths, links, duplicate members, incomplete assets, and oversized packages. Use <code>--replace</code> only for an intentional update; use the Samba route if direct local access is unavailable.</p></div></details>
+          <details><summary>I do not see 3D Home, or an entity will not respond</summary><div class="detail-body"><p>Confirm the folder is exactly <code>custom_components/home_floorplan</code>, check the YAML entry, and check HA logs for <code>home_floorplan</code>. Restart after a successful configuration check and sign in as an administrator. For device controls, verify the entity ID and availability in HA, then wait for the layout to save.</p></div></details>
+        </section>
+        <section class="next-section" id="private-projects">
+          <h2>The same core can serve a private project</h2>
+          <p>The public package is MIT licensed. A private project can use its compiler, viewer, integration core, and installer while keeping its plans and extra adapters private. Generic packages require <code>site.json</code> with <code>site_features: false</code>.</p>
+          <p>Separately supplied <code>private_site</code> and <code>private_site_config</code> modules can support a household's custom behavior. Installing such a prepared private package requires <code>--allow-site-features</code>; that flag does not add missing modules, set up SSO, or discover devices. See the <a href="https://github.com/ha-homelab/home-studio/blob/main/docs/architecture.md">shared-core architecture</a> for details.</p>
+        </section>
+        <footer class="lesson-footer">
+          <h2>Start with a room.</h2>
+          <p>The seven-step drawing guide takes you from a blank page to your first project.</p>
+          <a class="button" href="./planner/guide.html">Open the illustrated guide <span aria-hidden="true">→</span></a>
+          <p class="small"><a href="./privacy.html">Privacy and storage</a> <span aria-hidden="true">·</span> <a href="https://github.com/ha-homelab/home-studio">Complete source and MIT license</a> <span aria-hidden="true">·</span> <a href="#installation">Back to the top ↑</a></p>
+        </footer>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

@@ -55,22 +55,21 @@
   <dialog id="help-dialog"><button class="dialog-close icon-button" data-close="help-dialog" aria-label="Close quick start">×</button><p class="eyebrow">FROM BLANK PAGE TO HOME</p><h2>Draw your first home.</h2><p>New to floorplans? <a href="./guide.html" target="_blank" rel="noopener">Follow the illustrated two-room tutorial</a>. Each step shows what to click and what you should see. This website works in your browser; no Python or installation is needed.</p><ol class="steps"><li><strong>Draw the rooms.</strong><p>Drag a rectangle on the metric plan, or add a room by dimensions in Floor settings. Edit its polygon points for other shapes. Rooms define floor areas only.</p></li><li><strong>Give them walls.</strong><p>Select a room and choose Build wall outline, or draw individual wall segments. Exact shared walls are reused. Walls stay separate when rooms move.</p></li><li><strong>Open up the space.</strong><p>Choose Add door or Add window, then click a wall. Adjust width, distance from wall start, sill, and head in the inspector. These are actual holes in the 3D walls.</p></li><li><strong>Make it your own.</strong><p>Place items, add more floors, inspect the 3D preview, and export JSON when ready. Entity IDs are optional notes for a later integration; leave them blank for a drawing.</p></li></ol><p class="tip">V select · R room · W wall · D door · N window · I item<br>Space / Shift + drag to pan · scroll to zoom · Delete to remove<br>⌘ / Ctrl Z undo · ⌘ / Ctrl Shift Z redo · Escape cancel</p><p class="fine-print">Local drafts belong to this browser profile and website origin. Export JSON for a portable backup. This planner does not connect to or control Home Assistant. <a href="./publishing.html" target="_blank" rel="noopener">Saving, sharing and next steps ↗</a></p><button class="primary" data-close="help-dialog">Start designing</button></dialog>
   <dialog id="build-dialog">
     <button class="dialog-close icon-button" data-close="build-dialog" aria-label="Close build instructions">×</button>
-    <p class="eyebrow">KEEP YOUR WORK</p>
-    <h2>Export your plan. Know the next steps.</h2>
-    <p>This public site lets you draw, preview in 3D, and save an editable JSON project. The generic Home Assistant compiler and installer are not included in this initial public release. The planner does not connect to or control Home Assistant.</p>
+    <p class="eyebrow">FROM DRAWING TO HOME ASSISTANT</p>
+    <h2>Export, build, and install your plan.</h2>
+    <p>The complete public toolkit includes the compiler and Home Assistant installer. Export your drawing here, then run the local tools on your computer with Python 3.10 or newer. This browser editor does not connect to or control Home Assistant.</p>
     <div id="build-validation" class="callout"></div>
     <ol class="steps compact">
       <li><strong>Save a portable draft.</strong><p>Download project.json and keep it somewhere you can find again. This file contains your drawing and any entity IDs you entered. It is not an installed dashboard.</p><button id="build-export" class="primary">Export project.json</button></li>
-      <li><strong>Reopen or share the drawing.</strong><p>Choose Open JSON to continue later or on another computer. Someone with your JSON file can open their own copy in this planner. Export a backup before replacing a draft.</p></li>
-      <li><strong>Read what comes next.</strong><p>Building a separate viewer or installing a Home Assistant integration needs additional tools and instructions. Neither action happens when you export.</p><a href="./publishing.html" target="_blank" rel="noopener">Saving, sharing and Home Assistant next steps ↗</a></li>
+      <li><strong>Get the complete toolkit.</strong><p>Download and extract the public package. The local compiler and installer use Python's standard library; no extra packages are needed.</p><a href="https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip">Download the complete ZIP ↗</a></li>
+      <li><strong>Build, preview, and install.</strong><p>The guide walks through the local build, your Home Assistant config folder, a dry run, backups, the YAML entry, and restart. It includes a file-copy route for Home Assistant OS.</p><a href="../install.html" target="_blank" rel="noopener">Complete installation guide ↗</a></li>
     </ol>
     <details>
-      <summary>Optional: developer build from a full source checkout</summary>
-      <p>This command is only for maintainers who already have the full development repository, its dependencies, and installation instructions. Those files are not part of this public site or its static download.</p>
-      <p>In that checkout, create <code>.local-artifacts/my-home/</code> and place the exported <code>project.json</code> there. Run the command from the repository folder:</p>
-      <pre><code>python3 scripts/build-planner-project.py --project .local-artifacts/my-home/project.json --output dist/my-home --ha-package</code></pre>
+      <summary>Build command for the downloaded toolkit</summary>
+      <p>Open a terminal in the extracted toolkit folder. Replace <code>/path/to/project.json</code> with the actual location of your exported file; quote paths containing spaces.</p>
+      <pre><code>python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package</code></pre>
       <button id="copy-command" class="quiet small">Copy command</button>
-      <p>Building produces files; installing them is a separate task. This command cannot run inside the browser and is not a setup step for using this planner.</p>
+      <p>This creates your viewer and <code>dist/my-home/home-floorplan.tar.gz</code>. Follow the guide to preview and install it. Keep your editable JSON outside the generated output folder.</p>
     </details>
   </dialog>
   <script type="module" src="./editor.js"></script>
