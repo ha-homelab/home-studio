@@ -270,3 +270,33 @@ indicator. Switch-only lamps without brightness retain full on/off behavior.
 This is a UI intensity cue, not a claim about measured illuminance. It adds no
 polling, render loop or GPU effect. Run `node --test scripts/test-light-state.cjs`
 for brightness, color, missing-state and icon-contrast regressions.
+
+### Read-only appliance status
+
+Optional `model.appliance_status` entries bind an inventory object ID to its
+`entity_id`, `room`, and `kind` (`smoke` or `cooktop`). Both the binding and room
+must match before a reading can affect that object. Clicking an appliance opens
+Home Assistant details; it never switches the appliance.
+
+Smoke entries also name a `battery_entity_id`. A current binary `off` reading
+shows green OK, `on` shows red SMOKE ALARM, and a valid 0–100 percent battery is
+shown beside it. Missing, disconnected, or restored readings are neutral, never
+an inferred all-clear. An entity name containing “motion” does not make a smoke
+detector a motion source.
+
+Cooktop entries provide up to eight `burners`, each `[x, y, z, radius]` in the
+inventory asset's normalized local coordinates. A current binary `on` reading
+shows a symbolic gas ring on those positions. This indicates aggregate cooktop
+activity, not which individual burner is lit. An optional `oven_entity_id` uses
+an independent `running` / `ready` / `paused` state; only `running` illuminates the
+oven window. Temperature and job names do not imply active heating. The standard
+oven window occupies local X ±0.38, Y 0.19–0.67, Z 0.501; +Z is the asset front.
+
+The rings and window are small CSS/SVG overlays projected through the existing
+orthographic camera. Rotation, scale, and placement use the object's world
+transform. The window is hidden when its front faces away. No polling, animation
+loop, extra WebGL pass, or shadow invalidation is added. CSS handles the subtle
+flicker, reduced-motion settings disable it, and hidden pages or rooms stop the
+overlays. Host state projection remains read-only and credentials stay outside
+the viewer. `scripts/test-appliance-state.cjs` covers unavailable evidence,
+remapping, battery edge cases, and independent cooktop/oven transitions.

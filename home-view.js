@@ -113,7 +113,8 @@ homeView = (() => {
   const curtainCommands=new Map();
   const describeCurtain=item=>{const info=curtainStateFor(item);return (info.description||describeDeviceState(deviceDisplayState(item)))+(info.position!==null?` · ${info.remembered?'last known ':'HA reports '}${info.position}% open`:' · position unknown');};
   const isTV=item=>item.entity_id?.startsWith('media_player.');
-  const isSupportedControl = item => item.entity_id && (['light','switch','input_boolean','fan'].includes(item.entity_id.split('.')[0]) || isMotion(item) || isTV(item) || isCover(item));
+  const applianceSpec=item=>model.appliance_status?.[item.id];
+  const isSupportedControl = item => item.entity_id && (['light','switch','input_boolean','fan'].includes(item.entity_id.split('.')[0]) || isMotion(item) || isTV(item) || isCover(item) || applianceSpec(item));
   // Only light-shaped objects illuminate a room; other linked switches remain controls.
   const isLight = item => ['chandelier','lamp'].includes(item.type) || item.entity_id?.startsWith('light.');
   const deviceDisplayState = item => !embedded ? 'preview' : !haConnected ? 'disconnected' : isMotion(item) ? resolveMotionState(model.motion_sources?.[item.entity_id]||[item.entity_id],haStates) : !haStates[item.entity_id] ? 'missing' : isCover(item) && ['open','closed','opening','closing'].includes(haStates[item.entity_id].state) ? haStates[item.entity_id].state : isTV(item) && ['playing','paused','idle','buffering'].includes(haStates[item.entity_id].state) ? 'on' : ['on','off'].includes(haStates[item.entity_id].state) ? haStates[item.entity_id].state : 'unavailable';
@@ -197,7 +198,8 @@ homeView = (() => {
       labels.push({el:label,room:room.id,position:new THREE.Vector3(xm(room.label[0]), .06, zm(room.label[1]))});
     }
     for (const item of bindings) {
-      const glyph=receiverSpec(item)?'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/></svg>':isMotion(item)?motionIcon:isTV(item)?tvIcon:isCover(item)?coverIcon:icon;
+      const appliance=applianceSpec(item);
+      const glyph=appliance?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c2 5-2 6 1 9 2-1 3-3 3-4 6 7 5 15-4 15S2 13 7 8c-1 4 1 5 2 5-2-5 3-7 3-11Z"/></svg>':receiverSpec(item)?'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/></svg>':isMotion(item)?motionIcon:isTV(item)?tvIcon:isCover(item)?coverIcon:icon;
       const marker = document.createElement('button'); marker.className = 'home-marker'; marker.dataset.homeItem = item.id; marker.innerHTML = glyph;
       const card = document.createElement('button'); card.className = 'home-device'; card.dataset.homeDevice = item.id;
       const symbol = document.createElement('span'); symbol.className = 'home-device-icon'; symbol.innerHTML = glyph;
@@ -208,6 +210,19 @@ homeView = (() => {
       $('homeDeviceList').append(card); $('homeMarkers').append(marker);
       const position = new THREE.Vector3(item.position_m.x,item.position_m.y + item.dimensions_m.height / 2,item.position_m.z);
       const point = {item,marker,card,detail,position,object:objectsById.get(item.id),original:model.inventory.find(i=>i.id===item.id),duplicateControl:isCover(item)&&points.some(p=>p.item.entity_id===item.entity_id)}; points.push(point);
+      if(appliance){
+        for(const el of [marker,card])el.dataset.appliance=appliance.kind;
+        if(appliance.kind==='smoke'){
+          point.reading=document.createElement('span');point.reading.className='appliance-reading';marker.append(point.reading);
+        }else if(appliance.kind==='cooktop'){
+          point.flames=createCooktopFlames(appliance);$('homeMarkers').append(point.flames);
+          if(appliance.oven_entity_id){
+            point.oven=document.createElement('span');point.oven.className='oven-glow';point.oven.hidden=true;
+            point.oven.setAttribute('aria-hidden','true');point.oven.innerHTML='<span></span>';$('homeMarkers').append(point.oven);
+          }
+          if(point.object)point.position.copy(point.object.localToWorld(new THREE.Vector3(0,1.1,0)));
+        }
+      }
       const anchor=objectsById.get(model.control_anchors?.[item.id]);
       if(anchor)point.anchor=anchor.localToWorld(new THREE.Vector3(0,.5,.5));
       else if(isMotion(item))point.anchor=position.clone().setY(.12);
@@ -296,16 +311,23 @@ homeView = (() => {
           invalidateShadows();
         }
       }
-      const description=(sensing?activityText[sensing]||activityText.unknown:isCover(item)?describeCurtain(item):isMotion(item)&&enabled?(state==='on'?'Motion detected':'No detection'):isTV(item)&&enabled?haStates[item.entity_id].state:describeDeviceState(state))+(state==='on' && appearance.percent!==null?' · '+appearance.percent+'%':'')+
+      const appliance=applianceSpec(item),status=appliance?resolveApplianceStatus(item,appliance,haStates,haConnected):null;
+      if(point.reading)point.reading.textContent=status.text;
+      if(point.flames)point.flames.hidden=!active||!visible||!status.running||document.hidden;
+      const oven=appliance?.oven_entity_id?resolveOvenStatus(appliance,haStates,haConnected&&item.entity_id===appliance.entity_id&&item.room===appliance.room):null;
+      if(point.oven)point.oven.hidden=!active||!visible||!oven.running||document.hidden;
+      const description=status?status.text+(oven?' · '+oven.text:'')+(appliance.kind==='cooktop'&&status.running?' · Individual burners are not reported':''):(sensing?activityText[sensing]||activityText.unknown:isCover(item)?describeCurtain(item):isMotion(item)&&enabled?(state==='on'?'Motion detected':'No detection'):isTV(item)&&enabled?haStates[item.entity_id].state:describeDeviceState(state))+(state==='on' && appearance.percent!==null?' · '+appearance.percent+'%':'')+
         (state==='on' && appearance.kelvin?' · '+appearance.kelvin+' K':'');
       for (const button of [marker,card]) {
+        if(status)button.dataset.tone=oven?.running&&status.tone==='idle'?'active':status.tone;
         button.dataset.activity=sensing||'';
         button.style.setProperty('--light-rgb',appearance.rgb.join(','));
         button.style.setProperty('--light-level',String(appearance.brightness));
         button.style.setProperty('--light-fill-rgb',appearance.indicatorRGB.join(','));
         button.style.setProperty('--light-text',appearance.text);
-        button.dataset.state=state; button.disabled=(isTV(item)||isMotion(item)||isCover(item)?!haConnected||(!receiverSpec(item)&&!haStates[item.entity_id]):!enabled) || busy || !bridge;
-        button.setAttribute('aria-pressed',String(state==='on')); button.setAttribute('aria-busy',String(busy));
+        button.dataset.state=state; button.disabled=(status||isTV(item)||isMotion(item)||isCover(item)?!haConnected||(!receiverSpec(item)&&!haStates[item.entity_id]):!enabled) || busy || !bridge;
+        if(status)button.removeAttribute('aria-pressed');else button.setAttribute('aria-pressed',String(state==='on'));
+        button.setAttribute('aria-busy',String(busy));
         button.setAttribute('aria-label',`${item.name}: ${description}${busy ? ', waiting for confirmation' : ''}`);
         button.title=`${roomName(item.room)} · ${item.name} · ${description}`;
       }
@@ -357,6 +379,7 @@ homeView = (() => {
   }
   function activateDevice(item,quick=true,tvPower=false) {
     const state=deviceDisplayState(item);
+    if(applianceSpec(item)){if(bridge&&haConnected&&haStates[item.entity_id])bridge.postMessage({type:'more_info',entity_id:item.entity_id});return;}
     if(receiverSpec(item)&&bridge&&haConnected){inspectActivitySource(item);return;}
     if(isCover(item)&&bridge&&haConnected){curtainItem=item;curtainDirty=false;curtainCheckCycle=null;$('curtainChecked').checked=false;$('curtainError').hidden=true;updateCurtainDialog();$('curtainDialog').showModal();const action=curtainStateFor(item).action;if(quick&&action)curtainCommand(action);return;}
     if(bridge && haConnected && haStates[item.entity_id] && !tvPower && (isTV(item)||isMotion(item))){bridge.postMessage({type:'more_info',entity_id:item.entity_id});return;}
@@ -512,7 +535,12 @@ homeView = (() => {
       step.el.style.setProperty('--angle',(Math.atan2(-(q.y-p.y)*rect.height,(q.x-p.x)*rect.width)*180/Math.PI+90)+'deg');
     }
     positionMediaPreviews(camera,rect,selected);
+    for(const point of points){
+      if(point.flames)positionCooktopFlames(point.flames,point.object,camera,rect,THREE);
+      if(point.oven)positionOvenGlow(point.oven,point.object,camera,rect,THREE);
+    }
   }
+  document.addEventListener('visibilitychange',()=>{refreshControls();if(!document.hidden)window.renderModel?.();});
 
   function clearTrail(point){clearTimeout(point.trailTimer);point.trail?.remove();point.trail=null;point.steps=[];}
   function startTrail(point,room){
