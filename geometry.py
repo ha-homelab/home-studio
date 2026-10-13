@@ -15,15 +15,15 @@ MATERIALS = {
 def floor_context(meshes, elevation_m):
     """Bake a lightweight, read-only storey in the active floor's metric frame.
 
-    Keep architectural surfaces and true edges, never inventory, labels or
-    devices. Adjacent coplanar triangles do not introduce diagonal wire lines.
+    Keep architecture and explicit static vehicles, never inventory, labels or
+    device controls. Coplanar triangles do not introduce diagonal wire lines.
     This is viewer metadata; the active floor's export meshes stay untouched.
     """
     if not math.isfinite(elevation_m) or elevation_m >= 0:
         raise ValueError('Context floor elevation must be finite and below zero')
     surfaces, lines = [], set()
     for mesh in meshes:
-        if mesh['kind'] not in {'walls', 'floors', 'windows', 'doors'}:
+        if mesh['kind'] not in {'walls', 'floors', 'windows', 'doors', 'vehicles'}:
             continue
         edges = {}
         vertices = [tuple(round(v + (elevation_m if i == 1 else 0), 4)

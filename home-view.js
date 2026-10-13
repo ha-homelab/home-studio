@@ -327,6 +327,7 @@ homeView = (() => {
       if (visible && !counted.has(item.entity_id)) { counted.add(item.entity_id);total++; if(state==='on'){if(isMotion(item))motion++;else on++;} if(!enabled)unavailable++; }
     }
     refreshTVPreviews();
+    updateTelemetryPreviews(haStates,haConnected);
     updateDaylight();
     updateCurtainDialog();
     refreshActivity();

@@ -207,8 +207,43 @@ room filtering, source anchors, dismissal, and the host command boundary.
 
 ### Read-only lower-storey context
 
-`geometry.floor_context()` bakes architectural surfaces and true triangle-boundary edges into the optional `lower_floor_context` model metadata. It omits inventory, fixtures, device bindings, labels and source images. Coplanar face diagonals and duplicate edges are removed. The geometry is translated into the active floor's metric frame at compile time. `planner/project.py` selects the nearest strictly lower `elevation_m`, using a shared X/Z origin; the source meshes and standalone model exports are unchanged.
+`geometry.floor_context()` bakes architectural surfaces, explicit `vehicles` meshes and true triangle-boundary edges into the optional `lower_floor_context` model metadata. It omits inventory, fixtures, device bindings, labels and source images. Coplanar face diagonals and duplicate edges are removed. The geometry is translated into the active floor's metric frame at compile time. `planner/project.py` selects the nearest strictly lower `elevation_m`, using a shared X/Z origin; the source meshes and standalone model exports are unchanged.
 
 `buildLowerFloorContext()` creates one unlit surface batch and one line batch directly under the Three.js scene, outside the interactive root, inventory and lighting groups. Both are transparent, write no depth, cast no shadows and respect opaque active-floor depth. No extra pass, timer, light, texture, network request or frame loop is introduced. Home view enables the context only in Whole floor view when its toggle is on; room focus and the editor hide it. It never participates in camera bounds or device picking. Existing floors without context render exactly as before.
 
 Validation: `python3 scripts/test-floor-context.py` checks geometry filtering, edge deduplication, elevation and compiler order independence. `node --test scripts/test-floor-context.cjs` checks the two inert render batches. Browser checks compare active-floor marker positions before and after toggling the layer and confirm idle rendering stops.
+
+
+### Passive telemetry and power labels
+
+Optional `model.telemetry` holds up to four read-only cards. Each descriptor has
+`id`, `name`, `room`, `position_m`, optional `lower_floor`, and up to eight `metrics`.
+A metric supplies `label`, `entity_id` and `format` (`number`, `percent`, `pressure`,
+`power` or `status`), with optional `decimals` (0–2) or status `labels`. Concrete
+entity IDs remain in the site model, never in shared code. Generic planner exports
+omit these optional bindings unless a site build explicitly supplies them.
+
+`updateTelemetryPreviews()` consumes the existing normalized HA state messages.
+It creates stable DOM nodes, updates their text, and never requests a measurement
+or sends a command. Values are labelled as last reported, not real-time vehicle
+measurements: many cars report tire pressure only when awake or driving. Missing,
+unavailable, restored or disconnected readings display an em dash. Pressure is
+converted from the declared psi/kPa/bar/Pa unit to PSI; unknown units are rejected.
+Power accepts W/kW, and percentages require a valid 0–100 value with `%` units.
+
+Cards use the media free-space allocator after TVs and cameras, but never create
+leaders. No room or control is covered to make room for them. Lower-floor cards
+follow the context toggle and disappear during upper-floor room focus. All cards
+hide in the editor. Small screens may have no spare space; in that case cards are
+hidden instead of shrinking the plan. No additional timer, polling, texture,
+render loop or dependency is introduced.
+
+Optional `model.power_labels` binds a sensor to an existing `object_id` with an
+accessible `name`. Up to twelve labels show positive W/kW readings just left of
+those objects. They disappear at zero, on missing data or disconnection. Nearby
+vertical alternatives avoid device/room hit targets; labels never intercept
+pointer input. They describe a power strip's total, not the isolated appliance
+load, unless the source measures that appliance separately.
+
+`node --test scripts/test-media-preview.cjs` covers unit conversion, unknown data,
+stable cards, visibility, absence of telemetry leaders, and zero/offline labels.

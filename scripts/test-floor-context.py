@@ -28,6 +28,13 @@ class FloorContextTests(unittest.TestCase):
         self.assertEqual(source[0], geometry.meshes[0])
         self.assertEqual(len(floor_context(source + source, -2.86)['lines']), 12 * 6)
 
+    def test_explicit_vehicle_geometry_is_allowed_without_bindings(self):
+        g = create_geometry([(0, 0), (1, 1)], [(0, 0), (1, 1)])
+        g.box_m('parked_car', 0, 0, 2, 5, 0, 1.7, kind='vehicles')
+        result = floor_context(g.meshes, -3)
+        self.assertEqual(len(result['lines']), 72)
+        self.assertEqual(set(result), {'elevation_m', 'surfaces', 'lines'})
+
     def test_rejects_above_floor_or_invalid_elevations(self):
         for elevation in (0, 2, float('nan'), float('inf')):
             with self.assertRaises(ValueError):
