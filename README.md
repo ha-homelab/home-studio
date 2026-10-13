@@ -121,3 +121,8 @@ credentials, or a real home design to a public issue.
 
 Home studio is available under the [MIT license](LICENSE). The bundled Three.js
 license and notices are in [vendor/THREE-LICENSE.txt](vendor/THREE-LICENSE.txt).
+
+TV preview cards provide power controls and link to their screen positions with
+cyan dashed leaders. Optional notification clips link to their camera positions.
+Images require the site-specific adapters; the public installer does not capture
+TVs or cameras by itself. See [linked media previews](docs/architecture.md#linked-tv-and-camera-previews).

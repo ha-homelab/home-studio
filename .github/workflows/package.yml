@@ -31,3 +31,5 @@ jobs:
         run: node scripts/test-wall-sheen.cjs
       - name: Test TV frame retention and disposal
         run: node --test scripts/test-tv-screen.cjs
+      - name: Test linked media previews and bounded TV power commands
+        run: node --test scripts/test-media-preview.cjs

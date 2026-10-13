@@ -318,6 +318,7 @@ homeView = (() => {
       }
       if (visible && !counted.has(item.entity_id)) { counted.add(item.entity_id);total++; if(state==='on'){if(isMotion(item))motion++;else on++;} if(!enabled)unavailable++; }
     }
+    refreshTVPreviews();
     updateDaylight();
     updateCurtainDialog();
     refreshActivity();
@@ -338,12 +339,17 @@ homeView = (() => {
     if((active||$('curtainDialog').open)&&points.some(p=>isCover(p.item)&&curtainStateFor(p.item).seconds>0))countdownTimer=setTimeout(()=>{refreshControls();window.renderModel?.();},1000);
   }
 
-  function activateDevice(item,quick=true) {
+  function refreshTVPreviews(){
+    updateTVPreviews(bindings.filter(isTV).map(item=>({item,state:deviceDisplayState(item),
+      busy:pending.has(item.entity_id),enabled:!!(bridge&&haConnected&&haStates[item.entity_id]),
+      details:()=>activateDevice(item),power:()=>activateDevice(item,false,true)})));
+  }
+  function activateDevice(item,quick=true,tvPower=false) {
     const state=deviceDisplayState(item);
     if(receiverSpec(item)&&bridge&&haConnected){inspectActivitySource(item);return;}
     if(isCover(item)&&bridge&&haConnected){curtainItem=item;curtainDirty=false;curtainCheckCycle=null;$('curtainChecked').checked=false;$('curtainError').hidden=true;updateCurtainDialog();$('curtainDialog').showModal();const action=curtainStateFor(item).action;if(quick&&action)curtainCommand(action);return;}
-    if(bridge && haConnected && haStates[item.entity_id] && (isTV(item)||isMotion(item))){bridge.postMessage({type:'more_info',entity_id:item.entity_id});return;}
-    if (!bridge || !['on','off'].includes(state) || pending.has(item.entity_id)) return;
+    if(bridge && haConnected && haStates[item.entity_id] && !tvPower && (isTV(item)||isMotion(item))){bridge.postMessage({type:'more_info',entity_id:item.entity_id});return;}
+    if (!bridge || !haConnected || !['on','off'].includes(state) || pending.has(item.entity_id)) return;
     errors.delete(item.entity_id);
     const request_id='home_'+(++sequence);
     const timer=setTimeout(() => {
@@ -351,7 +357,7 @@ homeView = (() => {
       pending.delete(item.entity_id); errors.set(item.entity_id,`${item.name}: state change was not confirmed. Check the device before trying again.`); refreshControls();
     },12000);
     pending.set(item.entity_id,{request_id,before:state,timer});
-    bridge.postMessage({type:'toggle',entity_id:item.entity_id,request_id}); refreshControls();
+    bridge.postMessage({type:tvPower?'tv_power':'toggle',...(tvPower?{action:state==='on'?'turn_off':'turn_on'}:{}),entity_id:item.entity_id,request_id}); refreshControls();
   }
 
   function handleCommandResult(message) {
@@ -472,13 +478,14 @@ homeView = (() => {
     camera.up.set(0,1,0); camera.position.copy(center).add(offset); camera.lookAt(center); camera.updateMatrixWorld();
     const bounds=new THREE.Box3().setFromPoints(vertices.flatMap(v=>[v,v.clone().setY(model.ceiling_height_m)]).map(v=>v.applyMatrix4(camera.matrixWorldInverse)));
     const aspect=rect.width/rect.height, width=bounds.max.x-bounds.min.x, height=bounds.max.y-bounds.min.y;
-    const half=Math.max(height/2,width/aspect/2)*1.15/zoom;
-    const cx=(bounds.min.x+bounds.max.x)/2+panX, cy=(bounds.min.y+bounds.max.y)/2+panY;
+    const media=mediaPreviewInsets(rect,selected), availableWidth=Math.max(120,rect.width-media.left-media.right), availableHeight=Math.max(180,rect.height-media.top-media.bottom);
+    const half=Math.max(height*rect.height/availableHeight/2,width*rect.height/availableWidth/2)*1.15/zoom;
+    const cx=(bounds.min.x+bounds.max.x)/2+panX+(media.right-media.left)*half/rect.height, cy=(bounds.min.y+bounds.max.y)/2+panY+(media.top-media.bottom)*half/rect.height;
     camera.left=cx-half*aspect;camera.right=cx+half*aspect;camera.top=cy+half;camera.bottom=cy-half;camera.updateProjectionMatrix();
     roomLighting?.update(points);
     assumedZones?.render(selected,signalZone);refreshSignalStatus();
     renderer.render(scene,camera);renderCount++;
-    positionCameraPreviews(camera,rect.height,selected);
+    positionMediaPreviews(camera,rect,selected);
     for(const label of labels) label.el.textContent=rect.width<600 ? roomCode(label.room) : roomName(label.room);
     for(const point of [...labels,...points.map(p=>({el:p.marker,position:p.anchor||(!isCover(p.item)&&model.control_groups?.[p.item.id]?p.position.clone().setY(p.item.position_m.y+p.item.dimensions_m.height):p.position)}))]) {
       const p=point.position.clone().project(camera);
@@ -520,6 +527,7 @@ homeView = (() => {
   }
 
   // Magnify the existing frame; hovering never requests another capture.
+  for(const id of ['homeTVs','homeCameras'])$(id).addEventListener('scroll',()=>{if(active&&camera)positionMediaPreviews(camera,$('homeStage').getBoundingClientRect(),selected);},{passive:true});
   const tvControl=Object.keys(tvEntities).map(id=>`[data-home-item="${id}"],[data-home-device="${id}"]`).join(',');
   const tvId=el=>el?.dataset.homeItem||el?.dataset.homeDevice;
   const hoverRay=new THREE.Raycaster();
@@ -621,6 +629,6 @@ homeView = (() => {
     $('homeSignalToggle').onchange=()=>{refreshControls();window.renderModel?.();};
     window.addEventListener('pagehide',event=>{if(!event.persisted)assumedZones?.dispose();});
   }
-  return {get active(){return active},rebuildControls,refreshControls,render,handleCommandResult,setActive,applyViewPreferences,
+  return {get active(){return active},rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
     get illuminated(){return points.filter(p=>p.overlay?.visible && active).map(p=>p.item.id)}};
 })();

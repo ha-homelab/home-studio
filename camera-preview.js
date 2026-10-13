@@ -18,19 +18,10 @@ function applyCameraFrames(frames={}){
       name.textContent=item.name+' · Motion';close.textContent='×';close.setAttribute('aria-label','Dismiss camera preview');img.alt=item.name+' notification video';
       caption.append(name,close);el.append(img,caption);$('homeCameras').append(el);
       entry={el,img};cameraPreviews.set(id,entry);
-      close.onclick=()=>{dismissedCameraEvents.set(id,entry.event);el.hidden=true};
+      close.onclick=()=>{dismissedCameraEvents.set(id,entry.event);el.hidden=true;window.renderModel?.();};
     }
     entry.event=frame.event_id;entry.captured=frame.captured_at;entry.img.src=frame.image;
-    clearTimeout(entry.timer);entry.timer=setTimeout(()=>{entry.el.remove();cameraPreviews.delete(id)},(5-age)*1000);
+    clearTimeout(entry.timer);entry.timer=setTimeout(()=>{entry.el.remove();cameraPreviews.delete(id);window.renderModel?.();},(5-age)*1000);
   }
   if(changed)window.renderModel?.();
-}
-function positionCameraPreviews(camera,height,room){
-  for(const [id,entry] of cameraPreviews){
-    const item=items.find(i=>i.id===id);
-    entry.el.hidden=!item||dismissedCameraEvents.get(id)===entry.event||!!room&&item.room!==room;
-    if(entry.el.hidden)continue;
-    const p=new THREE.Vector3(item.position_m.x,item.position_m.y,item.position_m.z).project(camera);
-    entry.el.style.top=Math.max(4,Math.min(height-entry.el.offsetHeight-4,(1-p.y)*height/2-entry.el.offsetHeight-12))+'px';
-  }
 }
