@@ -25,3 +25,5 @@ jobs:
           node-version: '22'
       - name: Test bounded diagnostic display with synthetic clocks
         run: node scripts/test-module-expiry.cjs
+      - name: Test visible wall outlines and doorway gaps
+        run: node scripts/test-wall-tops.cjs

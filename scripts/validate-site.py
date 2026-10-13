@@ -22,7 +22,7 @@ SITE_FILES = (
 REPO_FILES = ('README.md', 'LICENSE', '.gitignore', 'scripts/validate-site.py', '.github/workflows/pages.yml',
               '.github/workflows/package.yml', 'docs/architecture.md',
               'scripts/build-planner-project.py', 'scripts/install-home-assistant.py',
-              'scripts/test-install-home-assistant.py', 'scripts/test-public-package.py',
+              'scripts/test-install-home-assistant.py', 'scripts/test-public-package.py', 'scripts/test-wall-tops.cjs',
               'scripts/test-module-expiry.cjs',
               'planner/project.py', 'planner/example-home.json', 'geometry.py', 'exporters.py',
               'viewer.template.html', 'viewer.js', 'home-view.html', 'home-view.css',
