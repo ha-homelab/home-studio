@@ -1,9 +1,7 @@
 name: Validate complete package
 on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
+  workflow_call:
+
 permissions:
   contents: read
 jobs:
@@ -39,3 +37,5 @@ jobs:
         run: python3 scripts/test-floor-context.py && node --test scripts/test-floor-context.cjs
       - name: Test initial viewer mode and first-render fallback
         run: node scripts/test-viewer-startup.cjs
+      - name: Test deterministic public source release
+        run: python3 scripts/test_package_release.py

@@ -1,0 +1,47 @@
+name: Package public Home Studio source
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+      channel:
+        type: string
+        required: true
+      release_plan_artifact:
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: ${{ inputs.release_plan_artifact }}
+          path: .
+      - name: Apply frozen Home Studio version
+        run: python3 scripts/version_plan.py sync --root . --plan .release-plan.json
+      - name: Validate public inventory and package declared source
+        run: |
+          python3 scripts/test_package_release.py
+          python3 scripts/package_release.py
+      - name: Bind source archive and metadata to the release plan
+        run: python3 scripts/stage_release_assets.py --target public-source --pattern 'release-dist/*'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: release-assets-public-source
+          path: release-assets/public-source/*
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict';
+import { projectOnWall, wallPieces, signedArea, pointInPolygon, validateProject } from '../planner/model.js';
+
+function near(actual, expected, tolerance = 1e-7) {
+  assert.ok(Number.isFinite(actual) && Math.abs(actual - expected) <= tolerance * Math.max(1, Math.abs(expected)), `${actual} != ${expected}`);
+}
+
+export function fuzz(data) {
+  if (data.length < 14 || data.length > 4096) return;
+  const unit = i => data[i % data.length] / 255;
+  const x = unit(0) * 80 - 40, z = unit(1) * 80 - 40;
+  const width = 1 + unit(2) * 30, depth = 1 + unit(3) * 30;
+  const height = 1 + unit(4) * 10;
+  const angle = unit(5) * Math.PI * 2;
+  const start = [x, z], end = [x + width * Math.cos(angle), z + width * Math.sin(angle)];
+  const wall = { id: 'wall_a', start, end, thickness_m: 0.15 };
+  const t = unit(6) * 3 - 1;
+  const projection = projectOnWall([x + t * (end[0] - x), z + t * (end[1] - z)], wall);
+  near(projection.offset, Math.max(0, Math.min(1, t)) * width);
+  near(projection.length, width);
+  near(projection.distance, Math.abs(t - Math.max(0, Math.min(1, t))) * width);
+  const openingWidth = width * (0.1 + unit(7) * 0.3);
+  const offset = unit(8) * (width - openingWidth);
+  const sill = unit(9) * height * 0.3;
+  const head = sill + height * (0.1 + unit(10) * 0.4);
+  const opening = { id: 'window_a', wall_id: wall.id, type: 'window', offset_m: offset, width_m: openingWidth, sill_m: sill, head_m: head };
+  const polygon = [[x,z], [x+width,z], [x+width,z+depth], [x,z+depth]];
+  const project = { schema_version: 1, title: 'Fictional fuzz room', floors: [{ id: 'ground', name: 'Ground', elevation_m: 0, height_m: height, rooms: [{ id: 'room_a', name: 'Room', polygon, material: 'floor' }], walls: [wall], openings: [opening], items: [] }] };
+  validateProject(project, { complete: true });
+  const pieces = wallPieces(wall, [opening], height);
+  near(pieces.reduce((area, piece) => area + piece.width * piece.height, 0), width * height - openingWidth * (head - sill));
+  for (const piece of pieces) {
+    assert.ok(piece.offset >= -1e-8 && piece.offset + piece.width <= width + 1e-7);
+    assert.ok(piece.bottom >= 0 && piece.bottom + piece.height <= height + 1e-7);
+  }
+  near(signedArea(polygon), width * depth);
+  near(signedArea([...polygon].reverse()), -width * depth);
+  assert.equal(pointInPolygon([x + width / 2, z + depth / 2], polygon), true);
+  assert.equal(pointInPolygon([x - 1, z - 1], polygon), false);
+  assert.equal(pointInPolygon(start, polygon, true), true);
+  assert.equal(pointInPolygon(start, polygon, false), false);
+}

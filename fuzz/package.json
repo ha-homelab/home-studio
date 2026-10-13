@@ -1,0 +1,10 @@
+{
+  "name": "home-studio-fuzz",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Isolated RC-only fuzzing of public fictional project validation and geometry",
+  "devDependencies": {
+    "@jazzer.js/core": "4.0.0"
+  }
+}
