@@ -104,18 +104,22 @@ exports, backups, credentials, or photos merely to make a public build pass.
 The shared code is [MIT licensed](../LICENSE). Preserve the bundled
 [Three.js notices](../vendor/THREE-LICENSE.txt) when redistributing it.
 
-## Visible wall-top outlines
+## Translucent walls and boundary outlines
 
-The viewer derives a turquoise outline from wall geometry at the current visible
-height. In the home view this follows the low wall cutaway; the editor follows
-its cutaway setting or each wall's actual top. Door openings remain open, and
-lintels above the cut do not produce floating lines. Horizontal face diagonals
-are excluded. The model data and downloadable geometry are unchanged.
+Walls use a 16% opaque, single-pass, double-sided fill with depth writing disabled.
+Their original opaque shadow geometry and room-light masks remain intact: visual
+transparency does not let lights leak between rooms. The geometry exports are
+unchanged.
 
-`wallTopSegments` intersects wall triangles only when the clipping height changes.
-Coincident segments are deduplicated. One batched line layer and one narrow,
-transparent ribbon provide the bright edge and soft halo without bloom, new
-lights, polling, or additional animation. Both layers use normal depth testing;
-they do not show through objects. Old GPU buffers and materials are disposed
-when the visible height changes. Run `node scripts/test-wall-tops.cjs` to check
-cutaway/full-height boundaries, rotated walls, low walls, and doorway gaps.
+`wallBoundarySegments` derives blue base contours and brighter cyan top contours
+from wall geometry at the visible cutaway height, or at full height in the editor.
+Hidden lintels produce neither contour. Horizontal face diagonals are excluded,
+and coincident segments are deduplicated. Each color uses a batched line and a
+narrow translucent band: four draw objects in total, replacing the earlier
+per-wall edge objects. The group draws after wall fills with depth testing still
+enabled, so opaque furniture hides the lines naturally. It needs no bloom, new
+light, dependency, network request or animation.
+
+Rebuilds happen only when the clipping height changes, disposing old GPU resources.
+Run `node scripts/test-wall-tops.cjs` to check top and base boundaries for rotated
+walls, raised bases, both cutaway heights, low walls and doorway gaps.
