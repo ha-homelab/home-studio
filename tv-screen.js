@@ -15,7 +15,7 @@ function applyTVFrame(image,render=true,id=Object.keys(tvEntities)[0]){
   if(!tvFrames.has(id))tvFrames.set(id,{version:0});
   const frame=tvFrames.get(id),screen=objectsById.get(id)?.userData.screen,version=++frame.version;
   if(!screen||image===null){
-    frame.image=null;previewTV();
+    frame.image=null;previewTV();homeView?.refreshTVPreviews?.();
     if(!screen)return;
     screen.material.map?.dispose();screen.material.map=null;screen.visible=false;
     if(render)window.renderModel?.();return;
@@ -25,6 +25,6 @@ function applyTVFrame(image,render=true,id=Object.keys(tvEntities)[0]){
     if(version!==frame.version||screen!==objectsById.get(id)?.userData.screen){loaded.dispose();return}
     screen.material.map?.dispose();loaded.colorSpace=THREE.SRGBColorSpace;
     screen.material.map=loaded;screen.material.needsUpdate=true;screen.visible=true;
-    frame.image=image;previewTV();window.renderModel?.();
+    frame.image=image;previewTV();homeView?.refreshTVPreviews?.();window.renderModel?.();
   },undefined,()=>{texture.dispose()});
 }

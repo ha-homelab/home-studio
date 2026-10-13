@@ -345,8 +345,8 @@ class HomeFloorplanPanel extends HTMLElement {
       const id=message.entity_id;
       if(typeof id!=='string' || !this.savedItems.some(item=>item.entity_id===id) || !this._hass.states[id])return;
       this.dispatchEvent(new CustomEvent('hass-more-info',{detail:{entityId:id},bubbles:true,composed:true}));
-    } else if (message.type === 'curtain_command' || message.type === 'toggle') {
-      const curtain = message.type === 'curtain_command';
+    } else if (message.type === 'curtain_command' || message.type === 'toggle' || message.type === 'tv_power') {
+      const curtain = message.type === 'curtain_command', tvPower = message.type === 'tv_power';
       const id = message.entity_id;
       // Reply only to the originating floor's channel.
       const port = this.port;
@@ -359,13 +359,13 @@ class HomeFloorplanPanel extends HTMLElement {
       if (this.pending || this.failed) return result(false, 'Wait for placements to save successfully before controlling devices.');
       if (!this.savedItems.some(item => item.entity_id === id)) return result(false, 'This device is not linked to the saved plan.');
       const domain = typeof id === 'string' ? id.split('.')[0] : '';
-      if (this._hass.connected === false || (curtain ? domain !== 'cover' :
+      if (this._hass.connected === false || (curtain ? domain !== 'cover' : tvPower ? domain !== 'media_player' || !['turn_on','turn_off'].includes(message.action) || !['on','off','playing','paused','idle','buffering'].includes(this._hass.states[id]?.state) :
         !['light','switch','input_boolean','fan'].includes(domain) || !['on','off'].includes(this._hass.states[id]?.state))) return result(false, 'This device is unavailable or Home Assistant is disconnected.');
       if (this.commands.has(id)) return result(false, 'A command for this device is already in progress.');
       this.commands.add(id);
       Promise.resolve().then(() => curtain
         ? this._hass.callWS({type:'home_floorplan/curtain_command',entity_id:id,action:message.action,...(message.action==='set_cover_position'?{position:message.position}:{})})
-        : this._hass.callService(domain, 'toggle', {entity_id:id}))
+        : this._hass.callService(domain, tvPower ? message.action : 'toggle', {entity_id:id}))
         .then(() => result(true))
         .catch(error => result(false, `Command failed: ${error.message || error}`))
         .finally(() => this.commands.delete(id));

@@ -318,6 +318,7 @@ homeView = (() => {
       }
       if (visible && !counted.has(item.entity_id)) { counted.add(item.entity_id);total++; if(state==='on'){if(isMotion(item))motion++;else on++;} if(!enabled)unavailable++; }
     }
+    refreshTVPreviews();
     updateDaylight();
     updateCurtainDialog();
     refreshActivity();
@@ -338,12 +339,17 @@ homeView = (() => {
     if((active||$('curtainDialog').open)&&points.some(p=>isCover(p.item)&&curtainStateFor(p.item).seconds>0))countdownTimer=setTimeout(()=>{refreshControls();window.renderModel?.();},1000);
   }
 
-  function activateDevice(item,quick=true) {
+  function refreshTVPreviews(){
+    updateTVPreviews(bindings.filter(isTV).map(item=>({item,state:deviceDisplayState(item),
+      busy:pending.has(item.entity_id),enabled:!!(bridge&&haConnected&&haStates[item.entity_id]),
+      details:()=>activateDevice(item),power:()=>activateDevice(item,false,true)})));
+  }
+  function activateDevice(item,quick=true,tvPower=false) {
     const state=deviceDisplayState(item);
     if(receiverSpec(item)&&bridge&&haConnected){inspectActivitySource(item);return;}
     if(isCover(item)&&bridge&&haConnected){curtainItem=item;curtainDirty=false;curtainCheckCycle=null;$('curtainChecked').checked=false;$('curtainError').hidden=true;updateCurtainDialog();$('curtainDialog').showModal();const action=curtainStateFor(item).action;if(quick&&action)curtainCommand(action);return;}
-    if(bridge && haConnected && haStates[item.entity_id] && (isTV(item)||isMotion(item))){bridge.postMessage({type:'more_info',entity_id:item.entity_id});return;}
-    if (!bridge || !['on','off'].includes(state) || pending.has(item.entity_id)) return;
+    if(bridge && haConnected && haStates[item.entity_id] && !tvPower && (isTV(item)||isMotion(item))){bridge.postMessage({type:'more_info',entity_id:item.entity_id});return;}
+    if (!bridge || !haConnected || !['on','off'].includes(state) || pending.has(item.entity_id)) return;
     errors.delete(item.entity_id);
     const request_id='home_'+(++sequence);
     const timer=setTimeout(() => {
@@ -351,7 +357,7 @@ homeView = (() => {
       pending.delete(item.entity_id); errors.set(item.entity_id,`${item.name}: state change was not confirmed. Check the device before trying again.`); refreshControls();
     },12000);
     pending.set(item.entity_id,{request_id,before:state,timer});
-    bridge.postMessage({type:'toggle',entity_id:item.entity_id,request_id}); refreshControls();
+    bridge.postMessage({type:tvPower?'tv_power':'toggle',...(tvPower?{action:state==='on'?'turn_off':'turn_on'}:{}),entity_id:item.entity_id,request_id}); refreshControls();
   }
 
   function handleCommandResult(message) {
@@ -478,7 +484,6 @@ homeView = (() => {
     roomLighting?.update(points);
     assumedZones?.render(selected,signalZone);refreshSignalStatus();
     renderer.render(scene,camera);renderCount++;
-    positionCameraPreviews(camera,rect.height,selected);
     for(const label of labels) label.el.textContent=rect.width<600 ? roomCode(label.room) : roomName(label.room);
     for(const point of [...labels,...points.map(p=>({el:p.marker,position:p.anchor||(!isCover(p.item)&&model.control_groups?.[p.item.id]?p.position.clone().setY(p.item.position_m.y+p.item.dimensions_m.height):p.position)}))]) {
       const p=point.position.clone().project(camera);
@@ -493,6 +498,7 @@ homeView = (() => {
       step.el.style.left=((p.x+1)*rect.width/2)+'px';step.el.style.top=((1-p.y)*rect.height/2)+'px';
       step.el.style.setProperty('--angle',(Math.atan2(-(q.y-p.y)*rect.height,(q.x-p.x)*rect.width)*180/Math.PI+90)+'deg');
     }
+    positionMediaPreviews(camera,rect,selected);
   }
 
   function clearTrail(point){clearTimeout(point.trailTimer);point.trail?.remove();point.trail=null;point.steps=[];}
@@ -621,6 +627,6 @@ homeView = (() => {
     $('homeSignalToggle').onchange=()=>{refreshControls();window.renderModel?.();};
     window.addEventListener('pagehide',event=>{if(!event.persisted)assumedZones?.dispose();});
   }
-  return {get active(){return active},rebuildControls,refreshControls,render,handleCommandResult,setActive,applyViewPreferences,
+  return {get active(){return active},rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
     get illuminated(){return points.filter(p=>p.overlay?.visible && active).map(p=>p.item.id)}};
 })();
