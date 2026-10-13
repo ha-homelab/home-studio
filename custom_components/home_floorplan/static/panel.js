@@ -211,7 +211,7 @@ class HomeFloorplanPanel extends HTMLElement {
     clearTimeout(tv.timer);tv.timer=null;
     tv.busy=true;tv.next=Date.now()+60000;
     const version=tv.version;
-    let frame={image:null};
+    let frame; // Transport failure is not an explicit instruction to clear a frame.
     try {frame=await this._hass.callWS({type:'home_floorplan/tv_frame',entity_id:id});} catch {}
     finally {tv.busy=false;}
     if(generation===this.generation && port===this.port && version===tv.version && !document.hidden)
