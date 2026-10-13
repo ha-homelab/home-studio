@@ -302,6 +302,7 @@ homeView = (() => {
         button.dataset.activity=sensing||'';
         button.style.setProperty('--light-rgb',appearance.rgb.join(','));
         button.style.setProperty('--light-level',String(appearance.brightness));
+        button.style.setProperty('--light-fill-rgb',appearance.indicatorRGB.join(','));
         button.style.setProperty('--light-text',appearance.text);
         button.dataset.state=state; button.disabled=(isTV(item)||isMotion(item)||isCover(item)?!haConnected||(!receiverSpec(item)&&!haStates[item.entity_id]):!enabled) || busy || !bridge;
         button.setAttribute('aria-pressed',String(state==='on')); button.setAttribute('aria-busy',String(busy));

@@ -247,3 +247,17 @@ load, unless the source measures that appliance separately.
 
 `node --test scripts/test-media-preview.cjs` covers unit conversion, unknown data,
 stable cards, visibility, absence of telemetry leaders, and zero/offline labels.
+
+
+### Light indicator brightness
+
+`resolveLightAppearance()` preserves HA RGB and normalized brightness separately
+for scene lighting. For map buttons, `indicatorRGB` blends that RGB with the
+inactive button surface in proportion to brightness. The bulb foreground is
+chosen against the resulting fill, not against the undimmed lamp color. Button
+fill, border and halo therefore distinguish dimmed lights from full output;
+hover keeps the same brightness-aware fill. The controls list uses the same
+indicator. Switch-only lamps without brightness retain full on/off behavior.
+This is a UI intensity cue, not a claim about measured illuminance. It adds no
+polling, render loop or GPU effect. Run `node --test scripts/test-light-state.cjs`
+for brightness, color, missing-state and icon-contrast regressions.

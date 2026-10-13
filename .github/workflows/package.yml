@@ -29,6 +29,8 @@ jobs:
         run: node scripts/test-wall-tops.cjs
       - name: Test passive wall sheen and lighting composition
         run: node scripts/test-wall-sheen.cjs
+      - name: Test dimmed light indicators and color interpretation
+        run: node --test scripts/test-light-state.cjs
       - name: Test TV frame retention and disposal
         run: node --test scripts/test-tv-screen.cjs
       - name: Test linked media previews and bounded TV power commands

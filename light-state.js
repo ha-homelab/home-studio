@@ -1,7 +1,7 @@
 // HA exposes derived RGB for HS/XY/temperature lights. Brightness is independent.
 // https://developers.home-assistant.io/docs/core/entity/light/
 const resolveLightAppearance = (() => {
-  const neutral = [255,244,226];
+  const neutral = [255,244,226], markerSurface = [39,59,73];
   const clamp = (n,lo,hi) => Math.min(hi,Math.max(lo,n));
   const isNumericTuple = (v,n) => Array.isArray(v) && v.length === n && v.every(Number.isFinite);
   const clampRGB = v => v.map(n=>Math.round(clamp(n,0,255)));
@@ -40,8 +40,10 @@ const resolveLightAppearance = (() => {
       else if(isNumericTuple(a.xy_color,2))color=xyToRGB(a.xy_color);
     } else if(mode==='white')color=[255,255,255];
     const brightness=entity?.state==='on'?level:0;
-    const linear=color.map(c=>{c/=255;return c<=.04045?c/12.92:Math.pow((c+.055)/1.055,2.4)});
-    return {rgb:color,brightness,percent:dimmable?Math.round(level*100):null,kelvin:kelvin?Math.round(kelvin):null,
+    // Mix against the marker's off surface, keeping scene light RGB independent.
+    const indicatorRGB=color.map((c,i)=>Math.round(markerSurface[i]+(c-markerSurface[i])*brightness));
+    const linear=indicatorRGB.map(c=>{c/=255;return c<=.04045?c/12.92:Math.pow((c+.055)/1.055,2.4)});
+    return {rgb:color,indicatorRGB,brightness,percent:dimmable?Math.round(level*100):null,kelvin:kelvin?Math.round(kelvin):null,
       text:linear[0]*.2126+linear[1]*.7152+linear[2]*.0722>.179?'#182027':'#ffffff'};
   };
 })();
