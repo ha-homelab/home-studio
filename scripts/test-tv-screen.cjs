@@ -58,7 +58,8 @@ test('external URLs and oversized images never load; decode failures retain the 
   assert.equal(loads.length,0);
   apply(jpeg);loads[0].success(loads[0].texture);apply(jpeg);loads[1].error();
   assert.equal(screen.visible,true);assert.equal(screen.material.map,loads[0].texture);assert.equal(loads[0].texture.disposed,false);assert.equal(loads[1].texture.disposed,true);
-  apply(undefined);assert.equal(screen.material.map,loads[0].texture);assert.equal(loads.length,2);
+  for(const invalid of [undefined,'https://tv/capture.jpg','data:image/svg+xml,test',jpeg+'a'.repeat(250000)])apply(invalid);
+  assert.equal(screen.material.map,loads[0].texture);assert.equal(loads.length,2);
 });
 
 test('hover magnifies only the current texture, stays in the viewport, and clears with it',()=>{

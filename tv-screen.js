@@ -14,12 +14,13 @@ function applyTVFrame(image,render=true,id=Object.keys(tvEntities)[0]){
   if(!Object.hasOwn(tvEntities,id)||image===undefined)return;
   if(!tvFrames.has(id))tvFrames.set(id,{version:0});
   const frame=tvFrames.get(id),screen=objectsById.get(id)?.userData.screen,version=++frame.version;
-  if(!screen||typeof image!=='string'||image.length>250000||!image.startsWith('data:image/jpeg;base64,')){
+  if(!screen||image===null){
     frame.image=null;previewTV();
     if(!screen)return;
     screen.material.map?.dispose();screen.material.map=null;screen.visible=false;
     if(render)window.renderModel?.();return;
   }
+  if(typeof image!=='string'||image.length>250000||!image.startsWith('data:image/jpeg;base64,'))return;
   const texture=new THREE.TextureLoader().load(image,loaded=>{
     if(version!==frame.version||screen!==objectsById.get(id)?.userData.screen){loaded.dispose();return}
     screen.material.map?.dispose();loaded.colorSpace=THREE.SRGBColorSpace;
