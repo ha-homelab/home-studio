@@ -1,7 +1,7 @@
 // Decode completion, disposal and retention after refresh failures without WebGL or TV access.
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm');
-function fixture(tvEntities={living_tv:'media_player.living_room_tv_77',bedroom_tv:'media_player.lg2'}){
+function fixture(tvEntities={living_tv:'media_player.living_tv',bedroom_tv:'media_player.bedroom_tv'}){
   const loads=[],timers=new Map();let sequence=0;
   const preview={hidden:true,style:{},offsetWidth:360,offsetHeight:203,hasAttribute(){return !!this.src},removeAttribute(){delete this.src}};
   const screen={visible:false,material:{map:null}},bedroom={visible:false,material:{map:null}},objects=new Map([['living_tv',{userData:{screen}}],['bedroom_tv',{userData:{screen:bedroom}}]]);
