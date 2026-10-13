@@ -239,11 +239,20 @@ hidden instead of shrinking the plan. No additional timer, polling, texture,
 render loop or dependency is introduced.
 
 Optional `model.power_labels` binds a sensor to an existing `object_id` with an
-accessible `name`. Up to twelve labels show positive W/kW readings just left of
-those objects. They disappear at zero, on missing data or disconnection. Nearby
-vertical alternatives avoid device/room hit targets; labels never intercept
-pointer input. They describe a power strip's total, not the isolated appliance
-load, unless the source measures that appliance separately.
+accessible `name`. Alternatively, supply a stable `id` and `room_ids` for a circuit
+that supplies one or several rooms. Circuit watts are appended to the existing
+room caption, with no separate badge, explanatory caption or additional node.
+The first room receives the reading on the whole-floor view; focusing a member
+room moves the reading into that room's existing caption. Each shared source
+appears once. Several sources in one room remain separate readings, never an
+invented total. Existing room buttons keep their focus behavior.
+
+Up to twelve configured sources show W/kW readings. Zero, missing, restored and
+disconnected values disappear while room names remain. Signed measurements
+require explicit `signed: true` and keep their sign. Object readings continue to
+follow saved objects, avoiding device/room controls and never intercepting clicks.
+Do not add circuit totals to downstream smart-plug readings or duplicate the
+same meter's total and phase channels. No extra polling or animation is needed.
 
 `node --test scripts/test-media-preview.cjs` covers unit conversion, unknown data,
 stable cards, visibility, absence of telemetry leaders, and zero/offline labels.

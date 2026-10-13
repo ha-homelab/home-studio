@@ -9,7 +9,7 @@ function fixture(){
  const context=vm.createContext({document:{createElement:element,createElementNS:(ns,tag)=>element(tag)},
   $:id=>{if(!nodes.has(id))nodes.set(id,element('div'));return nodes.get(id)},
   tvFrames:new Map(),cameraPreviews:new Map(),dismissedCameraEvents:new Map(),items:[],objectsById:new Map(),
-  model:{},lowerFloorContext:{visible:true},root:{children:[]},objectGroup:{children:[]},THREE:{Vector3:class{constructor(x=0,y=0,z=0){Object.assign(this,{x,y,z})}project(){return this}}}});
+  model:{},xm:x=>x,zm:z=>z,lowerFloorContext:{visible:true},root:{children:[]},objectGroup:{children:[]},THREE:{Vector3:class{constructor(x=0,y=0,z=0){Object.assign(this,{x,y,z})}project(){return this}}}});
  vm.runInContext(fs.readFileSync('media-preview.js','utf8'),context);
  const item={id:'tv',name:'Study TV',room:'study',position_m:{x:0,y:0,z:0},dimensions_m:{height:1}};
  const update=(state='off',extra={})=>context.updateTVPreviews([{item,state,busy:false,enabled:true,details(){},power(){},...extra}]);
@@ -106,4 +106,47 @@ test('power labels vanish for zero, missing and disconnected readings',()=>{
   c.updateTelemetryPreviews({'sensor.power':{state,unit:'W'}},connected);c.positionMediaPreviews(camera,{width:1200,height:700},'');
   const label=nodes.get('homeTelemetry').children[0];assert.equal(!label.hidden,visible);assert.equal(label.onclick,undefined);
  }
+});
+
+test('shared circuit watts reuse the existing room caption without creating another label',()=>{
+ const {context:c,nodes}=fixture();
+ c.model.power_labels=[{id:'shared',room_ids:['study','hall'],name:'Study and hall circuit',entity_id:'sensor.circuit'}];
+ c.updateTelemetryPreviews({'sensor.circuit':{state:'158',unit:'W'}},true);
+ assert.equal(nodes.has('homeTelemetry'),false);
+ assert.equal(c.roomPowerText('study',''),'158 W');
+ assert.equal(c.roomPowerText('hall',''),'');
+ assert.equal(c.roomPowerText('hall','hall'),'158 W');
+ assert.equal(c.roomPowerText('study','hall'),'');
+ assert.equal(c.roomPowerText('other','other'),'');
+ c.updateTelemetryPreviews({},false);assert.equal(c.roomPowerText('hall','hall'),'');
+});
+
+test('signed circuit power preserves direction only when explicitly configured',()=>{
+ const {context:c}=fixture(),negative={state:'-1.25',unit:'kW'};
+ assert.equal(c.formatTelemetryReading(negative,{format:'power'}),'—');
+ assert.equal(c.formatTelemetryReading(negative,{format:'power',signed:true}),'-1.3 kW');
+ assert.equal(c.formatTelemetryReading({state:'-0.5',unit:'W'},{format:'power',signed:true}),'-0.5 W');
+ c.model.power_labels=[{id:'signed',room_ids:['hall'],name:'Signed circuit',entity_id:'sensor.circuit',signed:true}];
+ c.updateTelemetryPreviews({'sensor.circuit':negative},true);assert.equal(c.roomPowerText('hall',''),'-1.3 kW');
+ for(const state of ['0','unknown','unavailable']){
+  c.updateTelemetryPreviews({'sensor.circuit':{state,unit:'W'}},true);assert.equal(c.roomPowerText('hall',''),'');
+ }
+});
+
+test('multiple circuits keep separate readings in one room caption',()=>{
+ const {context:c,nodes}=fixture();
+ c.model.power_labels=[{id:'left',room_ids:['kitchen'],entity_id:'sensor.left'},
+  {id:'right',room_ids:['kitchen'],entity_id:'sensor.right'}];
+ c.updateTelemetryPreviews({'sensor.left':{state:'10',unit:'W'},'sensor.right':{state:'20',unit:'W'}},true);
+ assert.equal(c.roomPowerText('kitchen',''),'10 W · 20 W');assert.equal(nodes.has('homeTelemetry'),false);
+ c.updateTelemetryPreviews({'sensor.left':{state:'0',unit:'W'},'sensor.right':{state:'20',unit:'W',restored:true}},true);
+ assert.equal(c.roomPowerText('kitchen',''),'');
+});
+
+test('a missing appliance never turns into an unrelated room measurement',()=>{
+ const {context:c,nodes}=fixture(),camera={matrixWorld:{elements:[]},projectionMatrix:{elements:[]}};
+ c.model.rooms=[{id:'study',label:[0,0]}];
+ c.model.power_labels=[{object_id:'missing',name:'Missing appliance',entity_id:'sensor.circuit'}];
+ c.updateTelemetryPreviews({'sensor.circuit':{state:'50',unit:'W'}},true);c.positionMediaPreviews(camera,{width:1200,height:700},'study');
+ assert.equal(nodes.get('homeTelemetry').children[0].hidden,true);
 });

@@ -6,13 +6,13 @@ function formatTelemetryReading(reading,metric){
   if(!reading||reading.restored||reading.state==null||!String(reading.state).trim()||['unknown','unavailable'].includes(reading.state))return '—';
   if(metric.format==='status')return metric.labels?.[reading.state]||String(reading.state).replaceAll('_',' ').slice(0,32);
   let value=Number(reading.state),unit=String(reading.unit||'').trim();
-  if(!Number.isFinite(value)||value<0)return '—';
+  if(!Number.isFinite(value)||(value<0&&!(metric.format==='power'&&metric.signed)))return '—';
   if(metric.format==='percent'&&(unit!=='%'||value>100))return '—';
   if(metric.format==='pressure'){
     const factor={psi:1,kpa:1/6.894757,bar:14.503774,pa:1/6894.757}[unit.toLowerCase()];
     if(!factor||value===0)return '—';value*=factor;unit='PSI';
   }
-  if(metric.format==='power'){if(!['W','kW'].includes(unit))return '—';const watts=value*(unit==='kW'?1000:1);return watts>=1000?`${(watts/1000).toFixed(1)} kW`:`${watts>0&&watts<10?watts.toFixed(1):Math.round(watts)} W`;}
+  if(metric.format==='power'){if(!['W','kW'].includes(unit))return '—';const watts=value*(unit==='kW'?1000:1),magnitude=Math.abs(watts);return magnitude>=1000?`${(watts/1000).toFixed(1)} kW`:`${magnitude>0&&magnitude<10?watts.toFixed(1):Math.round(watts)} W`;}
   return `${value.toFixed(Math.max(0,Math.min(2,metric.decimals||0)))}${unit==='%'?'':' '}${unit}`.trim();
 }
 function updateTelemetryPreviews(states,connected){
@@ -29,12 +29,21 @@ function updateTelemetryPreviews(states,connected){
     entry.note.textContent=connected?'Last reported · updates may be delayed':'Home Assistant disconnected';
   }
   for(const spec of (model.power_labels||[]).slice(0,12)){
-    let entry=powerLabels.get(spec.object_id);
-    if(!entry){const el=document.createElement('span');el.className='home-power-label';el.dataset.powerLabel=spec.object_id;$('homeTelemetry').append(el);entry={el,spec};powerLabels.set(spec.object_id,entry);}
-    const reading=connected?states[spec.entity_id]:null,text=formatTelemetryReading(reading,{format:'power'});
-    entry.available=text!=='—'&&Number(reading.state)>0;entry.el.textContent=text;
-    entry.el.title=spec.name+' · '+text;entry.el.setAttribute('aria-label',entry.el.title);
+    const id=spec.id||spec.object_id;if(!id)continue;
+    let entry=powerLabels.get(id);
+    if(!entry){
+      const el=spec.object_id?document.createElement('span'):null;
+      if(el){el.className='home-power-label';el.dataset.powerLabel=id;$('homeTelemetry').append(el);}
+      entry={el,spec};powerLabels.set(id,entry);
+    }
+    const reading=connected?states[spec.entity_id]:null,text=formatTelemetryReading(reading,{format:'power',signed:spec.signed});
+    entry.available=text!=='—'&&Number(reading.state)!==0;entry.text=text;
+    if(entry.el){entry.el.textContent=text;entry.el.title=spec.name+' · '+text;entry.el.setAttribute('aria-label',entry.el.title);}
   }
+}
+
+function roomPowerText(room,selected){
+  return [...powerLabels.values()].filter(e=>!e.el&&e.available&&(selected?selected===room&&e.spec.room_ids?.includes(room):e.spec.room_ids?.[0]===room)).map(e=>e.text).join(' · ');
 }
 
 function positionPowerLabels(camera,rect,room){
@@ -43,13 +52,14 @@ function positionPowerLabels(camera,rect,room){
   for(const el of $('homeStage').querySelectorAll('.home-marker:not([hidden]),.home-room-label:not([hidden])')){
     const b=el.getBoundingClientRect();blocked.push({x:b.left-stage.left,y:b.top-stage.top,width:b.width,height:b.height});
   }
-  for(const [id,entry] of powerLabels){
-    const item=items.find(item=>item.id===id);
+  for(const entry of powerLabels.values()){
+    if(!entry.el)continue;
+    const item=items.find(item=>item.id===entry.spec.object_id);
     entry.el.hidden=!entry.available||!item||!!room&&item.room!==room;
     if(entry.el.hidden)continue;
     const point=new THREE.Vector3(item.position_m.x,item.position_m.y+(item.dimensions_m?.height||0),item.position_m.z).project(camera),size=entry.el.getBoundingClientRect();
     const x=(point.x+1)*rect.width/2-size.width-18,y=(1-point.y)*rect.height/2-size.height/2;
-    const box=[0,-24,24,-48,48].map(d=>({x,y:y+d,width:size.width,height:size.height})).find(b=>point.z>=-1&&point.z<=1&&b.x>=4&&b.y>=4&&b.x+b.width<=rect.width-4&&b.y+b.height<=rect.height-4&&!blocked.some(o=>b.x<o.x+o.width+4&&b.x+b.width>o.x-4&&b.y<o.y+o.height+4&&b.y+b.height>o.y-4));
+    const box=[0,-1,1,-2,2].map(d=>({x,y:y+d*(size.height+8),width:size.width,height:size.height})).find(b=>point.z>=-1&&point.z<=1&&b.x>=4&&b.y>=4&&b.x+b.width<=rect.width-4&&b.y+b.height<=rect.height-4&&!blocked.some(o=>b.x<o.x+o.width+4&&b.x+b.width>o.x-4&&b.y<o.y+o.height+4&&b.y+b.height>o.y-4));
     entry.el.hidden=!box;
     if(box){entry.el.style.left=box.x+'px';entry.el.style.top=box.y+'px';blocked.push(box);}
   }
@@ -147,7 +157,7 @@ function positionMediaPreviews(camera,rect,room){
   for(const [id,entry] of tvPreviews)collect('tv:'+id,entry,entry.item);
   for(const [id,entry] of cameraPreviews){const item=items.find(item=>item.id===id);if(item)collect('camera:'+id,entry,item);else entry.el.hidden=true;}
   for(const [id,entry] of telemetryPreviews)collect('telemetry:'+id,entry,entry.item);
-  const key=[rect.width,rect.height,room,...camera.matrixWorld.elements,...camera.projectionMatrix.elements,...cards.flatMap(c=>[c.id,c.size.width,c.size.height,c.point.x,c.point.y]),...[...powerLabels.values()].map(e=>e.el.hidden?'':e.el.textContent)].join('|');
+  const key=[rect.width,rect.height,room,...camera.matrixWorld.elements,...camera.projectionMatrix.elements,...cards.flatMap(c=>[c.id,c.size.width,c.size.height,c.point.x,c.point.y]),...[...powerLabels.values()].map(e=>e.el?.hidden?'':e.text)].join('|');
   const first=objectGroup?.children[0];
   if(!mediaLayout||mediaLayout.key!==key||mediaLayout.first!==first){
     const blocked=mediaSceneObstacles(camera,rect),boxes=new Map();
