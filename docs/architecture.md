@@ -130,3 +130,21 @@ Home view cuts walls at 2.1 m, at the standard window-head elevation, so both
 window jambs and the upper frame remain visible. Blue-grey structural frames
 with a low emissive contribution stay legible in unlit rooms. The editor retains
 its separate 1.15 m cutaway toggle; exported dimensions remain unchanged.
+
+## TV frame refresh failures
+
+The optional TV adapter may send a JPEG after each one-minute capture attempt.
+The host distinguishes an explicit `null` image (clear the playback session)
+from an absent image after a transport failure (retain the current picture).
+The viewer keeps the last successfully decoded texture while a replacement
+decodes, and also if that decode fails. It only disposes that texture after a
+successful replacement or an explicit lifecycle clear. No independent expiry
+blanks the television after a missed refresh. Off/restored state, changed source,
+disconnected HA, hidden document, changed bindings and rebuilt meshes retain
+their existing invalidation behavior. Hover previews reuse the same texture.
+
+Adapters should return the original capture timestamp with a retained image,
+not stamp a failed refresh as new footage. Frames remain memory-only and are
+never included in saved inventory or exports. The renderer tests exercise
+replacement disposal, failure retention, late decode races and per-TV isolation:
+`node --test scripts/test-tv-screen.cjs`.
