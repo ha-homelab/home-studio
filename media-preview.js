@@ -1,5 +1,59 @@
 // Reuse decoded TV frames and notification frames; these callouts never poll.
 const tvPreviews=new Map(),mediaLeaders=new Map();
+const telemetryPreviews=new Map();
+const powerLabels=new Map();
+function formatTelemetryReading(reading,metric){
+  if(!reading||reading.restored||reading.state==null||!String(reading.state).trim()||['unknown','unavailable'].includes(reading.state))return '—';
+  if(metric.format==='status')return metric.labels?.[reading.state]||String(reading.state).replaceAll('_',' ').slice(0,32);
+  let value=Number(reading.state),unit=String(reading.unit||'').trim();
+  if(!Number.isFinite(value)||value<0)return '—';
+  if(metric.format==='percent'&&(unit!=='%'||value>100))return '—';
+  if(metric.format==='pressure'){
+    const factor={psi:1,kpa:1/6.894757,bar:14.503774,pa:1/6894.757}[unit.toLowerCase()];
+    if(!factor||value===0)return '—';value*=factor;unit='PSI';
+  }
+  if(metric.format==='power'){if(!['W','kW'].includes(unit))return '—';const watts=value*(unit==='kW'?1000:1);return watts>=1000?`${(watts/1000).toFixed(1)} kW`:`${watts>0&&watts<10?watts.toFixed(1):Math.round(watts)} W`;}
+  return `${value.toFixed(Math.max(0,Math.min(2,metric.decimals||0)))}${unit==='%'?'':' '}${unit}`.trim();
+}
+function updateTelemetryPreviews(states,connected){
+  for(const item of (model.telemetry||[]).slice(0,4)){
+    if(!item.position_m||!['x','y','z'].every(k=>Number.isFinite(item.position_m[k])))continue;
+    let entry=telemetryPreviews.get(item.id);
+    if(!entry){
+      const el=document.createElement('section'),title=document.createElement('strong'),grid=document.createElement('dl'),note=document.createElement('small');
+      el.className='telemetry-preview';el.dataset.telemetryPreview=item.id;title.textContent=item.name;el.setAttribute('aria-label',item.name+' · Last reported telemetry');
+      const rows=(item.metrics||[]).slice(0,8).map(metric=>{const row=document.createElement('div'),label=document.createElement('dt'),value=document.createElement('dd');label.textContent=metric.label;row.dataset.format=metric.format;row.append(label,value);grid.append(row);return {metric,value};});
+      el.append(title,grid,note);$('homeTelemetry').append(el);entry={el,item,rows,note};telemetryPreviews.set(item.id,entry);
+    }
+    for(const {metric,value} of entry.rows)value.textContent=formatTelemetryReading(connected?states[metric.entity_id]:null,metric);
+    entry.note.textContent=connected?'Last reported · updates may be delayed':'Home Assistant disconnected';
+  }
+  for(const spec of (model.power_labels||[]).slice(0,12)){
+    let entry=powerLabels.get(spec.object_id);
+    if(!entry){const el=document.createElement('span');el.className='home-power-label';el.dataset.powerLabel=spec.object_id;$('homeTelemetry').append(el);entry={el,spec};powerLabels.set(spec.object_id,entry);}
+    const reading=connected?states[spec.entity_id]:null,text=formatTelemetryReading(reading,{format:'power'});
+    entry.available=text!=='—'&&Number(reading.state)>0;entry.el.textContent=text;
+    entry.el.title=spec.name+' · '+text;entry.el.setAttribute('aria-label',entry.el.title);
+  }
+}
+
+function positionPowerLabels(camera,rect,room){
+  if(!powerLabels.size)return;
+  const stage=$('homeStage').getBoundingClientRect(),blocked=[];
+  for(const el of $('homeStage').querySelectorAll('.home-marker:not([hidden]),.home-room-label:not([hidden])')){
+    const b=el.getBoundingClientRect();blocked.push({x:b.left-stage.left,y:b.top-stage.top,width:b.width,height:b.height});
+  }
+  for(const [id,entry] of powerLabels){
+    const item=items.find(item=>item.id===id);
+    entry.el.hidden=!entry.available||!item||!!room&&item.room!==room;
+    if(entry.el.hidden)continue;
+    const point=new THREE.Vector3(item.position_m.x,item.position_m.y+(item.dimensions_m?.height||0),item.position_m.z).project(camera),size=entry.el.getBoundingClientRect();
+    const x=(point.x+1)*rect.width/2-size.width-18,y=(1-point.y)*rect.height/2-size.height/2;
+    const box=[0,-24,24,-48,48].map(d=>({x,y:y+d,width:size.width,height:size.height})).find(b=>point.z>=-1&&point.z<=1&&b.x>=4&&b.y>=4&&b.x+b.width<=rect.width-4&&b.y+b.height<=rect.height-4&&!blocked.some(o=>b.x<o.x+o.width+4&&b.x+b.width>o.x-4&&b.y<o.y+o.height+4&&b.y+b.height>o.y-4));
+    entry.el.hidden=!box;
+    if(box){entry.el.style.left=box.x+'px';entry.el.style.top=box.y+'px';blocked.push(box);}
+  }
+}
 function removeMediaLeader(id){mediaLeaders.get(id)?.remove();mediaLeaders.delete(id);}
 function updateTVPreviews(entries){
   const ids=new Set(entries.map(entry=>entry.item.id));
@@ -72,16 +126,17 @@ function mediaSceneObstacles(camera,rect){
     blocked.push({x:left,y:top,width:right-left,height:bottom-top});
   }
   const stage=$('homeStage').getBoundingClientRect();
-  for(const node of $('homeStage').querySelectorAll('.home-marker:not([hidden]),.home-room-label:not([hidden])')){
+  for(const node of $('homeStage').querySelectorAll('.home-marker:not([hidden]),.home-room-label:not([hidden]),.home-power-label:not([hidden])')){
     const b=node.getBoundingClientRect();if(b.width&&b.height)blocked.push({x:b.left-stage.left,y:b.top-stage.top,width:b.width,height:b.height});
   }
   return blocked;
 }
 function positionMediaPreviews(camera,rect,room){
+  positionPowerLabels(camera,rect,room);
   const svg=$('homeMediaLinks'),visible=new Set(),cards=[];
   svg.setAttribute('viewBox',`0 0 ${rect.width} ${rect.height}`);
   const collect=(id,entry,item)=>{
-    entry.el.hidden=!!room&&item.room!==room||id.startsWith('camera:')&&dismissedCameraEvents.get(item.id)===entry.event;
+    entry.el.hidden=!!room&&item.room!==room||item.lower_floor&&!lowerFloorContext?.visible||id.startsWith('camera:')&&dismissedCameraEvents.get(item.id)===entry.event;
     if(entry.el.hidden)return;
     const screen=objectsById.get(item.id)?.userData.screen;
     const anchor=screen?screen.getWorldPosition(new THREE.Vector3()):new THREE.Vector3(item.position_m.x,item.position_m.y+(item.dimensions_m?.height||0)/2,item.position_m.z);
@@ -91,7 +146,8 @@ function positionMediaPreviews(camera,rect,room){
   };
   for(const [id,entry] of tvPreviews)collect('tv:'+id,entry,entry.item);
   for(const [id,entry] of cameraPreviews){const item=items.find(item=>item.id===id);if(item)collect('camera:'+id,entry,item);else entry.el.hidden=true;}
-  const key=[rect.width,rect.height,room,...camera.matrixWorld.elements,...camera.projectionMatrix.elements,...cards.flatMap(c=>[c.id,c.size.width,c.size.height,c.point.x,c.point.y])].join('|');
+  for(const [id,entry] of telemetryPreviews)collect('telemetry:'+id,entry,entry.item);
+  const key=[rect.width,rect.height,room,...camera.matrixWorld.elements,...camera.projectionMatrix.elements,...cards.flatMap(c=>[c.id,c.size.width,c.size.height,c.point.x,c.point.y]),...[...powerLabels.values()].map(e=>e.el.hidden?'':e.el.textContent)].join('|');
   const first=objectGroup?.children[0];
   if(!mediaLayout||mediaLayout.key!==key||mediaLayout.first!==first){
     const blocked=mediaSceneObstacles(camera,rect),boxes=new Map();
@@ -102,6 +158,8 @@ function positionMediaPreviews(camera,rect,room){
     const box=mediaLayout.boxes.get(id);
     entry.el.hidden=!box;if(!box)continue;
     entry.el.style.left=box.x+'px';entry.el.style.top=box.y+'px';
+    // Telemetry cards must never draw a leader across the active storey.
+    if(id.startsWith('telemetry:'))continue;
     let group=mediaLeaders.get(id);
     if(!group){
       const create=tag=>document.createElementNS('http://www.w3.org/2000/svg',tag);

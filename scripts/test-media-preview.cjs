@@ -9,7 +9,7 @@ function fixture(){
  const context=vm.createContext({document:{createElement:element,createElementNS:(ns,tag)=>element(tag)},
   $:id=>{if(!nodes.has(id))nodes.set(id,element('div'));return nodes.get(id)},
   tvFrames:new Map(),cameraPreviews:new Map(),dismissedCameraEvents:new Map(),items:[],objectsById:new Map(),
-  root:{children:[]},objectGroup:{children:[]},THREE:{Vector3:class{constructor(x=0,y=0,z=0){Object.assign(this,{x,y,z})}project(){return this}}}});
+  model:{},lowerFloorContext:{visible:true},root:{children:[]},objectGroup:{children:[]},THREE:{Vector3:class{constructor(x=0,y=0,z=0){Object.assign(this,{x,y,z})}project(){return this}}}});
  vm.runInContext(fs.readFileSync('media-preview.js','utf8'),context);
  const item={id:'tv',name:'Study TV',room:'study',position_m:{x:0,y:0,z:0},dimensions_m:{height:1}};
  const update=(state='off',extra={})=>context.updateTVPreviews([{item,state,busy:false,enabled:true,details(){},power(){},...extra}]);
@@ -78,4 +78,32 @@ test('rebinding or renaming a TV updates existing card callbacks and accessible 
  const [image,,caption]=nodes.get('homeTVs').children[0].children;
  caption.children[1].onclick();assert.equal(called,'new');caption.children[0].onclick();assert.equal(called,'details-new');
  assert.equal(image.alt,'Renamed TV picture');assert.equal(caption.children[0].textContent,'Renamed TV');
+});
+
+test('telemetry formats valid units and rejects absent, restored and invalid values',()=>{
+ const {context:c}=fixture(),format=(state,unit,metric={format:'pressure'},extra={})=>c.formatTelemetryReading({state,unit,...extra},metric);
+ assert.equal(format('235','kPa'),'34 PSI');assert.equal(format('2.75','bar'),'40 PSI');assert.equal(format('34','psi'),'34 PSI');
+ for(const value of ['unknown','unavailable','',' ',null,undefined,'NaN','-4','0'])assert.equal(format(value,'psi'),'—');
+ assert.equal(format('34','psi',{}, {restored:true}),'—');assert.equal(format('34','unknown'),'—');
+ assert.equal(format('80','%',{format:'percent'}),'80%');assert.equal(format('101','%',{format:'percent'}),'—');
+ assert.equal(format('0','W',{format:'power'}),'0 W');assert.equal(format('0.5','W',{format:'power'}),'0.5 W');assert.equal(format('1.5','kW',{format:'power'}),'1.5 kW');
+ assert.equal(format('2.57','kWh',{format:'number',decimals:2}),'2.57 kWh');
+});
+test('telemetry cards reuse HA values, never create leaders, and follow lower-floor visibility',()=>{
+ const {context:c,nodes}=fixture(),camera={matrixWorld:{elements:[]},projectionMatrix:{elements:[]}};
+ c.model.telemetry=[{id:'car',name:'Garage vehicle',lower_floor:true,position_m:{x:0,y:0,z:0},metrics:[{label:'Battery',entity_id:'sensor.example',format:'percent'}]}];
+ c.updateTelemetryPreviews({'sensor.example':{state:'80',unit:'%'}},true);
+ const card=nodes.get('homeTelemetry').children[0],value=card.children[1].children[0].children[1];assert.equal(value.textContent,'80%');
+ c.positionMediaPreviews(camera,{width:1200,height:700},'');assert.equal(card.hidden,false);assert.equal(nodes.get('homeMediaLinks').children.length,0);
+ c.lowerFloorContext.visible=false;c.positionMediaPreviews(camera,{width:1200,height:700},'');assert.equal(card.hidden,true);
+ c.updateTelemetryPreviews({},false);assert.equal(value.textContent,'—');assert.equal(nodes.get('homeTelemetry').children.length,1);
+ c.lowerFloorContext.visible=true;c.positionMediaPreviews(camera,{width:1200,height:700},'other');assert.equal(card.hidden,true);
+});
+test('power labels vanish for zero, missing and disconnected readings',()=>{
+ const {context:c,nodes,item}=fixture(),camera={matrixWorld:{elements:[]},projectionMatrix:{elements:[]}};
+ item.dimensions_m.height=0;c.items.push(item);c.model.power_labels=[{object_id:item.id,name:'Power strip',entity_id:'sensor.power'}];
+ for(const [state,connected,visible] of [['123',true,true],['0',true,false],['unavailable',true,false],['123',false,false]]){
+  c.updateTelemetryPreviews({'sensor.power':{state,unit:'W'}},connected);c.positionMediaPreviews(camera,{width:1200,height:700},'');
+  const label=nodes.get('homeTelemetry').children[0];assert.equal(!label.hidden,visible);assert.equal(label.onclick,undefined);
+ }
 });

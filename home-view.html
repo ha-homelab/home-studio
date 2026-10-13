@@ -5,6 +5,7 @@
         <label for="homeRoom">View</label><select id="homeRoom"><option value="">Whole floor</option></select>
         <div class="home-zoom" role="group" aria-label="Plan zoom"><button id="homeZoomOut" aria-label="Zoom out">−</button><button id="homeZoomReset" aria-label="Reset zoom and pan">100%</button><button id="homeZoomIn" aria-label="Zoom in">+</button></div>
         <button id="homeOtherFloor">__OTHER_TITLE__</button>
+        <button id="homeFloorContext" aria-pressed="true" title="Show a muted lower floor behind this floor" hidden>Lower floor outline</button>
         <button id="homeToggleControls" aria-controls="homeControls" aria-expanded="true">Hide controls</button>
         <button id="homeToggleActivity" aria-controls="homeActivity" aria-expanded="false">Activity</button>
         <span id="homeConnection" role="status">Connecting…</span><button id="editLayout">Edit layout</button>
@@ -21,7 +22,7 @@
         <p id="homeSignalReason"></p>
         <p>Blue regions and bars show recent signal changes, not measured people. New activity restores brightness; each highlight fades over 15 seconds from its observation. Region cards stay visible when you focus the map. Geometry is approximate; a quiet signal does not mean an empty room.</p>
       </details>
-      <div id="homeStage"><div id="homeLabels"></div><div id="homeMotion" aria-hidden="true"></div><div id="homeMarkers"></div><svg id="homeMediaLinks" aria-hidden="true"></svg><div id="homeCameras"></div><div id="homeTVs" aria-label="TV previews"></div></div>
+      <div id="homeStage"><div id="homeLabels"></div><div id="homeMotion" aria-hidden="true"></div><div id="homeMarkers"></div><svg id="homeMediaLinks" aria-hidden="true"></svg><div id="homeCameras"></div><div id="homeTVs" aria-label="TV previews"></div><div id="homeTelemetry"></div></div>
       <p id="homeFeedback" role="status" aria-live="polite" hidden></p>
     </section>
     <section id="homeControls" class="home-controls" aria-label="Bound devices">

@@ -126,3 +126,15 @@ TV preview cards provide power controls and link to their screen positions with
 cyan dashed leaders. Optional notification clips link to their camera positions.
 Images require the site-specific adapters; the public installer does not capture
 TVs or cameras by itself. See [linked media previews](docs/architecture.md#linked-tv-and-camera-previews).
+
+### Lower-floor context
+
+In **Whole floor** view, the nearest lower storey appears as muted architectural outlines beneath the active floor. Use **Lower floor outline** to hide it. Selecting a room hides the context automatically; returning to Whole floor restores your choice. Only the active floor has labels and device controls, and its zoom and framing stay unchanged.
+
+For a planner project, draw all floors against the same X/Z origin and set their `elevation_m` values to their finished-floor heights. For example, use `0` for the ground floor and `2.9` for an upper floor 2.9 metres above it. The compiler selects the nearest lower elevation regardless of list order. A single-floor project needs no changes. Model downloads remain separate floor models.
+
+Site builds can also add muted, read-only vehicle or energy cards in unused space.
+These reuse Home Assistant state updates and show the last reported measurements.
+Power labels beside objects appear only above zero. They do not add controls,
+poll devices or cover the active floor; see [passive telemetry](docs/architecture.md#passive-telemetry-and-power-labels)
+for the optional site-model bindings.
