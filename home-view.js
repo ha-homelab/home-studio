@@ -2,6 +2,13 @@
 homeView = (() => {
   let active = false, camera, overlayGroup, roomLighting, selected = '', bindings = [], points = [], labels = [];
   let assumedZones, signalZone='';
+  let showLowerFloor=true;
+  $('homeFloorContext').hidden=!lowerFloorContext;
+  $('homeFloorContext').onclick=()=>{
+    showLowerFloor=!showLowerFloor;
+    $('homeFloorContext').setAttribute('aria-pressed',String(showLowerFloor));
+    window.renderModel?.();
+  };
   const signalRegions=new Map();
   // Diffuse daylight: the plan does not establish compass orientation.
   const daylightWindows=model.openings.filter(o=>['window','sliding_door'].includes(o.type)).flatMap(o=>{
@@ -149,6 +156,7 @@ homeView = (() => {
 
   function setActive(value) {
     active = value;previewTV(null);
+    if(lowerFloorContext)lowerFloorContext.visible=value&&showLowerFloor&&!selected;
     document.body.classList.toggle('home-mode', value); $('homeView').hidden = !value;
     if (renderer) {
       (value ? $('homeStage') : $('view3d')).prepend(renderer.domElement);
@@ -482,6 +490,8 @@ homeView = (() => {
     const cx=(bounds.min.x+bounds.max.x)/2+panX, cy=(bounds.min.y+bounds.max.y)/2+panY;
     camera.left=cx-half*aspect;camera.right=cx+half*aspect;camera.top=cy+half;camera.bottom=cy-half;camera.updateProjectionMatrix();
     roomLighting?.update(points);
+    if(lowerFloorContext)lowerFloorContext.visible=showLowerFloor&&!selected;
+    $('homeFloorContext').disabled=!!selected;
     assumedZones?.render(selected,signalZone);refreshSignalStatus();
     renderer.render(scene,camera);renderCount++;
     for(const label of labels) label.el.textContent=rect.width<600 ? roomCode(label.room) : roomName(label.room);

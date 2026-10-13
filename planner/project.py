@@ -1,7 +1,7 @@
 """Validated, metric project compiler; independent of household plans and catalogs.
 
 Coordinates are local to each floor, with Y=0 at the finished floor. Elevation
-is metadata, because each floor is exported separately. No image tracing or
+also aligns the muted lower-floor context; each floor is exported separately. No image tracing or
 household inventory is loaded by this module.
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ import struct
 import tarfile
 import tempfile
 
-from geometry import MATERIALS, create_geometry
+from geometry import MATERIALS, create_geometry, floor_context
 from exporters import export_models
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -444,7 +444,7 @@ def render_viewer(data, svg):
         "__MODEL_STEM__": data["id"], "__FLOOR_TITLE__": html.escape(data["title"]),
         "__OTHER_URL__": data["next_floor"]["url"] if data["next_floor"] else "#",
         "__OTHER_TITLE__": html.escape(data["next_floor"]["title"]) if data["next_floor"] else "Only floor",
-        "__ASSUMPTIONS__": "<p>Authored geometry in metres. Check measurements, wall thickness, opening heights and object dimensions before use. Floor elevations are metadata; floor models are exported separately.</p>",
+        "__ASSUMPTIONS__": "<p>Authored geometry in metres. Check measurements, wall thickness, opening heights and object dimensions before use. Floor elevations align a muted lower-floor outline; exported models remain separate.</p>",
     }
     # Expand source fragments before inserting user text, so a title resembling a
     # template token cannot trigger a replacement inside the model or HTML.
@@ -544,10 +544,17 @@ def compile_project(project, output=DEFAULT_OUTPUT, ha_package=False, project_pa
     try:
         manifest = {"schema_version": 1, "site_id": site_id(project), "default_floor": project["floors"][0]["id"],
                     "floors": {f["id"]: {"stem": f["id"], "title": f["name"]} for f in project["floors"]}, "site_features": False}
+        compiled = []
         for i, floor in enumerate(project["floors"]):
             following = project["floors"][(i + 1) % len(project["floors"])]
             next_floor = {"id": following["id"], "title": following["name"], "url": "../" + following["id"] + "/index.html"} if len(project["floors"]) > 1 else None
             data, svg = make_floor(project, floor, next_floor)
+            compiled.append((floor, data, svg))
+        for floor, data, svg in compiled:
+            below = [other for _, other, _ in compiled if other['elevation_m'] < data['elevation_m']]
+            if below:
+                lower = max(below, key=lambda other: other['elevation_m'])
+                data['lower_floor_context'] = floor_context(lower['meshes'], lower['elevation_m'] - data['elevation_m'])
             folder = stage / floor["id"]
             folder.mkdir()
             (folder / "model-data.json").write_text(json_text(data), encoding="utf-8")

@@ -68,6 +68,17 @@ function wallBoundarySegments(meshes,limit,atBase=false){
   return [...segments.values()];
 }
 let wallOutlines,wallOutlineHeight;
+let lowerFloorContext;
+function buildLowerFloorContext(){
+  const data=model.lower_floor_context;
+  if(!data?.lines?.length)return;
+  const group=new THREE.Group();group.name='Lower floor context';group.visible=false;
+  const geometry=values=>new THREE.BufferGeometry().setAttribute('position',new THREE.Float32BufferAttribute(values,3));
+  group.add(new THREE.Mesh(geometry(data.surfaces),new THREE.MeshBasicMaterial({color:0x729aa7,transparent:true,opacity:.055,depthWrite:false,toneMapped:false,side:THREE.DoubleSide,forceSinglePass:true})));
+  group.add(new THREE.LineSegments(geometry(data.lines),new THREE.LineBasicMaterial({color:0x729fb3,transparent:true,opacity:.3,depthWrite:false,toneMapped:false})));
+  // Separate from interactive architecture: no lights, hit targets or camera fit.
+  group.renderOrder=-2;scene.add(group);lowerFloorContext=group;
+}
 function updateWallOutlines(){
   if(!root||wallOutlineHeight===clipping.constant)return;
   wallOutlineHeight=clipping.constant;
@@ -97,7 +108,7 @@ scene=new THREE.Scene();scene.background=new THREE.Color('#e7e8df');camera=new T
 renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.localClippingEnabled=true;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.95;$('view3d').prepend(renderer.domElement);
 hemisphere=new THREE.HemisphereLight(0xffffff,0xa6aaa1,1.8);scene.add(hemisphere);sun=new THREE.DirectionalLight(0xfff9ee,2.3);sun.position.set(-7,22,12);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-16,right:16,top:22,bottom:-22,near:1,far:65});sun.shadow.normalBias=.035;sun.target.position.set(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]);scene.add(sun,sun.target);
 if(planBounds){const scale=Math.max(1,planRadius/32);sun.position.copy(sun.target.position).add(new THREE.Vector3(-7,22,12).multiplyScalar(scale));Object.assign(sun.shadow.camera,{left:-planRadius,right:planRadius,top:planRadius,bottom:-planRadius,far:Math.max(65,planRadius*4)});sun.shadow.camera.updateProjectionMatrix();}
-root=new THREE.Group();objectGroup=new THREE.Group();scene.add(root,objectGroup);
+root=new THREE.Group();objectGroup=new THREE.Group();scene.add(root,objectGroup);buildLowerFloorContext();
 for(const m of model.meshes){const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(m.vertices.flat(),3));geometry.setAttribute('normal',new THREE.Float32BufferAttribute(m.normals.flat(),3));geometry.setIndex(m.indices);const col=model.materials[m.material];const mat=new THREE.MeshStandardMaterial({color:m.kind==='walls'?0xb2d8d2:m.kind==='frames'?0x9abfcb:new THREE.Color(...col.slice(0,3)),roughness:.8,emissive:m.kind==='walls'?0x315d59:m.kind==='frames'?0x18333d:0,metalness:m.material==='steel'?.35:0,transparent:m.kind==='walls'||col[3]<1,opacity:m.kind==='walls'?.16:col[3],depthWrite:m.kind!=='walls',forceSinglePass:m.kind==='walls',side:THREE.DoubleSide});if(m.kind==='walls')mat.onBeforeCompile=applyWallSheen;if(['walls','frames','doors','windows'].includes(m.kind)){mat.clippingPlanes=[clipping];mat.clipShadows=false}const mesh=new THREE.Mesh(geometry,mat);mesh.name=m.name;mesh.userData.category=m.kind;mesh.castShadow=col[3]===1;mesh.receiveShadow=true;root.add(mesh)}
 ground=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(60,planRadius*2),Math.max(65,planRadius*2)),new THREE.MeshStandardMaterial({color:'#dfe3d8',roughness:1}));ground.rotation.x=-Math.PI/2;ground.position.set(planCenter[0],-1.97,planCenter[1]);ground.receiveShadow=true;scene.add(ground);grid=new THREE.GridHelper(44,44,0xc0cabe,0xd0d7cb);grid.position.set(planCenter[0],-1.96,planCenter[1]);scene.add(grid);
 renderer.domElement.addEventListener('webglcontextrestored',()=>{invalidateShadows();render()});

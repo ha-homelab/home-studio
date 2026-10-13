@@ -12,6 +12,44 @@ MATERIALS = {
  'added':[.82,.48,.23,1]
 }
 
+def floor_context(meshes, elevation_m):
+    """Bake a lightweight, read-only storey in the active floor's metric frame.
+
+    Keep architectural surfaces and true edges, never inventory, labels or
+    devices. Adjacent coplanar triangles do not introduce diagonal wire lines.
+    This is viewer metadata; the active floor's export meshes stay untouched.
+    """
+    if not math.isfinite(elevation_m) or elevation_m >= 0:
+        raise ValueError('Context floor elevation must be finite and below zero')
+    surfaces, lines = [], set()
+    for mesh in meshes:
+        if mesh['kind'] not in {'walls', 'floors', 'windows', 'doors'}:
+            continue
+        edges = {}
+        vertices = [tuple(round(v + (elevation_m if i == 1 else 0), 4)
+                          for i, v in enumerate(p)) for p in mesh['vertices']]
+        for i in range(0, len(mesh['indices']), 3):
+            triangle = [vertices[j] for j in mesh['indices'][i:i+3]]
+            a, b, c = triangle
+            u, v = [b[j]-a[j] for j in range(3)], [c[j]-a[j] for j in range(3)]
+            n = [u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0]]
+            length = math.sqrt(sum(x*x for x in n))
+            if length < 1e-9:
+                continue
+            normal = [x/length for x in n]
+            # The active storey's slab must not intersect or peek above itself.
+            if max(p[1] for p in triangle) >= -.01:
+                continue
+            surfaces.extend(x for p in triangle for x in p)
+            for j in range(3):
+                key = tuple(sorted((triangle[j], triangle[(j+1) % 3])))
+                edges.setdefault(key, []).append(normal)
+        for edge, normals in edges.items():
+            if len(normals) == 1 or any(abs(sum(a*b for a, b in zip(normals[0], n))) < .999 for n in normals[1:]):
+                lines.add(edge)
+    return {'elevation_m': elevation_m, 'surfaces': surfaces,
+            'lines': [x for edge in sorted(lines) for p in edge for x in p]}
+
 def create_geometry(x_anchors, z_anchors, height=2.7):
     H=height; XA=x_anchors; YA=z_anchors
     def interp(v, aa):
