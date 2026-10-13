@@ -278,7 +278,8 @@ Optional `model.appliance_status` entries bind an inventory object ID to its
 must match before a reading can affect that object. Clicking an appliance opens
 Home Assistant details; it never switches the appliance.
 
-Smoke entries also name a `battery_entity_id`. A current binary `off` reading
+The smoke detector uses a cloud-and-wisps icon; the flame icon is reserved for
+the cooktop. Smoke entries also name a `battery_entity_id`. A current binary `off` reading
 shows green OK, `on` shows red SMOKE ALARM, and a valid 0–100 percent battery is
 shown beside it. Missing, disconnected, or restored readings are neutral, never
 an inferred all-clear. An entity name containing “motion” does not make a smoke

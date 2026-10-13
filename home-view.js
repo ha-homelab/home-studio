@@ -204,7 +204,7 @@ homeView = (() => {
     }
     for (const item of bindings) {
       const appliance=applianceSpec(item);
-      const glyph=appliance?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c2 5-2 6 1 9 2-1 3-3 3-4 6 7 5 15-4 15S2 13 7 8c-1 4 1 5 2 5-2-5 3-7 3-11Z"/></svg>':receiverSpec(item)||presenceSpec(item)?'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/></svg>':isMotion(item)?motionIcon:isTV(item)?tvIcon:isCover(item)?coverIcon:icon;
+      const glyph=appliance?.kind==='smoke'?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 14a4 4 0 0 1-1-8 5 5 0 0 1 9-1 4 4 0 0 1 4 9M7 19c-2-2 2-3 0-5m5 7c-2-2 2-3 0-5m5 3c-2-2 2-3 0-5"/></svg>':appliance?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c2 5-2 6 1 9 2-1 3-3 3-4 6 7 5 15-4 15S2 13 7 8c-1 4 1 5 2 5-2-5 3-7 3-11Z"/></svg>':receiverSpec(item)||presenceSpec(item)?'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/></svg>':isMotion(item)?motionIcon:isTV(item)?tvIcon:isCover(item)?coverIcon:icon;
       const marker = document.createElement('button'); marker.className = 'home-marker'; marker.dataset.homeItem = item.id; marker.innerHTML = glyph;
       const card = document.createElement('button'); card.className = 'home-device'; card.dataset.homeDevice = item.id;
       const symbol = document.createElement('span'); symbol.className = 'home-device-icon'; symbol.innerHTML = glyph;
