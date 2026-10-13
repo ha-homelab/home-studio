@@ -125,3 +125,8 @@ light, dependency, network request or animation.
 Rebuilds happen only when the clipping height changes, disposing old GPU resources.
 Run `node scripts/test-wall-tops.cjs` to check top and base boundaries for rotated
 walls, raised bases, both cutaway heights, low walls and doorway gaps.
+
+Home view cuts walls at 2.1 m, at the standard window-head elevation, so both
+window jambs and the upper frame remain visible. Blue-grey structural frames
+with a low emissive contribution stay legible in unlit rooms. The editor retains
+its separate 1.15 m cutaway toggle; exported dimensions remain unchanged.

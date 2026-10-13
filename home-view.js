@@ -156,7 +156,8 @@ homeView = (() => {
       // A dim base keeps unlit rooms readable while HA lights provide the contrast.
       hemisphere.intensity = value ? .16 : 1.8; sun.intensity = value ? .18 : 2.3;
       ground.visible = grid.visible = !value;
-      clipping.constant = value ? .82 : $('cutaway').checked ? 1.15 : 20;
+      // Keep window heads visible.
+      clipping.constant = value ? 2.1 : $('cutaway').checked ? 1.15 : 20;
       // Keep full-height shadow blockers when changing view modes.
       roomLighting?.attach(root,value);roomLighting?.attach(objectGroup,value);
       updateFixtureShadows();
