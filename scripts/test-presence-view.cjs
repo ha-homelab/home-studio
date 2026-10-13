@@ -28,9 +28,9 @@ test('room captions and inspector merge direct presence without promoting quiet 
   assert.equal(mergePresenceActivity(null,{presence:'unknown'}),'unknown');
   assert.equal(mergePresenceActivity('invalid',{}),'unknown');
 });
-test('room overlay follows the camera, fades only on quiet, and withdraws stale or changed evidence',()=>{
+test('compact presence badge follows the room label without filling or scaling with the room',()=>{
   class Element {
-    constructor(){this.attributes={};this.children=[];this.dataset={};this.style={};this.classList={add(){}};this.writes=0;}
+    constructor(tag){this.tag=tag;this.attributes={};this.children=[];this.dataset={};this.style={};this.classList={add(){}};this.writes=0;}
     append(...nodes){this.children.push(...nodes);}
     setAttribute(key,value){this.attributes[key]=value;this.writes++;}
     getAttribute(key){return this.attributes[key];}
@@ -41,30 +41,39 @@ test('room overlay follows the camera, fades only on quiet, and withdraws stale 
     clone(){return new Vector3(this.x,this.y,this.z);}
     project(camera){this.x+=camera.x;this.y=this.z;return this;}
   }
-  const previous=global.document;global.document={createElementNS:()=>new Element()};
+  const previous=global.document;global.document={createElementNS:(_ns,tag)=>new Element(tag)};
   try{
     const container=new Element();
     const {createPresenceView}=require('../presence-view.js');
-    const view=createPresenceView(container,[{id:'living',polygon:[[-1,-1],[1,-1],[1,1],[-1,1]]},{id:'dining',polygon:[]}],{presence:spec},{Vector3},x=>x,z=>z);
-    const svg=container.children[0],polygon=svg.children[1];
-    assert.equal(svg.children.length,2,'only the configured room has a footprint');
+    // No polygon is needed: presence belongs to the room caption, not its floor.
+    const view=createPresenceView(container,[{id:'living',label:[.25,-.5]},{id:'dining',label:[0,0]}],{presence:spec},{Vector3},x=>x,z=>z);
+    const svg=container.children[0],indicator=svg.children[0];
+    assert.equal(svg.children.length,1,'only the configured room has a badge');
+    assert.equal(svg.getAttribute('aria-hidden'),'true','the existing room caption provides the text alternative');
+    assert.equal(indicator.tag,'g');
+    assert.deepEqual(indicator.children.map(node=>node.tag),['circle','circle','path'],'no floor polygon, gradient or trail is created');
+    assert.equal(indicator.children[0].getAttribute('r'),10,'the badge is only 20 screen pixels across');
+    assert.equal(indicator.style.opacity,'0','nothing is shown before current evidence arrives');
     view.update([item],reading('on'),true,true,'');
-    assert.equal(polygon.style.opacity,'1');assert.equal(polygon.dataset.state,'presence');
+    assert.equal(indicator.style.opacity,'1');assert.equal(indicator.dataset.state,'presence');
     view.render({x:0},{width:200,height:100});
-    assert.equal(polygon.getAttribute('points'),'0,100 200,100 200,0 0,0');
-    const writes=polygon.writes;view.render({x:0},{width:200,height:100});
-    assert.equal(polygon.writes,writes,'an unchanged camera does not repaint attributes');
+    assert.equal(indicator.getAttribute('transform'),'translate(125 97)','the badge stays 22 screen pixels below the label');
+    const writes=indicator.writes;view.render({x:0},{width:200,height:100});
+    assert.equal(indicator.writes,writes,'an unchanged camera does not repaint attributes');
     view.render({x:1},{width:200,height:100});
-    assert.equal(polygon.getAttribute('points'),'100,100 300,100 300,0 100,0');
+    assert.equal(indicator.getAttribute('transform'),'translate(225 97)');
+    view.render({x:0},{width:400,height:200});
+    assert.equal(indicator.getAttribute('transform'),'translate(250 172)');
+    assert.equal(indicator.children[0].getAttribute('r'),10,'resizing moves the badge without enlarging it');
     view.update([item],reading('off'),true,true,'');
-    assert.equal(polygon.dataset.state,'quiet');assert.equal(polygon.style.opacity,'0');
+    assert.equal(indicator.dataset.state,'quiet');assert.equal(indicator.style.opacity,'0');
     view.update([item],reading('on'),true,true,'');
-    assert.equal(polygon.dataset.state,'presence');assert.equal(polygon.style.opacity,'1');
+    assert.equal(indicator.dataset.state,'presence');assert.equal(indicator.style.opacity,'1');
     view.update([item],reading('on'),false,true,'');
-    assert.equal(polygon.dataset.state,'unknown');assert.equal(polygon.style.opacity,'0');
+    assert.equal(indicator.dataset.state,'unknown');assert.equal(indicator.style.opacity,'0');
     view.update([],reading('on'),true,true,'');
-    assert.equal(polygon.dataset.state,'unknown');
-    view.update([item],reading('on'),true,true,'dining');assert.equal(polygon.style.display,'none');
+    assert.equal(indicator.dataset.state,'unknown');
+    view.update([item],reading('on'),true,true,'dining');assert.equal(indicator.style.display,'none');
     view.update([item],reading('on'),true,false,'');assert.equal(svg.style.display,'none');
     view.dispose();assert.equal(svg.removed,true);
   }finally{global.document=previous;}

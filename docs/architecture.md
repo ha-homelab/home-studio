@@ -217,9 +217,23 @@ Validation: `python3 scripts/test-floor-context.py` checks geometry filtering, e
 ### Passive telemetry and power labels
 
 Optional `model.telemetry` holds up to four read-only cards. Each descriptor has
-`id`, `name`, `room`, `position_m`, optional `lower_floor`, and up to eight `metrics`.
+`id`, `name`, `room`, `position_m`, optional `lower_floor`, and up to twelve `metrics`.
 A metric supplies `label`, `entity_id` and `format` (`number`, `percent`, `pressure`,
-`power` or `status`), with optional `decimals` (0–2) or status `labels`. Concrete
+`power` or `status`), with optional `decimals` (0–2) or status `labels`.
+For power or energy totals, `entity_ids` replaces `entity_id`: all distinct sources
+(up to eight) must be valid. Power normalizes W/kW to W and energy Wh/kWh to kWh.
+Missing, restored, invalid-unit or negative unsigned inputs make the total unknown;
+there is no partial total or double-counting of duplicate IDs. Do not combine a
+site total with its constituent meters. `signed: true` permits signed power;
+`flow: [positiveLabel, negativeLabel]` replaces the metric caption with the matching direction and displays an
+in/out arrow with absolute magnitude; exact zero keeps its neutral label and `0 W`. Sum grid phases before choosing direction.
+Optional `icon: solar|battery|grid` supplies static CSS symbols; a battery percentage
+fills its icon from 0 to 100, and unknown readings clear and dim it. The host's
+existing updates drive these DOM changes; no animation loop or polling is added.
+Optional `requires` lists up to eight simple metric descriptors that must also
+be usable, guarding derived sensors that default to zero when their inputs fail.
+A site's voltage-derived SoC should bind its existing calibrated sensor, not
+silently invent a voltage-to-charge curve in the shared renderer. Concrete
 entity IDs remain in the site model, never in shared code. Generic planner exports
 omit these optional bindings unless a site build explicitly supplies them.
 
@@ -311,19 +325,19 @@ this mapping; the generic planner does not guess coverage from a device name.
 
 `presence-view.js` accepts only connected, non-restored binary `on` or `off`
 readings whose current inventory binding and room still match. An `on` reading
-holds a translucent cyan-green room footprint continuously; it does not expire
-because its state has not changed recently. A valid `off` fades the footprint
+holds a small, fixed-size person badge beneath the existing room caption; it does not expire
+because its state has not changed recently. A valid `off` fades the badge
 over 15 seconds. Another `on` restores full intensity immediately. Missing,
 unavailable, restored, disconnected, removed, or remapped sources withdraw the
 overlay immediately. With multiple reviewed sources, any active source holds
 the room; fading requires all of them to report `off`.
 
-The footprint uses the existing room polygon and camera projection. It is an
-occupancy overlay, not emitted light or a measured detection cone. It cannot
-spill into another room's footprint and does not block pointer events. CSS
-handles the release fade, with no new polling, JavaScript timer, WebGL pass,
-shadow update, texture, or vendor dependency. Reduced motion disables the fade;
-unchanged projections avoid repeated SVG attribute writes.
+The 20-pixel SVG badge follows the existing room-label anchor and camera
+projection. It leaves the room floor, furniture, and lighting untouched, and
+does not block pointer events. A subtle outline and person glyph indicate
+occupancy, not a person's measured location. CSS handles the release fade, with
+no new polling, JavaScript timer, WebGL pass, shadow update, texture, or dependency.
+Reduced motion disables the fade; unchanged projections avoid SVG writes.
 
 Direct presence merges into the room caption and Activity inspector separately
 from server-aggregated motion and signal estimates. Existing motion keeps its

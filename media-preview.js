@@ -15,6 +15,21 @@ function formatTelemetryReading(reading,metric){
   if(metric.format==='power'){if(!['W','kW'].includes(unit))return '—';const watts=value*(unit==='kW'?1000:1),magnitude=Math.abs(watts);return magnitude>=1000?`${(watts/1000).toFixed(1)} kW`:`${magnitude>0&&magnitude<10?watts.toFixed(1):Math.round(watts)} W`;}
   return `${value.toFixed(Math.max(0,Math.min(2,metric.decimals||0)))}${unit==='%'?'':' '}${unit}`.trim();
 }
+// Aggregates are complete or unknown; never disguise a missing source as zero.
+function telemetryReading(states,metric){
+  if(metric.requires&&(!Array.isArray(metric.requires)||metric.requires.length>8||metric.requires.some(r=>formatTelemetryReading(states[r.entity_id],r)==='—')))return null;
+  if(!metric.entity_ids)return states[metric.entity_id];
+  const ids=metric.entity_ids;
+  if(!Array.isArray(ids)||!ids.length||ids.length>8||new Set(ids).size!==ids.length)return null;
+  const units=metric.format==='power'?{W:1,kW:1000}:{Wh:.001,kWh:1};
+  let total=0;
+  for(const id of ids){
+    const r=states[id];
+    if(formatTelemetryReading(r,metric)==='—'||!units[r.unit])return null;
+    total+=Number(r.state)*units[r.unit];
+  }
+  return {state:total,unit:metric.format==='power'?'W':'kWh'};
+}
 function updateTelemetryPreviews(states,connected){
   for(const item of (model.telemetry||[]).slice(0,4)){
     if(!item.position_m||!['x','y','z'].every(k=>Number.isFinite(item.position_m[k])))continue;
@@ -22,10 +37,19 @@ function updateTelemetryPreviews(states,connected){
     if(!entry){
       const el=document.createElement('section'),title=document.createElement('strong'),grid=document.createElement('dl'),note=document.createElement('small');
       el.className='telemetry-preview';el.dataset.telemetryPreview=item.id;title.textContent=item.name;el.setAttribute('aria-label',item.name+' · Last reported telemetry');
-      const rows=(item.metrics||[]).slice(0,8).map(metric=>{const row=document.createElement('div'),label=document.createElement('dt'),value=document.createElement('dd');label.textContent=metric.label;row.dataset.format=metric.format;row.append(label,value);grid.append(row);return {metric,value};});
+      const rows=(item.metrics||[]).slice(0,12).map(metric=>{const row=document.createElement('div'),label=document.createElement('dt'),value=document.createElement('dd');label.textContent=metric.label;let icon;if(['solar','battery','grid'].includes(metric.icon)){icon=document.createElement('span');icon.className='telemetry-symbol';icon.dataset.icon=metric.icon;icon.setAttribute('aria-hidden','true');label.append(icon);}row.dataset.format=metric.format;row.append(label,value);grid.append(row);return {metric,value,icon,label};});
       el.append(title,grid,note);$('homeTelemetry').append(el);entry={el,item,rows,note};telemetryPreviews.set(item.id,entry);
     }
-    for(const {metric,value} of entry.rows)value.textContent=formatTelemetryReading(connected?states[metric.entity_id]:null,metric);
+    for(const {metric,value,icon,label} of entry.rows){
+      const reading=connected?telemetryReading(states,metric):null,text=formatTelemetryReading(reading,metric),known=text!=='—';
+      const n=known?Number(reading.state):0;
+      value.textContent=known&&metric.flow?(n>0?'↓ ':n<0?'↑ ':'')+text.replace(/^-/,''):text;
+      if(metric.flow){label.textContent=known&&n!==0?metric.flow[n>0?0:1]:metric.label;if(icon)label.append(icon);}
+      if(icon?.dataset.icon==='battery'){
+        icon.style.setProperty('--charge',known&&metric.format==='percent'?n+'%':'0%');
+        icon.dataset.known=String(known);
+      }
+    }
     entry.note.textContent=connected?'Last reported · updates may be delayed':'Home Assistant disconnected';
   }
   for(const spec of (model.power_labels||[]).slice(0,12)){

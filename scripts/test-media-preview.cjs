@@ -1,7 +1,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 function fixture(){
  const nodes=new Map();
- const element=tag=>({tag,hidden:false,style:{},dataset:{},children:[],attributes:{},
+ const element=tag=>({tag,hidden:false,style:{setProperty(k,v){this[k]=v}},dataset:{},children:[],attributes:{},
   append(...children){this.children.push(...children)},remove(){this.removed=true},
   getAttribute(key){return key==='src'?this.src:this.attributes[key]},setAttribute(key,value){this.attributes[key]=value},removeAttribute(key){delete this[key];delete this.attributes[key]},
   getBoundingClientRect(){return {left:100,top:20,width:200,height:120}},
@@ -149,4 +149,48 @@ test('a missing appliance never turns into an unrelated room measurement',()=>{
  c.model.power_labels=[{object_id:'missing',name:'Missing appliance',entity_id:'sensor.circuit'}];
  c.updateTelemetryPreviews({'sensor.circuit':{state:'50',unit:'W'}},true);c.positionMediaPreviews(camera,{width:1200,height:700},'study');
  assert.equal(nodes.get('homeTelemetry').children[0].hidden,true);
+});
+
+
+test('energy sums normalize units and require every distinct source',()=>{
+ const {context:c}=fixture();
+ const states={a:{state:'500',unit:'W'},b:{state:'1.2',unit:'kW'}};
+ const metric={entity_ids:['a','b'],format:'power'};
+ assert.equal(c.telemetryReading(states,metric).state,1700);
+ for(const state of ['unavailable','unknown','','NaN','-1']){
+  assert.equal(c.telemetryReading({...states,b:{state,unit:'W'}},metric),null);
+ }
+ assert.equal(c.telemetryReading({a:states.a},metric),null);
+ assert.equal(c.telemetryReading({...states,b:{state:'100',unit:'Wh'}},metric),null);
+ assert.equal(c.telemetryReading({...states,b:{state:'100',unit:'W',restored:true}},metric),null);
+ assert.equal(c.telemetryReading(states,{...metric,entity_ids:['a','a']}),null);
+ assert.equal(c.telemetryReading(states,{...metric,entity_ids:[]}),null);
+ assert.equal(c.telemetryReading({a:{state:'200',unit:'Wh'},b:{state:'.8',unit:'kWh'}},{...metric,format:'number'}).state,1);
+ assert.equal(c.telemetryReading({...states,b:{state:'-.2',unit:'kW'}},{...metric,signed:true}).state,300);
+});
+test('energy shows directional power and clears battery fill when unavailable',()=>{
+ const {context:c,nodes}=fixture();
+ c.model.telemetry=[{id:'energy',name:'Energy',position_m:{x:0,y:0,z:0},metrics:[
+  {label:'Battery',icon:'battery',entity_id:'soc',format:'percent'},
+  {label:'Grid',icon:'grid',entity_ids:['l1','l2'],format:'power',signed:true,flow:['Import','Export']}
+ ]}];
+ const state=(soc,l1,l2)=>({soc:{state:soc,unit:'%'},l1:{state:l1,unit:'W'},l2:{state:l2,unit:'W'}});
+ c.updateTelemetryPreviews(state('65','500','-200'),true);
+ const rows=nodes.get('homeTelemetry').children[0].children[1].children;
+ const icon=rows[0].children[0].children[0];
+ assert.equal(icon.style['--charge'],'65%');assert.equal(rows[1].children[1].textContent,'↓ 300 W');
+ c.updateTelemetryPreviews(state('100','-500','200'),true);
+ assert.equal(icon.style['--charge'],'100%');assert.equal(rows[1].children[1].textContent,'↑ 300 W');assert.equal(rows[1].children[0].textContent,'Export');
+ c.updateTelemetryPreviews(state('0','-200','200'),true);
+ assert.equal(icon.style['--charge'],'0%');assert.equal(icon.dataset.known,'true');assert.equal(rows[1].children[1].textContent,'0 W');
+ c.updateTelemetryPreviews(state('101','100','0'),true);assert.equal(icon.dataset.known,'false');
+ c.updateTelemetryPreviews({},false);assert.equal(icon.style['--charge'],'0%');assert.equal(icon.dataset.known,'false');assert.equal(rows[1].children[1].textContent,'—');
+});
+
+test('derived percentages require usable source readings',()=>{
+ const {context:c}=fixture(),m={entity_id:'soc',format:'percent',requires:[{entity_id:'v',format:'percent'},{entity_id:'p',format:'power',signed:true}]};
+ const states={soc:{state:70,unit:'%'},v:{state:72,unit:'%'},p:{state:-100,unit:'W'}};
+ assert.equal(c.telemetryReading(states,m).state,70);
+ for(const state of ['unavailable','unknown','',null])assert.equal(c.telemetryReading({...states,v:{state,unit:'%'}},m),null);
+ assert.equal(c.telemetryReading({...states,p:{state:100,unit:'W',restored:true}},m),null);
 });
