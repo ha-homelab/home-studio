@@ -31,11 +31,19 @@ function updateTelemetryPreviews(states,connected){
   for(const spec of (model.power_labels||[]).slice(0,12)){
     const id=spec.id||spec.object_id;if(!id)continue;
     let entry=powerLabels.get(id);
-    if(!entry){const el=document.createElement('span');el.className='home-power-label';el.dataset.powerLabel=id;el.dataset.scope=spec.room_ids?'circuit':'object';$('homeTelemetry').append(el);entry={el,spec};powerLabels.set(id,entry);}
+    if(!entry){
+      const el=spec.object_id?document.createElement('span'):null;
+      if(el){el.className='home-power-label';el.dataset.powerLabel=id;$('homeTelemetry').append(el);}
+      entry={el,spec};powerLabels.set(id,entry);
+    }
     const reading=connected?states[spec.entity_id]:null,text=formatTelemetryReading(reading,{format:'power',signed:spec.signed});
-    entry.available=text!=='—'&&Number(reading.state)!==0;entry.el.textContent=spec.label?`${spec.label}\n${text}`:text;
-    entry.el.title=spec.name+' · '+text;entry.el.setAttribute('aria-label',entry.el.title);
+    entry.available=text!=='—'&&Number(reading.state)!==0;entry.text=text;
+    if(entry.el){entry.el.textContent=text;entry.el.title=spec.name+' · '+text;entry.el.setAttribute('aria-label',entry.el.title);}
   }
+}
+
+function roomPowerText(room,selected){
+  return [...powerLabels.values()].filter(e=>!e.el&&e.available&&(selected?selected===room&&e.spec.room_ids?.includes(room):e.spec.room_ids?.[0]===room)).map(e=>e.text).join(' · ');
 }
 
 function positionPowerLabels(camera,rect,room){
@@ -45,14 +53,12 @@ function positionPowerLabels(camera,rect,room){
     const b=el.getBoundingClientRect();blocked.push({x:b.left-stage.left,y:b.top-stage.top,width:b.width,height:b.height});
   }
   for(const entry of powerLabels.values()){
-    const {spec}=entry,item=items.find(item=>item.id===spec.object_id),rooms=spec.room_ids||(item?[item.room]:[]);
-    const region=model.rooms?.find(r=>r.id===(room||rooms[0]));
-    const anchor=spec.object_id?(item?{x:item.position_m.x,y:item.position_m.y+(item.dimensions_m?.height||0),z:item.position_m.z}:null):
-      ((!room||room===rooms[0])&&spec.position_m)|| (region?{x:xm(region.label[0]),y:.08,z:zm(region.label[1])}:null);
-    entry.el.hidden=!entry.available||!anchor||!['x','y','z'].every(k=>Number.isFinite(anchor[k]))||!!room&&!rooms.includes(room);
+    if(!entry.el)continue;
+    const item=items.find(item=>item.id===entry.spec.object_id);
+    entry.el.hidden=!entry.available||!item||!!room&&item.room!==room;
     if(entry.el.hidden)continue;
-    const point=new THREE.Vector3(anchor.x,anchor.y,anchor.z).project(camera),size=entry.el.getBoundingClientRect();
-    const x=(point.x+1)*rect.width/2-(item?size.width+18:size.width/2),y=(1-point.y)*rect.height/2-size.height/2;
+    const point=new THREE.Vector3(item.position_m.x,item.position_m.y+(item.dimensions_m?.height||0),item.position_m.z).project(camera),size=entry.el.getBoundingClientRect();
+    const x=(point.x+1)*rect.width/2-size.width-18,y=(1-point.y)*rect.height/2-size.height/2;
     const box=[0,-1,1,-2,2].map(d=>({x,y:y+d*(size.height+8),width:size.width,height:size.height})).find(b=>point.z>=-1&&point.z<=1&&b.x>=4&&b.y>=4&&b.x+b.width<=rect.width-4&&b.y+b.height<=rect.height-4&&!blocked.some(o=>b.x<o.x+o.width+4&&b.x+b.width>o.x-4&&b.y<o.y+o.height+4&&b.y+b.height>o.y-4));
     entry.el.hidden=!box;
     if(box){entry.el.style.left=box.x+'px';entry.el.style.top=box.y+'px';blocked.push(box);}
@@ -151,7 +157,7 @@ function positionMediaPreviews(camera,rect,room){
   for(const [id,entry] of tvPreviews)collect('tv:'+id,entry,entry.item);
   for(const [id,entry] of cameraPreviews){const item=items.find(item=>item.id===id);if(item)collect('camera:'+id,entry,item);else entry.el.hidden=true;}
   for(const [id,entry] of telemetryPreviews)collect('telemetry:'+id,entry,entry.item);
-  const key=[rect.width,rect.height,room,...camera.matrixWorld.elements,...camera.projectionMatrix.elements,...cards.flatMap(c=>[c.id,c.size.width,c.size.height,c.point.x,c.point.y]),...[...powerLabels.values()].map(e=>e.el.hidden?'':e.el.textContent)].join('|');
+  const key=[rect.width,rect.height,room,...camera.matrixWorld.elements,...camera.projectionMatrix.elements,...cards.flatMap(c=>[c.id,c.size.width,c.size.height,c.point.x,c.point.y]),...[...powerLabels.values()].map(e=>e.el?.hidden?'':e.text)].join('|');
   const first=objectGroup?.children[0];
   if(!mediaLayout||mediaLayout.key!==key||mediaLayout.first!==first){
     const blocked=mediaSceneObstacles(camera,rect),boxes=new Map();

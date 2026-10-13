@@ -108,35 +108,39 @@ test('power labels vanish for zero, missing and disconnected readings',()=>{
  }
 });
 
-test('a shared circuit follows room focus without splitting or duplicating its reading',()=>{
- const {context:c,nodes}=fixture(),camera={matrixWorld:{elements:[]},projectionMatrix:{elements:[]}};
- c.model.rooms=[{id:'study',label:[0,0]},{id:'hall',label:[.2,0]},{id:'other',label:[-.2,0]}];
- c.model.power_labels=[{id:'shared',room_ids:['study','hall'],name:'Study and hall circuit',label:'Study + hall',entity_id:'sensor.circuit'}];
- for(const room of ['', 'study', 'hall', 'other']){
-  c.updateTelemetryPreviews({'sensor.circuit':{state:'158',unit:'W'}},true);
-  c.positionMediaPreviews(camera,{width:1200,height:700},room);
-  const label=nodes.get('homeTelemetry').children[0];
-  assert.equal(label.hidden,room==='other');assert.equal(label.textContent,'Study + hall\n158 W');
-  assert.equal(label.attributes['aria-label'],'Study and hall circuit · 158 W');
-  assert.equal(nodes.get('homeTelemetry').children.length,1);assert.equal(label.onclick,undefined);
- }
- c.updateTelemetryPreviews({},false);c.positionMediaPreviews(camera,{width:1200,height:700},'hall');
- assert.equal(nodes.get('homeTelemetry').children[0].hidden,true);
+test('shared circuit watts reuse the existing room caption without creating another label',()=>{
+ const {context:c,nodes}=fixture();
+ c.model.power_labels=[{id:'shared',room_ids:['study','hall'],name:'Study and hall circuit',entity_id:'sensor.circuit'}];
+ c.updateTelemetryPreviews({'sensor.circuit':{state:'158',unit:'W'}},true);
+ assert.equal(nodes.has('homeTelemetry'),false);
+ assert.equal(c.roomPowerText('study',''),'158 W');
+ assert.equal(c.roomPowerText('hall',''),'');
+ assert.equal(c.roomPowerText('hall','hall'),'158 W');
+ assert.equal(c.roomPowerText('study','hall'),'');
+ assert.equal(c.roomPowerText('other','other'),'');
+ c.updateTelemetryPreviews({},false);assert.equal(c.roomPowerText('hall','hall'),'');
 });
 
 test('signed circuit power preserves direction only when explicitly configured',()=>{
- const {context:c,nodes}=fixture(),camera={matrixWorld:{elements:[]},projectionMatrix:{elements:[]}};
- const negative={state:'-1.25',unit:'kW'};
+ const {context:c}=fixture(),negative={state:'-1.25',unit:'kW'};
  assert.equal(c.formatTelemetryReading(negative,{format:'power'}),'—');
  assert.equal(c.formatTelemetryReading(negative,{format:'power',signed:true}),'-1.3 kW');
  assert.equal(c.formatTelemetryReading({state:'-0.5',unit:'W'},{format:'power',signed:true}),'-0.5 W');
- c.model.rooms=[{id:'hall',label:[0,0]}];
- c.model.power_labels=[{id:'signed',room_ids:['hall'],label:'Signed circuit',name:'Signed circuit',entity_id:'sensor.circuit',signed:true}];
- c.updateTelemetryPreviews({'sensor.circuit':negative},true);c.positionMediaPreviews(camera,{width:1200,height:700},'');
- const label=nodes.get('homeTelemetry').children[0];assert.equal(label.hidden,false);assert.match(label.textContent,/-1.3 kW/);
+ c.model.power_labels=[{id:'signed',room_ids:['hall'],name:'Signed circuit',entity_id:'sensor.circuit',signed:true}];
+ c.updateTelemetryPreviews({'sensor.circuit':negative},true);assert.equal(c.roomPowerText('hall',''),'-1.3 kW');
  for(const state of ['0','unknown','unavailable']){
-  c.updateTelemetryPreviews({'sensor.circuit':{state,unit:'W'}},true);c.positionMediaPreviews(camera,{width:1200,height:700},'');assert.equal(label.hidden,true);
+  c.updateTelemetryPreviews({'sensor.circuit':{state,unit:'W'}},true);assert.equal(c.roomPowerText('hall',''),'');
  }
+});
+
+test('multiple circuits keep separate readings in one room caption',()=>{
+ const {context:c,nodes}=fixture();
+ c.model.power_labels=[{id:'left',room_ids:['kitchen'],entity_id:'sensor.left'},
+  {id:'right',room_ids:['kitchen'],entity_id:'sensor.right'}];
+ c.updateTelemetryPreviews({'sensor.left':{state:'10',unit:'W'},'sensor.right':{state:'20',unit:'W'}},true);
+ assert.equal(c.roomPowerText('kitchen',''),'10 W · 20 W');assert.equal(nodes.has('homeTelemetry'),false);
+ c.updateTelemetryPreviews({'sensor.left':{state:'0',unit:'W'},'sensor.right':{state:'20',unit:'W',restored:true}},true);
+ assert.equal(c.roomPowerText('kitchen',''),'');
 });
 
 test('a missing appliance never turns into an unrelated room measurement',()=>{

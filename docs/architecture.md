@@ -240,20 +240,18 @@ render loop or dependency is introduced.
 
 Optional `model.power_labels` binds a sensor to an existing `object_id` with an
 accessible `name`. Alternatively, supply a stable `id` and `room_ids` for a circuit
-that supplies one or several rooms. An optional `label` identifies the measured
-circuit visibly; keep shared-room names together rather than inventing per-room
-values. `position_m` can anchor a circuit to a particular area of its first room.
-Otherwise the room's existing label coordinates provide the anchor. During room
-focus a shared circuit appears once in the selected member room, retaining its
-full description and reading. Appliance anchors continue to follow saved objects.
+that supplies one or several rooms. Circuit watts are appended to the existing
+room caption, with no separate badge, explanatory caption or additional node.
+The first room receives the reading on the whole-floor view; focusing a member
+room moves the reading into that room's existing caption. Each shared source
+appears once. Several sources in one room remain separate readings, never an
+invented total. Existing room buttons keep their focus behavior.
 
-Up to twelve labels show W/kW readings near their targets. They disappear at zero,
-on missing/restored data or disconnection. Signed measurements require explicit
-`signed: true`; negative values retain their sign and are not treated as ordinary
-positive consumption. Describe that source as signed until its direction has
-been established. Nearby vertical alternatives account for the actual label
-height and avoid device/room hit targets; labels never intercept pointer input.
-Do not add circuit totals to downstream smart-plug readings, or duplicate the
+Up to twelve configured sources show W/kW readings. Zero, missing, restored and
+disconnected values disappear while room names remain. Signed measurements
+require explicit `signed: true` and keep their sign. Object readings continue to
+follow saved objects, avoiding device/room controls and never intercepting clicks.
+Do not add circuit totals to downstream smart-plug readings or duplicate the
 same meter's total and phase channels. No extra polling or animation is needed.
 
 `node --test scripts/test-media-preview.cjs` covers unit conversion, unknown data,

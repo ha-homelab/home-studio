@@ -333,10 +333,11 @@ homeView = (() => {
     updateCurtainDialog();
     refreshActivity();
     for (const label of labels) {
-      label.el.hidden=!!selected;
+      label.power=roomPowerText(label.room,selected);
+      label.el.hidden=!!selected&&(label.room!==selected||!label.power);
       const value=activityState(model.room_activity?.[label.room]);
       label.el.dataset.activity=value||'unknown';
-      label.el.title=roomName(label.room)+' · '+(activityText[value]||activityText.unknown);
+      label.el.title=roomName(label.room)+(label.power?' · '+label.power:'')+' · '+(activityText[value]||activityText.unknown);
       label.el.setAttribute('aria-description',label.el.title);
     }
     $('homeSummary').textContent=`${on} on · ${total} linked${motion?' · '+motion+' active sensors':''}${unavailable ? ' · '+unavailable+' unavailable' : ''}`;
@@ -496,7 +497,7 @@ homeView = (() => {
     $('homeFloorContext').disabled=!!selected;
     assumedZones?.render(selected,signalZone);refreshSignalStatus();
     renderer.render(scene,camera);renderCount++;
-    for(const label of labels) label.el.textContent=rect.width<600 ? roomCode(label.room) : roomName(label.room);
+    for(const label of labels) label.el.textContent=(rect.width<600 ? roomCode(label.room) : roomName(label.room))+(label.power?' · '+label.power:'');
     for(const point of [...labels,...points.map(p=>({el:p.marker,position:p.anchor||(!isCover(p.item)&&model.control_groups?.[p.item.id]?p.position.clone().setY(p.item.position_m.y+p.item.dimensions_m.height):p.position)}))]) {
       const p=point.position.clone().project(camera);
       point.el.style.left=((p.x+1)*rect.width/2)+'px'; point.el.style.top=((1-p.y)*rect.height/2)+'px';
