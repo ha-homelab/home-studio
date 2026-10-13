@@ -36,7 +36,7 @@ function validateInventoryItems(list){if(!Array.isArray(list)||list.length>2000)
 try{items=validateInventoryItems(items)}catch(e){items=[];setEditorStatus('Stored inventory could not be read. Import a valid backup JSON.')}
 const inventoryNodes=new Map(),objectsById=new Map();
 let renderer,scene,camera,objectGroup,root,hemisphere,sun,ground,grid,homeView=null,radius=planRadius,azimuth=.57,polar=.48,target=new THREE.Vector3(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]),clipping=new THREE.Plane(new THREE.Vector3(0,-1,0),20),renderCount=0;
-// Defer embedded rendering until Home is selected.
+// Defer embedded drawing to the next frame.
 let initialViewReady=!embedded;
 function invalidateShadows(){scene?.traverse(o=>{if(o.shadow){o.shadow.autoUpdate=false;o.shadow.needsUpdate=true}})}
 // Intersect wall sides with their visible top or base, including the cutaway.
@@ -170,4 +170,4 @@ bridge.postMessage({type:'model_config',...Object.fromEntries(['tv_entities','ca
 document.querySelector('aside').inert=false;rebuildInventoryView();setEditorStatus('Connected. Select an entity from the list to bind an object.');window.removeEventListener('message',init);
 });
 }
-rebuildInventoryView();if(embedded){homeView.setActive(true);initialViewReady=true;try{window.resizeModel?.();}catch(e){report3DError(e)}}else if(model.initial_room)focusRoom(model.initial_room);window.floorplan={model,get homeMode(){return homeView.active},get illuminated(){return homeView.illuminated},get items(){return items},get renderCount(){return renderCount},get meshCount(){return root?.children.length||0},get objectCount(){return objectGroup?.children.length||0},get translucentObjectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh&&o.material.transparent&&o.material.opacity<1&&!o.material.depthWrite)n++});return n},get objectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh)n++});return n}};
+rebuildInventoryView();if(embedded){homeView.setActive(true);requestAnimationFrame(()=>{initialViewReady=true;try{window.resizeModel?.();}catch(e){report3DError(e)}})}else if(model.initial_room)focusRoom(model.initial_room);window.floorplan={model,get homeMode(){return homeView.active},get illuminated(){return homeView.illuminated},get items(){return items},get renderCount(){return renderCount},get meshCount(){return root?.children.length||0},get objectCount(){return objectGroup?.children.length||0},get translucentObjectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh&&o.material.transparent&&o.material.opacity<1&&!o.material.depthWrite)n++});return n},get objectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh)n++});return n}};
