@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "language": "javascript",
+  "setup": [
+    [
+      "npm",
+      "ci",
+      "--prefix",
+      "fuzz",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund"
+    ]
+  ],
+  "targets": [
+    {
+      "name": "project-validation",
+      "engine": "libfuzzer",
+      "command": [
+        "node",
+        "fuzz/node_modules/@jazzer.js/core/dist/cli.js",
+        "fuzz/project-validation.mjs",
+        "--sync",
+        "--"
+      ],
+      "seconds": 60,
+      "corpus": "fuzz/corpus/project-validation"
+    },
+    {
+      "name": "wall-geometry",
+      "engine": "libfuzzer",
+      "command": [
+        "node",
+        "fuzz/node_modules/@jazzer.js/core/dist/cli.js",
+        "fuzz/wall-geometry.mjs",
+        "--sync",
+        "--"
+      ],
+      "seconds": 60,
+      "corpus": "fuzz/corpus/wall-geometry"
+    }
+  ]
+}

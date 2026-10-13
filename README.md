@@ -1,5 +1,7 @@
 # Home studio
 
+[![Fuzzing: RC only](https://img.shields.io/badge/Fuzzing-RC%20only-blue)](docs/fuzzing.md)
+
 **[Start drawing](https://ha-homelab.github.io/home-studio/planner/)** ·
 **[Illustrated drawing guide](https://ha-homelab.github.io/home-studio/planner/guide.html)** ·
 **[Install in Home Assistant](https://ha-homelab.github.io/home-studio/install.html)** ·
@@ -138,3 +140,11 @@ These reuse Home Assistant state updates and show the last reported measurements
 Power labels beside objects appear only above zero. They do not add controls,
 poll devices or cover the active floor; see [passive telemetry](docs/architecture.md#passive-telemetry-and-power-labels)
 for the optional site-model bindings.
+
+## Release validation
+
+Public release candidates run bounded, offline mutation tests against project
+validation and geometry. See the [fuzzing guide](docs/fuzzing.md) for targets,
+budgets, synthetic data rules and reproduction, and [release instructions](RELEASING.md)
+for versioned source ZIPs. Beta builds and ordinary pull requests do not run
+mutation campaigns.

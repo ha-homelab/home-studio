@@ -7,3 +7,16 @@ __pycache__/
 /dist/
 /ha-transfer/
 /project.json
+
+# Isolated local fuzz dependencies and diagnostics
+node_modules/
+fuzz/.build/
+crash-*
+timeout-*
+oom-*
+
+# Generated release evidence
+release-dist/
+release-assets/
+.release-plan.json
+release-inputs-*.json

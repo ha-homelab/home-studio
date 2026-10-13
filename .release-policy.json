@@ -1,0 +1,55 @@
+{
+  "repository": "ha-homelab/home-studio",
+  "mode": "release",
+  "default_branch": "main",
+  "visibility": "public",
+  "version_file": "custom_components/home_floorplan/manifest.json",
+  "validation_workflows": [
+    "package.yml"
+  ],
+  "artifact_pattern": "release-assets*",
+  "local_checks": [
+    "python3 scripts/validate-site.py",
+    "python3 scripts/test-install-home-assistant.py",
+    "python3 scripts/test-public-package.py",
+    "python3 scripts/test_package_release.py"
+  ],
+  "notes": [
+    "Release ZIPs contain only the reviewed public website/compiler inventory and fictional examples. Personal project.json, generated homes and credentials are excluded.",
+    "GitHub Pages remains an independent existing deployment workflow. Offline geometry fuzzing does not establish Home Assistant or physical device acceptance."
+  ],
+  "release_notes": "CHANGELOG.md",
+  "single_entry_ci": true,
+  "fuzzing": {
+    "toolkit_ref": "5e413f80a4353d328b4529eae57992ac3987e2dd"
+  },
+  "versioning": {
+    "schema": 1,
+    "promotion": "promote-bytes",
+    "files": [
+      {
+        "path": "custom_components/home_floorplan/manifest.json",
+        "format": "json",
+        "field": "version",
+        "value": "package"
+      }
+    ],
+    "artifacts": [
+      {
+        "path": "home-studio-*.zip",
+        "format": "zip-json",
+        "member": "home-studio/custom_components/home_floorplan/manifest.json",
+        "field": "version",
+        "value": "package"
+      },
+      {
+        "path": "home-studio.version.json",
+        "format": "json",
+        "field": "version",
+        "value": "package"
+      }
+    ],
+    "toolkit_revision": "5e413f80a4353d328b4529eae57992ac3987e2dd"
+  },
+  "toolkit_revision": "5e413f80a4353d328b4529eae57992ac3987e2dd"
+}
