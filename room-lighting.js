@@ -1,3 +1,19 @@
+// Compute the view-dependent palette per vertex; no clock, texture or extra pass.
+function applyWallSheen(shader) {
+  shader.vertexShader = 'varying vec3 wallSheen;\n' + shader.vertexShader.replace(
+    '#include <project_vertex>', `#include <project_vertex>
+    vec3 wallView = isOrthographic ? vec3(0.0,0.0,1.0) : normalize(-mvPosition.xyz);
+    float grazing = 1.0-abs(dot(normalize(transformedNormal),wallView));
+    float band = 0.5+0.5*sin(dot(position,vec3(0.35,0.65,0.25)));
+    float tint = clamp(0.75*grazing+0.25*band,0.0,1.0);
+    wallSheen = mix(vec3(0.10,0.72,0.56),vec3(0.15,0.40,0.85),smoothstep(0.0,0.65,tint));
+    wallSheen = mix(wallSheen,vec3(0.55,0.36,0.75),smoothstep(0.65,1.0,tint));`
+  );
+  shader.fragmentShader = 'varying vec3 wallSheen;\n' + shader.fragmentShader.replace(
+    '#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb,wallSheen,0.48);'
+  ).replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += wallSheen*0.16;');
+}
+
 // Softly confine each fixture's direct light to its room, retaining a short
 // doorway spill. Full-height shadow geometry still blocks opaque walls/doors.
 function createRoomLighting(THREE, rooms, capacity, windows) {
@@ -69,7 +85,9 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
     attach(group, enabled) {
       group?.traverse(mesh => {
         if (!mesh.material?.isMeshStandardMaterial) return;
+        const wall = mesh.userData.category === 'walls';
         mesh.material.onBeforeCompile = shader => {
+          if (wall) applyWallSheen(shader);
           // Keep uniform definitions identical in both material variants.
           Object.assign(shader.uniforms, uniforms, {homeExteriorSurface:{value:mesh.userData.category==='stairs'?1:0}});
           // The editor needs no room/window shader, especially on software WebGL.
@@ -80,7 +98,7 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
           );
           shader.fragmentShader = fragment + shader.fragmentShader.replace('#include <lights_fragment_begin>', lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
         };
-        mesh.material.customProgramCacheKey = () => enabled ? fragment : 'home-editor';
+        mesh.material.customProgramCacheKey = () => (enabled ? fragment : 'home-editor') + (wall ? ':wall-sheen-v1' : '');
         mesh.material.needsUpdate = true;
       });
     },

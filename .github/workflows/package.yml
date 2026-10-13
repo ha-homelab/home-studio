@@ -27,5 +27,7 @@ jobs:
         run: node scripts/test-module-expiry.cjs
       - name: Test visible wall outlines and doorway gaps
         run: node scripts/test-wall-tops.cjs
+      - name: Test passive wall sheen and lighting composition
+        run: node scripts/test-wall-sheen.cjs
       - name: Test TV frame retention and disposal
         run: node --test scripts/test-tv-screen.cjs

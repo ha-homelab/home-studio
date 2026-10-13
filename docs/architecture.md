@@ -131,6 +131,26 @@ window jambs and the upper frame remain visible. Blue-grey structural frames
 with a low emissive contribution stay legible in unlit rooms. The editor retains
 its separate 1.15 m cutaway toggle; exported dimensions remain unchanged.
 
+### Passive iridescent wall fill
+
+`applyWallSheen` in `room-lighting.js` adds a teal-to-blue tint with a subtle
+violet edge to the existing wall material. The palette depends on viewing angle
+and a broad spatial band, computed per vertex and interpolated across each face.
+Fragments only blend that color into diffuse and emissive terms. Perspective
+views use the eye-to-vertex direction; orthographic views use a constant viewing
+direction, so panning does not make the tint swim across a flat wall.
+
+This is view-dependent iridescence, not time animation: a stationary plan stays
+stationary, including with reduced-motion preferences. It adds no frame loop,
+timer, texture, geometry, light, render pass or network request. There is a small
+amount of extra shader arithmetic during already-requested frames. Wall opacity,
+blue base contours, cyan top contours, clipping and shadow occlusion are retained.
+The patch runs both on initial material compilation and when room lighting is
+attached; wall and non-wall shader cache keys remain distinct in Home and editor
+modes. `node scripts/test-wall-sheen.cjs` checks that composition against the
+vendored Three.js shader. Browser checks should also compare idle render counts,
+draw calls and texture/geometry counts with the same scene before and after.
+
 ## TV frame refresh failures
 
 The optional TV adapter may send a JPEG after each one-minute capture attempt.
