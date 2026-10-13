@@ -37,11 +37,12 @@ function updateTelemetryPreviews(states,connected){
     if(!entry){
       const el=document.createElement('section'),title=document.createElement('strong'),grid=document.createElement('dl'),note=document.createElement('small');
       el.className='telemetry-preview';el.dataset.telemetryPreview=item.id;title.textContent=item.name;el.setAttribute('aria-label',item.name+' · Last reported telemetry');
-      const rows=(item.metrics||[]).slice(0,12).map(metric=>{const row=document.createElement('div'),label=document.createElement('dt'),value=document.createElement('dd');label.textContent=metric.label;let icon;if(['solar','battery','grid'].includes(metric.icon)){icon=document.createElement('span');icon.className='telemetry-symbol';icon.dataset.icon=metric.icon;icon.setAttribute('aria-hidden','true');label.append(icon);}row.dataset.format=metric.format;row.append(label,value);grid.append(row);return {metric,value,icon,label};});
+      const rows=(item.metrics||[]).slice(0,12).map(metric=>{const row=document.createElement('div'),label=document.createElement('dt'),value=document.createElement('dd');label.textContent=metric.label;let icon,hint;if(['solar','battery','grid'].includes(metric.icon)){icon=document.createElement(metric.details?'button':'span');icon.className='telemetry-symbol';icon.dataset.icon=metric.icon;if(metric.details){icon.type='button';hint=document.createElement('span');hint.className='telemetry-hint';hint.setAttribute('aria-hidden','true');icon.append(hint);}else icon.setAttribute('aria-hidden','true');label.append(icon);}row.dataset.format=metric.format;if(metric.wide)row.dataset.wide='true';row.append(label,value);grid.append(row);return {metric,value,icon,label,hint};});
       el.append(title,grid,note);$('homeTelemetry').append(el);entry={el,item,rows,note};telemetryPreviews.set(item.id,entry);
     }
-    for(const {metric,value,icon,label} of entry.rows){
+    for(const {metric,value,icon,label,hint} of entry.rows){
       const reading=connected?telemetryReading(states,metric):null,text=formatTelemetryReading(reading,metric),known=text!=='—';
+      if(hint){hint.textContent=metric.details.slice(0,8).map(m=>m.label+': '+formatTelemetryReading(connected?telemetryReading(states,m):null,m)).join('\n');icon.setAttribute('aria-label',metric.label+' details\n'+hint.textContent);}
       const n=known?Number(reading.state):0;
       value.textContent=known&&metric.flow?(n>0?'↓ ':n<0?'↑ ':'')+text.replace(/^-/,''):text;
       if(metric.flow){label.textContent=known&&n!==0?metric.flow[n>0?0:1]:metric.label;if(icon)label.append(icon);}

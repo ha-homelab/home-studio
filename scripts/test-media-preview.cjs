@@ -194,3 +194,30 @@ test('derived percentages require usable source readings',()=>{
  for(const state of ['unavailable','unknown','',null])assert.equal(c.telemetryReading({...states,v:{state,unit:'%'}},m),null);
  assert.equal(c.telemetryReading({...states,p:{state:100,unit:'W',restored:true}},m),null);
 });
+
+
+test('solar detail hints reuse live readings and clear unavailable or disconnected channels',()=>{
+ const {context:c,nodes}=fixture();
+ c.model.telemetry=[{id:'energy',name:'Energy',position_m:{x:0,y:0,z:0},metrics:[
+  {label:'Grid',icon:'grid',wide:true,entity_id:'grid',format:'power',signed:true},
+  {label:'Solar',icon:'solar',entity_ids:['mppt','pv'],format:'power',details:[
+   {label:'MPPT',entity_id:'mppt',format:'power'},
+   {label:'PV',entity_ids:['pv'],format:'power'}]}
+ ]}];
+ const states={grid:{state:100,unit:'W'},mppt:{state:200,unit:'W'},pv:{state:.3,unit:'kW'}};
+ c.updateTelemetryPreviews(states,true);
+ const rows=nodes.get('homeTelemetry').children[0].children[1].children;
+ assert.equal(rows[0].dataset.wide,'true');
+ const button=rows[1].children[0].children[0],hint=button.children[0];
+ assert.equal(button.tag,'button');assert.equal(button.type,'button');
+ assert.equal(rows[1].children[1].textContent,'500 W');
+ assert.equal(hint.textContent,'MPPT: 200 W\nPV: 300 W');
+ assert.match(button.getAttribute('aria-label'),/Solar details\nMPPT: 200 W/);
+ states.mppt.state='unavailable';c.updateTelemetryPreviews(states,true);
+ assert.equal(rows[1].children[1].textContent,'—');
+ assert.equal(hint.textContent,'MPPT: —\nPV: 300 W');
+ c.updateTelemetryPreviews(states,false);
+ assert.equal(hint.textContent,'MPPT: —\nPV: —');
+ assert.doesNotMatch(button.getAttribute('aria-label'),/300/);
+ assert.equal(nodes.get('homeTelemetry').children.length,1);
+});

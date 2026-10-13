@@ -230,6 +230,11 @@ in/out arrow with absolute magnitude; exact zero keeps its neutral label and `0 
 Optional `icon: solar|battery|grid` supplies static CSS symbols; a battery percentage
 fills its icon from 0 to 100, and unknown readings clear and dim it. The host's
 existing updates drive these DOM changes; no animation loop or polling is added.
+Optional `wide: true` places a metric across both columns. `details` on an icon
+metric supplies up to eight ordinary metric descriptors in a compact hover/focus
+hint. The icon is a keyboard-focusable button (tap to focus on touch screens);
+its accessible label includes the same readings. Hints use text content, reuse
+state updates, clear on disconnect, and do not make requests or add timers.
 Optional `requires` lists up to eight simple metric descriptors that must also
 be usable, guarding derived sensors that default to zero when their inputs fail.
 A site's voltage-derived SoC should bind its existing calibrated sensor, not
