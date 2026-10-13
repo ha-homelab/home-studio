@@ -106,18 +106,22 @@ The shared code is [MIT licensed](../LICENSE). Preserve the bundled
 
 Optional module diagnostics carry their original `module_expires_at_ms`, `module_snapshot_at_ms` and `module_fresh_count` alongside bounded text. The host forwards these values only for explicitly configured sensors. The viewer rejects missing or invalid metadata, expires text at the original deadline (at most two seconds after its source snapshot), and prevents repeated states or a backward wall clock from renewing it. Room activity is independent of this display-only data.
 
-## Visible wall-top outlines
+## Translucent walls and boundary outlines
 
-The viewer derives a turquoise outline from wall geometry at the current visible
-height. In the home view this follows the low wall cutaway; the editor follows
-its cutaway setting or each wall's actual top. Door openings remain open, and
-lintels above the cut do not produce floating lines. Horizontal face diagonals
-are excluded. The model data and downloadable geometry are unchanged.
+Walls use a 16% opaque, single-pass, double-sided fill with depth writing disabled.
+Their original opaque shadow geometry and room-light masks remain intact: visual
+transparency does not let lights leak between rooms. The geometry exports are
+unchanged.
 
-`wallTopSegments` intersects wall triangles only when the clipping height changes.
-Coincident segments are deduplicated. One batched line layer and one narrow,
-transparent ribbon provide the bright edge and soft halo without bloom, new
-lights, polling, or additional animation. Both layers use normal depth testing;
-they do not show through objects. Old GPU buffers and materials are disposed
-when the visible height changes. Run `node scripts/test-wall-tops.cjs` to check
-cutaway/full-height boundaries, rotated walls, low walls, and doorway gaps.
+`wallBoundarySegments` derives blue base contours and brighter cyan top contours
+from wall geometry at the visible cutaway height, or at full height in the editor.
+Hidden lintels produce neither contour. Horizontal face diagonals are excluded,
+and coincident segments are deduplicated. Each color uses a batched line and a
+narrow translucent band: four draw objects in total, replacing the earlier
+per-wall edge objects. The group draws after wall fills with depth testing still
+enabled, so opaque furniture hides the lines naturally. It needs no bloom, new
+light, dependency, network request or animation.
+
+Rebuilds happen only when the clipping height changes, disposing old GPU resources.
+Run `node scripts/test-wall-tops.cjs` to check top and base boundaries for rotated
+walls, raised bases, both cutaway heights, low walls and doorway gaps.
