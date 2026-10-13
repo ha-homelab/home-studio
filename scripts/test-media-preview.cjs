@@ -66,3 +66,12 @@ test('leaders are withheld while a card is fully scrolled out of its rail',()=>{
  card.getBoundingClientRect=()=>({top:20,bottom:140,left:10,right:210,width:200,height:120});
  c.positionMediaPreviews({}, {width:1000,height:700}, '');assert.equal(nodes.get('homeMediaLinks').children.length,0);
 });
+
+test('rebinding or renaming a TV updates existing card callbacks and accessible text',()=>{
+ const {nodes,update,item}=fixture();let called='';update('off',{power:()=>called='old'});
+ const renamed={...item,name:'Renamed TV',entity_id:'media_player.new'};
+ update('off',{item:renamed,power:()=>called='new',details:()=>called='details-new'});
+ const [image,,caption]=nodes.get('homeTVs').children[0].children;
+ caption.children[1].onclick();assert.equal(called,'new');caption.children[0].onclick();assert.equal(called,'details-new');
+ assert.equal(image.alt,'Renamed TV picture');assert.equal(caption.children[0].textContent,'Renamed TV');
+});

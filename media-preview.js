@@ -8,13 +8,15 @@ function updateTVPreviews(entries){
     let entry=tvPreviews.get(item.id);
     if(!entry){
       const el=document.createElement('figure'),img=document.createElement('img'),caption=document.createElement('figcaption'),name=document.createElement('button'),button=document.createElement('button'),status=document.createElement('span');
-      el.className='tv-preview';el.dataset.tvPreview=item.id;img.alt=item.name+' picture';img.width=320;img.height=180;
-      name.className='tv-preview-details';name.textContent=item.name;name.title=item.name+' · Open Home Assistant TV controls';name.onclick=details;
-      button.className='tv-preview-power';button.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9m-5-7a8 8 0 1 0 10 0"/></svg>';button.onclick=power;
+      el.className='tv-preview';el.dataset.tvPreview=item.id;img.width=320;img.height=180;
+      name.className='tv-preview-details';
+      button.className='tv-preview-power';button.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9m-5-7a8 8 0 1 0 10 0"/></svg>';
       status.className='tv-preview-status';caption.append(name,button);el.append(img,status,caption);$('homeTVs').append(el);
       entry={el,img,name,button,status,item};tvPreviews.set(item.id,entry);
     }
     entry.item=item;entry.state=state;
+    entry.img.alt=item.name+' picture';entry.name.textContent=item.name;
+    entry.name.title=item.name+' · Open Home Assistant TV controls';entry.name.onclick=details;entry.button.onclick=power;
     const image=state==='on'?tvFrames.get(item.id)?.image:null;
     if(image){if(entry.img.getAttribute('src')!==image)entry.img.src=image;}else entry.img.removeAttribute('src');
     entry.img.hidden=!image;entry.status.hidden=!!image;
