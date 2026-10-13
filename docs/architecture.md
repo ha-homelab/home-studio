@@ -300,3 +300,37 @@ flicker, reduced-motion settings disable it, and hidden pages or rooms stop the
 overlays. Host state projection remains read-only and credentials stay outside
 the viewer. `scripts/test-appliance-state.cjs` covers unavailable evidence,
 remapping, battery edge cases, and independent cooktop/oven transitions.
+
+### Held room presence
+
+Optional `model.presence_sources` maps an inventory object ID to its reviewed
+`entity_id` and `room`. For example, a stationary-presence sensor can cover a
+whole room without providing a person's coordinates. Site metadata supplies
+this mapping; the generic planner does not guess coverage from a device name.
+
+`presence-view.js` accepts only connected, non-restored binary `on` or `off`
+readings whose current inventory binding and room still match. An `on` reading
+holds a translucent cyan-green room footprint continuously; it does not expire
+because its state has not changed recently. A valid `off` fades the footprint
+over 15 seconds. Another `on` restores full intensity immediately. Missing,
+unavailable, restored, disconnected, removed, or remapped sources withdraw the
+overlay immediately. With multiple reviewed sources, any active source holds
+the room; fading requires all of them to report `off`.
+
+The footprint uses the existing room polygon and camera projection. It is an
+occupancy overlay, not emitted light or a measured detection cone. It cannot
+spill into another room's footprint and does not block pointer events. CSS
+handles the release fade, with no new polling, JavaScript timer, WebGL pass,
+shadow update, texture, or vendor dependency. Reduced motion disables the fade;
+unchanged projections avoid repeated SVG attribute writes.
+
+Direct presence merges into the room caption and Activity inspector separately
+from server-aggregated motion and signal estimates. Existing motion keeps its
+label priority; a direct presence report can promote a signal-only room to
+presence, while a quiet source cannot erase other evidence. The source marker
+opens HA details and never calls a device service. It creates no footsteps,
+person count, location, heart-rate value, or simulated heartbeat.
+
+Run `node --test scripts/test-presence-view.cjs` for binding, disconnection,
+held-state, aggregation, projection, and display-state checks. Validate a site's
+coverage with its owner before adding its private mapping.

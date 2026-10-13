@@ -25,6 +25,9 @@ homeView = (() => {
   const motionIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="14" cy="4" r="2"/><path d="m10 22 2-7-4-3 3-5 4 5 4 1M5 11l3-4 3-1M5 21l3-6"/></svg>';
   const tvIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>';
   const receiverSpec=item=>model.receiver_activity?.[item.id];
+  const presenceSpec=item=>model.presence_sources?.[item.id];
+  const presenceForRoom=room=>presenceEvidence(model.presence_sources,items,haStates,haConnected,room);
+  const presenceView=Object.keys(model.presence_sources||{}).length?createPresenceView($('homeStage'),model.rooms,model.presence_sources,THREE,xm,zm):null;
   const activityState=id=>haConnected&&!haStates[id]?.restored?haStates[id]?.state||'unknown':'unknown';
   const receiverState=item=>{const spec=receiverSpec(item);return spec.entity_id===item.entity_id&&spec.room===item.room?activityState(spec.sensor):'unbound';};
   const activityText={motion:'Motion detected',presence:'Presence detected',quiet:'No detection',experimental:'Signal activity · room coverage unverified',unverified_motion:'Motion signal · room coverage unverified',unverified_presence:'Presence signal · room coverage unverified',unverified_quiet:'No elevated signal · room coverage unverified',misplaced:'Receiver moved · room sensing disabled',unbound:'Receiver binding changed',unknown:'Activity unknown'};
@@ -34,7 +37,7 @@ homeView = (() => {
     for(const [key,value] of Object.entries(properties))if(el[key]!==value)el[key]=value;
     for(const [key,value] of Object.entries(attributes))if(el.getAttribute(key)!==value)el.setAttribute(key,value);
   };
-  const roomActivity=room=>['motion','presence','quiet','experimental'].includes(activityState(model.room_activity?.[room]))?activityState(model.room_activity[room]):'unknown';
+  const roomActivity=room=>mergePresenceActivity(model.room_activity?.[room]?activityState(model.room_activity[room]):null,presenceForRoom(room));
   function clearActivityLocation(){
     if(activityLocation)for(const el of [activityLocation.marker,activityLocation.card])el.removeAttribute('data-activity-location');
     activityLocation=null;
@@ -68,8 +71,10 @@ homeView = (() => {
     }
     const visibleSources=new Set();
     const id=model.room_activity?.[selected],entity=haConnected?haStates[id]:null;
+    const configured=id||Object.keys(presenceForRoom(selected)).length;
     let sources=0;
-    if(entity&&!entity.restored&&['motion','presence','quiet','experimental','unknown'].includes(entity.state))for(const [itemId,value] of Object.entries(entity.activity?.evidence||{})){
+    const evidence={...(entity&&!entity.restored&&['motion','presence','quiet','experimental','unknown'].includes(entity.state)?entity.activity?.evidence:{}),...presenceForRoom(selected)};
+    for(const [itemId,value] of Object.entries(evidence)){
       const item=items.find(i=>i.id===itemId);
       if(!item||!Object.hasOwn(activityText,value))continue;
       visibleSources.add(itemId);
@@ -96,7 +101,7 @@ homeView = (() => {
     }
     updateNode($('homeActivityAll'),{},{'aria-pressed':String(!selected)});
     updateNode($('homeActivitySummary'),{textContent:!activityRooms.size?'Room sensing not configured':!haConnected?'Disconnected · activity unavailable':selected?
-      roomName(selected)+' · '+(id?activityText[roomActivity(selected)]:'Room sensing not configured')+(sources?' · Select a source for details':id?' · Source details unavailable':''):
+      roomName(selected)+' · '+(configured?activityText[roomActivity(selected)]:'Room sensing not configured')+(sources?' · Select a source for details':configured?' · Source details unavailable':''):
       `${detected} room${detected===1?'':'s'} with detection · ${signalOnly} signal only · ${unknown} unknown. Select a room for sources.`});
   }
   $('homeActivityAll').onclick=()=>selectHomeRoom('');
@@ -105,7 +110,7 @@ homeView = (() => {
     $('homeToggleActivity').setAttribute('aria-expanded',String(!$('homeActivity').hidden));
     refreshActivity();requestAnimationFrame(()=>window.resizeModel?.());
   };
-  const isMotion=item=>item.entity_id?.startsWith('binary_sensor.') && (receiverSpec(item) || model.motion_paths?.[item.id] || model.motion_sources?.[item.entity_id] || ['motion','occupancy','presence'].includes(haStates[item.entity_id]?.device_class));
+  const isMotion=item=>!presenceSpec(item)&&item.entity_id?.startsWith('binary_sensor.') && (receiverSpec(item) || model.motion_paths?.[item.id] || model.motion_sources?.[item.entity_id] || ['motion','occupancy','presence'].includes(haStates[item.entity_id]?.device_class));
   const coverIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h20M4 4v17h5V4m11 0v17h-5V4M7 5v13m10-13v13M9 16l-5-2m11 2 5-2"/></svg>';
   const isCover=item=>item.entity_id?.startsWith('cover.');
   const curtainStateFor=item=>deriveCurtainStatus(haStates[item.entity_id],haStates);
@@ -114,7 +119,7 @@ homeView = (() => {
   const describeCurtain=item=>{const info=curtainStateFor(item);return (info.description||describeDeviceState(deviceDisplayState(item)))+(info.position!==null?` · ${info.remembered?'last known ':'HA reports '}${info.position}% open`:' · position unknown');};
   const isTV=item=>item.entity_id?.startsWith('media_player.');
   const applianceSpec=item=>model.appliance_status?.[item.id];
-  const isSupportedControl = item => item.entity_id && (['light','switch','input_boolean','fan'].includes(item.entity_id.split('.')[0]) || isMotion(item) || isTV(item) || isCover(item) || applianceSpec(item));
+  const isSupportedControl = item => item.entity_id && (['light','switch','input_boolean','fan'].includes(item.entity_id.split('.')[0]) || isMotion(item) || isTV(item) || isCover(item) || applianceSpec(item) || presenceSpec(item));
   // Only light-shaped objects illuminate a room; other linked switches remain controls.
   const isLight = item => ['chandelier','lamp'].includes(item.type) || item.entity_id?.startsWith('light.');
   const deviceDisplayState = item => !embedded ? 'preview' : !haConnected ? 'disconnected' : isMotion(item) ? resolveMotionState(model.motion_sources?.[item.entity_id]||[item.entity_id],haStates) : !haStates[item.entity_id] ? 'missing' : isCover(item) && ['open','closed','opening','closing'].includes(haStates[item.entity_id].state) ? haStates[item.entity_id].state : isTV(item) && ['playing','paused','idle','buffering'].includes(haStates[item.entity_id].state) ? 'on' : ['on','off'].includes(haStates[item.entity_id].state) ? haStates[item.entity_id].state : 'unavailable';
@@ -122,7 +127,7 @@ homeView = (() => {
 
   for (const room of model.rooms) {
     const option = document.createElement('option'); option.value = room.id; option.textContent = roomName(room.id); $('homeRoom').append(option);
-    if(model.room_activity?.[room.id]){
+    if(model.room_activity?.[room.id]||Object.values(model.presence_sources||{}).some(s=>s.room===room.id)){
       const button=document.createElement('button');button.onclick=()=>selectHomeRoom(room.id);
       activityRooms.set(room.id,button);$('homeActivityRooms').append(button);
     }
@@ -199,7 +204,7 @@ homeView = (() => {
     }
     for (const item of bindings) {
       const appliance=applianceSpec(item);
-      const glyph=appliance?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c2 5-2 6 1 9 2-1 3-3 3-4 6 7 5 15-4 15S2 13 7 8c-1 4 1 5 2 5-2-5 3-7 3-11Z"/></svg>':receiverSpec(item)?'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/></svg>':isMotion(item)?motionIcon:isTV(item)?tvIcon:isCover(item)?coverIcon:icon;
+      const glyph=appliance?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c2 5-2 6 1 9 2-1 3-3 3-4 6 7 5 15-4 15S2 13 7 8c-1 4 1 5 2 5-2-5 3-7 3-11Z"/></svg>':receiverSpec(item)||presenceSpec(item)?'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/></svg>':isMotion(item)?motionIcon:isTV(item)?tvIcon:isCover(item)?coverIcon:icon;
       const marker = document.createElement('button'); marker.className = 'home-marker'; marker.dataset.homeItem = item.id; marker.innerHTML = glyph;
       const card = document.createElement('button'); card.className = 'home-device'; card.dataset.homeDevice = item.id;
       const symbol = document.createElement('span'); symbol.className = 'home-device-icon'; symbol.innerHTML = glyph;
@@ -226,7 +231,7 @@ homeView = (() => {
       const anchor=objectsById.get(model.control_anchors?.[item.id]);
       if(anchor)point.anchor=anchor.localToWorld(new THREE.Vector3(0,.5,.5));
       else if(isMotion(item))point.anchor=position.clone().setY(.12);
-      for(const el of [marker,card])el.dataset.kind=isMotion(item)?'motion':isTV(item)?'tv':isCover(item)?'cover':'control';
+      for(const el of [marker,card])el.dataset.kind=presenceSpec(item)?'presence':isMotion(item)?'motion':isTV(item)?'tv':isCover(item)?'cover':'control';
       const room = model.rooms.find(r => r.id === item.room);
       if (overlayGroup && room && isLight(item)) {
         const shape = new THREE.Shape(room.polygon.map(([x,z]) => new THREE.Vector2(xm(x),-zm(z))));
@@ -292,7 +297,7 @@ homeView = (() => {
     $('homeConnection').dataset.connected = String(connected);
     let on=0, motion=0, unavailable=0, total=0; const counted=new Set();
     for (const point of points) {
-      const {item,marker,card,detail} = point, sensing=receiverSpec(item)?receiverState(item):null;
+      const {item,marker,card,detail} = point, sensing=receiverSpec(item)?receiverState(item):presenceSpec(item)?presenceState(item,presenceSpec(item),haStates,haConnected):null;
       const state=sensing?['motion','presence','unverified_motion','unverified_presence'].includes(sensing)?'on':['quiet','unverified_quiet'].includes(sensing)?'off':'unavailable':deviceDisplayState(item), waiting=pending.get(item.entity_id);
       const visible=!selected || selected===item.room;
       card.hidden = marker.hidden = !visible || point.duplicateControl;
@@ -325,8 +330,8 @@ homeView = (() => {
         button.style.setProperty('--light-level',String(appearance.brightness));
         button.style.setProperty('--light-fill-rgb',appearance.indicatorRGB.join(','));
         button.style.setProperty('--light-text',appearance.text);
-        button.dataset.state=state; button.disabled=(status||isTV(item)||isMotion(item)||isCover(item)?!haConnected||(!receiverSpec(item)&&!haStates[item.entity_id]):!enabled) || busy || !bridge;
-        if(status)button.removeAttribute('aria-pressed');else button.setAttribute('aria-pressed',String(state==='on'));
+        button.dataset.state=state; button.disabled=(status||presenceSpec(item)||isTV(item)||isMotion(item)||isCover(item)?!haConnected||(!receiverSpec(item)&&!haStates[item.entity_id]):!enabled) || busy || !bridge;
+        if(status||presenceSpec(item))button.removeAttribute('aria-pressed');else button.setAttribute('aria-pressed',String(state==='on'));
         button.setAttribute('aria-busy',String(busy));
         button.setAttribute('aria-label',`${item.name}: ${description}${busy ? ', waiting for confirmation' : ''}`);
         button.title=`${roomName(item.room)} · ${item.name} · ${description}`;
@@ -347,8 +352,9 @@ homeView = (() => {
         point.overlay.material.uniforms.brightness.value=appearance.brightness;
         point.overlay.visible=point.light.visible=state==='on';
       }
-      if (visible && !counted.has(item.entity_id)) { counted.add(item.entity_id);total++; if(state==='on'){if(isMotion(item))motion++;else on++;} if(!enabled)unavailable++; }
+      if (visible && !counted.has(item.entity_id)) { counted.add(item.entity_id);total++; if(state==='on'){if(isMotion(item)||presenceSpec(item))motion++;else on++;} if(!enabled)unavailable++; }
     }
+    presenceView?.update(items,haStates,haConnected,active,selected);
     refreshTVPreviews();
     updateTelemetryPreviews(haStates,haConnected);
     updateDaylight();
@@ -357,7 +363,7 @@ homeView = (() => {
     for (const label of labels) {
       label.power=roomPowerText(label.room,selected);
       label.el.hidden=!!selected&&(label.room!==selected||!label.power);
-      const value=activityState(model.room_activity?.[label.room]);
+      const value=roomActivity(label.room);
       label.el.dataset.activity=value||'unknown';
       label.el.title=roomName(label.room)+(label.power?' · '+label.power:'')+' · '+(activityText[value]||activityText.unknown);
       label.el.setAttribute('aria-description',label.el.title);
@@ -379,7 +385,7 @@ homeView = (() => {
   }
   function activateDevice(item,quick=true,tvPower=false) {
     const state=deviceDisplayState(item);
-    if(applianceSpec(item)){if(bridge&&haConnected&&haStates[item.entity_id])bridge.postMessage({type:'more_info',entity_id:item.entity_id});return;}
+    if(applianceSpec(item)||presenceSpec(item)){if(bridge&&haConnected&&haStates[item.entity_id])bridge.postMessage({type:'more_info',entity_id:item.entity_id});return;}
     if(receiverSpec(item)&&bridge&&haConnected){inspectActivitySource(item);return;}
     if(isCover(item)&&bridge&&haConnected){curtainItem=item;curtainDirty=false;curtainCheckCycle=null;$('curtainChecked').checked=false;$('curtainError').hidden=true;updateCurtainDialog();$('curtainDialog').showModal();const action=curtainStateFor(item).action;if(quick&&action)curtainCommand(action);return;}
     if(bridge && haConnected && haStates[item.entity_id] && !tvPower && (isTV(item)||isMotion(item))){bridge.postMessage({type:'more_info',entity_id:item.entity_id});return;}
@@ -534,6 +540,7 @@ homeView = (() => {
       step.el.style.left=((p.x+1)*rect.width/2)+'px';step.el.style.top=((1-p.y)*rect.height/2)+'px';
       step.el.style.setProperty('--angle',(Math.atan2(-(q.y-p.y)*rect.height,(q.x-p.x)*rect.width)*180/Math.PI+90)+'deg');
     }
+    presenceView?.render(camera,rect);
     positionMediaPreviews(camera,rect,selected);
     for(const point of points){
       if(point.flames)positionCooktopFlames(point.flames,point.object,camera,rect,THREE);

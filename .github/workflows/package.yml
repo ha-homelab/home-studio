@@ -39,3 +39,5 @@ jobs:
         run: node --test scripts/test-media-preview.cjs
       - name: Test muted lower-floor context and independent camera focus
         run: python3 scripts/test-floor-context.py && node --test scripts/test-floor-context.cjs
+      - name: Test held presence and room evidence
+        run: node --test scripts/test-presence-view.cjs

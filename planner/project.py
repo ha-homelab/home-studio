@@ -435,7 +435,7 @@ def render_viewer(data, svg):
         "__VIEWER_JS__": (ROOT / "viewer.js").read_text(),
         "__HOME_HTML__": (ROOT / "home-view.html").read_text(),
         "__HOME_CSS__": (ROOT / "home-view.css").read_text(),
-        "__HOME_JS__": "\n".join((ROOT / name).read_text() for name in ("curtain-state.js", "motion-state.js", "appliance-state.js", "tv-screen.js", "camera-preview.js", "media-preview.js", "assumed-zone-view.js", "home-view.js")),
+        "__HOME_JS__": "\n".join((ROOT / name).read_text() for name in ("curtain-state.js", "motion-state.js", "appliance-state.js", "presence-view.js", "tv-screen.js", "camera-preview.js", "media-preview.js", "assumed-zone-view.js", "home-view.js")),
         "__LIGHT_STATE_JS__": (ROOT / "light-state.js").read_text(),
         "__ROOM_LIGHTING_JS__": (ROOT / "room-lighting.js").read_text(),
         "__THREE_B64__": base64.b64encode((ROOT / "vendor/three.module.min.js").read_bytes()).decode(),
