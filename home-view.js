@@ -478,14 +478,12 @@ homeView = (() => {
     camera.up.set(0,1,0); camera.position.copy(center).add(offset); camera.lookAt(center); camera.updateMatrixWorld();
     const bounds=new THREE.Box3().setFromPoints(vertices.flatMap(v=>[v,v.clone().setY(model.ceiling_height_m)]).map(v=>v.applyMatrix4(camera.matrixWorldInverse)));
     const aspect=rect.width/rect.height, width=bounds.max.x-bounds.min.x, height=bounds.max.y-bounds.min.y;
-    const media=mediaPreviewInsets(rect,selected), availableWidth=Math.max(120,rect.width-media.left-media.right), availableHeight=Math.max(180,rect.height-media.top-media.bottom);
-    const half=Math.max(height*rect.height/availableHeight/2,width*rect.height/availableWidth/2)*1.15/zoom;
-    const cx=(bounds.min.x+bounds.max.x)/2+panX+(media.right-media.left)*half/rect.height, cy=(bounds.min.y+bounds.max.y)/2+panY+(media.top-media.bottom)*half/rect.height;
+    const half=Math.max(height/2,width/aspect/2)*1.15/zoom;
+    const cx=(bounds.min.x+bounds.max.x)/2+panX, cy=(bounds.min.y+bounds.max.y)/2+panY;
     camera.left=cx-half*aspect;camera.right=cx+half*aspect;camera.top=cy+half;camera.bottom=cy-half;camera.updateProjectionMatrix();
     roomLighting?.update(points);
     assumedZones?.render(selected,signalZone);refreshSignalStatus();
     renderer.render(scene,camera);renderCount++;
-    positionMediaPreviews(camera,rect,selected);
     for(const label of labels) label.el.textContent=rect.width<600 ? roomCode(label.room) : roomName(label.room);
     for(const point of [...labels,...points.map(p=>({el:p.marker,position:p.anchor||(!isCover(p.item)&&model.control_groups?.[p.item.id]?p.position.clone().setY(p.item.position_m.y+p.item.dimensions_m.height):p.position)}))]) {
       const p=point.position.clone().project(camera);
@@ -500,6 +498,7 @@ homeView = (() => {
       step.el.style.left=((p.x+1)*rect.width/2)+'px';step.el.style.top=((1-p.y)*rect.height/2)+'px';
       step.el.style.setProperty('--angle',(Math.atan2(-(q.y-p.y)*rect.height,(q.x-p.x)*rect.width)*180/Math.PI+90)+'deg');
     }
+    positionMediaPreviews(camera,rect,selected);
   }
 
   function clearTrail(point){clearTimeout(point.trailTimer);point.trail?.remove();point.trail=null;point.steps=[];}
@@ -527,7 +526,6 @@ homeView = (() => {
   }
 
   // Magnify the existing frame; hovering never requests another capture.
-  for(const id of ['homeTVs','homeCameras'])$(id).addEventListener('scroll',()=>{if(active&&camera)positionMediaPreviews(camera,$('homeStage').getBoundingClientRect(),selected);},{passive:true});
   const tvControl=Object.keys(tvEntities).map(id=>`[data-home-item="${id}"],[data-home-device="${id}"]`).join(',');
   const tvId=el=>el?.dataset.homeItem||el?.dataset.homeDevice;
   const hoverRay=new THREE.Raycaster();

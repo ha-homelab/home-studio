@@ -171,12 +171,19 @@ replacement disposal, failure retention, late decode races and per-TV isolation:
 
 ## Linked TV and camera previews
 
-`media-preview.js` displays small TV cards beside the plan and draws static cyan
-dashed SVG leaders from the cards to the projected TV screen or camera position.
-The SVG ignores pointer input. Desktop cards use side rails; narrow layouts use
-top/bottom rails. Camera fitting reserves their space, and filtering a room hides
-other rooms' cards and leaders. Scrolling a rail updates leaders without drawing
-another WebGL frame; fully clipped cards have no visible leader.
+`media-preview.js` places small TV/camera cards only in unused screen space and
+links them to projected device positions with bright blue dashed SVG segments.
+Connections use horizontal/vertical runs and square 90-degree turns. The SVG
+ignores pointer input. No rail, stage resize, camera offset or zoom adjustment is
+introduced when media appears. If a card cannot fit, it stays hidden; the device
+and its ordinary controls/TV hover preview remain accessible.
+
+Placement conservatively excludes projected bounds of visible architecture and
+furniture, plus device/room buttons and previously placed cards. World bounds are
+cached per object and placement is recomputed only when the view, card dimensions,
+source positions or rebuilt inventory change. The 24-pixel candidate grid favors
+short connections. Conservative bounds may omit a card even when a small visible
+gap exists; they never deliberately cover a room to display media.
 
 TV cards reuse the last decoded frame from `tv-screen.js`, including its existing
 failure-retention rules. An explicitly off TV shows a compact power control.
@@ -191,7 +198,7 @@ The public package supplies cards, controls and leaders. Actual images still
 require a site's optional TV or notification-frame adapter. No adapter, private
 entity identifier, screenshot, camera stream or credential is bundled here.
 Camera previews retain the existing five-second frame lease and event dismissal;
-expiry/dismissal removes the leader and releases the rail. Cards do not request
+expiry/dismissal removes the leader and releases its screen space. Cards do not request
 additional captures, poll, animate the dash pattern, create textures or start a
 render loop. They add bounded DOM/SVG work only on existing updates.
 

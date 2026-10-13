@@ -9,7 +9,7 @@ function fixture(){
  const context=vm.createContext({document:{createElement:element,createElementNS:(ns,tag)=>element(tag)},
   $:id=>{if(!nodes.has(id))nodes.set(id,element('div'));return nodes.get(id)},
   tvFrames:new Map(),cameraPreviews:new Map(),dismissedCameraEvents:new Map(),items:[],objectsById:new Map(),
-  THREE:{Vector3:class{constructor(x=0,y=0,z=0){Object.assign(this,{x,y,z})}project(){return this}}}});
+  root:{children:[]},objectGroup:{children:[]},THREE:{Vector3:class{constructor(x=0,y=0,z=0){Object.assign(this,{x,y,z})}project(){return this}}}});
  vm.runInContext(fs.readFileSync('media-preview.js','utf8'),context);
  const item={id:'tv',name:'Study TV',room:'study',position_m:{x:0,y:0,z:0},dimensions_m:{height:1}};
  const update=(state='off',extra={})=>context.updateTVPreviews([{item,state,busy:false,enabled:true,details(){},power(){},...extra}]);
@@ -24,26 +24,38 @@ test('TV cards reuse frames, show truthful off/unknown states and disable pendin
  update('off',{busy:true});assert.equal(caption.children[1].disabled,true);assert.match(status.textContent,/Waiting/);
  update('disconnected',{enabled:false});assert.equal(caption.children[0].disabled,true);assert.equal(caption.children[1].disabled,true);
  update('on');assert.equal(nodes.get('homeTVs').children.length,1);
- c.positionMediaPreviews({}, {width:1200,height:700}, '');assert.equal(nodes.get('homeMediaLinks').children.length,1);
+ c.positionMediaPreviews({matrixWorld:{elements:[]},projectionMatrix:{elements:[]}}, {width:1200,height:700}, '');assert.equal(nodes.get('homeMediaLinks').children.length,1);
  c.updateTVPreviews([]);assert.equal(card.removed,true);assert.equal(nodes.get('homeMediaLinks').children[0].removed,true);
 });
-test('room filtering reserves empty map space only for visible media and removes links',()=>{
- const {context:c,nodes,update}=fixture();update();
- assert.deepEqual({...c.mediaPreviewInsets({width:1200,height:700},'')},{left:0,right:220,top:0,bottom:0});
- c.positionMediaPreviews({}, {width:1200,height:700}, '');const line=nodes.get('homeMediaLinks').children[0];assert.match(line.children[0].attributes.d,/^M /);
- assert.deepEqual({...c.mediaPreviewInsets({width:480,height:700},'')},{left:0,right:0,top:0,bottom:150});
- c.positionMediaPreviews({}, {width:1200,height:700}, 'other');assert.equal(line.removed,true);
- assert.deepEqual({...c.mediaPreviewInsets({width:1200,height:700},'other')},{left:0,right:0,top:0,bottom:0});
+test('room filtering hides callouts and removes their leaders',()=>{
+ const {context:c,nodes,update}=fixture();update();const camera={matrixWorld:{elements:[]},projectionMatrix:{elements:[]}};
+ c.positionMediaPreviews(camera,{width:1200,height:700},'');const line=nodes.get('homeMediaLinks').children[0];assert.match(line.children[0].attributes.d,/^M /);
+ c.positionMediaPreviews(camera,{width:1200,height:700},'other');assert.equal(line.removed,true);assert.equal(nodes.get('homeTVs').children[0].hidden,true);
 });
-test('camera leaders follow physical anchors and disappear on dismissal or expiry',()=>{
- const {context:c,nodes,element}=fixture();
+test('camera leaders follow physical anchors and disappear on dismissal',()=>{
+ const {context:c,nodes,element}=fixture(),camera={matrixWorld:{elements:[]},projectionMatrix:{elements:[]}};
  c.items.push({id:'camera',room:'study',position_m:{x:.2,y:.1,z:0},dimensions_m:{height:.2}});
  c.cameraPreviews.set('camera',{el:element('figure'),event:'event-a'});
- c.positionMediaPreviews({}, {width:1000,height:700}, '');const line=nodes.get('homeMediaLinks').children[0];
+ c.positionMediaPreviews(camera,{width:1000,height:700},'');const line=nodes.get('homeMediaLinks').children[0];
  assert.equal(line.children[2].attributes.cx,600);assert.equal(line.children[2].attributes.cy,280);
- assert.deepEqual({...c.mediaPreviewInsets({width:480,height:700},'')},{left:0,right:0,top:150,bottom:0});
- c.dismissedCameraEvents.set('camera','event-a');c.positionMediaPreviews({}, {width:1000,height:700}, '');assert.equal(line.removed,true);
- c.cameraPreviews.clear();assert.deepEqual({...c.mediaPreviewInsets({width:1200,height:700},'')},{left:0,right:0,top:0,bottom:0});
+ c.dismissedCameraEvents.set('camera','event-a');c.positionMediaPreviews(camera,{width:1000,height:700},'');assert.equal(line.removed,true);
+});
+test('automatic placement uses only free pixels and returns nothing when the map fills the viewport',()=>{
+ const {context:c}=fixture(),view={width:600,height:400},size={width:160,height:100},point={x:350,y:200};
+ const blocked=[{x:0,y:130,width:600,height:270}];const placed=c.findMediaSpace(size,view,blocked,point);
+ assert.ok(placed);assert.ok(placed.y+placed.height<=120);assert.ok(placed.x>=8&&placed.x+placed.width<=592);
+ assert.equal(c.findMediaSpace(size,view,[{x:0,y:0,width:600,height:400}],point),null);
+ assert.equal(c.findMediaSpace(size,{width:120,height:80},[],point),null);
+ const next=c.findMediaSpace(size,view,[...blocked,placed],point);assert.ok(next);assert.ok(Math.abs(next.x-placed.x)>=170);
+});
+test('leaders contain only horizontal and vertical runs, including above/below cases',()=>{
+ const {context:c}=fixture(),box={x:100,y:100,width:160,height:100};
+ for(const point of [{x:400,y:300},{x:20,y:50},{x:200,y:300},{x:200,y:30}]){
+  const path=c.mediaLeaderPath(box,point);assert.match(path,/^M [\d.]+ [\d.]+ [HV] /);assert.ok(!/[CLQAS]/.test(path));
+  const commands=path.match(/[MHV][^MHV]*/g);let x=0,y=0;
+  for(const command of commands){const nums=command.slice(1).trim().split(/ +/).map(Number);if(command[0]==='M')[x,y]=nums;else if(command[0]==='H')x=nums[0];else y=nums[0];}
+  assert.deepEqual({x,y},point);
+ }
 });
 test('host restricts TV power to explicit actions on saved media entities and serializes requests',async()=>{
  let Panel;const context=vm.createContext({HTMLElement:class{},customElements:{get(){},define(name,value){Panel=value}}});
@@ -57,14 +69,6 @@ test('host restricts TV power to explicit actions on saved media entities and se
  send('media_player.study','turn_on');send('media_player.study','turn_on');await Promise.resolve();assert.equal(calls.length,1);assert.equal(calls[0][0],'media_player');assert.equal(calls[0][1],'turn_on');
  complete();await new Promise(resolve=>setImmediate(resolve));assert.equal(panel.commands.size,0);assert.equal(messages.at(-1).ok,true);
  panel._hass.connected=false;send('media_player.study','turn_on');await Promise.resolve();assert.equal(calls.length,1);assert.equal(messages.at(-1).ok,false);
-});
-
-test('leaders are withheld while a card is fully scrolled out of its rail',()=>{
- const {context:c,nodes,update}=fixture();update();
- const card=nodes.get('homeTVs').children[0];
- card.parentElement={getBoundingClientRect:()=>({top:200,bottom:500,left:0,right:300})};
- card.getBoundingClientRect=()=>({top:20,bottom:140,left:10,right:210,width:200,height:120});
- c.positionMediaPreviews({}, {width:1000,height:700}, '');assert.equal(nodes.get('homeMediaLinks').children.length,0);
 });
 
 test('rebinding or renaming a TV updates existing card callbacks and accessible text',()=>{
