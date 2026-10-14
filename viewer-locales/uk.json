@@ -99,5 +99,10 @@
   "Inventory exported. Keep this JSON as a placement backup.": "Інвентар експортовано. Збережіть цей JSON як резервну копію розташування.",
   "Imported {count} objects; matching IDs were updated.": "Імпортовано об’єктів: {count}; об’єкти зі збіжними ID оновлено.",
   "Import failed: {error}": "Не вдалося імпортувати: {error}",
-  "Connected. Select an entity from the list to bind an object.": "Підключено. Виберіть сутність зі списку, щоб прив’язати об’єкт."
+  "Connected. Select an entity from the list to bind an object.": "Підключено. Виберіть сутність зі списку, щоб прив’язати об’єкт.",
+  "Locked": "Замкнено",
+  "Unlocked": "Відімкнено",
+  "Locking": "Замикається",
+  "Unlocking": "Відмикається",
+  "Jammed": "Заклинило"
 }

@@ -34,7 +34,7 @@ SITE_FILES = (
 REPO_FILES = ('docs/i18n.md', 'docs/translations/README.md',
               *(f'docs/translations/README.{code}.md' for code in LOCALE_CODES if code != 'en'),
               'scripts/test-i18n.mjs', 'scripts/test-i18n-browser.cjs', 'scripts/test-validation-i18n.mjs',
-              'scripts/test-help-i18n.cjs', 'scripts/test-panel-language.cjs', 'scripts/test-viewer-i18n.cjs',
+              'scripts/test-help-i18n.cjs', 'scripts/test-panel-language.cjs', 'scripts/test-viewer-i18n.cjs', 'scripts/test-lock-control.cjs',
               'viewer-i18n.js', 'viewer-locales/index.json',
               *(f'viewer-locales/{code}.json' for code in LOCALE_CODES),
               'README.md', 'LICENSE', '.gitignore', 'scripts/validate-site.py', '.github/workflows/pages.yml',

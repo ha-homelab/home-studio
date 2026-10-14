@@ -99,5 +99,10 @@
   "Inventory exported. Keep this JSON as a placement backup.": "Inventario esportato. Conserva questo JSON come backup del posizionamento.",
   "Imported {count} objects; matching IDs were updated.": "Importati {count} oggetti; gli ID corrispondenti sono stati aggiornati.",
   "Import failed: {error}": "Importazione non riuscita: {error}",
-  "Connected. Select an entity from the list to bind an object.": "Connesso. Seleziona un’entità dall’elenco per collegare un oggetto."
+  "Connected. Select an entity from the list to bind an object.": "Connesso. Seleziona un’entità dall’elenco per collegare un oggetto.",
+  "Locked": "Bloccata",
+  "Unlocked": "Sbloccata",
+  "Locking": "Blocco in corso",
+  "Unlocking": "Sblocco in corso",
+  "Jammed": "Inceppata"
 }

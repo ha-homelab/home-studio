@@ -28,6 +28,13 @@
 #homeFeedback{margin:0;padding:6px 0;min-height:0;color:#ffd19b}
 #homeView .home-marker[data-kind="cover"]{border-radius:6px;color:#d4e1ed;background:#30404d}
 #homeView .home-device[data-kind="cover"] .home-device-icon{color:#c9d9e8}
+#homeView [data-kind="lock"]{--lock-color:#bdc6ca}
+#homeView [data-kind="lock"][data-state="locked"]{--lock-color:#75e3b1}
+#homeView [data-kind="lock"]:is([data-state="unlocked"],[data-state="open"]){--lock-color:#ffd17f}
+#homeView [data-kind="lock"]:is([data-state="locking"],[data-state="unlocking"]){--lock-color:#83ddff}
+#homeView [data-kind="lock"][data-state="jammed"]{--lock-color:#ff8b99}
+#homeView .home-marker[data-kind="lock"]{background:#24343e;color:var(--lock-color);border-color:var(--lock-color)}
+#homeView .home-device[data-kind="lock"] .home-device-icon{color:var(--lock-color)}
 #homeView .home-marker[data-countdown]:not([data-countdown=""])::after{content:attr(data-countdown);position:absolute;top:100%;left:50%;transform:translateX(-50%);padding:2px 4px;border-radius:4px;background:#18242c;color:#e4ecee;font:10px system-ui;white-space:nowrap}
 @media(min-width:951px){.home-layout{height:calc(100dvh - 24px);min-height:420px}}
 @media(max-width:950px){.home-layout{padding-top:10px}.home-layout.controls-collapsed{min-height:0}#homeStage{height:72dvh;min-height:360px}.home-controls{padding-top:12px}#homeRoom{max-width:160px}#homeConnection{margin-left:auto}}

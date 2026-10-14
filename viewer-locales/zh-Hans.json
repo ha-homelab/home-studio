@@ -99,5 +99,10 @@
   "Inventory exported. Keep this JSON as a placement backup.": "物品清单已导出。请保留此 JSON 作为摆放备份。",
   "Imported {count} objects; matching IDs were updated.": "已导入 {count} 个物体；匹配的 ID 已更新。",
   "Import failed: {error}": "导入失败：{error}",
-  "Connected. Select an entity from the list to bind an object.": "已连接。从列表中选择实体以绑定物体。"
+  "Connected. Select an entity from the list to bind an object.": "已连接。从列表中选择实体以绑定物体。",
+  "Locked": "已上锁",
+  "Unlocked": "已解锁",
+  "Locking": "正在上锁",
+  "Unlocking": "正在解锁",
+  "Jammed": "锁已卡住"
 }

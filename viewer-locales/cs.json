@@ -99,5 +99,10 @@
   "Inventory exported. Keep this JSON as a placement backup.": "Inventář byl exportován. Tento JSON si uchovejte jako zálohu rozmístění.",
   "Imported {count} objects; matching IDs were updated.": "Počet importovaných objektů: {count}; objekty se shodnými ID byly aktualizovány.",
   "Import failed: {error}": "Import se nezdařil: {error}",
-  "Connected. Select an entity from the list to bind an object.": "Připojeno. Vyberte entitu ze seznamu pro propojení s objektem."
+  "Connected. Select an entity from the list to bind an object.": "Připojeno. Vyberte entitu ze seznamu pro propojení s objektem.",
+  "Locked": "Zamčeno",
+  "Unlocked": "Odemčeno",
+  "Locking": "Zamykání",
+  "Unlocking": "Odemykání",
+  "Jammed": "Zaseknuto"
 }

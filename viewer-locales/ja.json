@@ -99,5 +99,10 @@
   "Inventory exported. Keep this JSON as a placement backup.": "配置リストを書き出しました。この JSON を配置のバックアップとして保管してください。",
   "Imported {count} objects; matching IDs were updated.": "{count} 個のオブジェクトを読み込みました。一致する ID を更新しました。",
   "Import failed: {error}": "読み込みに失敗しました：{error}",
-  "Connected. Select an entity from the list to bind an object.": "接続しました。リストからエンティティを選択してオブジェクトに連携してください。"
+  "Connected. Select an entity from the list to bind an object.": "接続しました。リストからエンティティを選択してオブジェクトに連携してください。",
+  "Locked": "施錠済み",
+  "Unlocked": "解錠済み",
+  "Locking": "施錠中",
+  "Unlocking": "解錠中",
+  "Jammed": "ロックが動きません"
 }

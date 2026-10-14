@@ -99,5 +99,10 @@
   "Inventory exported. Keep this JSON as a placement backup.": "Инвентарь экспортирован. Сохраните этот JSON как резервную копию расстановки.",
   "Imported {count} objects; matching IDs were updated.": "Импортировано объектов: {count}; объекты с совпадающими ID обновлены.",
   "Import failed: {error}": "Не удалось импортировать: {error}",
-  "Connected. Select an entity from the list to bind an object.": "Подключено. Выберите сущность из списка, чтобы привязать объект."
+  "Connected. Select an entity from the list to bind an object.": "Подключено. Выберите сущность из списка, чтобы привязать объект.",
+  "Locked": "Заперт",
+  "Unlocked": "Отперт",
+  "Locking": "Запирается",
+  "Unlocking": "Отпирается",
+  "Jammed": "Заклинил"
 }

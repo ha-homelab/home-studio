@@ -99,5 +99,10 @@
   "Inventory exported. Keep this JSON as a placement backup.": "Envanter dışa aktarıldı. Bu JSON dosyasını yerleşim yedeği olarak saklayın.",
   "Imported {count} objects; matching IDs were updated.": "{count} nesne içe aktarıldı; eşleşen ID değerleri güncellendi.",
   "Import failed: {error}": "İçe aktarma başarısız: {error}",
-  "Connected. Select an entity from the list to bind an object.": "Bağlandı. Bir nesneyi bağlamak için listeden bir varlık seçin."
+  "Connected. Select an entity from the list to bind an object.": "Bağlandı. Bir nesneyi bağlamak için listeden bir varlık seçin.",
+  "Locked": "Kilitli",
+  "Unlocked": "Kilidi açık",
+  "Locking": "Kilitleniyor",
+  "Unlocking": "Kilit açılıyor",
+  "Jammed": "Sıkışmış"
 }
