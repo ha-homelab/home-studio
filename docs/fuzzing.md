@@ -1,5 +1,7 @@
 # Release-candidate fuzzing
 
+> **Local packaging:** `python3 scripts/release.py package` is unsupported in this repository because no shell packaging adapter is installed. Use the [project commands below](#local-release-packaging); the generic example in `release-workflow.md` does not apply here.
+
 The public repository runs [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js)
 through the shared `venus-os-ci-toolkit` workflow. `.github/fuzz.json` defines
 the real production entry points, locked dependency setup and time budgets;
@@ -79,3 +81,27 @@ homes and private checkouts are never inputs. The component manifest inside the
 ZIP carries the frozen version. GitHub Pages publishing keeps its existing
 workflow and reviewed website allowlist. See [release policy](../RELEASING.md)
 for beta, RC and stable promotion requirements.
+
+## Local release packaging
+
+Use Python 3.12+ from the repository root:
+
+```sh
+python3 scripts/test_package_release.py
+python3 scripts/package_release.py
+```
+
+This writes the public Home Studio ZIP, checksum and version metadata to a new `release-dist/` directory. The website/compiler allowlist excludes personal project files. It does not publish GitHub Pages. Use a clean disposable checkout and a new output directory.
+
+To reproduce an already allocated beta or RC, first check out the exact source
+commit from its published `release-manifest.json`, restore that manifest's
+`version_plan` object as `.release-plan.json`, and apply its version overlay:
+
+```sh
+python3 scripts/version_plan.py sync --root . --plan .release-plan.json
+```
+
+Then run the project commands above. Keep the source, plan and channel together;
+do not invent a release sequence or edit version fields by hand. Local packaging
+does not create a qualified release: the hosted pipeline still verifies the full
+build inventory, provenance and, for an RC, its own isolated fuzz report.
