@@ -11,12 +11,13 @@ from urllib.parse import unquote, urlsplit
 SITE_FILES = (
     'index.html', 'site.css', 'privacy.html', 'install.html', '404.html', '.nojekyll',
     'planner/index.html', 'planner/editor.css', 'planner/editor.js',
-    'planner/model.js', 'planner/guide.html', 'planner/guide.css',
+    'planner/model.js', 'planner/catalog.js', 'planner/furniture.js', 'planner/guide.html', 'planner/guide.css',
     'planner/publishing.html', 'planner/guide-assets/practice-home.json',
     'planner/guide-assets/01-room.jpg', 'planner/guide-assets/02-rooms.jpg',
     'planner/guide-assets/03-door.jpg', 'planner/guide-assets/04-window.jpg',
     'planner/guide-assets/05-item.jpg', 'planner/guide-assets/06-preview.jpg',
     'planner/guide-assets/07-export.jpg',
+    'planner/guide-assets/08-library.jpg',
     'vendor/three.module.min.js', 'vendor/THREE-LICENSE.txt',
 )
 REPO_FILES = ('README.md', 'LICENSE', '.gitignore', 'scripts/validate-site.py', '.github/workflows/pages.yml',
@@ -24,7 +25,11 @@ REPO_FILES = ('README.md', 'LICENSE', '.gitignore', 'scripts/validate-site.py', 
               'scripts/build-planner-project.py', 'scripts/install-home-assistant.py',
               'scripts/test-install-home-assistant.py', 'scripts/test-public-package.py', 'scripts/test-wall-tops.cjs',
               'scripts/test-viewer-startup.cjs', 'scripts/test-module-expiry.cjs', 'scripts/test-floor-context.py', 'scripts/test-floor-context.cjs',
-              'planner/project.py', 'planner/example-home.json', 'geometry.py', 'exporters.py',
+              'planner/project.py', 'planner/package.json', 'planner/catalog.json', 'planner/furniture.py',
+              'scripts/generate-furniture-catalog.py', 'scripts/test-furniture.mjs', 'scripts/test-furniture.py',
+              'scripts/test-inventory-appearance.cjs', 'scripts/test-inventory-appearance.py',
+              'scripts/test-furniture-editor.cjs', 'package.json', 'package-lock.json',
+              'planner/example-home.json', 'geometry.py', 'exporters.py',
               'viewer.template.html', 'viewer.js', 'home-view.html', 'home-view.css',
               'curtain-state.js', 'motion-state.js', 'tv-screen.js', 'camera-preview.js', 'media-preview.js',
               'assumed-zone-view.js', 'home-view.js', 'light-state.js', 'room-lighting.js',
@@ -98,7 +103,7 @@ def validate(root):
                 raise ValueError(f'Link to unpublished file: {relative}: {link}')
             if parsed.fragment and name in documents and unquote(parsed.fragment) not in documents[name].ids:
                 raise ValueError(f'Missing anchor: {relative}: {link}')
-    for relative in ('planner/editor.js', 'planner/model.js'):
+    for relative in (name for name in SITE_FILES if name.startswith('planner/') and name.endswith('.js')):
         code = (root / relative).read_text()
         for imported in re.findall(r'from\s+[\'"]([^\'"]+)[\'"]', code):
             target = ((root / relative).parent / imported).resolve()

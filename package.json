@@ -1,0 +1,12 @@
+{
+  "name": "home-studio-checks",
+  "private": true,
+  "type": "commonjs",
+  "description": "Development-only browser checks for the static Home Studio planner",
+  "scripts": {
+    "test:planner": "node scripts/test-furniture-editor.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.64.0"
+  }
+}

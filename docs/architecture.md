@@ -30,7 +30,62 @@ covers the commands, manual YAML entry, restart, and Home Assistant OS file
 transfer. Installation is a local file operation, not a hosted wizard or HACS
 installation flow.
 
-## Public core
+## Furniture authoring and export
+
+`planner/catalog.json` is the canonical, versioned library of original low-poly
+designs. It defines categories, coordinated material palettes, dimensions, and
+normalized box/cylinder parts. `scripts/generate-furniture-catalog.py` validates
+the recipes and generates `planner/catalog.js`; `--check` fails on drift. The
+browser imports the generated module directly, preserving the editor's
+`connect-src 'none'` policy. Neither thumbnails nor models need a network request.
+
+Project schema version 1 adds optional `model_id`, `style_id`, and `color`
+(`#RRGGBB`) fields to inventory items. The JavaScript and Python validators check
+model membership, semantic type, and palette membership. An item without these
+fields follows the existing basic-shape path; there is no guesswork based on its
+name. A finish changes coordinated surfaces and clears an explicit body override.
+The custom color changes only the designated body surface, preserving accents.
+
+`planner/furniture.js` and `planner/furniture.py` expand the same recipes into
+matching indexed triangles, outward normals, and linear RGB materials. X/Z span
+−0.5 to 0.5; Y spans 0 to 1. An item's dimensions scale that normalized geometry,
+then its rotation and position place it on the floor. Tests compare every model
+across the two implementations and inspect actual exported vertex/material data.
+
+The editor uses cached CPU thumbnails, height-sorted top surfaces for 2D, and the
+same parts for the 3D preview. A rug placed after a sofa remains below it. The
+preview renders only when needed; choosing furniture introduces no idle frame
+loop. Undo, local drafts, and JSON export store the recipe identifiers rather than
+triangle buffers. The full library is not copied into the installed HA runtime.
+
+The compiler creates transformed meshes for GLB, OBJ/MTL, DAE, USDA and the
+downloadable plan SVG. Item namespaces include their ordinal to avoid collisions
+between a user identifier and a generated part suffix. Runtime model data retains
+only normalized `object_assets` plus placements for furniture, omitting duplicate
+transformed meshes. The installed viewer batches each item's parts by material.
+Its editable SVG background excludes baked furniture silhouettes so a moved or
+deleted item leaves no ghost behind.
+
+HA placement validation preserves bounded appearance metadata without importing
+the authoring catalog. The installed editor retains it when moving, renaming,
+resizing, or binding an item, and clears it when changing semantic type. Changing
+designs or finishes requires rebuilding the project; inventory imports reject
+changed appearance metadata instead of silently displaying an old baked color.
+When a rebuilt project loads a previously saved layout, its compiled appearances
+replace stale appearance metadata while positions, sizes, names, and entity
+bindings remain intact. The viewer reports this refresh. An intentionally basic
+object stays basic; a removed or incompatible design falls back to a basic shape.
+Generated model downloads describe the compiled project, not later HA placement
+edits. Keep the planner JSON as the design source.
+
+The complete package includes the source catalog and both geometry builders;
+Pages publishes only browser modules and the illustrated guide. CI exercises
+all 40 designs, legacy projects, real export formats, a maximum-single-floor
+256-plant build/install case, browser editing/history/import, and installation of
+the browser's actual exported file. Installer file and total-size limits remain
+unchanged; large multi-floor designs must also fit those archive limits.
+
+## Public integration core
 
 The public integration includes `__init__.py`, `site.py`, `validation.py`,
 `curtains.py`, `manifest.json`, and `static/panel.js`. The compiler supplies the
