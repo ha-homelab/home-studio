@@ -19,6 +19,7 @@ SITE_FILES = (
     'planner/guide-assets/07-export.jpg',
     'planner/guide-assets/08-library.jpg', 'planner/guide-assets/09-garage-studio.jpg',
     'planner/guide-assets/garage-and-studio.json',
+    'planner/guide-assets/decor-studio.json', 'planner/guide-assets/10-decor-studio.jpg',
     'vendor/three.module.min.js', 'vendor/THREE-LICENSE.txt',
 )
 REPO_FILES = ('README.md', 'LICENSE', '.gitignore', 'scripts/validate-site.py', '.github/workflows/pages.yml',

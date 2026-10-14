@@ -149,7 +149,7 @@
         <section class="step" id="table" aria-labelledby="table-title">
           <p class="step-label">STEP 05 · SOMETHING TO GIVE THE ROOM SCALE</p>
           <h2 id="table-title">Put a table in the studio</h2>
-          <p>The Item library includes 104 designs: furniture, lighting, electronics, toys, vehicles, sports gear, and outdoor accessories. Search by name or browse a category, then choose a design. Each has a starting size you can adjust to match your home. Search looks through the entire library; <strong>Show more</strong> adds another 24 cards.</p>
+          <p>The Item library includes 149 designs: furniture, rugs and tapestries, mirrors, lighting, plants, life-size display bears, electronics, toys, vehicles, sports gear, and outdoor accessories. Search by name or browse a category, then choose a design. Each has a starting size you can adjust to match your home. Search looks through the entire library; <strong>Show more</strong> adds another 24 cards.</p>
           <figure>
             <a href="./guide-assets/08-library.jpg" target="_blank" rel="noopener" aria-label="Open full-size screenshot of the Item library"><img width="1440" height="1000" src="./guide-assets/08-library.jpg" alt="The Item library shows Search items and Category controls above illustrated cards for sofas, chairs, a bench, a stool, and tables, with starting dimensions beneath each design." loading="lazy"></a>
             <figcaption><span>05A</span> Browse the illustrated library, or search for a familiar item name. Choose a card to place that design in your plan.</figcaption>
@@ -177,6 +177,22 @@
             <figure>
               <a href="./guide-assets/09-garage-studio.jpg" target="_blank" rel="noopener" aria-label="Open full-size garage and creative studio preview"><img width="1440" height="1000" src="./guide-assets/09-garage-studio.jpg" alt="A fictional garage contains a car, motorcycle, bicycle and skis; a creative studio has a server, printer, teddy bear, piano, guitar and easel; a patio has outdoor equipment." loading="lazy"></a>
               <figcaption>Every object in this example can be selected, moved, resized, rotated, and recolored. Product-inspired designs are approximate; use your own measurements.</figcaption>
+            </figure>
+          </details>
+          <details>
+            <summary>Dress the room: rugs, wall hangings, lights, and plants</summary>
+            <p>Search for a familiar word such as <strong>rug</strong>, <strong>tapestry</strong>, <strong>mirror</strong>, <strong>star</strong>, <strong>sconce</strong>, <strong>ficus</strong>, <strong>cactus</strong>, or <strong>bear</strong>. Use the Category menu to narrow the choices. The life-size display bears are separate from the small teddy bear.</p>
+            <ol class="instructions">
+              <li><strong>On the floor:</strong> place a floor rug, plant, floor lamp, or bear inside the room. Its bottom starts at y 0. Rugs stay below taller furniture even when you add them last.</li>
+              <li><strong>On a wall:</strong> choose a wall rug, tapestry, mirror, or sconce. These designs already stand upright. Move the item next to the wall and use Rotation to face it into the room: start with 0, 90, 180, or 270 degrees. Keep the decorated front clear of the wall.</li>
+              <li><strong>At the right height:</strong> y is the height of the item's <em>bottom</em>. A 1-meter mirror at y 1 reaches 2 meters. Changing its height does not move its bottom.</li>
+              <li><strong>Near the ceiling:</strong> choose a chandelier or bulb. For a 0.6-meter fixture under a 2.7-meter ceiling, set y to 2.1. The top is y plus Height. Check it in Preview 3D before exporting.</li>
+              <li><strong>Make it yours:</strong> choose a Finish for coordinated colors, or Custom body color for its main surface. Use design’s original size restores the suggested dimensions; measure your own object for a close fit.</li>
+            </ol>
+            <p><a href="./guide-assets/decor-studio.json" download>Download the fictional decorated studio</a>, save your current drawing, then use <strong>Open JSON</strong>. Try moving its wall hanging, changing its rug color, or lowering its chandelier.</p>
+            <figure>
+              <a href="./guide-assets/10-decor-studio.jpg" target="_blank" rel="noopener" aria-label="Open full-size decorated studio preview"><img width="1440" height="1000" src="./guide-assets/10-decor-studio.jpg" alt="A fictional decorated studio combines patterned rugs, upright wall art and a mirror, suspended lighting, plants, a balustrade, and a life-size display bear." loading="lazy"></a>
+              <figcaption>Floor pieces, wall pieces, and ceiling pieces share one editable room. Mirrors are stylized glass surfaces; they do not calculate live reflections. Light controls need your own Home Assistant entity binding.</figcaption>
             </figure>
           </details>
           <p class="small">Your older projects still open with their original basic shapes. Select an item and choose a Design to give it a new appearance, or open <strong>Basic shapes &amp; devices</strong> in the left panel to place a simple block, switch, outlet, or sensor.</p>

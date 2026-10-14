@@ -34,7 +34,7 @@ installation flow.
 
 `planner/catalog.json` is the canonical, versioned library of original low-poly
 designs. It defines categories, coordinated material palettes, dimensions, and
-normalized box, cylinder, sphere, and ring parts. `scripts/generate-furniture-catalog.py` validates
+normalized box, cylinder, sphere, ring, and cone parts. `scripts/generate-furniture-catalog.py` validates
 the recipes and generates `planner/catalog.js`; `--check` fails on drift. The
 browser imports the generated module directly, preserving the editor's
 `connect-src 'none'` policy. Neither thumbnails nor models need a network request.
@@ -54,13 +54,27 @@ across the two implementations and inspect actual exported vertex/material data.
 
 A sphere is a low-poly ellipsoid with 48 triangles. A ring is a thick annular
 cylinder around local Y with 96 triangles and an optional `inner_ratio` (default
-0.72). Inner ring faces point toward the hole. Optional per-part
+0.72). Inner ring faces point toward the hole. A cone has a closed 12-sided base
+at local `y - height / 2` and an apex at `y + height / 2` (24 triangles total).
+It gives trees and shades a tapered silhouette without extra assets or dependencies.
+Optional per-part
 `rotation_deg: [x, y, z]` rotates about the part center in X, then Y, then Z
 order, before item scaling. Existing boxes and cylinders retain their geometry.
 The generator checks finite numbers, positive sizes, valid material roles,
 unique metadata, and bounds from actual transformed vertices. Each model has
 at most 32 parts. New designs belong in `catalog.json`; regenerate `catalog.js`
 with `python3 scripts/generate-furniture-catalog.py` and run both geometry suites.
+
+Dimensions describe the complete object, including its frame, pot, fringe, or
+ceiling mount. `elevation_m` sets the starting bottom height, not the center.
+Wall textiles and mirrors are upright thin models with their decorated face
+toward local +Z; rotate the whole item around Y to face into the room. Floor
+textiles are separate flat models, so they do not need a new item rotation axis.
+Wall lamps use type `lamp`, and suspended lights use `chandelier`; their entity
+bindings remain optional. Mirrors use a pale glass material, not a reflection
+render pass. Plants, ornaments, and display bears have no animation or network
+dependency. The `decor-studio.json` example demonstrates these conventions in
+one fictional room and runs through the same browser/export/install checks.
 
 The editor uses cached CPU thumbnails, height-sorted top surfaces for 2D, and the
 same parts for the 3D preview. A rug placed after a sofa remains below it. The
@@ -94,14 +108,14 @@ edits. Keep the planner JSON as the design source.
 
 The complete package includes the source catalog and both geometry builders;
 Pages publishes only browser modules and the illustrated guide. CI exercises
-all 104 designs, legacy projects, real export formats, a maximum-single-floor
+all 149 designs, legacy projects, real export formats, a maximum-single-floor
 256-plant build/install case, a mixed full-catalog installation, browser editing/history/import, and installation of
 the browser's actual exported file. Installer file and total-size limits remain
 unchanged: 32 MiB per file and 96 MiB in total. The 256-item count ceiling is not
 a guarantee that every combination fits: hundreds of detailed bicycles or plush
 toys can exceed archive limits. Use fewer detailed objects or basic shapes for
 distant/repeated items, and run the installer dry run before deployment. The
-full mixed 104-design regression stays below these limits. Palettes and custom
+full mixed 149-design regression stays below these limits. Palettes and custom
 body colors do not add geometry; entities and telemetry remain separate from
 the visual catalog.
 

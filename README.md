@@ -23,8 +23,9 @@ installable Home Assistant package. Examples and guide screenshots are fictional
 
 ## Furnish your rooms
 
-Open **Item library** to browse **104 designs in 16 categories**: furniture and
-lighting, servers and electronics, toys, musical instruments and workshop tools,
+Open **Item library** to browse **149 designs in 20 categories**: furniture and
+lighting, rugs and tapestries, mirrors, plants and life-size display bears,
+servers and electronics, toys, musical instruments and workshop tools,
 vehicles, bicycles, sports gear, garden equipment, and more. Search for a
 server rack, teddy bear, Tesla, café racer, moped, skis, or satellite dish, choose its thumbnail,
 then click inside a room. You can also select a room and choose **Place item at
@@ -51,6 +52,17 @@ combines a car, motorcycle, bicycle, skis, server rack, teddy bear, music and ar
 supplies, and a patio. Export your current drawing first if you want to keep it.
 
 ![A fictional garage, creative studio, and patio with objects from the expanded library](planner/guide-assets/09-garage-studio.jpg)
+
+Try the [decorated studio](planner/guide-assets/decor-studio.json) for floor and
+wall textiles, a starburst chandelier, a wall sconce, a mirror, plants, a
+balustrade, and a life-size bear. Wall designs already stand upright. Set their
+bottom height with **y**, rotate them to face into the room, and inspect them in
+3D. For ceiling lights, **y + Height** should reach your ceiling. The
+[illustrated guide](https://ha-homelab.github.io/home-studio/planner/guide.html#table)
+walks through these placements. Mirrors use stylized glass without a reflection
+render pass; decorations do not introduce continuous animation.
+
+![Fictional decorated studio with rugs, wall hangings, lights, plants, and a bear](planner/guide-assets/10-decor-studio.jpg)
 
 These are original, simplified designs. Product-inspired names describe an
 approximate silhouette, not a manufacturer-supplied model or exact dimensions.

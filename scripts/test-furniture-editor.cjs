@@ -106,7 +106,9 @@ function findFiles(folder, name) {
     assert(await page.locator('.library-card[data-model-id="cafe_racer_motorcycle"]').isVisible());
     await page.locator('[data-close="library-dialog"]').click();
     // Pick real new designs through the UI, including each new shape family.
-    for (const id of ['server_rack', 'teddy_bear', 'tesla_model_y', 'cafe_racer_motorcycle', 'retro_moped', 'skis_and_poles', 'road_bicycle', 'satellite_dish']) {
+    for (const id of ['server_rack', 'teddy_bear', 'tesla_model_y', 'cafe_racer_motorcycle', 'retro_moped', 'skis_and_poles',
+      'road_bicycle', 'satellite_dish', 'kilim_rug', 'tasseled_wall_rug', 'sunburst_mirror', 'starburst_chandelier',
+      'globe_wall_sconce', 'classic_balustrade', 'christmas_tree', 'standing_brown_bear']) {
       await chooseModel(id); await placeCenter();
       assert.equal((await lastItem()).model_id, id);
       await page.getByLabel('Finish', { exact: true }).selectOption('ocean_blue');
@@ -231,30 +233,32 @@ function findFiles(folder, name) {
     assert(await page.evaluate(() => Object.hasOwn(window.floorplan.model.materials, 'furniture_c18c42')));
     assert.match(await page.locator('#status').textContent(), /appearances refreshed/);
 
-    // The downloadable advanced example must use the same browser/export/install path.
-    await page.goto(origin + '/planner/'); await page.waitForFunction(() => window.planner);
-    const advanced = JSON.parse(fs.readFileSync(path.join(root, 'planner/guide-assets/garage-and-studio.json')));
-    await importProject(advanced);
-    await page.locator('#preview-tab').click();
-    await page.waitForFunction(count => window.planner.getPreviewMetadata().catalogItems === count, advanced.floors[0].items.length);
-    const advancedIdle = await page.evaluate(() => window.planner.getPreviewMetadata().renderCount);
-    await page.waitForTimeout(350);
-    assert.equal(await page.evaluate(() => window.planner.getPreviewMetadata().renderCount), advancedIdle);
-    if (process.env.PLANNER_SCREENSHOT_DIR) {
-      await page.locator('#preview-canvas').focus();
-      await page.keyboard.press('ArrowUp'); await page.keyboard.press('ArrowUp');
-      await page.screenshot({ path: path.join(process.env.PLANNER_SCREENSHOT_DIR, '09-garage-studio.jpg'), type: 'jpeg', quality: 92 });
+    // Each downloadable example follows the real browser/export/install path.
+    for (const [example, screenshot] of [['garage-and-studio', '09-garage-studio.jpg'], ['decor-studio', '10-decor-studio.jpg']]) {
+      await page.goto(origin + '/planner/'); await page.waitForFunction(() => window.planner);
+      const advanced = JSON.parse(fs.readFileSync(path.join(root, `planner/guide-assets/${example}.json`)));
+      await importProject(advanced);
+      await page.locator('#preview-tab').click();
+      await page.waitForFunction(count => window.planner.getPreviewMetadata().catalogItems === count, advanced.floors[0].items.length);
+      const advancedIdle = await page.evaluate(() => window.planner.getPreviewMetadata().renderCount);
+      await page.waitForTimeout(350);
+      assert.equal(await page.evaluate(() => window.planner.getPreviewMetadata().renderCount), advancedIdle);
+      if (process.env.PLANNER_SCREENSHOT_DIR) {
+        await page.locator('#preview-canvas').focus();
+        await page.keyboard.press('ArrowUp'); await page.keyboard.press('ArrowUp');
+        await page.screenshot({ path: path.join(process.env.PLANNER_SCREENSHOT_DIR, screenshot), type: 'jpeg', quality: 92 });
+      }
+      const advancedDownload = page.waitForEvent('download'); await page.locator('#export-project').click();
+      const advancedSource = path.join(temporary, example + '.json');
+      await (await advancedDownload).saveAs(advancedSource);
+      assert.deepEqual(JSON.parse(fs.readFileSync(advancedSource)), advanced);
+      const advancedOutput = path.join(temporary, example + '-built'), advancedConfig = path.join(temporary, example + '-config');
+      fs.mkdirSync(advancedConfig); fs.writeFileSync(path.join(advancedConfig, 'configuration.yaml'), 'default_config:\n');
+      runPython(['scripts/build-planner-project.py', '--project', advancedSource, '--output', advancedOutput, '--ha-package']);
+      runPython(['scripts/install-home-assistant.py', path.join(advancedOutput, 'home-floorplan.tar.gz'), '--config', advancedConfig]);
+      const advancedAssets = findFiles(advancedConfig, 'model-data.json').map(file => JSON.parse(fs.readFileSync(file)));
+      assert(advancedAssets.some(asset => advanced.floors[0].items.every(item => asset.object_assets[item.id]?.model_id === item.model_id)));
     }
-    const advancedDownload = page.waitForEvent('download'); await page.locator('#export-project').click();
-    const advancedSource = path.join(temporary, 'advanced.json');
-    await (await advancedDownload).saveAs(advancedSource);
-    assert.deepEqual(JSON.parse(fs.readFileSync(advancedSource)), advanced);
-    const advancedOutput = path.join(temporary, 'advanced-built'), advancedConfig = path.join(temporary, 'advanced-config');
-    fs.mkdirSync(advancedConfig); fs.writeFileSync(path.join(advancedConfig, 'configuration.yaml'), 'default_config:\n');
-    runPython(['scripts/build-planner-project.py', '--project', advancedSource, '--output', advancedOutput, '--ha-package']);
-    runPython(['scripts/install-home-assistant.py', path.join(advancedOutput, 'home-floorplan.tar.gz'), '--config', advancedConfig]);
-    const advancedAssets = findFiles(advancedConfig, 'model-data.json').map(file => JSON.parse(fs.readFileSync(file)));
-    assert(advancedAssets.some(asset => advanced.floors[0].items.every(item => asset.object_assets[item.id]?.model_id === item.model_id)));
     assert.deepEqual(errors, []); assert.deepEqual(external, []);
     console.log('Browser furniture checks passed: paged catalog and keyboard focus, new designs, colors, history, layering, idle rendering, mobile dialog, JSON round trip, real installs and rebuilt viewer with preserved placements.');
   } finally {
