@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add 45 original designs for rugs, tapestries, mirrors, chandeliers, bulbs,
+  sconces, floor lamps, balustrades, plants, and life-size display bears:
+  149 designs in 20 categories. Keep existing model identifiers compatible.
+- Add a 24-triangle cone shared by the editor and compiler for tapered tree
+  crowns and light fixtures, with geometry, normals, and export parity checks.
+- Explain floor, wall, and ceiling placement in the illustrated guide and add
+  an editable fictional decorated studio tested through the real installer.
+
 - Expand the library to 104 designs and 16 categories, including electronics,
   plush toys, music and art equipment, cars, motorcycles, bicycles, sports gear,
   dishes, solar panels, and outdoor furniture. Add six finishes (ten total).

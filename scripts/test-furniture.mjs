@@ -15,7 +15,7 @@ const fixtures = CATALOG.models.map((model, index) => {
   const item = itemFor(model, index);
   return { item, asset: buildFurnitureAsset(item) };
 });
-const primitiveFixtures = ['box', 'cylinder', 'sphere', 'ring'].flatMap(shape =>
+const primitiveFixtures = ['box', 'cylinder', 'sphere', 'ring', 'cone'].flatMap(shape =>
   [undefined, [90, 0, 0], [0, 90, 0], [0, 0, 90], [23, -41, 67]].map(rotation_deg => {
     const part = { shape, center: [.07, .4, -.1], size: [.4, .5, .3],
       ...(rotation_deg ? { rotation_deg } : {}), ...(shape === 'ring' ? { inner_ratio: .61 } : {}) };
@@ -34,7 +34,7 @@ function unrotate(point, rotation = [0, 0, 0]) {
 }
 
 function verifyPrimitive(part, mesh) {
-  const vertexCounts = { box: 36, cylinder: 144, sphere: 144, ring: 288 };
+  const vertexCounts = { box: 36, cylinder: 144, sphere: 144, ring: 288, cone: 72 };
   assert.equal(mesh.vertices.length, vertexCounts[part.shape]);
   assert.equal(mesh.vertices.length, mesh.normals.length);
   assert.equal(mesh.vertices.length, mesh.indices.length);
@@ -90,6 +90,20 @@ if (process.argv.includes('--primitive-fixtures')) {
     'art_easel', 'sewing_machine', 'hobby_workbench', 'telescope', 'coffee_machine', 'microwave', 'dishwasher',
     'stick_vacuum', 'ironing_board', 'air_purifier'];
   for (const id of expandedIds) assert.ok(getCatalogModel(id), `expanded catalog includes ${id}`);
+  const decorIds = [
+    'kilim_rug', 'striped_runner', 'oval_braided_rug', 'checkerboard_rug',
+    'scalloped_rug', 'tasseled_wall_rug', 'geometric_tapestry', 'macrame_wall_hanging',
+    'woven_wall_disc', 'round_frame_mirror', 'oval_frame_mirror', 'arch_wall_mirror',
+    'sunburst_mirror', 'standing_full_length_mirror', 'tabletop_vanity_mirror', 'triptych_wall_mirror',
+    'sputnik_chandelier', 'starburst_chandelier', 'candle_chandelier', 'led_ring_chandelier',
+    'tiered_ring_chandelier', 'linear_globe_chandelier', 'led_light_bulb', 'edison_light_bulb',
+    'gu10_spotlight_bulb', 'arc_floor_lamp', 'tripod_floor_lamp', 'torchiere_floor_lamp',
+    'globe_wall_sconce', 'up_down_wall_sconce', 'wood_balustrade', 'classic_balustrade',
+    'glass_railing', 'fir_tree', 'christmas_tree', 'fiddle_leaf_fig',
+    'weeping_fig', 'monstera_plant', 'kentia_palm', 'barrel_cactus',
+    'saguaro_cactus', 'prickly_pear_cactus', 'standing_brown_bear', 'brown_bear_all_fours',
+    'polar_bear'];
+  for (const id of decorIds) assert.ok(getCatalogModel(id), `decor catalog includes ${id}`);
   assert.equal(new Set(CATALOG.models.map(model => model.id)).size, CATALOG.models.length);
   for (const { part, mesh } of primitiveFixtures) {
     verifyPrimitive(part, mesh);

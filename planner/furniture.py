@@ -33,7 +33,7 @@ def linear_color(color):
 
 
 def primitive(part):
-    if not isinstance(part, dict) or part.get('shape') not in ('box', 'cylinder', 'sphere', 'ring'):
+    if not isinstance(part, dict) or part.get('shape') not in ('box', 'cylinder', 'sphere', 'ring', 'cone'):
         raise ValueError('unknown furniture primitive')
     for key in ('center', 'size') + (('rotation_deg',) if 'rotation_deg' in part else ()):
         if (not isinstance(part.get(key), list) or len(part[key]) != 3
@@ -61,6 +61,16 @@ def primitive(part):
         for i in range(sides):
             bottom, following = 2 + 2 * i, 2 + 2 * ((i + 1) % sides)
             faces.extend(([0,bottom,following], [1,following+1,bottom+1], [bottom,bottom+1,following+1], [bottom,following+1,following]))
+    elif part['shape'] == 'cone':
+        sides = 12
+        vertices = [[x,y-h/2,z], [x,y+h/2,z]]
+        for i in range(sides):
+            angle = 2 * math.pi * i / sides
+            vertices.append([x+w/2*math.cos(angle), y-h/2, z+d/2*math.sin(angle)])
+        faces = []
+        for i in range(sides):
+            bottom, following = 2 + i, 2 + (i + 1) % sides
+            faces.extend(([0,bottom,following], [1,following,bottom]))
     elif part['shape'] == 'sphere':
         sides, spans = 8, 4
         vertices = [[x,y+h/2,z], [x,y-h/2,z]]

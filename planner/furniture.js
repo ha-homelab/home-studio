@@ -38,7 +38,7 @@ function linearColor(hex) {
 }
 
 export function primitive(part) {
-  if (!part || typeof part !== 'object' || !['box', 'cylinder', 'sphere', 'ring'].includes(part.shape)) throw new Error('Unknown furniture primitive.');
+  if (!part || typeof part !== 'object' || !['box', 'cylinder', 'sphere', 'ring', 'cone'].includes(part.shape)) throw new Error('Unknown furniture primitive.');
   for (const key of ['center', 'size', ...(Object.hasOwn(part, 'rotation_deg') ? ['rotation_deg'] : [])]) {
     if (!Array.isArray(part[key]) || part[key].length !== 3 || !part[key].every(Number.isFinite)) throw new Error('Furniture ' + key + ' must contain three finite numbers.');
   }
@@ -60,6 +60,18 @@ export function primitive(part) {
     for (let i = 0; i < sides; i++) {
       const bottom = 2+2*i, next = 2+2*((i+1)%sides);
       faces.push([0,bottom,next],[1,next+1,bottom+1],[bottom,bottom+1,next+1],[bottom,next+1,next]);
+    }
+  } else if (part.shape === 'cone') {
+    const sides = 12;
+    vertices = [[x,y-h/2,z], [x,y+h/2,z]];
+    for (let i = 0; i < sides; i++) {
+      const angle = 2*Math.PI*i/sides;
+      vertices.push([x+w/2*Math.cos(angle), y-h/2, z+d/2*Math.sin(angle)]);
+    }
+    faces = [];
+    for (let i = 0; i < sides; i++) {
+      const bottom = 2+i, next = 2+(i+1)%sides;
+      faces.push([0,bottom,next], [1,next,bottom]);
     }
   } else if (part.shape === 'sphere') {
     const sides = 8, spans = 4;

@@ -190,7 +190,7 @@ class FurnitureTests(unittest.TestCase):
         # legacy boxes and cylinders and independent material overrides.
         chosen = [next(model for model in CATALOG['models'] if model['id'] == name)
                   for name in ('sofa_2', 'round_dining_table')]
-        for shape in ('sphere', 'ring'):
+        for shape in ('sphere', 'ring', 'cone'):
             model = next((model for model in CATALOG['models']
                           if any(part['shape'] == shape for part in model['parts'])), None)
             if model and model not in chosen:
