@@ -28,8 +28,12 @@ function findFiles(folder, name) {
 
 (async () => {
   const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'home-studio-furniture-')));
+  let compiledPage;
   const server = http.createServer((request, response) => {
     const route = new URL(request.url, 'http://localhost').pathname.replace(/^\/(?:home-studio\/)?/, '');
+    if (route === 'compiled/' && compiledPage) {
+      response.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' }).end(compiledPage); return;
+    }
     const file = files.get(route);
     if (!file) { response.writeHead(404).end(); return; }
     response.writeHead(200, { 'Content-Type': file[1], 'Cache-Control': 'no-store' });
@@ -47,7 +51,7 @@ function findFiles(folder, name) {
     page.setDefaultTimeout(30000);
     page.on('pageerror', error => errors.push(String(error)));
     page.on('dialog', dialog => dialog.accept());
-    page.on('request', request => { if (!request.url().startsWith(origin + '/')) external.push(request.url()); });
+    page.on('request', request => { if (!request.url().startsWith(origin + '/') && !request.url().startsWith('data:')) external.push(request.url()); });
     const project = () => page.evaluate(() => window.planner.getProject());
     const lastItem = async () => (await project()).floors[0].items.at(-1);
     const change = async (label, value) => {
@@ -176,7 +180,30 @@ function findFiles(folder, name) {
     const assets = findFiles(component, 'model-data.json').map(file => JSON.parse(fs.readFileSync(file)));
     assert(assets.some(asset => expected.floors[0].items.every(item => asset.object_assets[item.id]?.model_id === item.model_id)), 'Installed model contains the selected catalog geometries');
     assert.equal(fs.readFileSync(path.join(config, 'configuration.yaml'), 'utf8'), 'default_config:\n');
-    console.log('Browser furniture checks passed: catalog, colors, history, layering, idle rendering, mobile dialog, JSON round trip and real package install.');
+    compiledPage = fs.readFileSync(path.join(built, expected.floors[0].id, 'index.html'));
+    await page.goto(origin + '/compiled/');
+    await page.waitForFunction(() => window.floorplan?.objectCount === 2);
+    assert(await page.evaluate(() => window.floorplan.objectMeshCount > window.floorplan.objectCount));
+    await page.locator('#items li').filter({ hasText: 'Reading sofa' }).getByRole('button', { name: 'Edit', exact: true }).click();
+    await page.getByLabel('Object name', { exact: true }).fill('Sofa moved in installed viewer');
+    await page.getByLabel('X position (m)', { exact: true }).fill('2.5');
+    await page.locator('#addItem').click();
+    const savedItem = await page.evaluate(() => window.floorplan.items.find(item => item.model_id === 'sofa_2'));
+    assert.equal(savedItem.position_m.x, 2.5); assert.equal(savedItem.color, '#507b95');
+    const rebuilt = JSON.parse(JSON.stringify(expected));
+    rebuilt.floors[0].items.find(item => item.model_id === 'sofa_2').color = '#c18c42';
+    const rebuiltSource = path.join(temporary, 'rebuilt.json'), rebuiltOutput = path.join(temporary, 'rebuilt');
+    fs.writeFileSync(rebuiltSource, JSON.stringify(rebuilt));
+    runPython(['scripts/build-planner-project.py', '--project', rebuiltSource, '--output', rebuiltOutput]);
+    compiledPage = fs.readFileSync(path.join(rebuiltOutput, expected.floors[0].id, 'index.html'));
+    await page.reload(); await page.waitForFunction(() => window.floorplan?.objectCount === 2);
+    const refreshed = await page.evaluate(() => window.floorplan.items.find(item => item.model_id === 'sofa_2'));
+    assert.equal(refreshed.color, '#c18c42'); assert.equal(refreshed.position_m.x, 2.5);
+    assert.equal(refreshed.name, 'Sofa moved in installed viewer');
+    assert(await page.evaluate(() => Object.hasOwn(window.floorplan.model.materials, 'furniture_c18c42')));
+    assert.match(await page.locator('#status').textContent(), /appearances refreshed/);
+    assert.deepEqual(errors, []); assert.deepEqual(external, []);
+    console.log('Browser furniture checks passed: catalog, colors, history, layering, idle rendering, mobile dialog, JSON round trip, real install and rebuilt viewer with preserved placements.');
   } finally {
     await browser?.close(); await new Promise(resolve => server.close(resolve));
     fs.rmSync(temporary, { recursive: true, force: true });
