@@ -8,9 +8,16 @@ import re
 import shutil
 from urllib.parse import unquote, urlsplit
 
+LOCALE_CODES = (
+    'en', 'ar', 'bn', 'cs', 'de', 'es', 'fa', 'fr', 'he', 'hi', 'id', 'it',
+    'ja', 'ko', 'nl', 'pl', 'pt', 'ru', 'th', 'tr', 'uk', 'vi', 'zh-Hans', 'zh-Hant',
+)
+
 SITE_FILES = (
     'index.html', 'site.css', 'privacy.html', 'install.html', '404.html', '.nojekyll',
     'planner/index.html', 'planner/editor.css', 'planner/editor.js',
+    'planner/i18n.js', 'planner/validation.js', 'planner/locales/index.js',
+    *(f'planner/locales/{code}.js' for code in LOCALE_CODES),
     'planner/model.js', 'planner/catalog.js', 'planner/furniture.js', 'planner/guide.html', 'planner/guide.css',
     'planner/publishing.html', 'planner/guide-assets/practice-home.json',
     'planner/guide-assets/01-room.jpg', 'planner/guide-assets/02-rooms.jpg',
@@ -23,7 +30,10 @@ SITE_FILES = (
     'planner/guide-assets/pattern-studio.json', 'planner/guide-assets/11-pattern-studio.jpg',
     'vendor/three.module.min.js', 'vendor/THREE-LICENSE.txt',
 )
-REPO_FILES = ('README.md', 'LICENSE', '.gitignore', 'scripts/validate-site.py', '.github/workflows/pages.yml',
+REPO_FILES = ('docs/i18n.md', 'docs/translations/README.md',
+              *(f'docs/translations/README.{code}.md' for code in LOCALE_CODES if code != 'en'),
+              'scripts/test-i18n.mjs', 'scripts/test-i18n-browser.cjs', 'scripts/test-validation-i18n.mjs',
+              'README.md', 'LICENSE', '.gitignore', 'scripts/validate-site.py', '.github/workflows/pages.yml',
               '.github/workflows/package.yml', 'docs/architecture.md',
               'scripts/build-planner-project.py', 'scripts/install-home-assistant.py',
               'scripts/test-install-home-assistant.py', 'scripts/test-public-package.py', 'scripts/test-wall-tops.cjs',

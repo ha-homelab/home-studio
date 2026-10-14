@@ -29,12 +29,18 @@ jobs:
           node scripts/test-furniture-patterns.mjs
           python3 scripts/test-inventory-appearance.py
           node --test scripts/test-inventory-appearance.cjs
+      - name: Check translation coverage and placeholders
+        run: |
+          node scripts/test-i18n.mjs
+          node scripts/test-validation-i18n.mjs
       - name: Install browser test tools
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           npx playwright install --with-deps chromium
       - name: Test drawing, furnishing, export and installation through the editor
         run: npm run test:planner
+      - name: Test language switching, right-to-left layout and project preservation
+        run: node scripts/test-i18n-browser.cjs
       - name: Test bounded diagnostic display with synthetic clocks
         run: node scripts/test-module-expiry.cjs
       - name: Test visible wall outlines and doorway gaps

@@ -21,6 +21,19 @@ Assistant. **Export JSON** saves your editable project; **Open JSON** restores i
 The local compiler turns that project into a separate viewer, 3D exports, and an
 installable Home Assistant package. Examples and guide screenshots are fictional.
 
+## Choose your language
+
+The drawing editor supports **24 languages**, including translated tools,
+object names, palettes, patterns, dialogs, and accessibility labels. Choose a
+language in the header; Arabic, Hebrew, and Persian support right-to-left text.
+Your project names and entity IDs remain unchanged. Only the selected language
+pack loads; no online translation service is used.
+
+Read a [localized README quick start](docs/translations/README.md), or see
+[translation scope and how to contribute](docs/i18n.md). The detailed illustrated
+guide, compiler diagnostics, and installed Home Assistant viewer currently
+remain in English.
+
 ## Furnish your rooms
 
 Open **Item library** to browse **195 designs in 22 categories**: furniture and
@@ -177,6 +190,7 @@ python3 scripts/test-public-package.py
 python3 scripts/test-install-home-assistant.py
 python3 scripts/generate-furniture-catalog.py --check
 python3 scripts/test-furniture.py
+node scripts/test-i18n.mjs
 python3 scripts/validate-site.py
 python3 scripts/validate-site.py --output _site
 ```

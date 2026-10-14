@@ -1,5 +1,6 @@
 // Original low-poly furniture, shared by the offline planner and compiler.
 import { CATALOG } from './catalog.js';
+import { ValidationError } from './validation.js';
 export { CATALOG };
 const models = new Map(CATALOG.models.map(model => [model.id, model]));
 const styles = new Map(CATALOG.styles.map(style => [style.id, style]));
@@ -12,25 +13,25 @@ export const supportsFurniturePattern = model => !!model?.parts.some(part => par
 export function validateFurnitureAppearance(item) {
   const has = key => Object.hasOwn(item, key);
   if (!has('model_id')) {
-    if (has('style_id') || has('color') || has('pattern_id') || has('pattern_color')) throw new Error('Choose a furniture model before setting a style, color or pattern.');
+    if (has('style_id') || has('color') || has('pattern_id') || has('pattern_color')) throw new ValidationError('Choose a furniture model before setting a style, color or pattern.');
     return null;
   }
   const model = getCatalogModel(item.model_id);
-  if (!model) throw new Error('Unknown furniture model.');
-  if (item.type !== model.type) throw new Error('Furniture model does not match this item type.');
-  if (has('style_id') && !getCatalogStyle(item.style_id)) throw new Error('Unknown furniture style.');
-  if (has('color') && (typeof item.color !== 'string' || !COLOR.test(item.color))) throw new Error('Furniture color must use #RRGGBB.');
-  if (has('pattern_id') && !PATTERNS.some(pattern => pattern.id === item.pattern_id)) throw new Error('Unknown furniture pattern.');
+  if (!model) throw new ValidationError('Unknown furniture model.');
+  if (item.type !== model.type) throw new ValidationError('Furniture model does not match this item type.');
+  if (has('style_id') && !getCatalogStyle(item.style_id)) throw new ValidationError('Unknown furniture style.');
+  if (has('color') && (typeof item.color !== 'string' || !COLOR.test(item.color))) throw new ValidationError('Furniture color must use #RRGGBB.');
+  if (has('pattern_id') && !PATTERNS.some(pattern => pattern.id === item.pattern_id)) throw new ValidationError('Unknown furniture pattern.');
   const patterned = has('pattern_id') && item.pattern_id !== 'none';
-  if (has('pattern_color') && !patterned) throw new Error('Choose a furniture pattern before setting its color.');
-  if (has('pattern_color') && (typeof item.pattern_color !== 'string' || !COLOR.test(item.pattern_color))) throw new Error('Furniture pattern color must use #RRGGBB.');
-  if (patterned && !supportsFurniturePattern(model)) throw new Error('This furniture model does not support patterns.');
+  if (has('pattern_color') && !patterned) throw new ValidationError('Choose a furniture pattern before setting its color.');
+  if (has('pattern_color') && (typeof item.pattern_color !== 'string' || !COLOR.test(item.pattern_color))) throw new ValidationError('Furniture pattern color must use #RRGGBB.');
+  if (patterned && !supportsFurniturePattern(model)) throw new ValidationError('This furniture model does not support patterns.');
   return model;
 }
 
 export function createFurnitureItemFields(modelId, styleId) {
   const model = getCatalogModel(modelId);
-  if (!model) throw new Error('Unknown furniture model.');
+  if (!model) throw new ValidationError('Unknown furniture model.');
   const fields = { type: model.type, model_id: model.id, style_id: styleId ?? model.default_style,
     dimensions_m: { ...model.dimensions_m }, elevation_m: model.elevation_m };
   validateFurnitureAppearance(fields);
