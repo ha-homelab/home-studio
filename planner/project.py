@@ -380,12 +380,15 @@ def make_floor(project, floor, next_floor):
             cursor = b
         segment(f"wall_{wall['id']}_solid_{len(cuts)}", cursor, length, 0, floor["height_m"])
     materials, object_assets = dict(MATERIALS), {}
-    for item in floor["items"]:
+    for item_index, item in enumerate(floor["items"]):
         p, d = item["position_m"], item["dimensions_m"]
         angle = math.radians(item["rotation_deg"])
+        # The ordinal makes each item's namespace unambiguous even when a
+        # portable user ID looks like another item's generated part suffix.
+        item_name = f"item_{item_index}_{item['id']}"
         asset = build_furniture_asset(item)
         if asset is None:
-            box(g, "item_" + item["id"], [p["x"], p["z"]], [math.cos(angle), -math.sin(angle)], -d["width"] / 2, d["width"] / 2,
+            box(g, item_name, [p["x"], p["z"]], [math.cos(angle), -math.sin(angle)], -d["width"] / 2, d["width"] / 2,
                 d["depth"], p["y"], p["y"] + d["height"], "dark" if item["type"] == "tv" else "added", "inventory", item_id=item["id"], entity_id=item["entity_id"])
             continue
         object_assets[item["id"]] = {"model_id": item["model_id"], "meshes": asset["meshes"]}
@@ -397,7 +400,7 @@ def make_floor(project, floor, next_floor):
                 x, z = x * d["width"], z * d["depth"]
                 vertices.append([p["x"] + cosine * x + sine * z, p["y"] + y * d["height"], p["z"] - sine * x + cosine * z])
             faces = [part["indices"][index:index + 3] for index in range(0, len(part["indices"]), 3)]
-            g.mesh("item_" + item["id"] + "_" + part["name"], vertices, faces, part["material"], "inventory",
+            g.mesh(item_name + "_" + part["name"], vertices, faces, part["material"], "inventory",
                    item_id=item["id"], entity_id=item["entity_id"], model_id=item["model_id"])
     points = [p for mesh in g.meshes for p in mesh["vertices"]]
     minx, maxx = min(p[0] for p in points), max(p[0] for p in points)
@@ -470,6 +473,16 @@ def json_text(value, pretty=False):
     return json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2 if pretty else None, separators=None if pretty else (",", ":"))
 
 
+def runtime_model_data(data):
+    """Keep one renderable representation of editable inventory in HA assets.
+
+    Export formats still receive every transformed mesh. The runtime builds
+    furniture from normalized object_assets and placements, so retaining those
+    transformed copies would double geometry data and exceed package limits.
+    """
+    return {**data, "meshes": [mesh for mesh in data["meshes"] if mesh["kind"] != "inventory"]}
+
+
 def render_viewer(data, svg):
     template = (ROOT / "viewer.template.html").read_text()
     # Saved model downloads represent the built project. The editable viewer
@@ -496,7 +509,7 @@ def render_viewer(data, svg):
     token = re.compile("|".join(map(re.escape, replacements)))
     while any(key in template for key in source_tokens):
         template = token.sub(lambda m: source_tokens.get(m.group(), m.group()), template)
-    viewer_data = {**data, "meshes": [mesh for mesh in data["meshes"] if mesh["kind"] != "inventory"]}
+    viewer_data = runtime_model_data(data)
     replacements["__MODEL_JSON__"] = json_text(viewer_data).replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
     token = re.compile("|".join(map(re.escape, replacements)))
     return token.sub(lambda m: replacements[m.group()], template)
@@ -601,7 +614,7 @@ def compile_project(project, output=DEFAULT_OUTPUT, ha_package=False, project_pa
                 data['lower_floor_context'] = floor_context(lower['meshes'], lower['elevation_m'] - data['elevation_m'])
             folder = stage / floor["id"]
             folder.mkdir()
-            (folder / "model-data.json").write_text(json_text(data), encoding="utf-8")
+            (folder / "model-data.json").write_text(json_text(runtime_model_data(data)), encoding="utf-8")
             (folder / "plan.svg").write_text(svg, encoding="utf-8")
             inventory = {"schema_version": 1, "model": floor["id"], "units": "metres", "up_axis": "Y", "items": floor["items"]}
             (folder / "inventory.json").write_text(json_text(inventory, True) + "\n", encoding="utf-8")
