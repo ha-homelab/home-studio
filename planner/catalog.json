@@ -1,0 +1,729 @@
+{
+  "version": 1,
+  "categories": [
+    {"id": "seating", "label": "Seating"},
+    {"id": "tables", "label": "Tables & desks"},
+    {"id": "beds", "label": "Beds"},
+    {"id": "storage", "label": "Storage & media"},
+    {"id": "kitchen", "label": "Kitchen & laundry"},
+    {"id": "bath", "label": "Bathroom"},
+    {"id": "decor", "label": "Rugs & decor"},
+    {"id": "lighting", "label": "Lighting"}
+  ],
+  "styles": [
+    {"id": "contemporary", "label": "Soft contemporary", "materials": {"body": "#879d91", "accent": "#e8dfcf", "wood": "#a77d54", "metal": "#323a3c", "white": "#f3f3ee", "dark": "#202c33", "glass": "#89b6c3", "foliage": "#567a49"}},
+    {"id": "scandinavian", "label": "Light Scandinavian", "materials": {"body": "#ded8c9", "accent": "#f6f2e8", "wood": "#caa475", "metal": "#555c59", "white": "#f3f3ee", "dark": "#202c33", "glass": "#89b6c3", "foliage": "#567a49"}},
+    {"id": "warm_wood", "label": "Warm wood", "materials": {"body": "#ad7155", "accent": "#e6c497", "wood": "#774e32", "metal": "#493c34", "white": "#f3f3ee", "dark": "#202c33", "glass": "#89b6c3", "foliage": "#567a49"}},
+    {"id": "monochrome", "label": "Dark modern", "materials": {"body": "#454c54", "accent": "#b9c2c5", "wood": "#706355", "metal": "#20282d", "white": "#f3f3ee", "dark": "#202c33", "glass": "#89b6c3", "foliage": "#567a49"}}
+  ],
+  "models": [
+    {
+      "id": "sofa_2",
+      "label": "Two-seat sofa",
+      "category": "seating",
+      "type": "furniture",
+      "dimensions_m": {"width": 1.8, "depth": 0.88, "height": 0.86},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [-0.42, 0.075, -0.35], "size": [0.1, 0.15, 0.1], "material": "wood"},
+        {"shape": "box", "center": [-0.42, 0.075, 0.35], "size": [0.1, 0.15, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.075, -0.35], "size": [0.1, 0.15, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.075, 0.35], "size": [0.1, 0.15, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.29, 0.0], "size": [1.0, 0.28, 1.0], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.73, -0.39], "size": [1.0, 0.54, 0.22], "material": "body"},
+        {"shape": "box", "center": [-0.445, 0.56, 0.03], "size": [0.11, 0.38, 0.94], "material": "body"},
+        {"shape": "box", "center": [0.445, 0.56, 0.03], "size": [0.11, 0.38, 0.94], "material": "body"},
+        {"shape": "box", "center": [-0.19, 0.47, 0.09], "size": [0.355, 0.1, 0.7], "material": "accent"},
+        {"shape": "box", "center": [-0.19, 0.72, -0.245], "size": [0.355, 0.42, 0.1], "material": "body"},
+        {"shape": "box", "center": [0.19, 0.47, 0.09], "size": [0.355, 0.1, 0.7], "material": "accent"},
+        {"shape": "box", "center": [0.19, 0.72, -0.245], "size": [0.355, 0.42, 0.1], "material": "body"}
+      ]
+    },
+    {
+      "id": "sofa_3",
+      "label": "Three-seat sofa",
+      "category": "seating",
+      "type": "furniture",
+      "dimensions_m": {"width": 2.35, "depth": 0.9, "height": 0.86},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [-0.42, 0.075, -0.35], "size": [0.1, 0.15, 0.1], "material": "wood"},
+        {"shape": "box", "center": [-0.42, 0.075, 0.35], "size": [0.1, 0.15, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.075, -0.35], "size": [0.1, 0.15, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.075, 0.35], "size": [0.1, 0.15, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.29, 0.0], "size": [1.0, 0.28, 1.0], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.73, -0.39], "size": [1.0, 0.54, 0.22], "material": "body"},
+        {"shape": "box", "center": [-0.445, 0.56, 0.03], "size": [0.11, 0.38, 0.94], "material": "body"},
+        {"shape": "box", "center": [0.445, 0.56, 0.03], "size": [0.11, 0.38, 0.94], "material": "body"},
+        {"shape": "box", "center": [-0.2533333333, 0.47, 0.09], "size": [0.2283333333, 0.1, 0.7], "material": "accent"},
+        {"shape": "box", "center": [-0.2533333333, 0.72, -0.245], "size": [0.2283333333, 0.42, 0.1], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.47, 0.09], "size": [0.2283333333, 0.1, 0.7], "material": "accent"},
+        {"shape": "box", "center": [0.0, 0.72, -0.245], "size": [0.2283333333, 0.42, 0.1], "material": "body"},
+        {"shape": "box", "center": [0.2533333333, 0.47, 0.09], "size": [0.2283333333, 0.1, 0.7], "material": "accent"},
+        {"shape": "box", "center": [0.2533333333, 0.72, -0.245], "size": [0.2283333333, 0.42, 0.1], "material": "body"}
+      ]
+    },
+    {
+      "id": "corner_sofa",
+      "label": "Corner sofa with chaise",
+      "category": "seating",
+      "type": "furniture",
+      "dimensions_m": {"width": 2.6, "depth": 1.7, "height": 0.86},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.25, -0.17], "size": [1.0, 0.3, 0.66], "material": "body"},
+        {"shape": "box", "center": [-0.29, 0.25, 0.16], "size": [0.42, 0.3, 0.68], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.73, -0.42], "size": [1.0, 0.54, 0.16], "material": "body"},
+        {"shape": "box", "center": [-0.45, 0.64, 0.07], "size": [0.1, 0.38, 0.86], "material": "body"},
+        {"shape": "box", "center": [0.45, 0.58, -0.12], "size": [0.1, 0.34, 0.76], "material": "body"},
+        {"shape": "box", "center": [-0.25, 0.45, 0.12], "size": [0.32, 0.1, 0.68], "material": "accent"},
+        {"shape": "box", "center": [0.16, 0.45, -0.12], "size": [0.46, 0.1, 0.54], "material": "accent"},
+        {"shape": "box", "center": [-0.42, 0.05, -0.37], "size": [0.09, 0.1, 0.09], "material": "wood"},
+        {"shape": "box", "center": [-0.42, 0.05, 0.37], "size": [0.09, 0.1, 0.09], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.05, -0.37], "size": [0.09, 0.1, 0.09], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.05, 0.37], "size": [0.09, 0.1, 0.09], "material": "wood"}
+      ]
+    },
+    {
+      "id": "armchair",
+      "label": "Armchair",
+      "category": "seating",
+      "type": "furniture",
+      "dimensions_m": {"width": 0.86, "depth": 0.84, "height": 0.88},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [-0.42, 0.075, -0.35], "size": [0.1, 0.15, 0.1], "material": "wood"},
+        {"shape": "box", "center": [-0.42, 0.075, 0.35], "size": [0.1, 0.15, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.075, -0.35], "size": [0.1, 0.15, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.075, 0.35], "size": [0.1, 0.15, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.29, 0.0], "size": [1.0, 0.28, 1.0], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.73, -0.39], "size": [1.0, 0.54, 0.22], "material": "body"},
+        {"shape": "box", "center": [-0.445, 0.56, 0.03], "size": [0.11, 0.38, 0.94], "material": "body"},
+        {"shape": "box", "center": [0.445, 0.56, 0.03], "size": [0.11, 0.38, 0.94], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.47, 0.09], "size": [0.735, 0.1, 0.7], "material": "accent"},
+        {"shape": "box", "center": [0.0, 0.72, -0.245], "size": [0.735, 0.42, 0.1], "material": "body"}
+      ]
+    },
+    {
+      "id": "dining_chair",
+      "label": "Dining chair",
+      "category": "seating",
+      "type": "furniture",
+      "dimensions_m": {"width": 0.48, "depth": 0.52, "height": 0.86},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [-0.37, 0.24, -0.37], "size": [0.12, 0.48, 0.12], "material": "wood"},
+        {"shape": "box", "center": [-0.37, 0.24, 0.37], "size": [0.12, 0.48, 0.12], "material": "wood"},
+        {"shape": "box", "center": [0.37, 0.24, -0.37], "size": [0.12, 0.48, 0.12], "material": "wood"},
+        {"shape": "box", "center": [0.37, 0.24, 0.37], "size": [0.12, 0.48, 0.12], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.51, 0.0], "size": [1.0, 0.08, 1.0], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.79, -0.43], "size": [1.0, 0.42, 0.14], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.79, -0.34], "size": [0.78, 0.28, 0.05], "material": "accent"}
+      ]
+    },
+    {
+      "id": "bench",
+      "label": "Upholstered bench",
+      "category": "seating",
+      "type": "furniture",
+      "dimensions_m": {"width": 1.4, "depth": 0.45, "height": 0.47},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [-0.4, 0.34, -0.32], "size": [0.1, 0.68, 0.1], "material": "wood"},
+        {"shape": "box", "center": [-0.4, 0.34, 0.32], "size": [0.1, 0.68, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.4, 0.34, -0.32], "size": [0.1, 0.68, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.4, 0.34, 0.32], "size": [0.1, 0.68, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.84, 0.0], "size": [1.0, 0.32, 1.0], "material": "body"}
+      ]
+    },
+    {
+      "id": "stool",
+      "label": "Round stool",
+      "category": "seating",
+      "type": "furniture",
+      "dimensions_m": {"width": 0.42, "depth": 0.42, "height": 0.48},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [-0.28, 0.41, -0.28], "size": [0.1, 0.82, 0.1], "material": "wood"},
+        {"shape": "box", "center": [-0.28, 0.41, 0.28], "size": [0.1, 0.82, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.28, 0.41, -0.28], "size": [0.1, 0.82, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.28, 0.41, 0.28], "size": [0.1, 0.82, 0.1], "material": "wood"},
+        {"shape": "cylinder", "center": [0.0, 0.91, 0.0], "size": [1.0, 0.18, 1.0], "material": "body"}
+      ]
+    },
+    {
+      "id": "dining_table",
+      "label": "Dining table",
+      "category": "tables",
+      "type": "furniture",
+      "dimensions_m": {"width": 1.8, "depth": 0.9, "height": 0.75},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.94, 0.0], "size": [1.0, 0.12, 1.0], "material": "body"},
+        {"shape": "box", "center": [-0.42, 0.44, -0.4], "size": [0.1, 0.88, 0.1], "material": "wood"},
+        {"shape": "box", "center": [-0.42, 0.44, 0.4], "size": [0.1, 0.88, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.44, -0.4], "size": [0.1, 0.88, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.44, 0.4], "size": [0.1, 0.88, 0.1], "material": "wood"}
+      ]
+    },
+    {
+      "id": "round_dining_table",
+      "label": "Round dining table",
+      "category": "tables",
+      "type": "furniture",
+      "dimensions_m": {"width": 1.15, "depth": 1.15, "height": 0.75},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "cylinder", "center": [0.0, 0.94, 0.0], "size": [1.0, 0.12, 1.0], "material": "body"},
+        {"shape": "cylinder", "center": [0.0, 0.42, 0.0], "size": [0.16, 0.84, 0.16], "material": "metal"},
+        {"shape": "cylinder", "center": [0.0, 0.045, 0.0], "size": [0.68, 0.09, 0.68], "material": "metal"}
+      ]
+    },
+    {
+      "id": "coffee_table",
+      "label": "Coffee table",
+      "category": "tables",
+      "type": "furniture",
+      "dimensions_m": {"width": 1.1, "depth": 0.6, "height": 0.42},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.94, 0.0], "size": [1.0, 0.12, 1.0], "material": "body"},
+        {"shape": "box", "center": [-0.42, 0.44, -0.4], "size": [0.1, 0.88, 0.1], "material": "wood"},
+        {"shape": "box", "center": [-0.42, 0.44, 0.4], "size": [0.1, 0.88, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.44, -0.4], "size": [0.1, 0.88, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.44, 0.4], "size": [0.1, 0.88, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.27, 0.0], "size": [0.82, 0.06, 0.8], "material": "accent"}
+      ]
+    },
+    {
+      "id": "round_coffee_table",
+      "label": "Round coffee table",
+      "category": "tables",
+      "type": "furniture",
+      "dimensions_m": {"width": 0.85, "depth": 0.85, "height": 0.42},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "cylinder", "center": [0.0, 0.94, 0.0], "size": [1.0, 0.12, 1.0], "material": "body"},
+        {"shape": "cylinder", "center": [0.0, 0.42, 0.0], "size": [0.16, 0.84, 0.16], "material": "metal"},
+        {"shape": "cylinder", "center": [0.0, 0.045, 0.0], "size": [0.68, 0.09, 0.68], "material": "metal"}
+      ]
+    },
+    {
+      "id": "side_table",
+      "label": "Side table",
+      "category": "tables",
+      "type": "furniture",
+      "dimensions_m": {"width": 0.5, "depth": 0.5, "height": 0.52},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.94, 0.0], "size": [1.0, 0.12, 1.0], "material": "body"},
+        {"shape": "box", "center": [-0.42, 0.44, -0.4], "size": [0.1, 0.88, 0.1], "material": "wood"},
+        {"shape": "box", "center": [-0.42, 0.44, 0.4], "size": [0.1, 0.88, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.44, -0.4], "size": [0.1, 0.88, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.44, 0.4], "size": [0.1, 0.88, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.25, 0.0], "size": [0.84, 0.06, 0.8], "material": "wood"}
+      ]
+    },
+    {
+      "id": "desk",
+      "label": "Writing desk",
+      "category": "tables",
+      "type": "furniture",
+      "dimensions_m": {"width": 1.4, "depth": 0.7, "height": 0.75},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.95, 0.0], "size": [1.0, 0.1, 1.0], "material": "wood"},
+        {"shape": "box", "center": [-0.44, 0.45, -0.4], "size": [0.08, 0.9, 0.08], "material": "wood"},
+        {"shape": "box", "center": [-0.44, 0.45, 0.4], "size": [0.08, 0.9, 0.08], "material": "wood"},
+        {"shape": "box", "center": [0.44, 0.45, -0.4], "size": [0.08, 0.9, 0.08], "material": "wood"},
+        {"shape": "box", "center": [0.44, 0.45, 0.4], "size": [0.08, 0.9, 0.08], "material": "wood"},
+        {"shape": "box", "center": [0.27, 0.65, 0.0], "size": [0.32, 0.5, 0.82], "material": "body"},
+        {"shape": "box", "center": [0.27, 0.77, 0.42], "size": [0.14, 0.025, 0.035], "material": "metal"},
+        {"shape": "box", "center": [0.27, 0.54, 0.42], "size": [0.14, 0.025, 0.035], "material": "metal"}
+      ]
+    },
+    {
+      "id": "single_bed",
+      "label": "Single bed",
+      "category": "beds",
+      "type": "furniture",
+      "dimensions_m": {"width": 1.0, "depth": 2.05, "height": 1.0},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.29, 0.0102040816], "size": [1.0, 0.28, 0.9591836735], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.51, 0.0255102041], "size": [0.94, 0.16, 0.9183673469], "material": "white"},
+        {"shape": "box", "center": [0.0, 0.61, 0.2040816327], "size": [0.96, 0.12, 0.5918367347], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.68, -0.4591836735], "size": [1.0, 0.64, 0.0816326531], "material": "wood"},
+        {"shape": "box", "center": [-0.42, 0.075, -0.3775510204], "size": [0.1, 0.15, 0.1020408163], "material": "wood"},
+        {"shape": "box", "center": [-0.42, 0.075, 0.3979591837], "size": [0.1, 0.15, 0.1020408163], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.075, -0.3775510204], "size": [0.1, 0.15, 0.1020408163], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.075, 0.3979591837], "size": [0.1, 0.15, 0.1020408163], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.64, -0.2806122449], "size": [0.75, 0.1, 0.2040816327], "material": "accent"}
+      ]
+    },
+    {
+      "id": "double_bed",
+      "label": "Double bed",
+      "category": "beds",
+      "type": "furniture",
+      "dimensions_m": {"width": 1.65, "depth": 2.1, "height": 1.1},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.29, 0.0102040816], "size": [1.0, 0.28, 0.9591836735], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.51, 0.0255102041], "size": [0.94, 0.16, 0.9183673469], "material": "white"},
+        {"shape": "box", "center": [0.0, 0.61, 0.2040816327], "size": [0.96, 0.12, 0.5918367347], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.68, -0.4591836735], "size": [1.0, 0.64, 0.0816326531], "material": "wood"},
+        {"shape": "box", "center": [-0.42, 0.075, -0.3775510204], "size": [0.1, 0.15, 0.1020408163], "material": "wood"},
+        {"shape": "box", "center": [-0.42, 0.075, 0.3979591837], "size": [0.1, 0.15, 0.1020408163], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.075, -0.3775510204], "size": [0.1, 0.15, 0.1020408163], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.075, 0.3979591837], "size": [0.1, 0.15, 0.1020408163], "material": "wood"},
+        {"shape": "box", "center": [-0.235, 0.64, -0.2806122449], "size": [0.4, 0.1, 0.2040816327], "material": "accent"},
+        {"shape": "box", "center": [0.235, 0.64, -0.2806122449], "size": [0.4, 0.1, 0.2040816327], "material": "accent"}
+      ]
+    },
+    {
+      "id": "bunk_bed",
+      "label": "Bunk bed",
+      "category": "beds",
+      "type": "furniture",
+      "dimensions_m": {"width": 1.05, "depth": 2.05, "height": 1.7},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [-0.46, 0.5, -0.47], "size": [0.08, 1.0, 0.06], "material": "wood"},
+        {"shape": "box", "center": [-0.46, 0.5, 0.47], "size": [0.08, 1.0, 0.06], "material": "wood"},
+        {"shape": "box", "center": [0.46, 0.5, -0.47], "size": [0.08, 1.0, 0.06], "material": "wood"},
+        {"shape": "box", "center": [0.46, 0.5, 0.47], "size": [0.08, 1.0, 0.06], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.15, 0.0], "size": [1.0, 0.06, 1.0], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.21, 0.0], "size": [0.88, 0.06, 0.92], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.26, -0.32], "size": [0.65, 0.04, 0.2], "material": "accent"},
+        {"shape": "box", "center": [0.0, 0.68, 0.0], "size": [1.0, 0.06, 1.0], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.74, 0.0], "size": [0.88, 0.06, 0.92], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.79, -0.32], "size": [0.65, 0.04, 0.2], "material": "accent"},
+        {"shape": "box", "center": [-0.46, 0.85, 0.0], "size": [0.06, 0.07, 0.9], "material": "wood"},
+        {"shape": "box", "center": [0.46, 0.85, -0.12], "size": [0.06, 0.07, 0.66], "material": "wood"},
+        {"shape": "box", "center": [0.46, 0.22, 0.34], "size": [0.06, 0.025, 0.22], "material": "metal"},
+        {"shape": "box", "center": [0.46, 0.36, 0.34], "size": [0.06, 0.025, 0.22], "material": "metal"},
+        {"shape": "box", "center": [0.46, 0.5, 0.34], "size": [0.06, 0.025, 0.22], "material": "metal"},
+        {"shape": "box", "center": [0.46, 0.64, 0.34], "size": [0.06, 0.025, 0.22], "material": "metal"},
+        {"shape": "box", "center": [0.46, 0.78, 0.34], "size": [0.06, 0.025, 0.22], "material": "metal"}
+      ]
+    },
+    {
+      "id": "wardrobe",
+      "label": "Double wardrobe",
+      "category": "storage",
+      "type": "furniture",
+      "dimensions_m": {"width": 1.2, "depth": 0.6, "height": 2.05},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.4639175258, 0.0], "size": [1.0, 0.9278350515, 0.95], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.9639175258, 0.0], "size": [1.0, 0.0721649485, 1.0], "material": "wood"},
+        {"shape": "box", "center": [-0.245, 0.4742268041, 0.485], "size": [0.475, 0.8865979381, 0.02], "material": "body"},
+        {"shape": "box", "center": [-0.049, 0.4948453608, 0.498], "size": [0.018, 0.1340206186, 0.004], "material": "metal"},
+        {"shape": "box", "center": [0.245, 0.4742268041, 0.485], "size": [0.475, 0.8865979381, 0.02], "material": "body"},
+        {"shape": "box", "center": [0.049, 0.4948453608, 0.498], "size": [0.018, 0.1340206186, 0.004], "material": "metal"}
+      ]
+    },
+    {
+      "id": "dresser",
+      "label": "Three-drawer dresser",
+      "category": "storage",
+      "type": "furniture",
+      "dimensions_m": {"width": 1.1, "depth": 0.48, "height": 0.83},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.4639175258, 0.0], "size": [1.0, 0.9278350515, 0.95], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.9639175258, 0.0], "size": [1.0, 0.0721649485, 1.0], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.1786941581, 0.485], "size": [0.95, 0.2697594502, 0.02], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.1786941581, 0.498], "size": [0.2, 0.0206185567, 0.004], "material": "metal"},
+        {"shape": "box", "center": [0.0, 0.4742268041, 0.485], "size": [0.95, 0.2697594502, 0.02], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.4742268041, 0.498], "size": [0.2, 0.0206185567, 0.004], "material": "metal"},
+        {"shape": "box", "center": [0.0, 0.7697594502, 0.485], "size": [0.95, 0.2697594502, 0.02], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.7697594502, 0.498], "size": [0.2, 0.0206185567, 0.004], "material": "metal"}
+      ]
+    },
+    {
+      "id": "bookcase",
+      "label": "Open bookcase",
+      "category": "storage",
+      "type": "furniture",
+      "dimensions_m": {"width": 0.9, "depth": 0.32, "height": 1.8},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [-0.46, 0.5, 0.0], "size": [0.08, 1.0, 1.0], "material": "wood"},
+        {"shape": "box", "center": [0.46, 0.5, 0.0], "size": [0.08, 1.0, 1.0], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.5, -0.47], "size": [0.84, 1.0, 0.06], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.025, 0.0], "size": [0.84, 0.05, 1.0], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.26, 0.0], "size": [0.84, 0.05, 1.0], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.5, 0.0], "size": [0.84, 0.05, 1.0], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.74, 0.0], "size": [0.84, 0.05, 1.0], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.975, 0.0], "size": [0.84, 0.05, 1.0], "material": "wood"},
+        {"shape": "box", "center": [-0.29, 0.37, 0.0], "size": [0.085, 0.15, 0.55], "material": "body"},
+        {"shape": "box", "center": [-0.15, 0.365, 0.0], "size": [0.085, 0.14, 0.55], "material": "accent"},
+        {"shape": "box", "center": [0.22, 0.86, 0.0], "size": [0.085, 0.19, 0.55], "material": "body"},
+        {"shape": "box", "center": [0.33, 0.855, 0.0], "size": [0.085, 0.18, 0.55], "material": "accent"},
+        {"shape": "box", "center": [-0.26, 0.61, 0.0], "size": [0.085, 0.15, 0.55], "material": "accent"}
+      ]
+    },
+    {
+      "id": "tv_console",
+      "label": "TV console",
+      "category": "storage",
+      "type": "furniture",
+      "dimensions_m": {"width": 1.6, "depth": 0.42, "height": 0.5},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.48, 0.0], "size": [1.0, 0.9, 0.95], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.965, 0.0], "size": [1.0, 0.07, 1.0], "material": "wood"},
+        {"shape": "box", "center": [-0.245, 0.49, 0.485], "size": [0.475, 0.86, 0.02], "material": "body"},
+        {"shape": "box", "center": [-0.049, 0.51, 0.498], "size": [0.018, 0.13, 0.004], "material": "metal"},
+        {"shape": "box", "center": [0.245, 0.49, 0.485], "size": [0.475, 0.86, 0.02], "material": "body"},
+        {"shape": "box", "center": [0.049, 0.51, 0.498], "size": [0.018, 0.13, 0.004], "material": "metal"},
+        {"shape": "box", "center": [-0.42, 0.05, -0.35], "size": [0.1, 0.1, 0.1], "material": "wood"},
+        {"shape": "box", "center": [-0.42, 0.05, 0.35], "size": [0.1, 0.1, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.05, -0.35], "size": [0.1, 0.1, 0.1], "material": "wood"},
+        {"shape": "box", "center": [0.42, 0.05, 0.35], "size": [0.1, 0.1, 0.1], "material": "wood"}
+      ]
+    },
+    {
+      "id": "nightstand",
+      "label": "Bedside cabinet",
+      "category": "storage",
+      "type": "furniture",
+      "dimensions_m": {"width": 0.48, "depth": 0.42, "height": 0.52},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.4639175258, 0.0], "size": [1.0, 0.9278350515, 0.95], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.9639175258, 0.0], "size": [1.0, 0.0721649485, 1.0], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.2525773196, 0.485], "size": [0.95, 0.4175257732, 0.02], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.2525773196, 0.498], "size": [0.2, 0.0206185567, 0.004], "material": "metal"},
+        {"shape": "box", "center": [0.0, 0.6958762887, 0.485], "size": [0.95, 0.4175257732, 0.02], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.6958762887, 0.498], "size": [0.2, 0.0206185567, 0.004], "material": "metal"}
+      ]
+    },
+    {
+      "id": "television",
+      "label": "Television",
+      "category": "storage",
+      "type": "tv",
+      "dimensions_m": {"width": 1.2, "depth": 0.24, "height": 0.82},
+      "elevation_m": 0.5,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.6, -0.16], "size": [1.0, 0.8, 0.26], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.6, -0.023], "size": [0.94, 0.72, 0.015], "material": "dark"},
+        {"shape": "box", "center": [0.0, 0.17, -0.16], "size": [0.09, 0.22, 0.14], "material": "metal"},
+        {"shape": "box", "center": [0.0, 0.04, 0.0], "size": [0.65, 0.08, 1.0], "material": "metal"}
+      ]
+    },
+    {
+      "id": "kitchen_cabinet",
+      "label": "Kitchen base cabinet",
+      "category": "kitchen",
+      "type": "furniture",
+      "dimensions_m": {"width": 0.8, "depth": 0.62, "height": 0.9},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.4639175258, 0.0], "size": [1.0, 0.9278350515, 0.95], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.9639175258, 0.0], "size": [1.0, 0.0721649485, 1.0], "material": "wood"},
+        {"shape": "box", "center": [-0.245, 0.4742268041, 0.485], "size": [0.475, 0.8865979381, 0.02], "material": "body"},
+        {"shape": "box", "center": [-0.049, 0.4948453608, 0.498], "size": [0.018, 0.1340206186, 0.004], "material": "metal"},
+        {"shape": "box", "center": [0.245, 0.4742268041, 0.485], "size": [0.475, 0.8865979381, 0.02], "material": "body"},
+        {"shape": "box", "center": [0.049, 0.4948453608, 0.498], "size": [0.018, 0.1340206186, 0.004], "material": "metal"},
+        {"shape": "box", "center": [0.0, 0.9690721649, 0.0], "size": [1.0, 0.0618556701, 1.0], "material": "accent"}
+      ]
+    },
+    {
+      "id": "kitchen_island",
+      "label": "Kitchen island",
+      "category": "kitchen",
+      "type": "furniture",
+      "dimensions_m": {"width": 1.6, "depth": 0.85, "height": 0.92},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.44, -0.08], "size": [0.86, 0.88, 0.84], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.95, 0.0], "size": [1.0, 0.1, 1.0], "material": "accent"},
+        {"shape": "box", "center": [-0.26, 0.53, 0.347], "size": [0.25, 0.65, 0.012], "material": "wood"},
+        {"shape": "box", "center": [0.02, 0.53, 0.347], "size": [0.25, 0.65, 0.012], "material": "wood"},
+        {"shape": "box", "center": [0.3, 0.53, 0.347], "size": [0.25, 0.65, 0.012], "material": "wood"}
+      ]
+    },
+    {
+      "id": "refrigerator",
+      "label": "Refrigerator",
+      "category": "kitchen",
+      "type": "appliance",
+      "dimensions_m": {"width": 0.7, "depth": 0.72, "height": 1.8},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.5, -0.0208333333], "size": [1.0, 1.0, 0.9583333333], "material": "metal"},
+        {"shape": "box", "center": [0.0, 0.68, 0.4677083333], "size": [0.97, 0.61, 0.0520833333], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.18, 0.4677083333], "size": [0.97, 0.34, 0.0520833333], "material": "body"},
+        {"shape": "box", "center": [-0.35, 0.55, 0.4979166667], "size": [0.028, 0.22, 0.0041666667], "material": "metal"},
+        {"shape": "box", "center": [-0.35, 0.23, 0.4979166667], "size": [0.028, 0.13, 0.0041666667], "material": "metal"}
+      ]
+    },
+    {
+      "id": "oven",
+      "label": "Cooker and oven",
+      "category": "kitchen",
+      "type": "appliance",
+      "dimensions_m": {"width": 0.6, "depth": 0.62, "height": 0.9},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.47, 0.0], "size": [1.0, 0.94, 0.95], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.47, 0.485], "size": [0.82, 0.56, 0.02], "material": "dark"},
+        {"shape": "box", "center": [0.0, 0.78, 0.498], "size": [0.72, 0.025, 0.004], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.97, 0.0], "size": [1.0, 0.06, 1.0], "material": "dark"},
+        {"shape": "cylinder", "center": [-0.25, 0.998, -0.24], "size": [0.3, 0.004, 0.3], "material": "metal"},
+        {"shape": "cylinder", "center": [-0.25, 0.998, 0.24], "size": [0.3, 0.004, 0.3], "material": "metal"},
+        {"shape": "cylinder", "center": [0.25, 0.998, -0.24], "size": [0.3, 0.004, 0.3], "material": "metal"},
+        {"shape": "cylinder", "center": [0.25, 0.998, 0.24], "size": [0.3, 0.004, 0.3], "material": "metal"},
+        {"shape": "box", "center": [-0.3, 0.86, 0.498], "size": [0.075, 0.055, 0.004], "material": "accent"},
+        {"shape": "box", "center": [0.0, 0.86, 0.498], "size": [0.075, 0.055, 0.004], "material": "accent"},
+        {"shape": "box", "center": [0.3, 0.86, 0.498], "size": [0.075, 0.055, 0.004], "material": "accent"}
+      ]
+    },
+    {
+      "id": "kitchen_sink",
+      "label": "Sink cabinet",
+      "category": "kitchen",
+      "type": "furniture",
+      "dimensions_m": {"width": 0.8, "depth": 0.62, "height": 1.05},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.4, 0.0], "size": [1.0, 0.8, 1.0], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.81, 0.0], "size": [0.76, 0.04, 0.62], "material": "metal"},
+        {"shape": "box", "center": [-0.445, 0.86, 0.0], "size": [0.11, 0.08, 1.0], "material": "accent"},
+        {"shape": "box", "center": [0.445, 0.86, 0.0], "size": [0.11, 0.08, 1.0], "material": "accent"},
+        {"shape": "box", "center": [0.0, 0.86, -0.43], "size": [0.78, 0.08, 0.14], "material": "accent"},
+        {"shape": "box", "center": [0.0, 0.86, 0.43], "size": [0.78, 0.08, 0.14], "material": "accent"},
+        {"shape": "cylinder", "center": [0.0, 0.94, -0.36], "size": [0.045, 0.12, 0.045], "material": "metal"},
+        {"shape": "box", "center": [0.0, 0.985, -0.25], "size": [0.045, 0.03, 0.24], "material": "metal"}
+      ]
+    },
+    {
+      "id": "washing_machine",
+      "label": "Washing machine",
+      "category": "kitchen",
+      "type": "appliance",
+      "dimensions_m": {"width": 0.6, "depth": 0.62, "height": 0.85},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.5, -0.0128205128], "size": [1.0, 1.0, 0.9743589744], "material": "white"},
+        {"shape": "box", "center": [0.0, 0.43, 0.4846153846], "size": [0.72, 0.6, 0.0205128205], "material": "metal"},
+        {"shape": "box", "center": [0.0, 0.43, 0.4979487179], "size": [0.58, 0.46, 0.0041025641], "material": "dark"},
+        {"shape": "box", "center": [-0.25, 0.86, 0.4979487179], "size": [0.3, 0.07, 0.0041025641], "material": "body"},
+        {"shape": "box", "center": [0.3, 0.86, 0.4979487179], "size": [0.09, 0.09, 0.0041025641], "material": "metal"}
+      ]
+    },
+    {
+      "id": "bathtub",
+      "label": "Freestanding bathtub",
+      "category": "bath",
+      "type": "furniture",
+      "dimensions_m": {"width": 0.76, "depth": 1.7, "height": 0.62},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.16, 0.0], "size": [0.82, 0.32, 0.87], "material": "body"},
+        {"shape": "box", "center": [-0.44, 0.59, 0.0], "size": [0.12, 0.82, 1.0], "material": "white"},
+        {"shape": "box", "center": [0.44, 0.59, 0.0], "size": [0.12, 0.82, 1.0], "material": "white"},
+        {"shape": "box", "center": [0.0, 0.59, -0.43], "size": [0.76, 0.82, 0.14], "material": "white"},
+        {"shape": "box", "center": [0.0, 0.59, 0.43], "size": [0.76, 0.82, 0.14], "material": "white"},
+        {"shape": "box", "center": [0.0, 0.38, 0.0], "size": [0.76, 0.06, 0.72], "material": "accent"}
+      ]
+    },
+    {
+      "id": "toilet",
+      "label": "Toilet",
+      "category": "bath",
+      "type": "furniture",
+      "dimensions_m": {"width": 0.4, "depth": 0.68, "height": 0.78},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.22, 0.1], "size": [0.5, 0.44, 0.55], "material": "white"},
+        {"shape": "cylinder", "center": [0.0, 0.5, 0.16], "size": [1.0, 0.23, 0.68], "material": "white"},
+        {"shape": "cylinder", "center": [0.0, 0.63, 0.16], "size": [0.96, 0.05, 0.64], "material": "body"},
+        {"shape": "cylinder", "center": [0.0, 0.66, 0.16], "size": [0.65, 0.02, 0.43], "material": "dark"},
+        {"shape": "box", "center": [0.0, 0.63, -0.34], "size": [0.88, 0.74, 0.32], "material": "white"},
+        {"shape": "box", "center": [0.0, 0.995, -0.34], "size": [0.16, 0.01, 0.08], "material": "metal"}
+      ]
+    },
+    {
+      "id": "bathroom_vanity",
+      "label": "Bathroom vanity",
+      "category": "bath",
+      "type": "furniture",
+      "dimensions_m": {"width": 0.85, "depth": 0.5, "height": 1.02},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.4, 0.0], "size": [1.0, 0.8, 1.0], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.81, 0.0], "size": [0.76, 0.04, 0.62], "material": "metal"},
+        {"shape": "box", "center": [-0.445, 0.86, 0.0], "size": [0.11, 0.08, 1.0], "material": "accent"},
+        {"shape": "box", "center": [0.445, 0.86, 0.0], "size": [0.11, 0.08, 1.0], "material": "accent"},
+        {"shape": "box", "center": [0.0, 0.86, -0.43], "size": [0.78, 0.08, 0.14], "material": "accent"},
+        {"shape": "box", "center": [0.0, 0.86, 0.43], "size": [0.78, 0.08, 0.14], "material": "accent"},
+        {"shape": "cylinder", "center": [0.0, 0.94, -0.36], "size": [0.045, 0.12, 0.045], "material": "metal"},
+        {"shape": "box", "center": [0.0, 0.985, -0.25], "size": [0.045, 0.03, 0.24], "material": "metal"}
+      ]
+    },
+    {
+      "id": "rug",
+      "label": "Rectangular rug",
+      "category": "decor",
+      "type": "furniture",
+      "dimensions_m": {"width": 2.0, "depth": 1.4, "height": 0.018},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.35, 0.0], "size": [1.0, 0.7, 1.0], "material": "accent"},
+        {"shape": "box", "center": [0.0, 0.85, 0.0], "size": [0.92, 0.3, 0.88], "material": "body"}
+      ]
+    },
+    {
+      "id": "round_rug",
+      "label": "Round rug",
+      "category": "decor",
+      "type": "furniture",
+      "dimensions_m": {"width": 1.5, "depth": 1.5, "height": 0.018},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "cylinder", "center": [0.0, 0.35, 0.0], "size": [1.0, 0.7, 1.0], "material": "accent"},
+        {"shape": "cylinder", "center": [0.0, 0.85, 0.0], "size": [0.9, 0.3, 0.9], "material": "body"}
+      ]
+    },
+    {
+      "id": "plant",
+      "label": "Potted plant",
+      "category": "decor",
+      "type": "furniture",
+      "dimensions_m": {"width": 0.7, "depth": 0.7, "height": 1.2},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "cylinder", "center": [0.0, 0.15, 0.0], "size": [0.45, 0.3, 0.703125], "material": "body"},
+        {"shape": "cylinder", "center": [0.0, 0.32, 0.0], "size": [0.06, 0.34, 0.09375], "material": "wood"},
+        {"shape": "cylinder", "center": [0.0, 0.65, 0.0], "size": [0.58, 0.34, 0.90625], "material": "foliage"},
+        {"shape": "cylinder", "center": [-0.23, 0.57, -0.078125], "size": [0.54, 0.22, 0.84375], "material": "foliage"},
+        {"shape": "cylinder", "center": [0.23, 0.69, 0.078125], "size": [0.54, 0.25, 0.84375], "material": "foliage"},
+        {"shape": "cylinder", "center": [0.0, 0.9, 0.0], "size": [0.43, 0.2, 0.671875], "material": "foliage"}
+      ]
+    },
+    {
+      "id": "wall_art",
+      "label": "Framed wall art",
+      "category": "decor",
+      "type": "furniture",
+      "dimensions_m": {"width": 0.8, "depth": 0.05, "height": 0.6},
+      "elevation_m": 1.3,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.5, -0.0945945946], "size": [1.0, 1.0, 0.8108108108], "material": "wood"},
+        {"shape": "box", "center": [0.0, 0.5, 0.3783783784], "size": [0.85, 0.85, 0.1351351351], "material": "accent"},
+        {"shape": "box", "center": [-0.17, 0.42, 0.472972973], "size": [0.27, 0.38, 0.0540540541], "material": "body"},
+        {"shape": "box", "center": [0.18, 0.64, 0.472972973], "size": [0.3, 0.25, 0.0540540541], "material": "metal"}
+      ]
+    },
+    {
+      "id": "mirror",
+      "label": "Wall mirror",
+      "category": "decor",
+      "type": "furniture",
+      "dimensions_m": {"width": 0.65, "depth": 0.055, "height": 0.95},
+      "elevation_m": 1.1,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "box", "center": [0.0, 0.5, -0.0714285714], "size": [1.0, 1.0, 0.8571428571], "material": "body"},
+        {"shape": "box", "center": [0.0, 0.5, 0.4285714286], "size": [0.85, 0.85, 0.1428571429], "material": "glass"}
+      ]
+    },
+    {
+      "id": "floor_lamp",
+      "label": "Floor lamp",
+      "category": "lighting",
+      "type": "lamp",
+      "dimensions_m": {"width": 0.42, "depth": 0.42, "height": 1.55},
+      "elevation_m": 0,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "cylinder", "center": [0.0, 0.04, 0.0], "size": [0.6, 0.08, 0.6], "material": "metal"},
+        {"shape": "cylinder", "center": [0.0, 0.48, 0.0], "size": [0.06, 0.88, 0.06], "material": "metal"},
+        {"shape": "cylinder", "center": [0.0, 0.87, 0.0], "size": [1.0, 0.26, 1.0], "material": "body"},
+        {"shape": "cylinder", "center": [0.0, 0.743, 0.0], "size": [0.88, 0.006, 0.88], "material": "accent"}
+      ]
+    },
+    {
+      "id": "table_lamp",
+      "label": "Table lamp",
+      "category": "lighting",
+      "type": "lamp",
+      "dimensions_m": {"width": 0.3, "depth": 0.3, "height": 0.43},
+      "elevation_m": 0.75,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "cylinder", "center": [0.0, 0.045, 0.0], "size": [0.6, 0.09, 0.6], "material": "metal"},
+        {"shape": "cylinder", "center": [0.0, 0.32, 0.0], "size": [0.22, 0.55, 0.22], "material": "wood"},
+        {"shape": "cylinder", "center": [0.0, 0.77, 0.0], "size": [1.0, 0.46, 1.0], "material": "body"}
+      ]
+    },
+    {
+      "id": "pendant",
+      "label": "Pendant light",
+      "category": "lighting",
+      "type": "chandelier",
+      "dimensions_m": {"width": 0.5, "depth": 0.5, "height": 0.65},
+      "elevation_m": 1.95,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "cylinder", "center": [0.0, 0.96, 0.0], "size": [0.2, 0.08, 0.2], "material": "metal"},
+        {"shape": "cylinder", "center": [0.0, 0.69, 0.0], "size": [0.025, 0.5, 0.025], "material": "metal"},
+        {"shape": "cylinder", "center": [0.0, 0.24, 0.0], "size": [1.0, 0.48, 1.0], "material": "body"},
+        {"shape": "cylinder", "center": [0.0, 0.006, 0.0], "size": [0.88, 0.012, 0.88], "material": "accent"}
+      ]
+    },
+    {
+      "id": "ceiling_light",
+      "label": "Flush ceiling light",
+      "category": "lighting",
+      "type": "chandelier",
+      "dimensions_m": {"width": 0.4, "depth": 0.4, "height": 0.14},
+      "elevation_m": 2.5,
+      "default_style": "contemporary",
+      "parts": [
+        {"shape": "cylinder", "center": [0.0, 0.84, 0.0], "size": [0.84, 0.32, 0.84], "material": "metal"},
+        {"shape": "cylinder", "center": [0.0, 0.34, 0.0], "size": [1.0, 0.68, 1.0], "material": "body"}
+      ]
+    }
+  ]
+}

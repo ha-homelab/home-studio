@@ -23,6 +23,7 @@ import tempfile
 
 from geometry import MATERIALS, create_geometry, floor_context
 from exporters import export_models
+from planner.furniture import build_furniture_asset, validate_furniture_appearance
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "dist" / "planner-project"
@@ -262,11 +263,16 @@ def validate_project(project):
         room_ids = {room["id"] for room in floor["rooms"]}
         for ii, item in enumerate(floor["items"]):
             ip = f"{path}.items[{ii}]"
-            fields(item, {"id", "name", "type", "room", "position_m", "dimensions_m", "rotation_deg", "entity_id", "notes"}, ip)
+            fields(item, {"id", "name", "type", "room", "position_m", "dimensions_m", "rotation_deg", "entity_id", "notes"}, ip,
+                   {"model_id", "style_id", "color"})
             text(item["name"], ip + ".name", 100)
             text(item["type"], ip + ".type", 30)
             if item["type"] not in KINDS:
                 fail(ip + ".type", "unsupported inventory type; choose " + ", ".join(sorted(KINDS)))
+            try:
+                validate_furniture_appearance(item)
+            except ValueError as error:
+                fail(ip, str(error))
             identifier(item["room"], ip + ".room")
             if item["room"] not in room_ids:
                 fail(ip + ".room", "unknown room ID " + item["room"])
@@ -373,11 +379,26 @@ def make_floor(project, floor, next_floor):
             openings.append({**opening, "start_m": [start[i] + a * direction[i] for i in (0, 1)], "end_m": [start[i] + b * direction[i] for i in (0, 1)], "thickness_m": wall["thickness_m"]})
             cursor = b
         segment(f"wall_{wall['id']}_solid_{len(cuts)}", cursor, length, 0, floor["height_m"])
+    materials, object_assets = dict(MATERIALS), {}
     for item in floor["items"]:
         p, d = item["position_m"], item["dimensions_m"]
         angle = math.radians(item["rotation_deg"])
-        box(g, "item_" + item["id"], [p["x"], p["z"]], [math.cos(angle), -math.sin(angle)], -d["width"] / 2, d["width"] / 2,
-            d["depth"], p["y"], p["y"] + d["height"], "dark" if item["type"] == "tv" else "added", "inventory", item_id=item["id"], entity_id=item["entity_id"])
+        asset = build_furniture_asset(item)
+        if asset is None:
+            box(g, "item_" + item["id"], [p["x"], p["z"]], [math.cos(angle), -math.sin(angle)], -d["width"] / 2, d["width"] / 2,
+                d["depth"], p["y"], p["y"] + d["height"], "dark" if item["type"] == "tv" else "added", "inventory", item_id=item["id"], entity_id=item["entity_id"])
+            continue
+        object_assets[item["id"]] = {"model_id": item["model_id"], "meshes": asset["meshes"]}
+        materials.update(asset["materials"])
+        cosine, sine = math.cos(angle), math.sin(angle)
+        for part in asset["meshes"]:
+            vertices = []
+            for x, y, z in part["vertices"]:
+                x, z = x * d["width"], z * d["depth"]
+                vertices.append([p["x"] + cosine * x + sine * z, p["y"] + y * d["height"], p["z"] - sine * x + cosine * z])
+            faces = [part["indices"][index:index + 3] for index in range(0, len(part["indices"]), 3)]
+            g.mesh("item_" + item["id"] + "_" + part["name"], vertices, faces, part["material"], "inventory",
+                   item_id=item["id"], entity_id=item["entity_id"], model_id=item["model_id"])
     points = [p for mesh in g.meshes for p in mesh["vertices"]]
     minx, maxx = min(p[0] for p in points), max(p[0] for p in points)
     minz, maxz = min(p[2] for p in points), max(p[2] for p in points)
@@ -404,7 +425,7 @@ def make_floor(project, floor, next_floor):
                 ceiling_height_m=floor["height_m"], elevation_m=floor["elevation_m"], origin="Floor-local metric coordinates; Y=0 at finished floor",
                 calibration=dict(reference_size=size, source_size=size, x_anchors=[[margin, minx], [margin + width * scale, maxx]], z_anchors=[[margin, minz], [margin + depth * scale, maxz]]),
                 dimensions_m=dict(width=width, depth=depth, height=floor["height_m"]), bounds_m=dict(min_x=minx, min_z=minz, max_x=maxx, max_z=maxz),
-                dimension_checks=[], rooms=rooms, materials=dict(MATERIALS), meshes=g.meshes, openings=openings, inventory=floor["items"], object_assets={},
+                dimension_checks=[], rooms=rooms, materials=materials, meshes=g.meshes, openings=openings, inventory=floor["items"], object_assets=object_assets,
                 initial_room=None, next_floor=next_floor, exterior_rooms=[r["id"] for r in floor["rooms"] if r["material"] == "deck"], exports=["glb", "obj", "mtl", "dae", "usda"])
     for name in ("room_activity", "receiver_activity", "motion_paths", "motion_sources", "motion_zones", "cover_windows", "control_anchors", "control_groups", "room_views", "room_display_names", "room_display_ids", "camera_entities", "tv_entities"):
         data[name] = {}
@@ -421,7 +442,27 @@ def make_floor(project, floor, next_floor):
         svg.append(f'<path d="M{a[0]:.3f},{a[1]:.3f} L{b[0]:.3f},{b[1]:.3f}" stroke="#f7f5ef" stroke-width="{opening["thickness_m"] * scale + 1:.3f}"/>')
         if opening["type"] == "window":
             svg.append(f'<path d="M{a[0]:.3f},{a[1]:.3f} L{b[0]:.3f},{b[1]:.3f}" stroke="#53a5bd" stroke-width="3"/>')
-    svg.append("</svg>")
+    # Top-facing furniture surfaces produce the same footprints and finishes in
+    # the portable plan as in the 3D scene, including rotation and raised items.
+    tops = []
+    for mesh in g.meshes:
+        if mesh["kind"] != "inventory":
+            continue
+        for index in range(0, len(mesh["indices"]), 3):
+            indices = mesh["indices"][index:index + 3]
+            if mesh["normals"][indices[0]][1] <= .01:
+                continue
+            triangle = [mesh["vertices"][j] for j in indices]
+            tops.append((sum(v[1] for v in triangle) / 3, mesh["material"], triangle))
+    svg.append('<g id="furniture">')
+    for _, material, triangle in sorted(tops, key=lambda entry: entry[0]):
+        if material.startswith("furniture_"):
+            color = "#" + material[len("furniture_"):]
+        else:
+            color = "#" + "".join(f"{round(channel * 255):02x}" for channel in materials[material][:3])
+        coords = " ".join(f"{x:.3f},{z:.3f}" for x, z in (pixel([v[0], v[2]]) for v in triangle))
+        svg.append(f'<polygon points="{coords}" fill="{color}"/>')
+    svg.append("</g></svg>")
     return data, "".join(svg)
 
 
@@ -431,6 +472,9 @@ def json_text(value, pretty=False):
 
 def render_viewer(data, svg):
     template = (ROOT / "viewer.template.html").read_text()
+    # Saved model downloads represent the built project. The editable viewer
+    # must not leave those static furniture silhouettes behind after a move.
+    viewer_plan = re.sub(r'<g id="furniture">.*?</g>', '', svg, flags=re.S)
     replacements = {
         "__VIEWER_JS__": (ROOT / "viewer.js").read_text(),
         "__HOME_HTML__": (ROOT / "home-view.html").read_text(),
@@ -439,7 +483,7 @@ def render_viewer(data, svg):
         "__LIGHT_STATE_JS__": (ROOT / "light-state.js").read_text(),
         "__ROOM_LIGHTING_JS__": (ROOT / "room-lighting.js").read_text(),
         "__THREE_B64__": base64.b64encode((ROOT / "vendor/three.module.min.js").read_bytes()).decode(),
-        "__PLAN_MIME__": "image/svg+xml", "__PLAN_DATA__": base64.b64encode(svg.encode()).decode(),
+        "__PLAN_MIME__": "image/svg+xml", "__PLAN_DATA__": base64.b64encode(viewer_plan.encode()).decode(),
         "__PLAN_WIDTH__": str(data["calibration"]["reference_size"][0]), "__PLAN_HEIGHT__": str(data["calibration"]["reference_size"][1]),
         "__MODEL_STEM__": data["id"], "__FLOOR_TITLE__": html.escape(data["title"]),
         "__OTHER_URL__": data["next_floor"]["url"] if data["next_floor"] else "#",

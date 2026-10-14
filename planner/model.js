@@ -1,4 +1,5 @@
 // Pure, metric project operations shared by the editor and its checks.
+import { validateFurnitureAppearance } from './furniture.js';
 export const LIMITS = Object.freeze({ floors: 8, rooms: 64, walls: 256, openings: 256, items: 256, points: 64, bytes: 2_000_000 });
 const EPS = 1e-8;
 const ID = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
@@ -86,11 +87,11 @@ export function demoProject() {
     { id: 'terrace_door', wall_id: 'wall_3', type: 'passage', offset_m: 1, width_m: 3.4, sill_m: 0, head_m: 2.3 },
   ];
   f.items = [
-    { id: 'sofa', name: 'Sofa', type: 'furniture', room: 'living', position_m: { x: 1.5, y: 0, z: 2.2 }, dimensions_m: { width: 2.2, depth: 0.85, height: 0.75 }, rotation_deg: 90, entity_id: '', notes: '' },
-    { id: 'table', name: 'Dining table', type: 'furniture', room: 'living', position_m: { x: 4.2, y: 0, z: 3.4 }, dimensions_m: { width: 1.6, depth: 0.9, height: 0.75 }, rotation_deg: 0, entity_id: '', notes: '' },
-    { id: 'light', name: 'Pendant', type: 'chandelier', room: 'living', position_m: { x: 4.2, y: 2.15, z: 3.4 }, dimensions_m: { width: 0.45, depth: 0.45, height: 0.4 }, rotation_deg: 0, entity_id: 'light.demo_dining', notes: 'Example entity only. Replace with your own Home Assistant entity.' },
-    { id: 'desk', name: 'Desk', type: 'furniture', room: 'studio', position_m: { x: 8.5, y: 0, z: 1.5 }, dimensions_m: { width: 1.4, depth: 0.7, height: 0.75 }, rotation_deg: 90, entity_id: '', notes: '' },
-    { id: 'desk_lamp', name: 'Desk lamp', type: 'lamp', room: 'studio', position_m: { x: 8.5, y: 0.75, z: 1.3 }, dimensions_m: { width: 0.25, depth: 0.25, height: 0.4 }, rotation_deg: 0, entity_id: 'light.demo_studio', notes: '' },
+    { id: 'sofa', name: 'Sofa', type: 'furniture', model_id: 'sofa_3', style_id: 'contemporary', room: 'living', position_m: { x: 1.5, y: 0, z: 2.2 }, dimensions_m: { width: 2.2, depth: 0.85, height: 0.75 }, rotation_deg: 90, entity_id: '', notes: '' },
+    { id: 'table', name: 'Dining table', type: 'furniture', model_id: 'dining_table', style_id: 'warm_wood', room: 'living', position_m: { x: 4.2, y: 0, z: 3.4 }, dimensions_m: { width: 1.6, depth: 0.9, height: 0.75 }, rotation_deg: 0, entity_id: '', notes: '' },
+    { id: 'light', name: 'Pendant', type: 'chandelier', model_id: 'pendant', style_id: 'scandinavian', room: 'living', position_m: { x: 4.2, y: 2.15, z: 3.4 }, dimensions_m: { width: 0.45, depth: 0.45, height: 0.4 }, rotation_deg: 0, entity_id: 'light.demo_dining', notes: 'Example entity only. Replace with your own Home Assistant entity.' },
+    { id: 'desk', name: 'Desk', type: 'furniture', model_id: 'desk', style_id: 'warm_wood', room: 'studio', position_m: { x: 8.5, y: 0, z: 1.5 }, dimensions_m: { width: 1.4, depth: 0.7, height: 0.75 }, rotation_deg: 90, entity_id: '', notes: '' },
+    { id: 'desk_lamp', name: 'Desk lamp', type: 'lamp', model_id: 'table_lamp', style_id: 'monochrome', room: 'studio', position_m: { x: 8.5, y: 0.75, z: 1.3 }, dimensions_m: { width: 0.25, depth: 0.25, height: 0.4 }, rotation_deg: 0, entity_id: 'light.demo_studio', notes: '' },
   ];
   return p;
 }
@@ -165,8 +166,9 @@ export function validateProject(project, { complete = false } = {}) {
       if (a.wall_id === b.wall_id && Math.min(a.offset_m + a.width_m, b.offset_m + b.width_m) > Math.max(a.offset_m, b.offset_m) + EPS) fail('Openings on the same wall cannot overlap.');
     }
     for (const item of f.items) {
-      fields(item, ['id', 'name', 'type', 'room', 'position_m', 'dimensions_m', 'rotation_deg', 'entity_id', 'notes'], 'Item'); id(item.room, ID, 'Item room');
+      fields(item, ['id', 'name', 'type', 'room', 'position_m', 'dimensions_m', 'rotation_deg', 'entity_id', 'notes'], 'Item', ['model_id', 'style_id', 'color']); id(item.room, ID, 'Item room');
       string(item.name, 100, 'Item name'); if (!ITEM_TYPES.includes(item.type)) fail('Unknown item type.');
+      validateFurnitureAppearance(item);
       if (!f.rooms.some(r => r.id === item.room)) fail(`${item.name}: choose a room on this floor.`);
       fields(item.position_m, ['x', 'y', 'z'], 'Item position'); fields(item.dimensions_m, ['width', 'depth', 'height'], 'Item dimensions');
       number(item.position_m.x, -100, 100, 'Item x'); number(item.position_m.z, -100, 100, 'Item z'); number(item.position_m.y, 0, f.height_m, 'Item elevation');
@@ -187,7 +189,13 @@ export function wallPieces(wall, openings, height) {
   return pieces;
 }
 export function floorBounds(floor) {
-  const points = [...floor.rooms.flatMap(r => r.polygon), ...floor.walls.flatMap(w => [w.start, w.end]), ...floor.items.flatMap(i => [[i.position_m.x - i.dimensions_m.width / 2, i.position_m.z - i.dimensions_m.depth / 2], [i.position_m.x + i.dimensions_m.width / 2, i.position_m.z + i.dimensions_m.depth / 2]])];
+  const points = [...floor.rooms.flatMap(r => r.polygon), ...floor.walls.flatMap(w => [w.start, w.end]), ...floor.items.flatMap(item => {
+    const angle = item.rotation_deg * Math.PI / 180, cosine = Math.cos(angle), sine = Math.sin(angle);
+    return [-1, 1].flatMap(sx => [-1, 1].map(sz => {
+      const x = sx * item.dimensions_m.width / 2, z = sz * item.dimensions_m.depth / 2;
+      return [item.position_m.x + cosine * x + sine * z, item.position_m.z - sine * x + cosine * z];
+    }));
+  })];
   if (!points.length) return { minX: -1, maxX: 11, minZ: -1, maxZ: 8 };
   return { minX: Math.min(...points.map(p => p[0])), maxX: Math.max(...points.map(p => p[0])), minZ: Math.min(...points.map(p => p[1])), maxZ: Math.max(...points.map(p => p[1])) };
 }
