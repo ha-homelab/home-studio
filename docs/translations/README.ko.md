@@ -17,7 +17,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 영문 설치 안내에는 백업, Home Assistant OS, 설정 경로, 재시작 방법이 설명되어 있습니다. 브라우저 편집기 자체는 Home Assistant에 연결하거나 기기를 제어하지 않습니다.
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=ko) · [README](../../README.md) · [i18n](../i18n.md)
 
 집의 평면도와 기기 엔터티 ID는 개인 정보일 수 있습니다. 공개 예시에는 가상의 집을 사용하세요.
 

@@ -79,3 +79,21 @@
 @media(max-width:600px){#homeSignalRegions{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 .telemetry-preview dl>div[data-format="status"]{grid-column:1/-1}
+
+/* Language changes affect control layout, never world or canvas coordinates. */
+.sr{left:auto;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.viewer-language-label{display:flex;align-items:center;gap:6px;font-size:11px}
+.viewer-language-label select{width:auto;max-width:160px;min-width:90px}
+#homeView .viewer-language-label{display:flex;gap:6px}
+#homeStage,#plan,#view3d,.home-zoom,.zoom-controls{direction:ltr}
+#homeStage .home-device-name,#homeStage .home-room-label{unicode-bidi:plaintext}
+#homeView .home-device,#homeView .tv-preview-details,#homeActivityRooms button,#homeActivitySources button,#homeSignalRegions button{text-align:start}
+:root[dir="rtl"] .toolbar label{margin-left:0;margin-inline-start:7px}
+:root[dir="rtl"] aside{border-left:0;border-inline-start:1px solid #d4d6ce}
+:root[dir="rtl"] .note{border-left:0;border-inline-start:2px solid #aa8051;padding-left:0;padding-inline-start:10px}
+:root[dir="rtl"] .home-controls{border-left:0;border-inline-start:1px solid var(--line);padding:12px 24px 12px 0}
+:root[dir="rtl"] #homeOtherFloor{margin-left:0;margin-inline-start:auto}
+:root[dir="rtl"] :is(#curtainDialog,#moduleDialog) .curtain-dismiss{right:auto;inset-inline-end:12px}
+:root[dir="rtl"] #curtainRecovery ol{padding-left:0;padding-inline-start:22px}
+@media(max-width:950px){:root[dir="rtl"] .home-controls{border-inline-start:0;padding:12px 0 0}:root[dir="rtl"] #homeOtherFloor{margin-inline-start:0}:root[dir="rtl"] #homeConnection{margin-left:0;margin-inline-start:auto}}
+@media(max-width:850px){header{flex-wrap:wrap}:root[dir="rtl"] aside{border-inline-start:0}.viewer-language-label select{max-width:130px}}

@@ -17,7 +17,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 คู่มือติดตั้งภาษาอังกฤษอธิบายการสำรองข้อมูล Home Assistant OS ตำแหน่งการตั้งค่า และการเริ่มระบบใหม่ ตัวแก้ไขในเบราว์เซอร์ไม่ได้เชื่อมต่อกับ Home Assistant หรือควบคุมอุปกรณ์โดยตรง
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=th) · [README](../../README.md) · [i18n](../i18n.md)
 
 แปลนบ้านและ ID เอนทิตีของอุปกรณ์อาจเป็นข้อมูลส่วนตัว ควรใช้บ้านสมมติเป็นตัวอย่างที่เผยแพร่ต่อสาธารณะ
 

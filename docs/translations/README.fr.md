@@ -17,7 +17,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 Le guide d’installation en anglais explique les sauvegardes, Home Assistant OS, le chemin de configuration et le redémarrage. L’éditeur web ne se connecte pas lui-même à Home Assistant et ne commande aucun appareil.
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=fr) · [README](../../README.md) · [i18n](../i18n.md)
 
 Votre plan et les identifiants d’appareils peuvent être confidentiels. Utilisez un logement fictif pour les exemples publics.
 

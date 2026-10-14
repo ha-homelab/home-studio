@@ -17,7 +17,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 英語のインストールガイドには、バックアップ、Home Assistant OS、設定フォルダー、再起動の手順があります。ブラウザーのエディター自体はHome Assistantに接続せず、機器を操作しません。
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=ja) · [README](../../README.md) · [i18n](../i18n.md)
 
 間取りや機器のエンティティIDは個人情報に関わる場合があります。公開する例には架空の家を使ってください。
 

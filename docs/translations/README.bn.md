@@ -17,7 +17,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 ইংরেজি ইনস্টলেশন গাইডে ব্যাকআপ, Home Assistant OS, কনফিগারেশনের পথ ও পুনরায় চালু করার পদ্ধতি আছে। ব্রাউজার সম্পাদক নিজে Home Assistant-এ সংযুক্ত হয় না বা ডিভাইস নিয়ন্ত্রণ করে না।
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=bn) · [README](../../README.md) · [i18n](../i18n.md)
 
 আপনার বাড়ির নকশা ও ডিভাইস ID ব্যক্তিগত হতে পারে। প্রকাশ্য উদাহরণে কাল্পনিক বাড়ি ব্যবহার করুন।
 

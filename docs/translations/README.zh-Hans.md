@@ -17,7 +17,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 英文安装指南介绍了备份、Home Assistant OS、配置路径和重启方法。浏览器编辑器本身不会连接 Home Assistant，也不会控制设备。
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=zh-Hans) · [README](../../README.md) · [i18n](../i18n.md)
 
 家庭平面图和设备实体 ID 可能涉及隐私。公开分享时请使用虚构的房屋示例。
 

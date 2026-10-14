@@ -17,7 +17,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 अंग्रेज़ी इंस्टॉलेशन गाइड में बैकअप, Home Assistant OS, कॉन्फ़िगरेशन का पथ और रीस्टार्ट समझाए गए हैं। ब्राउज़र संपादक स्वयं Home Assistant से नहीं जुड़ता और उपकरणों को नियंत्रित नहीं करता।
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=hi) · [README](../../README.md) · [i18n](../i18n.md)
 
 आपके घर का नक्शा और उपकरणों के ID निजी हो सकते हैं। सार्वजनिक उदाहरणों के लिए काल्पनिक घर इस्तेमाल करें।
 

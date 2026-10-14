@@ -1,4 +1,14 @@
 /** Native HA host. Tokens stay outside the sandbox. */
+// Kept in parity with viewer-locales/index.json by the language contract test.
+const viewerLanguages = ['en','ar','bn','cs','de','es','fa','fr','he','hi','id','it','ja','ko','nl','pl','pt','ru','th','tr','uk','vi','zh-Hans','zh-Hant'];
+function resolveViewerLanguage(value) {
+  if (typeof value !== 'string') return null;
+  const code = value.trim().replaceAll('_', '-').toLowerCase();
+  const exact = viewerLanguages.find(language => language.toLowerCase() === code);
+  if (exact) return exact;
+  if (/^zh(?:-|$)/.test(code)) return /(?:^|-)(?:hant|tw|hk|mo)(?:-|$)/.test(code) ? 'zh-Hant' : 'zh-Hans';
+  return viewerLanguages.includes(code.split('-')[0]) ? code.split('-')[0] : null;
+}
 function projectAssumedZoneActivity(id, state, attributes, configuration) {
   if(!configuration?.sensor||id!==configuration.sensor||attributes.restored)return {};
   if(state!=='active'){
@@ -66,6 +76,8 @@ class HomeFloorplanPanel extends HTMLElement {
     this.curtains = {memory:{},power:{},checks:{},profiles:{},boot_seconds:50};
     this.viewPreferences = {sidebarCollapsed:false};
     try { this.viewPreferences.sidebarCollapsed=localStorage.getItem('home-floorplan:sidebar-collapsed')==='true'; } catch {}
+    try { this.explicitLanguage=resolveViewerLanguage(localStorage.getItem('home-studio.language.v1')); } catch {}
+    if (this.explicitLanguage) this.viewPreferences.language=this.explicitLanguage;
     this.$('menu').onclick = () => this.dispatchEvent(new CustomEvent('hass-toggle-menu', {bubbles:true, composed:true}));
     this.$('retry').onclick = () => {
       if (this.pending) return this.notice('Wait for the current save to finish.', true);
@@ -85,6 +97,12 @@ class HomeFloorplanPanel extends HTMLElement {
   }
   set hass(value) {
     this._hass = value;
+    const requestedLanguage=value?.locale?.language || value?.language;
+    const language=this.explicitLanguage || (typeof requestedLanguage==='string' && requestedLanguage.trim() ? resolveViewerLanguage(requestedLanguage) || 'en' : null);
+    if (language && language!==this.viewPreferences.language) {
+      this.viewPreferences.language=language;
+      this.port?.postMessage({type:'view_preferences',language});
+    }
     if (!this.started && this.isConnected) { this.started = true; this.loadFloor(); }
     this.publishEntityStates();
   }
@@ -320,9 +338,15 @@ class HomeFloorplanPanel extends HTMLElement {
       this.assumedActivity=sensor(message.assumed_activity?.sensor)?message.assumed_activity:null;
       this.publishEntityStates();
     } else if (message.type === 'view_preferences') {
-      if(typeof message.sidebarCollapsed!=='boolean')return;
-      this.viewPreferences.sidebarCollapsed=message.sidebarCollapsed;
-      try {localStorage.setItem('home-floorplan:sidebar-collapsed',String(message.sidebarCollapsed));} catch {}
+      if(typeof message.sidebarCollapsed==='boolean') {
+        this.viewPreferences.sidebarCollapsed=message.sidebarCollapsed;
+        try {localStorage.setItem('home-floorplan:sidebar-collapsed',String(message.sidebarCollapsed));} catch {}
+      }
+      // Accept only advertised canonical codes from the established MessagePort.
+      if(viewerLanguages.includes(message.language)) {
+        this.viewPreferences.language=this.explicitLanguage=message.language;
+        try {localStorage.setItem('home-studio.language.v1',message.language);} catch {}
+      }
     } else if (message.type === 'save') {
       const floor = this.floor;
       this.pending++;

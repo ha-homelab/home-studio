@@ -19,7 +19,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 يوضح دليل التثبيت باللغة الإنجليزية النسخ الاحتياطي وHome Assistant OS ومسار الإعدادات وإعادة التشغيل. محرر المتصفح نفسه لا يتصل بـHome Assistant ولا يتحكم بالأجهزة.
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=ar) · [README](../../README.md) · [i18n](../i18n.md)
 
 قد يكون مخطط منزلك ومعرّفات الأجهزة معلومات خاصة. استخدم منزلًا خياليًا للأمثلة المنشورة للعامة.
 

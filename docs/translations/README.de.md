@@ -17,7 +17,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 Die englische Installationsanleitung erklärt Sicherungen, Home Assistant OS, den Konfigurationspfad und den Neustart. Der Browser-Editor selbst verbindet sich nicht mit Home Assistant und steuert keine Geräte.
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=de) · [README](../../README.md) · [i18n](../i18n.md)
 
 Dein Grundriss und Gerätekennungen können vertraulich sein. Teile öffentliche Beispiele mit einem erfundenen Zuhause.
 

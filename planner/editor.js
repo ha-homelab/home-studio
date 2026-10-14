@@ -1,3 +1,4 @@
+import './language-links.js';
 import { formatValidationError } from './validation.js';
 import { t, LOCALES, initI18n, setLocale, getLocale, onLocaleChange, translateStatic } from './i18n.js';
 
@@ -782,6 +783,15 @@ onLocaleChange(({ loaded }) => {
   renderLocale();
   if (!loaded) status(() => t('Language could not be loaded. English is shown instead.'), true);
 });
-$('language-select').addEventListener('change', event => { void setLocale(event.target.value); });
+$('language-select').addEventListener('change', async event => {
+  const result = await setLocale(event.target.value);
+  if (result.applied) {
+    // A manual choice replaces the language in a deep link for the next reload.
+    try {
+      const url = new URL(location.href); url.searchParams.set('lang', result.locale);
+      window.history.replaceState(window.history.state, '', url);
+    } catch { /* Restricted hosts may deny history without blocking language changes. */ }
+  }
+});
 renderLocale();
 if (!initialLocale.loaded) status(() => t('Language could not be loaded. English is shown instead.'), true);

@@ -1,17 +1,18 @@
-<section id="homeView" aria-label="Home controls" hidden>
+<section id="homeView" aria-label="Home controls" hidden data-viewer-i18n-attrs='{&quot;aria-label&quot;: &quot;Home controls&quot;}'>
   <div class="home-layout">
-    <section class="home-map" aria-label="Interactive floor plan">
+    <section class="home-map" aria-label="Interactive floor plan" data-viewer-i18n-attrs='{&quot;aria-label&quot;: &quot;Interactive floor plan&quot;}'>
       <div class="home-map-tools">
-        <label for="homeRoom">View</label><select id="homeRoom"><option value="">Whole floor</option></select>
-        <div class="home-zoom" role="group" aria-label="Plan zoom"><button id="homeZoomOut" aria-label="Zoom out">−</button><button id="homeZoomReset" aria-label="Reset zoom and pan">100%</button><button id="homeZoomIn" aria-label="Zoom in">+</button></div>
+        <label for="homeRoom" data-viewer-i18n="View">View</label><select id="homeRoom"><option value="" data-viewer-i18n="Whole floor">Whole floor</option></select>
+        <div class="home-zoom" role="group" aria-label="Plan zoom" data-viewer-i18n-attrs='{&quot;aria-label&quot;: &quot;Plan zoom&quot;}'><button id="homeZoomOut" aria-label="Zoom out" data-viewer-i18n-attrs='{&quot;aria-label&quot;: &quot;Zoom out&quot;}'>−</button><button id="homeZoomReset" aria-label="Reset zoom and pan" data-viewer-i18n-attrs='{&quot;aria-label&quot;: &quot;Reset zoom and pan&quot;}'>100%</button><button id="homeZoomIn" aria-label="Zoom in" data-viewer-i18n-attrs='{&quot;aria-label&quot;: &quot;Zoom in&quot;}'>+</button></div>
         <button id="homeOtherFloor">__OTHER_TITLE__</button>
-        <button id="homeFloorContext" aria-pressed="true" title="Show a muted lower floor behind this floor" hidden>Lower floor outline</button>
+        <button id="homeFloorContext" aria-pressed="true" title="Show a muted lower floor behind this floor" hidden data-viewer-i18n="Lower floor outline">Lower floor outline</button>
         <button id="homeToggleControls" aria-controls="homeControls" aria-expanded="true">Hide controls</button>
-        <button id="homeToggleActivity" aria-controls="homeActivity" aria-expanded="false">Activity</button>
-        <span id="homeConnection" role="status">Connecting…</span><button id="editLayout">Edit layout</button>
+        <button id="homeToggleActivity" aria-controls="homeActivity" aria-expanded="false" data-viewer-i18n="Activity">Activity</button>
+        <label class="viewer-language-label" for="homeLanguage"><span data-viewer-i18n="Language">Language</span><select id="homeLanguage" data-viewer-language></select></label>
+        <span id="homeConnection" role="status">Connecting…</span><button id="editLayout" data-viewer-i18n="Edit layout">Edit layout</button>
       </div>
       <section id="homeActivity" aria-label="Room activity" hidden>
-        <div class="activity-navigation"><button id="homeActivityAll" aria-pressed="true">Whole floor</button><div id="homeActivityRooms" aria-label="Focus a room"></div></div>
+        <div class="activity-navigation"><button id="homeActivityAll" aria-pressed="true" data-viewer-i18n="Whole floor">Whole floor</button><div id="homeActivityRooms" aria-label="Focus a room"></div></div>
         <p id="homeActivitySummary" role="status"></p>
         <div id="homeActivitySources" aria-label="Sources for selected room"></div>
         <p class="activity-hint">No detection does not mean an empty room. Signal coverage is not yet calibrated. Show on plan locates the device, not a person.</p>
@@ -25,10 +26,10 @@
       <div id="homeStage"><div id="homeLabels"></div><div id="homeMotion" aria-hidden="true"></div><div id="homeMarkers"></div><svg id="homeMediaLinks" aria-hidden="true"></svg><div id="homeCameras"></div><div id="homeTVs" aria-label="TV previews"></div><div id="homeTelemetry"></div></div>
       <p id="homeFeedback" role="status" aria-live="polite" hidden></p>
     </section>
-    <section id="homeControls" class="home-controls" aria-label="Bound devices">
-      <div class="home-controls-heading"><h2>Lights & activity</h2><p id="homeSummary"></p></div>
+    <section id="homeControls" class="home-controls" aria-label="Bound devices" data-viewer-i18n-attrs='{&quot;aria-label&quot;: &quot;Bound devices&quot;}'>
+      <div class="home-controls-heading"><h2 data-viewer-i18n="Lights &amp; activity">Lights & activity</h2><p id="homeSummary"></p></div>
       <div id="homeDeviceList"></div>
-      <p id="homeEmpty" hidden>No devices are linked in this view. Use Edit layout to link an existing Home Assistant entity.</p>
+      <p id="homeEmpty" hidden data-viewer-i18n="No devices are linked in this view. Use Edit layout to link an existing Home Assistant entity.">No devices are linked in this view. Use Edit layout to link an existing Home Assistant entity.</p>
     </section>
   </div>
   <img id="tvPreview" alt="Current TV picture" width="480" height="270" hidden>
@@ -40,14 +41,14 @@
     <details><summary>Technical details</summary><pre id="moduleDetails"></pre></details>
   </dialog>
   <dialog id="curtainDialog" aria-labelledby="curtainTitle">
-    <form method="dialog"><button class="curtain-dismiss" aria-label="Close curtain controls">×</button></form>
+    <form method="dialog"><button class="curtain-dismiss" aria-label="Close curtain controls" data-viewer-i18n-attrs='{&quot;aria-label&quot;: &quot;Close curtain controls&quot;}'>×</button></form>
     <h2 id="curtainTitle"></h2><p id="curtainStatus" role="status"></p>
     <p id="curtainAccuracy" role="status"></p>
     <button id="curtainPower">Power on guard · wait 50s</button>
-    <div class="curtain-actions"><button id="curtainClose">Close</button><button id="curtainStop">Stop</button><button id="curtainOpen">Open</button></div>
-    <label for="curtainPosition">Open <output id="curtainPercent">—</output></label>
+    <div class="curtain-actions"><button id="curtainClose" data-viewer-i18n="Close">Close</button><button id="curtainStop" data-viewer-i18n="Stop">Stop</button><button id="curtainOpen" data-viewer-i18n="Open">Open</button></div>
+    <label for="curtainPosition"><span data-viewer-i18n="Open">Open</span> <output id="curtainPercent">—</output></label>
     <input id="curtainPosition" type="range" min="0" max="100" step="1">
-    <button id="curtainApply">Set position</button><button id="curtainDetails">More details</button>
+    <button id="curtainApply" data-viewer-i18n="Set position">Set position</button><button id="curtainDetails" data-viewer-i18n="More details">More details</button>
     <details id="curtainRecovery">
       <summary>Check position after power loss</summary>
       <p>A connected motor can still have an inaccurate travel reference. HA may repeat an old percentage after reconnecting.</p>

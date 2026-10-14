@@ -17,7 +17,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 De Engelse installatiehandleiding legt back-ups, Home Assistant OS, het configuratiepad en opnieuw opstarten uit. De browsereditor maakt zelf geen verbinding met Home Assistant en bedient geen apparaten.
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=nl) · [README](../../README.md) · [i18n](../i18n.md)
 
 Je plattegrond en apparaat-ID’s kunnen privé zijn. Gebruik een fictief huis voor openbare voorbeelden.
 
