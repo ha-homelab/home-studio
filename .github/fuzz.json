@@ -39,5 +39,19 @@
       "seconds": 60,
       "corpus": "fuzz/corpus/wall-geometry"
     }
+  ],
+  "preflight": [
+    [
+      "node",
+      "--test",
+      "fuzz/project-validation.test.mjs",
+      "fuzz/wall-geometry.test.mjs"
+    ]
+  ],
+  "preflight-paths": [
+    "fuzz",
+    "planner",
+    ".github/fuzz.json",
+    ".github/workflows/package.yml"
   ]
 }

@@ -9,7 +9,10 @@ the real production entry points, locked dependency setup and time budgets;
 
 Mutation campaigns run only for an explicit RC dispatch on the public default
 branch. Pushes, pull requests, beta and nightly releases retain ordinary checks
-without fuzzing minutes. Private forks cannot use this public RC gate. This is
+without mutation-campaign minutes. A deterministic regression check replays the
+synthetic validation and geometry corpora, checks deliberate error classes, and
+verifies that named positive/negative furniture seeds reach their intended branch in ordinary CI;
+it needs no Jazzer installation. Private forks cannot use this public RC gate. This is
 repository-managed fuzzing, not enrollment in Google's hosted OSS-Fuzz service.
 
 ## Targets and boundaries
@@ -20,11 +23,16 @@ repository-managed fuzzing, not enrollment in Google's hosted OSS-Fuzz service.
   have unique identifiers and finite bounds, and produce positive wall pieces.
   The target also checks complete-project requirements and rejection of added
   fields and reserved prototype identifiers.
-* `wall-geometry` generates fictional metric rooms, rotated walls and windows.
+* `wall-geometry` generates fictional metric rooms, rotated walls, windows and
+  catalog furniture with styles, colors and supported patterns.
   It validates them through production validation, checks clamped wall projection,
   wall area minus opening area, polygon winding and point containment. Expected
   areas and projection distances are computed independently of the functions
-  under test; comparisons allow floating-point rounding.
+  under test; comparisons allow floating-point rounding. Both targets check
+  rotated furniture bounds against an independent support-radius formula.
+  Geometry also checks isolated item bounds (so room bounds cannot hide errors)
+  and translation invariance. Fixed tests cover quarter/diagonal rotations,
+  byte extrema, and invalid model/style/type/pattern/color combinations.
 
 Each target gets 60 seconds of mutation, a 10-second per-input timeout and a
 2 GiB RSS limit. JSON is capped at 64 KiB; geometry input at 4 KiB. The production
@@ -40,6 +48,10 @@ usability, installation acceptance and physical-device behavior require their
 separate checks.
 
 ## Local use and reproducing findings
+
+Run the cheap regression checks with `node --test fuzz/*.test.mjs`.
+It accepts ordinary `Error` and the production `ValidationError` exactly; unexpected
+subclasses, including `TypeError` and `RangeError`, remain findings.
 
 Use Node 24 in a source checkout; contributor infrastructure is not part of the
 end-user application ZIP.
