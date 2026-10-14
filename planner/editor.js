@@ -1,8 +1,12 @@
+import { formatValidationError } from './validation.js';
+import { t, LOCALES, initI18n, setLocale, getLocale, onLocaleChange, translateStatic } from './i18n.js';
+
 import * as THREE from '../vendor/three.module.min.js';
 import { LIMITS, ITEM_TYPES, clone, round, distance, signedArea, pointInPolygon, projectOnWall, nextId, newFloor, blankProject, demoProject, outlineRoom, validateProject, wallPieces, floorBounds } from './model.js';
 import { CATALOG } from './catalog.js';
 import { getCatalogModel, getCatalogStyle, buildFurnitureAsset, PATTERNS, supportsFurniturePattern } from './furniture.js';
 
+const initialLocale = await initI18n();
 const $ = id => document.getElementById(id);
 const STORAGE_KEY = 'home-studio.project.v1';
 const BUILD_COMMAND = 'python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package';
@@ -13,6 +17,8 @@ const planCanvas = $('plan-canvas'), ctx = planCanvas.getContext('2d');
 let project = blankProject(), activeFloorId, selection = null, tool = 'select', view = 'plan', history = [], future = [], drag = null;
 let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, spaceHeld = false, saveFailed = false, previewDirty = true;
 let startupMessage = '';
+let lastStatus = null;
+let buildValidationText = null;
 let placementModelId = CATALOG.models[0].id;
 const assetCache = new Map(), planShapeCache = new Map(), thumbnailCache = new Map();
 const LIBRARY_PAGE_SIZE = 24, THUMBNAIL_CACHE_LIMIT = 32;
@@ -23,18 +29,23 @@ const APPEARANCE_CACHE_LIMIT = LIMITS.items + THUMBNAIL_CACHE_LIMIT;
 try {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
-    if (new Blob([saved]).size > LIMITS.bytes) throw new Error('Saved draft is too large.');
+    if (new Blob([saved]).size > LIMITS.bytes) throw new Error(t('Saved draft is too large.'));
     const restored = validateProject(JSON.parse(saved)); serializeProject(restored);
-    project = restored; startupMessage = 'Restored your local draft.';
+    project = restored; startupMessage = () => t('Restored your local draft.');
   }
-} catch (error) { startupMessage = `Could not restore local draft: ${error.message} A blank project is open.`; saveFailed = true; }
+} catch (error) { startupMessage = () => t('Could not restore local draft: {error} A blank project is open.', { error: formatValidationError(error, t) }); saveFailed = true; }
 activeFloorId = project.floors[0].id;
 const floor = () => project.floors.find(f => f.id === activeFloorId) || project.floors[0];
 const selected = () => selection ? floor()[selection.kind]?.find(o => o.id === selection.id) : null;
 const snap = value => $('snap').checked ? Math.round(value * 4) / 4 : round(value);
 function node(tag, className, text) { const n = document.createElement(tag); if (className) n.className = className; if (text !== undefined) n.textContent = text; return n; }
 function button(text, handler, className = 'quiet') { const b = node('button', className, text); b.type = 'button'; b.addEventListener('click', handler); return b; }
-function status(message, error = false) { $('status').textContent = message; $('status').parentElement.classList.toggle('error', error); $('status').title = message; }
+function status(message, error = false) {
+  lastStatus = { message, error };
+  const text = typeof message === 'function' ? message() : message;
+  $('status').textContent = text; $('status').parentElement.classList.toggle('error', error); $('status').title = text;
+}
+function translatedText(id, key) { const element = $(id); element.dataset.i18n = key; element.textContent = t(key); }
 function itemAsset(item) {
   if (!item.model_id) return null;
   const key = `${item.model_id}|${item.style_id || ''}|${item.color || ''}|${item.pattern_id || ''}|${item.pattern_color || ''}`;
@@ -45,11 +56,11 @@ function itemAsset(item) {
   return assetCache.get(key);
 }
 function materialColor(material, shade = 1) { return new THREE.Color(...material.slice(0, 3)).multiplyScalar(shade).getStyle(); }
-function placementName() { return placementModelId ? getCatalogModel(placementModelId).label : LABELS[$('place-type').value]; }
-function toolHint() { return tool === 'item' ? `Click inside a room to place: ${placementName()}. V returns to Select / move.` : HINTS[tool]; }
+function placementName() { return placementModelId ? t(`model.${placementModelId}`) : t(LABELS[$('place-type').value]); }
+function toolHint() { return tool === 'item' ? t('Click inside a room to place: {item}. V returns to Select / move.', { item: placementName() }) : t(HINTS[tool]); }
 function updatePlacement() {
-  $('placement-summary').textContent = `Ready to place: ${placementName()}`;
-  $('browse-items').title = `Open item library. Ready to place: ${placementName()}`;
+  $('placement-summary').textContent = t('Ready to place: {item}', { item: placementName() });
+  $('browse-items').title = t('Open item library. Ready to place: {item}', { item: placementName() });
   if (view === 'plan') $('tool-hint').textContent = toolHint();
 }
 function modelDimensions(model, ceiling, elevation = model.elevation_m) {
@@ -61,8 +72,8 @@ function renderLibrary(append = false) {
   const query = $('library-search').value.trim().toLocaleLowerCase(), category = $('library-category').value;
   const words = query.split(/\s+/).filter(Boolean);
   const models = CATALOG.models.filter(model => {
-    const categoryName = CATALOG.categories.find(entry => entry.id === model.category)?.label || model.category;
-    const text = `${model.label} ${categoryName} ${model.id.replaceAll('_', ' ')} ${model.tags?.join(' ') || ''}`.toLocaleLowerCase();
+    const categoryName = t(`category.${model.category}`);
+    const text = `${t(`model.${model.id}`)} ${model.label} ${categoryName} ${model.id.replaceAll('_', ' ')} ${model.tags?.join(' ') || ''}`.toLocaleLowerCase();
     return (!category || model.category === category) && words.every(word => text.includes(word));
   });
   if (!append) { $('library-items').replaceChildren(); libraryShown = 0; }
@@ -72,21 +83,21 @@ function renderLibrary(append = false) {
     const card = button('', () => {
       placementModelId = model.id; $('place-type').value = ''; updatePlacement();
       $('library-dialog').close(); setTool('item'); renderInspector(); planCanvas.focus();
-      status(`${model.label} selected. Click inside a room, or select a room and choose Place item at room center.`);
+      status(() => t('{item} selected. Click inside a room, or select a room and choose Place item at room center.', { item: t(`model.${model.id}`) }));
     }, 'library-card');
     card.dataset.modelId = model.id;
     firstNewCard ||= card;
-    card.setAttribute('aria-label', `Choose ${model.label}`);
+    card.setAttribute('aria-label', t('Choose {item}', { item: t(`model.${model.id}`) }));
     card.setAttribute('aria-pressed', String(placementModelId === model.id));
     const canvas = node('canvas', 'item-thumbnail'); canvas.width = 280; canvas.height = 170; canvas.setAttribute('aria-hidden', 'true');
     const d = model.dimensions_m;
-    card.append(canvas, node('strong', '', model.label), node('span', 'item-size', `${d.width} × ${d.depth} × ${d.height} m`), node('span', 'item-card-action', placementModelId === model.id ? 'Ready to place' : 'Choose item'));
+    card.append(canvas, node('strong', '', t(`model.${model.id}`)), node('span', 'item-size', `${d.width} × ${d.depth} × ${d.height} m`), node('span', 'item-card-action', placementModelId === model.id ? t('Ready to place') : t('Choose item')));
     $('library-items').append(card); drawItemThumbnail(canvas, model);
   }
   libraryShown += nextPage.length;
-  $('library-count').textContent = `Showing ${libraryShown} of ${models.length} design${models.length === 1 ? '' : 's'}${category ? ` in ${CATALOG.categories.find(entry => entry.id === category).label}` : ''}`;
+  $('library-count').textContent = category ? t('Showing {shown} of {total} designs in {category}', { shown: libraryShown, total: models.length, category: t(`category.${category}`) }) : t('Showing {shown} of {total} designs', { shown: libraryShown, total: models.length });
   $('library-more').hidden = libraryShown >= models.length;
-  $('library-more').textContent = `Show ${Math.min(LIBRARY_PAGE_SIZE, models.length - libraryShown)} more`;
+  $('library-more').textContent = t('Show {count} more', { count: Math.min(LIBRARY_PAGE_SIZE, models.length - libraryShown) });
   $('library-empty').hidden = models.length > 0;
   if (append) firstNewCard?.focus();
 }
@@ -164,21 +175,21 @@ function itemPlanShapes(item) {
 // Check before committing an edit; storage quota failures must still allow export.
 function serializeProject(value) {
   const serialized = JSON.stringify(value);
-  if (new Blob([serialized]).size > LIMITS.bytes) throw new Error('Project would exceed the 2 MB limit (2,000,000 UTF-8 bytes). Shorten notes or remove items before adding more.');
+  if (new Blob([serialized]).size > LIMITS.bytes) throw new Error(t('Project would exceed the 2 MB limit (2,000,000 UTF-8 bytes). Shorten notes or remove items before adding more.'));
   return serialized;
 }
 function save() {
   try {
     const serialized = serializeProject(project);
     localStorage.setItem(STORAGE_KEY, serialized); saveFailed = false;
-    $('save-status').textContent = 'Saved in this browser'; $('save-status').classList.remove('problem');
+    translatedText('save-status', 'Saved in this browser'); $('save-status').classList.remove('problem');
   } catch (error) {
-    saveFailed = true; $('save-status').textContent = 'Autosave unavailable · export a backup'; $('save-status').classList.add('problem');
-    status(`Autosave failed: ${error.message}. Export JSON to keep your work.`, true);
+    saveFailed = true; translatedText('save-status', 'Autosave unavailable · export a backup'); $('save-status').classList.add('problem');
+    status(() => t('Autosave failed: {error}. Export JSON to keep your work.', { error: formatValidationError(error, t) }), true);
   }
 }
 function historyPush(previous) { history.push(previous); if (history.length > 60) history.shift(); future = []; }
-function transact(change, message = 'Project updated.', { fit = false } = {}) {
+function transact(change, message = () => t('Project updated.'), { fit = false } = {}) {
   const draft = clone(project), priorSelection = selection && { ...selection };
   try {
     change(draft, draft.floors.find(f => f.id === activeFloorId) || draft.floors[0]); validateProject(draft); serializeProject(draft);
@@ -187,7 +198,7 @@ function transact(change, message = 'Project updated.', { fit = false } = {}) {
     if (!selected()) selection = null;
     renderUI(); if (fit) { fitPlan(); fitPreview(); } renderPlan(); status(message); save();
     return true;
-  } catch (error) { selection = priorSelection; $('project-title').value = project.title; status(`Change not applied: ${error.message}`, true); renderInspector(); return false; }
+  } catch (error) { selection = priorSelection; $('project-title').value = project.title; status(() => t('Change not applied: {error}', { error: formatValidationError(error, t) }), true); renderInspector(); return false; }
 }
 function replaceProject(next, message) {
   validateProject(next); serializeProject(next); historyPush(project); project = clone(next); activeFloorId = project.floors[0].id; selection = null; drag = null; previewDirty = true;
@@ -196,7 +207,7 @@ function replaceProject(next, message) {
 function undo(redo = false) {
   const source = redo ? future : history, destination = redo ? history : future; if (!source.length) return;
   destination.push(project); project = source.pop(); if (!project.floors.some(f => f.id === activeFloorId)) activeFloorId = project.floors[0].id;
-  selection = null; drag = null; previewDirty = true; renderUI(); renderPlan(); status(redo ? 'Change restored.' : 'Change undone.'); save();
+  selection = null; drag = null; previewDirty = true; renderUI(); renderPlan(); status(() => redo ? t('Change restored.') : t('Change undone.')); save();
 }
 function renderUI() {
   $('project-title').value = project.title; $('floor-caption').textContent = floor().name;
@@ -212,20 +223,21 @@ function renderUI() {
     count++;
     const b = button('', () => { selection = { kind, id: object.id }; setTool('select'); renderUI(); renderPlan(); }, 'object-button');
     b.setAttribute('aria-pressed', String(selection?.kind === kind && selection?.id === object.id));
-    b.append(node('span', 'object-icon', icon), node('span', '', object.name || (kind === 'openings' ? `${object.type} · ${object.id}` : object.id.replaceAll('_', ' '))));
-    b.title = `${kind.slice(0, -1)}: ${object.name || object.id}`; $('object-list').append(b);
+    b.append(node('span', 'object-icon', icon), node('span', '', object.name || (kind === 'openings' ? `${t(object.type)} · ${object.id}` : object.id.replaceAll('_', ' '))));
+    b.title = t('{kind}: {name}', { kind: t(kind === 'openings' ? 'opening' : kind.slice(0, -1)), name: object.name || object.id }); $('object-list').append(b);
   }
   $('object-count').textContent = String(count);
-  if (!count) $('object-list').append(node('p', 'object-empty', 'Your rooms, walls, and items will appear here.'));
+  if (!count) $('object-list').append(node('p', 'object-empty', t('Your rooms, walls, and items will appear here.')));
   $('empty-state').hidden = count > 0 || tool !== 'select' || view !== 'plan';
   renderInspector(); if (view === 'preview') renderPreview();
 }
-function field(parent, label, value, onChange, { type = 'text', min, max, step = '0.05', help, options, rows, readOnly = false } = {}) {
+function field(parent, label, value, onChange, { type = 'text', min, max, step = '0.05', help, options, rows, readOnly = false, dir } = {}) {
   const wrap = node('label', 'field'), title = node('span', '', label);
   const input = node(options ? 'select' : rows ? 'textarea' : 'input');
   if (options) for (const entry of options) { const opt = node('option', '', typeof entry === 'string' ? entry : entry.label); opt.value = typeof entry === 'string' ? entry : entry.value; input.append(opt); }
   else if (!rows) { input.type = type; if (type === 'number') { input.step = step; if (min !== undefined) input.min = String(min); if (max !== undefined) input.max = String(max); } }
   if (rows) input.rows = rows; input.value = String(value ?? ''); input.readOnly = readOnly;
+  if (dir) input.dir = dir;
   input.setAttribute('aria-label', label); input.addEventListener('change', () => { if (onChange) onChange(type === 'number' ? Number(input.value) : input.value); });
   wrap.append(title, input); if (help) wrap.append(node('small', '', help)); parent.append(wrap); return input;
 }
@@ -235,122 +247,122 @@ function editObject(change, message) { transact((_p, f) => { const o = f[selecti
 function renderInspector() {
   const parent = $('inspector-body'); parent.replaceChildren(); const object = selected(), f = floor();
   if (!object) {
-    $('inspector-title').textContent = 'Floor settings'; $('inspector-subtitle').textContent = 'A good plan starts with the basics.';
-    field(parent, 'Floor name', f.name, v => transact((_p, d) => { d.name = v; }, 'Floor renamed.'));
-    const dimensions = row(parent); field(dimensions, 'Elevation (m)', f.elevation_m, v => transact((_p, d) => { d.elevation_m = v; }), { type: 'number', min: -100, max: 100 });
-    field(dimensions, 'Ceiling height (m)', f.height_m, v => transact((_p, d) => { d.height_m = v; }), { type: 'number', min: .5, max: 20 });
-    parent.append(node('p', 'field-note', 'Elevation is measured from the building origin. Items use height above their own floor.'));
-    section(parent, 'Add room by dimensions');
+    $('inspector-title').textContent = t('Floor settings'); $('inspector-subtitle').textContent = t('A good plan starts with the basics.');
+    field(parent, t('Floor name'), f.name, v => transact((_p, d) => { d.name = v; }, () => t('Floor renamed.')));
+    const dimensions = row(parent); field(dimensions, t('Elevation (m)'), f.elevation_m, v => transact((_p, d) => { d.elevation_m = v; }), { type: 'number', min: -100, max: 100 });
+    field(dimensions, t('Ceiling height (m)'), f.height_m, v => transact((_p, d) => { d.height_m = v; }), { type: 'number', min: .5, max: 20 });
+    parent.append(node('p', 'field-note', t('Elevation is measured from the building origin. Items use height above their own floor.')));
+    section(parent, t('Add room by dimensions'));
     const bounds = floorBounds(f), proposedX = f.rooms.length ? Math.ceil(bounds.maxX + 1) : 0;
     const origin = row(parent), dims = row(parent);
-    const x = field(origin, 'Start x (m)', proposedX, null, { type: 'number', min: -100, max: 100 }), z = field(origin, 'Start z (m)', 0, null, { type: 'number', min: -100, max: 100 });
-    const width = field(dims, 'Width (m)', 4, null, { type: 'number', min: .25, max: 100 }), depth = field(dims, 'Depth (m)', 4, null, { type: 'number', min: .25, max: 100 });
-    parent.append(button('Add room', () => {
+    const x = field(origin, t('Start x (m)'), proposedX, null, { type: 'number', min: -100, max: 100 }), z = field(origin, t('Start z (m)'), 0, null, { type: 'number', min: -100, max: 100 });
+    const width = field(dims, t('Width (m)'), 4, null, { type: 'number', min: .25, max: 100 }), depth = field(dims, t('Depth (m)'), 4, null, { type: 'number', min: .25, max: 100 });
+    parent.append(button(t('Add room'), () => {
       const sx = Number(x.value), sz = Number(z.value), w = Number(width.value), d = Number(depth.value);
-      if (w < .05 || d < .05) return status('Room width and depth must be at least 0.05 m.', true);
-      transact((_p, target) => { const id = nextId(target, 'room'); target.rooms.push({ id, name: `Room ${target.rooms.length + 1}`, polygon: [[sx, sz], [round(sx + w), sz], [round(sx + w), round(sz + d)], [sx, round(sz + d)]], material: 'floor' }); selection = { kind: 'rooms', id }; }, 'Room added. Choose Build wall outline to create its walls.', { fit: true });
+      if (w < .05 || d < .05) return status(() => t('Room width and depth must be at least 0.05 m.'), true);
+      transact((_p, target) => { const id = nextId(target, 'room'); target.rooms.push({ id, name: `Room ${target.rooms.length + 1}`, polygon: [[sx, sz], [round(sx + w), sz], [round(sx + w), round(sz + d)], [sx, round(sz + d)]], material: 'floor' }); selection = { kind: 'rooms', id }; }, () => t('Room added. Choose Build wall outline to create its walls.'), { fit: true });
     }, 'primary'));
-    parent.append(node('p', 'callout', 'Rooms are floor areas. Draw walls yourself, or select a room and build its wall outline. Moving a room will not move its walls.'));
-    parent.append(button('Clear this floor', () => { if (confirm(`Clear every room, wall, opening, and item on ${f.name}? You can undo this.`)) transact((_p, target) => { for (const key of ['rooms', 'walls', 'openings', 'items']) target[key] = []; selection = null; }, 'Floor cleared.'); }, 'danger'));
-    if (project.floors.length > 1) parent.append(button('Delete this floor', () => { if (confirm(`Delete ${f.name} and everything on it? You can undo this.`)) transact(p => { p.floors = p.floors.filter(item => item.id !== activeFloorId); selection = null; }, 'Floor deleted.', { fit: true }); }, 'danger'));
-    parent.append(node('p', 'property-id', `Floor ID: ${f.id}`)); return;
+    parent.append(node('p', 'callout', t('Rooms are floor areas. Draw walls yourself, or select a room and build its wall outline. Moving a room will not move its walls.')));
+    parent.append(button(t('Clear this floor'), () => { if (confirm(t('Clear every room, wall, opening, and item on {floor}? You can undo this.', { floor: f.name }))) transact((_p, target) => { for (const key of ['rooms', 'walls', 'openings', 'items']) target[key] = []; selection = null; }, () => t('Floor cleared.')); }, 'danger'));
+    if (project.floors.length > 1) parent.append(button(t('Delete this floor'), () => { if (confirm(t('Delete {floor} and everything on it? You can undo this.', { floor: f.name }))) transact(p => { p.floors = p.floors.filter(item => item.id !== activeFloorId); selection = null; }, () => t('Floor deleted.'), { fit: true }); }, 'danger'));
+    parent.append(node('p', 'property-id', t('Floor ID: {id}', { id: f.id }))); return;
   }
   const kind = selection.kind;
-  $('inspector-title').textContent = ({ rooms: 'Room details', walls: 'Wall details', openings: 'Opening details', items: 'Item details' })[kind];
-  $('inspector-subtitle').textContent = ({ rooms: 'Shape the space. Then add its walls.', walls: 'A physical segment with real thickness.', openings: 'A true cutout in the selected wall.', items: 'Give every object a place and a purpose.' })[kind];
+  $('inspector-title').textContent = ({ rooms: t('Room details'), walls: t('Wall details'), openings: t('Opening details'), items: t('Item details') })[kind];
+  $('inspector-subtitle').textContent = ({ rooms: t('Shape the space. Then add its walls.'), walls: t('A physical segment with real thickness.'), openings: t('A true cutout in the selected wall.'), items: t('Give every object a place and a purpose.') })[kind];
   if (kind === 'rooms') {
-    const metric = node('div', 'metric-strip'); metric.append(node('strong', '', Math.abs(signedArea(object.polygon)).toFixed(2)), node('span', '', 'm² floor area')); parent.append(metric);
-    field(parent, 'Room name', object.name, v => editObject(o => { o.name = v; }));
-    field(parent, 'Floor material', object.material, v => editObject(o => { o.material = v; }), { options: [{ value: 'floor', label: 'Warm timber' }, { value: 'tile', label: 'Tile / stone' }, { value: 'deck', label: 'Outdoor deck' }] });
-    parent.append(button('Build wall outline', () => { let n = 0; const ok = transact((_p, d) => { n = outlineRoom(d, d.rooms.find(r => r.id === object.id)); }, 'Wall outline added. Exact shared walls are reused.'); if (ok) status(n ? `${n} wall segment${n === 1 ? '' : 's'} added. Exact shared walls were reused.` : 'This room already has a complete wall outline.'); }, 'primary'));
-    parent.append(node('p', 'field-note', 'Outlines use 0.15 m walls. Existing walls stay independent of this room.'));
-    parent.append(button('Place item at room center', () => {
+    const metric = node('div', 'metric-strip'); metric.append(node('strong', '', Math.abs(signedArea(object.polygon)).toFixed(2)), node('span', '', t('m² floor area'))); parent.append(metric);
+    field(parent, t('Room name'), object.name, v => editObject(o => { o.name = v; }));
+    field(parent, t('Floor material'), object.material, v => editObject(o => { o.material = v; }), { options: [{ value: 'floor', label: t('Warm timber') }, { value: 'tile', label: t('Tile / stone') }, { value: 'deck', label: t('Outdoor deck') }] });
+    parent.append(button(t('Build wall outline'), () => { let n = 0; const ok = transact((_p, d) => { n = outlineRoom(d, d.rooms.find(r => r.id === object.id)); }, () => t('Wall outline added. Exact shared walls are reused.')); if (ok) status(() => n ? t('{count} wall segments added. Exact shared walls were reused.', { count: n }) : t('This room already has a complete wall outline.')); }, 'primary'));
+    parent.append(node('p', 'field-note', t('Outlines use 0.15 m walls. Existing walls stay independent of this room.')));
+    parent.append(button(t('Place item at room center'), () => {
       const center = object.polygon.reduce((sum, p) => [sum[0] + p[0] / object.polygon.length, sum[1] + p[1] / object.polygon.length], [0, 0]);
       addItem(center, object.id);
     }));
-    parent.append(node('p', 'field-note', `Places ${placementName()}. Choose another design in the Item library, then select this room again.`));
-    section(parent, 'Polygon points');
-    field(parent, 'x, z coordinates (m)', object.polygon.map(p => p.join(', ')).join('\n'), value => editObject(o => {
+    parent.append(node('p', 'field-note', t('Places {item}. Choose another design in the Item library, then select this room again.', { item: placementName() })));
+    section(parent, t('Polygon points'));
+    field(parent, t('x, z coordinates (m)'), object.polygon.map(p => p.join(', ')).join('\n'), value => editObject(o => {
       const points = value.trim().split('\n').filter(s => s.trim()).map(line => line.trim().split(/[\s,]+/).map(Number));
-      if (points.some(p => p.length !== 2 || p.some(v => !Number.isFinite(v)))) throw new Error('Use one x, z coordinate pair per line.'); o.polygon = points;
-    }), { rows: Math.min(7, object.polygon.length), help: 'One corner per line, around the perimeter. Do not repeat the first point. Concave shapes are supported; crossing edges are not.' });
+      if (points.some(p => p.length !== 2 || p.some(v => !Number.isFinite(v)))) throw new Error(t('Use one x, z coordinate pair per line.')); o.polygon = points;
+    }), { rows: Math.min(7, object.polygon.length), dir: 'ltr', help: t('One corner per line, around the perimeter. Do not repeat the first point. Concave shapes are supported; crossing edges are not.') });
   } else if (kind === 'walls') {
-    const length = distance(object.start, object.end); const metric = node('div', 'metric-strip'); metric.append(node('strong', '', length.toFixed(2)), node('span', '', 'm segment length')); parent.append(metric);
-    for (const endpoint of ['start', 'end']) { section(parent, `${endpoint} point`); const r = row(parent); ['x', 'z'].forEach((axis, index) => field(r, `${endpoint} ${axis} (m)`, object[endpoint][index], v => editObject(o => { o[endpoint][index] = v; }), { type: 'number', min: -100, max: 100 })); }
-    field(parent, 'Thickness (m)', object.thickness_m, v => editObject(o => { o.thickness_m = v; }), { type: 'number', min: .04, max: 2, step: '.01' });
-    const r = row(parent); r.append(button('Add door', () => addOpening(object, length / 2, 'door')), button('Add window', () => addOpening(object, length / 2, 'window')));
-    section(parent, 'Create a junction');
-    const split = field(parent, 'Split distance from start (m)', round(length / 2), null, { type: 'number', min: .05, max: round(length - .05), help: 'Split this segment so another wall can meet at an endpoint. A split cannot pass through an opening.' });
-    parent.append(button('Split wall', () => editObject((o, d) => {
-      const at = Number(split.value); if (at < .05 || at > length - .05) throw new Error('Split point must be at least 0.05 m from each end.');
-      if (d.openings.some(c => c.wall_id === o.id && c.offset_m < at && c.offset_m + c.width_m > at)) throw new Error('Move the split point outside the opening.');
+    const length = distance(object.start, object.end); const metric = node('div', 'metric-strip'); metric.append(node('strong', '', length.toFixed(2)), node('span', '', t('m segment length'))); parent.append(metric);
+    for (const endpoint of ['start', 'end']) { section(parent, t(`${endpoint} point`)); const r = row(parent); ['x', 'z'].forEach((axis, index) => field(r, t(`${endpoint} ${axis} (m)`), object[endpoint][index], v => editObject(o => { o[endpoint][index] = v; }), { type: 'number', min: -100, max: 100 })); }
+    field(parent, t('Thickness (m)'), object.thickness_m, v => editObject(o => { o.thickness_m = v; }), { type: 'number', min: .04, max: 2, step: '.01' });
+    const r = row(parent); r.append(button(t('Add door'), () => addOpening(object, length / 2, 'door')), button(t('Add window'), () => addOpening(object, length / 2, 'window')));
+    section(parent, t('Create a junction'));
+    const split = field(parent, t('Split distance from start (m)'), round(length / 2), null, { type: 'number', min: .05, max: round(length - .05), help: t('Split this segment so another wall can meet at an endpoint. A split cannot pass through an opening.') });
+    parent.append(button(t('Split wall'), () => editObject((o, d) => {
+      const at = Number(split.value); if (at < .05 || at > length - .05) throw new Error(t('Split point must be at least 0.05 m from each end.'));
+      if (d.openings.some(c => c.wall_id === o.id && c.offset_m < at && c.offset_m + c.width_m > at)) throw new Error(t('Move the split point outside the opening.'));
       const mid = [round(o.start[0] + (o.end[0] - o.start[0]) * at / length), round(o.start[1] + (o.end[1] - o.start[1]) * at / length)];
       const second = { id: nextId(d, 'wall'), start: mid, end: [...o.end], thickness_m: o.thickness_m }; o.end = mid; d.walls.push(second);
       d.openings.filter(c => c.wall_id === o.id && c.offset_m >= at).forEach(c => { c.wall_id = second.id; c.offset_m = round(c.offset_m - at); });
-    }, 'Wall split into two segments.')));
+    }, () => t('Wall split into two segments.'))));
   } else if (kind === 'openings') {
     const wall = f.walls.find(w => w.id === object.wall_id);
-    field(parent, 'Opening type', object.type, v => editObject(o => { o.type = v; if (v !== 'window') o.sill_m = 0; }), { options: ['door', 'window', 'passage'] });
-    field(parent, 'Width (m)', object.width_m, v => editObject(o => { o.width_m = v; }), { type: 'number', min: .05, max: distance(wall.start, wall.end) });
-    field(parent, 'Offset from wall start (m)', object.offset_m, v => editObject(o => { o.offset_m = v; }), { type: 'number', min: 0, help: `Wall starts at x ${wall.start[0]}, z ${wall.start[1]}. Offset locates the first edge of this opening.` });
-    const r = row(parent); field(r, 'Sill height (m)', object.sill_m, v => editObject(o => { o.sill_m = v; }), { type: 'number', min: 0, max: f.height_m }); field(r, 'Head height (m)', object.head_m, v => editObject(o => { o.head_m = v; }), { type: 'number', min: .05, max: f.height_m });
-    parent.append(node('p', 'callout', 'These dimensions remove wall geometry in both the preview and the exported build. The window tint is only a preview aid.'));
-    parent.append(button('Select parent wall', () => { selection = { kind: 'walls', id: wall.id }; renderUI(); renderPlan(); }));
+    field(parent, t('Opening type'), object.type, v => editObject(o => { o.type = v; if (v !== 'window') o.sill_m = 0; }), { options: ['door', 'window', 'passage'].map(value => ({ value, label: t(value) })) });
+    field(parent, t('Width (m)'), object.width_m, v => editObject(o => { o.width_m = v; }), { type: 'number', min: .05, max: distance(wall.start, wall.end) });
+    field(parent, t('Offset from wall start (m)'), object.offset_m, v => editObject(o => { o.offset_m = v; }), { type: 'number', min: 0, help: t('Wall starts at x {x}, z {z}. Offset locates the first edge of this opening.', { x: wall.start[0], z: wall.start[1] }) });
+    const r = row(parent); field(r, t('Sill height (m)'), object.sill_m, v => editObject(o => { o.sill_m = v; }), { type: 'number', min: 0, max: f.height_m }); field(r, t('Head height (m)'), object.head_m, v => editObject(o => { o.head_m = v; }), { type: 'number', min: .05, max: f.height_m });
+    parent.append(node('p', 'callout', t('These dimensions remove wall geometry in both the preview and the exported build. The window tint is only a preview aid.')));
+    parent.append(button(t('Select parent wall'), () => { selection = { kind: 'walls', id: wall.id }; renderUI(); renderPlan(); }));
   } else if (kind === 'items') {
-    field(parent, 'Item name', object.name, v => editObject(o => { o.name = v; }));
+    field(parent, t('Item name'), object.name, v => editObject(o => { o.name = v; }));
     const model = object.model_id ? getCatalogModel(object.model_id) : null;
-    field(parent, 'Design', object.model_id || '', value => editObject(o => {
+    field(parent, t('Design'), object.model_id || '', value => editObject(o => {
       if (!value) { for (const key of ['model_id', 'style_id', 'color', 'pattern_id', 'pattern_color']) delete o[key]; return; }
       const next = getCatalogModel(value), previous = o.model_id ? getCatalogModel(o.model_id) : null;
       if (o.name === previous?.label || o.name === LABELS[o.type]) o.name = next.label;
       o.model_id = next.id; o.type = next.type; o.style_id ||= next.default_style;
       if (!supportsFurniturePattern(next)) { delete o.pattern_id; delete o.pattern_color; }
-    }, 'Item design changed. Size and position kept.'), { options: [{ value: '', label: 'Basic shape / device' }, ...CATALOG.models.map(entry => ({ value: entry.id, label: entry.label }))], help: 'Changes the shape while keeping your size and placement.' });
+    }, () => t('Item design changed. Size and position kept.')), { options: [{ value: '', label: t('Basic shape / device') }, ...CATALOG.models.map(entry => ({ value: entry.id, label: t(`model.${entry.id}`) }))], help: t('Changes the shape while keeping your size and placement.') });
     if (model) {
       const style = getCatalogStyle(object.style_id || model.default_style);
-      field(parent, 'Color palette', style.id, value => editObject(o => { o.style_id = value; delete o.color; delete o.pattern_color; }, 'Color palette applied.'), { options: CATALOG.styles.map(entry => ({ value: entry.id, label: entry.label })), help: 'Coordinated colors for the whole item. Changing palette resets custom colors and keeps your pattern.' });
-      const strip = node('div', 'palette-preview'); strip.setAttribute('aria-label', `${style.label} palette`);
-      for (const role of ['body', 'accent', 'wood', 'metal']) { const swatch = node('span'); swatch.style.backgroundColor = style.materials[role]; swatch.title = `${role}: ${style.materials[role]}`; strip.append(swatch); }
+      field(parent, t('Color palette'), style.id, value => editObject(o => { o.style_id = value; delete o.color; delete o.pattern_color; }, () => t('Color palette applied.')), { options: CATALOG.styles.map(entry => ({ value: entry.id, label: t(`palette.${entry.id}`) })), help: t('Coordinated colors for the whole item. Changing palette resets custom colors and keeps your pattern.') });
+      const strip = node('div', 'palette-preview'); strip.setAttribute('aria-label', t('{palette} palette', { palette: t(`palette.${style.id}`) }));
+      for (const role of ['body', 'accent', 'wood', 'metal']) { const swatch = node('span'); swatch.style.backgroundColor = style.materials[role]; swatch.title = t('{role}: {color}', { role: t(role), color: style.materials[role] }); strip.append(swatch); }
       parent.append(strip);
-      field(parent, 'Custom body color', object.color || style.materials.body, value => editObject(o => { o.color = value; }, 'Item color changed.'), { type: 'color', help: 'Recolors the main surface; legs and accents keep the selected palette.' });
-      const palette = node('div', 'color-palette'); palette.setAttribute('role', 'group'); palette.setAttribute('aria-label', 'Body color suggestions');
+      field(parent, t('Custom body color'), object.color || style.materials.body, value => editObject(o => { o.color = value; }, () => t('Item color changed.')), { type: 'color', help: t('Recolors the main surface; legs and accents keep the selected palette.') });
+      const palette = node('div', 'color-palette'); palette.setAttribute('role', 'group'); palette.setAttribute('aria-label', t('Body color suggestions'));
       for (const [label, color] of [['Ivory', '#e6dfd1'], ['Sand', '#c9aa7d'], ['Terracotta', '#be785d'], ['Sage', '#899e82'], ['Forest', '#416c59'], ['Ocean', '#507b95'], ['Slate', '#757985'], ['Charcoal', '#363e43']]) {
-        const swatch = button('', () => editObject(o => { o.color = color; }, `${label} color applied.`), 'color-swatch');
-        swatch.style.setProperty('--swatch', color); swatch.title = label; swatch.setAttribute('aria-label', label); swatch.setAttribute('aria-pressed', String(object.color?.toLowerCase() === color)); palette.append(swatch);
+        const swatch = button('', () => editObject(o => { o.color = color; }, () => t('{color} color applied.', { color: t(label) })), 'color-swatch');
+        swatch.style.setProperty('--swatch', color); swatch.title = t(label); swatch.setAttribute('aria-label', t(label)); swatch.setAttribute('aria-pressed', String(object.color?.toLowerCase() === color)); palette.append(swatch);
       }
       parent.append(palette);
-      const resetColor = button('Use palette color', () => editObject(o => { delete o.color; }, 'Palette color restored.'), 'quiet small'); resetColor.disabled = !object.color; parent.append(resetColor);
+      const resetColor = button(t('Use palette color'), () => editObject(o => { delete o.color; }, () => t('Palette color restored.')), 'quiet small'); resetColor.disabled = !object.color; parent.append(resetColor);
       if (supportsFurniturePattern(model)) {
-        field(parent, 'Surface pattern', object.pattern_id || 'none', value => editObject(o => {
+        field(parent, t('Surface pattern'), object.pattern_id || 'none', value => editObject(o => {
           if (value === 'none') { delete o.pattern_id; delete o.pattern_color; } else o.pattern_id = value;
-        }, 'Surface pattern updated.'), { options: PATTERNS.map(entry => ({ value: entry.id, label: entry.label })), help: 'Applies to this design’s fabric or decorative panels. Choose None for its original appearance.' });
+        }, () => t('Surface pattern updated.')), { options: PATTERNS.map(entry => ({ value: entry.id, label: t(`pattern.${entry.id}`) })), help: t('Applies to this design’s fabric or decorative panels. Choose None for its original appearance.') });
         if (object.pattern_id && object.pattern_id !== 'none') {
-          field(parent, 'Pattern color', object.pattern_color || style.materials.accent, value => editObject(o => { o.pattern_color = value; }, 'Pattern color changed.'), { type: 'color', help: 'Choose a contrasting color so the pattern is easy to see.' });
-          const resetPattern = button('Use palette pattern color', () => editObject(o => { delete o.pattern_color; }, 'Pattern color restored.'), 'quiet small'); resetPattern.disabled = !object.pattern_color; parent.append(resetPattern);
+          field(parent, t('Pattern color'), object.pattern_color || style.materials.accent, value => editObject(o => { o.pattern_color = value; }, () => t('Pattern color changed.')), { type: 'color', help: t('Choose a contrasting color so the pattern is easy to see.') });
+          const resetPattern = button(t('Use palette pattern color'), () => editObject(o => { delete o.pattern_color; }, () => t('Pattern color restored.')), 'quiet small'); resetPattern.disabled = !object.pattern_color; parent.append(resetPattern);
         }
       }
       const preview = node('canvas', 'appearance-preview'); preview.width = 280; preview.height = 170;
-      preview.setAttribute('aria-label', `${object.name}: current color palette and pattern`);
+      preview.setAttribute('aria-label', t('{name}: current color palette and pattern', { name: object.name }));
       parent.append(preview); drawItemThumbnail(preview, model, object);
     } else {
-      field(parent, 'Item type', object.type, value => editObject(o => { o.type = value; }), { options: ITEM_TYPES.map(value => ({ value, label: LABELS[value] })) });
+      field(parent, t('Item type'), object.type, value => editObject(o => { o.type = value; }), { options: ITEM_TYPES.map(value => ({ value, label: t(LABELS[value]) })) });
     }
-    field(parent, 'Room', object.room, v => editObject(o => { o.room = v; }), { options: f.rooms.map(r => ({ value: r.id, label: r.name })) });
-    section(parent, 'Position'); const pos = row(parent, true);
-    for (const axis of ['x', 'y', 'z']) field(pos, `${axis} (m)`, object.position_m[axis], v => editObject(o => { o.position_m[axis] = v; }), { type: 'number', min: axis === 'y' ? 0 : -100, max: axis === 'y' ? f.height_m : 100 });
-    parent.append(node('p', 'field-note', 'x/z locate the center. y is the bottom height above this floor.'));
-    section(parent, 'Size & rotation'); const dims = row(parent, true);
-    for (const [axis, title] of [['width', 'Width'], ['depth', 'Depth'], ['height', 'Height']]) field(dims, `${title} (m)`, object.dimensions_m[axis], v => editObject(o => { o.dimensions_m[axis] = v; }), { type: 'number', min: .001, max: 100 });
-    if (model) parent.append(button('Use design’s original size', () => editObject(o => {
+    field(parent, t('Room'), object.room, v => editObject(o => { o.room = v; }), { options: f.rooms.map(r => ({ value: r.id, label: r.name })) });
+    section(parent, t('Position')); const pos = row(parent, true);
+    for (const axis of ['x', 'y', 'z']) field(pos, t(`${axis} (m)`), object.position_m[axis], v => editObject(o => { o.position_m[axis] = v; }), { type: 'number', min: axis === 'y' ? 0 : -100, max: axis === 'y' ? f.height_m : 100 });
+    parent.append(node('p', 'field-note', t('x/z locate the center. y is the bottom height above this floor.')));
+    section(parent, t('Size & rotation')); const dims = row(parent, true);
+    for (const [axis, title] of [['width', 'Width'], ['depth', 'Depth'], ['height', 'Height']]) field(dims, t(`${title} (m)`), object.dimensions_m[axis], v => editObject(o => { o.dimensions_m[axis] = v; }), { type: 'number', min: .001, max: 100 });
+    if (model) parent.append(button(t('Use design’s original size'), () => editObject(o => {
       const defaults = modelDimensions(model, f.height_m, o.position_m.y); o.dimensions_m = defaults.dimensions; o.position_m.y = defaults.elevation;
-    }, 'Original design size restored to fit this floor.')));
-    field(parent, 'Rotation (degrees)', object.rotation_deg, v => editObject(o => { o.rotation_deg = v; }), { type: 'number', min: -360, max: 360, step: '15' });
-    section(parent, 'Home Assistant');
-    field(parent, 'Entity ID (optional)', object.entity_id, v => editObject(o => { o.entity_id = v.trim(); }), { help: 'Example: light.living_room. This planner stores the mapping; it never controls devices.' });
-    field(parent, 'Notes', object.notes, v => editObject(o => { o.notes = v; }), { rows: 3 });
+    }, () => t('Original design size restored to fit this floor.'))));
+    field(parent, t('Rotation (degrees)'), object.rotation_deg, v => editObject(o => { o.rotation_deg = v; }), { type: 'number', min: -360, max: 360, step: '15' });
+    section(parent, t('Home Assistant'));
+    field(parent, t('Entity ID (optional)'), object.entity_id, v => editObject(o => { o.entity_id = v.trim(); }), { dir: 'ltr', help: t('Example: light.living_room. This planner stores the mapping; it never controls devices.') });
+    field(parent, t('Notes'), object.notes, v => editObject(o => { o.notes = v; }), { rows: 3 });
   }
-  parent.append(button(`Delete ${kind === 'openings' ? 'opening' : kind.slice(0, -1)}`, deleteSelection, 'danger'));
-  parent.append(node('p', 'property-id', `ID: ${object.id}${object.wall_id ? ` · Wall: ${object.wall_id}` : ''}`));
+  parent.append(button(t(`Delete ${kind === 'openings' ? 'opening' : kind.slice(0, -1)}`), deleteSelection, 'danger'));
+  parent.append(node('p', 'property-id', object.wall_id ? t('ID: {id} · Wall: {wall}', { id: object.id, wall: object.wall_id }) : t('ID: {id}', { id: object.id })));
 }
 function deleteSelection() {
   if (!selection || !selected()) return;
@@ -360,7 +372,7 @@ function deleteSelection() {
     if (kind === 'walls') f.openings = f.openings.filter(o => o.wall_id !== id);
     if (kind === 'rooms') f.items = f.items.filter(o => o.room !== id);
     selection = null;
-  }, kind === 'walls' ? 'Wall and its openings deleted. Undo is available.' : kind === 'rooms' ? 'Room and its assigned items deleted. Walls remain. Undo is available.' : 'Object deleted. Undo is available.');
+  }, () => kind === 'walls' ? t('Wall and its openings deleted. Undo is available.') : kind === 'rooms' ? t('Room and its assigned items deleted. Walls remain. Undo is available.') : t('Object deleted. Undo is available.'));
 }
 function setTool(next) {
   tool = next; document.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === tool)));
@@ -374,7 +386,7 @@ function setView(next) {
   $('plan-tab').setAttribute('aria-selected', String(next === 'plan')); $('preview-tab').setAttribute('aria-selected', String(next === 'preview'));
   $('plan-tab').tabIndex = next === 'plan' ? 0 : -1; $('preview-tab').tabIndex = next === 'preview' ? 0 : -1;
   $('plan-view').hidden = next !== 'plan'; $('preview-view').hidden = next !== 'preview'; $('snap-label').hidden = next !== 'plan';
-  $('tool-hint').textContent = next === 'preview' ? 'Drag to orbit · scroll to zoom · arrow keys to rotate' : toolHint();
+  $('tool-hint').textContent = next === 'preview' ? t('Drag to orbit · scroll to zoom · arrow keys to rotate') : toolHint();
   $('empty-state').hidden = floor().rooms.length + floor().walls.length + floor().items.length > 0 || tool !== 'select' || next !== 'plan';
   if (next === 'preview') renderPreview(); else renderPlan(); updateZoom();
 }
@@ -385,10 +397,10 @@ function addOpening(wall, offset, type) {
   transact((_p, f) => {
     const id = nextId(f, type), head = round(Math.min(type === 'window' ? 2.2 : 2.1, height));
     f.openings.push({ id, wall_id: wall.id, type, offset_m: start, width_m: width, sill_m: type === 'window' ? round(Math.min(.9, head / 2)) : 0, head_m: head }); selection = { kind: 'openings', id };
-  }, `${type === 'window' ? 'Window' : 'Door'} opening added. Adjust its dimensions in the inspector.`);
+  }, () => t(type === 'window' ? 'Window opening added. Adjust its dimensions in the inspector.' : 'Door opening added. Adjust its dimensions in the inspector.'));
 }
 function addItem(point, roomId) {
-  if (!floor().rooms.length) return status('Add a room before placing items. Each item belongs to a room.', true);
+  if (!floor().rooms.length) return status(() => t('Add a room before placing items. Each item belongs to a room.'), true);
   const model = placementModelId ? getCatalogModel(placementModelId) : null, type = model ? model.type : $('place-type').value;
   const defaults = { furniture: [1.5, .75, .75, 0], lamp: [.3, .3, 1.4, 0], chandelier: [.55, .55, .35, Math.max(0, floor().height_m - .55)], tv: [1.3, .1, .8, .85], appliance: [.6, .65, .9, 0], switch: [.1, .05, .1, 1.2], outlet: [.1, .05, .1, .3], sensor: [.12, .08, .12, 1.8] };
   const [w, d, h, y] = defaults[type]; const safeHeight = Math.min(h, floor().height_m), safeY = Math.min(y, floor().height_m - safeHeight);
@@ -396,7 +408,7 @@ function addItem(point, roomId) {
   transact((_p, f) => {
     const id = nextId(f, type), room = f.rooms.find(r => r.id === roomId) || f.rooms.find(r => pointInPolygon(point, r.polygon)) || f.rooms[0];
     f.items.push({ id, name: model?.label || LABELS[type], type, room: room.id, position_m: { x: snap(point[0]), y: catalogDefaults?.elevation ?? round(safeY), z: snap(point[1]) }, dimensions_m: catalogDefaults?.dimensions || { width: w, depth: d, height: round(safeHeight) }, rotation_deg: 0, entity_id: '', notes: '', ...(model ? { model_id: model.id, style_id: model.default_style } : {}) }); selection = { kind: 'items', id };
-  }, `${model?.label || LABELS[type]} placed. Change its finish, color, or size in Item details.`);
+  }, () => t('{item} placed. Change its finish, color, or size in Item details.', { item: model ? t(`model.${model.id}`) : t(LABELS[type]) }));
 }
 
 // Canvas plan: x right, z down. Coordinates remain meters at every zoom level.
@@ -432,7 +444,7 @@ function renderPlan() {
   for (const w of f.walls) {
     const active = selection?.kind === 'walls' && selection.id === w.id;
     path([w.start, w.end]); ctx.strokeStyle = active ? '#3a7b6a' : '#778776'; ctx.lineWidth = Math.max(3, w.thickness_m * map.scale); ctx.lineCap = 'butt'; ctx.stroke();
-    if (active) { for (const [i, p] of [w.start, w.end].entries()) { const [x, y] = toScreen(p); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#3a7b6a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#3a7b6a'; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(i ? 'end' : 'start', x + 7, y - 7); } }
+    if (active) { for (const [i, p] of [w.start, w.end].entries()) { const [x, y] = toScreen(p); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#3a7b6a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#3a7b6a'; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(t(i ? 'end' : 'start'), x + 7, y - 7); } }
   }
   for (const o of f.openings) {
     const w = f.walls.find(wall => wall.id === o.wall_id); if (!w) continue;
@@ -483,7 +495,7 @@ function renderPlan() {
   }
   // A fixed metric scale makes the current zoom unambiguous.
   const scaleMeters = map.scale < 20 ? 5 : map.scale > 150 ? .5 : 1, sx = 20, sy = size.height - 76;
-  ctx.strokeStyle = '#9bab8f'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sx, sy - 3); ctx.lineTo(sx, sy + 3); ctx.moveTo(sx, sy); ctx.lineTo(sx + scaleMeters * map.scale, sy); ctx.moveTo(sx + scaleMeters * map.scale, sy - 3); ctx.lineTo(sx + scaleMeters * map.scale, sy + 3); ctx.stroke(); ctx.fillStyle = '#8a9b7e'; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`${scaleMeters} m · grid ${gridStep} m`, sx, sy - 9);
+  ctx.strokeStyle = '#9bab8f'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sx, sy - 3); ctx.lineTo(sx, sy + 3); ctx.moveTo(sx, sy); ctx.lineTo(sx + scaleMeters * map.scale, sy); ctx.moveTo(sx + scaleMeters * map.scale, sy - 3); ctx.lineTo(sx + scaleMeters * map.scale, sy + 3); ctx.stroke(); ctx.fillStyle = '#8a9b7e'; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(t('{scale} m · grid {grid} m', { scale: scaleMeters, grid: gridStep }), sx, sy - 9);
 }
 function wallAt(point) { return floor().walls.map(w => ({ wall: w, hit: projectOnWall(point, w) })).filter(o => o.hit.distance < Math.max(.1, 10 / map.scale)).sort((a, b) => a.hit.distance - b.hit.distance)[0]; }
 function hitTest(point) {
@@ -502,7 +514,7 @@ planCanvas.addEventListener('pointerdown', event => {
   event.preventDefault(); planCanvas.focus(); const screen = localPoint(event), world = toWorld(screen); planCanvas.setPointerCapture(event.pointerId);
   if (spaceHeld || event.shiftKey || event.button === 1) { drag = { kind: 'pan', screen, map: { ...map } }; planCanvas.style.cursor = 'grabbing'; return; }
   if (tool === 'room' || tool === 'wall') { const p = world.map(snap); drag = { kind: 'draw', startWorld: p, endWorld: p, screen }; return; }
-  if (tool === 'door' || tool === 'window') { const near = wallAt(world); if (near) addOpening(near.wall, near.hit.offset, tool); else status('Click directly on an existing wall to add an opening.', true); return; }
+  if (tool === 'door' || tool === 'window') { const near = wallAt(world); if (near) addOpening(near.wall, near.hit.offset, tool); else status(() => t('Click directly on an existing wall to add an opening.'), true); return; }
   if (tool === 'item') { addItem(world); return; }
   selection = hitTest(world); renderUI(); renderPlan();
   if (selection) drag = { kind: 'move', startWorld: world, original: clone(project), selection: { ...selection }, moved: false };
@@ -528,18 +540,18 @@ function finishPointer(event, cancel = false) {
   if (event && planCanvas.hasPointerCapture(event.pointerId)) planCanvas.releasePointerCapture(event.pointerId);
   if (current.kind === 'draw' && !cancel) {
     const [a, b] = [current.startWorld, current.endWorld];
-    if (distance(a, b) < .05) { status('Drag across the plan to draw a shape.'); renderPlan(); return; }
+    if (distance(a, b) < .05) { status(() => t('Drag across the plan to draw a shape.')); renderPlan(); return; }
     if (tool === 'room') {
-      if (Math.abs(a[0] - b[0]) < .05 || Math.abs(a[1] - b[1]) < .05) { status('A room needs both width and depth.', true); renderPlan(); return; }
-      transact((_p, f) => { const id = nextId(f, 'room'); f.rooms.push({ id, name: `Room ${f.rooms.length + 1}`, polygon: [a, [b[0], a[1]], b, [a[0], b[1]]], material: 'floor' }); selection = { kind: 'rooms', id }; }, 'Room drawn. Build its wall outline in the inspector.');
-    } else transact((_p, f) => { const id = nextId(f, 'wall'); f.walls.push({ id, start: a, end: b, thickness_m: .15 }); selection = { kind: 'walls', id }; }, 'Wall drawn. Add a door or window by clicking the wall.');
+      if (Math.abs(a[0] - b[0]) < .05 || Math.abs(a[1] - b[1]) < .05) { status(() => t('A room needs both width and depth.'), true); renderPlan(); return; }
+      transact((_p, f) => { const id = nextId(f, 'room'); f.rooms.push({ id, name: `Room ${f.rooms.length + 1}`, polygon: [a, [b[0], a[1]], b, [a[0], b[1]]], material: 'floor' }); selection = { kind: 'rooms', id }; }, () => t('Room drawn. Build its wall outline in the inspector.'));
+    } else transact((_p, f) => { const id = nextId(f, 'wall'); f.walls.push({ id, start: a, end: b, thickness_m: .15 }); selection = { kind: 'walls', id }; }, () => t('Wall drawn. Add a door or window by clicking the wall.'));
     setTool('select');
   }
   if (current.kind === 'move') {
     if (cancel || !current.moved) project = current.original;
     else {
-      try { validateProject(project); serializeProject(project); historyPush(current.original); previewDirty = true; status('Object moved.'); save(); }
-      catch (error) { project = current.original; status(`Move cancelled: ${error.message}`, true); }
+      try { validateProject(project); serializeProject(project); historyPush(current.original); previewDirty = true; status(() => t('Object moved.')); save(); }
+      catch (error) { project = current.original; status(() => t('Move cancelled: {error}', { error: formatValidationError(error, t) }), true); }
     }
     renderUI();
   }
@@ -560,7 +572,7 @@ function initPreview() {
     previewSun = new THREE.DirectionalLight(0xfff6e6, 2.5); previewSun.castShadow = true; previewSun.shadow.mapSize.set(2048, 2048); previewSun.shadow.normalBias = .025; previewSun.shadow.bias = -.0002; scene.add(previewSun); scene.add(previewSun.target);
     const fill = new THREE.DirectionalLight(0xdce9f2, .5); fill.position.set(12, 10, -10); scene.add(fill);
     worldGroup = new THREE.Group(); scene.add(worldGroup); fitPreview();
-  } catch (error) { previewUnavailable = true; $('preview-error').hidden = false; $('preview-error').textContent = '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'; previewMetadata = { error: String(error.message) }; }
+  } catch (error) { previewUnavailable = true; $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
 }
 function previewFloors() { return $('all-floors').checked ? project.floors : [floor()]; }
 function fitPreview() {
@@ -652,40 +664,47 @@ previewCanvas.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft') orbit.yaw -= .12; if (e.key === 'ArrowRight') orbit.yaw += .12; if (e.key === 'ArrowUp') orbit.pitch = Math.min(1.5, orbit.pitch + .1); if (e.key === 'ArrowDown') orbit.pitch = Math.max(.1, orbit.pitch - .1);
   if (e.key === '+' || e.key === '=') zoomPreview(1.15); else if (e.key === '-') zoomPreview(1 / 1.15); else drawPreview();
 });
-previewCanvas.addEventListener('webglcontextlost', e => { e.preventDefault(); $('preview-error').hidden = false; $('preview-error').textContent = 'The graphics context was lost. Reload to restore 3D. Your local draft and JSON export remain available.'; });
+previewCanvas.addEventListener('webglcontextlost', e => { e.preventDefault(); $('preview-error').hidden = false; translatedText('preview-error', 'The graphics context was lost. Reload to restore 3D. Your local draft and JSON export remain available.'); });
 
 // Project actions and keyboard navigation.
 function exportProject() {
-  try { validateProject(project); const blob = new Blob([serializeProject(project)], { type: 'application/json' }), url = URL.createObjectURL(blob), a = node('a'); a.href = url; a.download = 'project.json'; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); status('project.json exported. Keep it as your portable, editable backup.'); }
-  catch (error) { status(error.message, true); }
+  try { validateProject(project); const blob = new Blob([serializeProject(project)], { type: 'application/json' }), url = URL.createObjectURL(blob), a = node('a'); a.href = url; a.download = 'project.json'; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); status(() => t('project.json exported. Keep it as your portable, editable backup.')); }
+  catch (error) { status(() => t('Could not export project: {error}', { error: formatValidationError(error, t) }), true); }
 }
 function hasContent() { return project.floors.length > 1 || project.floors.some(f => ['rooms', 'walls', 'openings', 'items'].some(k => f[k].length)); }
-$('new-project').addEventListener('click', () => { if (!hasContent() || confirm('Start a new blank project? Export JSON first if you need a separate copy of the current plan. You can undo this.')) replaceProject(blankProject(), 'New blank project created.'); });
-$('load-demo').addEventListener('click', () => { if (!hasContent() || confirm('Replace the current plan with a fictional demo? You can undo this.')) replaceProject(demoProject(), 'Fictional demo loaded. All names, geometry, and entities are examples.'); });
+$('new-project').addEventListener('click', () => { if (!hasContent() || confirm(t('Start a new blank project? Export JSON first if you need a separate copy of the current plan. You can undo this.'))) replaceProject(blankProject(), () => t('New blank project created.')); });
+$('load-demo').addEventListener('click', () => { if (!hasContent() || confirm(t('Replace the current plan with a fictional demo? You can undo this.'))) replaceProject(demoProject(), () => t('Fictional demo loaded. All names, geometry, and entities are examples.')); });
 $('open-project').addEventListener('click', () => $('file-input').click());
 $('file-input').addEventListener('change', async e => {
   const file = e.target.files[0]; e.target.value = ''; if (!file) return;
   try {
-    if (file.size > LIMITS.bytes) throw new Error('Project file is too large. Maximum size is 2 MB.');
+    if (file.size > LIMITS.bytes) throw new Error(t('Project file is too large. Maximum size is 2 MB.'));
     const parsed = JSON.parse(await file.text()); validateProject(parsed);
-    if (hasContent() && !confirm('Open this project and replace the current plan? Export the current plan first if needed. You can undo this.')) return;
-    replaceProject(parsed, 'Project opened and validated.');
-  } catch (error) { status(`Import rejected: ${error.message} Your current plan is unchanged.`, true); }
+    if (hasContent() && !confirm(t('Open this project and replace the current plan? Export the current plan first if needed. You can undo this.'))) return;
+    replaceProject(parsed, () => t('Project opened and validated.'));
+  } catch (error) { status(() => t('Import rejected: {error} Your current plan is unchanged.', { error: formatValidationError(error, t) }), true); }
 });
 $('export-project').addEventListener('click', exportProject); $('build-export').addEventListener('click', exportProject);
-$('project-title').addEventListener('change', e => transact(p => { p.title = e.target.value; }, 'Project renamed.'));
+$('project-title').addEventListener('change', e => transact(p => { p.title = e.target.value; }, () => t('Project renamed.')));
 $('add-floor').addEventListener('click', () => {
-  if (project.floors.length >= LIMITS.floors) return status(`A project supports up to ${LIMITS.floors} floors.`, true);
+  if (project.floors.length >= LIMITS.floors) return status(() => t('A project supports up to {count} floors.', { count: LIMITS.floors }), true);
   let index = 2; while (project.floors.some(f => f.id === `floor_${index}`)) index++;
   const previousId = activeFloorId, id = `floor_${index}`, next = newFloor(id, `Floor ${index}`, round(floor().elevation_m + floor().height_m + .25));
-  const ok = transact(p => { p.floors.push(next); }, 'New floor added. Set its name and elevation in the inspector.');
+  const ok = transact(p => { p.floors.push(next); }, () => t('New floor added. Set its name and elevation in the inspector.'));
   if (ok) { activeFloorId = id; selection = null; previewDirty = true; renderUI(); fitPlan(); fitPreview(); renderPlan(); } else activeFloorId = previousId;
 });
 $('start-room').addEventListener('click', () => { setTool('room'); planCanvas.focus(); });
 document.querySelectorAll('[data-tool]').forEach(b => { const label = b.querySelector('span:nth-child(2)').textContent; b.setAttribute('aria-label', label); b.title = label; b.addEventListener('click', () => { setTool(b.dataset.tool); }); });
 $('place-type').addEventListener('change', () => { placementModelId = null; updatePlacement(); setTool('item'); renderInspector(); });
 $('browse-items').addEventListener('click', openLibrary);
-for (const category of CATALOG.categories) { const option = node('option', '', category.label); option.value = category.id; $('library-category').append(option); }
+function renderCategories() {
+  const selectedCategory = $('library-category').value;
+  $('library-category').replaceChildren();
+  const all = node('option', '', t('All categories')); all.value = ''; $('library-category').append(all);
+  for (const category of CATALOG.categories) { const option = node('option', '', t(`category.${category.id}`)); option.value = category.id; $('library-category').append(option); }
+  $('library-category').value = selectedCategory;
+}
+renderCategories();
 $('library-search').addEventListener('input', () => renderLibrary());
 $('library-category').addEventListener('change', () => renderLibrary());
 $('library-more').addEventListener('click', () => renderLibrary(true));
@@ -700,11 +719,11 @@ $('help-button').addEventListener('click', () => $('help-dialog').showModal());
 document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => $(b.dataset.close).close()));
 $('build-project').addEventListener('click', () => {
   const label = $('build-validation');
-  try { validateProject(project, { complete: true }); label.className = 'callout'; label.textContent = 'Your project passes the editor checks and is ready to export. The compiler performs its own final validation.'; }
-  catch (error) { label.className = 'callout error'; label.textContent = `Before building: ${error.message} You can still export this draft.`; }
+  try { validateProject(project, { complete: true }); label.className = 'callout'; buildValidationText = () => t('Your project passes the editor checks and is ready to export. The compiler performs its own final validation.'); label.textContent = buildValidationText(); }
+  catch (error) { label.className = 'callout error'; buildValidationText = () => t('Before building: {error} You can still export this draft.', { error: formatValidationError(error, t) }); label.textContent = buildValidationText(); }
   $('build-dialog').showModal();
 });
-$('copy-command').addEventListener('click', async () => { try { await navigator.clipboard.writeText(BUILD_COMMAND); $('copy-command').textContent = 'Copied'; } catch { $('copy-command').textContent = 'Select and copy the command above'; } });
+$('copy-command').addEventListener('click', async () => { try { await navigator.clipboard.writeText(BUILD_COMMAND); translatedText('copy-command', 'Copied'); } catch { translatedText('copy-command', 'Select and copy the command above'); } });
 window.addEventListener('keydown', e => {
   if (e.target.closest('input, textarea, select') || document.querySelector('dialog[open]')) return;
   if (e.key === 'Escape') { finishPointer(null, true); selection = null; setTool('select'); renderUI(); renderPlan(); return; }
@@ -735,4 +754,34 @@ new ResizeObserver(entries => {
 window.planner = Object.freeze({ getProject: () => clone(project), getPreviewMetadata: () => ({ ...previewMetadata }), getView: () => view, getSelection: () => selection && { ...selection }, worldToScreen: point => toScreen(point), validate: () => validateProject(clone(project), { complete: true }) });
 updatePlacement(); renderUI(); fitPlan(); renderPlan();
 if (startupMessage) status(startupMessage, saveFailed);
-if (saveFailed) { $('save-status').textContent = 'Draft restore unavailable · export a backup'; $('save-status').classList.add('problem'); } else $('save-status').textContent = startupMessage ? 'Restored from this browser' : 'Local draft · export to keep a copy';
+if (saveFailed) { translatedText('save-status', 'Draft restore unavailable · export a backup'); $('save-status').classList.add('problem'); } else translatedText('save-status', startupMessage ? 'Restored from this browser' : 'Local draft · export to keep a copy');
+
+function renderLocale() {
+  // Switching a presentation preference must not discard an unfinished form.
+  const drafts = [...$('inspector-body').querySelectorAll('input,select,textarea')].map(input => ({ value: input.value, checked: input.checked }));
+  translateStatic();
+  $('language-select').value = getLocale();
+  document.querySelectorAll('[data-tool]').forEach(element => {
+    const label = element.querySelector('span:nth-child(2)').textContent;
+    element.setAttribute('aria-label', label); element.title = label;
+  });
+  renderCategories(); updatePlacement(); renderUI(); renderPlan();
+  [...$('inspector-body').querySelectorAll('input,select,textarea')].forEach((input, index) => {
+    if (drafts[index]) { input.value = drafts[index].value; if (input.type === 'checkbox') input.checked = drafts[index].checked; }
+  });
+  if (view === 'preview') $('tool-hint').textContent = t('Drag to orbit · scroll to zoom · arrow keys to rotate');
+  if ($('library-dialog').open) renderLibrary();
+  if (buildValidationText) $('build-validation').textContent = buildValidationText();
+  if (lastStatus) status(lastStatus.message, lastStatus.error);
+}
+for (const locale of LOCALES) {
+  const option = node('option', '', locale.name); option.value = locale.code; option.lang = locale.code;
+  $('language-select').append(option);
+}
+onLocaleChange(({ loaded }) => {
+  renderLocale();
+  if (!loaded) status(() => t('Language could not be loaded. English is shown instead.'), true);
+});
+$('language-select').addEventListener('change', event => { void setLocale(event.target.value); });
+renderLocale();
+if (!initialLocale.loaded) status(() => t('Language could not be loaded. English is shown instead.'), true);

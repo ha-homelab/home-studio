@@ -30,6 +30,30 @@ covers the commands, manual YAML entry, restart, and Home Assistant OS file
 transfer. Installation is a local file operation, not a hosted wizard or HACS
 installation flow.
 
+## Editor language boundary
+
+`planner/i18n.js` loads English and the locale manifest at startup. It selects an
+allowlisted language from the URL, stored preference, or browser settings, then
+imports only that language's local module. A request revision prevents an older
+download from replacing a more recent selection. No translation API is involved.
+
+The editor translates explicit message keys and catalog labels. Project data,
+entity IDs, geometry, and history remain independent of presentation language.
+An interface refresh preserves unfinished inspector fields. Right-to-left
+locales change text layout while numeric coordinates, code, and canvas controls
+keep their original orientation.
+
+`planner/validation.js` carries a message key, literal values, and explicitly
+marked field labels alongside each user-facing validation error. The UI formats
+these in the current language; the original English `Error.message` remains
+available for callers and parity tests. User-authored names never become
+translation keys. Technical schema diagnostics may remain in English.
+
+The compiler does not copy editor language packs into the installed HA viewer.
+The public source archive includes them and the translated README quick starts.
+See [language coverage and contribution rules](i18n.md) for the supported scope
+and the contract and browser checks enforced by CI.
+
 ## Furniture authoring and export
 
 `planner/catalog.json` is the canonical, versioned library of original low-poly
