@@ -166,7 +166,7 @@ export function validateProject(project, { complete = false } = {}) {
       if (a.wall_id === b.wall_id && Math.min(a.offset_m + a.width_m, b.offset_m + b.width_m) > Math.max(a.offset_m, b.offset_m) + EPS) fail('Openings on the same wall cannot overlap.');
     }
     for (const item of f.items) {
-      fields(item, ['id', 'name', 'type', 'room', 'position_m', 'dimensions_m', 'rotation_deg', 'entity_id', 'notes'], 'Item', ['model_id', 'style_id', 'color']); id(item.room, ID, 'Item room');
+      fields(item, ['id', 'name', 'type', 'room', 'position_m', 'dimensions_m', 'rotation_deg', 'entity_id', 'notes'], 'Item', ['model_id', 'style_id', 'color', 'pattern_id', 'pattern_color']); id(item.room, ID, 'Item room');
       string(item.name, 100, 'Item name'); if (!ITEM_TYPES.includes(item.type)) fail('Unknown item type.');
       validateFurnitureAppearance(item);
       if (!f.rooms.some(r => r.id === item.room)) fail(`${item.name}: choose a room on this floor.`);

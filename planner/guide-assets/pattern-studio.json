@@ -1,0 +1,520 @@
+{
+  "schema_version": 1,
+  "id": "pattern_studio",
+  "title": "Color & pattern studio \u00b7 fictional example",
+  "floors": [
+    {
+      "id": "main",
+      "name": "Pattern studio",
+      "elevation_m": 0,
+      "height_m": 2.7,
+      "rooms": [
+        {
+          "id": "studio",
+          "name": "Color & pattern studio",
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              9,
+              0
+            ],
+            [
+              9,
+              6
+            ],
+            [
+              0,
+              6
+            ]
+          ],
+          "material": "floor"
+        }
+      ],
+      "walls": [
+        {
+          "id": "north",
+          "start": [
+            0,
+            0
+          ],
+          "end": [
+            9,
+            0
+          ],
+          "thickness_m": 0.15
+        },
+        {
+          "id": "west",
+          "start": [
+            0,
+            6
+          ],
+          "end": [
+            0,
+            0
+          ],
+          "thickness_m": 0.15
+        },
+        {
+          "id": "east",
+          "start": [
+            9,
+            0
+          ],
+          "end": [
+            9,
+            6
+          ],
+          "thickness_m": 0.15
+        }
+      ],
+      "openings": [
+        {
+          "id": "window",
+          "wall_id": "north",
+          "type": "window",
+          "offset_m": 3.3,
+          "width_m": 2.2,
+          "sill_m": 0.7,
+          "head_m": 2.25
+        }
+      ],
+      "items": [
+        {
+          "id": "rug_0",
+          "name": "Rectangular rug",
+          "type": "furniture",
+          "model_id": "rug",
+          "style_id": "coastal_sand",
+          "room": "studio",
+          "position_m": {
+            "x": 2.35,
+            "y": 0,
+            "z": 3.1
+          },
+          "dimensions_m": {
+            "width": 3.5,
+            "depth": 3.4,
+            "height": 0.025
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "pattern_id": "herringbone"
+        },
+        {
+          "id": "sofa_3_1",
+          "name": "Three-seat sofa",
+          "type": "furniture",
+          "model_id": "sofa_3",
+          "style_id": "sage_linen",
+          "room": "studio",
+          "position_m": {
+            "x": 2.05,
+            "y": 0,
+            "z": 0.85
+          },
+          "dimensions_m": {
+            "width": 2.35,
+            "depth": 0.9,
+            "height": 0.86
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "pattern_id": "stripes"
+        },
+        {
+          "id": "square_cushion_2",
+          "name": "Rounded square cushion",
+          "type": "furniture",
+          "model_id": "square_cushion",
+          "style_id": "desert_clay",
+          "room": "studio",
+          "position_m": {
+            "x": 1.5,
+            "y": 0.4472,
+            "z": 1.02
+          },
+          "dimensions_m": {
+            "width": 0.48,
+            "depth": 0.48,
+            "height": 0.13
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "pattern_id": "chevrons"
+        },
+        {
+          "id": "square_cushion_3",
+          "name": "Rounded square cushion",
+          "type": "furniture",
+          "model_id": "square_cushion",
+          "style_id": "ochre_cream",
+          "room": "studio",
+          "position_m": {
+            "x": 2.6,
+            "y": 0.4472,
+            "z": 1.02
+          },
+          "dimensions_m": {
+            "width": 0.48,
+            "depth": 0.48,
+            "height": 0.13
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "pattern_id": "dots"
+        },
+        {
+          "id": "coffee_table_4",
+          "name": "Coffee table",
+          "type": "furniture",
+          "model_id": "coffee_table",
+          "style_id": "walnut_brass",
+          "room": "studio",
+          "position_m": {
+            "x": 2.25,
+            "y": 0,
+            "z": 2.7
+          },
+          "dimensions_m": {
+            "width": 1.1,
+            "depth": 0.6,
+            "height": 0.42
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": ""
+        },
+        {
+          "id": "stacked_books_5",
+          "name": "Stack of hardcover books",
+          "type": "furniture",
+          "model_id": "stacked_books",
+          "style_id": "plum_velvet",
+          "room": "studio",
+          "position_m": {
+            "x": 2,
+            "y": 0.42,
+            "z": 2.7
+          },
+          "dimensions_m": {
+            "width": 0.31,
+            "depth": 0.25,
+            "height": 0.15
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": ""
+        },
+        {
+          "id": "ceramic_vase_6",
+          "name": "Round ceramic vase",
+          "type": "furniture",
+          "model_id": "ceramic_vase",
+          "style_id": "desert_clay",
+          "room": "studio",
+          "position_m": {
+            "x": 2.55,
+            "y": 0.42,
+            "z": 2.7
+          },
+          "dimensions_m": {
+            "width": 0.26,
+            "depth": 0.26,
+            "height": 0.32
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": ""
+        },
+        {
+          "id": "rocking_chair_7",
+          "name": "Cushioned wooden rocking chair",
+          "type": "furniture",
+          "model_id": "rocking_chair",
+          "style_id": "coastal_sand",
+          "room": "studio",
+          "position_m": {
+            "x": 0.7,
+            "y": 0,
+            "z": 4.4
+          },
+          "dimensions_m": {
+            "width": 0.68,
+            "depth": 0.98,
+            "height": 1.02
+          },
+          "rotation_deg": 35,
+          "entity_id": "",
+          "notes": "",
+          "pattern_id": "checks"
+        },
+        {
+          "id": "storage_ottoman_8",
+          "name": "Upholstered storage ottoman",
+          "type": "furniture",
+          "model_id": "storage_ottoman",
+          "style_id": "desert_clay",
+          "room": "studio",
+          "position_m": {
+            "x": 3.8,
+            "y": 0,
+            "z": 4.4
+          },
+          "dimensions_m": {
+            "width": 0.85,
+            "depth": 0.58,
+            "height": 0.46
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "pattern_id": "diamonds"
+        },
+        {
+          "id": "curtain_pair_open_9",
+          "name": "Open curtain pair with tiebacks",
+          "type": "furniture",
+          "model_id": "curtain_pair_open",
+          "style_id": "coastal_sand",
+          "room": "studio",
+          "position_m": {
+            "x": 4.4,
+            "y": 0.03,
+            "z": 0.2
+          },
+          "dimensions_m": {
+            "width": 2.2,
+            "depth": 0.18,
+            "height": 2.35
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "pattern_id": "stripes"
+        },
+        {
+          "id": "daybed_10",
+          "name": "Upholstered daybed with cushions",
+          "type": "furniture",
+          "model_id": "daybed",
+          "style_id": "dusty_rose",
+          "room": "studio",
+          "position_m": {
+            "x": 7.3,
+            "y": 0,
+            "z": 1.0
+          },
+          "dimensions_m": {
+            "width": 2.05,
+            "depth": 0.9,
+            "height": 0.93
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "pattern_id": "checks"
+        },
+        {
+          "id": "folded_throw_11",
+          "name": "Folded fringed throw",
+          "type": "furniture",
+          "model_id": "folded_throw",
+          "style_id": "plum_velvet",
+          "room": "studio",
+          "position_m": {
+            "x": 7.3,
+            "y": 0.528,
+            "z": 1.13
+          },
+          "dimensions_m": {
+            "width": 0.7,
+            "depth": 0.42,
+            "height": 0.12
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "pattern_id": "chevrons"
+        },
+        {
+          "id": "rug_12",
+          "name": "Rectangular rug",
+          "type": "furniture",
+          "model_id": "rug",
+          "style_id": "dusty_rose",
+          "room": "studio",
+          "position_m": {
+            "x": 7.15,
+            "y": 0,
+            "z": 2.9
+          },
+          "dimensions_m": {
+            "width": 2.8,
+            "depth": 2.1,
+            "height": 0.025
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "pattern_id": "diamonds"
+        },
+        {
+          "id": "hanging_egg_chair_13",
+          "name": "Hanging egg chair on stand",
+          "type": "furniture",
+          "model_id": "hanging_egg_chair",
+          "style_id": "coastal_sand",
+          "room": "studio",
+          "position_m": {
+            "x": 8.2,
+            "y": 0,
+            "z": 4.8
+          },
+          "dimensions_m": {
+            "width": 1.06,
+            "depth": 0.98,
+            "height": 1.98
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": ""
+        },
+        {
+          "id": "cat_tree_14",
+          "name": "Three-level cat tree",
+          "type": "furniture",
+          "model_id": "cat_tree",
+          "style_id": "sage_linen",
+          "room": "studio",
+          "position_m": {
+            "x": 5.3,
+            "y": 0,
+            "z": 4.9
+          },
+          "dimensions_m": {
+            "width": 0.65,
+            "depth": 0.55,
+            "height": 1.3
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": ""
+        },
+        {
+          "id": "pet_bed_15",
+          "name": "Bolstered pet bed",
+          "type": "furniture",
+          "model_id": "pet_bed",
+          "style_id": "plum_velvet",
+          "room": "studio",
+          "position_m": {
+            "x": 6.25,
+            "y": 0,
+            "z": 4.95
+          },
+          "dimensions_m": {
+            "width": 0.8,
+            "depth": 0.62,
+            "height": 0.24
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "pattern_id": "dots"
+        },
+        {
+          "id": "coat_tree_16",
+          "name": "Branching coat tree",
+          "type": "furniture",
+          "model_id": "coat_tree",
+          "style_id": "walnut_brass",
+          "room": "studio",
+          "position_m": {
+            "x": 8.5,
+            "y": 0,
+            "z": 0.4
+          },
+          "dimensions_m": {
+            "width": 0.61,
+            "depth": 0.61,
+            "height": 1.78
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": ""
+        },
+        {
+          "id": "side_table_17",
+          "name": "Side table",
+          "type": "furniture",
+          "model_id": "side_table",
+          "style_id": "walnut_brass",
+          "room": "studio",
+          "position_m": {
+            "x": 5.2,
+            "y": 0,
+            "z": 2.85
+          },
+          "dimensions_m": {
+            "width": 0.5,
+            "depth": 0.5,
+            "height": 0.52
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": ""
+        },
+        {
+          "id": "tabletop_photo_frame_18",
+          "name": "Tabletop picture frame",
+          "type": "furniture",
+          "model_id": "tabletop_photo_frame",
+          "style_id": "ochre_cream",
+          "room": "studio",
+          "position_m": {
+            "x": 5.2,
+            "y": 0.52,
+            "z": 2.85
+          },
+          "dimensions_m": {
+            "width": 0.22,
+            "depth": 0.14,
+            "height": 0.28
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": ""
+        },
+        {
+          "id": "fiddle_leaf_fig_19",
+          "name": "Fiddle-leaf fig",
+          "type": "furniture",
+          "model_id": "fiddle_leaf_fig",
+          "style_id": "sage_linen",
+          "room": "studio",
+          "position_m": {
+            "x": 0.55,
+            "y": 0,
+            "z": 0.55
+          },
+          "dimensions_m": {
+            "width": 0.72,
+            "depth": 0.62,
+            "height": 1.8
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": ""
+        }
+      ]
+    }
+  ]
+}

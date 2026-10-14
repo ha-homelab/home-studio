@@ -39,11 +39,12 @@ the recipes and generates `planner/catalog.js`; `--check` fails on drift. The
 browser imports the generated module directly, preserving the editor's
 `connect-src 'none'` policy. Neither thumbnails nor models need a network request.
 
-Project schema version 1 adds optional `model_id`, `style_id`, and `color`
-(`#RRGGBB`) fields to inventory items. The JavaScript and Python validators check
+Project schema version 1 adds optional `model_id`, `style_id`, `color`,
+`pattern_id`, and `pattern_color` fields (colors use `#RRGGBB`) to inventory items. The JavaScript and Python validators check
 model membership, semantic type, and palette membership. An item without these
 fields follows the existing basic-shape path; there is no guesswork based on its
-name. A finish changes coordinated surfaces and clears an explicit body override.
+name. A palette changes coordinated surfaces and clears body/pattern color overrides,
+while preserving the selected pattern.
 The custom color changes only the designated body surface, preserving accents.
 
 `planner/furniture.js` and `planner/furniture.py` expand the same recipes into
@@ -64,6 +65,36 @@ The generator checks finite numbers, positive sizes, valid material roles,
 unique metadata, and bounds from actual transformed vertices. Each model has
 at most 32 parts. New designs belong in `catalog.json`; regenerate `catalog.js`
 with `python3 scripts/generate-furniture-catalog.py` and run both geometry suites.
+
+### Pattern surfaces and bounded geometry
+
+A recipe may mark up to three box parts with `pattern_face: "top"` (+Y) or
+`"front"` (+Z). The marker does not change its unpatterned geometry. Six shared
+pattern identifiers are exported by both builders: `stripes`, `checks`,
+`diamonds`, `dots`, `herringbone`, and `chevrons`; absent/`none` preserves the
+original meshes. An active pattern on an unsupported design is rejected, as is
+a pattern color without an active pattern. Pattern panels use the body material;
+the pattern defaults to the palette accent, or the explicit `pattern_color`.
+The editor clears a pattern when changing to an incompatible design.
+
+The builders partition the marked face instead of layering coplanar polygons.
+Its background triangles remain in the original `part_N` mesh and all accent
+triangles join a single `pattern` mesh. This preserves exact bounds and outward
+normals, including after per-part rotation, with no depth fighting or shader or
+texture dependency. The six patterns add respectively 10, 30, 52, 106, 126, and
+94 triangles per marked face, at most 378 extra triangles per item. They add at
+most one new material batch; no-pattern items retain their existing geometry.
+The generator enforces the three-face limit.
+
+The 2D drawing uses height-sorted top-facing triangles for patterned items,
+without strokes on internal triangle edges. Other items retain their compact
+silhouette path. Appearance caches include both pattern fields; the item-detail
+preview uses the same bounded thumbnail cache as the library. The full pipeline
+bakes identical geometry into GLB, OBJ/MTL, DAE, USDA, SVG, and installed HA assets.
+`test-furniture-patterns` verifies JS/Python parity, rotated bounds, face coverage,
+exports, invalid values, and unchanged unpatterned meshes. Browser tests exercise
+pattern edits, Undo, palette resets, incompatible design changes, downloaded JSON,
+and rebuilt HA viewer metadata while retaining a moved object's placement.
 
 Dimensions describe the complete object, including its frame, pot, fringe, or
 ceiling mount. `elevation_m` sets the starting bottom height, not the center.
@@ -97,7 +128,7 @@ deleted item leaves no ghost behind.
 HA placement validation preserves bounded appearance metadata without importing
 the authoring catalog. The installed editor retains it when moving, renaming,
 resizing, or binding an item, and clears it when changing semantic type. Changing
-designs or finishes requires rebuilding the project; inventory imports reject
+designs, palettes, or patterns requires rebuilding the project; inventory imports reject
 changed appearance metadata instead of silently displaying an old baked color.
 When a rebuilt project loads a previously saved layout, its compiled appearances
 replace stale appearance metadata while positions, sizes, names, and entity
@@ -108,16 +139,18 @@ edits. Keep the planner JSON as the design source.
 
 The complete package includes the source catalog and both geometry builders;
 Pages publishes only browser modules and the illustrated guide. CI exercises
-all 149 designs, legacy projects, real export formats, a maximum-single-floor
+all 195 designs, legacy projects, real export formats, a maximum-single-floor
 256-plant build/install case, a mixed full-catalog installation, browser editing/history/import, and installation of
 the browser's actual exported file. Installer file and total-size limits remain
 unchanged: 32 MiB per file and 96 MiB in total. The 256-item count ceiling is not
 a guarantee that every combination fits: hundreds of detailed bicycles or plush
 toys can exceed archive limits. Use fewer detailed objects or basic shapes for
 distant/repeated items, and run the installer dry run before deployment. The
-full mixed 149-design regression stays below these limits. Palettes and custom
-body colors do not add geometry; entities and telemetry remain separate from
-the visual catalog.
+full mixed 195-design regression stays below these limits. Palettes and custom
+body colors do not add geometry. Patterns do: dense floors containing many
+detailed or patterned items can reach those same archive limits. Start with a
+small representative room, use None on distant objects, and check the installer
+dry run. Entities and telemetry remain separate from the visual catalog.
 
 ## Public integration core
 

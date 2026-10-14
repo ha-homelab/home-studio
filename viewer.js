@@ -35,15 +35,16 @@ $('kind').addEventListener('change',()=>{['w','d','h','y'].forEach((id,i)=>$(id)
 // Catalog fields are inert metadata. The compiler owns model/style membership.
 function inventoryAppearance(item, type = item?.type) {
   if (!item || item.type !== type) return {};
-  if ((Object.hasOwn(item, 'style_id') || Object.hasOwn(item, 'color')) && !Object.hasOwn(item, 'model_id')) throw Error('A finish or color requires a furniture model.');
+  if (['style_id', 'color', 'pattern_id', 'pattern_color'].some(key => Object.hasOwn(item, key)) && !Object.hasOwn(item, 'model_id')) throw Error('A finish or color requires a furniture model.');
   const result = {};
-  for (const key of ['model_id', 'style_id']) if (Object.hasOwn(item, key)) {
+  for (const key of ['model_id', 'style_id', 'pattern_id']) if (Object.hasOwn(item, key)) {
     if (typeof item[key] !== 'string' || !/^[a-z][a-z0-9_]{0,63}$/.test(item[key])) throw Error('Invalid furniture ' + key + '.');
     result[key] = item[key];
   }
-  if (Object.hasOwn(item, 'color')) {
-    if (typeof item.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(item.color)) throw Error('Invalid furniture color.');
-    result.color = item.color;
+  if (Object.hasOwn(item, 'pattern_color') && (!item.pattern_id || item.pattern_id === 'none')) throw Error('A pattern color requires a pattern.');
+  for (const key of ['color', 'pattern_color']) if (Object.hasOwn(item, key)) {
+    if (typeof item[key] !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(item[key])) throw Error('Invalid furniture color.');
+    result[key] = item[key];
   }
   return result;
 }
@@ -52,7 +53,7 @@ function validateImportedAppearance(list) {
   for (const item of list) {
     if (!item.model_id) continue;
     const original = originals.get(item.id);
-    if (!original || ['model_id', 'style_id', 'color'].some(key => (item[key] || '').toLowerCase() !== (original[key] || '').toLowerCase())) {
+    if (!original || ['model_id', 'style_id', 'color', 'pattern_id', 'pattern_color'].some(key => (item[key] || '').toLowerCase() !== (original[key] || '').toLowerCase())) {
       throw Error('Change furniture designs and finishes in the planner, then rebuild and install the project. Inventory imports update placements only.');
     }
   }
@@ -68,7 +69,7 @@ function reconcileStoredAppearance(list) {
     if (JSON.stringify(appearance) === JSON.stringify(inventoryAppearance(item))) return item;
     changed = true;
     const updated = { ...item };
-    for (const key of ['model_id', 'style_id', 'color']) delete updated[key];
+    for (const key of ['model_id', 'style_id', 'color', 'pattern_id', 'pattern_color']) delete updated[key];
     return Object.assign(updated, appearance);
   });
   appearanceRefreshNotice = changed ? 'Furniture appearances refreshed from the rebuilt project. Saved placements and device bindings were kept.' : '';

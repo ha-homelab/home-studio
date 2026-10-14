@@ -264,7 +264,7 @@ def validate_project(project):
         for ii, item in enumerate(floor["items"]):
             ip = f"{path}.items[{ii}]"
             fields(item, {"id", "name", "type", "room", "position_m", "dimensions_m", "rotation_deg", "entity_id", "notes"}, ip,
-                   {"model_id", "style_id", "color"})
+                   {"model_id", "style_id", "color", "pattern_id", "pattern_color"})
             text(item["name"], ip + ".name", 100)
             text(item["type"], ip + ".type", 30)
             if item["type"] not in KINDS:

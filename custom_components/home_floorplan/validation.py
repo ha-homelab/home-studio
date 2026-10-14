@@ -4,7 +4,7 @@ import math
 import re
 
 KINDS = {"chandelier", "lamp", "tv", "appliance", "furniture", "switch", "outlet", "sensor"}
-APPEARANCE_FIELDS = {"model_id", "style_id", "color"}
+APPEARANCE_FIELDS = {"model_id", "style_id", "color", "pattern_id", "pattern_color"}
 
 
 def validate_appearance(item):
@@ -14,15 +14,18 @@ def validate_appearance(item):
     meshes. Runtime placement editing retains those identifiers and colors;
     they are never file paths, imports, URLs, or executable markup.
     """
-    if ("style_id" in item or "color" in item) and "model_id" not in item:
+    if any(key in item for key in APPEARANCE_FIELDS - {"model_id"}) and "model_id" not in item:
         raise ValueError("A furniture finish or color requires a model")
-    for key in ("model_id", "style_id"):
+    for key in ("model_id", "style_id", "pattern_id"):
         if key in item and (not isinstance(item[key], str)
                             or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", item[key])):
             raise ValueError(f"Invalid {key}")
-    if "color" in item and (not isinstance(item["color"], str)
-                           or not re.fullmatch(r"#[0-9a-fA-F]{6}", item["color"])):
-        raise ValueError("Invalid furniture color")
+    if "pattern_color" in item and item.get("pattern_id", "none") == "none":
+        raise ValueError("A pattern color requires a pattern")
+    for key in ("color", "pattern_color"):
+        if key in item and (not isinstance(item[key], str)
+                            or not re.fullmatch(r"#[0-9a-fA-F]{6}", item[key])):
+            raise ValueError("Invalid furniture color")
 
 
 def validate_inventory(items, rooms):
