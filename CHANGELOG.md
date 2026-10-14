@@ -37,6 +37,20 @@
 - Extend the illustrated drawing guide and add browser-to-install regression
   coverage using fictional projects only.
 
+### Upgrade
+
+Keep personal project files and Home Assistant configuration backed up and
+separate from the public source archive. Existing project identifiers remain
+compatible. Use the documented installer dry-run before replacing an installed
+component, and test the selected candidate with your own project copy.
+
+### Security
+
+The expanded campaigns use synthetic projects with bounded offline execution.
+They exercise project rejection and furniture geometry without accessing a live
+Home Assistant instance. Household plans, credentials and private device bindings
+remain outside the public package and corpus.
+
 ## [0.6.1] - Development line
 
 - Add bounded, offline RC-only Jazzer.js campaigns for imported project validation and wall/polygon geometry.
