@@ -23,13 +23,14 @@ installable Home Assistant package. Examples and guide screenshots are fictional
 
 ## Furnish your rooms
 
-Open **Item library** to browse 40 designs across seating, tables and desks,
-beds, storage, kitchen and laundry, bathroom, rugs and decor, and lighting.
-Search for a sofa, desk, plant, or another familiar object, choose its thumbnail,
+Open **Item library** to browse **104 designs in 16 categories**: furniture and
+lighting, servers and electronics, toys, musical instruments and workshop tools,
+vehicles, bicycles, sports gear, garden equipment, and more. Search for a
+server rack, teddy bear, Tesla, café racer, moped, skis, or satellite dish, choose its thumbnail,
 then click inside a room. You can also select a room and choose **Place item at
 room center** for keyboard placement.
 
-Select an item to change its **Design**, choose one of four **Finish** palettes,
+Select an item to change its **Design**, choose one of ten **Finish** palettes,
 or set a **Custom body color**. Change its width, depth, height, elevation, and
 rotation to match your measurements. A new design keeps your dimensions;
 **Use design’s original size** restores the starting size. **Basic shapes &
@@ -41,7 +42,20 @@ The same furniture geometry and colors appear in the 2D drawing, 3D preview,
 downloaded models, and installed HA plan. Export your project JSON as the editable
 source. Older projects retain their basic shapes until you choose a design.
 The library is bundled locally: no asset account, remote model downloads, or
-additional runtime dependencies are required.
+additional runtime dependencies are required. The library opens with 24 designs;
+**Show more** reveals the next set. Search and category filters cover every design.
+
+Try the [fictional garage and creative studio](planner/guide-assets/garage-and-studio.json):
+download the JSON, choose **Open JSON** in the editor, then **Preview 3D**. It
+combines a car, motorcycle, bicycle, skis, server rack, teddy bear, music and art
+supplies, and a patio. Export your current drawing first if you want to keep it.
+
+![A fictional garage, creative studio, and patio with objects from the expanded library](planner/guide-assets/09-garage-studio.jpg)
+
+These are original, simplified designs. Product-inspired names describe an
+approximate silhouette, not a manufacturer-supplied model or exact dimensions.
+Object libraries provide geometry; adding a server or car does not automatically
+connect its telemetry to Home Assistant.
 
 Furniture designs and finishes are authored in the planner. After changing them,
 rebuild and reinstall the project. The installed panel can move, resize, rename,

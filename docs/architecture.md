@@ -34,7 +34,7 @@ installation flow.
 
 `planner/catalog.json` is the canonical, versioned library of original low-poly
 designs. It defines categories, coordinated material palettes, dimensions, and
-normalized box/cylinder parts. `scripts/generate-furniture-catalog.py` validates
+normalized box, cylinder, sphere, and ring parts. `scripts/generate-furniture-catalog.py` validates
 the recipes and generates `planner/catalog.js`; `--check` fails on drift. The
 browser imports the generated module directly, preserving the editor's
 `connect-src 'none'` policy. Neither thumbnails nor models need a network request.
@@ -52,11 +52,25 @@ matching indexed triangles, outward normals, and linear RGB materials. X/Z span
 then its rotation and position place it on the floor. Tests compare every model
 across the two implementations and inspect actual exported vertex/material data.
 
+A sphere is a low-poly ellipsoid with 48 triangles. A ring is a thick annular
+cylinder around local Y with 96 triangles and an optional `inner_ratio` (default
+0.72). Inner ring faces point toward the hole. Optional per-part
+`rotation_deg: [x, y, z]` rotates about the part center in X, then Y, then Z
+order, before item scaling. Existing boxes and cylinders retain their geometry.
+The generator checks finite numbers, positive sizes, valid material roles,
+unique metadata, and bounds from actual transformed vertices. Each model has
+at most 32 parts. New designs belong in `catalog.json`; regenerate `catalog.js`
+with `python3 scripts/generate-furniture-catalog.py` and run both geometry suites.
+
 The editor uses cached CPU thumbnails, height-sorted top surfaces for 2D, and the
 same parts for the 3D preview. A rug placed after a sofa remains below it. The
 preview renders only when needed; choosing furniture introduces no idle frame
 loop. Undo, local drafts, and JSON export store the recipe identifiers rather than
-triangle buffers. The full library is not copied into the installed HA runtime.
+triangle buffers. The library renders 24 thumbnails at a time; search covers the
+whole catalog, and Show more focuses the first newly added card for keyboard
+users. Its pixel cache retains at most 32 thumbnails. Geometry and top-view
+caches are bounded independently of catalog growth. The full library is not
+copied into the installed HA runtime.
 
 The compiler creates transformed meshes for GLB, OBJ/MTL, DAE, USDA and the
 downloadable plan SVG. Item namespaces include their ordinal to avoid collisions
@@ -80,10 +94,16 @@ edits. Keep the planner JSON as the design source.
 
 The complete package includes the source catalog and both geometry builders;
 Pages publishes only browser modules and the illustrated guide. CI exercises
-all 40 designs, legacy projects, real export formats, a maximum-single-floor
-256-plant build/install case, browser editing/history/import, and installation of
+all 104 designs, legacy projects, real export formats, a maximum-single-floor
+256-plant build/install case, a mixed full-catalog installation, browser editing/history/import, and installation of
 the browser's actual exported file. Installer file and total-size limits remain
-unchanged; large multi-floor designs must also fit those archive limits.
+unchanged: 32 MiB per file and 96 MiB in total. The 256-item count ceiling is not
+a guarantee that every combination fits: hundreds of detailed bicycles or plush
+toys can exceed archive limits. Use fewer detailed objects or basic shapes for
+distant/repeated items, and run the installer dry run before deployment. The
+full mixed 104-design regression stays below these limits. Palettes and custom
+body colors do not add geometry; entities and telemetry remain separate from
+the visual catalog.
 
 ## Public integration core
 

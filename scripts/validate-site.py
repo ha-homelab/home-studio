@@ -17,7 +17,8 @@ SITE_FILES = (
     'planner/guide-assets/03-door.jpg', 'planner/guide-assets/04-window.jpg',
     'planner/guide-assets/05-item.jpg', 'planner/guide-assets/06-preview.jpg',
     'planner/guide-assets/07-export.jpg',
-    'planner/guide-assets/08-library.jpg',
+    'planner/guide-assets/08-library.jpg', 'planner/guide-assets/09-garage-studio.jpg',
+    'planner/guide-assets/garage-and-studio.json',
     'vendor/three.module.min.js', 'vendor/THREE-LICENSE.txt',
 )
 REPO_FILES = ('README.md', 'LICENSE', '.gitignore', 'scripts/validate-site.py', '.github/workflows/pages.yml',
@@ -111,10 +112,12 @@ def validate(root):
                 raise ValueError(f'Unpublished import: {relative}: {imported}')
         if re.search(r'\b(?:fetch|WebSocket|XMLHttpRequest|sendBeacon)\s*\(', code):
             raise ValueError(f'New network API needs public-data review: {relative}')
-    practice = json.loads((root / 'planner/guide-assets/practice-home.json').read_text())
-    for floor in practice['floors']:
-        if any(item.get('entity_id') for item in floor['items']):
-            raise ValueError('The public practice project must have empty device bindings')
+    for relative in SITE_FILES:
+        if relative.startswith('planner/guide-assets/') and relative.endswith('.json'):
+            practice = json.loads((root / relative).read_text())
+            for floor in practice['floors']:
+                if any(item.get('entity_id') for item in floor['items']):
+                    raise ValueError(f'The public practice project must have empty device bindings: {relative}')
     return len(SITE_FILES)
 
 

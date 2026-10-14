@@ -2,8 +2,18 @@
 
 ## Unreleased
 
-- Add a searchable library of 40 furniture and accessory designs, four coordinated
-  finishes, custom body colors, and editable dimensions and rotation.
+- Expand the library to 104 designs and 16 categories, including electronics,
+  plush toys, music and art equipment, cars, motorcycles, bicycles, sports gear,
+  dishes, solar panels, and outdoor furniture. Add six finishes (ten total).
+- Add matching browser/compiler spheres, hollow rings, and per-part rotations
+  with validated bounds, normals, and export parity.
+- Load library cards in sets of 24, bound thumbnail memory, and preserve
+  keyboard navigation while loading more designs.
+- Add an editable fictional garage/studio example and a full-library install
+  regression. Keep existing project data and installer limits compatible.
+
+- Add searchable furniture and accessory designs, coordinated finishes, custom
+  body colors, and editable dimensions and rotation.
 - Preserve furniture appearance from the browser drawing through 3D exports and
   the installed Home Assistant plan, including placement edits after a rebuild.
 - Keep rugs below taller furniture in 2D, avoid duplicate runtime geometry, and
