@@ -99,5 +99,10 @@
   "Inventory exported. Keep this JSON as a placement backup.": "Đã xuất danh mục. Giữ tệp JSON này làm bản sao lưu bố trí.",
   "Imported {count} objects; matching IDs were updated.": "Đã nhập {count} đối tượng; các ID trùng khớp đã được cập nhật.",
   "Import failed: {error}": "Nhập thất bại: {error}",
-  "Connected. Select an entity from the list to bind an object.": "Đã kết nối. Chọn một thực thể từ danh sách để liên kết với đối tượng."
+  "Connected. Select an entity from the list to bind an object.": "Đã kết nối. Chọn một thực thể từ danh sách để liên kết với đối tượng.",
+  "Locked": "Đã khóa",
+  "Unlocked": "Đã mở khóa",
+  "Locking": "Đang khóa",
+  "Unlocking": "Đang mở khóa",
+  "Jammed": "Bị kẹt"
 }

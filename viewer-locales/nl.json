@@ -99,5 +99,10 @@
   "Inventory exported. Keep this JSON as a placement backup.": "Inventaris geëxporteerd. Bewaar deze JSON als back-up van de plaatsing.",
   "Imported {count} objects; matching IDs were updated.": "{count} objecten geïmporteerd; overeenkomende ID’s zijn bijgewerkt.",
   "Import failed: {error}": "Importeren mislukt: {error}",
-  "Connected. Select an entity from the list to bind an object.": "Verbonden. Selecteer een entiteit uit de lijst om een object te koppelen."
+  "Connected. Select an entity from the list to bind an object.": "Verbonden. Selecteer een entiteit uit de lijst om een object te koppelen.",
+  "Locked": "Vergrendeld",
+  "Unlocked": "Ontgrendeld",
+  "Locking": "Bezig met vergrendelen",
+  "Unlocking": "Bezig met ontgrendelen",
+  "Jammed": "Geblokkeerd"
 }

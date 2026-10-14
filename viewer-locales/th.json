@@ -99,5 +99,10 @@
   "Inventory exported. Keep this JSON as a placement backup.": "ส่งออกรายการวัตถุแล้ว เก็บ JSON นี้เป็นข้อมูลสำรองการจัดวาง",
   "Imported {count} objects; matching IDs were updated.": "นำเข้าวัตถุ {count} รายการแล้ว อัปเดต ID ที่ตรงกันแล้ว",
   "Import failed: {error}": "นำเข้าไม่สำเร็จ: {error}",
-  "Connected. Select an entity from the list to bind an object.": "เชื่อมต่อแล้ว เลือกเอนทิตีจากรายการเพื่อเชื่อมโยงกับวัตถุ"
+  "Connected. Select an entity from the list to bind an object.": "เชื่อมต่อแล้ว เลือกเอนทิตีจากรายการเพื่อเชื่อมโยงกับวัตถุ",
+  "Locked": "ล็อกแล้ว",
+  "Unlocked": "ปลดล็อกแล้ว",
+  "Locking": "กำลังล็อก",
+  "Unlocking": "กำลังปลดล็อก",
+  "Jammed": "ล็อกติดขัด"
 }

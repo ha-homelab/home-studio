@@ -99,5 +99,10 @@
   "Inventory exported. Keep this JSON as a placement backup.": "বস্তুতালিকা রপ্তানি হয়েছে। বিন্যাসের ব্যাকআপ হিসেবে এই JSON রাখুন।",
   "Imported {count} objects; matching IDs were updated.": "{count}টি বস্তু আমদানি হয়েছে; মিলে যাওয়া ID আপডেট হয়েছে।",
   "Import failed: {error}": "আমদানি ব্যর্থ: {error}",
-  "Connected. Select an entity from the list to bind an object.": "সংযুক্ত হয়েছে। বস্তুর সঙ্গে সংযোগ করতে তালিকা থেকে একটি এনটিটি বেছে নিন।"
+  "Connected. Select an entity from the list to bind an object.": "সংযুক্ত হয়েছে। বস্তুর সঙ্গে সংযোগ করতে তালিকা থেকে একটি এনটিটি বেছে নিন।",
+  "Locked": "তালা লাগানো",
+  "Unlocked": "তালা খোলা",
+  "Locking": "তালা লাগানো হচ্ছে",
+  "Unlocking": "তালা খোলা হচ্ছে",
+  "Jammed": "তালা আটকে গেছে"
 }

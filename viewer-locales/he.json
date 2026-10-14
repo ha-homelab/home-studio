@@ -99,5 +99,10 @@
   "Inventory exported. Keep this JSON as a placement backup.": "רשימת הפריטים יוצאה. יש לשמור את קובץ ה־JSON הזה כגיבוי של ההצבה.",
   "Imported {count} objects; matching IDs were updated.": "יובאו {count} פריטים; המזהים התואמים עודכנו.",
   "Import failed: {error}": "הייבוא נכשל: {error}",
-  "Connected. Select an entity from the list to bind an object.": "החיבור נוצר. יש לבחור ישות מהרשימה כדי לקשר פריט."
+  "Connected. Select an entity from the list to bind an object.": "החיבור נוצר. יש לבחור ישות מהרשימה כדי לקשר פריט.",
+  "Locked": "נעול",
+  "Unlocked": "לא נעול",
+  "Locking": "ננעל",
+  "Unlocking": "ביטול נעילה",
+  "Jammed": "המנעול תקוע"
 }

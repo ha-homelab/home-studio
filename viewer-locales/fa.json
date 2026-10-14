@@ -99,5 +99,10 @@
   "Inventory exported. Keep this JSON as a placement backup.": "فهرست اشیا صادر شد. این JSON را به‌عنوان نسخهٔ پشتیبان جانمایی نگه دارید.",
   "Imported {count} objects; matching IDs were updated.": "{count} شیء وارد شد؛ شناسه‌های منطبق به‌روزرسانی شدند.",
   "Import failed: {error}": "وارد کردن ناموفق بود: {error}",
-  "Connected. Select an entity from the list to bind an object.": "متصل شد. برای پیوند دادن شیء، موجودیتی را از فهرست انتخاب کنید."
+  "Connected. Select an entity from the list to bind an object.": "متصل شد. برای پیوند دادن شیء، موجودیتی را از فهرست انتخاب کنید.",
+  "Locked": "قفل است",
+  "Unlocked": "قفل باز است",
+  "Locking": "در حال قفل شدن",
+  "Unlocking": "در حال باز شدن قفل",
+  "Jammed": "قفل گیر کرده است"
 }

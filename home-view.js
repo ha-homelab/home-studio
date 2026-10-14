@@ -113,11 +113,14 @@ homeView = (() => {
   const curtainCommands=new Map();
   const describeCurtain=item=>{const info=curtainStateFor(item);return (info.description||describeDeviceState(deviceDisplayState(item)))+(info.position!==null?` · ${info.remembered?'last known ':'HA reports '}${info.position}% open`:' · position unknown');};
   const isTV=item=>item.entity_id?.startsWith('media_player.');
-  const isSupportedControl = item => item.entity_id && (['light','switch','input_boolean','fan'].includes(item.entity_id.split('.')[0]) || isMotion(item) || isTV(item) || isCover(item));
+  const isLock=item=>item.entity_id?.startsWith('lock.');
+  const lockStates=['locked','unlocked','locking','unlocking','jammed','open'];
+  const lockIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path data-lock-shackle d="M8 10V6a4 4 0 0 1 8 0v4"/><path d="M12 14v3"/></svg>';
+  const isSupportedControl = item => item.entity_id && (['light','switch','input_boolean','fan'].includes(item.entity_id.split('.')[0]) || isMotion(item) || isTV(item) || isCover(item) || isLock(item));
   // Only light-shaped objects illuminate a room; other linked switches remain controls.
   const isLight = item => ['chandelier','lamp'].includes(item.type) || item.entity_id?.startsWith('light.');
-  const deviceDisplayState = item => !embedded ? 'preview' : !haConnected ? 'disconnected' : isMotion(item) ? resolveMotionState(model.motion_sources?.[item.entity_id]||[item.entity_id],haStates) : !haStates[item.entity_id] ? 'missing' : isCover(item) && ['open','closed','opening','closing'].includes(haStates[item.entity_id].state) ? haStates[item.entity_id].state : isTV(item) && ['playing','paused','idle','buffering'].includes(haStates[item.entity_id].state) ? 'on' : ['on','off'].includes(haStates[item.entity_id].state) ? haStates[item.entity_id].state : 'unavailable';
-  const describeDeviceState = state => vt(({on:'On',off:'Off',open:'Open',closed:'Closed',opening:'Opening',closing:'Closing',missing:'Entity not found',unavailable:'Unavailable',disconnected:'Disconnected',preview:'Offline preview'})[state] || state);
+  const deviceDisplayState = item => !embedded ? 'preview' : !haConnected ? 'disconnected' : isMotion(item) ? resolveMotionState(model.motion_sources?.[item.entity_id]||[item.entity_id],haStates) : !haStates[item.entity_id] ? 'missing' : isLock(item) ? lockStates.includes(haStates[item.entity_id].state) ? haStates[item.entity_id].state : 'unavailable' : isCover(item) && ['open','closed','opening','closing'].includes(haStates[item.entity_id].state) ? haStates[item.entity_id].state : isTV(item) && ['playing','paused','idle','buffering'].includes(haStates[item.entity_id].state) ? 'on' : ['on','off'].includes(haStates[item.entity_id].state) ? haStates[item.entity_id].state : 'unavailable';
+  const describeDeviceState = state => vt(({on:'On',off:'Off',open:'Open',closed:'Closed',opening:'Opening',closing:'Closing',locked:'Locked',unlocked:'Unlocked',locking:'Locking',unlocking:'Unlocking',jammed:'Jammed',missing:'Entity not found',unavailable:'Unavailable',disconnected:'Disconnected',preview:'Offline preview'})[state] || state);
 
   for (const room of model.rooms) {
     const option = document.createElement('option'); option.value = room.id; option.textContent = roomName(room.id); $('homeRoom').append(option);
@@ -199,7 +202,7 @@ homeView = (() => {
       labels.push({el:label,room:room.id,position:new THREE.Vector3(xm(room.label[0]), .06, zm(room.label[1]))});
     }
     for (const item of bindings) {
-      const glyph=receiverSpec(item)?'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/></svg>':isMotion(item)?motionIcon:isTV(item)?tvIcon:isCover(item)?coverIcon:icon;
+      const glyph=receiverSpec(item)?'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/></svg>':isMotion(item)?motionIcon:isTV(item)?tvIcon:isCover(item)?coverIcon:isLock(item)?lockIcon:icon;
       const marker = document.createElement('button'); marker.className = 'home-marker'; marker.dataset.homeItem = item.id; marker.innerHTML = glyph;
       const card = document.createElement('button'); card.className = 'home-device'; card.dataset.homeDevice = item.id;
       const symbol = document.createElement('span'); symbol.className = 'home-device-icon'; symbol.innerHTML = glyph;
@@ -213,7 +216,7 @@ homeView = (() => {
       const anchor=objectsById.get(model.control_anchors?.[item.id]);
       if(anchor)point.anchor=anchor.localToWorld(new THREE.Vector3(0,.5,.5));
       else if(isMotion(item))point.anchor=position.clone().setY(.12);
-      for(const el of [marker,card])el.dataset.kind=isMotion(item)?'motion':isTV(item)?'tv':isCover(item)?'cover':'control';
+      for(const el of [marker,card])el.dataset.kind=isMotion(item)?'motion':isTV(item)?'tv':isCover(item)?'cover':isLock(item)?'lock':'control';
       const room = model.rooms.find(r => r.id === item.room);
       if (overlayGroup && room && isLight(item)) {
         const shape = new THREE.Shape(room.polygon.map(([x,z]) => new THREE.Vector2(xm(x),-zm(z))));
@@ -284,7 +287,7 @@ homeView = (() => {
       const visible=!selected || selected===item.room;
       card.hidden = marker.hidden = !visible || point.duplicateControl;
       if(isMotion(item) && !selected && state!=='on')marker.hidden=true;
-      const enabled=['on','off','open','closed','opening','closing'].includes(state);
+      const enabled=isLock(item)?lockStates.includes(state):['on','off','open','closed','opening','closing'].includes(state);
       if (waiting && state !== waiting.before && enabled) { clearTimeout(waiting.timer); pending.delete(item.entity_id); }
       const busy=pending.has(item.entity_id)||curtainCommands.has(item.entity_id);
       const appearance=resolveLightAppearance(haStates[item.entity_id]);
@@ -306,10 +309,17 @@ homeView = (() => {
         button.style.setProperty('--light-level',String(appearance.brightness));
         button.style.setProperty('--light-fill-rgb',appearance.indicatorRGB.join(','));
         button.style.setProperty('--light-text',appearance.text);
-        button.dataset.state=state; button.disabled=(isTV(item)||isMotion(item)||isCover(item)?!haConnected||(!receiverSpec(item)&&!haStates[item.entity_id]):!enabled) || busy || !bridge;
-        button.setAttribute('aria-pressed',String(state==='on')); button.setAttribute('aria-busy',String(busy));
+        button.dataset.state=state; button.disabled=(isTV(item)||isMotion(item)||isCover(item)||isLock(item)?!haConnected||(!receiverSpec(item)&&!haStates[item.entity_id]):!enabled) || busy || !bridge;
+        if(isLock(item))button.removeAttribute('aria-pressed');
+        else button.setAttribute('aria-pressed',String(state==='on'));
+        button.setAttribute('aria-busy',String(busy));
         button.setAttribute('aria-label',busy?vt('{name}: {state}; waiting for confirmation',{name:item.name,state:description}):`${item.name}: ${description}`);
         button.title=`${roomName(item.room)} · ${item.name} · ${description}`;
+      }
+      if(isLock(item)&&point.lockState!==state){
+        point.lockState=state;
+        for(const button of [marker,card])button.querySelector('[data-lock-shackle]').setAttribute('d',
+          ['unlocked','unlocking','open'].includes(state)?'M8 10V6a4 4 0 0 1 8 0':'M8 10V6a4 4 0 0 1 8 0v4');
       }
       detail.textContent=roomName(item.room)+' · '+(busy ? vt('Waiting for confirmation…') : description);
       if(isMotion(item)&&!receiverSpec(item)){
@@ -361,7 +371,8 @@ homeView = (() => {
     const state=deviceDisplayState(item);
     if(receiverSpec(item)&&bridge&&haConnected){inspectActivitySource(item);return;}
     if(isCover(item)&&bridge&&haConnected){curtainItem=item;curtainDirty=false;curtainCheckCycle=null;$('curtainChecked').checked=false;$('curtainError').hidden=true;updateCurtainDialog();$('curtainDialog').showModal();const action=curtainStateFor(item).action;if(quick&&action)curtainCommand(action);return;}
-    if(bridge && haConnected && haStates[item.entity_id] && !tvPower && (isTV(item)||isMotion(item))){bridge.postMessage({type:'more_info',entity_id:item.entity_id});return;}
+    // Locks always use HA's explicit lock/unlock controls, never a toggle.
+    if(bridge && haConnected && haStates[item.entity_id] && !tvPower && (isTV(item)||isMotion(item)||isLock(item))){bridge.postMessage({type:'more_info',entity_id:item.entity_id});return;}
     if (!bridge || !haConnected || !['on','off'].includes(state) || pending.has(item.entity_id)) return;
     errors.delete(item.entity_id);
     const request_id='home_'+(++sequence);

@@ -226,7 +226,18 @@ through a dedicated message channel. The host checks saved entity bindings and
 allowed actions before a user-initiated device command. The public static panel
 script does not need a floorplan, photos, or credentials embedded in it.
 
+### Lock markers
+
+Linked `lock.*` entities show a padlock marker at the saved object's position.
+Locked is green, unlocked/open is amber, transitions are blue, and jammed is red;
+missing, disconnected and unknown readings remain neutral. These states never
+count as lighting or illuminate a room. Selecting the marker or device card
+opens Home Assistant's native entity controls through the existing saved-binding
+check. The marker never toggles, unlocks, opens or latches a door by itself.
+An independent host must provide its own explicit controls for `more_info`.
+
 ## Optional private extensions
+
 
 A private deployment can supply `private_site_config.py` with its site metadata
 and `private_site.py` with its setup and adapter behavior, plus its own required

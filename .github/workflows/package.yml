@@ -46,6 +46,8 @@ jobs:
         run: |
           node scripts/test-help-i18n.cjs
           node scripts/test-viewer-i18n.cjs
+      - name: Test lock status and native controls without device commands
+        run: node scripts/test-lock-control.cjs
       - name: Test bounded diagnostic display with synthetic clocks
         run: node scripts/test-module-expiry.cjs
       - name: Test visible wall outlines and doorway gaps

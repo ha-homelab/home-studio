@@ -99,5 +99,10 @@
   "Inventory exported. Keep this JSON as a placement backup.": "Inventaris diekspor. Simpan JSON ini sebagai cadangan penempatan.",
   "Imported {count} objects; matching IDs were updated.": "{count} objek diimpor; ID yang cocok diperbarui.",
   "Import failed: {error}": "Impor gagal: {error}",
-  "Connected. Select an entity from the list to bind an object.": "Terhubung. Pilih entitas dari daftar untuk menautkan objek."
+  "Connected. Select an entity from the list to bind an object.": "Terhubung. Pilih entitas dari daftar untuk menautkan objek.",
+  "Locked": "Terkunci",
+  "Unlocked": "Tidak terkunci",
+  "Locking": "Sedang mengunci",
+  "Unlocking": "Sedang membuka kunci",
+  "Jammed": "Macet"
 }

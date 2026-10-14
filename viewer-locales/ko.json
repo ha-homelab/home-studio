@@ -99,5 +99,10 @@
   "Inventory exported. Keep this JSON as a placement backup.": "객체 목록을 내보냈습니다. 이 JSON을 배치 백업으로 보관하세요.",
   "Imported {count} objects; matching IDs were updated.": "객체 {count}개를 가져왔습니다. 일치하는 ID가 업데이트되었습니다.",
   "Import failed: {error}": "가져오기 실패: {error}",
-  "Connected. Select an entity from the list to bind an object.": "연결되었습니다. 목록에서 엔터티를 선택하여 객체에 연결하세요."
+  "Connected. Select an entity from the list to bind an object.": "연결되었습니다. 목록에서 엔터티를 선택하여 객체에 연결하세요.",
+  "Locked": "잠김",
+  "Unlocked": "잠금 해제됨",
+  "Locking": "잠그는 중",
+  "Unlocking": "잠금 해제 중",
+  "Jammed": "잠금장치 걸림"
 }

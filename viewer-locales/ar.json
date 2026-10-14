@@ -99,5 +99,10 @@
   "Inventory exported. Keep this JSON as a placement backup.": "تم تصدير قائمة العناصر. احتفظ بملف JSON هذا كنسخة احتياطية لتوزيع العناصر.",
   "Imported {count} objects; matching IDs were updated.": "تم استيراد {count} من العناصر؛ وتم تحديث المعرّفات المطابقة.",
   "Import failed: {error}": "فشل الاستيراد: {error}",
-  "Connected. Select an entity from the list to bind an object.": "تم الاتصال. اختر كيانًا من القائمة لربطه بعنصر."
+  "Connected. Select an entity from the list to bind an object.": "تم الاتصال. اختر كيانًا من القائمة لربطه بعنصر.",
+  "Locked": "مقفل",
+  "Unlocked": "غير مقفل",
+  "Locking": "جارٍ القفل",
+  "Unlocking": "جارٍ فتح القفل",
+  "Jammed": "القفل عالق"
 }
