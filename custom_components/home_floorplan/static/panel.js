@@ -62,7 +62,7 @@ class HomeFloorplanPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({mode: 'open'});
-    this.shadowRoot.innerHTML = `<style>:host{display:flex;flex-direction:column;height:100dvh;min-height:0;background:#11191f}header{flex-shrink:0;display:flex;align-items:center;gap:12px;padding:8px 12px;font:14px system-ui;color:#b8c8d0}button{padding:8px 10px;cursor:pointer;background:#202d35;color:#e9eeef;border:1px solid #44515a;border-radius:7px;min-height:40px}#notice{flex:1}iframe{border:0;flex:1;width:100%;min-height:0}.error{color:#ffd19b}#recovery{padding:20px;color:#e9eeef;font:14px/1.5 system-ui;overflow:auto}#recovery-details{white-space:pre-wrap;overflow-wrap:anywhere}button:disabled{opacity:.5}[hidden]{display:none!important}</style><header><button id="menu" aria-label="Open sidebar">☰</button><span id="notice" role="status">Connecting to Home Assistant…</span><button id="retry">Reload saved plan</button></header><section id="recovery" hidden><h2>Saved placements need repair</h2><p>Nothing has been overwritten. Export the original inventory, keep it as a backup, and edit a copy using the current floor and room IDs below. Importing the repaired copy replaces all saved floors only after validation.</p><pre id="recovery-details"></pre><button id="recovery-export">Export original inventory</button> <button id="recovery-import">Import repaired inventory</button><input id="recovery-file" type="file" accept="application/json,.json" hidden></section><iframe title="Private home floorplan" sandbox="allow-scripts allow-downloads allow-forms"></iframe>`;
+    this.shadowRoot.innerHTML = `<style>:host{display:flex;flex-direction:column;height:100dvh;min-height:0;background:#11191f}header{flex-shrink:0;display:flex;align-items:center;gap:12px;padding:8px 12px;font:14px system-ui;color:#b8c8d0}button{padding:8px 10px;cursor:pointer;background:#202d35;color:#e9eeef;border:1px solid #44515a;border-radius:7px;min-height:40px}#notice{flex:1}#dry-run[aria-pressed="true"]{border-color:#e8c56c;color:#ffe6a2}iframe{border:0;flex:1;width:100%;min-height:0}.error{color:#ffd19b}#recovery{padding:20px;color:#e9eeef;font:14px/1.5 system-ui;overflow:auto}#recovery-details{white-space:pre-wrap;overflow-wrap:anywhere}button:disabled{opacity:.5}[hidden]{display:none!important}</style><header><button id="menu" aria-label="Open sidebar">☰</button><span id="notice" role="status">Connecting to Home Assistant…</span><button id="dry-run" type="button" aria-pressed="false">Dry run: Off</button><button id="retry">Reload saved plan</button></header><section id="recovery" hidden><h2>Saved placements need repair</h2><p>Nothing has been overwritten. Export the original inventory, keep it as a backup, and edit a copy using the current floor and room IDs below. Importing the repaired copy replaces all saved floors only after validation.</p><pre id="recovery-details"></pre><button id="recovery-export">Export original inventory</button> <button id="recovery-import">Import repaired inventory</button><input id="recovery-file" type="file" accept="application/json,.json" hidden></section><iframe title="Private home floorplan" sandbox="allow-scripts allow-downloads allow-forms"></iframe>`;
     this.floor = null;
     this.floors = [];
     this.siteFeatures = false;
@@ -74,6 +74,13 @@ class HomeFloorplanPanel extends HTMLElement {
     this.pending = 0;
     this.commands = new Set();
     this.curtains = {memory:{},power:{},checks:{},profiles:{},boot_seconds:50};
+    // Per-browser preference. An explicit dry-run URL pins this session on.
+    this.dryRunPinned = !!globalThis.location?.search && new URLSearchParams(location.search).get('dry_run') === '1';
+    this.dryRun = this.dryRunPinned;
+    try { this.dryRun ||= localStorage.getItem('home-floorplan:dry-run') === 'true'; }
+    catch {}
+    this.updateDryRunButton();
+    this.$('dry-run').onclick = () => this.setDryRun(!this.dryRun);
     this.viewPreferences = {sidebarCollapsed:false};
     try { this.viewPreferences.sidebarCollapsed=localStorage.getItem('home-floorplan:sidebar-collapsed')==='true'; } catch {}
     try { this.explicitLanguage=resolveViewerLanguage(localStorage.getItem('home-studio.language.v1')); } catch {}
@@ -90,6 +97,34 @@ class HomeFloorplanPanel extends HTMLElement {
       const file = event.target.files[0]; event.target.value = '';
       if (file) this.importRecovery(file);
     };
+  }
+
+  updateDryRunButton() {
+    const button = this.$('dry-run');
+    button.textContent = this.dryRun ? 'Dry run: On' : 'Dry run: Off';
+    button.ariaPressed = String(this.dryRun);
+    button.disabled = this.dryRunPinned;
+    button.title = this.dryRunPinned ? 'Dry run is required by this link.' : 'Try device buttons without sending commands.';
+  }
+  setDryRun(enabled) {
+    if (this.dryRunPinned && !enabled) return;
+    // Never turn off an active guard if its new preference cannot be saved.
+    let saved = true;
+    try { localStorage.setItem('home-floorplan:dry-run', String(enabled)); }
+    catch { saved = false; }
+    if (!enabled && !saved) return this.notice('Dry run remains on: the preference could not be saved.', true);
+    this.dryRun = enabled;
+    this.updateDryRunButton();
+    this.notice(enabled ? 'Dry run · device commands are blocked; states stay live.' +
+      (saved ? '' : ' Keep ?dry_run=1 in the link to retain it after reload.') : 'Live controls enabled.');
+  }
+  blockDeviceCommand(message = {}) {
+    if (!this.dryRun) return false;
+    const error = 'Dry run · no command sent. Showing live device states.';
+    this.port?.postMessage({type:'command_result',request_id:message.request_id,
+      entity_id:message.entity_id,ok:false,dry_run:true,error});
+    this.notice(error);
+    return true;
   }
 
   resetModelConfig() {
@@ -324,6 +359,11 @@ class HomeFloorplanPanel extends HTMLElement {
   }
   handleViewerMessage(message, generation) {
     if (generation !== this.generation || this.recovery || !message || typeof message !== 'object') return;
+    // Only non-device messages pass in dry run. This also blocks native HA
+    // more-info dialogs, which expose controls outside the sandbox, and future
+    // command types until their behavior has been explicitly classified.
+    if (!['model_config','view_preferences','save','floor','export'].includes(message.type) &&
+        this.blockDeviceCommand(message)) return;
     if (message.type === 'model_config') {
       if(this.modelConfigured)return;
       this.modelConfigured=true;
@@ -378,7 +418,7 @@ class HomeFloorplanPanel extends HTMLElement {
         if (generation !== this.generation || port !== this.port) return;
         port?.postMessage({type:'command_result', request_id:message.request_id, entity_id:id, ok, error});
         if (error) this.notice(error, true);
-        else if (ok && !this.pending && !this.failed) this.notice('Command sent · device state updates live');
+        else if (ok && !this.dryRun && !this.pending && !this.failed) this.notice('Command sent · device state updates live');
       };
       if (this.pending || this.failed) return result(false, 'Wait for placements to save successfully before controlling devices.');
       if (!this.savedItems.some(item => item.entity_id === id)) return result(false, 'This device is not linked to the saved plan.');
@@ -387,10 +427,14 @@ class HomeFloorplanPanel extends HTMLElement {
         !['light','switch','input_boolean','fan'].includes(domain) || !['on','off'].includes(this._hass.states[id]?.state))) return result(false, 'This device is unavailable or Home Assistant is disconnected.');
       if (this.commands.has(id)) return result(false, 'A command for this device is already in progress.');
       this.commands.add(id);
-      Promise.resolve().then(() => curtain
-        ? this._hass.callWS({type:'home_floorplan/curtain_command',entity_id:id,action:message.action,...(message.action==='set_cover_position'?{position:message.position}:{})})
-        : this._hass.callService(domain, tvPower ? message.action : 'toggle', {entity_id:id}))
-        .then(() => result(true))
+      Promise.resolve().then(async () => {
+        if (generation !== this.generation || port !== this.port) return;
+        // The user may enable dry run after clicking but before dispatch.
+        if (this.blockDeviceCommand(message)) return;
+        if (curtain) await this._hass.callWS({type:'home_floorplan/curtain_command',entity_id:id,action:message.action,...(message.action==='set_cover_position'?{position:message.position}:{})});
+        else await this._hass.callService(domain, tvPower ? message.action : 'toggle', {entity_id:id});
+        result(true);
+      })
         .catch(error => result(false, `Command failed: ${error.message || error}`))
         .finally(() => this.commands.delete(id));
     } else if (message.type === 'export' && ['glb','usdz','obj','mtl','dae'].includes(message.format)) {

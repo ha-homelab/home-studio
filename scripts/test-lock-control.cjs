@@ -13,6 +13,7 @@ from pathlib import Path
 from planner.project import validate_project,make_floor,render_viewer
 p=json.loads(Path('planner/example-home.json').read_text())
 p['floors'][0]['items'][0].update(name='Front door',entity_id='lock.front_door')
+p['floors'][0]['items'][1].update(name='Test light',entity_id='light.test')
 p=validate_project(p)
 data,svg=make_floor(p,p['floors'][0],None)
 Path(sys.argv[1]).write_text(render_viewer(data,svg))`,output],{cwd:root,encoding:'utf8'});
@@ -33,7 +34,7 @@ Path(sys.argv[1]).write_text(render_viewer(data,svg))`,output],{cwd:root,encodin
         return {html,items,revision:1,floor:'main',floors:['main'],site_features:false};
       },callService:(...args)=>calls.push(args)};
       window.changeLock=(state,connected=true)=>{
-        hass.connected=connected;hass.states=state===null?{}:{'lock.front_door':{state,attributes:{friendly_name:'Front door'}}};
+        hass.connected=connected;hass.states={'light.test':{state:'on',attributes:{friendly_name:'Test light'}},...(state===null?{}:{'lock.front_door':{state,attributes:{friendly_name:'Front door'}}})};
         panel.hass=hass;
       };
       changeLock('locked');
@@ -75,7 +76,25 @@ Path(sys.argv[1]).write_text(render_viewer(data,svg))`,output],{cwd:root,encodin
       panel.handleViewerMessage({type:'more_info',entity_id:'lock.unbound'},panel.generation);
     });
     assert.equal(await page.evaluate(()=>inspected.length),before,'unbound locks cannot open native controls');
+    await page.evaluate(()=>changeLock('locked'));
+    await frame.locator('[data-home-item="studio_table"][data-state="locked"]').waitFor();
+    await page.locator('home-floorplan-panel #dry-run').click();
+    assert.equal(await page.locator('home-floorplan-panel #dry-run').getAttribute('aria-pressed'),'true');
+    await card.click();
+    await page.waitForFunction(()=>document.querySelector('home-floorplan-panel').shadowRoot.querySelector('#notice').textContent.includes('no command sent'));
+    assert.equal(await page.evaluate(()=>inspected.length),before,'Dry run cannot open native lock controls');
+    const light=frame.locator('[data-home-device="living_light"]');
+    for(let attempt=0;attempt<2;attempt++){
+      await light.click();
+      await frame.locator('#homeFeedback').filter({hasText:'no command sent'}).waitFor();
+      await light.evaluate(button=>new Promise(resolve=>{
+        const ready=()=>button.disabled?requestAnimationFrame(ready):resolve();ready();
+      }));
+      assert.equal(await frame.locator('[data-home-item="living_light"]').getAttribute('data-state'),'on',
+        'The simulated click must not change the reported light state');
+    }
+    assert.deepEqual(await page.evaluate(()=>calls),[],'Dry run must not dispatch any service call');
     assert.deepEqual(errors,[]);
-    console.log('PASS: lock states, shackle, native inspection, localization, disconnection and saved-binding guard; zero device commands.');
+    console.log('PASS: lock states, shackle, native inspection, localization, disconnection and saved-binding guard; dry-run lock blocking and cleared pending toggles; zero device commands.');
   }finally{await browser?.close();fs.rmSync(temporary,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});

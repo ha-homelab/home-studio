@@ -50,6 +50,8 @@ jobs:
         run: |
           node scripts/test-help-i18n.cjs
           node scripts/test-viewer-i18n.cjs
+      - name: Test dry-run command gate without physical devices
+        run: node --test scripts/test-dry-run.cjs
       - name: Test lock status and native controls without device commands
         run: node scripts/test-lock-control.cjs
       - name: Test bounded diagnostic display with synthetic clocks
