@@ -21,6 +21,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '22'
+      - name: Replay fuzz regression inputs without mutation campaigns
+        run: node --test fuzz/*.test.mjs
       - name: Check generated catalog and furniture export parity
         run: |
           python3 scripts/generate-furniture-catalog.py --check

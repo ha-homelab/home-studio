@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## [0.6.2] - Development line
+
+- Recognize expected project validation failures during fuzzing while retaining
+  unexpected exceptions as failures. Replay the invalid-title regression in CI.
+- Extend offline RC campaigns to furniture catalog choices and rotated bounds,
+  checked against an independent analytic geometry oracle. Replay committed
+  positive and negative examples in ordinary CI without timed mutations.
+- Update the shared RC runner to retain source-bound execution metrics and
+  deterministic preflight evidence with the candidate.
 
 - Add 45 original designs for rugs, tapestries, mirrors, chandeliers, bulbs,
   sconces, floor lamps, balustrades, plants, and life-size display bears:
@@ -28,6 +36,20 @@
   validate a full 256-item floor through the real installer.
 - Extend the illustrated drawing guide and add browser-to-install regression
   coverage using fictional projects only.
+
+### Upgrade
+
+Keep personal project files and Home Assistant configuration backed up and
+separate from the public source archive. Existing project identifiers remain
+compatible. Use the documented installer dry-run before replacing an installed
+component, and test the selected candidate with your own project copy.
+
+### Security
+
+The expanded campaigns use synthetic projects with bounded offline execution.
+They exercise project rejection and furniture geometry without accessing a live
+Home Assistant instance. Household plans, credentials and private device bindings
+remain outside the public package and corpus.
 
 ## [0.6.1] - Development line
 

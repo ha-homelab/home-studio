@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
 import { projectOnWall, wallPieces, signedArea, pointInPolygon, validateProject } from '../planner/model.js';
-
-function near(actual, expected, tolerance = 1e-7) {
-  assert.ok(Number.isFinite(actual) && Math.abs(actual - expected) <= tolerance * Math.max(1, Math.abs(expected)), `${actual} != ${expected}`);
-}
+import { CATALOG, supportsFurniturePattern } from '../planner/furniture.js';
+import { assertFloorBounds, near } from './bounds-oracle.mjs';
 
 export function fuzz(data) {
   if (data.length < 14 || data.length > 4096) return;
@@ -26,7 +24,32 @@ export function fuzz(data) {
   const opening = { id: 'window_a', wall_id: wall.id, type: 'window', offset_m: offset, width_m: openingWidth, sill_m: sill, head_m: head };
   const polygon = [[x,z], [x+width,z], [x+width,z+depth], [x,z+depth]];
   const project = { schema_version: 1, title: 'Fictional fuzz room', floors: [{ id: 'ground', name: 'Ground', elevation_m: 0, height_m: height, rooms: [{ id: 'room_a', name: 'Room', polygon, material: 'floor' }], walls: [wall], openings: [opening], items: [] }] };
+  const model = CATALOG.models[data[11] % CATALOG.models.length];
+  const item = {
+    id: 'item_a', name: 'Fictional furniture', type: model.type, room: 'room_a',
+    model_id: model.id, style_id: CATALOG.styles[data[12] % CATALOG.styles.length].id,
+    color: '#' + data.subarray(0, 3).toString('hex'),
+    position_m: { x, y: 0, z },
+    dimensions_m: { width: 0.01 + unit(12) * 30, depth: 0.01 + unit(13) * 30, height: height / 2 },
+    rotation_deg: unit(13) * 72000 - 36000, entity_id: '', notes: '',
+  };
+  if (supportsFurniturePattern(model)) {
+    item.pattern_id = ['stripes', 'checks', 'diamonds', 'dots', 'herringbone', 'chevrons'][data[10] % 6];
+    item.pattern_color = '#aabbcc';
+  }
+  project.floors[0].items.push(item);
   validateProject(project, { complete: true });
+  const floor = project.floors[0];
+  assertFloorBounds(floor);
+  // Check items separately so a larger room cannot mask an incorrect item box.
+  const isolated = { rooms: [], walls: [], items: [item] };
+  const bounds = assertFloorBounds(isolated);
+  const translated = structuredClone(isolated);
+  translated.items[0].position_m.x += 7;
+  translated.items[0].position_m.z -= 9;
+  const moved = assertFloorBounds(translated);
+  near(moved.minX, bounds.minX + 7); near(moved.maxX, bounds.maxX + 7);
+  near(moved.minZ, bounds.minZ - 9); near(moved.maxZ, bounds.maxZ - 9);
   const pieces = wallPieces(wall, [opening], height);
   near(pieces.reduce((area, piece) => area + piece.width * piece.height, 0), width * height - openingWidth * (head - sill));
   for (const piece of pieces) {

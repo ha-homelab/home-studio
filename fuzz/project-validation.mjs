@@ -1,12 +1,19 @@
 import assert from 'node:assert/strict';
 import { validateProject, wallPieces, floorBounds, LIMITS } from '../planner/model.js';
+import { ValidationError } from '../planner/validation.js';
+import { assertFloorBounds } from './bounds-oracle.mjs';
+
+export function assertExpectedValidationError(error) {
+  // Only the validator's two deliberate rejection classes are allowed.
+  assert.ok(error?.constructor === Error || error?.constructor === ValidationError);
+  assert.ok(error.message.length > 0);
+}
 
 function accepted(value, complete = false) {
   try { validateProject(value, { complete }); return true; }
   catch (error) {
-    // Invalid data has a deliberate validation Error. TypeError/RangeError are bugs.
-    assert.equal(error.constructor, Error);
-    assert.ok(error.message.length > 0);
+    // Localized validation guidance is deliberate; runtime errors remain bugs.
+    assertExpectedValidationError(error);
     return false;
   }
 }
@@ -24,6 +31,7 @@ export function fuzz(data) {
   assert.ok(accepted(JSON.parse(before)), 'accepted JSON round trip');
   assert.equal(accepted(project, true), project.floors.every(floor => floor.rooms.length > 0));
   for (const floor of project.floors) {
+    assertFloorBounds(floor);
     const bounds = floorBounds(floor);
     assert.ok(Object.values(bounds).every(Number.isFinite));
     assert.ok(bounds.minX <= bounds.maxX && bounds.minZ <= bounds.maxZ);
