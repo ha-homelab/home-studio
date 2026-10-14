@@ -4,13 +4,15 @@ export { CATALOG };
 const models = new Map(CATALOG.models.map(model => [model.id, model]));
 const styles = new Map(CATALOG.styles.map(style => [style.id, style]));
 const COLOR = /^#[0-9a-fA-F]{6}$/;
+export const PATTERNS = ['none', 'stripes', 'checks', 'diamonds', 'dots', 'herringbone', 'chevrons'].map(id => ({ id, label: id[0].toUpperCase() + id.slice(1) }));
 export const getCatalogModel = id => models.get(id) || null;
 export const getCatalogStyle = id => styles.get(id) || null;
+export const supportsFurniturePattern = model => !!model?.parts.some(part => part.shape === 'box' && ['top', 'front'].includes(part.pattern_face));
 
 export function validateFurnitureAppearance(item) {
   const has = key => Object.hasOwn(item, key);
   if (!has('model_id')) {
-    if (has('style_id') || has('color')) throw new Error('Choose a furniture model before setting a style or color.');
+    if (has('style_id') || has('color') || has('pattern_id') || has('pattern_color')) throw new Error('Choose a furniture model before setting a style, color or pattern.');
     return null;
   }
   const model = getCatalogModel(item.model_id);
@@ -18,6 +20,11 @@ export function validateFurnitureAppearance(item) {
   if (item.type !== model.type) throw new Error('Furniture model does not match this item type.');
   if (has('style_id') && !getCatalogStyle(item.style_id)) throw new Error('Unknown furniture style.');
   if (has('color') && (typeof item.color !== 'string' || !COLOR.test(item.color))) throw new Error('Furniture color must use #RRGGBB.');
+  if (has('pattern_id') && !PATTERNS.some(pattern => pattern.id === item.pattern_id)) throw new Error('Unknown furniture pattern.');
+  const patterned = has('pattern_id') && item.pattern_id !== 'none';
+  if (has('pattern_color') && !patterned) throw new Error('Choose a furniture pattern before setting its color.');
+  if (has('pattern_color') && (typeof item.pattern_color !== 'string' || !COLOR.test(item.pattern_color))) throw new Error('Furniture pattern color must use #RRGGBB.');
+  if (patterned && !supportsFurniturePattern(model)) throw new Error('This furniture model does not support patterns.');
   return model;
 }
 
@@ -44,6 +51,7 @@ export function primitive(part) {
   }
   if (part.size.some(value => value <= 0)) throw new Error('Furniture primitive sizes must be positive.');
   if (Object.hasOwn(part, 'inner_ratio') && (part.shape !== 'ring' || !Number.isFinite(part.inner_ratio) || part.inner_ratio <= 0 || part.inner_ratio >= 1)) throw new Error('Ring inner_ratio must be between zero and one.');
+  if (Object.hasOwn(part, 'pattern_face') && (part.shape !== 'box' || !['top', 'front'].includes(part.pattern_face))) throw new Error('Furniture pattern_face must be top or front on a box.');
   const [x, y, z] = part.center, [w, h, d] = part.size;
   let vertices, faces;
   if (part.shape === 'box') {
@@ -107,6 +115,11 @@ export function primitive(part) {
         [a+1,a+3,b+3],[a+1,b+3,b+1], [a,b+2,a+2],[a,b,b+2]);
     }
   }
+  return triangleMesh(part, vertices, faces);
+}
+
+function triangleMesh(part, vertices, faces) {
+  const [x, y, z] = part.center;
   if (part.rotation_deg) {
     // Rotate offsets around the part center, first X, then Y, then Z.
     const [rx, ry, rz] = part.rotation_deg.map(value => (value % 360)*Math.PI/180);
@@ -127,15 +140,101 @@ export function primitive(part) {
   return { vertices: expanded, normals, indices };
 }
 
+// Split convex polygons at a line. The pieces share edges, never coplanar area.
+function clipPolygon(polygon, a, b, inside) {
+  const distance = point => (b[0]-a[0])*(point[1]-a[1]) - (b[1]-a[1])*(point[0]-a[0]);
+  const clipped = [];
+  for (let i = 0; i < polygon.length; i++) {
+    const start = polygon[i], end = polygon[(i+1)%polygon.length], da = distance(start), db = distance(end);
+    const first = inside ? da >= 0 : da <= 0, second = inside ? db >= 0 : db <= 0;
+    if (first) clipped.push(start);
+    if (first !== second) clipped.push(start.map((value, axis) => value + (end[axis]-value)*da/(da-db)));
+  }
+  return clipped;
+}
+
+function patternSurface(part, pattern) {
+  const background = { vertices: [], faces: [] }, accent = { vertices: [], faces: [] };
+  const rectangle = (left, bottom, right, top) => [[left,bottom],[right,bottom],[right,top],[left,top]];
+  const columns = pattern === 'stripes' ? 6 : pattern === 'diamonds' || pattern === 'dots' ? 3 : 4;
+  const rows = pattern === 'stripes' ? 1 : pattern === 'dots' ? 2 : pattern === 'diamonds' ? 3 : 4;
+  for (let row = 0; row < rows; row++) for (let column = 0; column < columns; column++) {
+    let motif;
+    if (pattern === 'stripes' || pattern === 'checks') motif = (column + (pattern === 'checks' ? row : 0)) % 2 ? [] : rectangle(0,0,1,1);
+    else if (pattern === 'diamonds') motif = [[.5,0],[1,.5],[.5,1],[0,.5]];
+    else if (pattern === 'dots') motif = Array.from({ length: 8 }, (_, index) => {
+      const angle = index*Math.PI/4;
+      return [.5+.38*Math.cos(angle), .5+.38*Math.sin(angle)];
+    });
+    else if (pattern === 'herringbone') {
+      // Interlocking 2:1 planks, split at tile boundaries without adding seams.
+      const phase = ((column-row)%4+4)%4;
+      motif = rectangle(phase === 1 ? 0 : .09, phase === 2 ? 0 : .09, phase === 0 ? 1 : .91, phase === 3 ? 1 : .91);
+    } else {
+      motif = [[-.3,0],[0,-.3],[1.3,1],[1,1.3]];
+      if (column%2) motif = motif.map(([u,v]) => [1-u,v]).reverse();
+    }
+    const emit = (polygon, target) => {
+      for (let i = 1; i < polygon.length-1; i++) {
+        const points = [polygon[0], polygon[i], polygon[i+1]];
+        const [a,b,c] = points;
+        if ((b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0]) <= 1e-12) continue;
+        const offset = target.vertices.length;
+        for (const [u,v] of points) {
+          const px = ((column+u)/columns-.5)*part.size[0]+part.center[0];
+          target.vertices.push(part.pattern_face === 'top'
+            ? [px, part.center[1]+part.size[1]/2, (.5-(row+v)/rows)*part.size[2]+part.center[2]]
+            : [px, ((row+v)/rows-.5)*part.size[1]+part.center[1], part.center[2]+part.size[2]/2]);
+        }
+        target.faces.push([offset,offset+1,offset+2]);
+      }
+    };
+    let remaining = rectangle(0,0,1,1);
+    for (let i = 0; i < motif.length; i++) {
+      const a = motif[i], b = motif[(i+1)%motif.length];
+      emit(clipPolygon(remaining, a, b, false), background);
+      remaining = clipPolygon(remaining, a, b, true);
+    }
+    emit(remaining, motif.length ? accent : background);
+  }
+  return [background, accent].map(mesh => triangleMesh(part, mesh.vertices, mesh.faces));
+}
+
+function appendMesh(target, source) {
+  const offset = target.vertices.length;
+  target.vertices.push(...source.vertices);
+  target.normals.push(...source.normals);
+  target.indices.push(...source.indices.map(index => index+offset));
+}
+
 export function buildFurnitureAsset(item) {
   const model = validateFurnitureAppearance(item);
   if (!model) return null;
   const style = getCatalogStyle(item.style_id ?? model.default_style), materials = {};
+  const pattern = item.pattern_id && item.pattern_id !== 'none' ? item.pattern_id : null;
+  const patternedMesh = { name: 'pattern', vertices: [], normals: [], indices: [], kind: 'inventory' };
   const meshes = model.parts.map((part, index) => {
     const color = (part.material === 'body' && item.color ? item.color : style.materials[part.material] || part.material).toLowerCase();
     const material = 'furniture_' + color.slice(1);
     materials[material] = linearColor(color);
-    return { name: 'part_' + index, ...primitive(part), material, kind: 'inventory' };
+    const mesh = { name: 'part_' + index, ...primitive(part), material, kind: 'inventory' };
+    if (pattern && part.pattern_face) {
+      // Replace precisely the original top (+Y) or front (+Z) two triangles.
+      const offset = part.pattern_face === 'top' ? 6 : 24;
+      mesh.vertices.splice(offset, 6);
+      mesh.normals.splice(offset, 6);
+      mesh.indices = mesh.vertices.map((_, index) => index);
+      const [background, accent] = patternSurface(part, pattern);
+      appendMesh(mesh, background);
+      appendMesh(patternedMesh, accent);
+    }
+    return mesh;
   });
+  if (pattern) {
+    const color = (item.pattern_color || style.materials.accent).toLowerCase();
+    patternedMesh.material = 'furniture_' + color.slice(1);
+    materials[patternedMesh.material] = linearColor(color);
+    meshes.push(patternedMesh);
+  }
   return { meshes, materials };
 }

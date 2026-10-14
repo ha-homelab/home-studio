@@ -23,16 +23,21 @@ installable Home Assistant package. Examples and guide screenshots are fictional
 
 ## Furnish your rooms
 
-Open **Item library** to browse **149 designs in 20 categories**: furniture and
-lighting, rugs and tapestries, mirrors, plants and life-size display bears,
+Open **Item library** to browse **195 designs in 22 categories**: furniture and
+lighting, cushions and throws, curtains and blinds, rugs and tapestries, mirrors,
+plants and life-size display bears, tabletop and bathroom accessories, pet furniture,
 servers and electronics, toys, musical instruments and workshop tools,
 vehicles, bicycles, sports gear, garden equipment, and more. Search for a
 server rack, teddy bear, Tesla, café racer, moped, skis, or satellite dish, choose its thumbnail,
 then click inside a room. You can also select a room and choose **Place item at
 room center** for keyboard placement.
 
-Select an item to change its **Design**, choose one of ten **Finish** palettes,
-or set a **Custom body color**. Change its width, depth, height, elevation, and
+Select an item to change its **Design**, choose one of 18 coordinated **Color palette** themes,
+or set a **Custom body color**. Fabric and decorative panels on supported designs
+also offer **Surface pattern**: stripes, checks, diamonds, dots, herringbone, or
+chevrons. Choose a separate **Pattern color**, or keep the palette’s accent. The
+small item preview shows your choices immediately. **None** restores the original
+surface; changing palette resets custom colors but keeps the pattern. Change its width, depth, height, elevation, and
 rotation to match your measurements. A new design keeps your dimensions;
 **Use design’s original size** restores the starting size. **Basic shapes &
 devices** remains available for blocks, switches, outlets, and sensors.
@@ -45,6 +50,15 @@ source. Older projects retain their basic shapes until you choose a design.
 The library is bundled locally: no asset account, remote model downloads, or
 additional runtime dependencies are required. The library opens with 24 designs;
 **Show more** reveals the next set. Search and category filters cover every design.
+
+Try the [color and pattern studio](planner/guide-assets/pattern-studio.json) to
+compare all six patterns in a furnished room. Export your current drawing first,
+open the example with **Open JSON**, select a rug or cushion, and try another
+palette or pattern. Patterns apply to designated flat fabric/decorative panels,
+not every curved surface. Curtains are static furnishings; this does not create
+Home Assistant curtain controls.
+
+![A fictional room with patterned rugs, cushions, curtains and coordinated palettes](planner/guide-assets/11-pattern-studio.jpg)
 
 Try the [fictional garage and creative studio](planner/guide-assets/garage-and-studio.json):
 download the JSON, choose **Open JSON** in the editor, then **Preview 3D**. It
@@ -69,7 +83,7 @@ approximate silhouette, not a manufacturer-supplied model or exact dimensions.
 Object libraries provide geometry; adding a server or car does not automatically
 connect its telemetry to Home Assistant.
 
-Furniture designs and finishes are authored in the planner. After changing them,
+Furniture designs, palettes, and patterns are authored in the planner. After changing them,
 rebuild and reinstall the project. The installed panel can move, resize, rename,
 and bind existing furniture to entities; its inventory import is for placements,
 not a way to download or replace furniture models.

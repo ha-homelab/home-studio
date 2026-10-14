@@ -80,6 +80,10 @@ def validate_catalog(catalog):
             for style in styles.values():
                 color = style['materials'].get(material, material)
                 require(isinstance(color, str) and COLOR.fullmatch(color), prefix + ': unknown material ' + material)
+                if 'pattern_face' in part:
+                    require('accent' in style['materials'], style['id'] + ': patterned furniture requires an accent color')
+        require(sum('pattern_face' in part for part in model['parts']) <= 3,
+                identifier + ': at most 3 patterned faces are allowed')
 
 
 def generated_catalog():

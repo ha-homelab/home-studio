@@ -108,10 +108,10 @@ function findFiles(folder, name) {
     // Pick real new designs through the UI, including each new shape family.
     for (const id of ['server_rack', 'teddy_bear', 'tesla_model_y', 'cafe_racer_motorcycle', 'retro_moped', 'skis_and_poles',
       'road_bicycle', 'satellite_dish', 'kilim_rug', 'tasseled_wall_rug', 'sunburst_mirror', 'starburst_chandelier',
-      'globe_wall_sconce', 'classic_balustrade', 'christmas_tree', 'standing_brown_bear']) {
+      'globe_wall_sconce', 'classic_balustrade', 'christmas_tree', 'standing_brown_bear', 'square_cushion', 'curtain_pair_open', 'nursery_crib', 'hanging_egg_chair']) {
       await chooseModel(id); await placeCenter();
       assert.equal((await lastItem()).model_id, id);
-      await page.getByLabel('Finish', { exact: true }).selectOption('ocean_blue');
+      await page.getByLabel('Color palette', { exact: true }).selectOption('ocean_blue');
       assert.equal((await lastItem()).style_id, 'ocean_blue');
       await page.getByRole('button', { name: 'Delete item', exact: true }).click();
     }
@@ -122,7 +122,7 @@ function findFiles(folder, name) {
     await page.locator('.library-card[data-model-id="sofa_3"]').click();
     await placeCenter();
     assert.equal((await lastItem()).model_id, 'sofa_3');
-    await page.getByLabel('Finish', { exact: true }).selectOption('warm_wood');
+    await page.getByLabel('Color palette', { exact: true }).selectOption('warm_wood');
     await page.getByRole('button', { name: 'Ocean', exact: true }).click();
     await change('Width (m)', 2.8);
     await change('Rotation (degrees)', 30);
@@ -142,9 +142,31 @@ function findFiles(folder, name) {
     assert.equal((await lastItem()).name, 'Reading sofa');
     await page.getByRole('button', { name: 'Use design’s original size' }).click();
     assert.deepEqual((await lastItem()).dimensions_m, catalog.models.find(model => model.id === 'sofa_2').dimensions_m);
-    await page.getByLabel('Finish', { exact: true }).selectOption('monochrome');
+    await page.getByLabel('Color palette', { exact: true }).selectOption('monochrome');
     assert(!Object.hasOwn(await lastItem(), 'color'), 'A coordinated finish resets the body override');
     await page.getByRole('button', { name: 'Ocean', exact: true }).click();
+
+    // Patterns update the real preview and survive every export/install boundary.
+    const plainAppearance = await page.locator('.appearance-preview').evaluate(canvas => canvas.toDataURL());
+    await page.getByLabel('Surface pattern', { exact: true }).selectOption('checks');
+    await page.getByLabel('Pattern color', { exact: true }).fill('#ffeedd');
+    assert.equal((await lastItem()).pattern_id, 'checks');
+    assert.equal((await lastItem()).pattern_color, '#ffeedd');
+    assert.notEqual(await page.locator('.appearance-preview').evaluate(canvas => canvas.toDataURL()), plainAppearance);
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    assert(!Object.hasOwn(await lastItem(), 'pattern_color'));
+    await page.getByRole('button', { name: 'Redo', exact: true }).click();
+    assert.equal((await lastItem()).pattern_color, '#ffeedd');
+    await page.locator('button[title="item: Reading sofa"]').click();
+    await page.getByLabel('Color palette', { exact: true }).selectOption('sage_linen');
+    assert(!Object.hasOwn(await lastItem(), 'color')); assert(!Object.hasOwn(await lastItem(), 'pattern_color'));
+    assert.equal((await lastItem()).pattern_id, 'checks');
+    await page.getByLabel('Design', { exact: true }).selectOption('floor_lamp');
+    assert(!Object.hasOwn(await lastItem(), 'pattern_id')); assert(!Object.hasOwn(await lastItem(), 'pattern_color'));
+    assert.equal(await page.getByLabel('Surface pattern', { exact: true }).count(), 0);
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    assert.equal((await lastItem()).color, '#507b95'); assert.equal((await lastItem()).pattern_color, '#ffeedd');
 
     // Catalog and basic shapes must remain explicitly selectable even for the same type.
     await page.locator('.basic-items summary').click();
@@ -153,6 +175,15 @@ function findFiles(folder, name) {
     assert(!Object.hasOwn(await lastItem(), 'model_id'));
     await page.getByRole('button', { name: 'Delete item', exact: true }).click();
     await chooseModel('rug'); await placeCenter();
+    const plainRug = await page.locator('#plan-canvas').evaluate(canvas => canvas.toDataURL());
+    for (const pattern of ['stripes', 'checks', 'diamonds', 'dots', 'herringbone', 'chevrons']) {
+      await page.getByLabel('Surface pattern', { exact: true }).selectOption(pattern);
+      assert.equal((await lastItem()).pattern_id, pattern);
+    }
+    assert.notEqual(await page.locator('#plan-canvas').evaluate(canvas => canvas.toDataURL()), plainRug);
+    await page.getByLabel('Surface pattern', { exact: true }).selectOption('none');
+    assert(!Object.hasOwn(await lastItem(), 'pattern_id')); assert(!Object.hasOwn(await lastItem(), 'pattern_color'));
+    await page.getByLabel('Surface pattern', { exact: true }).selectOption('herringbone');
     const withRug = await project();
     await page.locator('#plan-canvas').focus(); await page.keyboard.press('Escape');
     const beforeOrder = await page.locator('#plan-canvas').evaluate(canvas => canvas.toDataURL());
@@ -220,21 +251,23 @@ function findFiles(folder, name) {
     await page.locator('#addItem').click();
     const savedItem = await page.evaluate(() => window.floorplan.items.find(item => item.model_id === 'sofa_2'));
     assert.equal(savedItem.position_m.x, 2.5); assert.equal(savedItem.color, '#507b95');
+    assert.equal(savedItem.pattern_id, 'checks'); assert.equal(savedItem.pattern_color, '#ffeedd');
     const rebuilt = JSON.parse(JSON.stringify(expected));
-    rebuilt.floors[0].items.find(item => item.model_id === 'sofa_2').color = '#c18c42';
+    Object.assign(rebuilt.floors[0].items.find(item => item.model_id === 'sofa_2'), { color: '#c18c42', pattern_id: 'stripes', pattern_color: '#112233' });
     const rebuiltSource = path.join(temporary, 'rebuilt.json'), rebuiltOutput = path.join(temporary, 'rebuilt');
     fs.writeFileSync(rebuiltSource, JSON.stringify(rebuilt));
     runPython(['scripts/build-planner-project.py', '--project', rebuiltSource, '--output', rebuiltOutput]);
     compiledPage = fs.readFileSync(path.join(rebuiltOutput, expected.floors[0].id, 'index.html'));
     await page.reload(); await page.waitForFunction(() => window.floorplan?.objectCount === 2);
     const refreshed = await page.evaluate(() => window.floorplan.items.find(item => item.model_id === 'sofa_2'));
+    assert.equal(refreshed.pattern_id, 'stripes'); assert.equal(refreshed.pattern_color, '#112233');
     assert.equal(refreshed.color, '#c18c42'); assert.equal(refreshed.position_m.x, 2.5);
     assert.equal(refreshed.name, 'Sofa moved in installed viewer');
     assert(await page.evaluate(() => Object.hasOwn(window.floorplan.model.materials, 'furniture_c18c42')));
     assert.match(await page.locator('#status').textContent(), /appearances refreshed/);
 
     // Each downloadable example follows the real browser/export/install path.
-    for (const [example, screenshot] of [['garage-and-studio', '09-garage-studio.jpg'], ['decor-studio', '10-decor-studio.jpg']]) {
+    for (const [example, screenshot] of [['garage-and-studio', '09-garage-studio.jpg'], ['decor-studio', '10-decor-studio.jpg'], ['pattern-studio', '11-pattern-studio.jpg']]) {
       await page.goto(origin + '/planner/'); await page.waitForFunction(() => window.planner);
       const advanced = JSON.parse(fs.readFileSync(path.join(root, `planner/guide-assets/${example}.json`)));
       await importProject(advanced);
@@ -246,6 +279,11 @@ function findFiles(folder, name) {
       if (process.env.PLANNER_SCREENSHOT_DIR) {
         await page.locator('#preview-canvas').focus();
         await page.keyboard.press('ArrowUp'); await page.keyboard.press('ArrowUp');
+        if (example === 'pattern-studio') {
+          for (let turn = 0; turn < 26; turn++) await page.keyboard.press('ArrowRight');
+          await page.locator('button[title="item: Rounded square cushion"]').first().click();
+          await page.getByLabel('Surface pattern', { exact: true }).scrollIntoViewIfNeeded();
+        }
         await page.screenshot({ path: path.join(process.env.PLANNER_SCREENSHOT_DIR, screenshot), type: 'jpeg', quality: 92 });
       }
       const advancedDownload = page.waitForEvent('download'); await page.locator('#export-project').click();

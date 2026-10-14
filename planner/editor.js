@@ -1,7 +1,7 @@
 import * as THREE from '../vendor/three.module.min.js';
 import { LIMITS, ITEM_TYPES, clone, round, distance, signedArea, pointInPolygon, projectOnWall, nextId, newFloor, blankProject, demoProject, outlineRoom, validateProject, wallPieces, floorBounds } from './model.js';
 import { CATALOG } from './catalog.js';
-import { getCatalogModel, getCatalogStyle, buildFurnitureAsset } from './furniture.js';
+import { getCatalogModel, getCatalogStyle, buildFurnitureAsset, PATTERNS, supportsFurniturePattern } from './furniture.js';
 
 const $ = id => document.getElementById(id);
 const STORAGE_KEY = 'home-studio.project.v1';
@@ -37,7 +37,7 @@ function button(text, handler, className = 'quiet') { const b = node('button', c
 function status(message, error = false) { $('status').textContent = message; $('status').parentElement.classList.toggle('error', error); $('status').title = message; }
 function itemAsset(item) {
   if (!item.model_id) return null;
-  const key = `${item.model_id}|${item.style_id || ''}|${item.color || ''}`;
+  const key = `${item.model_id}|${item.style_id || ''}|${item.color || ''}|${item.pattern_id || ''}|${item.pattern_color || ''}`;
   if (!assetCache.has(key)) {
     if (assetCache.size >= APPEARANCE_CACHE_LIMIT) assetCache.delete(assetCache.keys().next().value);
     assetCache.set(key, buildFurnitureAsset(item));
@@ -90,10 +90,11 @@ function renderLibrary(append = false) {
   $('library-empty').hidden = models.length > 0;
   if (append) firstNewCard?.focus();
 }
-function drawItemThumbnail(canvas, model) {
+function drawItemThumbnail(canvas, model, appearance = { model_id: model.id, style_id: model.default_style, type: model.type }) {
   const context = canvas.getContext('2d');
-  if (thumbnailCache.has(model.id)) { context.putImageData(thumbnailCache.get(model.id), 0, 0); return; }
-  const asset = itemAsset({ model_id: model.id, style_id: model.default_style, type: model.type });
+  const key = JSON.stringify([appearance.model_id, appearance.style_id, appearance.color, appearance.pattern_id, appearance.pattern_color]);
+  if (thumbnailCache.has(key)) { context.putImageData(thumbnailCache.get(key), 0, 0); return; }
+  const asset = itemAsset(appearance);
   if (!asset) return;
   const d = model.dimensions_m, triangles = [];
   for (const mesh of asset.meshes) {
@@ -130,15 +131,26 @@ function drawItemThumbnail(canvas, model) {
     }
   }
   if (thumbnailCache.size >= THUMBNAIL_CACHE_LIMIT) thumbnailCache.delete(thumbnailCache.keys().next().value);
-  thumbnailCache.set(model.id, pixels); context.putImageData(pixels, 0, 0);
+  thumbnailCache.set(key, pixels); context.putImageData(pixels, 0, 0);
 }
 function itemPlanShapes(item) {
-  const key = `${item.model_id}|${item.style_id || ''}|${item.color || ''}`;
+  const key = `${item.model_id}|${item.style_id || ''}|${item.color || ''}|${item.pattern_id || ''}|${item.pattern_color || ''}`;
   if (planShapeCache.has(key)) return planShapeCache.get(key);
   const asset = itemAsset(item);
   if (!asset) return null;
   const cross = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-  const shapes = asset.meshes.map(mesh => {
+  const patterned = item.pattern_id && item.pattern_id !== 'none';
+  const shapes = asset.meshes.flatMap(mesh => {
+    if (patterned) {
+      const triangles = [];
+      for (let i = 0; i < mesh.indices.length; i += 3) {
+        const indices = mesh.indices.slice(i, i + 3);
+        if (mesh.normals[indices[0]][1] <= .01) continue;
+        const vertices = indices.map(index => mesh.vertices[index]);
+        triangles.push({ triangle: true, points: vertices.map(([x, _y, z]) => [x, z]), height: vertices.reduce((sum, p) => sum + p[1], 0) / 3, color: materialColor(asset.materials[mesh.material]) });
+      }
+      return triangles;
+    }
     const points = [...new Map(mesh.vertices.map(([x, _y, z]) => [`${x},${z}`, [x, z]])).values()].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     const lower = [], upper = [];
     for (const point of points) { while (lower.length >= 2 && cross(lower.at(-2), lower.at(-1), point) <= 0) lower.pop(); lower.push(point); }
@@ -288,22 +300,38 @@ function renderInspector() {
     field(parent, 'Item name', object.name, v => editObject(o => { o.name = v; }));
     const model = object.model_id ? getCatalogModel(object.model_id) : null;
     field(parent, 'Design', object.model_id || '', value => editObject(o => {
-      if (!value) { delete o.model_id; delete o.style_id; delete o.color; return; }
+      if (!value) { for (const key of ['model_id', 'style_id', 'color', 'pattern_id', 'pattern_color']) delete o[key]; return; }
       const next = getCatalogModel(value), previous = o.model_id ? getCatalogModel(o.model_id) : null;
       if (o.name === previous?.label || o.name === LABELS[o.type]) o.name = next.label;
       o.model_id = next.id; o.type = next.type; o.style_id ||= next.default_style;
+      if (!supportsFurniturePattern(next)) { delete o.pattern_id; delete o.pattern_color; }
     }, 'Item design changed. Size and position kept.'), { options: [{ value: '', label: 'Basic shape / device' }, ...CATALOG.models.map(entry => ({ value: entry.id, label: entry.label }))], help: 'Changes the shape while keeping your size and placement.' });
     if (model) {
       const style = getCatalogStyle(object.style_id || model.default_style);
-      field(parent, 'Finish', style.id, value => editObject(o => { o.style_id = value; delete o.color; }, 'Finish applied.'), { options: CATALOG.styles.map(entry => ({ value: entry.id, label: entry.label })), help: 'A finish sets coordinated colors for the whole item. Choosing one also resets any custom body color.' });
-      field(parent, 'Custom body color', object.color || style.materials.body, value => editObject(o => { o.color = value; }, 'Item color changed.'), { type: 'color', help: 'Recolors the main surface; legs and accents keep the selected finish.' });
+      field(parent, 'Color palette', style.id, value => editObject(o => { o.style_id = value; delete o.color; delete o.pattern_color; }, 'Color palette applied.'), { options: CATALOG.styles.map(entry => ({ value: entry.id, label: entry.label })), help: 'Coordinated colors for the whole item. Changing palette resets custom colors and keeps your pattern.' });
+      const strip = node('div', 'palette-preview'); strip.setAttribute('aria-label', `${style.label} palette`);
+      for (const role of ['body', 'accent', 'wood', 'metal']) { const swatch = node('span'); swatch.style.backgroundColor = style.materials[role]; swatch.title = `${role}: ${style.materials[role]}`; strip.append(swatch); }
+      parent.append(strip);
+      field(parent, 'Custom body color', object.color || style.materials.body, value => editObject(o => { o.color = value; }, 'Item color changed.'), { type: 'color', help: 'Recolors the main surface; legs and accents keep the selected palette.' });
       const palette = node('div', 'color-palette'); palette.setAttribute('role', 'group'); palette.setAttribute('aria-label', 'Body color suggestions');
       for (const [label, color] of [['Ivory', '#e6dfd1'], ['Sand', '#c9aa7d'], ['Terracotta', '#be785d'], ['Sage', '#899e82'], ['Forest', '#416c59'], ['Ocean', '#507b95'], ['Slate', '#757985'], ['Charcoal', '#363e43']]) {
         const swatch = button('', () => editObject(o => { o.color = color; }, `${label} color applied.`), 'color-swatch');
         swatch.style.setProperty('--swatch', color); swatch.title = label; swatch.setAttribute('aria-label', label); swatch.setAttribute('aria-pressed', String(object.color?.toLowerCase() === color)); palette.append(swatch);
       }
       parent.append(palette);
-      const resetColor = button('Use finish color', () => editObject(o => { delete o.color; }, 'Finish color restored.'), 'quiet small'); resetColor.disabled = !object.color; parent.append(resetColor);
+      const resetColor = button('Use palette color', () => editObject(o => { delete o.color; }, 'Palette color restored.'), 'quiet small'); resetColor.disabled = !object.color; parent.append(resetColor);
+      if (supportsFurniturePattern(model)) {
+        field(parent, 'Surface pattern', object.pattern_id || 'none', value => editObject(o => {
+          if (value === 'none') { delete o.pattern_id; delete o.pattern_color; } else o.pattern_id = value;
+        }, 'Surface pattern updated.'), { options: PATTERNS.map(entry => ({ value: entry.id, label: entry.label })), help: 'Applies to this design’s fabric or decorative panels. Choose None for its original appearance.' });
+        if (object.pattern_id && object.pattern_id !== 'none') {
+          field(parent, 'Pattern color', object.pattern_color || style.materials.accent, value => editObject(o => { o.pattern_color = value; }, 'Pattern color changed.'), { type: 'color', help: 'Choose a contrasting color so the pattern is easy to see.' });
+          const resetPattern = button('Use palette pattern color', () => editObject(o => { delete o.pattern_color; }, 'Pattern color restored.'), 'quiet small'); resetPattern.disabled = !object.pattern_color; parent.append(resetPattern);
+        }
+      }
+      const preview = node('canvas', 'appearance-preview'); preview.width = 280; preview.height = 170;
+      preview.setAttribute('aria-label', `${object.name}: current color palette and pattern`);
+      parent.append(preview); drawItemThumbnail(preview, model, object);
     } else {
       field(parent, 'Item type', object.type, value => editObject(o => { o.type = value; }), { options: ITEM_TYPES.map(value => ({ value, label: LABELS[value] })) });
     }
@@ -336,7 +364,8 @@ function deleteSelection() {
 }
 function setTool(next) {
   tool = next; document.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === tool)));
-  $('tool-hint').textContent = toolHint(); planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
+  if (view === 'plan') $('tool-hint').textContent = toolHint();
+  planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
   if (tool !== 'select' && view !== 'plan') setView('plan');
   $('empty-state').hidden = floor().rooms.length + floor().walls.length + floor().items.length > 0 || tool !== 'select' || view !== 'plan';
 }
@@ -431,7 +460,7 @@ function renderPlan() {
     ctx.fillStyle = COLORS[item.type]; ctx.strokeStyle = '#637f78'; ctx.lineWidth = 1; ctx.shadowColor = '#293c3315'; ctx.shadowBlur = 5;
     if (shape) {
       ctx.shadowBlur = 0; ctx.lineWidth = .65; ctx.strokeStyle = '#33453f55';
-      ctx.beginPath(); shape.points.forEach(([px, pz], index) => { if (index) ctx.lineTo(px * w, pz * d); else ctx.moveTo(px * w, pz * d); }); ctx.closePath(); ctx.fillStyle = shape.color; ctx.fill(); ctx.stroke();
+      ctx.beginPath(); shape.points.forEach(([px, pz], index) => { if (index) ctx.lineTo(px * w, pz * d); else ctx.moveTo(px * w, pz * d); }); ctx.closePath(); ctx.fillStyle = shape.color; ctx.fill(); if (!shape.triangle) ctx.stroke();
     } else if (['chandelier', 'lamp', 'sensor'].includes(item.type)) { ctx.beginPath(); ctx.ellipse(0, 0, w / 2, d / 2, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
     else { ctx.fillRect(-w / 2, -d / 2, w, d); ctx.strokeRect(-w / 2, -d / 2, w, d); if (item.type === 'furniture' && w > 28 && d > 20) { ctx.strokeStyle = '#ffffff66'; ctx.strokeRect(-w / 2 + 4, -d / 2 + 4, w - 8, d - 8); } }
     ctx.restore();

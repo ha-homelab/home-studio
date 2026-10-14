@@ -16,7 +16,7 @@ def item():
             "position_m": {"x": 1, "y": 0, "z": 2},
             "dimensions_m": {"width": .8, "depth": .8, "height": .9},
             "rotation_deg": 45, "entity_id": "", "notes": "",
-            "model_id": "armchair", "style_id": "natural", "color": "#4E9C99"}
+            "model_id": "armchair", "style_id": "natural", "color": "#4E9C99", "pattern_id": "checks", "pattern_color": "#FFEEDD"}
 
 
 class AppearanceTests(unittest.TestCase):
@@ -30,14 +30,15 @@ class AppearanceTests(unittest.TestCase):
 
     def test_legacy_inventory_remains_valid(self):
         legacy = item()
-        for key in ("model_id", "style_id", "color"):
+        for key in ("model_id", "style_id", "color", "pattern_id", "pattern_color"):
             del legacy[key]
         self.assertEqual(validation.validate_inventory([legacy], {"study"}), [legacy])
 
     def test_inert_appearance_has_bounded_syntax(self):
         for change in ({"model_id": "../chair"}, {"model_id": "x" * 65},
                        {"style_id": []}, {"style_id": "white\n"}, {"color": None},
-                       {"color": "#fff"}, {"color": "url(https://example.invalid)"},
+                       {"color": "#fff"}, {"pattern_id": "bad/path"},
+                       {"pattern_id": "none"}, {"pattern_color": "red"}, {"color": "url(https://example.invalid)"},
                        {"external_model_url": "https://example.invalid/chair.glb"}):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 validation.validate_inventory([{**item(), **change}], {"study"})

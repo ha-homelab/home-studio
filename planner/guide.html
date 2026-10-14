@@ -149,7 +149,7 @@
         <section class="step" id="table" aria-labelledby="table-title">
           <p class="step-label">STEP 05 · SOMETHING TO GIVE THE ROOM SCALE</p>
           <h2 id="table-title">Put a table in the studio</h2>
-          <p>The Item library includes 149 designs: furniture, rugs and tapestries, mirrors, lighting, plants, life-size display bears, electronics, toys, vehicles, sports gear, and outdoor accessories. Search by name or browse a category, then choose a design. Each has a starting size you can adjust to match your home. Search looks through the entire library; <strong>Show more</strong> adds another 24 cards.</p>
+          <p>The Item library includes 195 designs: furniture, rugs and tapestries, mirrors, lighting, plants, life-size display bears, electronics, toys, vehicles, sports gear, and outdoor accessories. Search by name or browse a category, then choose a design. Each has a starting size you can adjust to match your home. Search looks through the entire library; <strong>Show more</strong> adds another 24 cards.</p>
           <figure>
             <a href="./guide-assets/08-library.jpg" target="_blank" rel="noopener" aria-label="Open full-size screenshot of the Item library"><img width="1440" height="1000" src="./guide-assets/08-library.jpg" alt="The Item library shows Search items and Category controls above illustrated cards for sofas, chairs, a bench, a stool, and tables, with starting dimensions beneath each design." loading="lazy"></a>
             <figcaption><span>05A</span> Browse the illustrated library, or search for a familiar item name. Choose a card to place that design in your plan.</figcaption>
@@ -158,7 +158,7 @@
             <li>In the left panel, open <strong>Item library</strong>. Search for <strong>desk</strong> and choose a desk design. The library closes and the selected item is ready to place.</li>
             <li>Select <strong>Studio</strong> from <strong>On this floor</strong>. This selects the room without accidentally placing an item.</li>
             <li>On the right, click <strong>Place item at room center</strong>.</li>
-            <li>In Item details, set <strong>Item name</strong> to <strong>Studio table</strong>. Choose a <strong>Finish</strong>, or use <strong>Custom body color</strong> to pick a color. Under Size &amp; rotation, enter the size below. Press <kbd>Tab</kbd> after each edit.</li>
+            <li>In Item details, set <strong>Item name</strong> to <strong>Studio table</strong>. Choose a <strong>Color palette</strong>, or use <strong>Custom body color</strong> to pick a color. Under Size &amp; rotation, enter the size below. Press <kbd>Tab</kbd> after each edit.</li>
           </ol>
           <dl class="values four-values">
             <div><dt>Width (m)</dt><dd>1.4</dd></div><div><dt>Depth (m)</dt><dd>0.7</dd></div><div><dt>Height (m)</dt><dd>0.75</dd></div><div><dt>Rotation (degrees)</dt><dd>0</dd></div>
@@ -169,7 +169,7 @@
             <figcaption><span>05B</span> The selected Writing desk uses the Warm wood finish. Scroll down in Item details to adjust its position, dimensions, and rotation.</figcaption>
           </figure>
           <p class="check"><strong>Check:</strong> one item named Studio table is assigned to Studio. It is centered in the room, and its top is <strong>0.75 meters</strong> above the floor.</p>
-          <p class="small">For free placement later, choose Place item and click inside a room. The same design stays ready for repeated placement. Choose Select / move to drag it afterward, or type an exact position in Item details. Changing <strong>Design</strong> keeps your custom size and position; <strong>Use design’s original size</strong> restores its starting dimensions. Choose from ten coordinated finishes or a custom body color. Finish and color changes support Undo and stay with your JSON export.</p>
+          <p class="small">For free placement later, choose Place item and click inside a room. The same design stays ready for repeated placement. Choose Select / move to drag it afterward, or type an exact position in Item details. Changing <strong>Design</strong> keeps your custom size and position; <strong>Use design’s original size</strong> restores its starting dimensions. Choose from 18 coordinated color palettes or a custom body color. Color and pattern changes support Undo and stay with your JSON export.</p>
           <details>
             <summary>Try a garage, a music corner, or a workshop</summary>
             <p>Search for <strong>Tesla</strong>, <strong>café racer</strong>, <strong>bicycle</strong>, <strong>skis</strong>, <strong>server</strong>, <strong>teddy</strong>, or <strong>guitar</strong>. To put a small object on a desk, set its <strong>y</strong> position to the desk height. For example, a printer on a 0.75-meter desk starts at y 0.75.</p>
@@ -187,12 +187,30 @@
               <li><strong>On a wall:</strong> choose a wall rug, tapestry, mirror, or sconce. These designs already stand upright. Move the item next to the wall and use Rotation to face it into the room: start with 0, 90, 180, or 270 degrees. Keep the decorated front clear of the wall.</li>
               <li><strong>At the right height:</strong> y is the height of the item's <em>bottom</em>. A 1-meter mirror at y 1 reaches 2 meters. Changing its height does not move its bottom.</li>
               <li><strong>Near the ceiling:</strong> choose a chandelier or bulb. For a 0.6-meter fixture under a 2.7-meter ceiling, set y to 2.1. The top is y plus Height. Check it in Preview 3D before exporting.</li>
-              <li><strong>Make it yours:</strong> choose a Finish for coordinated colors, or Custom body color for its main surface. Use design’s original size restores the suggested dimensions; measure your own object for a close fit.</li>
+              <li><strong>Make it yours:</strong> choose a Color palette for coordinated colors, or Custom body color for its main surface. Use design’s original size restores the suggested dimensions; measure your own object for a close fit.</li>
             </ol>
             <p><a href="./guide-assets/decor-studio.json" download>Download the fictional decorated studio</a>, save your current drawing, then use <strong>Open JSON</strong>. Try moving its wall hanging, changing its rug color, or lowering its chandelier.</p>
             <figure>
               <a href="./guide-assets/10-decor-studio.jpg" target="_blank" rel="noopener" aria-label="Open full-size decorated studio preview"><img width="1440" height="1000" src="./guide-assets/10-decor-studio.jpg" alt="A fictional decorated studio combines patterned rugs, upright wall art and a mirror, suspended lighting, plants, a balustrade, and a life-size display bear." loading="lazy"></a>
               <figcaption>Floor pieces, wall pieces, and ceiling pieces share one editable room. Mirrors are stylized glass surfaces; they do not calculate live reflections. Light controls need your own Home Assistant entity binding.</figcaption>
+            </figure>
+          </details>
+          <details>
+            <summary>Choose a palette and a fabric pattern</summary>
+            <p>A <strong>Design</strong> is the shape, a <strong>Color palette</strong> is a coordinated set of colors, and a <strong>Surface pattern</strong> is a drawing on the fabric. You can change them independently, like choosing a chair, its upholstery, and its fabric print.</p>
+            <ol class="instructions">
+              <li>Open the Item library and search for <strong>cushion</strong>, <strong>rug</strong>, <strong>curtain</strong>, <strong>throw</strong>, or <strong>ottoman</strong>. Place the design inside a room and select it.</li>
+              <li>In Item details, choose a <strong>Color palette</strong>. The four-color strip shows its main, accent, wood, and metal colors. Try Sage and linen, Desert clay, or Plum velvet. The small item preview updates immediately.</li>
+              <li>Choose a <strong>Surface pattern</strong>: Stripes, Checks, Diamonds, Dots, Herringbone, or Chevrons. This control appears only when the design has a suitable fabric or decorative panel.</li>
+              <li>Use <strong>Custom body color</strong> for the base and <strong>Pattern color</strong> for the drawing. Pick contrasting colors if the drawing looks faint. <strong>Use palette pattern color</strong> restores the coordinated accent.</li>
+              <li>Select <strong>None</strong> to restore the original surface. Changing Color palette resets custom colors while keeping the chosen pattern. Use Undo if you prefer the previous look.</li>
+              <li>Open <strong>Preview 3D</strong>, then Export JSON to keep the editable version. Rebuild and reinstall after changing a design, palette, or pattern to update your Home Assistant plan.</li>
+            </ol>
+            <p>Patterns cover designated flat panels; they do not wrap around every curved shape. Choose the separate open or closed curtain design for the look you need: these are static furnishings, not live curtain controls. For a cushion on a 0.48-meter seat, set its bottom height <strong>y</strong> to <strong>0.48</strong>.</p>
+            <p><a href="./guide-assets/pattern-studio.json" download>Download the fictional color and pattern studio</a>. Save your own drawing first, then Open JSON to compare all six patterns in one room. Everything remains editable.</p>
+            <figure>
+              <a href="./guide-assets/11-pattern-studio.jpg" target="_blank" rel="noopener" aria-label="Open full-size color and pattern studio"><img width="1440" height="1000" src="./guide-assets/11-pattern-studio.jpg" alt="A furnished studio shows herringbone and diamond rugs, patterned sofa cushions and curtains, a rocking chair, ottoman, daybed, and pet furniture in coordinated colors." loading="lazy"></a>
+              <figcaption>One room, six fabric patterns. Each item has its own palette and can still be resized, moved, or connected to your own entity where supported.</figcaption>
             </figure>
           </details>
           <p class="small">Your older projects still open with their original basic shapes. Select an item and choose a Design to give it a new appearance, or open <strong>Basic shapes &amp; devices</strong> in the left panel to place a simple block, switch, outlet, or sensor.</p>
