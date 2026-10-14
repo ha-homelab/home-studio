@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## [0.6.2] - Development line
+
+- Recognize expected project validation failures during fuzzing while retaining
+  unexpected exceptions as failures. Replay the invalid-title regression in CI.
+- Extend offline RC campaigns to furniture catalog choices and rotated bounds,
+  checked against an independent analytic geometry oracle. Replay committed
+  positive and negative examples in ordinary CI without timed mutations.
+- Update the shared RC runner to retain source-bound execution metrics and
+  deterministic preflight evidence with the candidate.
 
 - Add 45 original designs for rugs, tapestries, mirrors, chandeliers, bulbs,
   sconces, floor lamps, balustrades, plants, and life-size display bears:
