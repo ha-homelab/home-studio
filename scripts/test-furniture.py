@@ -18,13 +18,16 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from planner.furniture import CATALOG, build_furniture_asset
+from planner.furniture import CATALOG, build_furniture_asset, primitive
 from planner.project import ProjectError, compile_project, make_floor, validate_project
 
 spec = importlib.util.spec_from_file_location('furniture_installer', ROOT / 'scripts/install-home-assistant.py')
 installer = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = installer
 spec.loader.exec_module(installer)
+catalog_spec = importlib.util.spec_from_file_location('catalog_generator', ROOT / 'scripts/generate-furniture-catalog.py')
+catalog_generator = importlib.util.module_from_spec(catalog_spec)
+catalog_spec.loader.exec_module(catalog_generator)
 
 
 def fixture_project():
@@ -42,6 +45,70 @@ def fixture_item(model, room):
 
 
 class FurnitureTests(unittest.TestCase):
+    def assert_mesh_equal(self, actual, expected):
+        self.assertEqual(actual['indices'], expected['indices'])
+        for key in ('vertices', 'normals'):
+            self.assertEqual(len(actual[key]), len(expected[key]))
+            for point, browser_point in zip(actual[key], expected[key]):
+                for value, browser_value in zip(point, browser_point):
+                    self.assertAlmostEqual(value, browser_value, places=12)
+
+    def test_standalone_primitives_and_rotation_match_javascript(self):
+        output = subprocess.check_output(['node', str(ROOT / 'scripts/test-furniture.mjs'), '--primitive-fixtures'])
+        for fixture in json.loads(output):
+            with self.subTest(part=fixture['part']):
+                self.assert_mesh_equal(primitive(fixture['part']), fixture['mesh'])
+        ring = {'shape': 'ring', 'center': [0, .5, 0], 'size': [1, 1, 1]}
+        self.assertEqual(primitive(ring), primitive({**ring, 'inner_ratio': .72}))
+        for patch in ({'shape': 'unknown'}, {'center': None}, {'center': [0, 0]},
+                      {'center': [0, math.inf, 0]}, {'center': [0, math.nan, 0]}, {'center': [0, True, 0]},
+                      {'size': [0, 1, 1]}, {'size': [-1, 1, 1]}, {'size': [1, 1, '1']},
+                      {'rotation_deg': [0, 0]}, {'rotation_deg': None}, {'rotation_deg': [0, math.nan, 0]},
+                      {'shape': 'box', 'inner_ratio': .5},
+                      *({'inner_ratio': value} for value in (0, 1, -.1, 1.1, None, True, math.nan, math.inf, '.5'))):
+            with self.subTest(patch=patch), self.assertRaises(ValueError):
+                primitive({**ring, **patch})
+        with self.assertRaises(ValueError):
+            primitive(None)
+
+    def test_catalog_metadata_and_actual_rotated_bounds_validation(self):
+        valid = copy.deepcopy(CATALOG)
+        valid['models'] = valid['models'][:1]
+        model = valid['models'][0]
+        # The rotated sphere fits its exact mesh bounds although a rotated
+        # bounding box would extend beyond the allowed normalized cube.
+        model['parts'] = [{'shape': 'sphere', 'center': [0, .5, 0], 'size': [1, 1, 1],
+                           'rotation_deg': [0, 0, 45], 'material': 'body'}]
+        catalog_generator.validate_catalog(valid)
+        for patch in ({'shape': 'box'}, {'center': [0, .6, 0]}, {'size': [1, math.inf, 1]},
+                      {'size': [1, -1, 1]}, {'rotation_deg': [0, '45', 0]}, {'material': 'missing'},
+                      {'shape': 'ring', 'inner_ratio': 1}):
+            invalid = copy.deepcopy(valid)
+            invalid['models'][0]['parts'][0].update(patch)
+            with self.subTest(part=patch), self.assertRaises(ValueError):
+                catalog_generator.validate_catalog(invalid)
+        for patch in ({'id': 'Bad id'}, {'label': ''}, {'category': 'missing'}, {'type': 'unknown'},
+                      {'default_style': 'missing'}, {'dimensions_m': {'width': 1, 'height': 1}},
+                      {'dimensions_m': {'width': True, 'height': 1, 'depth': 1}},
+                      {'elevation_m': math.nan}, {'tags': 'not-an-array'}, {'parts': []},
+                      {'parts': model['parts'] * 33}):
+            invalid = copy.deepcopy(valid)
+            invalid['models'][0].update(patch)
+            with self.subTest(model=patch), self.assertRaises(ValueError):
+                catalog_generator.validate_catalog(invalid)
+        for key in ('categories', 'styles', 'models'):
+            invalid = copy.deepcopy(valid)
+            invalid[key].append(copy.deepcopy(invalid[key][0]))
+            with self.subTest(duplicate=key), self.assertRaises(ValueError):
+                catalog_generator.validate_catalog(invalid)
+        for invalid in (None, {}, {**valid, 'version': True}, {**valid, 'categories': {}}):
+            with self.subTest(root=invalid), self.assertRaises(ValueError):
+                catalog_generator.validate_catalog(invalid)
+        invalid = copy.deepcopy(valid)
+        invalid['styles'][0]['materials']['body'] = '#fff'
+        with self.assertRaises(ValueError):
+            catalog_generator.validate_catalog(invalid)
+
     def test_catalog_generation_and_javascript_validation(self):
         subprocess.run([sys.executable, str(ROOT / 'scripts/generate-furniture-catalog.py'), '--check'], check=True)
         subprocess.run(['node', str(ROOT / 'scripts/test-furniture.mjs')], check=True)
@@ -63,11 +130,7 @@ class FurnitureTests(unittest.TestCase):
                 for mesh, browser_mesh in zip(actual['meshes'], expected['meshes']):
                     for key in ('name', 'indices', 'material', 'kind'):
                         self.assertEqual(mesh[key], browser_mesh[key])
-                    for key in ('vertices', 'normals'):
-                        self.assertEqual(len(mesh[key]), len(browser_mesh[key]))
-                        for point, browser_point in zip(mesh[key], browser_mesh[key]):
-                            for value, browser_value in zip(point, browser_point):
-                                self.assertAlmostEqual(value, browser_value, places=12)
+                    self.assert_mesh_equal(mesh, browser_mesh)
 
     def test_validation_legacy_and_invalid_appearance(self):
         legacy = json.loads((ROOT / 'planner/example-home.json').read_text())
@@ -123,10 +186,15 @@ class FurnitureTests(unittest.TestCase):
     def test_every_export_preserves_geometry_colors_and_inventory(self):
         project = fixture_project()
         floor = project['floors'][0]
-        # A nonuniformly scaled, rotated sofa and a cylinder-based table cover
-        # both primitive implementations and independent material overrides.
+        # Include new compact shapes when catalog models use them, along with
+        # legacy boxes and cylinders and independent material overrides.
         chosen = [next(model for model in CATALOG['models'] if model['id'] == name)
                   for name in ('sofa_2', 'round_dining_table')]
+        for shape in ('sphere', 'ring'):
+            model = next((model for model in CATALOG['models']
+                          if any(part['shape'] == shape for part in model['parts'])), None)
+            if model and model not in chosen:
+                chosen.append(model)
         floor['items'] = [fixture_item(model, floor['rooms'][0]['id']) for model in chosen]
         floor['items'][0]['entity_id'] = 'light.example'
         floor['items'][0]['dimensions_m'] = {'width': 2.13, 'height': .91, 'depth': 1.02}
@@ -204,17 +272,19 @@ class FurnitureTests(unittest.TestCase):
                 self.assertEqual(json.load(package.extractfile(name)), data)
 
     def test_maximum_density_floor_builds_and_installs_with_safety_limits(self):
+        plant = next(model for model in CATALOG['models'] if model['id'] == 'plant')
+        self.assert_models_build_and_install([plant] * 256)
+
+    def test_mixed_catalog_builds_and_installs_with_safety_limits(self):
+        self.assert_models_build_and_install(CATALOG['models'])
+
+    def assert_models_build_and_install(self, models):
         project = fixture_project()
         floor = project['floors'][0]
-        plant = next(model for model in CATALOG['models'] if model['id'] == 'plant')
-        vertex_counts = {model['id']: sum(len(part['vertices']) for part in build_furniture_asset(
-            {'model_id': model['id'], 'type': model['type']})['meshes']) for model in CATALOG['models']}
-        self.assertEqual(vertex_counts['plant'], max(vertex_counts.values()))
-        # Plants have the most vertices in the catalog. Distinct positions and
-        # rotation reproduce the long float strings that exceeded 32 MiB.
-        for index in range(256):
-            item = fixture_item(plant, floor['rooms'][0]['id'])
-            item.update(id=f'plant_{index}', style_id=plant['default_style'])
+        # Distinct positions reproduce the long float strings in dense exports.
+        for index, model in enumerate(models):
+            item = fixture_item(model, floor['rooms'][0]['id'])
+            item.update(id=f'catalog_{index}', style_id=model['default_style'])
             del item['color']
             item['position_m'] = {'x': 1.234 + index / 1000, 'y': 0, 'z': 2.345 + index / 1000}
             floor['items'].append(item)
@@ -227,7 +297,7 @@ class FurnitureTests(unittest.TestCase):
                 self.assertLess((folder / name).stat().st_size, installer.MAX_FILE_BYTES)
             data = json.loads((folder / 'model-data.json').read_text())
             self.assertEqual(data['inventory'], floor['items'])
-            self.assertEqual(len(data['object_assets']), 256)
+            self.assertEqual(len(data['object_assets']), len(models))
             self.assertFalse(any(mesh['kind'] == 'inventory' for mesh in data['meshes']))
             html = (folder / 'index.html').read_text()
             viewer = json.loads(re.search(r'<script[^>]*id="modelData"[^>]*>(.*?)</script>', html, re.S).group(1))
@@ -242,7 +312,7 @@ class FurnitureTests(unittest.TestCase):
             length = struct.unpack_from('<I', glb, 12)[0]
             document = json.loads(glb[20:20 + length])
             furniture_nodes = [node for node in document['nodes'] if node['extras']['category'] == 'inventory']
-            self.assertEqual(len(furniture_nodes), 256 * len(plant['parts']))
+            self.assertEqual(len(furniture_nodes), sum(len(model['parts']) for model in models))
 
     def test_user_ids_cannot_collide_with_generated_mesh_names(self):
         project = fixture_project()

@@ -1,0 +1,651 @@
+{
+  "schema_version": 1,
+  "id": "garage_creative_studio",
+  "title": "Garage & creative studio \u00b7 fictional example",
+  "floors": [
+    {
+      "id": "ground",
+      "name": "Garage & creative studio",
+      "elevation_m": 0,
+      "height_m": 2.7,
+      "rooms": [
+        {
+          "id": "garage",
+          "name": "Garage",
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              6,
+              0
+            ],
+            [
+              6,
+              8
+            ],
+            [
+              0,
+              8
+            ]
+          ],
+          "material": "tile"
+        },
+        {
+          "id": "studio",
+          "name": "Creative studio",
+          "polygon": [
+            [
+              6,
+              0
+            ],
+            [
+              12,
+              0
+            ],
+            [
+              12,
+              8
+            ],
+            [
+              6,
+              8
+            ]
+          ],
+          "material": "floor"
+        },
+        {
+          "id": "patio",
+          "name": "Patio",
+          "polygon": [
+            [
+              0,
+              8
+            ],
+            [
+              12,
+              8
+            ],
+            [
+              12,
+              11
+            ],
+            [
+              0,
+              11
+            ]
+          ],
+          "material": "deck"
+        }
+      ],
+      "walls": [
+        {
+          "id": "wall_1",
+          "start": [
+            0,
+            0
+          ],
+          "end": [
+            6,
+            0
+          ],
+          "thickness_m": 0.15
+        },
+        {
+          "id": "wall_2",
+          "start": [
+            6,
+            0
+          ],
+          "end": [
+            12,
+            0
+          ],
+          "thickness_m": 0.15
+        },
+        {
+          "id": "wall_3",
+          "start": [
+            12,
+            0
+          ],
+          "end": [
+            12,
+            8
+          ],
+          "thickness_m": 0.15
+        },
+        {
+          "id": "wall_4",
+          "start": [
+            12,
+            8
+          ],
+          "end": [
+            6,
+            8
+          ],
+          "thickness_m": 0.15
+        },
+        {
+          "id": "wall_5",
+          "start": [
+            6,
+            8
+          ],
+          "end": [
+            0,
+            8
+          ],
+          "thickness_m": 0.15
+        },
+        {
+          "id": "wall_6",
+          "start": [
+            0,
+            8
+          ],
+          "end": [
+            0,
+            0
+          ],
+          "thickness_m": 0.15
+        },
+        {
+          "id": "wall_7",
+          "start": [
+            6,
+            0
+          ],
+          "end": [
+            6,
+            8
+          ],
+          "thickness_m": 0.15
+        }
+      ],
+      "openings": [
+        {
+          "id": "garage_door",
+          "wall_id": "wall_1",
+          "type": "door",
+          "offset_m": 0.8,
+          "width_m": 4.2,
+          "sill_m": 0,
+          "head_m": 2.2
+        },
+        {
+          "id": "studio_window",
+          "wall_id": "wall_2",
+          "type": "window",
+          "offset_m": 1,
+          "width_m": 3.5,
+          "sill_m": 0.9,
+          "head_m": 2.2
+        },
+        {
+          "id": "passage",
+          "wall_id": "wall_7",
+          "type": "door",
+          "offset_m": 5.6,
+          "width_m": 1,
+          "sill_m": 0,
+          "head_m": 2.1
+        },
+        {
+          "id": "patio_door",
+          "wall_id": "wall_4",
+          "type": "door",
+          "offset_m": 1,
+          "width_m": 1.2,
+          "sill_m": 0,
+          "head_m": 2.1
+        }
+      ],
+      "items": [
+        {
+          "id": "item_1",
+          "name": "Tesla Model Y\u2013style crossover",
+          "type": "furniture",
+          "room": "garage",
+          "position_m": {
+            "x": 2.3,
+            "y": 0,
+            "z": 3.5
+          },
+          "dimensions_m": {
+            "width": 1.92,
+            "depth": 4.75,
+            "height": 1.63
+          },
+          "rotation_deg": 180,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "tesla_model_y",
+          "style_id": "gallery_white"
+        },
+        {
+          "id": "item_2",
+          "name": "Caf\u00e9-racer motorcycle",
+          "type": "furniture",
+          "room": "garage",
+          "position_m": {
+            "x": 4.8,
+            "y": 0,
+            "z": 2
+          },
+          "dimensions_m": {
+            "width": 0.74,
+            "depth": 2.05,
+            "height": 1.03
+          },
+          "rotation_deg": 180,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "cafe_racer_motorcycle",
+          "style_id": "racing_red"
+        },
+        {
+          "id": "item_3",
+          "name": "Mountain bicycle",
+          "type": "furniture",
+          "room": "garage",
+          "position_m": {
+            "x": 4.9,
+            "y": 0,
+            "z": 4.8
+          },
+          "dimensions_m": {
+            "width": 0.74,
+            "depth": 1.92,
+            "height": 1.1
+          },
+          "rotation_deg": 180,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "mountain_bicycle",
+          "style_id": "ocean_blue"
+        },
+        {
+          "id": "item_4",
+          "name": "Pair of skis with poles",
+          "type": "furniture",
+          "room": "garage",
+          "position_m": {
+            "x": 0.7,
+            "y": 0,
+            "z": 6.9
+          },
+          "dimensions_m": {
+            "width": 0.52,
+            "depth": 0.18,
+            "height": 1.75
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "skis_and_poles",
+          "style_id": "contemporary"
+        },
+        {
+          "id": "item_5",
+          "name": "Hobby workbench",
+          "type": "furniture",
+          "room": "garage",
+          "position_m": {
+            "x": 3.2,
+            "y": 0,
+            "z": 7.25
+          },
+          "dimensions_m": {
+            "width": 1.2,
+            "depth": 0.65,
+            "height": 1.35
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "hobby_workbench",
+          "style_id": "warm_wood"
+        },
+        {
+          "id": "item_6",
+          "name": "Full-height server rack",
+          "type": "furniture",
+          "room": "studio",
+          "position_m": {
+            "x": 6.8,
+            "y": 0,
+            "z": 1
+          },
+          "dimensions_m": {
+            "width": 0.6,
+            "depth": 1,
+            "height": 2
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "server_rack",
+          "style_id": "monochrome"
+        },
+        {
+          "id": "item_7",
+          "name": "Writing desk",
+          "type": "furniture",
+          "room": "studio",
+          "position_m": {
+            "x": 8.8,
+            "y": 0,
+            "z": 1
+          },
+          "dimensions_m": {
+            "width": 1.4,
+            "depth": 0.7,
+            "height": 0.75
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "desk",
+          "style_id": "contemporary"
+        },
+        {
+          "id": "item_8",
+          "name": "Desktop 3D printer",
+          "type": "appliance",
+          "room": "studio",
+          "position_m": {
+            "x": 8.8,
+            "y": 0.75,
+            "z": 1
+          },
+          "dimensions_m": {
+            "width": 0.46,
+            "depth": 0.46,
+            "height": 0.5
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "printer_3d",
+          "style_id": "industrial"
+        },
+        {
+          "id": "item_9",
+          "name": "Four-bay NAS storage",
+          "type": "furniture",
+          "room": "studio",
+          "position_m": {
+            "x": 9.3,
+            "y": 0.75,
+            "z": 1
+          },
+          "dimensions_m": {
+            "width": 0.22,
+            "depth": 0.24,
+            "height": 0.18
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "nas_storage",
+          "style_id": "monochrome"
+        },
+        {
+          "id": "item_10",
+          "name": "Armchair",
+          "type": "furniture",
+          "room": "studio",
+          "position_m": {
+            "x": 11.1,
+            "y": 0,
+            "z": 1.3
+          },
+          "dimensions_m": {
+            "width": 0.86,
+            "depth": 0.84,
+            "height": 0.88
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "armchair",
+          "style_id": "pastel"
+        },
+        {
+          "id": "item_11",
+          "name": "Plush teddy bear",
+          "type": "furniture",
+          "room": "studio",
+          "position_m": {
+            "x": 11.1,
+            "y": 0.458,
+            "z": 1.3
+          },
+          "dimensions_m": {
+            "width": 0.42,
+            "depth": 0.3,
+            "height": 0.5
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "teddy_bear",
+          "style_id": "warm_wood"
+        },
+        {
+          "id": "item_12",
+          "name": "Upright piano",
+          "type": "furniture",
+          "room": "studio",
+          "position_m": {
+            "x": 7,
+            "y": 0,
+            "z": 3.3
+          },
+          "dimensions_m": {
+            "width": 1.46,
+            "depth": 0.6,
+            "height": 1.2
+          },
+          "rotation_deg": 90,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "upright_piano",
+          "style_id": "warm_wood"
+        },
+        {
+          "id": "item_13",
+          "name": "Acoustic guitar on stand",
+          "type": "furniture",
+          "room": "studio",
+          "position_m": {
+            "x": 7,
+            "y": 0,
+            "z": 4.8
+          },
+          "dimensions_m": {
+            "width": 0.41,
+            "depth": 0.26,
+            "height": 1.07
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "acoustic_guitar",
+          "style_id": "warm_wood"
+        },
+        {
+          "id": "item_14",
+          "name": "Artist easel with canvas",
+          "type": "furniture",
+          "room": "studio",
+          "position_m": {
+            "x": 10.8,
+            "y": 0,
+            "z": 4
+          },
+          "dimensions_m": {
+            "width": 0.65,
+            "depth": 0.5,
+            "height": 1.5
+          },
+          "rotation_deg": 25,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "art_easel",
+          "style_id": "warm_wood"
+        },
+        {
+          "id": "item_15",
+          "name": "Round dining table",
+          "type": "furniture",
+          "room": "studio",
+          "position_m": {
+            "x": 9.6,
+            "y": 0,
+            "z": 6.2
+          },
+          "dimensions_m": {
+            "width": 1.15,
+            "depth": 1.15,
+            "height": 0.75
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "round_dining_table",
+          "style_id": "scandinavian"
+        },
+        {
+          "id": "item_16",
+          "name": "Sewing machine",
+          "type": "appliance",
+          "room": "studio",
+          "position_m": {
+            "x": 9.6,
+            "y": 0.75,
+            "z": 6.2
+          },
+          "dimensions_m": {
+            "width": 0.41,
+            "depth": 0.2,
+            "height": 0.31
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "sewing_machine",
+          "style_id": "gallery_white"
+        },
+        {
+          "id": "item_17",
+          "name": "Round satellite dish",
+          "type": "appliance",
+          "room": "patio",
+          "position_m": {
+            "x": 1,
+            "y": 0,
+            "z": 9.5
+          },
+          "dimensions_m": {
+            "width": 0.85,
+            "depth": 0.75,
+            "height": 1.1
+          },
+          "rotation_deg": 140,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "satellite_dish",
+          "style_id": "gallery_white"
+        },
+        {
+          "id": "item_18",
+          "name": "Freestanding solar panel",
+          "type": "appliance",
+          "room": "patio",
+          "position_m": {
+            "x": 3.2,
+            "y": 0,
+            "z": 9.7
+          },
+          "dimensions_m": {
+            "width": 1.13,
+            "depth": 1.7,
+            "height": 1.0
+          },
+          "rotation_deg": 140,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "solar_panel",
+          "style_id": "monochrome"
+        },
+        {
+          "id": "item_19",
+          "name": "Slatted garden bench",
+          "type": "furniture",
+          "room": "patio",
+          "position_m": {
+            "x": 6,
+            "y": 0,
+            "z": 9.7
+          },
+          "dimensions_m": {
+            "width": 1.5,
+            "depth": 0.62,
+            "height": 0.86
+          },
+          "rotation_deg": 180,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "garden_bench",
+          "style_id": "warm_wood"
+        },
+        {
+          "id": "item_20",
+          "name": "Kettle barbecue grill",
+          "type": "appliance",
+          "room": "patio",
+          "position_m": {
+            "x": 8.3,
+            "y": 0,
+            "z": 10
+          },
+          "dimensions_m": {
+            "width": 0.65,
+            "depth": 0.65,
+            "height": 1.02
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "kettle_grill",
+          "style_id": "racing_red"
+        },
+        {
+          "id": "item_21",
+          "name": "Round patio umbrella",
+          "type": "furniture",
+          "room": "patio",
+          "position_m": {
+            "x": 10.5,
+            "y": 0,
+            "z": 9.5
+          },
+          "dimensions_m": {
+            "width": 2.5,
+            "depth": 2.5,
+            "height": 2.35
+          },
+          "rotation_deg": 0,
+          "entity_id": "",
+          "notes": "",
+          "model_id": "patio_umbrella",
+          "style_id": "scandinavian"
+        }
+      ]
+    }
+  ]
+}

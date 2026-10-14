@@ -15,9 +15,11 @@ let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, space
 let startupMessage = '';
 let placementModelId = CATALOG.models[0].id;
 const assetCache = new Map(), planShapeCache = new Map(), thumbnailCache = new Map();
+const LIBRARY_PAGE_SIZE = 24, THUMBNAIL_CACHE_LIMIT = 32;
+let libraryShown = 0;
 // Keep a fully populated floor plus catalog thumbnails without clearing every
 // entry during a redraw; evict only the oldest appearance when the bound is hit.
-const APPEARANCE_CACHE_LIMIT = LIMITS.items + CATALOG.models.length;
+const APPEARANCE_CACHE_LIMIT = LIMITS.items + THUMBNAIL_CACHE_LIMIT;
 try {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
@@ -55,7 +57,7 @@ function modelDimensions(model, ceiling, elevation = model.elevation_m) {
   return { dimensions, elevation: round(Math.max(0, Math.min(elevation, ceiling - dimensions.height))) };
 }
 function openLibrary() { renderLibrary(); $('library-dialog').showModal(); (window.matchMedia('(min-width: 521px)').matches ? $('library-search') : $('library-title')).focus(); }
-function renderLibrary() {
+function renderLibrary(append = false) {
   const query = $('library-search').value.trim().toLocaleLowerCase(), category = $('library-category').value;
   const words = query.split(/\s+/).filter(Boolean);
   const models = CATALOG.models.filter(model => {
@@ -63,14 +65,17 @@ function renderLibrary() {
     const text = `${model.label} ${categoryName} ${model.id.replaceAll('_', ' ')} ${model.tags?.join(' ') || ''}`.toLocaleLowerCase();
     return (!category || model.category === category) && words.every(word => text.includes(word));
   });
-  $('library-items').replaceChildren();
-  for (const model of models) {
+  if (!append) { $('library-items').replaceChildren(); libraryShown = 0; }
+  const nextPage = models.slice(libraryShown, libraryShown + LIBRARY_PAGE_SIZE);
+  let firstNewCard;
+  for (const model of nextPage) {
     const card = button('', () => {
       placementModelId = model.id; $('place-type').value = ''; updatePlacement();
       $('library-dialog').close(); setTool('item'); renderInspector(); planCanvas.focus();
       status(`${model.label} selected. Click inside a room, or select a room and choose Place item at room center.`);
     }, 'library-card');
     card.dataset.modelId = model.id;
+    firstNewCard ||= card;
     card.setAttribute('aria-label', `Choose ${model.label}`);
     card.setAttribute('aria-pressed', String(placementModelId === model.id));
     const canvas = node('canvas', 'item-thumbnail'); canvas.width = 280; canvas.height = 170; canvas.setAttribute('aria-hidden', 'true');
@@ -78,8 +83,12 @@ function renderLibrary() {
     card.append(canvas, node('strong', '', model.label), node('span', 'item-size', `${d.width} × ${d.depth} × ${d.height} m`), node('span', 'item-card-action', placementModelId === model.id ? 'Ready to place' : 'Choose item'));
     $('library-items').append(card); drawItemThumbnail(canvas, model);
   }
-  $('library-count').textContent = `${models.length} design${models.length === 1 ? '' : 's'}${category ? ` in ${CATALOG.categories.find(entry => entry.id === category).label}` : ''}`;
+  libraryShown += nextPage.length;
+  $('library-count').textContent = `Showing ${libraryShown} of ${models.length} design${models.length === 1 ? '' : 's'}${category ? ` in ${CATALOG.categories.find(entry => entry.id === category).label}` : ''}`;
+  $('library-more').hidden = libraryShown >= models.length;
+  $('library-more').textContent = `Show ${Math.min(LIBRARY_PAGE_SIZE, models.length - libraryShown)} more`;
   $('library-empty').hidden = models.length > 0;
+  if (append) firstNewCard?.focus();
 }
 function drawItemThumbnail(canvas, model) {
   const context = canvas.getContext('2d');
@@ -120,6 +129,7 @@ function drawItemThumbnail(canvas, model) {
       pixels.data[offset] = triangle.color[0]; pixels.data[offset + 1] = triangle.color[1]; pixels.data[offset + 2] = triangle.color[2]; pixels.data[offset + 3] = 255;
     }
   }
+  if (thumbnailCache.size >= THUMBNAIL_CACHE_LIMIT) thumbnailCache.delete(thumbnailCache.keys().next().value);
   thumbnailCache.set(model.id, pixels); context.putImageData(pixels, 0, 0);
 }
 function itemPlanShapes(item) {
@@ -647,8 +657,9 @@ document.querySelectorAll('[data-tool]').forEach(b => { const label = b.querySel
 $('place-type').addEventListener('change', () => { placementModelId = null; updatePlacement(); setTool('item'); renderInspector(); });
 $('browse-items').addEventListener('click', openLibrary);
 for (const category of CATALOG.categories) { const option = node('option', '', category.label); option.value = category.id; $('library-category').append(option); }
-$('library-search').addEventListener('input', renderLibrary);
-$('library-category').addEventListener('change', renderLibrary);
+$('library-search').addEventListener('input', () => renderLibrary());
+$('library-category').addEventListener('change', () => renderLibrary());
+$('library-more').addEventListener('click', () => renderLibrary(true));
 $('library-clear').addEventListener('click', () => { $('library-search').value = ''; $('library-category').value = ''; renderLibrary(); $('library-search').focus(); });
 $('undo').addEventListener('click', () => undo()); $('redo').addEventListener('click', () => undo(true));
 $('plan-tab').addEventListener('click', () => setView('plan')); $('preview-tab').addEventListener('click', () => setView('preview'));
