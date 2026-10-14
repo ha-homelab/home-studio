@@ -63,7 +63,7 @@ function renderLibrary() {
   $('library-items').replaceChildren();
   for (const model of models) {
     const card = button('', () => {
-      placementModelId = model.id; $('place-type').value = model.type; updatePlacement();
+      placementModelId = model.id; $('place-type').value = ''; updatePlacement();
       $('library-dialog').close(); setTool('item'); renderInspector(); planCanvas.focus();
       status(`${model.label} selected. Click inside a room, or select a room and choose Place item at room center.`);
     }, 'library-card');
@@ -406,21 +406,32 @@ function renderPlan() {
     } else { ctx.setLineDash([3, 3]); path([start, end]); ctx.stroke(); ctx.setLineDash([]); }
     if (active) { path([start, end]); ctx.lineWidth = 7; ctx.strokeStyle = '#df935b55'; ctx.stroke(); }
   }
-  for (const item of f.items) {
-    const [x, y] = toScreen([item.position_m.x, item.position_m.z]), active = selection?.kind === 'items' && selection.id === item.id;
-    ctx.save(); ctx.translate(x, y); ctx.rotate(-item.rotation_deg * Math.PI / 180); const w = Math.max(7, item.dimensions_m.width * map.scale), d = Math.max(7, item.dimensions_m.depth * map.scale);
-    ctx.fillStyle = COLORS[item.type]; ctx.strokeStyle = active ? '#bd783c' : '#637f78'; ctx.lineWidth = active ? 2.5 : 1; ctx.shadowColor = '#293c3315'; ctx.shadowBlur = 5;
+  // Draw individual top surfaces by elevation, so a newly placed rug remains
+  // below furniture and a raised lamp stays above a table regardless of order.
+  const itemLayers = f.items.flatMap(item => {
     const shapes = item.model_id ? itemPlanShapes(item) : null;
-    if (shapes) {
+    return (shapes || [null]).map(shape => ({ item, shape, height: item.position_m.y + (shape?.height ?? 1) * item.dimensions_m.height }));
+  }).sort((a, b) => a.height - b.height);
+  for (const { item, shape } of itemLayers) {
+    const [x, y] = toScreen([item.position_m.x, item.position_m.z]);
+    ctx.save(); ctx.translate(x, y); ctx.rotate(-item.rotation_deg * Math.PI / 180); const w = Math.max(7, item.dimensions_m.width * map.scale), d = Math.max(7, item.dimensions_m.depth * map.scale);
+    ctx.fillStyle = COLORS[item.type]; ctx.strokeStyle = '#637f78'; ctx.lineWidth = 1; ctx.shadowColor = '#293c3315'; ctx.shadowBlur = 5;
+    if (shape) {
       ctx.shadowBlur = 0; ctx.lineWidth = .65; ctx.strokeStyle = '#33453f55';
-      for (const shape of shapes) {
-        ctx.beginPath(); shape.points.forEach(([px, pz], index) => { if (index) ctx.lineTo(px * w, pz * d); else ctx.moveTo(px * w, pz * d); }); ctx.closePath(); ctx.fillStyle = shape.color; ctx.fill(); ctx.stroke();
-      }
-      if (active) { ctx.strokeStyle = '#bd783c'; ctx.lineWidth = 2; ctx.setLineDash([4, 3]); ctx.strokeRect(-w / 2 - 3, -d / 2 - 3, w + 6, d + 6); }
+      ctx.beginPath(); shape.points.forEach(([px, pz], index) => { if (index) ctx.lineTo(px * w, pz * d); else ctx.moveTo(px * w, pz * d); }); ctx.closePath(); ctx.fillStyle = shape.color; ctx.fill(); ctx.stroke();
     } else if (['chandelier', 'lamp', 'sensor'].includes(item.type)) { ctx.beginPath(); ctx.ellipse(0, 0, w / 2, d / 2, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
     else { ctx.fillRect(-w / 2, -d / 2, w, d); ctx.strokeRect(-w / 2, -d / 2, w, d); if (item.type === 'furniture' && w > 28 && d > 20) { ctx.strokeStyle = '#ffffff66'; ctx.strokeRect(-w / 2 + 4, -d / 2 + 4, w - 8, d - 8); } }
     ctx.restore();
-    if (active) { ctx.fillStyle = '#5e776a'; ctx.textAlign = 'center'; ctx.font = '10px sans-serif'; ctx.fillText(item.name, x, y + Math.max(item.dimensions_m.width, item.dimensions_m.depth) * map.scale / 2 + 15); }
+  }
+  const activeItem = selection?.kind === 'items' ? selected() : null;
+  if (activeItem) {
+    const [x, y] = toScreen([activeItem.position_m.x, activeItem.position_m.z]);
+    const w = Math.max(7, activeItem.dimensions_m.width * map.scale), d = Math.max(7, activeItem.dimensions_m.depth * map.scale);
+    ctx.save(); ctx.translate(x, y); ctx.rotate(-activeItem.rotation_deg * Math.PI / 180); ctx.strokeStyle = '#bd783c'; ctx.lineWidth = 2;
+    if (activeItem.model_id) { ctx.setLineDash([4, 3]); ctx.strokeRect(-w / 2 - 3, -d / 2 - 3, w + 6, d + 6); }
+    else if (['chandelier', 'lamp', 'sensor'].includes(activeItem.type)) { ctx.beginPath(); ctx.ellipse(0, 0, w / 2, d / 2, 0, 0, Math.PI * 2); ctx.stroke(); }
+    else ctx.strokeRect(-w / 2, -d / 2, w, d);
+    ctx.restore(); ctx.fillStyle = '#5e776a'; ctx.textAlign = 'center'; ctx.font = '10px sans-serif'; ctx.fillText(activeItem.name, x, y + Math.max(activeItem.dimensions_m.width, activeItem.dimensions_m.depth) * map.scale / 2 + 15);
   }
   if (drag?.kind === 'draw') {
     const a = drag.startWorld, b = drag.endWorld; ctx.strokeStyle = '#3c8c79'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
@@ -434,7 +445,8 @@ function renderPlan() {
 }
 function wallAt(point) { return floor().walls.map(w => ({ wall: w, hit: projectOnWall(point, w) })).filter(o => o.hit.distance < Math.max(.1, 10 / map.scale)).sort((a, b) => a.hit.distance - b.hit.distance)[0]; }
 function hitTest(point) {
-  for (const item of [...floor().items].reverse()) {
+  const topFirst = [...floor().items].reverse().sort((a, b) => (b.position_m.y + b.dimensions_m.height) - (a.position_m.y + a.dimensions_m.height));
+  for (const item of topFirst) {
     const theta = item.rotation_deg * Math.PI / 180, dx = point[0] - item.position_m.x, dz = point[1] - item.position_m.z, x = dx * Math.cos(theta) - dz * Math.sin(theta), z = dx * Math.sin(theta) + dz * Math.cos(theta);
     if (Math.abs(x) <= Math.max(item.dimensions_m.width / 2, 6 / map.scale) && Math.abs(z) <= Math.max(item.dimensions_m.depth / 2, 6 / map.scale)) return { kind: 'items', id: item.id };
   }
