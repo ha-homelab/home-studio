@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
 const load = file => import(pathToFileURL(path.join(root, file)).href);
 const served = new Map([
   ['/home-studio/planner/', ['planner/index.html', 'text/html']],
-  ...['editor', 'model', 'catalog', 'furniture', 'i18n', 'validation'].map(name => [`/home-studio/planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
+  ...['editor', 'model', 'catalog', 'furniture', 'i18n', 'validation', 'language-links'].map(name => [`/home-studio/planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
   ...fs.readdirSync(path.join(root, 'planner/locales')).filter(name => name.endsWith('.js')).map(name => [`/home-studio/planner/locales/${name}`, [`planner/locales/${name}`, 'text/javascript']]),
   ['/home-studio/planner/editor.css', ['planner/editor.css', 'text/css']],
   ['/home-studio/vendor/three.module.min.js', ['vendor/three.module.min.js', 'text/javascript']],
@@ -44,7 +44,7 @@ const served = new Map([
 
     const change = async code => {
       await page.locator('#language-select').selectOption(code);
-      await page.waitForFunction(expected => document.documentElement.lang === expected, code);
+      await page.waitForFunction(expected => document.documentElement.lang === expected && new URL(location.href).searchParams.get('lang') === expected, code);
     };
     await page.getByLabel('Width (m)', { exact: true }).fill('8.75');
     await change('ru');
@@ -119,9 +119,17 @@ const served = new Map([
     await page.reload();
     await page.waitForFunction(() => document.documentElement.lang === 'ru');
     assert.equal(await page.evaluate(() => JSON.stringify(window.planner.getProject())), before);
-    await page.goto(url + '?lang=ja');
+    await page.goto(url + '?lang=ja&from=guide#language');
     await page.waitForFunction(() => document.documentElement.lang === 'ja');
     assert.equal(await page.evaluate(key => localStorage.getItem(key), LANGUAGE_STORAGE_KEY), 'ru', 'deep links do not overwrite explicit saved preferences');
+    await change('fr');
+    assert.equal(new URL(page.url()).searchParams.get('from'), 'guide');
+    assert.equal(new URL(page.url()).hash, '#language');
+    assert.equal(await page.evaluate(() => JSON.stringify(window.planner.getProject())), before, 'manual language choice does not change the project');
+    await page.reload();
+    await page.waitForFunction(() => window.planner && document.documentElement.lang === 'fr');
+    assert.equal(await page.locator('#language-select').inputValue(), 'fr', 'manual choice replaces the previous deep-link language on reload');
+    assert.equal(await page.evaluate(() => JSON.stringify(window.planner.getProject())), before, 'reloading the new language preserves the project');
 
     for (const code of ['ar', 'de', 'ja']) {
       await change(code);
@@ -148,10 +156,14 @@ const served = new Map([
     const privateContext = await browser.newContext({ locale: 'ru-RU' });
     await privateContext.addInitScript(() => Object.defineProperty(window, 'localStorage', { get() { throw new Error('storage denied'); } }));
     const privatePage = await privateContext.newPage();
+    const privateErrors = [];
+    privatePage.on('pageerror', error => privateErrors.push(String(error)));
     await privatePage.goto(url);
     await privatePage.waitForFunction(() => window.planner && document.documentElement.lang === 'ru');
+    await privatePage.evaluate(() => { history.replaceState = () => { throw new DOMException('history denied', 'SecurityError'); }; });
     await privatePage.locator('#language-select').selectOption('fr');
     await privatePage.waitForFunction(() => document.documentElement.lang === 'fr');
+    assert.deepEqual(privateErrors, [], 'denied history does not block a manual language choice');
     await privateContext.close();
     console.log(`Browser i18n checks passed: ${matrices.join(', ')}; lazy local packs, translated search, preserved drafts/forms, RTL, mobile, reload, deep links, failed downloads and denied storage.`);
   } finally {

@@ -17,7 +17,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 Следуйте инструкции по установке на английском: в ней описаны резервные копии, Home Assistant OS, путь к конфигурации и перезапуск. Сам браузерный редактор не подключается к Home Assistant и не управляет устройствами.
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=ru) · [README](../../README.md) · [i18n](../i18n.md)
 
 План дома и идентификаторы устройств могут быть конфиденциальными. Для публичных примеров используйте вымышленный дом.
 

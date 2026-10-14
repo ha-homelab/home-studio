@@ -488,7 +488,13 @@ def render_viewer(data, svg):
     # Saved model downloads represent the built project. The editable viewer
     # must not leave those static furniture silhouettes behind after a move.
     viewer_plan = re.sub(r'<g id="furniture">.*?</g>', '', svg, flags=re.S)
+    locale_dir = ROOT / "viewer-locales"
+    locales = json.loads((locale_dir / "index.json").read_text())
+    dictionaries = {entry["code"]: json.loads((locale_dir / (entry["code"] + ".json")).read_text()) for entry in locales}
+    viewer_i18n = json.dumps({"locales": locales, "dictionaries": dictionaries}, ensure_ascii=False, separators=(",", ":"))
     replacements = {
+        "__VIEWER_I18N_JS__": (ROOT / "viewer-i18n.js").read_text(),
+        "__VIEWER_I18N_DATA__": viewer_i18n.replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"),
         "__VIEWER_JS__": (ROOT / "viewer.js").read_text(),
         "__HOME_HTML__": (ROOT / "home-view.html").read_text(),
         "__HOME_CSS__": (ROOT / "home-view.css").read_text(),

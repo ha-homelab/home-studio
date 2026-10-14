@@ -17,7 +17,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 İngilizce kurulum kılavuzu yedeklemeyi, Home Assistant OS’yi, yapılandırma yolunu ve yeniden başlatmayı açıklar. Tarayıcı düzenleyicisi doğrudan Home Assistant’a bağlanmaz ve cihazları kontrol etmez.
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=tr) · [README](../../README.md) · [i18n](../i18n.md)
 
 Ev planınız ve cihaz kimlikleri özel olabilir. Herkese açık örneklerde kurgusal bir ev kullanın.
 

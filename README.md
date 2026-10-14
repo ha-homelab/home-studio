@@ -26,13 +26,16 @@ installable Home Assistant package. Examples and guide screenshots are fictional
 The drawing editor supports **24 languages**, including translated tools,
 object names, palettes, patterns, dialogs, and accessibility labels. Choose a
 language in the header; Arabic, Hebrew, and Persian support right-to-left text.
-Your project names and entity IDs remain unchanged. Only the selected language
-pack loads; no online translation service is used.
+Your project names and entity IDs remain unchanged. Only the selected editor
+language pack loads; no online translation service is used.
 
 Read a [localized README quick start](docs/translations/README.md), or see
-[translation scope and how to contribute](docs/i18n.md). The detailed illustrated
-guide, compiler diagnostics, and installed Home Assistant viewer currently
-remain in English.
+[translation scope and how to contribute](docs/i18n.md). The drawing and installation
+pages include a localized quick route with illustrations and copyable commands.
+The installed viewer also translates everyday navigation, placement controls,
+and device states into all 24 languages. It follows your Home Assistant language
+until you choose another language in the plan. The detailed reference, command-line
+diagnostics, and advanced device diagnostics remain in English.
 
 ## Furnish your rooms
 

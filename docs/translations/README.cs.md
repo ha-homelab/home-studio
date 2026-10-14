@@ -17,7 +17,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 Anglický návod k instalaci popisuje zálohy, Home Assistant OS, cestu ke konfiguraci a restart. Editor v prohlížeči se sám nepřipojuje k Home Assistant ani neovládá zařízení.
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=cs) · [README](../../README.md) · [i18n](../i18n.md)
 
 Plán domu a identifikátory zařízení mohou být soukromé. Ve veřejných příkladech používejte smyšlený dům.
 

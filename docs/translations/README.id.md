@@ -17,7 +17,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 Panduan instalasi berbahasa Inggris menjelaskan cadangan, Home Assistant OS, lokasi konfigurasi, dan mulai ulang. Editor browser sendiri tidak terhubung ke Home Assistant atau mengendalikan perangkat.
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=id) · [README](../../README.md) · [i18n](../i18n.md)
 
 Denah rumah dan ID entitas perangkat mungkin bersifat pribadi. Gunakan rumah fiktif untuk contoh publik.
 

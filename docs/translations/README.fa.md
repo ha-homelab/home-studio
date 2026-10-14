@@ -19,7 +19,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 راهنمای نصب انگلیسی، پشتیبان‌گیری، Home Assistant OS، مسیر تنظیمات و راه‌اندازی مجدد را توضیح می‌دهد. ویرایشگر مرورگر به‌خودی‌خود به Home Assistant متصل نمی‌شود و دستگاه‌ها را کنترل نمی‌کند.
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=fa) · [README](../../README.md) · [i18n](../i18n.md)
 
 نقشهٔ خانه و شناسه‌های دستگاه‌ها ممکن است خصوصی باشند. برای نمونه‌های عمومی از خانه‌ای خیالی استفاده کنید.
 

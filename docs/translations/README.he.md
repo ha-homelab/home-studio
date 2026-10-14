@@ -19,7 +19,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 מדריך ההתקנה באנגלית מסביר על גיבויים, Home Assistant OS, נתיב ההגדרות והפעלה מחדש. עורך הדפדפן עצמו אינו מתחבר ל־Home Assistant ואינו שולט במכשירים.
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=he) · [README](../../README.md) · [i18n](../i18n.md)
 
 תוכנית הבית ומזהי המכשירים עשויים להיות פרטיים. השתמשו בבית בדיוני בדוגמאות פומביות.
 

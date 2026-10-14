@@ -17,7 +17,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 Дотримуйтеся інструкції з установлення англійською: вона пояснює резервні копії, Home Assistant OS, шлях до конфігурації та перезапуск. Сам браузерний редактор не підключається до Home Assistant і не керує пристроями.
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=uk) · [README](../../README.md) · [i18n](../i18n.md)
 
 План дому та ідентифікатори пристроїв можуть бути конфіденційними. Для публічних прикладів використовуйте вигаданий дім.
 

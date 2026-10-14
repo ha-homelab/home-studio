@@ -17,7 +17,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 Hướng dẫn cài đặt bằng tiếng Anh giải thích sao lưu, Home Assistant OS, đường dẫn cấu hình và khởi động lại. Trình biên tập trên trình duyệt không tự kết nối với Home Assistant hay điều khiển thiết bị.
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=vi) · [README](../../README.md) · [i18n](../i18n.md)
 
 Sơ đồ nhà và ID thực thể của thiết bị có thể là thông tin riêng tư. Hãy dùng ngôi nhà hư cấu làm ví dụ công khai.
 

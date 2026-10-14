@@ -33,6 +33,7 @@ jobs:
         run: |
           node scripts/test-i18n.mjs
           node scripts/test-validation-i18n.mjs
+          node --test scripts/test-panel-language.cjs
       - name: Install browser test tools
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
@@ -41,6 +42,10 @@ jobs:
         run: npm run test:planner
       - name: Test language switching, right-to-left layout and project preservation
         run: node scripts/test-i18n-browser.cjs
+      - name: Test localized help and offline installed viewer
+        run: |
+          node scripts/test-help-i18n.cjs
+          node scripts/test-viewer-i18n.cjs
       - name: Test bounded diagnostic display with synthetic clocks
         run: node scripts/test-module-expiry.cjs
       - name: Test visible wall outlines and doorway gaps

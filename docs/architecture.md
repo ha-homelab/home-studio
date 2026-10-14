@@ -54,6 +54,38 @@ The public source archive includes them and the translated README quick starts.
 See [language coverage and contribution rules](i18n.md) for the supported scope
 and the contract and browser checks enforced by CI.
 
+### Help pages and the installed viewer
+
+`planner/help.js` adds a localized, illustrated quick route above the existing
+English drawing, installation, and publishing references. It reuses translated
+editor terminology and a small `help-locales.js` dictionary for installation
+guidance. The original reference remains readable without JavaScript. Literal
+commands stay left-to-right and are never passed through translation.
+`planner/language-links.js` carries the selected language only to recognized
+same-origin editor/help routes; downloads, external links, and anchors retain
+their meaning. No project content is placed in a URL.
+
+`viewer-i18n.js` is a separate small runtime for generated plans. The compiler
+embeds its explicit `viewer-locales` dictionaries as script-safe JSON inside
+each self-contained viewer. This avoids remote dependencies and relative locale
+requests from the opaque-origin HA iframe. The viewer uses explicit text and
+attribute markers, preserves inventory and unsaved placement fields, and updates
+existing controls when the language changes. Geometry, IDs, user names, and
+service actions are not localized. Advanced diagnostics remain English.
+
+The authenticated `static/panel.js` host remembers language alongside the
+existing view preferences. A language-only `view_preferences` message cannot
+reset the sidebar state, and a sidebar-only message cannot reset language. The
+host accepts only canonical allowlisted codes on the established MessagePort;
+stale viewer generations and recovery mode reject preference updates. Without
+an explicit choice, the host follows the HA profile language. It never exposes
+storage, tokens, or arbitrary HA attributes to the iframe for localization.
+
+Website preferences cannot automatically cross into a different HA origin.
+Offline previews use their own browser preference; installed plans receive
+the HA host preference. Neither changes the project schema. Update compiler
+and viewer sources together when consuming this package in a private builder.
+
 ## Furniture authoring and export
 
 `planner/catalog.json` is the canonical, versioned library of original low-poly

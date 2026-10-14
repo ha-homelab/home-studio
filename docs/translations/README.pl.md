@@ -17,7 +17,7 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 Angielska instrukcja instalacji opisuje kopie zapasowe, Home Assistant OS, ścieżkę konfiguracji i ponowne uruchomienie. Edytor w przeglądarce sam nie łączy się z Home Assistant ani nie steruje urządzeniami.
 
-[Home Assistant](https://ha-homelab.github.io/home-studio/install.html) · [README](../../README.md) · [i18n](../i18n.md)
+[Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=pl) · [README](../../README.md) · [i18n](../i18n.md)
 
 Plan domu i identyfikatory urządzeń mogą być poufne. W publicznych przykładach używaj fikcyjnego domu.
 
