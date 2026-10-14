@@ -1,5 +1,7 @@
 import * as THREE from '../vendor/three.module.min.js';
 import { LIMITS, ITEM_TYPES, clone, round, distance, signedArea, pointInPolygon, projectOnWall, nextId, newFloor, blankProject, demoProject, outlineRoom, validateProject, wallPieces, floorBounds } from './model.js';
+import { CATALOG } from './catalog.js';
+import { getCatalogModel, getCatalogStyle, buildFurnitureAsset } from './furniture.js';
 
 const $ = id => document.getElementById(id);
 const STORAGE_KEY = 'home-studio.project.v1';
@@ -11,6 +13,8 @@ const planCanvas = $('plan-canvas'), ctx = planCanvas.getContext('2d');
 let project = blankProject(), activeFloorId, selection = null, tool = 'select', view = 'plan', history = [], future = [], drag = null;
 let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, spaceHeld = false, saveFailed = false, previewDirty = true;
 let startupMessage = '';
+let placementModelId = CATALOG.models[0].id;
+const assetCache = new Map(), planShapeCache = new Map(), thumbnailCache = new Map();
 try {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
@@ -26,6 +30,111 @@ const snap = value => $('snap').checked ? Math.round(value * 4) / 4 : round(valu
 function node(tag, className, text) { const n = document.createElement(tag); if (className) n.className = className; if (text !== undefined) n.textContent = text; return n; }
 function button(text, handler, className = 'quiet') { const b = node('button', className, text); b.type = 'button'; b.addEventListener('click', handler); return b; }
 function status(message, error = false) { $('status').textContent = message; $('status').parentElement.classList.toggle('error', error); $('status').title = message; }
+function itemAsset(item) {
+  if (!item.model_id) return null;
+  const key = `${item.model_id}|${item.style_id || ''}|${item.color || ''}`;
+  if (!assetCache.has(key)) {
+    if (assetCache.size > 160) assetCache.clear();
+    assetCache.set(key, buildFurnitureAsset(item));
+  }
+  return assetCache.get(key);
+}
+function materialColor(material, shade = 1) { return new THREE.Color(...material.slice(0, 3)).multiplyScalar(shade).getStyle(); }
+function placementName() { return placementModelId ? getCatalogModel(placementModelId).label : LABELS[$('place-type').value]; }
+function toolHint() { return tool === 'item' ? `Click inside a room to place: ${placementName()}. V returns to Select / move.` : HINTS[tool]; }
+function updatePlacement() {
+  $('placement-summary').textContent = `Ready to place: ${placementName()}`;
+  $('browse-items').title = `Open item library. Ready to place: ${placementName()}`;
+  if (view === 'plan') $('tool-hint').textContent = toolHint();
+}
+function modelDimensions(model, ceiling, elevation = model.elevation_m) {
+  const dimensions = { ...model.dimensions_m, height: round(Math.min(model.dimensions_m.height, ceiling)) };
+  return { dimensions, elevation: round(Math.max(0, Math.min(elevation, ceiling - dimensions.height))) };
+}
+function openLibrary() { renderLibrary(); $('library-dialog').showModal(); (window.matchMedia('(min-width: 521px)').matches ? $('library-search') : $('library-title')).focus(); }
+function renderLibrary() {
+  const query = $('library-search').value.trim().toLocaleLowerCase(), category = $('library-category').value;
+  const words = query.split(/\s+/).filter(Boolean);
+  const models = CATALOG.models.filter(model => {
+    const categoryName = CATALOG.categories.find(entry => entry.id === model.category)?.label || model.category;
+    const text = `${model.label} ${categoryName} ${model.id.replaceAll('_', ' ')} ${model.tags?.join(' ') || ''}`.toLocaleLowerCase();
+    return (!category || model.category === category) && words.every(word => text.includes(word));
+  });
+  $('library-items').replaceChildren();
+  for (const model of models) {
+    const card = button('', () => {
+      placementModelId = model.id; $('place-type').value = model.type; updatePlacement();
+      $('library-dialog').close(); setTool('item'); renderInspector(); planCanvas.focus();
+      status(`${model.label} selected. Click inside a room, or select a room and choose Place item at room center.`);
+    }, 'library-card');
+    card.dataset.modelId = model.id;
+    card.setAttribute('aria-label', `Choose ${model.label}`);
+    card.setAttribute('aria-pressed', String(placementModelId === model.id));
+    const canvas = node('canvas', 'item-thumbnail'); canvas.width = 280; canvas.height = 170; canvas.setAttribute('aria-hidden', 'true');
+    const d = model.dimensions_m;
+    card.append(canvas, node('strong', '', model.label), node('span', 'item-size', `${d.width} × ${d.depth} × ${d.height} m`), node('span', 'item-card-action', placementModelId === model.id ? 'Ready to place' : 'Choose item'));
+    $('library-items').append(card); drawItemThumbnail(canvas, model);
+  }
+  $('library-count').textContent = `${models.length} design${models.length === 1 ? '' : 's'}${category ? ` in ${CATALOG.categories.find(entry => entry.id === category).label}` : ''}`;
+  $('library-empty').hidden = models.length > 0;
+}
+function drawItemThumbnail(canvas, model) {
+  const context = canvas.getContext('2d');
+  if (thumbnailCache.has(model.id)) { context.putImageData(thumbnailCache.get(model.id), 0, 0); return; }
+  const asset = itemAsset({ model_id: model.id, style_id: model.default_style, type: model.type });
+  if (!asset) return;
+  const d = model.dimensions_m, triangles = [];
+  for (const mesh of asset.meshes) {
+    const vertices = mesh.vertices.map(([x, y, z]) => [x * d.width, y * d.height, z * d.depth]);
+    for (let i = 0; i < mesh.indices.length; i += 3) {
+      const ids = mesh.indices.slice(i, i + 3), points = ids.map(index => vertices[index]);
+      const normal = mesh.normals[ids[0]];
+      if (normal[0] / d.width + normal[1] * (.68 / .88) / d.height + normal[2] / d.depth <= 0) continue;
+      const shade = .72 + Math.max(0, normal[1]) * .25 + Math.max(0, normal[0]) * .08;
+      const color = new THREE.Color(...asset.materials[mesh.material].slice(0, 3)).multiplyScalar(shade).convertLinearToSRGB();
+      triangles.push({ points: points.map(([x, y, z]) => [(x - z) * .75, (x + z) * .34 - y * .88, (x + z) * .88 + y * .68]), color: [color.r, color.g, color.b].map(value => Math.round(Math.min(1, value) * 255)) });
+    }
+  }
+  const points = triangles.flatMap(triangle => triangle.points), minX = Math.min(...points.map(p => p[0])), maxX = Math.max(...points.map(p => p[0])), minY = Math.min(...points.map(p => p[1])), maxY = Math.max(...points.map(p => p[1]));
+  const scale = Math.min((canvas.width - 50) / Math.max(.01, maxX - minX), (canvas.height - 35) / Math.max(.01, maxY - minY));
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = '#e6eade'; context.beginPath(); context.ellipse(canvas.width / 2, canvas.height - 16, Math.min(85, (maxX - minX) * scale / 2), 7, 0, 0, Math.PI * 2); context.fill();
+  // A small depth buffer keeps overlapping legs, arms, and cushions correct,
+  // including in browsers without WebGL. No image downloads are needed.
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height), depths = new Float32Array(canvas.width * canvas.height).fill(-Infinity);
+  for (const triangle of triangles) {
+    const [a, b, c] = triangle.points.map(([x, y, depth]) => [canvas.width / 2 + (x - (minX + maxX) / 2) * scale, canvas.height / 2 - 3 + (y - (minY + maxY) / 2) * scale, depth]);
+    const denominator = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+    if (Math.abs(denominator) < 1e-8) continue;
+    const left = Math.max(0, Math.floor(Math.min(a[0], b[0], c[0]))), right = Math.min(canvas.width - 1, Math.ceil(Math.max(a[0], b[0], c[0]))), top = Math.max(0, Math.floor(Math.min(a[1], b[1], c[1]))), bottom = Math.min(canvas.height - 1, Math.ceil(Math.max(a[1], b[1], c[1])));
+    for (let y = top; y <= bottom; y++) for (let x = left; x <= right; x++) {
+      const u = ((b[1] - c[1]) * (x + .5 - c[0]) + (c[0] - b[0]) * (y + .5 - c[1])) / denominator;
+      const v = ((c[1] - a[1]) * (x + .5 - c[0]) + (a[0] - c[0]) * (y + .5 - c[1])) / denominator, w = 1 - u - v;
+      if (u < -1e-8 || v < -1e-8 || w < -1e-8) continue;
+      const depth = u * a[2] + v * b[2] + w * c[2], index = y * canvas.width + x;
+      if (depth < depths[index]) continue;
+      depths[index] = depth; const offset = index * 4;
+      pixels.data[offset] = triangle.color[0]; pixels.data[offset + 1] = triangle.color[1]; pixels.data[offset + 2] = triangle.color[2]; pixels.data[offset + 3] = 255;
+    }
+  }
+  thumbnailCache.set(model.id, pixels); context.putImageData(pixels, 0, 0);
+}
+function itemPlanShapes(item) {
+  const key = `${item.model_id}|${item.style_id || ''}|${item.color || ''}`;
+  if (planShapeCache.has(key)) return planShapeCache.get(key);
+  const asset = itemAsset(item);
+  if (!asset) return null;
+  const cross = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  const shapes = asset.meshes.map(mesh => {
+    const points = [...new Map(mesh.vertices.map(([x, _y, z]) => [`${x},${z}`, [x, z]])).values()].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const lower = [], upper = [];
+    for (const point of points) { while (lower.length >= 2 && cross(lower.at(-2), lower.at(-1), point) <= 0) lower.pop(); lower.push(point); }
+    for (const point of [...points].reverse()) { while (upper.length >= 2 && cross(upper.at(-2), upper.at(-1), point) <= 0) upper.pop(); upper.push(point); }
+    return { points: lower.slice(0, -1).concat(upper.slice(0, -1)), height: Math.max(...mesh.vertices.map(p => p[1])), color: materialColor(asset.materials[mesh.material]) };
+  }).sort((a, b) => a.height - b.height);
+  if (planShapeCache.size > 160) planShapeCache.clear();
+  planShapeCache.set(key, shapes); return shapes;
+}
 // Use identical compact UTF-8 bytes for storage, downloads, and the import limit.
 // Check before committing an edit; storage quota failures must still allow export.
 function serializeProject(value) {
@@ -134,7 +243,7 @@ function renderInspector() {
       const center = object.polygon.reduce((sum, p) => [sum[0] + p[0] / object.polygon.length, sum[1] + p[1] / object.polygon.length], [0, 0]);
       addItem(center, object.id);
     }));
-    parent.append(node('p', 'field-note', 'Uses the Item to place selector. Adjust the new item’s exact position afterward.'));
+    parent.append(node('p', 'field-note', `Places ${placementName()}. Choose another design in the Item library, then select this room again.`));
     section(parent, 'Polygon points');
     field(parent, 'x, z coordinates (m)', object.polygon.map(p => p.join(', ')).join('\n'), value => editObject(o => {
       const points = value.trim().split('\n').filter(s => s.trim()).map(line => line.trim().split(/[\s,]+/).map(Number));
@@ -164,13 +273,36 @@ function renderInspector() {
     parent.append(button('Select parent wall', () => { selection = { kind: 'walls', id: wall.id }; renderUI(); renderPlan(); }));
   } else if (kind === 'items') {
     field(parent, 'Item name', object.name, v => editObject(o => { o.name = v; }));
-    field(parent, 'Item type', object.type, v => editObject(o => { o.type = v; }), { options: ITEM_TYPES.map(v => ({ value: v, label: LABELS[v] })) });
+    const model = object.model_id ? getCatalogModel(object.model_id) : null;
+    field(parent, 'Design', object.model_id || '', value => editObject(o => {
+      if (!value) { delete o.model_id; delete o.style_id; delete o.color; return; }
+      const next = getCatalogModel(value), previous = o.model_id ? getCatalogModel(o.model_id) : null;
+      if (o.name === previous?.label || o.name === LABELS[o.type]) o.name = next.label;
+      o.model_id = next.id; o.type = next.type; o.style_id ||= next.default_style;
+    }, 'Item design changed. Size and position kept.'), { options: [{ value: '', label: 'Basic shape / device' }, ...CATALOG.models.map(entry => ({ value: entry.id, label: entry.label }))], help: 'Changes the shape while keeping your size and placement.' });
+    if (model) {
+      const style = getCatalogStyle(object.style_id || model.default_style);
+      field(parent, 'Finish', style.id, value => editObject(o => { o.style_id = value; delete o.color; }, 'Finish applied.'), { options: CATALOG.styles.map(entry => ({ value: entry.id, label: entry.label })), help: 'A finish sets coordinated colors for the whole item. Choosing one also resets any custom body color.' });
+      field(parent, 'Custom body color', object.color || style.materials.body, value => editObject(o => { o.color = value; }, 'Item color changed.'), { type: 'color', help: 'Recolors the main surface; legs and accents keep the selected finish.' });
+      const palette = node('div', 'color-palette'); palette.setAttribute('role', 'group'); palette.setAttribute('aria-label', 'Body color suggestions');
+      for (const [label, color] of [['Ivory', '#e6dfd1'], ['Sand', '#c9aa7d'], ['Terracotta', '#be785d'], ['Sage', '#899e82'], ['Forest', '#416c59'], ['Ocean', '#507b95'], ['Slate', '#757985'], ['Charcoal', '#363e43']]) {
+        const swatch = button('', () => editObject(o => { o.color = color; }, `${label} color applied.`), 'color-swatch');
+        swatch.style.setProperty('--swatch', color); swatch.title = label; swatch.setAttribute('aria-label', label); swatch.setAttribute('aria-pressed', String(object.color?.toLowerCase() === color)); palette.append(swatch);
+      }
+      parent.append(palette);
+      const resetColor = button('Use finish color', () => editObject(o => { delete o.color; }, 'Finish color restored.'), 'quiet small'); resetColor.disabled = !object.color; parent.append(resetColor);
+    } else {
+      field(parent, 'Item type', object.type, value => editObject(o => { o.type = value; }), { options: ITEM_TYPES.map(value => ({ value, label: LABELS[value] })) });
+    }
     field(parent, 'Room', object.room, v => editObject(o => { o.room = v; }), { options: f.rooms.map(r => ({ value: r.id, label: r.name })) });
     section(parent, 'Position'); const pos = row(parent, true);
     for (const axis of ['x', 'y', 'z']) field(pos, `${axis} (m)`, object.position_m[axis], v => editObject(o => { o.position_m[axis] = v; }), { type: 'number', min: axis === 'y' ? 0 : -100, max: axis === 'y' ? f.height_m : 100 });
     parent.append(node('p', 'field-note', 'x/z locate the center. y is the bottom height above this floor.'));
     section(parent, 'Size & rotation'); const dims = row(parent, true);
     for (const [axis, title] of [['width', 'Width'], ['depth', 'Depth'], ['height', 'Height']]) field(dims, `${title} (m)`, object.dimensions_m[axis], v => editObject(o => { o.dimensions_m[axis] = v; }), { type: 'number', min: .001, max: 100 });
+    if (model) parent.append(button('Use design’s original size', () => editObject(o => {
+      const defaults = modelDimensions(model, f.height_m, o.position_m.y); o.dimensions_m = defaults.dimensions; o.position_m.y = defaults.elevation;
+    }, 'Original design size restored to fit this floor.')));
     field(parent, 'Rotation (degrees)', object.rotation_deg, v => editObject(o => { o.rotation_deg = v; }), { type: 'number', min: -360, max: 360, step: '15' });
     section(parent, 'Home Assistant');
     field(parent, 'Entity ID (optional)', object.entity_id, v => editObject(o => { o.entity_id = v.trim(); }), { help: 'Example: light.living_room. This planner stores the mapping; it never controls devices.' });
@@ -191,7 +323,7 @@ function deleteSelection() {
 }
 function setTool(next) {
   tool = next; document.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === tool)));
-  $('tool-hint').textContent = HINTS[tool]; planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
+  $('tool-hint').textContent = toolHint(); planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
   if (tool !== 'select' && view !== 'plan') setView('plan');
   $('empty-state').hidden = floor().rooms.length + floor().walls.length + floor().items.length > 0 || tool !== 'select' || view !== 'plan';
 }
@@ -200,7 +332,7 @@ function setView(next) {
   $('plan-tab').setAttribute('aria-selected', String(next === 'plan')); $('preview-tab').setAttribute('aria-selected', String(next === 'preview'));
   $('plan-tab').tabIndex = next === 'plan' ? 0 : -1; $('preview-tab').tabIndex = next === 'preview' ? 0 : -1;
   $('plan-view').hidden = next !== 'plan'; $('preview-view').hidden = next !== 'preview'; $('snap-label').hidden = next !== 'plan';
-  $('tool-hint').textContent = next === 'preview' ? 'Drag to orbit · scroll to zoom · arrow keys to rotate' : HINTS[tool];
+  $('tool-hint').textContent = next === 'preview' ? 'Drag to orbit · scroll to zoom · arrow keys to rotate' : toolHint();
   $('empty-state').hidden = floor().rooms.length + floor().walls.length + floor().items.length > 0 || tool !== 'select' || next !== 'plan';
   if (next === 'preview') renderPreview(); else renderPlan(); updateZoom();
 }
@@ -215,13 +347,14 @@ function addOpening(wall, offset, type) {
 }
 function addItem(point, roomId) {
   if (!floor().rooms.length) return status('Add a room before placing items. Each item belongs to a room.', true);
-  const type = $('place-type').value;
+  const model = placementModelId ? getCatalogModel(placementModelId) : null, type = model ? model.type : $('place-type').value;
   const defaults = { furniture: [1.5, .75, .75, 0], lamp: [.3, .3, 1.4, 0], chandelier: [.55, .55, .35, Math.max(0, floor().height_m - .55)], tv: [1.3, .1, .8, .85], appliance: [.6, .65, .9, 0], switch: [.1, .05, .1, 1.2], outlet: [.1, .05, .1, .3], sensor: [.12, .08, .12, 1.8] };
   const [w, d, h, y] = defaults[type]; const safeHeight = Math.min(h, floor().height_m), safeY = Math.min(y, floor().height_m - safeHeight);
+  const catalogDefaults = model ? modelDimensions(model, floor().height_m) : null;
   transact((_p, f) => {
     const id = nextId(f, type), room = f.rooms.find(r => r.id === roomId) || f.rooms.find(r => pointInPolygon(point, r.polygon)) || f.rooms[0];
-    f.items.push({ id, name: LABELS[type], type, room: room.id, position_m: { x: snap(point[0]), y: round(safeY), z: snap(point[1]) }, dimensions_m: { width: w, depth: d, height: round(safeHeight) }, rotation_deg: 0, entity_id: '', notes: '' }); selection = { kind: 'items', id };
-  }, `${LABELS[type]} placed. Assign its entity ID in the inspector.`);
+    f.items.push({ id, name: model?.label || LABELS[type], type, room: room.id, position_m: { x: snap(point[0]), y: catalogDefaults?.elevation ?? round(safeY), z: snap(point[1]) }, dimensions_m: catalogDefaults?.dimensions || { width: w, depth: d, height: round(safeHeight) }, rotation_deg: 0, entity_id: '', notes: '', ...(model ? { model_id: model.id, style_id: model.default_style } : {}) }); selection = { kind: 'items', id };
+  }, `${model?.label || LABELS[type]} placed. Change its finish, color, or size in Item details.`);
 }
 
 // Canvas plan: x right, z down. Coordinates remain meters at every zoom level.
@@ -277,7 +410,14 @@ function renderPlan() {
     const [x, y] = toScreen([item.position_m.x, item.position_m.z]), active = selection?.kind === 'items' && selection.id === item.id;
     ctx.save(); ctx.translate(x, y); ctx.rotate(-item.rotation_deg * Math.PI / 180); const w = Math.max(7, item.dimensions_m.width * map.scale), d = Math.max(7, item.dimensions_m.depth * map.scale);
     ctx.fillStyle = COLORS[item.type]; ctx.strokeStyle = active ? '#bd783c' : '#637f78'; ctx.lineWidth = active ? 2.5 : 1; ctx.shadowColor = '#293c3315'; ctx.shadowBlur = 5;
-    if (['chandelier', 'lamp', 'sensor'].includes(item.type)) { ctx.beginPath(); ctx.ellipse(0, 0, w / 2, d / 2, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    const shapes = item.model_id ? itemPlanShapes(item) : null;
+    if (shapes) {
+      ctx.shadowBlur = 0; ctx.lineWidth = .65; ctx.strokeStyle = '#33453f55';
+      for (const shape of shapes) {
+        ctx.beginPath(); shape.points.forEach(([px, pz], index) => { if (index) ctx.lineTo(px * w, pz * d); else ctx.moveTo(px * w, pz * d); }); ctx.closePath(); ctx.fillStyle = shape.color; ctx.fill(); ctx.stroke();
+      }
+      if (active) { ctx.strokeStyle = '#bd783c'; ctx.lineWidth = 2; ctx.setLineDash([4, 3]); ctx.strokeRect(-w / 2 - 3, -d / 2 - 3, w + 6, d + 6); }
+    } else if (['chandelier', 'lamp', 'sensor'].includes(item.type)) { ctx.beginPath(); ctx.ellipse(0, 0, w / 2, d / 2, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
     else { ctx.fillRect(-w / 2, -d / 2, w, d); ctx.strokeRect(-w / 2, -d / 2, w, d); if (item.type === 'furniture' && w > 28 && d > 20) { ctx.strokeStyle = '#ffffff66'; ctx.strokeRect(-w / 2 + 4, -d / 2 + 4, w - 8, d - 8); } }
     ctx.restore();
     if (active) { ctx.fillStyle = '#5e776a'; ctx.textAlign = 'center'; ctx.font = '10px sans-serif'; ctx.fillText(item.name, x, y + Math.max(item.dimensions_m.width, item.dimensions_m.depth) * map.scale / 2 + 15); }
@@ -380,7 +520,7 @@ function fitPreview() {
 }
 function rebuildPreview() {
   while (worldGroup.children.length) { const child = worldGroup.children[0]; worldGroup.remove(child); child.traverse(obj => { obj.geometry?.dispose(); if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose()); else obj.material?.dispose(); }); }
-  let wallMeshCount = 0, openingCount = 0, roomCount = 0, itemCount = 0;
+  let wallMeshCount = 0, openingCount = 0, roomCount = 0, itemCount = 0, catalogItemCount = 0, itemMeshCount = 0;
   const box = (width, height, depth, position, color, rotation = 0, opacity = 1) => {
     const geometry = new THREE.BoxGeometry(width, height, depth), material = new THREE.MeshStandardMaterial({ color, roughness: .78, transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
     const mesh = new THREE.Mesh(geometry, material); mesh.position.set(...position); mesh.rotation.y = rotation; mesh.castShadow = opacity >= 1; mesh.receiveShadow = true; worldGroup.add(mesh); return mesh;
@@ -407,10 +547,21 @@ function rebuildPreview() {
     }
     for (const item of f.items) {
       const p = item.position_m, d = item.dimensions_m, rotation = item.rotation_deg * Math.PI / 180;
-      box(d.width, d.height, d.depth, [p.x, f.elevation_m + p.y + d.height / 2, p.z], COLORS[item.type], rotation); itemCount++;
+      const asset = itemAsset(item); itemCount++;
+      if (asset) {
+        const group = new THREE.Group(); group.position.set(p.x, f.elevation_m + p.y, p.z); group.rotation.y = rotation; group.scale.set(d.width, d.height, d.depth);
+        for (const part of asset.meshes) {
+          const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(part.vertices.flat(), 3)); geometry.setAttribute('normal', new THREE.Float32BufferAttribute(part.normals.flat(), 3)); geometry.setIndex(part.indices);
+          const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(...asset.materials[part.material].slice(0, 3)), roughness: .78 });
+          const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; mesh.castShadow = true; mesh.receiveShadow = true; group.add(mesh); itemMeshCount++;
+        }
+        worldGroup.add(group); catalogItemCount++; continue;
+      }
+      box(d.width, d.height, d.depth, [p.x, f.elevation_m + p.y + d.height / 2, p.z], COLORS[item.type], rotation); itemMeshCount++;
       if (item.type === 'tv') {
         const forward = new THREE.Vector3(0, 0, d.depth / 2 + .001).applyAxisAngle(new THREE.Vector3(0, 1, 0), rotation);
         box(d.width * .92, d.height * .88, .008, [p.x + forward.x, f.elevation_m + p.y + d.height / 2, p.z + forward.z], '#344c54', rotation);
+        itemMeshCount++;
       }
     }
   }
@@ -419,7 +570,8 @@ function rebuildPreview() {
   previewSun.position.set(cx - span * .6, high + span * 1.3, cz + span * .5); previewSun.target.position.set(cx, low, cz);
   Object.assign(previewSun.shadow.camera, { left: -span, right: span, top: span, bottom: -span, near: .1, far: span * 5 + 100 }); previewSun.shadow.camera.updateProjectionMatrix();
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(span * 8, span * 8), new THREE.ShadowMaterial({ color: '#54654c', opacity: .14 })); ground.rotation.x = -Math.PI / 2; ground.position.set(cx, low - .081, cz); ground.receiveShadow = true; worldGroup.add(ground);
-  previewMetadata = { floors: previewFloors().map(f => f.id), rooms: roomCount, wallSolidPieces: wallMeshCount, openings: openingCount, items: itemCount, meshes: worldGroup.children.length, renderCount: previewMetadata.renderCount || 0 };
+  let meshCount = 0; worldGroup.traverse(object => { if (object.isMesh) meshCount++; });
+  previewMetadata = { floors: previewFloors().map(f => f.id), rooms: roomCount, wallSolidPieces: wallMeshCount, openings: openingCount, items: itemCount, catalogItems: catalogItemCount, itemMeshes: itemMeshCount, meshes: meshCount, renderCount: previewMetadata.renderCount || 0 };
   previewDirty = false;
 }
 function drawPreview() {
@@ -477,7 +629,12 @@ $('add-floor').addEventListener('click', () => {
 });
 $('start-room').addEventListener('click', () => { setTool('room'); planCanvas.focus(); });
 document.querySelectorAll('[data-tool]').forEach(b => { const label = b.querySelector('span:nth-child(2)').textContent; b.setAttribute('aria-label', label); b.title = label; b.addEventListener('click', () => { setTool(b.dataset.tool); }); });
-$('place-type').addEventListener('change', () => setTool('item'));
+$('place-type').addEventListener('change', () => { placementModelId = null; updatePlacement(); setTool('item'); renderInspector(); });
+$('browse-items').addEventListener('click', openLibrary);
+for (const category of CATALOG.categories) { const option = node('option', '', category.label); option.value = category.id; $('library-category').append(option); }
+$('library-search').addEventListener('input', renderLibrary);
+$('library-category').addEventListener('change', renderLibrary);
+$('library-clear').addEventListener('click', () => { $('library-search').value = ''; $('library-category').value = ''; renderLibrary(); $('library-search').focus(); });
 $('undo').addEventListener('click', () => undo()); $('redo').addEventListener('click', () => undo(true));
 $('plan-tab').addEventListener('click', () => setView('plan')); $('preview-tab').addEventListener('click', () => setView('preview'));
 for (const tab of [$('plan-tab'), $('preview-tab')]) tab.addEventListener('keydown', e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); setView(view === 'plan' ? 'preview' : 'plan'); (view === 'plan' ? $('plan-tab') : $('preview-tab')).focus(); } });
@@ -521,6 +678,6 @@ new ResizeObserver(entries => {
   renderPlan(); if (view === 'preview') { const ratio = orbit.baseRadius / orbit.radius; fitPreview(); orbit.radius = orbit.baseRadius / ratio; renderPreview(); }
 }).observe(document.querySelector('.canvas-shell'));
 window.planner = Object.freeze({ getProject: () => clone(project), getPreviewMetadata: () => ({ ...previewMetadata }), getView: () => view, getSelection: () => selection && { ...selection }, worldToScreen: point => toScreen(point), validate: () => validateProject(clone(project), { complete: true }) });
-renderUI(); fitPlan(); renderPlan();
+updatePlacement(); renderUI(); fitPlan(); renderPlan();
 if (startupMessage) status(startupMessage, saveFailed);
 if (saveFailed) { $('save-status').textContent = 'Draft restore unavailable · export a backup'; $('save-status').classList.add('problem'); } else $('save-status').textContent = startupMessage ? 'Restored from this browser' : 'Local draft · export to keep a copy';
