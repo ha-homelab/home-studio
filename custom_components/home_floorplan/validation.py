@@ -4,6 +4,25 @@ import math
 import re
 
 KINDS = {"chandelier", "lamp", "tv", "appliance", "furniture", "switch", "outlet", "sensor"}
+APPEARANCE_FIELDS = {"model_id", "style_id", "color"}
+
+
+def validate_appearance(item):
+    """Preserve bounded catalog metadata without loading the editor in HA.
+
+    The project compiler validates catalog membership and exports the selected
+    meshes. Runtime placement editing retains those identifiers and colors;
+    they are never file paths, imports, URLs, or executable markup.
+    """
+    if ("style_id" in item or "color" in item) and "model_id" not in item:
+        raise ValueError("A furniture finish or color requires a model")
+    for key in ("model_id", "style_id"):
+        if key in item and (not isinstance(item[key], str)
+                            or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", item[key])):
+            raise ValueError(f"Invalid {key}")
+    if "color" in item and (not isinstance(item["color"], str)
+                           or not re.fullmatch(r"#[0-9a-fA-F]{6}", item["color"])):
+        raise ValueError("Invalid furniture color")
 
 
 def validate_inventory(items, rooms):
@@ -14,8 +33,10 @@ def validate_inventory(items, rooms):
     for item in items:
         if not isinstance(item, dict):
             raise ValueError("Every object must be a dictionary")
-        if set(item) != {"id", "name", "type", "room", "position_m", "dimensions_m", "rotation_deg", "entity_id", "notes"}:
+        required = {"id", "name", "type", "room", "position_m", "dimensions_m", "rotation_deg", "entity_id", "notes"}
+        if not required.issubset(item) or set(item) - required - APPEARANCE_FIELDS:
             raise ValueError("Unexpected or missing object fields")
+        validate_appearance(item)
         for key, maximum in (("id", 128), ("name", 100), ("type", 30), ("room", 100), ("entity_id", 150), ("notes", 2000)):
             if not isinstance(item[key], str) or len(item[key]) > maximum:
                 raise ValueError(f"Invalid {key}")

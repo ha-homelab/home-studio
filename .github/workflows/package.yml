@@ -7,7 +7,7 @@ permissions:
 jobs:
   package:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -21,6 +21,18 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '22'
+      - name: Check generated catalog and furniture export parity
+        run: |
+          python3 scripts/generate-furniture-catalog.py --check
+          python3 scripts/test-furniture.py
+          python3 scripts/test-inventory-appearance.py
+          node --test scripts/test-inventory-appearance.cjs
+      - name: Install browser test tools
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Test drawing, furnishing, export and installation through the editor
+        run: npm run test:planner
       - name: Test bounded diagnostic display with synthetic clocks
         run: node scripts/test-module-expiry.cjs
       - name: Test visible wall outlines and doorway gaps

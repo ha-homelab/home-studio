@@ -15,6 +15,9 @@ let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, space
 let startupMessage = '';
 let placementModelId = CATALOG.models[0].id;
 const assetCache = new Map(), planShapeCache = new Map(), thumbnailCache = new Map();
+// Keep a fully populated floor plus catalog thumbnails without clearing every
+// entry during a redraw; evict only the oldest appearance when the bound is hit.
+const APPEARANCE_CACHE_LIMIT = LIMITS.items + CATALOG.models.length;
 try {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
@@ -34,7 +37,7 @@ function itemAsset(item) {
   if (!item.model_id) return null;
   const key = `${item.model_id}|${item.style_id || ''}|${item.color || ''}`;
   if (!assetCache.has(key)) {
-    if (assetCache.size > 160) assetCache.clear();
+    if (assetCache.size >= APPEARANCE_CACHE_LIMIT) assetCache.delete(assetCache.keys().next().value);
     assetCache.set(key, buildFurnitureAsset(item));
   }
   return assetCache.get(key);
@@ -132,7 +135,7 @@ function itemPlanShapes(item) {
     for (const point of [...points].reverse()) { while (upper.length >= 2 && cross(upper.at(-2), upper.at(-1), point) <= 0) upper.pop(); upper.push(point); }
     return { points: lower.slice(0, -1).concat(upper.slice(0, -1)), height: Math.max(...mesh.vertices.map(p => p[1])), color: materialColor(asset.materials[mesh.material]) };
   }).sort((a, b) => a.height - b.height);
-  if (planShapeCache.size > 160) planShapeCache.clear();
+  if (planShapeCache.size >= APPEARANCE_CACHE_LIMIT) planShapeCache.delete(planShapeCache.keys().next().value);
   planShapeCache.set(key, shapes); return shapes;
 }
 // Use identical compact UTF-8 bytes for storage, downloads, and the import limit.

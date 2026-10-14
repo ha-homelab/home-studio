@@ -21,6 +21,33 @@ Assistant. **Export JSON** saves your editable project; **Open JSON** restores i
 The local compiler turns that project into a separate viewer, 3D exports, and an
 installable Home Assistant package. Examples and guide screenshots are fictional.
 
+## Furnish your rooms
+
+Open **Item library** to browse 40 designs across seating, tables and desks,
+beds, storage, kitchen and laundry, bathroom, rugs and decor, and lighting.
+Search for a sofa, desk, plant, or another familiar object, choose its thumbnail,
+then click inside a room. You can also select a room and choose **Place item at
+room center** for keyboard placement.
+
+Select an item to change its **Design**, choose one of four **Finish** palettes,
+or set a **Custom body color**. Change its width, depth, height, elevation, and
+rotation to match your measurements. A new design keeps your dimensions;
+**Use design’s original size** restores the starting size. **Basic shapes &
+devices** remains available for blocks, switches, outlets, and sensors.
+
+![The item library with searchable furniture thumbnails](planner/guide-assets/08-library.jpg)
+
+The same furniture geometry and colors appear in the 2D drawing, 3D preview,
+downloaded models, and installed HA plan. Export your project JSON as the editable
+source. Older projects retain their basic shapes until you choose a design.
+The library is bundled locally: no asset account, remote model downloads, or
+additional runtime dependencies are required.
+
+Furniture designs and finishes are authored in the planner. After changing them,
+rebuild and reinstall the project. The installed panel can move, resize, rename,
+and bind existing furniture to entities; its inventory import is for placements,
+not a way to download or replace furniture models.
+
 ## Draw, build, and preview
 
 1. Follow the [drawing guide](https://ha-homelab.github.io/home-studio/planner/guide.html)
@@ -108,9 +135,19 @@ and bindings. Keep your real home's source and generated files private.
 ```sh
 python3 scripts/test-public-package.py
 python3 scripts/test-install-home-assistant.py
+python3 scripts/generate-furniture-catalog.py --check
+python3 scripts/test-furniture.py
 python3 scripts/validate-site.py
 python3 scripts/validate-site.py --output _site
 ```
+
+For browser regression checks, install Node.js 22 or newer, run
+`npm ci --ignore-scripts`, then `npx playwright install chromium` and
+`npm run test:planner`. On a Linux CI host, use
+`npx playwright install --with-deps chromium`. These are development tools only;
+users do not need Node.js or Playwright to draw, compile, or install a plan.
+The browser test exports a real drawing and installs that exact file's package
+into a temporary config directory without contacting a live HA instance.
 
 The public repository contains the full package. GitHub Pages publishes only an
 explicit website allowlist, so the website stays a static editor and guide.

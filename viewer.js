@@ -32,8 +32,51 @@ function drawCursor(){$('cursorPin').replaceChildren();if($('x').value===''||$('
 ['x','z'].forEach(id=>$(id).addEventListener('input',drawCursor));
 const presets={chandelier:[.6,.6,.4,2.3],lamp:[.3,.3,1.5,0],tv:[1.2,.07,.7,1],appliance:[.6,.6,.85,0],furniture:[1.5,.7,.8,0],switch:[.08,.035,.12,1.05],outlet:[.08,.035,.12,.25],sensor:[.08,.05,.08,2.1]};
 $('kind').addEventListener('change',()=>{['w','d','h','y'].forEach((id,i)=>$(id).value=presets[$('kind').value][i])});
-function validateInventoryItems(list){if(!Array.isArray(list)||list.length>2000)throw Error('Inventory must contain an items array with at most 2,000 objects.');const ids=new Set();return list.map(it=>{if(!it||typeof it.id!=='string'||!/^[A-Za-z_][A-Za-z0-9_]*$/.test(it.id)||ids.has(it.id))throw Error('Every object needs a unique string ID.');ids.add(it.id);if(typeof it.name!=='string'||!it.name.trim()||!Object.hasOwn(presets,it.type)||!model.rooms.some(r=>r.id===it.room))throw Error('Object name, type or room is invalid.');for(const k of ['x','y','z'])if(!Number.isFinite(it.position_m?.[k]))throw Error('Coordinates must be finite numbers.');for(const k of ['width','depth','height'])if(!Number.isFinite(it.dimensions_m?.[k])||it.dimensions_m[k]<=0)throw Error('Dimensions must be positive finite numbers.');if(!Number.isFinite(it.rotation_deg))throw Error('Rotation must be a finite number.');return it})}
-try{items=validateInventoryItems(items)}catch(e){items=[];setEditorStatus('Stored inventory could not be read. Import a valid backup JSON.')}
+// Catalog fields are inert metadata. The compiler owns model/style membership.
+function inventoryAppearance(item, type = item?.type) {
+  if (!item || item.type !== type) return {};
+  if ((Object.hasOwn(item, 'style_id') || Object.hasOwn(item, 'color')) && !Object.hasOwn(item, 'model_id')) throw Error('A finish or color requires a furniture model.');
+  const result = {};
+  for (const key of ['model_id', 'style_id']) if (Object.hasOwn(item, key)) {
+    if (typeof item[key] !== 'string' || !/^[a-z][a-z0-9_]{0,63}$/.test(item[key])) throw Error('Invalid furniture ' + key + '.');
+    result[key] = item[key];
+  }
+  if (Object.hasOwn(item, 'color')) {
+    if (typeof item.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(item.color)) throw Error('Invalid furniture color.');
+    result.color = item.color;
+  }
+  return result;
+}
+function validateImportedAppearance(list) {
+  const originals = new Map((model.inventory || []).map(item => [item.id, item]));
+  for (const item of list) {
+    if (!item.model_id) continue;
+    const original = originals.get(item.id);
+    if (!original || ['model_id', 'style_id', 'color'].some(key => (item[key] || '').toLowerCase() !== (original[key] || '').toLowerCase())) {
+      throw Error('Change furniture designs and finishes in the planner, then rebuild and install the project. Inventory imports update placements only.');
+    }
+  }
+  return list;
+}
+let appearanceRefreshNotice = '';
+function reconcileStoredAppearance(list) {
+  const originals = new Map((model.inventory || []).map(item => [item.id, item]));
+  let changed = false;
+  const restored = list.map(item => {
+    if (!item.model_id) return item;
+    const appearance = inventoryAppearance(originals.get(item.id), item.type);
+    if (JSON.stringify(appearance) === JSON.stringify(inventoryAppearance(item))) return item;
+    changed = true;
+    const updated = { ...item };
+    for (const key of ['model_id', 'style_id', 'color']) delete updated[key];
+    return Object.assign(updated, appearance);
+  });
+  appearanceRefreshNotice = changed ? 'Furniture appearances refreshed from the rebuilt project. Saved placements and device bindings were kept.' : '';
+  if (appearanceRefreshNotice) setEditorStatus(appearanceRefreshNotice);
+  return restored;
+}
+function validateInventoryItems(list){if(!Array.isArray(list)||list.length>2000)throw Error('Inventory must contain an items array with at most 2,000 objects.');const ids=new Set();return list.map(it=>{if(!it||typeof it.id!=='string'||!/^[A-Za-z_][A-Za-z0-9_]*$/.test(it.id)||ids.has(it.id))throw Error('Every object needs a unique string ID.');ids.add(it.id);if(typeof it.name!=='string'||!it.name.trim()||!Object.hasOwn(presets,it.type)||!model.rooms.some(r=>r.id===it.room))throw Error('Object name, type or room is invalid.');for(const k of ['x','y','z'])if(!Number.isFinite(it.position_m?.[k]))throw Error('Coordinates must be finite numbers.');for(const k of ['width','depth','height'])if(!Number.isFinite(it.dimensions_m?.[k])||it.dimensions_m[k]<=0)throw Error('Dimensions must be positive finite numbers.');if(!Number.isFinite(it.rotation_deg))throw Error('Rotation must be a finite number.');inventoryAppearance(it);return it})}
+try{items=reconcileStoredAppearance(validateInventoryItems(items))}catch(e){items=[];setEditorStatus('Stored inventory could not be read. Import a valid backup JSON.')}
 const inventoryNodes=new Map(),objectsById=new Map();
 let renderer,scene,camera,objectGroup,root,hemisphere,sun,ground,grid,homeView=null,radius=planRadius,azimuth=.57,polar=.48,target=new THREE.Vector3(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]),clipping=new THREE.Plane(new THREE.Vector3(0,-1,0),20),renderCount=0;
 // Defer embedded drawing to the next frame.
@@ -133,7 +176,7 @@ for(const [index,it] of items.entries()){
 const x=xp(it.position_m.x),z=zp(it.position_m.z);const g=svgEl('g',{'data-item-id':it.id});g.append(svgEl('circle',{cx:x,cy:z,r:18,fill:'#b16e31',stroke:'white','stroke-width':3}),svgEl('text',{x,y:z+6,fill:'white','font-size':17,'text-anchor':'middle','font-family':'system-ui'},String(index+1)));g.addEventListener('click',e=>{e.stopPropagation();editInventoryItem(it)});$('pins').append(g);const nodes={pin:g};inventoryNodes.set(it.id,nodes);
 const li=document.createElement('li'),label=document.createElement('span');label.textContent=(index+1)+'. '+it.name;const sub=document.createElement('small');sub.textContent=roomCode(it.room)+(it.entity_id?' · '+it.entity_id:'');label.append(document.createElement('br'),sub);const ed=document.createElement('button');ed.textContent='Edit';ed.onclick=()=>editInventoryItem(it);const del=document.createElement('button');del.textContent='×';del.setAttribute('aria-label','Remove '+it.name);del.onclick=()=>{items=items.filter(v=>v.id!==it.id);if(editing===it.id)cancelInventoryEdit();persistInventory();rebuildInventoryView()};if(embedded&&it.entity_id){if(it.entity_id.startsWith('cover.')){const control=document.createElement('button');control.textContent='Open controls';control.onclick=()=>bridge?.postMessage({type:'more_info',entity_id:it.entity_id});li.append(control)}const live=document.createElement('small');live.dataset.stateFor=it.id;nodes.state=live;label.append(document.createElement('br'),live);if(['light','switch','input_boolean','fan'].includes(it.entity_id.split('.')[0])){const toggle=document.createElement('button');toggle.textContent='Toggle';toggle.dataset.toggleFor=it.id;nodes.toggle=toggle;toggle.setAttribute('aria-label','Toggle '+it.name);toggle.onclick=()=>bridge?.postMessage({type:'toggle',entity_id:it.entity_id});li.append(toggle)}}li.append(label,ed,del);$('items').append(li);
 if(objectGroup){
-const size=it.dimensions_m,asset=model.object_assets?.[it.id];let o;
+const size=it.dimensions_m,candidate=model.object_assets?.[it.id],asset=candidate?.model_id&&candidate.model_id!==it.model_id?null:candidate;let o;
 if(asset){
 o=new THREE.Group();const batches={};
 for(const part of asset.meshes){const batch=batches[part.material]??={vertices:[],normals:[],indices:[]};const offset=batch.vertices.length/3;batch.vertices.push(...part.vertices.flat());batch.normals.push(...part.normals.flat());batch.indices.push(...part.indices.map(i=>i+offset))}
@@ -146,9 +189,9 @@ o.rotation.y=it.rotation_deg*Math.PI/180;o.userData.id=it.id;objectGroup.add(o);
 function persistInventory(){if(embedded){if(bridge)bridge.postMessage({type:'save',items});else setEditorStatus('Not connected. Export JSON to keep your edits.');return}try{localStorage.setItem(KEY,JSON.stringify(items))}catch(e){setEditorStatus('Storage unavailable: export JSON to keep these objects.')}}
 function cancelInventoryEdit(){editing=null;$('addItem').textContent='Add object';$('cancelEdit').style.display='none';$('name').value='';$('entity').value='';$('notes').value=''}$('cancelEdit').onclick=cancelInventoryEdit;
 function editInventoryItem(it){editing=it.id;$('name').value=it.name;$('kind').value=it.type;$('room').value=it.room;for(const k of ['x','y','z'])$(k).value=it.position_m[k];for(const [f,k] of [['w','width'],['d','depth'],['h','height']])$(f).value=it.dimensions_m[k];$('rotation').value=it.rotation_deg;$('entity').value=it.entity_id||'';$('notes').value=it.notes||'';$('addItem').textContent='Save changes';$('cancelEdit').style.display='block';drawCursor();setEditorStatus('Editing '+it.name)}
-$('itemForm').onsubmit=e=>{e.preventDefault();const it={id:editing||('item_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7)),name:$('name').value.trim(),type:$('kind').value,room:$('room').value,position_m:{x:+$('x').value,y:+$('y').value,z:+$('z').value},dimensions_m:{width:+$('w').value,depth:+$('d').value,height:+$('h').value},rotation_deg:+$('rotation').value,entity_id:$('entity').value.trim(),notes:$('notes').value.trim()};try{validateInventoryItems([it])}catch(e){setEditorStatus(e.message);return}if(editing)items=items.map(x=>x.id===editing?it:x);else items.push(it);persistInventory();rebuildInventoryView();cancelInventoryEdit();setEditorStatus((embedded?'Updated ':'Saved ')+it.name+(embedded?'. Check the panel header for save status.':'. Export JSON when finished.'))};
+$('itemForm').onsubmit=e=>{e.preventDefault();const it={...inventoryAppearance(items.find(item=>item.id===editing),$('kind').value),id:editing||('item_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7)),name:$('name').value.trim(),type:$('kind').value,room:$('room').value,position_m:{x:+$('x').value,y:+$('y').value,z:+$('z').value},dimensions_m:{width:+$('w').value,depth:+$('d').value,height:+$('h').value},rotation_deg:+$('rotation').value,entity_id:$('entity').value.trim(),notes:$('notes').value.trim()};try{validateInventoryItems([it])}catch(e){setEditorStatus(e.message);return}if(editing)items=items.map(x=>x.id===editing?it:x);else items.push(it);persistInventory();rebuildInventoryView();cancelInventoryEdit();setEditorStatus((embedded?'Updated ':'Saved ')+it.name+(embedded?'. Check the panel header for save status.':'. Export JSON when finished.'))};
 function exportInventoryJson(){const file={schema_version:1,model:model.id,units:'metres',up_axis:'Y',coordinate_system:model.origin,items};const blob=new Blob([JSON.stringify(file,null,2)+'\n'],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=model.id+'-inventory.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);setEditorStatus('Inventory exported. Keep this JSON as a placement backup.')} $('export').onclick=exportInventoryJson;
-$('import').onclick=()=>$('importFile').click();$('importFile').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>5_000_000)throw Error('File is too large.');const incoming=JSON.parse(await file.text());if(incoming.schema_version!==1||incoming.model!==model.id||incoming.units!=='metres')throw Error('Expected an inventory for '+model.id+' in metres, schema version 1.');const list=validateInventoryItems(incoming.items);const merged=new Map(items.map(it=>[it.id,it]));list.forEach(it=>merged.set(it.id,it));items=validateInventoryItems([...merged.values()]);persistInventory();cancelInventoryEdit();rebuildInventoryView();setEditorStatus('Imported '+list.length+' objects; matching IDs were updated.')}catch(err){setEditorStatus('Import failed: '+err.message)}finally{e.target.value=''}};
+$('import').onclick=()=>$('importFile').click();$('importFile').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>5_000_000)throw Error('File is too large.');const incoming=JSON.parse(await file.text());if(incoming.schema_version!==1||incoming.model!==model.id||incoming.units!=='metres')throw Error('Expected an inventory for '+model.id+' in metres, schema version 1.');const list=validateImportedAppearance(validateInventoryItems(incoming.items));const merged=new Map(items.map(it=>[it.id,it]));list.forEach(it=>merged.set(it.id,it));items=validateInventoryItems([...merged.values()]);persistInventory();cancelInventoryEdit();rebuildInventoryView();setEditorStatus('Imported '+list.length+' objects; matching IDs were updated.')}catch(err){setEditorStatus('Import failed: '+err.message)}finally{e.target.value=''}};
 function refreshEntityPresentation(){
 for(const [id,entity] of Object.entries(tvEntities))if(!haConnected||haStates[entity]?.restored||!['on','playing','paused','idle','buffering'].includes(haStates[entity]?.state))applyTVFrame(null,false,id);
 if(embedded)for(const it of items){if(!it.entity_id)continue;const state=haStates[it.entity_id],available=haConnected&&state&&!['unavailable','unknown'].includes(state.state);const entityOn=state?.state==='on'||it.entity_id.startsWith('media_player.')&&['playing','paused','idle','buffering'].includes(state?.state);const color=!available?0x8b9197:entityOn?(it.type==='tv'?0x8eb7d6:0xfff4e2):0x58838b;
@@ -164,10 +207,10 @@ if(embedded){
 $('otherFloor').onclick=e=>{if(bridge){e.preventDefault();if(model.next_floor?.id)bridge.postMessage({type:'floor',floor:model.next_floor.id})}};
 for(const link of document.querySelectorAll('a[download]'))link.onclick=e=>{e.preventDefault();bridge?.postMessage({type:'export',format:link.getAttribute('href').split('.').pop()})};
 window.addEventListener('message',function init(event){if(event.source!==parent||event.data?.type!=='home-floorplan:init'||!event.ports[0]||bridge)return;
-try{items=validateInventoryItems(event.data.items)}catch(error){setEditorStatus('Cannot load saved inventory: '+error.message);return}
+try{items=reconcileStoredAppearance(validateInventoryItems(event.data.items))}catch(error){setEditorStatus('Cannot load saved inventory: '+error.message);return}
 bridge=event.ports[0];homeView?.applyViewPreferences(event.data.preferences||{});bridge.onmessage=event=>{if(event.data?.type==='camera_frames'){applyCameraFrames(event.data.frames);return}if(event.data?.type==='tv_frame'){applyTVFrame(event.data.image,true,event.data.item_id);return}if(event.data?.type==='command_result'){homeView.handleCommandResult(event.data);return}if(event.data?.type!=='states')return;haStates=event.data.states;haConnected=event.data.connected;if(!haConnected)applyCameraFrames();const options=Object.entries(haStates).map(([id,state])=>[id,state.name]);const key=JSON.stringify(options);if(key!==entityOptions){entityOptions=key;$('haEntities').replaceChildren(...options.map(([id,name])=>{const option=document.createElement('option');option.value=id;option.label=name;return option}))}refreshEntityPresentation()};
 bridge.postMessage({type:'model_config',...Object.fromEntries(['tv_entities','camera_entities','room_activity','receiver_activity','assumed_activity'].map(key=>[key,model[key]]))});
-document.querySelector('aside').inert=false;rebuildInventoryView();setEditorStatus('Connected. Select an entity from the list to bind an object.');window.removeEventListener('message',init);
+document.querySelector('aside').inert=false;rebuildInventoryView();setEditorStatus(appearanceRefreshNotice || 'Connected. Select an entity from the list to bind an object.');window.removeEventListener('message',init);
 });
 }
 rebuildInventoryView();if(embedded){homeView.setActive(true);requestAnimationFrame(()=>{initialViewReady=true;try{window.resizeModel?.();}catch(e){report3DError(e)}})}else if(model.initial_room)focusRoom(model.initial_room);window.floorplan={model,get homeMode(){return homeView.active},get illuminated(){return homeView.illuminated},get items(){return items},get renderCount(){return renderCount},get meshCount(){return root?.children.length||0},get objectCount(){return objectGroup?.children.length||0},get translucentObjectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh&&o.material.transparent&&o.material.opacity<1&&!o.material.depthWrite)n++});return n},get objectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh)n++});return n}};
