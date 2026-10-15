@@ -90,7 +90,7 @@ let initialViewReady=!embedded;
 // Software WebGL runs fragment shaders on the CPU. Bound its canvas and shadows;
 // controls remain sharp HTML and every fixture keeps its lighting and interaction.
 let renderProfile={pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048};
-function selectRenderProfile(gl){try{const info=gl.getExtension('WEBGL_debug_renderer_info');if(info&&/swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe/i.test(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)))return {pixels:250000,pointShadows:2,pointShadowSize:128,sunShadowSize:512}}catch{}return {pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048}}
+function selectRenderProfile(gl){try{const info=gl.getExtension('WEBGL_debug_renderer_info');if(info&&/swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe|^Apple Software Renderer$/i.test(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)))return {pixels:250000,pointShadows:2,pointShadowSize:128,sunShadowSize:512}}catch{}return {pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048}}
 let renderRequest=0,renderSuspended=false,renderLost=false;
 function cancelRender(){if(renderRequest)cancelAnimationFrame(renderRequest);renderRequest=0}
 function requestRender(){if(renderRequest||renderSuspended||renderLost||document.hidden)return;renderRequest=requestAnimationFrame(()=>{renderRequest=0;try{window.renderModel?.()}catch(error){report3DError(error)}})}

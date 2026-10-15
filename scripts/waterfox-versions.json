@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "checked_at": "2026-10-15",
+  "latest_stable": "6.7.6",
+  "versions": {
+    "6.7.5": {
+      "windows-x64": {
+        "url": "https://cdn.waterfox.com/waterfox/releases/6.7.5/WINNT_x86_64/Waterfox%20Setup%206.7.5.exe",
+        "sha512": "51ef1206a910978e62f2780d952fc5c546be3d20881ee95914d51f60bf8aca9291874305d59f8f80a1886de7c0e30750c0494640c308ca00a8dca2d6f91c9a36"
+      },
+      "macos": {
+        "url": "https://cdn.waterfox.com/waterfox/releases/6.7.5/Darwin_x86_64-aarch64/Waterfox%206.7.5.dmg",
+        "sha512": "1bab755f94403be04f86d7e29f039d513ca0627b643442309722b55f55b608a7b1e8688a63dee4e4038a842f68197411516cc309d30fc5acf586fd9b8495a0f1"
+      },
+      "linux-x64": {
+        "url": "https://cdn.waterfox.com/waterfox/releases/6.7.5/Linux_x86_64/waterfox-6.7.5.tar.bz2",
+        "sha512": "86e933f5ad255a660581cfce0039ff7639b3018ad433bab5174f5a0a525b6c04dd736b103b62bb2f28551bc378131ac094b30792ed7e307d70d4bf778ae6463e"
+      }
+    },
+    "6.7.6": {
+      "windows-x64": {
+        "url": "https://cdn.waterfox.com/waterfox/releases/6.7.6/WINNT_x86_64/Waterfox%20Setup%206.7.6.exe",
+        "sha512": "7b0d04383f5f1b15fafc4c9ba9cf787ce2682eb03eade41606c36cf745709845b6bc28e60824e10bc95055a198bc724f5034f75fb0886d32b9b6ce206d56c105"
+      },
+      "macos": {
+        "url": "https://cdn.waterfox.com/waterfox/releases/6.7.6/Darwin_x86_64-aarch64/Waterfox%206.7.6.dmg",
+        "sha512": "8fd6ddbd63d769337d02935971aa63af100ff2c7cb287ab50dcc37852c7d048351b098023297d19e70e2a2475ca3864b410bd100573f240f6abda5aff39e7f1a"
+      },
+      "linux-x64": {
+        "url": "https://cdn.waterfox.com/waterfox/releases/6.7.6/Linux_x86_64/waterfox-6.7.6.tar.bz2",
+        "sha512": "2a56a337a84bb0cd9dfa8818d1eeafa08756840e39b9687fa8f4554e9c983af47a220476b2b53f7ea7c6696477c528546bce4e30f6d4e720a0af690981837d0c"
+      }
+    }
+  }
+}

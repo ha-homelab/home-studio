@@ -1,0 +1,156 @@
+name: Cross-platform acceptance
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  install:
+    name: Package and install (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        id: python
+        with:
+          python-version: '3.13'
+      - name: Validate the public site and source inventory
+        run: python3 scripts/validate-site.py
+      - name: Test archive validation, installation, backup and rollback
+        run: python3 scripts/test-install-home-assistant.py
+      - name: Build and install a fictional home
+        run: python3 scripts/test-public-package.py
+      - name: Verify reproducible source archives
+        run: python3 scripts/test_package_release.py
+
+  browser:
+    name: Browser (${{ matrix.os }}, ${{ matrix.engine }})
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-15]
+        engine: [chromium, firefox]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+      BROWSER_STABILITY_ENGINES: ${{ matrix.engine }}
+      PLANNER_STABILITY_ENGINES: ${{ matrix.engine }}
+      BROWSER_STABILITY_HEADED: '1'
+      PLANNER_STABILITY_HEADED: '1'
+      FIREFOX_WEBGL_BACKEND: ${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && 'angle' || 'default' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        id: python
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+      - name: Install pinned browser test tools
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx playwright install --with-deps "${BROWSER_STABILITY_ENGINES}"
+      - name: Select the compiler interpreter
+        env:
+          SELECTED_PYTHON: ${{ steps.python.outputs.python-path }}
+        run: printf 'PYTHON=%s\n' "$SELECTED_PYTHON" >> "$GITHUB_ENV"
+      - name: Test generated viewer with 6 rooms and 18 lights
+        env:
+          HOME_STUDIO_DIAGNOSTICS_DIR: acceptance-artifacts/viewer-6
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-browser-stability.cjs
+          else
+            node scripts/test-browser-stability.cjs
+          fi
+      - name: Test generated viewer with 24 rooms and 72 lights
+        if: ${{ !cancelled() }}
+        env:
+          HOME_STUDIO_DIAGNOSTICS_DIR: acceptance-artifacts/viewer-24
+          BROWSER_STABILITY_ROOMS: '24'
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-browser-stability.cjs
+          else
+            node scripts/test-browser-stability.cjs
+          fi
+      - name: Test drawing and 3D preview with 2 floors and 256 items
+        if: ${{ !cancelled() }}
+        env:
+          HOME_STUDIO_DIAGNOSTICS_DIR: acceptance-artifacts/planner
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-planner-stability.cjs
+          else
+            node scripts/test-planner-stability.cjs
+          fi
+      - name: Preserve synthetic browser diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: acceptance-${{ matrix.os }}-${{ matrix.engine }}
+          path: acceptance-artifacts/
+          if-no-files-found: error
+          retention-days: 14
+
+  waterfox:
+    name: Waterfox ${{ matrix.version }} (windows-2022)
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        version: ['6.7.5', '6.7.6']
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+      WATERFOX_VERSION: ${{ matrix.version }}
+      WATERFOX_DIAGNOSTICS_DIR: acceptance-artifacts/waterfox-${{ matrix.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+      - name: Check pinned downloads and browser protocol tooling
+        run: python3 scripts/test-waterfox-tooling.py
+      - name: Extract the verified Waterfox version into an isolated directory
+        env:
+          WATERFOX_INSTALL_DIR: ${{ runner.temp }}/waterfox-${{ matrix.version }}
+        run: python3 scripts/setup-waterfox.py --version "$WATERFOX_VERSION" --output "$WATERFOX_INSTALL_DIR"
+      - name: Test this Waterfox version with synthetic viewer and planner fixtures
+        env:
+          WATERFOX_INSTALL_DIR: ${{ runner.temp }}/waterfox-${{ matrix.version }}
+        run: python3 scripts/test-waterfox-acceptance.py --installation "$WATERFOX_INSTALL_DIR/install.json" --output "$WATERFOX_DIAGNOSTICS_DIR"
+      - name: Preserve version-specific Waterfox diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: acceptance-windows-2022-waterfox-${{ matrix.version }}
+          path: ${{ env.WATERFOX_DIAGNOSTICS_DIR }}
+          if-no-files-found: error
+          retention-days: 14

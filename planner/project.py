@@ -484,23 +484,23 @@ def runtime_model_data(data):
 
 
 def render_viewer(data, svg):
-    template = (ROOT / "viewer.template.html").read_text()
+    template = (ROOT / "viewer.template.html").read_text(encoding="utf-8")
     # Saved model downloads represent the built project. The editable viewer
     # must not leave those static furniture silhouettes behind after a move.
     viewer_plan = re.sub(r'<g id="furniture">.*?</g>', '', svg, flags=re.S)
     locale_dir = ROOT / "viewer-locales"
-    locales = json.loads((locale_dir / "index.json").read_text())
-    dictionaries = {entry["code"]: json.loads((locale_dir / (entry["code"] + ".json")).read_text()) for entry in locales}
+    locales = json.loads((locale_dir / "index.json").read_text(encoding="utf-8"))
+    dictionaries = {entry["code"]: json.loads((locale_dir / (entry["code"] + ".json")).read_text(encoding="utf-8")) for entry in locales}
     viewer_i18n = json.dumps({"locales": locales, "dictionaries": dictionaries}, ensure_ascii=False, separators=(",", ":"))
     replacements = {
-        "__VIEWER_I18N_JS__": (ROOT / "viewer-i18n.js").read_text(),
+        "__VIEWER_I18N_JS__": (ROOT / "viewer-i18n.js").read_text(encoding="utf-8"),
         "__VIEWER_I18N_DATA__": viewer_i18n.replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"),
-        "__VIEWER_JS__": (ROOT / "viewer.js").read_text(),
-        "__HOME_HTML__": (ROOT / "home-view.html").read_text(),
-        "__HOME_CSS__": (ROOT / "home-view.css").read_text(),
-        "__HOME_JS__": "\n".join((ROOT / name).read_text() for name in ("curtain-state.js", "motion-state.js", "tv-screen.js", "camera-preview.js", "media-preview.js", "assumed-zone-view.js", "home-view.js")),
-        "__LIGHT_STATE_JS__": (ROOT / "light-state.js").read_text(),
-        "__ROOM_LIGHTING_JS__": (ROOT / "room-lighting.js").read_text(),
+        "__VIEWER_JS__": (ROOT / "viewer.js").read_text(encoding="utf-8"),
+        "__HOME_HTML__": (ROOT / "home-view.html").read_text(encoding="utf-8"),
+        "__HOME_CSS__": (ROOT / "home-view.css").read_text(encoding="utf-8"),
+        "__HOME_JS__": "\n".join((ROOT / name).read_text(encoding="utf-8") for name in ("curtain-state.js", "motion-state.js", "tv-screen.js", "camera-preview.js", "media-preview.js", "assumed-zone-view.js", "home-view.js")),
+        "__LIGHT_STATE_JS__": (ROOT / "light-state.js").read_text(encoding="utf-8"),
+        "__ROOM_LIGHTING_JS__": (ROOT / "room-lighting.js").read_text(encoding="utf-8"),
         "__THREE_B64__": base64.b64encode((ROOT / "vendor/three.module.min.js").read_bytes()).decode(),
         "__PLAN_MIME__": "image/svg+xml", "__PLAN_DATA__": base64.b64encode(viewer_plan.encode()).decode(),
         "__PLAN_WIDTH__": str(data["calibration"]["reference_size"][0]), "__PLAN_HEIGHT__": str(data["calibration"]["reference_size"][1]),
@@ -586,7 +586,7 @@ def compile_project(project, output=DEFAULT_OUTPUT, ha_package=False, project_pa
             fail("output", "expected a directory")
         if any(output.iterdir()):
             try:
-                owned = json.loads((output / MARKER).read_text()).get("generator") == "home-planner-v1"
+                owned = json.loads((output / MARKER).read_text(encoding="utf-8")).get("generator") == "home-planner-v1"
             except (OSError, ValueError, AttributeError):
                 owned = False
             if not owned:
@@ -634,7 +634,7 @@ def compile_project(project, output=DEFAULT_OUTPUT, ha_package=False, project_pa
         (stage / "project.json").write_bytes(snapshot)
         links = "".join('<li><a href="' + f["id"] + '/index.html">' + html.escape(f["name"]) + "</a></li>" for f in project["floors"])
         (stage / "index.html").write_text('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + html.escape(project["title"]) + '</title><h1>' + html.escape(project["title"]) + '</h1><p>Choose a floor</p><ul>' + links + "</ul></html>", encoding="utf-8")
-        (stage / MARKER).write_text(json_text({"generator": "home-planner-v1", "site_id": manifest["site_id"]}) + "\n")
+        (stage / MARKER).write_text(json_text({"generator": "home-planner-v1", "site_id": manifest["site_id"]}) + "\n", encoding="utf-8")
         if ha_package:
             package_ha(stage, manifest)
         if output.exists():

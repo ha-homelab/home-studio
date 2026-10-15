@@ -5,6 +5,8 @@ on:
 permissions:
   contents: read
 jobs:
+  platforms:
+    uses: ./.github/workflows/platform-acceptance.yml
   package:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -73,17 +75,8 @@ jobs:
         run: |
           node scripts/test-home-render-budget.cjs
           node scripts/test-render-lifecycle.cjs
-      - name: Test multi-light interaction and context recovery in Chromium and Firefox
-        env:
-          BROWSER_STABILITY_HEADED: '1'
-          LIBGL_ALWAYS_SOFTWARE: '1'
-        run: xvfb-run -a node scripts/test-browser-stability.cjs
+          node --test scripts/test-browser-stability-diagnostics.cjs
       - name: Test planner drawing and preview resource budgets
         run: node scripts/test-planner-render-budget.cjs
-      - name: Test large-plan drawing and 3D preview in Chromium and Firefox
-        env:
-          PLANNER_STABILITY_HEADED: '1'
-          LIBGL_ALWAYS_SOFTWARE: '1'
-        run: xvfb-run -a node scripts/test-planner-stability.cjs
       - name: Test deterministic public source release
         run: python3 scripts/test_package_release.py

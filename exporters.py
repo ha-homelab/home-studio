@@ -36,7 +36,7 @@ def export_models(data, ROOT, stem):
         pts=', '.join('('+', '.join(f'{x:.7f}' for x in p)+')' for p in m['vertices'])
         ns=', '.join('('+', '.join(f'{x:.6f}' for x in p)+')' for p in m['normals'])
         lines += [f' def Mesh "{m["name"]}" (prepend apiSchemas = ["MaterialBindingAPI"]) {{',f'  point3f[] points = [{pts}]',f'  int[] faceVertexCounts = [{", ".join(["3"]*(len(m["indices"])//3))}]',f'  int[] faceVertexIndices = [{", ".join(map(str,m["indices"]))}]',f'  normal3f[] normals = [{ns}] (interpolation = "vertex")','  uniform token subdivisionScheme = "none"','  uniform bool doubleSided = true',f'  rel material:binding = </HomeModel/Materials/{m["material"]}>',' }']
-    lines+=['}'];(ROOT/(stem+'.usda')).write_text('\n'.join(lines).replace('HomeModel',stem.title()))
+    lines+=['}'];(ROOT/(stem+'.usda')).write_text('\n'.join(lines).replace('HomeModel',stem.title()), encoding='utf-8')
 
     # OBJ/DAE use Z-up for architectural import; the plan-down coordinate becomes -Y.
     obj=['# '+data['title']+', METRES, Z up; imported reference meshes, not BIM families','mtllib '+stem+'.mtl'];off=1
@@ -44,8 +44,8 @@ def export_models(data, ROOT, stem):
         obj.extend([f'o {m["name"]}',f'usemtl {m["material"]}'])
         obj.extend(f'v {x:.7f} {-z:.7f} {y:.7f}' for x,y,z in m['vertices'])
         obj.extend('f '+' '.join(str(off+i) for i in m['indices'][j:j+3]) for j in range(0,len(m['indices']),3));off+=len(m['vertices'])
-    (ROOT/(stem+'.obj')).write_text('\n'.join(obj))
-    (ROOT/(stem+'.mtl')).write_text('\n'.join(f'newmtl {k}\nKd {v[0]} {v[1]} {v[2]}\nd {v[3]}\n' for k,v in MATS.items()))
+    (ROOT/(stem+'.obj')).write_text('\n'.join(obj), encoding='utf-8')
+    (ROOT/(stem+'.mtl')).write_text('\n'.join(f'newmtl {k}\nKd {v[0]} {v[1]} {v[2]}\nd {v[3]}\n' for k,v in MATS.items()), encoding='utf-8')
     dae=['<?xml version="1.0" encoding="utf-8"?>','<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1"><asset><contributor><authoring_tool>Home floorplan builder</authoring_tool></contributor><created>2026-09-19T00:00:00Z</created><modified>2026-09-19T00:00:00Z</modified><unit name="meter" meter="1"/><up_axis>Z_UP</up_axis></asset><library_effects>']
     for k,v in MATS.items():dae.append(f'<effect id="{k}-fx"><profile_COMMON><technique sid="common"><lambert><diffuse><color>{" ".join(map(str,v))}</color></diffuse></lambert></technique></profile_COMMON></effect>')
     dae+=['</library_effects><library_materials>']
@@ -56,4 +56,4 @@ def export_models(data, ROOT, stem):
         dae.append(f'<geometry id="g{i}" name="{m["name"]}"><mesh><source id="g{i}-pos"><float_array id="g{i}-arr" count="{n*3}">{vals}</float_array><technique_common><accessor source="#g{i}-arr" count="{n}" stride="3"><param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/></accessor></technique_common></source><vertices id="g{i}-v"><input semantic="POSITION" source="#g{i}-pos"/></vertices><triangles material="mat" count="{len(m["indices"])//3}"><input semantic="VERTEX" source="#g{i}-v" offset="0"/><p>{" ".join(map(str,m["indices"]))}</p></triangles></mesh></geometry>')
     dae+=['</library_geometries><library_visual_scenes><visual_scene id="Scene" name="Home floorplan">']
     for i,m in enumerate(meshes):dae.append(f'<node id="n{i}" name="{m["name"]}"><instance_geometry url="#g{i}"><bind_material><technique_common><instance_material symbol="mat" target="#{m["material"]}-mat"/></technique_common></bind_material></instance_geometry></node>')
-    dae+=['</visual_scene></library_visual_scenes><scene><instance_visual_scene url="#Scene"/></scene></COLLADA>'];(ROOT/(stem+'.dae')).write_text('\n'.join(dae))
+    dae+=['</visual_scene></library_visual_scenes><scene><instance_visual_scene url="#Scene"/></scene></COLLADA>'];(ROOT/(stem+'.dae')).write_text('\n'.join(dae), encoding='utf-8')

@@ -21,7 +21,7 @@ def package(root: Path, output: Path, source_sha: str) -> Path:
     if re.fullmatch(r"[a-f0-9]{40}", source_sha) is None:
         raise ValueError("Expected an exact source commit")
     public_site.validate(root)
-    manifest = json.loads((root / "custom_components/home_floorplan/manifest.json").read_text())
+    manifest = json.loads((root / "custom_components/home_floorplan/manifest.json").read_text(encoding="utf-8"))
     version = manifest["version"]
     if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", version) is None:
         raise ValueError("Invalid prepared Home Studio version")
@@ -32,6 +32,7 @@ def package(root: Path, output: Path, source_sha: str) -> Path:
     with zipfile.ZipFile(archive, "x", compression=zipfile.ZIP_DEFLATED) as zipped:
         for name, data in payload.items():
             entry = zipfile.ZipInfo(PREFIX + name, date_time=(1980, 1, 1, 0, 0, 0))
+            entry.create_system = 3  # Keep UNIX mode metadata identical on Windows.
             entry.compress_type = zipfile.ZIP_DEFLATED
             entry.external_attr = 0o100644 << 16
             zipped.writestr(entry, data)
@@ -42,11 +43,11 @@ def package(root: Path, output: Path, source_sha: str) -> Path:
             if zipped.read(PREFIX + name) != expected:
                 raise ValueError("Archive content mismatch")
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    archive.with_suffix(".sha256").write_text(f"{digest}  {archive.name}\n")
+    archive.with_suffix(".sha256").write_bytes(f"{digest}  {archive.name}\n".encode("utf-8"))
     metadata = {"schema": 1, "version": version, "source_sha": source_sha,
                 "archive": archive.name, "sha256": digest, "files": len(payload),
                 "scope": "public editor and compiler source with fictional examples"}
-    (output / "home-studio.version.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    (output / "home-studio.version.json").write_bytes((json.dumps(metadata, indent=2) + "\n").encode("utf-8"))
     return archive
 
 

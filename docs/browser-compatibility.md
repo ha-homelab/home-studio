@@ -14,6 +14,11 @@ recovery path when its 3D preview cannot start.
 
 ## Evidence and limits
 
+The public repository's [cross-platform acceptance](platform-acceptance.md)
+runs both browser paths on Linux, Windows, and macOS for every PR and release
+validation. Its artifacts record each tested environment; the dated local
+measurements below remain separate evidence, not results for every CI host.
+
 The package workflow includes real Chromium browser checks for drawing,
 furnishing, installation, localization, and the installed viewer. The isolated
 browser stability fixture additionally exercises a generated, fictional six-room
@@ -40,7 +45,7 @@ all 256 items.
   512 sun shadow map.
 
 These are end-to-end test-operation times, including input dispatch and frame
-waits. The software-rendered 2D gestures still took 2.1 to 2.8 seconds; passing
+waits. The Chromium 2D gestures still took 2.1 to 2.8 seconds; passing
 the regression does not make that interaction smooth. Both engines retained
 all items, used one WebGL context, and kept live resource counts at 2,077
 geometries, one texture, and four programs after each all-floor rebuild.
@@ -73,7 +78,7 @@ errors or context losses. The buffer was 870 by 730 pixels, with a 2048 by 2048
 sun shadow map. The gestures used twelve pointer steps of 16 ms each, so these
 times are not directly comparable to the Playwright runs at device scale 2.
 
-This was a single planner smoke check. It did not exercise Waterfox's full
+This earlier measurement was a single planner smoke check. It did not exercise Waterfox's full
 context-loss/lifecycle suite, the generated Home Assistant viewer, or the
 user's existing profile and configuration. It does not reproduce or establish
 the cause of the reported crash, or certify long-running Waterfox stability.
@@ -111,14 +116,17 @@ and resumed with the new size after restoration. Screenshots were captured only
 after the latency checks. Software startup still took 6.6 to 8.2 seconds in this
 fixture; this is not a claim of instant loading on CPU renderers. Timings include
 first-use work and are not steady-state frame-time percentiles or a long-running
-stability certification. The generated viewer was not tested in Waterfox.
+stability certification. These particular measurements did not include the
+generated viewer in Waterfox. The later native version suite covers both
+generated viewers and planner recovery; see [cross-platform acceptance](platform-acceptance.md).
 
 Passing a Playwright Firefox run is evidence for that bundled Firefox build,
 operating system, and graphics backend. It does not certify Waterfox. Likewise,
 Chromium with SwiftShader exercises software WebGL rather than physical GPU
 performance. Safari and mobile browsers still need their own target-browser
-acceptance runs. Waterfox evidence is limited to the separate planner smoke
-check above; broader compatibility and performance remain unverified.
+acceptance runs. Read the native Waterfox job's own version, platform, graphics
+backend, and outcome when assessing the expanded coverage. Neither these
+earlier measurements nor a hosted CI result certifies every user's environment.
 
 No exact cause of a reported Waterfox browser crash has been established by the
 code changes alone. A render timeout, shader error, context loss, browser-process
@@ -131,7 +139,18 @@ The drawing tool combines rapid 2D drag/wheel input and 3D orbit/wheel input
 into one pending animation frame, without an idle rendering loop. Moving a
 shape or item clones the project once per gesture and derives each position
 from its original coordinates; cancelling and undoing preserve the original
-project.
+project. With grid snapping enabled, repeated pointer events inside one grid
+cell do not redraw the plan. The snapped coordinates, completed edits, save
+behavior, and undo history are unchanged.
+
+Changing selection reuses the object list; reselecting the same item does not
+rebuild its inspector. A completed move refreshes the coordinates and undo
+controls without repainting geometry that is already current. The plan uses
+an opaque canvas and caches one scaled `Path2D` per furniture surface. Moving
+an item reuses its outlines; resizing or zooming replaces them. Weak references
+let discarded appearances release their outlines. Surfaces keep their global
+elevation order and fixed-width strokes, including rugs below tables and lamps
+above them.
 
 The 2D drawing buffer is capped at 4,000,000 pixels and device pixel ratio 2.
 It releases the old bitmap before applying a new orientation, avoiding an
@@ -179,7 +198,8 @@ shadow-casting lights reduce the selected face resolution.
 The main canvas drawing buffer is capped at 2,000,000 pixels and device pixel
 ratio 2, scaling below the native display resolution when necessary. When the
 reported renderer positively identifies SwiftShader, llvmpipe, softpipe,
-Lavapipe, a software rasterizer, or Microsoft Basic Render, the cap is 250,000
+Lavapipe, a software rasterizer, Microsoft Basic Render, or the exact
+`Apple Software Renderer` name, the cap is 250,000
 pixels, with the smaller point-shadow limits above and a 512 by 512 directional
 shadow map. Native and unknown renderers retain the 2,000,000-pixel cap and
 2048 by 2048 directional shadow map. HTML labels and controls retain their normal
@@ -197,12 +217,32 @@ instead of changing the compiled light count. An initial host inventory identica
 to the viewer's current inventory does not rebuild the scene.
 
 The room-light shader evaluates room transmission at most once per lit room per
-fragment and skips unlit rooms. After applying that cached transmission to each
-point light, it recalculates visibility; an exactly zero contribution skips
-shadow lookup and direct surface-reflectance calculation. Nonzero contributions
-retain the same lighting calculation. The limits do not bound the total light
-count or generated room/window shader size; large projects still need testing
-against the target GPU's limits.
+fragment and skips unlit rooms. An exactly zero cached transmission skips that
+light's distance, attenuation, shadow, and direct surface-reflectance work.
+Nonzero contributions retain the same lighting calculation.
+
+The 24-room, 72-light acceptance fixture exposed excessive software shader
+compilation from expanding a full lighting block for every fixture. Only the
+bounded shadow-casting prefix is now expanded into literal shader indices, as
+required for its shadow samplers. Consecutive unshadowed lights from the same room share a runtime range. A
+fragment outside that room skips the whole range; otherwise one shared loop
+evaluates every light in its original order, with the same room confinement
+and material response. Range ends use one preallocated integer array, and state
+updates do not change the shader layout.
+No light is dropped or merged. Total light count and generated room/window shader
+size remain unbounded by the rendering profile, so larger projects still need
+testing against the target GPU's limits.
+
+Each room also has its own signed-distance function with its original polygon
+edges. Transmission, daylight, and exterior-light calls select that function
+directly. This prevents software shader compilers from expanding a full
+room-selection branch chain at every call, while preserving the same boundary,
+distance, and doorway-spill calculations.
+For point-light transmission, an axis-aligned room bound expanded by 0.56 m
+rejects distant fragments before evaluating the polygon: the existing spill
+already reaches zero at 0.55 m. In-range and concave boundaries still use the
+exact polygon. Edge calculations retain squared distance until one final square
+root per room. Daylight and exterior boundaries keep their original tests.
 
 Home reuses the room camera fit until the selected room or viewport orientation
 changes. Pan, zoom, and resize continue to update the camera. Rounded-wall tint

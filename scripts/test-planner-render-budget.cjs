@@ -27,6 +27,26 @@ const event = (x = 0, y = 0) => ({clientX: x, clientY: y, button: 0, pointerId: 
 const scheduler = section('let canvasFrame =', 'let startupMessage =');
 
 (async () => {
+  let pathBuilds = 0;
+  class Outline {
+    constructor() { this.commands = []; pathBuilds++; }
+    moveTo(x, z) { this.commands.push(['move', x, z]); }
+    lineTo(x, z) { this.commands.push(['line', x, z]); }
+    closePath() { this.commands.push(['close']); }
+  }
+  const paths = vm.createContext({planPathCache: new WeakMap(), Path2D: Outline});
+  vm.runInContext(section('function planShapePath(', 'function renderPlan('), paths);
+  const shape = {points: [[-.5, -.5], [.5, -.5], [.25, .5]]};
+  const outline = paths.planShapePath(shape, 80, 30);
+  assert.deepEqual(outline.commands, [['move', -40, -15], ['line', 40, -15], ['line', 20, 15], ['close']]);
+  for (let i = 0; i < 100; i++) assert.equal(paths.planShapePath(shape, 80, 30), outline);
+  assert.equal(pathBuilds, 1, 'Repeated renders reuse the scaled path without resubmitting its vertices');
+  const resized = paths.planShapePath(shape, 20, 60);
+  assert.notEqual(resized, outline);
+  assert.deepEqual(resized.commands, [['move', -10, -30], ['line', 10, -30], ['line', 5, 30], ['close']]);
+  assert.equal(paths.planShapePath(shape, 20, 60), resized);
+  assert.notEqual(paths.planShapePath(shape, 80, 30), outline, 'Only the latest size is retained, not an unbounded zoom history');
+  assert.notEqual(paths.planShapePath({points: shape.points}, 80, 30), outline, 'A new appearance owns a separate outline');
   const THREE = await import('data:text/javascript;base64,' + fs.readFileSync(path.join(root, 'vendor/three.module.min.js')).toString('base64'));
   const model = await import('../planner/model.js');
   const project = model.blankProject(), f = project.floors[0];
@@ -72,11 +92,12 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   const clock = frames(c);
   vm.runInContext(scheduler + section('// On-demand 3D rendering.', '// Project actions and keyboard navigation.') + section('let firstResize =', 'window.planner ='), c);
   c.renderPreview(); assert.equal(constructions, 0, 'Plan-only use creates no WebGL context');
-  for (const label of ['SwiftShader', 'llvmpipe', 'softpipe', 'lavapipe', 'Microsoft Basic Render Driver']) {
+  for (const label of ['SwiftShader', 'llvmpipe', 'softpipe', 'lavapipe', 'Microsoft Basic Render Driver', 'Apple Software Renderer']) {
     assert.equal(c.previewRenderProfile({getExtension: () => ({UNMASKED_RENDERER_WEBGL: 1}), getParameter: () => label}).pixels, 250000);
   }
   for (const gl of [null, {getExtension: () => null}, {getExtension() { throw Error('blocked'); }},
-    {getExtension: () => ({UNMASKED_RENDERER_WEBGL: 1}), getParameter: () => 'Apple M1'}]) {
+    ...['Apple M1', 'Apple M1, or similar', 'Apple M2', 'Apple Software Renderer, or similar'].map(label =>
+      ({getExtension: () => ({UNMASKED_RENDERER_WEBGL: 1}), getParameter: () => label}))]) {
     assert.equal(c.previewRenderProfile(gl).pixels, 2000000);
     assert.equal(c.previewRenderProfile(gl).shadowSize, 2048);
   }
@@ -132,20 +153,30 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   // Real pointer handlers: exact endpoint math, one clone per gesture, and undo/cancel.
   for (const kind of ['rooms', 'walls', 'items', 'openings']) {
     const original = model.clone(project), snapshot = JSON.stringify(original), plan = surface();
-    let clones = 0, saves = 0; const history = [];
+    let clones = 0, saves = 0, uiDraws = 0, inspectorDraws = 0, planDraws = 0, inspectorObject, paintedProject, paintedSelection;
+    const history = [], buttons = ['rooms', 'walls', 'items', 'openings'].map(objectKind => ({
+      dataset: {objectKind, objectId: original.floors[0][objectKind][0].id},
+      attributes: {}, setAttribute(name, value) { this.attributes[name] = value; },
+    }));
+    const controls = {'object-list': {children: buttons}, undo: {disabled: true}, redo: {disabled: true}, 'pointer-position': {textContent: ''}};
     const p = vm.createContext({project: original, activeFloorId: f.id, selection: null, tool: 'select', view: 'plan', drag: null,
       planCanvas: plan, spaceHeld: false, previewDirty: false, map: {x: 0, y: 0},
       clone(value) { clones++; return model.clone(value); }, round: model.round, distance: model.distance,
       snap: value => value, localPoint: e => [e.clientX, e.clientY], toWorld: point => point,
       hitTest: () => ({kind, id: original.floors[0][kind][0].id}),
-      floor: () => p.project.floors[0], selected: () => p.project.floors[0][p.selection.kind].find(o => o.id === p.selection.id),
-      $: () => ({textContent: ''}), renderUI() {}, renderPlan() { p.cancelCanvasRender(); },
+      floor: () => p.project.floors[0], selected: () => p.selection && p.project.floors[0][p.selection.kind].find(o => o.id === p.selection.id),
+      $: id => controls[id], renderUI() { uiDraws++; p.renderInspector(); },
+      renderInspector() { inspectorDraws++; inspectorObject = model.clone(p.selected()); },
+      renderPlan() { p.cancelCanvasRender(); planDraws++; paintedProject = model.clone(p.project); paintedSelection = model.clone(p.selection); },
       renderPreview() {}, status() {}, save() { saves++; }, t: x => x,
       validateProject: model.validateProject, serializeProject: JSON.stringify, historyPush: value => history.push(value),
       document: {hidden: false}, zoomPlan() {}, history, future: [],
     });
-    const gestureClock = frames(p); vm.runInContext(scheduler + section("planCanvas.addEventListener('pointerdown'", '// On-demand 3D rendering.'), p);
+    const gestureClock = frames(p); vm.runInContext(scheduler + section('function setSelection(', 'function field(') + section("planCanvas.addEventListener('pointerdown'", '// On-demand 3D rendering.'), p);
     plan.events.pointerdown(event(1, 1));
+    assert.equal(uiDraws, 0, 'Selecting an existing object retains the floor and object list nodes');
+    assert.equal(inspectorDraws, 1, 'A changed selection updates its inspector once');
+    assert.deepEqual(buttons.map(b => b.attributes['aria-pressed']), buttons.map(b => String(b.dataset.objectKind === kind)), 'The retained list marks only the selected object');
     for (let i = 1; i <= 100; i++) plan.events.pointermove(event(1 + i / 100, 1));
     assert.equal(clones, 1, kind + ' clones the project only once per gesture');
     assert.equal(JSON.stringify(original), snapshot, 'Original snapshot is immutable during drag');
@@ -156,9 +187,31 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     if (kind === 'openings') assert.equal(moved.offset_m, base.offset_m + 1);
     assert.equal(gestureClock.pending.size, 1);
     plan.events.pointerup(event(2, 1)); assert.equal(saves, 1, kind + ' movement commits once'); assert.equal(history[0], original);
+    assert.equal(uiDraws, 0, 'A move does not rebuild unchanged floor or object lists');
+    assert.equal(inspectorDraws, 2); assert.deepEqual(inspectorObject, model.clone(p.selected()), 'The committed coordinates reach the inspector immediately');
+    assert.equal(controls.undo.disabled, false); assert.equal(controls.redo.disabled, true);
+    assert.equal(planDraws, 0, 'Pointerup preserves the queued final movement paint instead of drawing synchronously');
+    assert.equal(gestureClock.pending.size, 1); gestureClock.flush();
+    assert.deepEqual(paintedProject, model.clone(p.project), 'A movement paint queued across pointerup uses the committed project');
+    assert.deepEqual(paintedSelection, model.clone(p.selection), 'The final paint keeps the selected outline');
+    const drawsBeforeClick = planDraws, inspectorBeforeClick = inspectorDraws;
+    plan.events.pointerdown(event(1, 1)); plan.events.pointerup(event(1, 1)); gestureClock.flush();
+    assert.equal(planDraws, drawsBeforeClick, 'Clicking the current selection needs no new paint');
+    assert.equal(inspectorDraws, inspectorBeforeClick, 'Clicking the current selection retains the inspector');
+    p.setSelection(null); gestureClock.flush();
+    assert(buttons.every(b => b.attributes['aria-pressed'] === 'false'), 'Clearing selection clears the retained list markers');
+    assert.equal(inspectorObject, null); assert.equal(paintedSelection, null, 'Clearing selection removes its painted outline');
+    p.setSelection({kind, id: original.floors[0][kind][0].id}); gestureClock.flush();
     const committed = p.project; plan.events.pointerdown(event(1, 1)); plan.events.pointermove(event(2, 1));
     plan.events.pointercancel(event(2, 1)); assert.equal(p.project, committed); assert.equal(saves, 1, 'Cancel does not save or add undo history');
     assert.equal(history.length, 1);
+    assert.equal(gestureClock.pending.size, 0, 'Cancellation replaces a pending moved paint with the restored project');
+    assert.deepEqual(paintedProject, model.clone(committed)); assert.deepEqual(inspectorObject, model.clone(p.selected()));
+    plan.events.pointerdown(event(1, 1)); plan.events.pointermove(event(2, 1)); gestureClock.flush();
+    assert.notDeepEqual(paintedProject, model.clone(committed), 'The cancel fixture has already displayed its moved geometry');
+    plan.events.pointercancel(event(2, 1));
+    assert.deepEqual(paintedProject, model.clone(committed), 'Cancellation also repaints after an intermediate movement was displayed');
+    assert.deepEqual(paintedSelection, model.clone(p.selection)); assert.equal(saves, 1); assert.equal(history.length, 1);
     vm.runInContext(section('function undo(', 'function renderUI('), p);
     p.undo(); assert.equal(p.project, original, 'Undo restores the exact original snapshot');
     p.undo(true); assert.equal(p.project, committed, 'Redo restores the committed movement');
@@ -167,7 +220,38 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
       plan.events.pointerdown(event(1, 1)); plan.events.pointermove(event(301, 1)); plan.events.pointerup(event(301, 1));
       assert.equal(p.project, committed, 'Invalid movement rolls back without mutating the committed project');
       assert.equal(saves, savedBeforeInvalid);
+      assert.deepEqual(paintedProject, model.clone(committed), 'Invalid movement paints the restored geometry');
+      assert.deepEqual(inspectorObject, model.clone(p.selected()), 'Invalid movement retains the original inspector coordinates');
     }
+    // Real snap spacing and separated animation frames: most pointer events in
+    // a half-metre gesture stay in the same cell and must not repaint the floor.
+    let snappedDraws = 0;
+    p.snap = value => Math.round(value * 4) / 4;
+    p.renderPlan = () => { p.cancelCanvasRender(); snappedDraws++; };
+    p.renderPreview = () => { throw Error('A hidden preview must not rebuild during a 2D drag'); };
+    p.previewDirty = false;
+    const beforeSnapped = p.project, savesBeforeSnapped = saves, historyBeforeSnapped = history.length;
+    plan.events.pointerdown(event(1, 1));
+    gestureClock.flush();
+    const drawsBeforeMoves = snappedDraws;
+    for (let step = 1; step <= 12; step++) {
+      plan.events.pointermove(event(1 + step / 24, 1));
+      gestureClock.flush();
+    }
+    assert.equal(snappedDraws - drawsBeforeMoves, 2, kind + ' repaints only the two changed snap positions');
+    plan.events.pointerup(event(1.5, 1));
+    gestureClock.flush();
+    assert.equal(snappedDraws - drawsBeforeMoves, 2, 'Pointerup does not redraw an already displayed endpoint');
+    assert.equal(saves, savesBeforeSnapped + 1);
+    assert.equal(history.length, historyBeforeSnapped + 1);
+    assert.equal(history.at(-1), beforeSnapped, 'Snapped drag retains its exact undo snapshot');
+    assert.equal(p.previewDirty, true, 'Committed 2D movement invalidates the next visible preview');
+    const snapped = p.project.floors[0][kind][0], previous = beforeSnapped.floors[0][kind][0];
+    if (kind === 'rooms') assert.equal(snapped.polygon[0][0], previous.polygon[0][0] + .5);
+    if (kind === 'walls') assert.equal(snapped.start[0], previous.start[0] + .5);
+    if (kind === 'items') assert.equal(snapped.position_m.x, previous.position_m.x + .5);
+    if (kind === 'openings') assert.equal(snapped.offset_m, previous.offset_m + .5);
+    p.snap = value => value;
     if (kind === 'items') {
       p.nextId = model.nextId; p.setTool = value => { p.tool = value; }; p.renderInspector = () => {};
       vm.runInContext(section('function transact(', 'function replaceProject('), p);
