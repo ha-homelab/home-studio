@@ -98,6 +98,15 @@ renderer. Its disposable profile also sets `webgl.sanitize-unmasked-renderer=fal
 so Firefox reports the backend's actual name: otherwise it can hide an Apple
 software renderer behind "Apple M1, or similar". This changes the reported name,
 not the selected graphics backend. See the [Firefox implementation](https://github.com/mozilla-firefox/firefox/blob/FIREFOX_157_0_RELEASE/dom/canvas/ClientWebGLContext.cpp#L2513).
+The macOS Firefox job explicitly selects `FIREFOX_WEBGL_BACKEND=angle`, adding
+`webgl.disable-angle=false` to its temporary profile. Firefox packages
+[Metal ANGLE on macOS](https://bugzilla.mozilla.org/show_bug.cgi?id=2055532#c5).
+This avoids the hosted VM's native CGL fallback, `Apple Software Renderer`,
+which exceeded first-render deadlines even with the smaller software-rendering
+budget. The test requires the reported renderer to confirm `ANGLE Metal Renderer`;
+silently falling back to CGL cannot pass. This configured Metal path does not
+establish that the VM's default CGL path works. Local tests retain the default
+backend unless the variable is explicitly set.
 All shader, context, and rendering assertions still apply. This is
 coverage of that configured VM backend, not certification of Firefox's default
 graphics settings. Waterfox's isolated profile also permits software WebGL and
@@ -131,6 +140,9 @@ normal environment-variable syntax):
 - `HOME_STUDIO_DIAGNOSTICS_DIR=acceptance-artifacts/local` saves diagnostics.
 - `PYTHON` can point to the exact Python executable used by the compiler.
 - `PYTHONUTF8=1` matches CI's explicit UTF-8 mode.
+- `FIREFOX_WEBGL_BACKEND=angle` selects the CI macOS Firefox Metal path; omit
+  it or use `default` to test Firefox's default backend. Both retain all scene,
+  interaction, timing, and context-recovery assertions.
 
 The default generated viewer has six rooms and three lights per room. Only
 use synthetic projects when publishing screenshots or diagnostic files.

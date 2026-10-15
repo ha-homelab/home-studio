@@ -54,6 +54,7 @@ jobs:
       PLANNER_STABILITY_ENGINES: ${{ matrix.engine }}
       BROWSER_STABILITY_HEADED: '1'
       PLANNER_STABILITY_HEADED: '1'
+      FIREFOX_WEBGL_BACKEND: ${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && 'angle' || 'default' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

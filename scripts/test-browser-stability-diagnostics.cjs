@@ -98,6 +98,35 @@ test('launch failures persist and do not prevent the next selected engine from r
   assert.equal(read(diagnostics, 'summary.json').browsers.length, 2);
 });
 
+test('the Metal profile is explicit and rejects an unconfirmed macOS backend', async () => {
+  const previous = process.env.FIREFOX_WEBGL_BACKEND;
+  try {
+    process.env.FIREFOX_WEBGL_BACKEND = 'angle';
+    const launch = browserLaunchOptions('firefox', false);
+    assert.equal(launch.firefoxUserPrefs['webgl.disable-angle'], false);
+    assert.equal(launch.firefoxUserPrefs['webgl.sanitize-unmasked-renderer'], false);
+    if (process.platform === 'darwin') {
+      for (const renderer of ['Apple Software Renderer', 'ANGLE Metal Renderer: Fixture GPU']) {
+        const fake = fakeBrowser();
+        const diagnostics = suite('metal-backend', {firefox: {launch: async () => fake.browser}});
+        const run = diagnostics.run('firefox', {...options, launch}, async ({record}) => {
+          record.gpu = {unmaskedRenderer: renderer};
+        });
+        if (renderer.startsWith('ANGLE')) await run;
+        else await assert.rejects(run, /must be confirmed by the actual renderer/);
+        assert.deepEqual(read(diagnostics).launch.firefoxUserPrefs, launch.firefoxUserPrefs);
+      }
+    }
+    process.env.FIREFOX_WEBGL_BACKEND = 'default';
+    assert.equal(browserLaunchOptions('firefox', false).firefoxUserPrefs['webgl.disable-angle'], undefined);
+    process.env.FIREFOX_WEBGL_BACKEND = 'typo';
+    assert.throws(() => browserLaunchOptions('firefox', false), /must be default or angle/);
+  } finally {
+    if (previous === undefined) delete process.env.FIREFOX_WEBGL_BACKEND;
+    else process.env.FIREFOX_WEBGL_BACKEND = previous;
+  }
+});
+
 test('the browser watchdog fails a stalled test and saves evidence before closing', async () => {
   const fake = fakeBrowser();
   const diagnostics = suite('watchdog', {firefox: {launch: async () => fake.browser}});

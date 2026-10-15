@@ -26,6 +26,8 @@ function browserLaunchOptions(engine, headless) {
       args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']};
   }
   assert.equal(engine, 'firefox', 'A supported browser engine is required');
+  const backend = process.env.FIREFOX_WEBGL_BACKEND || 'default';
+  assert(['default', 'angle'].includes(backend), 'FIREFOX_WEBGL_BACKEND must be default or angle');
   // GPU-less Windows runners otherwise block WebGL2 before creating a context.
   // This allows the real software backend; all rendering assertions still run.
   // https://bugzilla.mozilla.org/show_bug.cgi?id=1970486
@@ -35,6 +37,9 @@ function browserLaunchOptions(engine, headless) {
     // to "Apple M1, or similar". Expose the real backend in this test profile.
     // This preference changes the reported string, not the selected GL backend.
     'webgl.sanitize-unmasked-renderer': false,
+    // Opt-in for macOS virtual machines whose native CGL implementation falls
+    // back to Apple Software Renderer. Verify the selected backend below.
+    ...(backend === 'angle' ? {'webgl.disable-angle': false} : {}),
   }};
 }
 
@@ -193,6 +198,10 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
           save();
         });
         await execute({browser, context, page, record, check, save});
+        if (process.platform === 'darwin' && options.launch.firefoxUserPrefs?.['webgl.disable-angle'] === false) {
+          check(/ANGLE Metal Renderer/i.test(record.gpu?.unmaskedRenderer || record.gpu?.renderer || ''),
+            'The requested Firefox Metal ANGLE backend must be confirmed by the actual renderer');
+        }
       })()]);
       record.status = options.reportOnly ? 'observation' : 'passed';
     } catch (error) {
