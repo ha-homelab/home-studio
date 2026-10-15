@@ -13,6 +13,8 @@ const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions
 const root = path.resolve(process.env.PLANNER_STABILITY_SOURCE_ROOT || path.join(__dirname, '..'));
 const reportOnly = process.env.PLANNER_STABILITY_REPORT_ONLY === '1';
 const fixtureOnly = process.env.HOME_STUDIO_FIXTURE_ONLY === '1';
+const restoreLayout = process.env.PLANNER_STABILITY_RESTORE_LAYOUT || 'immediate';
+assert(['immediate','settled'].includes(restoreLayout), 'PLANNER_STABILITY_RESTORE_LAYOUT must be immediate or settled');
 const diagnostics = fixtureOnly ? null : createDiagnostics('planner', 'PLANNER_STABILITY', root);
 let cycles, catalog, editor, sourceHash, project;
 
@@ -92,7 +94,7 @@ const server=http.createServer((request,response)=>{
   if(!fs.existsSync(file) || !fs.statSync(file).isFile()){response.writeHead(404).end();return;}
   let content=route==='/planner/editor.js'?editor:fs.readFileSync(file);
   if(fixtureOnly && route==='/planner/index.html')content=content.toString().replace('<head>',`<head><script>(${instrument.toString()})();</script>`);
-  if(route==='/planner/editor.js')content+=`\nwindow.__plannerScene=()=>renderer?({memory:{...renderer.info.memory},programs:renderer.info.programs.length,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,buffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),shadowMap:[previewSun.shadow.mapSize.x,previewSun.shadow.mapSize.y],orbit:[orbit.yaw,orbit.pitch,orbit.radius]}):null;`;
+  if(route==='/planner/editor.js')content+=`\nwindow.__plannerScene=()=>renderer?({layout:{...size},viewport:[innerWidth,innerHeight],memory:{...renderer.info.memory},programs:renderer.info.programs.length,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,buffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),shadowMap:[previewSun.shadow.mapSize.x,previewSun.shadow.mapSize.y],orbit:[orbit.yaw,orbit.pitch,orbit.radius]}):null;`;
   response.writeHead(200,{'Content-Type':{'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json'}[extension]||'application/octet-stream','Cache-Control':'no-store'}).end(content);
 });
 
@@ -221,7 +223,7 @@ async function run(engine,origin) {
     if(!reportOnly) {
       await input.tap(page.locator('#preview-tab'));await frames();
       const saved=await getProject(),before=await snapshot();
-      recovery=record.recovery={savedItems:saved.floors.flatMap(f=>f.items).length,steps:[]};
+      recovery=record.recovery={savedItems:saved.floors.flatMap(f=>f.items).length,layoutMode:restoreLayout,steps:[]};
       const checkpoint=async phase=>{
         await page.evaluate(value=>{window.__plannerRecoveryPhase=value;},phase);
         recovery.steps.push({phase,snapshot:await snapshot()});save();
@@ -236,7 +238,20 @@ async function run(engine,origin) {
       const [download]=await Promise.all([page.waitForEvent('download'),input.tap(page.locator('#export-project'))]);
       const exported=JSON.parse(fs.readFileSync(await download.path(),'utf8'));assert.deepEqual(exported,await getProject(),'JSON export remains intact while the graphics context is lost');
       await checkpoint('resize-while-lost');
-      await page.setViewportSize(profile.emulated ? {width:profile.context.viewport.width-40,height:profile.context.viewport.height-80} : {width:1280,height:900});await checkpoint('request-restore');await page.evaluate(()=>window.__restorePlanner());
+      await page.setViewportSize(profile.emulated ? {width:profile.context.viewport.width-40,height:profile.context.viewport.height-80} : {width:1280,height:900});
+      // Keep the immediate resize/restore race in the normal acceptance run.
+      // The explicit settled variant isolates pending ResizeObserver work.
+      if(restoreLayout==='settled') {
+        await frames();
+        const layout=await page.evaluate(()=>{
+          const box=document.querySelector('.canvas-shell').getBoundingClientRect();
+          return {actual:window.__plannerScene().layout,expected:{width:box.width,height:box.height},viewport:[innerWidth,innerHeight]};
+        });
+        recovery.settledLayout=layout;save();
+        check(['width','height'].every(key=>Math.abs(layout.actual[key]-layout.expected[key])<1),'Settled recovery uses the actual resized canvas layout');
+      }
+      check((await snapshot()).preview.renderCount===before.preview.renderCount,'Resizing while the graphics context is lost must not draw');
+      await checkpoint('request-restore');await page.evaluate(()=>window.__restorePlanner());
       await input.tap(page.locator('#preview-tab'));await page.waitForFunction(count=>window.planner.getPreviewMetadata().renderCount>count,before.preview.renderCount);await frames();
       recovery.after=await snapshot();save();
       check(recovery.after.stats.contextLosses===1,'Restoration must not lose the graphics context again');
