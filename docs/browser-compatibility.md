@@ -45,7 +45,7 @@ all 256 items.
   512 sun shadow map.
 
 These are end-to-end test-operation times, including input dispatch and frame
-waits. The software-rendered 2D gestures still took 2.1 to 2.8 seconds; passing
+waits. The Chromium 2D gestures still took 2.1 to 2.8 seconds; passing
 the regression does not make that interaction smooth. Both engines retained
 all items, used one WebGL context, and kept live resource counts at 2,077
 geometries, one texture, and four programs after each all-floor rebuild.
