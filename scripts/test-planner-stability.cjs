@@ -8,11 +8,12 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const {createDiagnostics, positiveInteger, selectedEngines} = require('./browser-stability-diagnostics.cjs');
+const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions} = require('./browser-stability-diagnostics.cjs');
 
 const root = path.resolve(process.env.PLANNER_STABILITY_SOURCE_ROOT || path.join(__dirname, '..'));
 const reportOnly = process.env.PLANNER_STABILITY_REPORT_ONLY === '1';
-const diagnostics = createDiagnostics('planner', 'PLANNER_STABILITY', root);
+const fixtureOnly = process.env.HOME_STUDIO_FIXTURE_ONLY === '1';
+const diagnostics = fixtureOnly ? null : createDiagnostics('planner', 'PLANNER_STABILITY', root);
 let cycles, catalog, editor, sourceHash, project;
 
 function fixture() {
@@ -70,11 +71,15 @@ function instrument() {
 
 const server=http.createServer((request,response)=>{
   let route=new URL(request.url,'http://localhost').pathname;
+  // Headed Chromium requests this implicitly even without an icon link.
+  if(route==='/favicon.ico'){response.writeHead(204,{'Cache-Control':'no-store'}).end();return;}
+  if(route==='/fixture.json'){response.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify(project));return;}
   if(route==='/planner/')route='/planner/index.html';
   if(!/^\/(planner|vendor)\/[\w./-]+$/.test(route) || route.includes('..')){response.writeHead(404).end();return;}
   const file=path.join(root,route),extension=path.extname(file);
   if(!fs.existsSync(file) || !fs.statSync(file).isFile()){response.writeHead(404).end();return;}
   let content=route==='/planner/editor.js'?editor:fs.readFileSync(file);
+  if(fixtureOnly && route==='/planner/index.html')content=content.toString().replace('<head>',`<head><script>(${instrument.toString()})();</script>`);
   if(route==='/planner/editor.js')content+=`\nwindow.__plannerScene=()=>renderer?({memory:{...renderer.info.memory},programs:renderer.info.programs.length,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,buffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),shadowMap:[previewSun.shadow.mapSize.x,previewSun.shadow.mapSize.y],orbit:[orbit.yaw,orbit.pitch,orbit.radius]}):null;`;
   response.writeHead(200,{'Content-Type':{'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json'}[extension]||'application/octet-stream','Cache-Control':'no-store'}).end(content);
 });
@@ -83,9 +88,7 @@ async function run(engine,origin) {
   return diagnostics.run(engine, {
     reportOnly, deadlineMs: 180000, sourceHash,
     fixture: {floors: 2, rooms: 16, catalogItems: 256},
-    launch: {headless: process.env.PLANNER_STABILITY_HEADED !== '1',
-      ...(engine === 'chromium' ? {executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
-        args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']} : {})},
+    launch: browserLaunchOptions(engine, process.env.PLANNER_STABILITY_HEADED !== '1'),
     context: {viewport: {width: 1440, height: 1000}, deviceScaleFactor: 2, locale: 'en-US'},
     instrument,
   }, async ({browser, page, record, check, save}) => {
@@ -135,23 +138,30 @@ async function run(engine,origin) {
     assert.deepEqual(await getProject(),beforeCancel,'Cancelling a furniture drag restores the complete original project');
     const initial=record.initial={shellLoadMs,importMs,roomDrawMs,wallDrawMs,planBurst};save();console.log(`${engine}: ${JSON.stringify(initial)}`);
     for(let cycle=0;cycle<cycles;cycle++) {
+      const sample={cycle};samples.push(sample);save();
       const item=(await getProject()).floors[0].items[0],before=[item.position_m.x,item.position_m.z];
       const itemDragMs=await dragWorld(before,[before[0]+.5,before[1]]);
+      sample.itemDragMs=itemDragMs;save();
       const moved=(await getProject()).floors[0].items[0];assert.equal(moved.position_m.x,before[0]+.5,'Pointer dragging moves the intended catalog furniture');
       const previewStart=Date.now();await page.locator('#preview-tab').click();await page.waitForFunction(()=>window.planner.getPreviewMetadata().items>0);await frames();
       const previewLoadMs=Date.now()-previewStart;
+      sample.previewLoadMs=previewLoadMs;save();
       let allFloorsMs=null;
       if(cycle===0){const allFloorsStart=Date.now();await page.locator('#all-floors').check();await frames();allFloorsMs=Date.now()-allFloorsStart;}
+      sample.allFloorsMs=allFloorsMs;save();
       const preOrbit=await snapshot(),box=await page.locator('#preview-canvas').boundingBox(),orbitStart=Date.now();
       await page.mouse.move(box.x+box.width*.45,box.y+box.height*.45);await page.mouse.down();
       await page.mouse.move(box.x+box.width*.6,box.y+box.height*.55,{steps:12});await page.mouse.up();await frames();
       const orbitMs=Date.now()-orbitStart,afterOrbit=await snapshot();
+      sample.orbitMs=orbitMs;save();
       assert.notDeepEqual(afterOrbit.scene.orbit,preOrbit.scene.orbit,'Actual pointer input changes the preview camera');
       check(afterOrbit.stats.canvasResizes===preOrbit.stats.canvasResizes,'Orbit does not reallocate the canvas drawing buffer');
-      const previewBurst=await burst('preview-canvas');check(previewBurst.sync<=1&&previewBurst.total>0&&previewBurst.total<=2,'Preview wheel bursts coalesce into one frame');
+      const previewBurst=await burst('preview-canvas');sample.previewBurst=previewBurst;save();
+      check(previewBurst.sync<=1&&previewBurst.total>0&&previewBurst.total<=2,'Preview wheel bursts coalesce into one frame');
       const current=await snapshot();
       record.gpu=current.stats.gpu;
       record.lastSnapshot=current;
+      Object.assign(sample,current);
       save();
       check(current.stats.contexts===1,'Repeated edit and preview uses one WebGL context');
       check(current.stats.contextLosses===0,'Editing and preview do not unexpectedly lose the graphics context');
@@ -162,9 +172,7 @@ async function run(engine,origin) {
       check(current.scene.shadowMap.every(size=>size===(software?512:2048)),'Preview shadow map matches the graphics profile');
       if(cycle>0)assert.deepEqual(current.scene.memory,samples[0].scene.memory,'Editing and rebuilding does not accumulate GPU resources');
       const idle=current.preview.renderCount;await page.waitForTimeout(250);check((await snapshot()).preview.renderCount===idle,'An idle preview does not render continuously');
-      check(itemDragMs<10000&&previewLoadMs<30000&&orbitMs<10000,'Planner editing and preview gestures remain responsive');
-      samples.push({cycle,itemDragMs,previewLoadMs,allFloorsMs,orbitMs,previewBurst,...current});
-      save();
+      check(itemDragMs<10000&&previewLoadMs<30000&&orbitMs<10000,`Planner editing and preview gestures remain responsive (item drag ${itemDragMs} ms, preview ${previewLoadMs} ms, orbit ${orbitMs} ms)`);
       console.log(`${engine}: cycle ${cycle+1}, item drag ${itemDragMs} ms, preview ${previewLoadMs} ms, orbit ${orbitMs} ms`);
       if(cycle===cycles-1&&process.env.PLANNER_STABILITY_SCREENSHOT_DIR){fs.mkdirSync(process.env.PLANNER_STABILITY_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.PLANNER_STABILITY_SCREENSHOT_DIR,`${engine}.png`)});}
       await page.locator('#plan-tab').click();await frames();
@@ -200,7 +208,7 @@ async function run(engine,origin) {
 
 (async()=>{
   const engines=selectedEngines(process.env.PLANNER_STABILITY_ENGINES);
-  diagnostics.configure(engines,reportOnly);
+  diagnostics?.configure(engines,reportOnly);
   cycles=positiveInteger('PLANNER_STABILITY_CYCLES',3,10);
   catalog=JSON.parse(fs.readFileSync(path.join(root,'planner/catalog.json')));
   editor=fs.readFileSync(path.join(root,'planner/editor.js'),'utf8');
@@ -208,6 +216,11 @@ async function run(engine,origin) {
   project=fixture();
   try {
     await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
-    await diagnostics.runAll(engines,engine=>run(engine,`http://127.0.0.1:${server.address().port}`));
+    if(fixtureOnly) {
+      console.log(JSON.stringify({fixtureServer:true,origin:`http://127.0.0.1:${server.address().port}`,sourceHash}));
+      await new Promise(resolve=>{process.once('SIGTERM',resolve);process.once('SIGINT',resolve);});
+    } else {
+      await diagnostics.runAll(engines,engine=>run(engine,`http://127.0.0.1:${server.address().port}`));
+    }
   } finally {await new Promise(resolve=>server.close(resolve));}
-})().then(()=>diagnostics.finish(),error=>{diagnostics.finish(error);console.error(error);process.exitCode=1;});
+})().then(()=>diagnostics?.finish(),error=>{diagnostics?.finish(error);console.error(error);process.exitCode=1;});

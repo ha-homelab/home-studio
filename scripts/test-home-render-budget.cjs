@@ -56,7 +56,7 @@ const root = path.resolve(__dirname, '..');
   assert(shader.fragmentShader.includes(lightChunk.slice(0, pointStart)), 'Lighting initialization is unchanged');
   assert(shader.fragmentShader.includes(lightChunk.slice(pointEnd)), 'Spot, directional, area and indirect lighting remain byte-identical');
   assert.doesNotMatch(guardedPoints, /homeRoomTransmission\(/, 'Point-light slots only index the cache');
-  assert(shader.fragmentShader.indexOf('homeRoomTransmissions[1] = homeLitRooms[0] != 0 ? homeRoomTransmission(1) : 0.0;') < guardedStart,
+  assert(shader.fragmentShader.indexOf('homeRoomTransmissions[1] = homeLitRooms[0] != 0 ? homeRoomTransmission(homeRoomDistance1()) : 0.0;') < guardedStart,
     'Literal room transmission is initialized once before the point-light loop');
 
   // Compare room uniform order to the exact comparator shipped with Three.
@@ -107,8 +107,10 @@ const root = path.resolve(__dirname, '..');
   lighting.configurePointShadows(fewLights, {maxTextures: 8, maxTextureSize: 4096});
   assert(fewLights.every(light => light.castShadow), 'Small scenes retain every point shadow');
   lighting.configurePointShadows(lights, {maxTextures: 16, maxTextureSize: 4096});
-  const rooms = Array.from({length: 24}, (_, i) => ({id: 'room-' + i, polygon: [[0, 0], [1, 0], [0, 1]]}));
-  const orderedLighting = lighting.createRoomLighting(THREE, rooms, lights.length, []);
+  const rooms = Array.from({length: 24}, (_, i) => ({id: 'room-' + i, exterior: i === 3,
+    polygon: [[i * 2, 0], [i * 2 + 1, 0], [i * 2, 1]]}));
+  const daylightWindows = [5, 20].map(i => ({room: rooms[i].id, a: rooms[i].polygon[0], b: rooms[i].polygon[1]}));
+  const orderedLighting = lighting.createRoomLighting(THREE, rooms, lights.length, daylightWindows);
   const orderedMaterial = new THREE.MeshStandardMaterial();
   orderedLighting.attach({traverse: visit => visit({material: orderedMaterial, userData: {}})}, true);
   const orderedShader = {uniforms: {}, vertexShader: THREE.ShaderLib.standard.vertexShader, fragmentShader: THREE.ShaderLib.standard.fragmentShader};
@@ -141,6 +143,29 @@ const root = path.resolve(__dirname, '..');
     'Only rooms with visible contributing lights enable transmission calculations');
   const cacheAssignments = orderedShader.fragmentShader.match(/homeRoomTransmissions\[\d+\] = homeLitRooms/g) || [];
   assert.equal(cacheAssignments.length, rooms.length, 'Cache size and work grow with rooms, not the light count');
+  const distanceFunctions = [...orderedShader.fragmentShader.matchAll(/float homeRoomDistance(\d+)\(\) \{([\s\S]*?)\n  \}/g)];
+  assert.equal(distanceFunctions.length, rooms.length, 'Each room has one branch-free distance function');
+  assert.doesNotMatch(orderedShader.fragmentShader, /homeRoomDistance\(|zone ==/,
+    'No call can inline a branch chain containing every other room polygon');
+  for (const [index, match] of distanceFunctions.entries()) {
+    assert.equal(Number(match[1]), index + 1);
+    const edges = [...match[2].matchAll(/homeRoomEdge\(p, vec2\(([^)]+)\), vec2\(([^)]+)\), distanceToRoom, inside\);/g)]
+      .map(edge => [edge[1].split(',').map(Number), edge[2].split(',').map(Number)]);
+    const polygon = rooms[index].polygon;
+    assert.deepEqual(edges, polygon.map((point, i) => [point, polygon[(i + 1) % polygon.length]]),
+      'Each specialized function keeps its exact room edges, winding and closing edge');
+    assert.match(match[2], /vec2 p = homeWorldPosition\.xz;/);
+    assert.match(match[2], /float distanceToRoom = 10000\.0;\s+bool inside = false;/);
+    assert.match(match[2], /return inside \? -distanceToRoom : distanceToRoom;/);
+    assert(orderedShader.fragmentShader.includes(`homeRoomTransmissions[${index + 1}] = homeLitRooms[${index}] != 0 ? homeRoomTransmission(homeRoomDistance${index + 1}()) : 0.0;`),
+      'Every room transmission uses only its corresponding polygon');
+  }
+  const exteriorRooms = [...orderedShader.fragmentShader.matchAll(/exterior = max\(exterior, 1\.0-smoothstep\(0\.0,0\.04,homeRoomDistance(\d+)\(\)\)\);/g)]
+    .map(match => Number(match[1]));
+  assert.deepEqual(exteriorRooms, [4], 'Exterior lighting retains the correct specialized room');
+  const windowRooms = [...orderedShader.fragmentShader.matchAll(/if \(homeRoomDistance(\d+)\(\) <= 0\.015\)/g)]
+    .map(match => Number(match[1]));
+  assert.deepEqual(windowRooms, [6, 21], 'Window spill retains each opening\'s own room');
 
   let allocations = 0;
   class TrackedVector extends THREE.Vector3 { constructor(...args) { super(...args); allocations++; } }

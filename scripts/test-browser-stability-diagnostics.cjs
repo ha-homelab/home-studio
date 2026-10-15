@@ -4,8 +4,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {EventEmitter} = require('node:events');
+const vm = require('node:vm');
 const {test, after} = require('node:test');
-const {createDiagnostics, positiveInteger, selectedEngines} = require('./browser-stability-diagnostics.cjs');
+const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions} = require('./browser-stability-diagnostics.cjs');
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'home-studio-diagnostics-unit-'));
 const previousDirectory = process.env.STABILITY_UNIT_DIAGNOSTICS_DIR;
@@ -44,6 +45,26 @@ test('invalid engines and bounded fixture values cannot produce an empty green r
   }
   assert.throws(() => positiveInteger('STABILITY_UNIT_UNSET', 0, 24));
   assert.throws(() => positiveInteger('STABILITY_UNIT_UNSET', 25, 24));
+});
+
+test('Firefox software WebGL2 preferences reach the browser and its diagnostic receipt', async () => {
+  const fake = fakeBrowser();
+  let launched;
+  const diagnostics = suite('firefox-webgl2', {firefox: {launch: async value => {
+    launched = value;
+    return fake.browser;
+  }}});
+  const launch = browserLaunchOptions('firefox', false);
+  await diagnostics.run('firefox', {...options, launch}, async () => {});
+  assert.equal(launched.headless, false);
+  assert.deepEqual(launched.firefoxUserPrefs, {'webgl.force-enabled': true});
+  assert.deepEqual(read(diagnostics).launch.firefoxUserPrefs, launched.firefoxUserPrefs);
+  assert.equal(read(diagnostics).status, 'passed');
+  const chromium = browserLaunchOptions('chromium', true);
+  assert.equal(chromium.headless, true);
+  assert.equal(chromium.firefoxUserPrefs, undefined);
+  assert(chromium.args.includes('--use-angle=swiftshader'));
+  assert.throws(() => browserLaunchOptions('webkit', true));
 });
 
 test('launch failures persist and do not prevent the next selected engine from running', async () => {
@@ -109,6 +130,9 @@ test('failed cleanup cannot convert a passing test into green acceptance', async
   assert.match(record.cleanupErrors[0].message, /synthetic cleanup failure/);
   assert.match(record.error.message, /synthetic cleanup failure/);
   assert(fake.browser.closed);
+  assert.deepEqual(record.cleanupTimeoutsMs, {context: 5000, browser: 15000});
+  assert(Number.isFinite(record.cleanupDurationsMs.context));
+  assert(Number.isFinite(record.cleanupDurationsMs.browser));
 });
 
 test('CI rejects report-only mode with a failed summary receipt', () => {
@@ -124,5 +148,42 @@ test('CI rejects report-only mode with a failed summary receipt', () => {
   } finally {
     if (previousCI === undefined) delete process.env.CI;
     else process.env.CI = previousCI;
+  }
+});
+
+test('resource failures retain the request URL and console location', async () => {
+  const fake = fakeBrowser();
+  const diagnostics = suite('resource-failure', {firefox: {launch: async () => fake.browser}});
+  const url = 'http://127.0.0.1:1234/planner/missing.js';
+  const request = {url: () => url, method: () => 'GET', resourceType: () => 'script',
+    failure: () => ({errorText: 'net::ERR_FAILED'})};
+  const location = {url, lineNumber: 0, columnNumber: 0};
+  await assert.rejects(diagnostics.run('firefox', options, async ({page, check}) => {
+    page.emit('console', {type: () => 'error', text: () => 'Resource failed', location: () => location});
+    page.emit('response', {url: () => url, status: () => 404, request: () => request});
+    page.emit('requestfailed', request);
+    check(false, 'Resource failure remains a test failure');
+  }), /Resource failure remains/);
+  const record = read(diagnostics);
+  assert.deepEqual(record.consoleErrors, ['Resource failed']);
+  assert.deepEqual(record.consoleErrorDetails, [{text: 'Resource failed', location}]);
+  assert.deepEqual(record.httpErrors, [{url, status: 404, method: 'GET', resourceType: 'script'}]);
+  assert.deepEqual(record.requestFailures, [{url, method: 'GET', resourceType: 'script', error: 'net::ERR_FAILED'}]);
+  assert.equal(record.status, 'failed');
+});
+
+test('the planner fixture serves the implicit favicon but still rejects missing resources', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'test-planner-stability.cjs'), 'utf8');
+  const start = source.indexOf('const server=http.createServer(');
+  const end = source.indexOf('\nasync function run(', start);
+  assert(start >= 0 && end > start, 'Exercise the actual planner fixture request handler');
+  const handle = vm.runInNewContext(source.slice(start, end) + '\nserver', {
+    http: {createServer: callback => callback}, URL, fs, path, root: path.join(__dirname, '..'), editor: '',
+  });
+  for (const [url, expected] of [['/favicon.ico', 204], ['/planner/nonexistent.js', 404], ['/unserved.js', 404]]) {
+    const response = {writeHead(status) { this.status = status; return this; }, end() { this.ended = true; }};
+    handle({url}, response);
+    assert.equal(response.status, expected, url);
+    assert(response.ended);
   }
 });

@@ -20,6 +20,18 @@ function selectedEngines(value = 'chromium,firefox') {
   return engines;
 }
 
+function browserLaunchOptions(engine, headless) {
+  if (engine === 'chromium') {
+    return {headless, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
+      args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']};
+  }
+  assert.equal(engine, 'firefox', 'A supported browser engine is required');
+  // GPU-less Windows runners otherwise block WebGL2 before creating a context.
+  // This allows the real software backend; all rendering assertions still run.
+  // https://bugzilla.mozilla.org/show_bug.cgi?id=1970486
+  return {headless, firefoxUserPrefs: {'webgl.force-enabled': true}};
+}
+
 function errorDetails(error) {
   return {name: error.name || 'Error', message: error.message || String(error), stack: error.stack || null};
 }
@@ -66,9 +78,12 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       schemaVersion: 1, suite: name, engine, status: 'running', startedAt: new Date().toISOString(),
       os: summary.os, nodeVersion: process.version, browserVersion: null, playwrightVersion: null,
       reportOnly: options.reportOnly, fixture: options.fixture, sourceRevision, sourceHash: options.sourceHash || null,
-      launch: {headless: options.launch.headless, args: options.launch.args || []},
+      launch: {headless: options.launch.headless, args: options.launch.args || [],
+        firefoxUserPrefs: options.launch.firefoxUserPrefs || {}},
       browserContext: options.context, gpu: null, samples: [], errors: [], crashes: [], consoleErrors: [],
+      consoleErrorDetails: [], httpErrors: [], requestFailures: [],
       failedAssertions: [], diagnosticsErrors: [], cleanupErrors: [], screenshot: null, snapshot: null, error: null,
+      cleanupTimeoutsMs: {context: 5000, browser: 15000}, cleanupDurationsMs: {},
     };
     const file = `${engine}.json`;
     const reference = {engine, file, status: record.status};
@@ -86,7 +101,7 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       summary.error = errorDetails(error);
       summary.finishedAt = record.finishedAt;
       try { save(); } finally { process.exit(1); }
-    }, options.deadlineMs + 25000);
+    }, options.deadlineMs + 35000);
     hardDeadline.unref();
     async function capture(screenshot) {
       if (!page || page.isClosed()) return;
@@ -143,7 +158,25 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
         page.on('pageerror', error => { record.errors.push(String(error)); save(); });
         page.on('crash', () => { record.crashes.push('Page crashed'); save(); });
         page.on('console', message => {
-          if (message.type() === 'error') { record.consoleErrors.push(message.text().slice(0, 1600)); save(); }
+          if (message.type() === 'error') {
+            const text = message.text().slice(0, 1600);
+            record.consoleErrors.push(text);
+            record.consoleErrorDetails.push({text, location: message.location()});
+            save();
+          }
+        });
+        page.on('response', response => {
+          if (response.status() >= 400) {
+            const request = response.request();
+            record.httpErrors.push({url: response.url(), status: response.status(),
+              method: request.method(), resourceType: request.resourceType()});
+            save();
+          }
+        });
+        page.on('requestfailed', request => {
+          record.requestFailures.push({url: request.url(), method: request.method(),
+            resourceType: request.resourceType(), error: request.failure()?.errorText || null});
+          save();
         });
         await execute({browser, context, page, record, check, save});
       })()]);
@@ -162,11 +195,13 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       let browserClosed = !browser;
       for (const [label, resource] of [['context', context], ['browser', browser]]) {
         if (!resource) continue;
+        const cleanupStarted = Date.now();
         try {
-          await bounded(() => resource.close(), 5000, `${engine} ${label} cleanup`);
+          await bounded(() => resource.close(), record.cleanupTimeoutsMs[label], `${engine} ${label} cleanup`);
           if (label === 'browser') browserClosed = true;
         }
         catch (error) { record.cleanupErrors.push(errorDetails(error)); failure ||= error; }
+        finally { record.cleanupDurationsMs[label] = Date.now()-cleanupStarted; save(); }
       }
       if (failure) { record.status = 'failed'; record.error ||= errorDetails(failure); }
       save();
@@ -204,4 +239,4 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
   };
 }
 
-module.exports = {createDiagnostics, positiveInteger, selectedEngines};
+module.exports = {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions};

@@ -87,8 +87,14 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
   };
   const glslNumber = n => Number(n).toFixed(5);
   const glslVector = p => `vec2(${p.map(glslNumber).join(',')})`;
-  const zones = rooms.map((room, i) => `if (zone == ${i + 1}) {
+  // Call sites already know their room. Separate functions prevent a shader
+  // compiler from inlining every room's branch chain at every literal call.
+  const roomDistances = rooms.map((room, i) => `float homeRoomDistance${i + 1}() {
+    vec2 p = homeWorldPosition.xz;
+    float distanceToRoom = 10000.0;
+    bool inside = false;
     ${room.polygon.map((a, j) => `homeRoomEdge(p, ${glslVector(a)}, ${glslVector(room.polygon[(j + 1) % room.polygon.length])}, distanceToRoom, inside);`).join('\n')}
+    return inside ? -distanceToRoom : distanceToRoom;
   }`).join('\n');
   const fragment = `
     varying vec3 homeWorldPosition;
@@ -104,16 +110,8 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
         if (p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
       }
     }
-    float homeRoomDistance(int zone) {
-      vec2 p = homeWorldPosition.xz;
-      float distanceToRoom = 10000.0;
-      bool inside = false;
-      ${zones}
-      return inside ? -distanceToRoom : distanceToRoom;
-    }
-    float homeRoomTransmission(int zone) {
-      if (zone == 0) return 1.0;
-      float distanceToRoom = homeRoomDistance(zone);
+    ${roomDistances}
+    float homeRoomTransmission(float distanceToRoom) {
       if (distanceToRoom <= 0.0) return 1.0;
       return exp(-8.0 * distanceToRoom) * (1.0 - smoothstep(0.1, 0.55, distanceToRoom));
     }
@@ -124,12 +122,12 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
     }
     vec3 homeDaylightIrradiance() {
       float exterior = homeExteriorSurface;
-      ${rooms.filter(room=>room.exterior===true).map(room=>`exterior = max(exterior, 1.0-smoothstep(0.0,0.04,homeRoomDistance(${roomIds.get(room.id)})));`).join('\n')}
+      ${rooms.filter(room=>room.exterior===true).map(room=>`exterior = max(exterior, 1.0-smoothstep(0.0,0.04,homeRoomDistance${roomIds.get(room.id)}()));`).join('\n')}
       float incoming = 0.0;
       if (homeDaylight > 0.0) {
         ${rooms.map(room=>{
           const openings=windows.flatMap((window,i)=>window.room===room.id?[{...window,index:i}]:[]);
-          return openings.length?`if (homeRoomDistance(${roomIds.get(room.id)}) <= 0.015) {\n${openings.map(window=>`incoming += homeWindowTransmission[${window.index}] * homeWindowGlow(${glslVector(window.a)}, ${glslVector(window.b)});`).join('\n')}\n}`:'';
+          return openings.length?`if (homeRoomDistance${roomIds.get(room.id)}() <= 0.015) {\n${openings.map(window=>`incoming += homeWindowTransmission[${window.index}] * homeWindowGlow(${glslVector(window.a)}, ${glslVector(window.b)});`).join('\n')}\n}`:'';
         }).join('\n')}
       }
       // Diffuse skylight enters at glazing, fades inward and cannot cross a room wall.
@@ -145,7 +143,7 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
     #if NUM_POINT_LIGHTS > 0
       float homeRoomTransmissions[${rooms.length + 1}];
       homeRoomTransmissions[0] = 1.0;
-      ${rooms.map((_, i) => `homeRoomTransmissions[${i + 1}] = homeLitRooms[${i}] != 0 ? homeRoomTransmission(${i + 1}) : 0.0;`).join('\n')}
+      ${rooms.map((_, i) => `homeRoomTransmissions[${i + 1}] = homeLitRooms[${i}] != 0 ? homeRoomTransmission(homeRoomDistance${i + 1}()) : 0.0;`).join('\n')}
     #endif
   `;
   const lightChunk = THREE.ShaderChunk.lights_fragment_begin;

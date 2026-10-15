@@ -215,6 +215,12 @@ No light is dropped or merged. Total light count and generated room/window shade
 size remain unbounded by the rendering profile, so larger projects still need
 testing against the target GPU's limits.
 
+Each room also has its own signed-distance function with its original polygon
+edges. Transmission, daylight, and exterior-light calls select that function
+directly. This prevents software shader compilers from expanding a full
+room-selection branch chain at every call, while preserving the same boundary,
+distance, and doorway-spill calculations.
+
 Home reuses the room camera fit until the selected room or viewport orientation
 changes. Pan, zoom, and resize continue to update the camera. Rounded-wall tint
 only advances during requested draws; it starts no animation loop. The existing

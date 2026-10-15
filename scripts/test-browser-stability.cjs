@@ -14,10 +14,11 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
-const {createDiagnostics, positiveInteger, selectedEngines} = require('./browser-stability-diagnostics.cjs');
+const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions} = require('./browser-stability-diagnostics.cjs');
 
 const root = path.resolve(process.env.HOME_STUDIO_SOURCE_ROOT || path.join(__dirname, '..'));
-const diagnostics = createDiagnostics('viewer', 'BROWSER_STABILITY', root);
+const fixtureOnly = process.env.HOME_STUDIO_FIXTURE_ONLY === '1';
+const diagnostics = fixtureOnly ? null : createDiagnostics('viewer', 'BROWSER_STABILITY', root);
 let temporary;
 const reportOnly = process.env.BROWSER_STABILITY_REPORT_ONLY === '1';
 
@@ -68,9 +69,7 @@ async function run(browserName, origin, project, sourceHash) {
   return diagnostics.run(browserName, {
     reportOnly, deadlineMs: 120000, sourceHash,
     fixture: {floors: 1, rooms: project.floors[0].rooms.length, lights: project.floors[0].items.length},
-    launch: {headless: process.env.BROWSER_STABILITY_HEADED !== '1',
-      ...(browserName === 'chromium' ? {executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
-        args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']} : {})},
+    launch: browserLaunchOptions(browserName, process.env.BROWSER_STABILITY_HEADED !== '1'),
     context: {viewport: {width: 1280, height: 800}, locale: 'en-US'},
   }, async ({browser, page, record, check, save}) => {
   const {samples, errors, crashes, consoleErrors} = record;
@@ -152,11 +151,45 @@ async function run(browserName, origin, project, sourceHash) {
       // trackpad input must not perform an unbounded number of synchronous draws.
       const burst = await child.evaluate(async () => {
         const canvas = document.querySelector('#view3d canvas');
+        const stage = document.querySelector('#view3d');
+        const settleStarted = performance.now();
+        let previous = null, stableSince = settleStarted, stableFrames = 0, settled = null;
+        // Switching modes queues both a frame and ResizeObserver work. Keep
+        // those draws outside the input baseline, without hiding a busy renderer.
+        while (performance.now()-settleStarted < 10000) {
+          await new Promise((resolve,reject) => {
+            const timer = setTimeout(() => {
+              cancelAnimationFrame(frame);
+              reject(new Error(`Editor frames stopped before wheel measurement: ${previous}`));
+            }, Math.max(1,10000-(performance.now()-settleStarted)));
+            const frame = requestAnimationFrame(() => {clearTimeout(timer);resolve();});
+          });
+          const now = performance.now(), viewport = stage.getBoundingClientRect();
+          if (now-settleStarted >= 10000) break;
+          const canvasBounds = canvas.getBoundingClientRect(), scene = window.__browserScene();
+          const state = {
+            homeMode: window.floorplan.homeMode, renderCount: window.floorplan.renderCount,
+            viewport: [viewport.width,viewport.height], canvas: [canvasBounds.width,canvasBounds.height],
+            drawingBuffer: [canvas.width,canvas.height], pixelRatio: scene.pixelRatio,
+          };
+          const sized = !state.homeMode && viewport.width > 0 && viewport.height > 0 &&
+            canvas.width === Math.floor(viewport.width*scene.pixelRatio) &&
+            canvas.height === Math.floor(viewport.height*scene.pixelRatio);
+          const key = JSON.stringify(state);
+          if (sized && key === previous) stableFrames++;
+          else { stableFrames = 1; stableSince = now; }
+          previous = key;
+          if (sized && stableFrames >= 3 && now-stableSince >= 150) {
+            settled = {...state,waitMs:now-settleStarted,stableFrames};
+            break;
+          }
+        }
+        if (!settled) throw new Error(`Editor did not settle before wheel measurement: ${previous}`);
         const before = window.floorplan.renderCount;
         for(let i=0;i<40;i++)canvas.dispatchEvent(new WheelEvent('wheel',{deltaY:1,cancelable:true,bubbles:true}));
         const synchronousDraws = window.floorplan.renderCount-before;
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        return {synchronousDraws,totalDraws:window.floorplan.renderCount-before};
+        return {synchronousDraws,totalDraws:window.floorplan.renderCount-before,settled};
       });
       sample.burst = burst;
       check(burst.synchronousDraws<=1 && burst.totalDraws>0 && burst.totalDraws<=2, 'Wheel bursts coalesce into at most one scheduled scene draw');
@@ -239,7 +272,7 @@ async function run(browserName, origin, project, sourceHash) {
 
 (async () => {
   const engines = selectedEngines(process.env.BROWSER_STABILITY_ENGINES);
-  diagnostics.configure(engines, reportOnly);
+  diagnostics?.configure(engines, reportOnly);
   const project = fixture();
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'home-studio-browser-'));
   const source = path.join(temporary,'fictional.json'), output = path.join(temporary,'compiled');
@@ -252,12 +285,18 @@ async function run(browserName, origin, project, sourceHash) {
   html = html.replace('</script></body>', `window.__browserScene=()=>({drawingBuffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),programs:renderer.info.programs.length,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,triangles:renderer.info.render.triangles,drawCalls:renderer.info.render.calls,shadowMaps:(()=>{const sizes=[];scene.traverse(o=>{if(o.castShadow&&o.shadow)sizes.push([o.type,o.shadow.mapSize.x,o.shadow.mapSize.y])});return sizes})(),pointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible)n++});return n})(),activePointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible&&o.intensity>0)n++});return n})()});\n</script></body>`);
   const sourceHash = crypto.createHash('sha256').update(html).digest('hex');
   const server = http.createServer((request,response) => {
+    if(request.url==='/fixture.json'){response.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify(project));return;}
     response.writeHead(200,{'Content-Type':'text/html','Cache-Control':'no-store'});
     response.end(request.url==='/viewer'?html:'<!doctype html><html lang="en"><title>Fictional dashboard fixture</title><body style="margin:0"><p>Isolated dashboard fixture</p></body></html>');
   });
   try {
     await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
-    await diagnostics.runAll(engines, browserName=>run(browserName,`http://127.0.0.1:${server.address().port}`,project,sourceHash));
+    if(fixtureOnly) {
+      console.log(JSON.stringify({fixtureServer:true,origin:`http://127.0.0.1:${server.address().port}`,sourceHash}));
+      await new Promise(resolve=>{process.once('SIGTERM',resolve);process.once('SIGINT',resolve);});
+    } else {
+      await diagnostics.runAll(engines, browserName=>run(browserName,`http://127.0.0.1:${server.address().port}`,project,sourceHash));
+    }
   } finally {await new Promise(resolve=>server.close(resolve));}
-})().then(()=>diagnostics.finish(),error=>{diagnostics.finish(error);console.error(error);process.exitCode=1;})
+})().then(()=>diagnostics?.finish(),error=>{diagnostics?.finish(error);console.error(error);process.exitCode=1;})
   .finally(()=>{if(temporary)fs.rmSync(temporary,{recursive:true,force:true});});
