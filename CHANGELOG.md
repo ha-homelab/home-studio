@@ -9,6 +9,9 @@
 - Add native Firefox Stable/ESR and Safari acceptance alongside Waterfox, using
   official browser binaries and supported browser automation protocols. Browser
   identity, source revision, rendering errors and cleanup remain release gates.
+- Fix WebKit preview recovery by releasing geometry and shadow resources while
+  the graphics context is lost, before rebuilding them. Preserve edits and JSON
+  export through context loss without stale GPU callbacks or missing furniture.
 - Reduce room-lighting shader compilation and fragment work while preserving
   light order, every illuminated fixture and nonzero light through doorways.
 - Reuse planner outlines and selection controls, and avoid redrawing unchanged
