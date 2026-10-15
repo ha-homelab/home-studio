@@ -2,6 +2,9 @@
 
 import importlib.util
 import json
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -96,24 +99,38 @@ class PlatformAcceptanceTests(unittest.TestCase):
         self.assertIn('scripts/setup-chrome-for-testing.py', runs)
         self.assertIn('"$HOME_STUDIO_PLAYWRIGHT_MODULE/cli.js"', runs)
 
-    def test_windows_webkit_settled_layout_is_failure_only_diagnostic(self):
+    def test_windows_webkit_recovery_comparisons_are_failure_only_diagnostics(self):
         steps = workflow('platform-acceptance.yml')['jobs']['browser']['steps']
         primary = next(step for step in steps if step.get('id') == 'planner_acceptance')
-        diagnostic = [step for step in steps if 'PLANNER_STABILITY_RESTORE_LAYOUT' in step.get('env', {})]
+        diagnostic = [step for step in steps if step.get('id') == 'planner_recovery_diagnostics']
         self.assertEqual(len(diagnostic), 1)
         diagnostic = diagnostic[0]
         self.assertEqual(primary['if'], '${{ !cancelled() }}')
         self.assertNotIn('PLANNER_STABILITY_RESTORE_LAYOUT', primary['env'])
+        self.assertNotIn('PLANNER_STABILITY_RECOVERY_ACTIONS', primary['env'])
         self.assertIn('node scripts/test-planner-stability.cjs', primary['run'])
         self.assertEqual(diagnostic['if'], "${{ !cancelled() && steps.planner_acceptance.outcome == 'failure' && matrix.engine == 'webkit' && matrix.os == 'windows-2022' }}")
-        self.assertEqual(diagnostic['env'], {
-            'HOME_STUDIO_DIAGNOSTICS_DIR': 'acceptance-artifacts/diagnostics/planner-settled',
-            'PLANNER_STABILITY_RESTORE_LAYOUT': 'settled',
-        })
-        self.assertEqual(diagnostic['run'], 'node scripts/test-planner-stability.cjs')
         self.assertLess(steps.index(primary), steps.index(diagnostic))
         for step in (primary, diagnostic):
             self.assertNotIn('continue-on-error', step)
+        fake_node = '''node() {
+          printf '%s|%s|%s|%s\\n' "$1" "$PLANNER_STABILITY_RECOVERY_ACTIONS" "$PLANNER_STABILITY_RESTORE_LAYOUT" "$HOME_STUDIO_DIAGNOSTICS_DIR" >> "$CALL_LOG"
+          [ "$PLANNER_STABILITY_RECOVERY_ACTIONS" != "$FAILED_ACTION" ]
+        }
+        '''
+        expected = [
+            f'scripts/test-planner-stability.cjs|{actions}|{layout}|acceptance-artifacts/diagnostics/planner-{name}'
+            for name, actions, layout in [('settled', 'all', 'settled'), ('none', 'none', 'immediate'),
+                                         ('edit', 'edit', 'immediate'), ('resize', 'resize', 'immediate')]
+        ]
+        for failed_action in ('all', 'edit', 'no-failure'):
+            with self.subTest(failed_action=failed_action), tempfile.TemporaryDirectory() as directory:
+                log = Path(directory) / 'calls.txt'
+                result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', fake_node + diagnostic['run']],
+                                        env={**os.environ, 'CALL_LOG': str(log), 'FAILED_ACTION': failed_action},
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0 if failed_action == 'no-failure' else 1, result.stderr)
+                self.assertEqual(log.read_text().splitlines(), expected)
 
     def test_native_browsers_use_exact_verified_downloads_and_versions(self):
         job = workflow('platform-acceptance.yml')['jobs']['native-browser']

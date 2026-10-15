@@ -147,12 +147,26 @@ jobs:
           else
             node scripts/test-planner-stability.cjs
           fi
-      - name: Compare settled layout after Windows WebKit planner failure
+      - name: Compare recovery actions after Windows WebKit planner failure
+        id: planner_recovery_diagnostics
         if: ${{ !cancelled() && steps.planner_acceptance.outcome == 'failure' && matrix.engine == 'webkit' && matrix.os == 'windows-2022' }}
-        env:
-          HOME_STUDIO_DIAGNOSTICS_DIR: acceptance-artifacts/diagnostics/planner-settled
-          PLANNER_STABILITY_RESTORE_LAYOUT: settled
-        run: node scripts/test-planner-stability.cjs
+        run: |
+          result=0
+          for comparison in settled none edit resize; do
+            actions="$comparison"
+            layout=immediate
+            if [ "$comparison" = settled ]; then
+              actions=all
+              layout=settled
+            fi
+            if ! HOME_STUDIO_DIAGNOSTICS_DIR="acceptance-artifacts/diagnostics/planner-$comparison" \
+              PLANNER_STABILITY_RECOVERY_ACTIONS="$actions" \
+              PLANNER_STABILITY_RESTORE_LAYOUT="$layout" \
+              node scripts/test-planner-stability.cjs; then
+              result=1
+            fi
+          done
+          exit "$result"
       - name: Preserve synthetic browser diagnostics and toolchain identity
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
