@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -52,7 +53,7 @@ def snapshot(root):
 
 class InstallerTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="home-studio-installer-test-")
+        self.temp = tempfile.TemporaryDirectory(prefix="home-studio installer-é-")
         self.addCleanup(self.temp.cleanup)
         # macOS /var is a symlink; tests intentionally use its real destination.
         self.work = Path(self.temp.name).resolve()
@@ -77,6 +78,18 @@ class InstallerTests(unittest.TestCase):
             for entry, data in extra:
                 archive.addfile(entry, io.BytesIO(data))
 
+    def directory_symlink(self, link, target):
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except OSError as error:
+            if os.name == "nt" and getattr(error, "winerror", None) == 1314 and not os.environ.get("CI"):
+                self.skipTest("Windows account lacks the symbolic-link creation privilege")
+            raise
+
+    def directory_junction(self, link, target):
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)],
+                       check=True, capture_output=True)
+
     def reject(self, pattern=None, **options):
         before = snapshot(self.config)
         with self.assertRaisesRegex(installer.InstallError, pattern or "."):
@@ -85,13 +98,20 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse(any(self.config.glob(".home-studio-install-*")))
 
     def test_install_preserves_config_and_storage_and_sanitizes_modes(self):
-        result = installer.install(self.archive, self.config)
+        with patch.object(Path, "chmod", autospec=True, side_effect=Path.chmod) as chmod:
+            result = installer.install(self.archive, self.config)
+        directories = {parent for name in self.files for parent in Path(name).parents}
+        modes = [args[1] for args, _kwargs in chmod.call_args_list]
+        self.assertEqual(modes, [0o644] * len(self.files) + [0o755] * len(directories))
         self.assertEqual(result.site_id, "example_home")
         self.assertIsNone(result.backup)
         for name, expected in self.files.items():
             path = self.target / name
             self.assertEqual(path.read_bytes(), expected)
-            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+            if os.name == "nt":
+                self.assertFalse(path.stat().st_file_attributes & stat.FILE_ATTRIBUTE_READONLY)
+            else:
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
         for name, expected in self.original.items():
             if expected is not None:
                 self.assertEqual((self.config / name).read_bytes(), expected)
@@ -167,6 +187,16 @@ class InstallerTests(unittest.TestCase):
                 entry.size = 1
                 self.write_package(extra=[(entry, b"x")])
                 self.reject("Duplicate|Case-colliding|conflict")
+
+    def test_windows_reserved_names_and_trailing_dots_rejected_on_every_platform(self):
+        for name in ("CON", "nul.txt", "AUX", "PRN.json", "COM1", "LPT9.log",
+                     "assets/NUL/main.glb", "site.json.", "static./panel.js",
+                     "file:stream", "C:/escape", "//server/share"):
+            with self.subTest(name=name):
+                entry = tarfile.TarInfo(installer.ARCHIVE_ROOT + "/" + name)
+                entry.size = 1
+                self.write_package(extra=[(entry, b"x")])
+                self.reject("Unsafe")
 
     def test_only_regular_files_and_directories_allowed(self):
         for kind in (tarfile.SYMTYPE, tarfile.LNKTYPE, tarfile.FIFOTYPE,
@@ -333,7 +363,7 @@ class InstallerTests(unittest.TestCase):
 
     def test_symlink_config_or_ancestor_rejected(self):
         link = self.work / "linked-config"
-        link.symlink_to(self.config, target_is_directory=True)
+        self.directory_symlink(link, self.config)
         for path in (link, link / ".storage"):
             with self.subTest(path=path), self.assertRaisesRegex(installer.InstallError, "Symlink"):
                 installer.install(self.archive, path)
@@ -343,20 +373,61 @@ class InstallerTests(unittest.TestCase):
         elsewhere = self.work / "elsewhere"
         elsewhere.mkdir()
         parent = self.target.parent
-        parent.symlink_to(elsewhere, target_is_directory=True)
+        self.directory_symlink(parent, elsewhere)
         self.reject("Symlink", replace=True)
         parent.unlink()
         parent.mkdir()
-        self.target.symlink_to(elsewhere, target_is_directory=True)
+        self.directory_symlink(self.target, elsewhere)
         self.reject("Symlink", replace=True)
         self.target.unlink()
-        self.target.symlink_to(self.work / "missing", target_is_directory=True)
+        self.directory_symlink(self.target, self.work / "missing")
         self.reject("Symlink", replace=True)
         self.target.unlink()
         self.target.mkdir()
         backups = self.config / ".home-studio-backups"
-        backups.symlink_to(elsewhere, target_is_directory=True)
+        self.directory_symlink(backups, elsewhere)
         self.reject("Symlink", replace=True)
+        self.assertEqual(list(elsewhere.iterdir()), [])
+
+    def test_link_metadata_rejected_even_without_symlink_creation_privilege(self):
+        self.target.mkdir(parents=True)
+        backups = self.config / ".home-studio-backups"
+        backups.mkdir()
+        original_lstat = Path.lstat
+        for link in (self.work, self.config, self.target.parent, self.target, backups):
+            for attributes in (dict(st_mode=stat.S_IFLNK | 0o777),
+                               dict(st_mode=stat.S_IFDIR | 0o755,
+                                    st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT)):
+                def lstat(path, *args, **kwargs):
+                    return SimpleNamespace(**attributes) if path == link else original_lstat(path, *args, **kwargs)
+
+                with self.subTest(link=link, attributes=attributes):
+                    before = snapshot(self.config)
+                    with patch.object(Path, "lstat", lstat):
+                        with self.assertRaisesRegex(installer.InstallError, "Symlink|reparse"):
+                            installer.install(self.archive, self.config, replace=True)
+                    self.assertEqual(snapshot(self.config), before)
+
+    @unittest.skipUnless(os.name == "nt", "Directory junctions are Windows-only")
+    def test_windows_junction_config_and_ancestor_rejected(self):
+        link = self.work / "junction config"
+        self.directory_junction(link, self.config)
+        for config in (link, link / ".storage"):
+            with self.subTest(config=config):
+                with self.assertRaisesRegex(installer.InstallError, "reparse"):
+                    installer.install(self.archive, config)
+        self.assertEqual(snapshot(self.config), self.original)
+
+    @unittest.skipUnless(os.name == "nt", "Directory junctions are Windows-only")
+    def test_windows_junction_component_and_backup_roots_rejected(self):
+        elsewhere = self.work / "elsewhere"
+        elsewhere.mkdir()
+        for link in (self.target.parent, self.target, self.config / ".home-studio-backups"):
+            with self.subTest(link=link):
+                self.directory_junction(link, elsewhere)
+                self.reject("reparse", replace=True)
+                link.rmdir()
+                link.mkdir()
         self.assertEqual(list(elsewhere.iterdir()), [])
 
     def test_existing_regular_file_target_rejected(self):
@@ -424,7 +495,7 @@ class InstallerTests(unittest.TestCase):
                                 text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Previous component backup:", result.stdout)
-        self.assertIn(".home-studio-backups/home_floorplan-", result.stdout)
+        self.assertIn(str(Path(".home-studio-backups") / "home_floorplan-"), result.stdout)
 
     def test_cli_errors_are_concise_and_nonzero(self):
         self.archive.write_bytes(b"invalid")

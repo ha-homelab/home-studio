@@ -14,6 +14,11 @@ recovery path when its 3D preview cannot start.
 
 ## Evidence and limits
 
+The public repository's [cross-platform acceptance](platform-acceptance.md)
+runs both browser paths on Linux, Windows, and macOS for every PR and release
+validation. Its artifacts record each tested environment; the dated local
+measurements below remain separate evidence, not results for every CI host.
+
 The package workflow includes real Chromium browser checks for drawing,
 furnishing, installation, localization, and the installed viewer. The isolated
 browser stability fixture additionally exercises a generated, fictional six-room

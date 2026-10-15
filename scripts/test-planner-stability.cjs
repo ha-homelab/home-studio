@@ -2,19 +2,18 @@
 // npx playwright install chromium firefox
 // PLANNER_STABILITY_ENGINES=firefox,chromium node scripts/test-planner-stability.cjs
 // PLANNER_STABILITY_SOURCE_ROOT=/path/to/baseline PLANNER_STABILITY_REPORT_ONLY=1 ...
+// HOME_STUDIO_DIAGNOSTICS_DIR (or PLANNER_STABILITY_DIAGNOSTICS_DIR) keeps JSON/failure PNGs.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const playwright = require('playwright');
+const {createDiagnostics, positiveInteger, selectedEngines} = require('./browser-stability-diagnostics.cjs');
 
 const root = path.resolve(process.env.PLANNER_STABILITY_SOURCE_ROOT || path.join(__dirname, '..'));
 const reportOnly = process.env.PLANNER_STABILITY_REPORT_ONLY === '1';
-const cycles = Number(process.env.PLANNER_STABILITY_CYCLES || 3);
-const catalog = JSON.parse(fs.readFileSync(path.join(root, 'planner/catalog.json')));
-const editor = fs.readFileSync(path.join(root, 'planner/editor.js'), 'utf8');
-const sourceHash = crypto.createHash('sha256').update(editor).digest('hex');
+const diagnostics = createDiagnostics('planner', 'PLANNER_STABILITY', root);
+let cycles, catalog, editor, sourceHash, project;
 
 function fixture() {
   const project = {schema_version:1,id:'planner_stress',title:'Fictional planner stress fixture',floors:[]};
@@ -69,7 +68,6 @@ function instrument() {
   };
 }
 
-const project=fixture();
 const server=http.createServer((request,response)=>{
   let route=new URL(request.url,'http://localhost').pathname;
   if(route==='/planner/')route='/planner/index.html';
@@ -82,18 +80,18 @@ const server=http.createServer((request,response)=>{
 });
 
 async function run(engine,origin) {
-  assert(['firefox','chromium'].includes(engine));
-  const browser=await playwright[engine].launch({headless:process.env.PLANNER_STABILITY_HEADED!=='1',...(engine==='chromium'?{args:['--enable-webgl','--use-angle=swiftshader','--enable-unsafe-swiftshader']}: {})});
-  const context=await browser.newContext({viewport:{width:1440,height:1000},deviceScaleFactor:2,locale:'en-US'});
-  await context.addInitScript(instrument);
-  const page=await context.newPage(),errors=[],crashes=[],external=[],samples=[];
-  const deadline=setTimeout(()=>{console.error(`${engine}: planner exceeded 180 seconds`);void browser.close();},180000);
-  page.setDefaultTimeout(30000);
-  page.on('pageerror',error=>errors.push(String(error)));
-  page.on('crash',()=>crashes.push('Page crashed'));
+  return diagnostics.run(engine, {
+    reportOnly, deadlineMs: 180000, sourceHash,
+    fixture: {floors: 2, rooms: 16, catalogItems: 256},
+    launch: {headless: process.env.PLANNER_STABILITY_HEADED !== '1',
+      ...(engine === 'chromium' ? {executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
+        args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']} : {})},
+    context: {viewport: {width: 1440, height: 1000}, deviceScaleFactor: 2, locale: 'en-US'},
+    instrument,
+  }, async ({browser, page, record, check, save}) => {
+  const {samples, errors, crashes, consoleErrors} = record, external = record.external = [];
   page.on('dialog',dialog=>dialog.accept());
-  page.on('request',request=>{if(!request.url().startsWith(origin+'/')&&!request.url().startsWith('data:'))external.push(request.url());});
-  const check=(condition,message)=>{if(!condition && reportOnly)console.warn(`OBSERVED ${engine}: ${message}`);else assert(condition,message);};
+  page.on('request',request=>{if(!request.url().startsWith(origin+'/')&&!request.url().startsWith('data:')){external.push(request.url());save();}});
   const frames=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   const snapshot=()=>page.evaluate(()=>({stats:window.__plannerStats,preview:window.planner.getPreviewMetadata(),scene:window.__plannerScene()}));
   const getProject=()=>page.evaluate(()=>window.planner.getProject());
@@ -114,7 +112,6 @@ async function run(engine,origin) {
       return {sync,total:id==='plan-canvas'?window.__plannerStats.planDraws-before:(window.planner.getPreviewMetadata().renderCount||0)-previewBefore};
     },canvasId);
   }
-  try {
     console.log(`${engine} ${browser.version()}: loading fictional planner`);
     const started=Date.now();await page.goto(origin+'/planner/?lang=en');await page.waitForFunction(()=>window.planner);
     const shellLoadMs=Date.now()-started,importStart=Date.now();
@@ -136,7 +133,7 @@ async function run(engine,origin) {
     await page.mouse.move(cancelBox.x+cancelPoint[0]+20,cancelBox.y+cancelPoint[1]+5,{steps:3});
     await page.keyboard.press('Escape');await page.mouse.up();await frames();
     assert.deepEqual(await getProject(),beforeCancel,'Cancelling a furniture drag restores the complete original project');
-    const initial={shellLoadMs,importMs,roomDrawMs,wallDrawMs,planBurst};console.log(`${engine}: ${JSON.stringify(initial)}`);
+    const initial=record.initial={shellLoadMs,importMs,roomDrawMs,wallDrawMs,planBurst};save();console.log(`${engine}: ${JSON.stringify(initial)}`);
     for(let cycle=0;cycle<cycles;cycle++) {
       const item=(await getProject()).floors[0].items[0],before=[item.position_m.x,item.position_m.z];
       const itemDragMs=await dragWorld(before,[before[0]+.5,before[1]]);
@@ -153,6 +150,9 @@ async function run(engine,origin) {
       check(afterOrbit.stats.canvasResizes===preOrbit.stats.canvasResizes,'Orbit does not reallocate the canvas drawing buffer');
       const previewBurst=await burst('preview-canvas');check(previewBurst.sync<=1&&previewBurst.total>0&&previewBurst.total<=2,'Preview wheel bursts coalesce into one frame');
       const current=await snapshot();
+      record.gpu=current.stats.gpu;
+      record.lastSnapshot=current;
+      save();
       check(current.stats.contexts===1,'Repeated edit and preview uses one WebGL context');
       check(current.stats.contextLosses===0,'Editing and preview do not unexpectedly lose the graphics context');
       check(current.preview.items===256&&current.preview.catalogItems===256,'All catalog furniture is retained in the two-floor preview');
@@ -164,6 +164,7 @@ async function run(engine,origin) {
       const idle=current.preview.renderCount;await page.waitForTimeout(250);check((await snapshot()).preview.renderCount===idle,'An idle preview does not render continuously');
       check(itemDragMs<10000&&previewLoadMs<30000&&orbitMs<10000,'Planner editing and preview gestures remain responsive');
       samples.push({cycle,itemDragMs,previewLoadMs,allFloorsMs,orbitMs,previewBurst,...current});
+      save();
       console.log(`${engine}: cycle ${cycle+1}, item drag ${itemDragMs} ms, preview ${previewLoadMs} ms, orbit ${orbitMs} ms`);
       if(cycle===cycles-1&&process.env.PLANNER_STABILITY_SCREENSHOT_DIR){fs.mkdirSync(process.env.PLANNER_STABILITY_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.PLANNER_STABILITY_SCREENSHOT_DIR,`${engine}.png`)});}
       await page.locator('#plan-tab').click();await frames();
@@ -188,12 +189,25 @@ async function run(engine,origin) {
       assert.deepEqual(restored.scene.buffer,[Math.floor(restored.preview.viewport.width*restored.scene.pixelRatio),Math.floor(restored.preview.viewport.height*restored.scene.pixelRatio)],'Restoration uses the viewport size changed while the context was lost');
       assert.deepEqual(await getProject(),exported,'Graphics restoration preserves the edited project');
     }
+    record.recovery=recovery;
+    save();
     const beforeReload=await getProject();await page.reload();await page.waitForFunction(()=>window.planner);
     assert.deepEqual(await getProject(),beforeReload,'Closing and reopening the planner restores its saved draft');
-    check(errors.length===0&&crashes.length===0&&external.length===0,'The isolated planner runs without crashes, uncaught errors, or external requests');
-    console.log(JSON.stringify({engine,version:browser.version(),platform:`${process.platform}/${process.arch}`,sourceHash,fixture:{floors:2,rooms:16,catalogItems:256},initial,samples,recovery,errors,crashes,external},null,2));
-  } catch(error){console.error(JSON.stringify({engine,sourceHash,samples,errors,crashes,external,snapshot:await snapshot().catch(()=>null)},null,2));throw error;}
-  finally{clearTimeout(deadline);await context.close();await browser.close();}
+    check(errors.length===0&&crashes.length===0&&external.length===0&&consoleErrors.length===0,'The isolated planner runs without crashes, uncaught errors, browser error logs, or external requests');
+    save();
+  });
 }
 
-(async()=>{await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));try{for(const engine of (process.env.PLANNER_STABILITY_ENGINES||'chromium,firefox').split(','))await run(engine,`http://127.0.0.1:${server.address().port}`);}finally{await new Promise(resolve=>server.close(resolve));}})().catch(error=>{console.error(error);process.exitCode=1;});
+(async()=>{
+  const engines=selectedEngines(process.env.PLANNER_STABILITY_ENGINES);
+  diagnostics.configure(engines,reportOnly);
+  cycles=positiveInteger('PLANNER_STABILITY_CYCLES',3,10);
+  catalog=JSON.parse(fs.readFileSync(path.join(root,'planner/catalog.json')));
+  editor=fs.readFileSync(path.join(root,'planner/editor.js'),'utf8');
+  sourceHash=crypto.createHash('sha256').update(editor).digest('hex');
+  project=fixture();
+  try {
+    await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+    await diagnostics.runAll(engines,engine=>run(engine,`http://127.0.0.1:${server.address().port}`));
+  } finally {await new Promise(resolve=>server.close(resolve));}
+})().then(()=>diagnostics.finish(),error=>{diagnostics.finish(error);console.error(error);process.exitCode=1;});

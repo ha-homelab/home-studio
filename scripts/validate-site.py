@@ -37,12 +37,15 @@ REPO_FILES = ('docs/i18n.md', 'docs/translations/README.md',
               'scripts/test-help-i18n.cjs', 'scripts/test-panel-language.cjs', 'scripts/test-viewer-i18n.cjs', 'scripts/test-lock-control.cjs',
               'viewer-i18n.js', 'viewer-locales/index.json',
               *(f'viewer-locales/{code}.json' for code in LOCALE_CODES),
-              'README.md', 'LICENSE', '.gitignore', 'scripts/validate-site.py', '.github/workflows/pages.yml',
-              '.github/workflows/package.yml', 'docs/architecture.md',
+              'README.md', 'LICENSE', '.gitignore', '.gitattributes', 'scripts/validate-site.py', '.github/workflows/pages.yml',
+              '.github/workflows/package.yml', '.github/workflows/platform-acceptance.yml',
+              'docs/architecture.md', 'docs/platform-acceptance.md',
               'scripts/build-planner-project.py', 'scripts/install-home-assistant.py',
+              'scripts/package_release.py', 'scripts/test_package_release.py',
               'scripts/test-install-home-assistant.py', 'scripts/test-public-package.py', 'scripts/test-wall-tops.cjs',
               'scripts/test-rounded-walls.cjs', 'scripts/test-wall-sheen.cjs', 'scripts/test-wall-motion.cjs', 'docs/rounded-walls.md',
-              'scripts/test-browser-stability.cjs', 'scripts/test-home-render-budget.cjs',
+              'scripts/test-browser-stability.cjs', 'scripts/browser-stability-diagnostics.cjs',
+              'scripts/test-browser-stability-diagnostics.cjs', 'scripts/test-home-render-budget.cjs',
               'scripts/test-render-lifecycle.cjs', 'docs/browser-compatibility.md',
               'scripts/test-planner-stability.cjs', 'scripts/test-planner-render-budget.cjs',
               'scripts/test-viewer-startup.cjs', 'scripts/test-module-expiry.cjs', 'scripts/test-floor-context.py', 'scripts/test-floor-context.cjs',
@@ -126,7 +129,7 @@ def validate(root):
             if parsed.fragment and name in documents and unquote(parsed.fragment) not in documents[name].ids:
                 raise ValueError(f'Missing anchor: {relative}: {link}')
     for relative in (name for name in SITE_FILES if name.startswith('planner/') and name.endswith('.js')):
-        code = (root / relative).read_text()
+        code = (root / relative).read_text(encoding="utf-8")
         for imported in re.findall(r'from\s+[\'"]([^\'"]+)[\'"]', code):
             target = ((root / relative).parent / imported).resolve()
             if not target.is_relative_to(root) or target.relative_to(root).as_posix() not in SITE_FILES:
@@ -135,7 +138,7 @@ def validate(root):
             raise ValueError(f'New network API needs public-data review: {relative}')
     for relative in SITE_FILES:
         if relative.startswith('planner/guide-assets/') and relative.endswith('.json'):
-            practice = json.loads((root / relative).read_text())
+            practice = json.loads((root / relative).read_text(encoding="utf-8"))
             for floor in practice['floors']:
                 if any(item.get('entity_id') for item in floor['items']):
                     raise ValueError(f'The public practice project must have empty device bindings: {relative}')

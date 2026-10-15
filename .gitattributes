@@ -1,0 +1,5 @@
+# Public source archives and generated fixtures must not depend on checkout OS.
+* text=auto eol=lf
+*.jpg binary
+*.png binary
+*.woff2 binary

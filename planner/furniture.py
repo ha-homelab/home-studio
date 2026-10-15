@@ -4,7 +4,7 @@ import math
 from pathlib import Path
 import re
 
-CATALOG = json.loads((Path(__file__).with_name('catalog.json')).read_text())
+CATALOG = json.loads((Path(__file__).with_name('catalog.json')).read_text(encoding='utf-8'))
 MODELS = {model['id']: model for model in CATALOG['models']}
 STYLES = {style['id']: style for style in CATALOG['styles']}
 PATTERNS = [{'id': name, 'label': name.capitalize()}

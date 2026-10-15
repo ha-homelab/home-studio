@@ -46,6 +46,7 @@ MAX_PATH_BYTES = 240
 MAX_PATH_DEPTH = 8
 IDENTIFIER = re.compile(r"[a-z][a-z0-9_]{0,47}\Z")
 SEGMENT = re.compile(r"[A-Za-z0-9_.-]+\Z")
+WINDOWS_DEVICE = re.compile(r"(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)", re.I)
 CORE_FILES = frozenset({
     "__init__.py", "curtains.py", "site.py", "validation.py", "manifest.json",
     "site.json", "curtains.json", "static/panel.js",
@@ -202,7 +203,8 @@ def member_path(member):
         name = name[:-1]
     parts = name.split("/")
     if (len(name) > MAX_PATH_BYTES or len(parts) > MAX_PATH_DEPTH
-            or any(p in ("", ".", "..") or not SEGMENT.fullmatch(p) for p in parts)
+            or any(p in ("", ".", "..") or not SEGMENT.fullmatch(p)
+                   or p.endswith(".") or WINDOWS_DEVICE.match(p) for p in parts)
             or parts[:2] != ["custom_components", COMPONENT]
             or (len(parts) == 2 and not member.isdir())):
         raise InstallError(f"Unsafe or out-of-component archive path: {member.name!r}")
@@ -294,14 +296,16 @@ def check_directory(path: Path, *, missing_ok=False):
     chain = [*reversed(path.parents), path]
     for entry in chain:
         try:
-            mode = entry.lstat().st_mode
+            info = entry.lstat()
         except FileNotFoundError:
             if missing_ok:
                 return
             raise InstallError(f"Required config directory does not exist: {path}") from None
-        if stat.S_ISLNK(mode):
-            raise InstallError(f"Symlink destinations and ancestors are forbidden: {entry}")
-        if not stat.S_ISDIR(mode):
+        # Windows junctions are directory reparse points, not S_IFLNK entries.
+        if (stat.S_ISLNK(info.st_mode)
+                or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+            raise InstallError(f"Symlink or reparse-point destinations and ancestors are forbidden: {entry}")
+        if not stat.S_ISDIR(info.st_mode):
             raise InstallError(f"Expected a directory: {entry}")
 
 

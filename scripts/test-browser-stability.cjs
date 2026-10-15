@@ -3,32 +3,41 @@
 // Install browsers: npx playwright install chromium firefox
 // Select engines: BROWSER_STABILITY_ENGINES=firefox,chromium node scripts/test-browser-stability.cjs
 // Compare a checkout: HOME_STUDIO_SOURCE_ROOT=/path/to/checkout node scripts/test-browser-stability.cjs
-// Default: six rooms / eighteen lights. BROWSER_STABILITY_LIGHTS_PER_ROOM varies the load.
+// Default: six rooms / eighteen lights. BROWSER_STABILITY_ROOMS supports 1–24 rooms.
+// BROWSER_STABILITY_LIGHTS_PER_ROOM supports 1–16 fictional lights per room.
+// HOME_STUDIO_DIAGNOSTICS_DIR (or BROWSER_STABILITY_DIAGNOSTICS_DIR) keeps JSON/failure PNGs.
 // BROWSER_STABILITY_REPORT_ONLY=1 records failing baselines without gating on assertions.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
-const playwright = require('playwright');
+const {createDiagnostics, positiveInteger, selectedEngines} = require('./browser-stability-diagnostics.cjs');
 
 const root = path.resolve(process.env.HOME_STUDIO_SOURCE_ROOT || path.join(__dirname, '..'));
-const engines = (process.env.BROWSER_STABILITY_ENGINES || 'chromium,firefox').split(',');
-const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'home-studio-browser-'));
+const diagnostics = createDiagnostics('viewer', 'BROWSER_STABILITY', root);
+let temporary;
 const reportOnly = process.env.BROWSER_STABILITY_REPORT_ONLY === '1';
 
 function fixture() {
+  const rooms = positiveInteger('BROWSER_STABILITY_ROOMS', 6, 24);
+  const lightsPerRoom = positiveInteger('BROWSER_STABILITY_LIGHTS_PER_ROOM', 3, 16);
+  const columns = Math.ceil(Math.sqrt(rooms * 1.5));
   const floor = { id: 'main', name: 'Fictional main floor', elevation_m: 0, height_m: 2.8, rooms: [], walls: [], openings: [], items: [] };
-  for (let z = 0; z < 2; z++) for (let x = 0; x < 3; x++) {
+  const walls = new Map();
+  for (let room = 0; room < rooms; room++) {
+    const x = room % columns, z = Math.floor(room / columns);
     const id = `room_${x}_${z}`;
     floor.rooms.push({ id, name: `Room ${x + 1}/${z + 1}`, polygon: [[x*4,z*4],[(x+1)*4,z*4],[(x+1)*4,(z+1)*4],[x*4,(z+1)*4]], material: 'floor' });
-    for (let n = 0; n < Number(process.env.BROWSER_STABILITY_LIGHTS_PER_ROOM || 3); n++) floor.items.push({ id: `${id}_light_${n}`, name: `Fictional light ${x}/${z}/${n}`, type: 'chandelier', room: id,
-      position_m: { x:x*4+0.75+n*0.75, y:2.3, z:z*4+2 }, dimensions_m:{width:0.4,depth:0.4,height:0.25}, rotation_deg:0, entity_id:`light.${id}_${n}`, notes:'' });
+    for (let n = 0; n < lightsPerRoom; n++) floor.items.push({ id: `${id}_light_${n}`, name: `Fictional light ${x}/${z}/${n}`, type: 'chandelier', room: id,
+      position_m: { x:x*4+0.75+(n%4)*0.75, y:2.3, z:z*4+(n<4?2:0.75+Math.floor(n/4)*0.75) }, dimensions_m:{width:0.4,depth:0.4,height:0.25}, rotation_deg:0, entity_id:`light.${id}_${n}`, notes:'' });
+    for (const edgeX of [x, x+1]) walls.set(`vertical_${edgeX}_${z}`, {id:`vertical_${edgeX}_${z}`,start:[edgeX*4,z*4],end:[edgeX*4,(z+1)*4],thickness_m:0.16});
+    for (const edgeZ of [z, z+1]) walls.set(`horizontal_${edgeZ}_${x}`, {id:`horizontal_${edgeZ}_${x}`,start:[x*4,edgeZ*4],end:[(x+1)*4,edgeZ*4],thickness_m:0.16});
+    if (z===0) floor.openings.push({id:`window_${x}`,wall_id:`horizontal_0_${x}`,type:'window',offset_m:1,width_m:1.6,sill_m:0.9,head_m:2.2});
   }
-  for (let x = 0; x <= 3; x++) for(let z=0;z<2;z++)floor.walls.push({id:`vertical_${x}_${z}`,start:[x*4,z*4],end:[x*4,(z+1)*4],thickness_m:0.16});
-  for (let z = 0; z <= 2; z++) for(let x=0;x<3;x++)floor.walls.push({id:`horizontal_${z}_${x}`,start:[x*4,z*4],end:[(x+1)*4,z*4],thickness_m:0.16});
-  for (let x = 0; x < 3; x++) floor.openings.push({id:`window_${x}`,wall_id:`horizontal_0_${x}`,type:'window',offset_m:1,width_m:1.6,sill_m:0.9,head_m:2.2});
+  floor.walls = [...walls.values()];
   return { schema_version:1, id:'browser_stability', title:'Fictional browser stability fixture', floors:[floor] };
 }
 
@@ -55,22 +64,16 @@ function instrumentation() {
   };
 }
 
-async function run(browserName, origin, project) {
-  assert(['chromium','firefox'].includes(browserName), 'Only Chromium and Firefox are supported');
-  const browser = await playwright[browserName].launch({headless:process.env.BROWSER_STABILITY_HEADED !== '1',
-    ...(browserName === 'chromium' ? {executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,args:['--enable-webgl','--use-angle=swiftshader','--enable-unsafe-swiftshader']} : {})});
-  const context = await browser.newContext({viewport:{width:1280,height:800},locale:'en-US'});
-  const page = await context.newPage(), errors = [], crashes = [], consoleErrors = [];
-  const watchdog = setTimeout(() => {console.error(`${browserName}: exceeded the 120-second browser deadline`);void browser.close();},120000);
-  page.setDefaultTimeout(30000);
-  page.on('pageerror', error => errors.push(String(error)));
-  page.on('crash', () => crashes.push('Page crashed'));
-  page.on('console', message => { if(message.type()==='error')consoleErrors.push(message.text().slice(0,1600)); });
-  const samples = [];
-  const check = (condition, description) => {
-    if (!condition && reportOnly) console.warn(`OBSERVED ${browserName}: ${description}`);
-    else assert(condition, description);
-  };
+async function run(browserName, origin, project, sourceHash) {
+  return diagnostics.run(browserName, {
+    reportOnly, deadlineMs: 120000, sourceHash,
+    fixture: {floors: 1, rooms: project.floors[0].rooms.length, lights: project.floors[0].items.length},
+    launch: {headless: process.env.BROWSER_STABILITY_HEADED !== '1',
+      ...(browserName === 'chromium' ? {executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
+        args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']} : {})},
+    context: {viewport: {width: 1280, height: 800}, locale: 'en-US'},
+  }, async ({browser, page, record, check, save}) => {
+  const {samples, errors, crashes, consoleErrors} = record;
   const dragCanvas = async (locator, child) => {
     const bounds = await locator.boundingBox();
     const point = await locator.evaluate(canvas => {
@@ -88,7 +91,6 @@ async function run(browserName, origin, project) {
     await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
     return Date.now()-started;
   };
-  try {
     await page.goto(origin);
     const states = Object.fromEntries(project.floors[0].items.map(item => [item.entity_id,{state:'on',name:item.name,light:{brightness:180,color_mode:'color_temp',color_temp_kelvin:3000}}]));
     states['sun.sun'] = {state:'above_horizon',elevation:30};
@@ -113,10 +115,13 @@ async function run(browserName, origin, project) {
       const child = page.frames().find(value => value !== page.mainFrame());
       await child.waitForFunction(() => window.floorplan?.renderCount > 0 && document.querySelector('#homeConnection')?.dataset.connected === 'true');
       const loadMs = Date.now()-started;
-      const sample = {cycle,loadMs};samples.push(sample);
+      const sample = {cycle,loadMs};samples.push(sample);save();
       console.log(`${browserName}: first connected draw in ${loadMs} ms`);
       const snapshot = () => child.evaluate(() => ({...window.__browserStability,renderCount:window.floorplan.renderCount,homeMode:window.floorplan.homeMode,scene:window.__browserScene?.()}));
       let initial = await snapshot();
+      record.gpu = initial.gpu;
+      Object.assign(sample, initial);
+      save();
       sample.initialPrograms = initial.linkedPrograms;
       check(initial.contexts===1, 'One WebGL context is created per viewer');
       check(initial.shaderErrors.length===0, 'All actual WebGL programs link successfully');
@@ -205,6 +210,7 @@ async function run(browserName, origin, project) {
         recovery = {before:beforeLoss,after:(await snapshot()).renderCount,contextLosses:(await snapshot()).contextLosses,drawingBuffer:restored.actual};
       }
       Object.assign(sample,{recovery,...initial});
+      save();
       // Screenshot readback drains GPU work. Capture after latency checks so it
       // cannot accidentally warm the first interaction being measured.
       if(process.env.BROWSER_STABILITY_SCREENSHOT_DIR) {
@@ -227,28 +233,31 @@ async function run(browserName, origin, project) {
     check(errors.length===0, `No uncaught exceptions: ${errors.join('; ')}`);
     check(crashes.length===0, 'No page crashes');
     check(consoleErrors.length===0, `No browser error logs: ${consoleErrors.join('; ')}`);
-    console.log(JSON.stringify({browser:browserName,version:browser.version(),platform:`${process.platform}/${process.arch}`,samples,errors,crashes,consoleErrors},null,2));
-  } catch(error) {
-    console.error(JSON.stringify({browser:browserName,version:browser.version(),samples,errors,crashes,consoleErrors},null,2));
-    throw error;
-  } finally { clearTimeout(watchdog);await context.close();await browser.close(); }
+    save();
+  });
 }
 
 (async () => {
+  const engines = selectedEngines(process.env.BROWSER_STABILITY_ENGINES);
+  diagnostics.configure(engines, reportOnly);
   const project = fixture();
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'home-studio-browser-'));
   const source = path.join(temporary,'fictional.json'), output = path.join(temporary,'compiled');
   fs.writeFileSync(source,JSON.stringify(project));
   const built = spawnSync(process.env.PYTHON || 'python3',['scripts/build-planner-project.py','--project',source,'--output',output],{cwd:root,encoding:'utf8',timeout:120000});
-  assert.equal(built.status,0,built.stderr || built.stdout);
+  if (built.error) throw built.error;
+  assert.equal(built.status,0,built.stderr || built.stdout || `Python builder exited with signal ${built.signal}`);
   let html = fs.readFileSync(path.join(output,'main/index.html'),'utf8');
   html = html.replace('<head>',`<head><script>window.__HOME_FLOORPLAN_EMBED__=true;(${instrumentation.toString()})();</script>`);
   html = html.replace('</script></body>', `window.__browserScene=()=>({drawingBuffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),programs:renderer.info.programs.length,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,triangles:renderer.info.render.triangles,drawCalls:renderer.info.render.calls,shadowMaps:(()=>{const sizes=[];scene.traverse(o=>{if(o.castShadow&&o.shadow)sizes.push([o.type,o.shadow.mapSize.x,o.shadow.mapSize.y])});return sizes})(),pointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible)n++});return n})(),activePointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible&&o.intensity>0)n++});return n})()});\n</script></body>`);
+  const sourceHash = crypto.createHash('sha256').update(html).digest('hex');
   const server = http.createServer((request,response) => {
     response.writeHead(200,{'Content-Type':'text/html','Cache-Control':'no-store'});
     response.end(request.url==='/viewer'?html:'<!doctype html><html lang="en"><title>Fictional dashboard fixture</title><body style="margin:0"><p>Isolated dashboard fixture</p></body></html>');
   });
   try {
-    await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-    for(const browserName of engines)await run(browserName,`http://127.0.0.1:${server.address().port}`,project);
-  } finally {await new Promise(resolve=>server.close(resolve));fs.rmSync(temporary,{recursive:true,force:true});}
-})().catch(error=>{console.error(error);process.exitCode=1;});
+    await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+    await diagnostics.runAll(engines, browserName=>run(browserName,`http://127.0.0.1:${server.address().port}`,project,sourceHash));
+  } finally {await new Promise(resolve=>server.close(resolve));}
+})().then(()=>diagnostics.finish(),error=>{diagnostics.finish(error);console.error(error);process.exitCode=1;})
+  .finally(()=>{if(temporary)fs.rmSync(temporary,{recursive:true,force:true});});
