@@ -583,7 +583,7 @@ const orbit = { yaw: -Math.PI / 3, pitch: .8, radius: 17, baseRadius: 17, target
 function previewRenderProfile(gl) {
   try {
     const info = gl.getExtension('WEBGL_debug_renderer_info');
-    if (info && /swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe/i.test(gl.getParameter(info.UNMASKED_RENDERER_WEBGL))) return { pixels: 250000, shadowSize: 512 };
+    if (info && /swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe|^Apple Software Renderer$/i.test(gl.getParameter(info.UNMASKED_RENDERER_WEBGL))) return { pixels: 250000, shadowSize: 512 };
   } catch { /* A hidden renderer name keeps the normal rendering profile. */ }
   return { pixels: 2000000, shadowSize: 2048 };
 }

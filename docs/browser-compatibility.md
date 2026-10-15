@@ -187,7 +187,8 @@ shadow-casting lights reduce the selected face resolution.
 The main canvas drawing buffer is capped at 2,000,000 pixels and device pixel
 ratio 2, scaling below the native display resolution when necessary. When the
 reported renderer positively identifies SwiftShader, llvmpipe, softpipe,
-Lavapipe, a software rasterizer, or Microsoft Basic Render, the cap is 250,000
+Lavapipe, a software rasterizer, Microsoft Basic Render, or the exact
+`Apple Software Renderer` name, the cap is 250,000
 pixels, with the smaller point-shadow limits above and a 512 by 512 directional
 shadow map. Native and unknown renderers retain the 2,000,000-pixel cap and
 2048 by 2048 directional shadow map. HTML labels and controls retain their normal

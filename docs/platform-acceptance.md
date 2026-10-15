@@ -94,7 +94,11 @@ timings. Chromium deliberately uses SwiftShader to cover software rendering.
 Linux runs headed browsers under Xvfb with software GL. Playwright Firefox uses
 `webgl.force-enabled=true` so the GPU-less Windows VM can attempt its real
 software WebGL backend. The diagnostics record this preference and the actual
-renderer; all shader, context, and rendering assertions still apply. This is
+renderer. Its disposable profile also sets `webgl.sanitize-unmasked-renderer=false`
+so Firefox reports the backend's actual name: otherwise it can hide an Apple
+software renderer behind "Apple M1, or similar". This changes the reported name,
+not the selected graphics backend. See the [Firefox implementation](https://github.com/mozilla-firefox/firefox/blob/FIREFOX_157_0_RELEASE/dom/canvas/ClientWebGLContext.cpp#L2513).
+All shader, context, and rendering assertions still apply. This is
 coverage of that configured VM backend, not certification of Firefox's default
 graphics settings. Waterfox's isolated profile also permits software WebGL and
 forces WebGL enablement, with those preferences saved in each report. These

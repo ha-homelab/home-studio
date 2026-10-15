@@ -72,11 +72,12 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   const clock = frames(c);
   vm.runInContext(scheduler + section('// On-demand 3D rendering.', '// Project actions and keyboard navigation.') + section('let firstResize =', 'window.planner ='), c);
   c.renderPreview(); assert.equal(constructions, 0, 'Plan-only use creates no WebGL context');
-  for (const label of ['SwiftShader', 'llvmpipe', 'softpipe', 'lavapipe', 'Microsoft Basic Render Driver']) {
+  for (const label of ['SwiftShader', 'llvmpipe', 'softpipe', 'lavapipe', 'Microsoft Basic Render Driver', 'Apple Software Renderer']) {
     assert.equal(c.previewRenderProfile({getExtension: () => ({UNMASKED_RENDERER_WEBGL: 1}), getParameter: () => label}).pixels, 250000);
   }
   for (const gl of [null, {getExtension: () => null}, {getExtension() { throw Error('blocked'); }},
-    {getExtension: () => ({UNMASKED_RENDERER_WEBGL: 1}), getParameter: () => 'Apple M1'}]) {
+    ...['Apple M1', 'Apple M1, or similar', 'Apple M2', 'Apple Software Renderer, or similar'].map(label =>
+      ({getExtension: () => ({UNMASKED_RENDERER_WEBGL: 1}), getParameter: () => label}))]) {
     assert.equal(c.previewRenderProfile(gl).pixels, 2000000);
     assert.equal(c.previewRenderProfile(gl).shadowSize, 2048);
   }

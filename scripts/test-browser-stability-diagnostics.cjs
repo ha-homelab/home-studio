@@ -57,7 +57,9 @@ test('Firefox software WebGL2 preferences reach the browser and its diagnostic r
   const launch = browserLaunchOptions('firefox', false);
   await diagnostics.run('firefox', {...options, launch}, async () => {});
   assert.equal(launched.headless, false);
-  assert.deepEqual(launched.firefoxUserPrefs, {'webgl.force-enabled': true});
+  assert.deepEqual(launched.firefoxUserPrefs, {
+    'webgl.force-enabled': true, 'webgl.sanitize-unmasked-renderer': false,
+  });
   assert.deepEqual(read(diagnostics).launch.firefoxUserPrefs, launched.firefoxUserPrefs);
   assert.equal(read(diagnostics).status, 'passed');
   const chromium = browserLaunchOptions('chromium', true);

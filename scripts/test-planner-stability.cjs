@@ -170,7 +170,7 @@ async function run(engine,origin) {
       check(current.stats.contextLosses===0,'Editing and preview do not unexpectedly lose the graphics context');
       check(current.preview.items===256&&current.preview.catalogItems===256,'All catalog furniture is retained in the two-floor preview');
       check(current.stats.shaderErrors.length===0&&current.stats.errors.length===0,'Every actual preview shader links without rendering errors');
-      const software=/swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe/i.test(current.stats.gpu.renderer);
+      const software=/swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe|^Apple Software Renderer$/i.test(current.stats.gpu.renderer);
       check(current.scene.buffer[0]*current.scene.buffer[1]<=(software?250000:2000000),'Preview drawing buffer respects the graphics budget at DPR 2');
       check(current.scene.shadowMap.every(size=>size===(software?512:2048)),'Preview shadow map matches the graphics profile');
       if(cycle>0)assert.deepEqual(current.scene.memory,samples[0].scene.memory,'Editing and rebuilding does not accumulate GPU resources');

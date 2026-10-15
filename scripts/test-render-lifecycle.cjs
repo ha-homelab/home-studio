@@ -41,11 +41,18 @@ const flush = () => { const pending = [...frames.values()]; frames.clear(); pend
 for(let i=0;i<200;i++) context.requestRender();
 assert.equal(draws,0); assert.equal(frames.size,1); flush(); assert.equal(draws,1);
 assert.equal(frames.size,0,'The scheduler must not create an idle animation loop');
-for (const renderer of ['ANGLE (Google, SwiftShader Device)', 'llvmpipe (LLVM 19)', 'softpipe', 'Microsoft Basic Render Driver', 'lavapipe']) {
+for (const renderer of ['ANGLE (Google, SwiftShader Device)', 'llvmpipe (LLVM 19)', 'softpipe', 'Microsoft Basic Render Driver', 'lavapipe', 'Apple Software Renderer']) {
   assert.equal(context.selectRenderProfile({getExtension:()=>({UNMASKED_RENDERER_WEBGL:1}),getParameter:()=>renderer}).pixels,250000);
 }
 for (const gl of [{getExtension:()=>null}, {getExtension(){throw Error('denied');}},
-  {getExtension:()=>({UNMASKED_RENDERER_WEBGL:1}),getParameter:()=> 'Apple M1'}]) assert.equal(context.selectRenderProfile(gl).pixels,2000000);
+  ...['Apple M1', 'Apple M1, or similar', 'Apple M2', 'Apple Software Renderer, or similar'].map(renderer =>
+    ({getExtension:()=>({UNMASKED_RENDERER_WEBGL:1}),getParameter:()=>renderer}))]) {
+  const profile = context.selectRenderProfile(gl);
+  assert.equal(profile.pixels,2000000);
+  assert.equal(profile.pointShadows,8);
+  assert.equal(profile.pointShadowSize,512);
+  assert.equal(profile.sunShadowSize,2048);
+}
 context.renderProfile=context.selectRenderProfile({getExtension:()=>({UNMASKED_RENDERER_WEBGL:1}),getParameter:()=>"SwiftShader"});
 assert.ok(1280*800*context.renderPixelRatio(1280,800)**2<=250000.001);
 assert.equal(context.renderProfile.pointShadows,2);

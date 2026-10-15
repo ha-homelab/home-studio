@@ -129,7 +129,7 @@ async function run(browserName, origin, project, sourceHash) {
       check(initial.shaderErrors.length===0, 'All actual WebGL programs link successfully');
       check(initial.scene.pointLights===project.floors[0].items.length, 'Every fixture retains a shader light slot');
       check(initial.scene.activePointLights===project.floors[0].items.length, 'Every active fixture still contributes illumination');
-      const software = /swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe/i.test(initial.gpu.unmaskedRenderer || '');
+      const software = /swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe|^Apple Software Renderer$/i.test(initial.gpu.unmaskedRenderer || '');
       check(initial.scene.drawingBuffer[0]*initial.scene.drawingBuffer[1]<=(software?250000:2000000), 'The actual drawing buffer respects the detected graphics budget');
       const pointShadows = initial.scene.shadowMaps.filter(([type]) => type==='PointLight');
       const expectedShadows = Math.max(0,Math.min(project.floors[0].items.length,software?2:8,initial.gpu.textureUnits-4));

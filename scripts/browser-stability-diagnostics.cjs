@@ -29,7 +29,13 @@ function browserLaunchOptions(engine, headless) {
   // GPU-less Windows runners otherwise block WebGL2 before creating a context.
   // This allows the real software backend; all rendering assertions still run.
   // https://bugzilla.mozilla.org/show_bug.cgi?id=1970486
-  return {headless, firefoxUserPrefs: {'webgl.force-enabled': true}};
+  return {headless, firefoxUserPrefs: {
+    'webgl.force-enabled': true,
+    // Firefox otherwise collapses all Apple renderer names, including software,
+    // to "Apple M1, or similar". Expose the real backend in this test profile.
+    // This preference changes the reported string, not the selected GL backend.
+    'webgl.sanitize-unmasked-renderer': false,
+  }};
 }
 
 function errorDetails(error) {
