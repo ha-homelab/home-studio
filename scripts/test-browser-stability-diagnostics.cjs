@@ -6,7 +6,7 @@ const path = require('node:path');
 const {EventEmitter} = require('node:events');
 const vm = require('node:vm');
 const {test, after} = require('node:test');
-const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions} = require('./browser-stability-diagnostics.cjs');
+const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver} = require('./browser-stability-diagnostics.cjs');
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'home-studio-diagnostics-unit-'));
 const previousDirectory = process.env.STABILITY_UNIT_DIAGNOSTICS_DIR;
@@ -20,11 +20,12 @@ after(() => {
 function fakeBrowser() {
   const page = Object.assign(new EventEmitter(), {
     setDefaultTimeout() {},
+    evaluate: async () => ({userAgent: 'Mozilla/5.0 Firefox/157.0', platform: 'test-platform', maxTouchPoints: 0}),
     isClosed: () => false,
     frames: () => [{evaluate: async () => ({stats: {gpu: {renderer: 'Fictional GPU'}, contexts: 1}})}],
     screenshot: async ({path: filename}) => fs.writeFileSync(filename, 'fictional screenshot'),
   });
-  const context = {newPage: async () => page, close: async () => { context.closed = true; }};
+  const context = {addInitScript: async () => {}, newPage: async () => page, close: async () => { context.closed = true; }};
   const browser = {version: () => 'fictional-browser', newContext: async () => context,
     close: async () => { browser.closed = true; }};
   return {page, context, browser};
@@ -40,7 +41,7 @@ const read = (diagnostics, file = 'firefox.json') => JSON.parse(fs.readFileSync(
 
 test('invalid engines and bounded fixture values cannot produce an empty green run', () => {
   assert.deepEqual(selectedEngines(' firefox, chromium '), ['firefox', 'chromium']);
-  for (const value of ['', 'chromium,,firefox', 'firefox,firefox', 'webkit']) {
+  for (const value of ['', 'chromium,,firefox', 'firefox,firefox', 'safari']) {
     assert.throws(() => selectedEngines(value));
   }
   assert.throws(() => positiveInteger('STABILITY_UNIT_UNSET', 0, 24));
@@ -66,7 +67,7 @@ test('Firefox software WebGL2 preferences reach the browser and its diagnostic r
   assert.equal(chromium.headless, true);
   assert.equal(chromium.firefoxUserPrefs, undefined);
   assert(chromium.args.includes('--use-angle=swiftshader'));
-  assert.throws(() => browserLaunchOptions('webkit', true));
+  assert.deepEqual(browserLaunchOptions('webkit', true), {headless: true});
 });
 
 test('launch failures persist and do not prevent the next selected engine from running', async () => {
@@ -220,4 +221,142 @@ test('the planner fixture serves the implicit favicon but still rejects missing 
     assert.equal(response.status, expected, url);
     assert(response.ended);
   }
+});
+
+
+test('browser profiles preserve real UA and use Firefox-compatible context options', () => {
+  const previous = process.env.HOME_STUDIO_BROWSER_PROFILE;
+  try {
+    const desktop = {viewport: {width: 1440, height: 1000}, deviceScaleFactor: 2};
+    delete process.env.HOME_STUDIO_BROWSER_PROFILE;
+    assert.deepEqual(browserProfile('chromium', desktop).context, {...desktop, locale: 'en-US'});
+    for (const name of ['phone', 'tablet']) {
+      process.env.HOME_STUDIO_BROWSER_PROFILE = name;
+      for (const engine of ['chromium', 'firefox', 'webkit']) {
+        const profile = browserProfile(engine, desktop);
+        assert.equal(profile.name, name);
+        assert.equal(profile.context.hasTouch, true);
+        assert.equal(profile.context.isMobile, engine === 'firefox' ? undefined : true);
+        assert.equal(profile.context.viewport.width, name === 'phone' ? 390 : 820);
+        assert.equal(profile.context.userAgent, undefined, 'Never replace actual browser identity with a device preset UA');
+        assert.equal(profile.realMobileOS, false);
+        assert.equal(profile.input, engine === 'chromium' ? 'native-touch' : 'native-tap-and-mouse-drag');
+      }
+    }
+    process.env.HOME_STUDIO_BROWSER_PROFILE = 'typo';
+    assert.throws(() => browserProfile('chromium', desktop), /must be desktop, phone or tablet/);
+  } finally {
+    if (previous === undefined) delete process.env.HOME_STUDIO_BROWSER_PROFILE;
+    else process.env.HOME_STUDIO_BROWSER_PROFILE = previous;
+  }
+});
+
+test('installed channels are explicit and do not allow unsupported engine combinations', () => {
+  const previous = process.env.HOME_STUDIO_BROWSER_CHANNEL;
+  try {
+    for (const channel of ['chrome', 'chrome-beta', 'msedge', 'msedge-beta']) {
+      process.env.HOME_STUDIO_BROWSER_CHANNEL = channel;
+      assert.equal(browserLaunchOptions('chromium', true).channel, channel);
+      assert.throws(() => browserLaunchOptions('firefox', true), /require the Chromium/);
+      assert.throws(() => browserLaunchOptions('webkit', true), /require the Chromium/);
+    }
+    process.env.HOME_STUDIO_BROWSER_CHANNEL = 'safari';
+    assert.throws(() => browserLaunchOptions('chromium', true), /must be chrome/);
+  } finally {
+    if (previous === undefined) delete process.env.HOME_STUDIO_BROWSER_CHANNEL;
+    else process.env.HOME_STUDIO_BROWSER_CHANNEL = previous;
+  }
+});
+
+test('actual identity rejects mismatched browser versions and mislabeled channels', async () => {
+  const previous = process.env.HOME_STUDIO_EXPECT_BROWSER_MAJOR;
+  const previousVersion = process.env.HOME_STUDIO_EXPECT_BROWSER_VERSION;
+  const page = (ua, brands) => ({evaluate: async () => ({userAgent: ua, platform: 'actual-desktop', maxTouchPoints: 1,
+    userAgentData: brands ? {brands: brands.map(brand => ({brand, version:'142'}))} : null})});
+  try {
+    process.env.HOME_STUDIO_EXPECT_BROWSER_MAJOR = '142';
+    const chrome = await browserIdentity(page('Mozilla Chrome/142.0', ['Google Chrome','Chromium']), 'chromium', {channel: 'chrome'}, '142.0.1');
+    assert.equal(chrome.product, 'Google Chrome');
+    assert.equal(chrome.platform, 'actual-desktop');
+    const unbranded = await browserIdentity(page('Chrome/142.0'), 'chromium', {}, '142.0');
+    assert.equal(unbranded.product, 'Chromium-compatible', 'A Chrome UA token alone cannot prove a Google Chrome binary');
+    await assert.rejects(browserIdentity(page('Chrome/142.0', ['Chromium']), 'chromium', {channel:'chrome'}, '142.0'), /actual Google Chrome brand/);
+    const edge = await browserIdentity(page('Mozilla Chrome/142.0 Edg/142.0'), 'chromium', {channel: 'msedge'}, '142.0.1');
+    assert.equal(edge.product, 'Microsoft Edge');
+    await assert.rejects(browserIdentity(page('Chrome/141.0'), 'chromium', {channel: 'chrome'}, '141.0'), /pinned browser major/);
+    await assert.rejects(browserIdentity(page('Chrome/142.0'), 'chromium', {channel: 'msedge'}, '142.0'), /identify itself as Edge/);
+    await assert.rejects(browserIdentity(page('Chrome/142.0 Edg/142.0'), 'chromium', {channel: 'chrome'}, '142.0'), /identify itself as Chrome/);
+    process.env.HOME_STUDIO_EXPECT_BROWSER_VERSION = '142.0.2';
+    await assert.rejects(browserIdentity(page('Chrome/142.0'), 'chromium', {}, '142.0.1'), /complete pinned browser version/);
+    delete process.env.HOME_STUDIO_EXPECT_BROWSER_VERSION;
+    process.env.HOME_STUDIO_EXPECT_BROWSER_MAJOR = 'not-a-major';
+    await assert.rejects(browserIdentity(page('Chrome/142.0'), 'chromium', {}, '142.0'), /positive integer/);
+  } finally {
+    if (previous === undefined) delete process.env.HOME_STUDIO_EXPECT_BROWSER_MAJOR;
+    else process.env.HOME_STUDIO_EXPECT_BROWSER_MAJOR = previous;
+    if (previousVersion === undefined) delete process.env.HOME_STUDIO_EXPECT_BROWSER_VERSION;
+    else process.env.HOME_STUDIO_EXPECT_BROWSER_VERSION = previousVersion;
+  }
+});
+
+test('isolated pinned Playwright package supplies both API and matching version evidence', () => {
+  const packagePath = fs.mkdtempSync(path.join(directory, 'isolated-playwright-'));
+  fs.writeFileSync(path.join(packagePath, 'index.js'), 'module.exports = {isolated: true};');
+  fs.writeFileSync(path.join(packagePath, 'package.json'), JSON.stringify({name:'playwright',version:'1.2.3'}));
+  assert.deepEqual(loadPlaywright(packagePath), {playwright:{isolated:true},version:'1.2.3'});
+  assert.throws(() => loadPlaywright('relative/path'), /absolute package directory/);
+});
+
+test('native touch drags use browser protocol and release a failed gesture', async () => {
+  const commands = [];
+  const page = {context: () => ({newCDPSession: async () => ({send: async (method, payload) => commands.push({method, payload})})})};
+  const input = await createInputDriver(page, 'chromium', {input:'native-touch',emulated:true});
+  await assert.rejects(input.drag({x:10,y:20},{x:100,y:200},async () => {throw Error('cancel failed');}), /cancel failed/);
+  assert.equal(commands.length, 14);
+  assert(commands.every(value => value.method === 'Input.dispatchTouchEvent'));
+  assert.equal(commands[0].payload.type, 'touchStart');
+  assert.equal(commands[12].payload.type, 'touchMove');
+  assert.deepEqual(commands[12].payload.touchPoints, [{x:100,y:200,id:0}]);
+  assert.deepEqual(commands[13].payload, {type:'touchEnd',touchPoints:[]});
+});
+
+test('planner disposes geometry and shadow callbacks before restoring the GL context', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../planner/editor.js'), 'utf8');
+  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+  let lost = false, scheduled = 0, cancelled = 0;
+  const disposed = [], handlers = {};
+  const resource = name => ({dispose() {
+    assert(lost, 'Old WebGL resources must be released while their context is lost');
+    disposed.push(name);
+  }});
+  const objects = [{geometry:resource('geometry'),material:[resource('material-a'),resource('material-b')]}];
+  const group = {children:[{traverse: callback => objects.forEach(callback)}],
+    remove(child) { this.children.splice(this.children.indexOf(child), 1); }};
+  const shadow = {map:resource('shadow-map'),mapPass:resource('shadow-pass'),needsUpdate:false,
+    dispose() { this.map?.dispose(); this.mapPass?.dispose(); }};
+  const error = {hidden:true};
+  const context = vm.createContext({worldGroup:group,previewSun:{shadow},
+    previewCanvas:{addEventListener: (name, callback) => { handlers[name] = callback; }},
+    cancelCanvasRender: () => cancelled++,requestCanvasRender: () => scheduled++,$: () => error,translatedText() {}});
+  vm.runInContext("let previewLost = false, previewDirty = false, previewSize = 'before';\n" +
+    section('function disposePreviewGeometry()', 'function rebuildPreview()') +
+    section("previewCanvas.addEventListener('webglcontextlost'", '// Project actions and keyboard navigation.'), context);
+  lost = true;
+  let prevented = false;
+  handlers.webglcontextlost({preventDefault() { prevented = true; }});
+  assert(prevented);
+  assert.equal(cancelled, 1);
+  assert.equal(scheduled, 0, 'A lost context cannot schedule drawing');
+  assert.deepEqual(disposed, ['geometry','material-a','material-b','shadow-map','shadow-pass']);
+  assert.equal(group.children.length, 0);
+  assert.equal(shadow.map, null);
+  assert.equal(shadow.mapPass, null);
+  assert.equal(vm.runInContext('previewDirty && previewLost', context), true);
+  lost = false;
+  handlers.webglcontextrestored();
+  shadow.dispose(); // Later page teardown must not invoke stale target callbacks.
+  assert.equal(scheduled, 1);
+  assert.equal(shadow.needsUpdate, true);
+  assert.equal(error.hidden, true);
+  assert.equal(vm.runInContext("!previewLost && previewSize === '' && previewDirty", context), true);
 });

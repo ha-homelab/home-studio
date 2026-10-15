@@ -1,5 +1,5 @@
 // Isolated, real-browser planner stress checks. No Home Assistant or user data.
-// npx playwright install chromium firefox
+// npx playwright install chromium firefox webkit
 // PLANNER_STABILITY_ENGINES=firefox,chromium node scripts/test-planner-stability.cjs
 // PLANNER_STABILITY_SOURCE_ROOT=/path/to/baseline PLANNER_STABILITY_REPORT_ONLY=1 ...
 // HOME_STUDIO_DIAGNOSTICS_DIR (or PLANNER_STABILITY_DIAGNOSTICS_DIR) keeps JSON/failure PNGs.
@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions} = require('./browser-stability-diagnostics.cjs');
+const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver} = require('./browser-stability-diagnostics.cjs');
 
 const root = path.resolve(process.env.PLANNER_STABILITY_SOURCE_ROOT || path.join(__dirname, '..'));
 const reportOnly = process.env.PLANNER_STABILITY_REPORT_ONLY === '1';
@@ -88,11 +88,12 @@ const server=http.createServer((request,response)=>{
 });
 
 async function run(engine,origin) {
+  const profile = browserProfile(engine, {viewport: {width: 1440, height: 1000}, deviceScaleFactor: 2});
   return diagnostics.run(engine, {
     reportOnly, deadlineMs: 180000, sourceHash,
     fixture: {floors: 2, rooms: 16, catalogItems: 256},
     launch: browserLaunchOptions(engine, process.env.PLANNER_STABILITY_HEADED !== '1'),
-    context: {viewport: {width: 1440, height: 1000}, deviceScaleFactor: 2, locale: 'en-US'},
+    context: profile.context, profile,
     instrument,
   }, async ({browser, page, record, check, save}) => {
   const {samples, errors, crashes, consoleErrors} = record, external = record.external = [];
@@ -101,17 +102,38 @@ async function run(engine,origin) {
   const frames=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   const snapshot=()=>page.evaluate(()=>({stats:window.__plannerStats,preview:window.planner.getPreviewMetadata(),scene:window.__plannerScene()}));
   const getProject=()=>page.evaluate(()=>window.planner.getProject());
+  const input = await createInputDriver(page, engine, profile);
   let dragPhases;
+  async function prepareWorldDrag(from,to) {
+    const canvas = page.locator('#plan-canvas');
+    await canvas.scrollIntoViewIfNeeded();
+    // Small touch motions below the browser's gesture threshold produce no drag;
+    // at phone zoom, nearby furniture hit areas also overlap for mouse input.
+    // Zoom through the real toolbar, then pan through real pointer input to keep
+    // both endpoints visible; the fixture and its metric coordinates stay intact.
+    for (let attempt=0; attempt<30; attempt++) {
+      const points=await page.evaluate(({from,to})=>[window.planner.worldToScreen(from),window.planner.worldToScreen(to)],{from,to});
+      const box=await canvas.boundingBox();
+      if (profile.emulated && Math.hypot(points[1][0]-points[0][0],points[1][1]-points[0][1])<28) {
+        await input.tap(page.locator('#zoom-in')); await frames(); continue;
+      }
+      const mid=[(points[0][0]+points[1][0])/2,(points[0][1]+points[1][1])/2];
+      if (points.every(p=>p[0]>=15&&p[0]<=box.width-15&&p[1]>=15&&p[1]<=box.height-15)) return {points,box};
+      const dx=Math.max(-box.width*.6,Math.min(box.width*.6,box.width/2-mid[0]));
+      const dy=Math.max(-box.height*.6,Math.min(box.height*.6,box.height/2-mid[1]));
+      const start={x:box.x+box.width/2-dx/2,y:box.y+box.height/2-dy/2};
+      await canvas.focus(); await page.keyboard.down('Space');
+      try { await input.drag(start,{x:start.x+dx,y:start.y+dy}); }
+      finally { await page.keyboard.up('Space'); }
+      await frames();
+    }
+    throw Error('Unable to frame the complete metric drag inside the visible plan canvas');
+  }
   async function dragWorld(from,to) {
-    const points=await page.evaluate(({from,to})=>[window.planner.worldToScreen(from),window.planner.worldToScreen(to)],{from,to});
-    const box=await page.locator('#plan-canvas').boundingBox();
+    const {points,box}=await prepareWorldDrag(from,to);
     const start=Date.now();
-    const marks=[start];
-    await page.mouse.move(box.x+points[0][0],box.y+points[0][1]);marks.push(Date.now());
-    await page.mouse.down();marks.push(Date.now());
-    await page.mouse.move(box.x+points[1][0],box.y+points[1][1],{steps:12});marks.push(Date.now());
-    await page.mouse.up();marks.push(Date.now());await frames();marks.push(Date.now());
-    dragPhases=Object.fromEntries(['hoverMs','pressMs','moveMs','releaseMs','framesMs'].map((key,i)=>[key,marks[i+1]-marks[i]]));
+    dragPhases=await input.drag({x:box.x+points[0][0],y:box.y+points[0][1]}, {x:box.x+points[1][0],y:box.y+points[1][1]});
+    const frameStart=Date.now();await frames();dragPhases.framesMs=Date.now()-frameStart;
     return Date.now()-start;
   }
   async function burst(canvasId) {
@@ -130,19 +152,18 @@ async function run(engine,origin) {
     await page.waitForFunction(()=>window.planner.getProject().id==='planner_stress');await frames();
     const importMs=Date.now()-importStart;
     assert.deepEqual(await getProject(),project,'The complete larger fictional project imports without data loss');
-    await page.locator('[data-tool="room"]').click();const roomDrawMs=await dragWorld([32.25,.25],[33.75,1.75]);
+    await input.tap(page.locator('[data-tool="room"]'));const roomDrawMs=await dragWorld([32.25,.25],[33.75,1.75]);
     assert.equal((await getProject()).floors[0].rooms.length,9,'Pointer drawing adds a room');
-    await page.locator('#undo').click();
-    await page.locator('[data-tool="wall"]').click();const wallDrawMs=await dragWorld([32.25,3],[33.75,3]);
+    await input.tap(page.locator('#undo'));
+    await input.tap(page.locator('[data-tool="wall"]'));const wallDrawMs=await dragWorld([32.25,3],[33.75,3]);
     assert.equal((await getProject()).floors[0].walls.length,23,'Pointer drawing adds a wall');
-    await page.locator('#undo').click();await page.locator('[data-tool="select"]').click();
+    await input.tap(page.locator('#undo'));await input.tap(page.locator('[data-tool="select"]'));
     const planBurst=await burst('plan-canvas');check(planBurst.sync<=1&&planBurst.total>0&&planBurst.total<=2,'Plan wheel bursts coalesce into one frame');
-    await page.locator('#fit-view').click();
-    const beforeCancel=await getProject(),cancelPoint=await page.evaluate(()=>window.planner.worldToScreen([1,1]));
-    const cancelBox=await page.locator('#plan-canvas').boundingBox();
-    await page.mouse.move(cancelBox.x+cancelPoint[0],cancelBox.y+cancelPoint[1]);await page.mouse.down();
-    await page.mouse.move(cancelBox.x+cancelPoint[0]+20,cancelBox.y+cancelPoint[1]+5,{steps:3});
-    await page.keyboard.press('Escape');await page.mouse.up();await frames();
+    await input.tap(page.locator('#fit-view'));
+    const beforeCancel=await getProject(),cancel=await prepareWorldDrag([1,1],[1.5,1]);
+    await input.drag({x:cancel.box.x+cancel.points[0][0],y:cancel.box.y+cancel.points[0][1]},
+      {x:cancel.box.x+cancel.points[1][0],y:cancel.box.y+cancel.points[1][1]},()=>page.keyboard.press('Escape'));
+    await frames();
     assert.deepEqual(await getProject(),beforeCancel,'Cancelling a furniture drag restores the complete original project');
     const initial=record.initial={shellLoadMs,importMs,roomDrawMs,wallDrawMs,planBurst};save();console.log(`${engine}: ${JSON.stringify(initial)}`);
     for(let cycle=0;cycle<cycles;cycle++) {
@@ -151,15 +172,16 @@ async function run(engine,origin) {
       const itemDragMs=await dragWorld(before,[before[0]+.5,before[1]]);
       sample.itemDragMs=itemDragMs;sample.itemDragPhases=dragPhases;save();
       const moved=(await getProject()).floors[0].items[0];assert.equal(moved.position_m.x,before[0]+.5,'Pointer dragging moves the intended catalog furniture');
-      const previewStart=Date.now();await page.locator('#preview-tab').click();await page.waitForFunction(()=>window.planner.getPreviewMetadata().items>0);await frames();
+      const previewStart=Date.now();await input.tap(page.locator('#preview-tab'));await page.waitForFunction(()=>window.planner.getPreviewMetadata().items>0);await frames();
       const previewLoadMs=Date.now()-previewStart;
       sample.previewLoadMs=previewLoadMs;save();
       let allFloorsMs=null;
-      if(cycle===0){const allFloorsStart=Date.now();await page.locator('#all-floors').check();await frames();allFloorsMs=Date.now()-allFloorsStart;}
+      if(cycle===0){const allFloorsStart=Date.now();await input.tap(page.locator('#all-floors'));assert(await page.locator('#all-floors').isChecked(),'All-floors control responds to the selected input');await frames();allFloorsMs=Date.now()-allFloorsStart;}
       sample.allFloorsMs=allFloorsMs;save();
+      await page.locator('#preview-canvas').scrollIntoViewIfNeeded();
       const preOrbit=await snapshot(),box=await page.locator('#preview-canvas').boundingBox(),orbitStart=Date.now();
-      await page.mouse.move(box.x+box.width*.45,box.y+box.height*.45);await page.mouse.down();
-      await page.mouse.move(box.x+box.width*.6,box.y+box.height*.55,{steps:12});await page.mouse.up();await frames();
+      await input.drag({x:box.x+box.width*.45,y:box.y+box.height*.45},
+        {x:box.x+box.width*.6,y:box.y+box.height*.55});await frames();
       const orbitMs=Date.now()-orbitStart,afterOrbit=await snapshot();
       sample.orbitMs=orbitMs;save();
       assert.notDeepEqual(afterOrbit.scene.orbit,preOrbit.scene.orbit,'Actual pointer input changes the preview camera');
@@ -183,28 +205,36 @@ async function run(engine,origin) {
       check(itemDragMs<10000&&previewLoadMs<30000&&orbitMs<10000,`Planner editing and preview gestures remain responsive (item drag ${itemDragMs} ms, preview ${previewLoadMs} ms, orbit ${orbitMs} ms)`);
       console.log(`${engine}: cycle ${cycle+1}, item drag ${itemDragMs} ms, preview ${previewLoadMs} ms, orbit ${orbitMs} ms`);
       if(cycle===cycles-1&&process.env.PLANNER_STABILITY_SCREENSHOT_DIR){fs.mkdirSync(process.env.PLANNER_STABILITY_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.PLANNER_STABILITY_SCREENSHOT_DIR,`${engine}.png`)});}
-      await page.locator('#plan-tab').click();await frames();
+      await input.tap(page.locator('#plan-tab'));await frames();
       const hidden=(await snapshot()).preview.renderCount;await page.waitForTimeout(150);check((await snapshot()).preview.renderCount===hidden,'A closed preview stops rendering');
     }
     let recovery=null;
     if(!reportOnly) {
-      await page.locator('#preview-tab').click();await frames();
+      await input.tap(page.locator('#preview-tab'));await frames();
       const saved=await getProject(),before=await snapshot();
       await page.evaluate(()=>{const extension=document.querySelector('#preview-canvas').getContext('webgl2').getExtension('WEBGL_lose_context');if(!extension)throw Error('WEBGL_lose_context required');window.__restorePlanner=()=>extension.restoreContext();extension.loseContext();});
       await page.waitForFunction(()=>window.__plannerStats.contextLosses===1);
       await burst('preview-canvas');check((await snapshot()).preview.renderCount===before.preview.renderCount,'Lost contexts suppress preview draws');
-      await page.locator('#plan-tab').click();const drag=(await getProject()).floors[0].items[0].position_m;await dragWorld([drag.x,drag.z],[drag.x-.5,drag.z]);
+      await input.tap(page.locator('#plan-tab'));const drag=(await getProject()).floors[0].items[0].position_m;await dragWorld([drag.x,drag.z],[drag.x-.5,drag.z]);
       assert.equal((await getProject()).floors[0].items[0].position_m.x,drag.x-.5,'Furniture remains editable while the graphics context is lost');
-      const [download]=await Promise.all([page.waitForEvent('download'),page.locator('#export-project').click()]);
+      const [download]=await Promise.all([page.waitForEvent('download'),input.tap(page.locator('#export-project'))]);
       const exported=JSON.parse(fs.readFileSync(await download.path(),'utf8'));assert.deepEqual(exported,await getProject(),'JSON export remains intact while the graphics context is lost');
-      await page.setViewportSize({width:1280,height:900});await page.evaluate(()=>window.__restorePlanner());
-      await page.locator('#preview-tab').click();await page.waitForFunction(count=>window.planner.getPreviewMetadata().renderCount>count,before.preview.renderCount);await frames();
+      await page.setViewportSize(profile.emulated ? {width:profile.context.viewport.width-40,height:profile.context.viewport.height-80} : {width:1280,height:900});await page.evaluate(()=>window.__restorePlanner());
+      await input.tap(page.locator('#preview-tab'));await page.waitForFunction(count=>window.planner.getPreviewMetadata().renderCount>count,before.preview.renderCount);await frames();
       recovery={savedItems:saved.floors.flatMap(f=>f.items).length,after:await snapshot()};
       check(recovery.after.stats.shaderErrors.length===0,'Restored preview shaders link successfully');
       const restored=recovery.after;
+      check(consoleErrors.length===0,'Restoring and rebuilding preview geometry produces no browser graphics errors');
+      check(restored.preview.catalogItems===256,'Restoration rebuilds every catalog item after edits made while the context was lost');
+      assert.deepEqual(restored.scene.memory,samples[0].scene.memory,'Restoration rebuilds the scene without leaking or omitting GPU resources');
       assert.deepEqual(restored.scene.buffer,[Math.floor(restored.preview.viewport.width*restored.scene.pixelRatio),Math.floor(restored.preview.viewport.height*restored.scene.pixelRatio)],'Restoration uses the viewport size changed while the context was lost');
       assert.deepEqual(await getProject(),exported,'Graphics restoration preserves the edited project');
     }
+    record.input=await page.evaluate(()=>window.__acceptanceInput);
+    if(profile.emulated) check(record.input.trustedTouchStarts>0&&record.input.trustedTouchEnds>0,
+      'Touch profiles exercise trusted browser touch input');
+    if(profile.input==='native-touch') check(record.input.trustedTouchMoves>0&&record.input.trustedTouchPointerMoves>0,
+      'Native touch drags reach the planner as trusted touch and pointer movement');
     record.recovery=recovery;
     save();
     const beforeReload=await getProject();await page.reload();await page.waitForFunction(()=>window.planner);

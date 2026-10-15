@@ -1,6 +1,6 @@
 // Real WebGL regression coverage. Uses fictional rooms and an isolated browser
 // profile; the sandboxed iframe and MessageChannel mirror the HA panel contract.
-// Install browsers: npx playwright install chromium firefox
+// Install browsers: npx playwright install chromium firefox webkit
 // Select engines: BROWSER_STABILITY_ENGINES=firefox,chromium node scripts/test-browser-stability.cjs
 // Compare a checkout: HOME_STUDIO_SOURCE_ROOT=/path/to/checkout node scripts/test-browser-stability.cjs
 // Default: six rooms / eighteen lights. BROWSER_STABILITY_ROOMS supports 1–24 rooms.
@@ -14,7 +14,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
-const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions} = require('./browser-stability-diagnostics.cjs');
+const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver} = require('./browser-stability-diagnostics.cjs');
 
 const root = path.resolve(process.env.HOME_STUDIO_SOURCE_ROOT || path.join(__dirname, '..'));
 const fixtureOnly = process.env.HOME_STUDIO_FIXTURE_ONLY === '1';
@@ -69,14 +69,17 @@ function instrumentation() {
 }
 
 async function run(browserName, origin, project, sourceHash) {
+  const profile = browserProfile(browserName, {viewport: {width: 1280, height: 800}});
   return diagnostics.run(browserName, {
     reportOnly, deadlineMs: 120000, sourceHash,
     fixture: {floors: 1, rooms: project.floors[0].rooms.length, lights: project.floors[0].items.length},
     launch: browserLaunchOptions(browserName, process.env.BROWSER_STABILITY_HEADED !== '1'),
-    context: {viewport: {width: 1280, height: 800}, locale: 'en-US'},
+    context: profile.context, profile,
   }, async ({browser, page, record, check, save}) => {
   const {samples, errors, crashes, consoleErrors} = record;
+  const input = await createInputDriver(page, browserName, profile);
   const dragCanvas = async (locator, child) => {
+    await locator.scrollIntoViewIfNeeded();
     const bounds = await locator.boundingBox();
     const point = await locator.evaluate(canvas => {
       const rect = canvas.getBoundingClientRect();
@@ -86,10 +89,8 @@ async function run(browserName, origin, project, sourceHash) {
       throw Error('No exposed canvas pixel is available for a real drag');
     });
     const started = Date.now();
-    await page.mouse.move(bounds.x+bounds.width*point.x,bounds.y+bounds.height*point.y);
-    await page.mouse.down();
-    await page.mouse.move(bounds.x+bounds.width*(point.x+.15),bounds.y+bounds.height*(point.y+.1),{steps:12});
-    await page.mouse.up();
+    await input.drag({x: bounds.x+bounds.width*point.x, y: bounds.y+bounds.height*point.y},
+      {x: bounds.x+bounds.width*(point.x+.15), y: bounds.y+bounds.height*(point.y+.1)});
     await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
     return Date.now()-started;
   };
@@ -99,18 +100,18 @@ async function run(browserName, origin, project, sourceHash) {
     for (let cycle = 0; cycle < 2; cycle++) {
       console.log(`${browserName} ${browser.version()}: loading fictional dashboard, cycle ${cycle + 1}`);
       const started = Date.now();
-      await page.evaluate(async ({items,states}) => {
+      await page.evaluate(async ({items,states,height}) => {
         const html = await (await fetch('/viewer')).text();
         const iframe = document.createElement('iframe');
         iframe.id = 'viewer';iframe.sandbox = 'allow-scripts allow-downloads allow-forms';
-        iframe.style.cssText = 'width:100%;height:740px;border:0';
+        iframe.style.cssText = `width:100%;height:${height}px;border:0`;
         iframe.onload = () => {
           const channel = new MessageChannel();window.viewerPort = channel.port1;
           channel.port1.onmessage = event => { if(event.data.type==='model_config') channel.port1.postMessage({type:'states',connected:true,states}); };
           iframe.contentWindow.postMessage({type:'home-floorplan:init',items,preferences:{}},'*',[channel.port2]);
         };
         iframe.srcdoc = html;document.body.append(iframe);
-      }, {items:project.floors[0].items,states});
+      }, {items:project.floors[0].items,states,height:profile.emulated?profile.context.viewport.height-60:740});
       await page.waitForFunction(() => document.querySelector('#viewer'));
       const frame = await page.locator('#viewer').contentFrame();
       // FrameLocator supports locators, but evaluate uses the actual child Frame.
@@ -154,7 +155,7 @@ async function run(browserName, origin, project, sourceHash) {
       check(afterHomeDrag.errors.length===0, `No rendering errors after Home drag: ${afterHomeDrag.errors.join('; ')}`);
       check(afterHomeDrag.renderCount>idleBefore, 'Dragging Home updates the rendered scene');
       check(sample.homeCameraChanged, 'Dragging Home changes the camera used to draw the scene');
-      await frame.locator('#editLayout').click();
+      await input.tap(frame.locator('#editLayout'));
       await child.waitForFunction(() => !window.floorplan.homeMode);
       // Exercise a burst of editor wheel events in a single task, as high-frequency
       // trackpad input must not perform an unbounded number of synchronous draws.
@@ -210,7 +211,7 @@ async function run(browserName, origin, project, sourceHash) {
         JSON.stringify(editorCameraBefore) !== JSON.stringify(editorCameraAfter));
       save();
       check(sample.editorCameraChanged, 'Dragging the editor changes the camera used to draw the scene');
-      await frame.locator('#openHome').click();
+      await input.tap(frame.locator('#openHome'));
       await child.waitForFunction(() => window.floorplan.homeMode);
       await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
       sample.statePrograms = [(await snapshot()).linkedPrograms];
@@ -243,7 +244,7 @@ async function run(browserName, origin, project, sourceHash) {
           extension.loseContext();
         });
         await child.waitForFunction(() => window.__browserStability.contextLosses===1);
-        await page.setViewportSize({width:1100,height:700});
+        await page.setViewportSize(profile.emulated ? {width:profile.context.viewport.width-40,height:profile.context.viewport.height-80} : {width:1100,height:700});
         await child.evaluate(() => {for(let i=0;i<40;i++){window.requestModelRender();window.renderModel();}});
         await page.waitForTimeout(100);
         check((await snapshot()).renderCount===beforeLoss, 'Lost WebGL contexts suppress pending and explicit draws');
@@ -257,13 +258,18 @@ async function run(browserName, origin, project, sourceHash) {
         assert.deepEqual(restored.actual,restored.expected, 'Context restoration applies viewport changes made while the context was lost');
         recovery = {before:beforeLoss,after:(await snapshot()).renderCount,contextLosses:(await snapshot()).contextLosses,drawingBuffer:restored.actual};
       }
+      sample.input = await child.evaluate(() => window.__acceptanceInput);
+      if (profile.emulated) check(sample.input.trustedTouchStarts>0 && sample.input.trustedTouchEnds>0,
+        'Touch profiles exercise trusted browser touch input');
+      if (profile.input === 'native-touch') check(sample.input.trustedTouchMoves>0 && sample.input.trustedTouchPointerMoves>0,
+        'Native touch drags reach the viewer as trusted touch and pointer movement');
       Object.assign(sample,{recovery,...initial});
       save();
       // Screenshot readback drains GPU work. Capture after latency checks so it
       // cannot accidentally warm the first interaction being measured.
       if(process.env.BROWSER_STABILITY_SCREENSHOT_DIR) {
         fs.mkdirSync(process.env.BROWSER_STABILITY_SCREENSHOT_DIR,{recursive:true});
-        await frame.locator('#homeZoomReset').click();
+        await input.tap(frame.locator('#homeZoomReset'));
         await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
         await page.screenshot({path:path.join(process.env.BROWSER_STABILITY_SCREENSHOT_DIR,`${browserName}-${cycle+1}.png`)});
       }
@@ -302,7 +308,7 @@ async function run(browserName, origin, project, sourceHash) {
   const server = http.createServer((request,response) => {
     if(request.url==='/fixture.json'){response.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify(project));return;}
     response.writeHead(200,{'Content-Type':'text/html','Cache-Control':'no-store'});
-    response.end(request.url==='/viewer'?html:'<!doctype html><html lang="en"><title>Fictional dashboard fixture</title><body style="margin:0"><p>Isolated dashboard fixture</p></body></html>');
+    response.end(request.url==='/viewer'?html:'<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fictional dashboard fixture</title><body style="margin:0"><p>Isolated dashboard fixture</p></body></html>');
   });
   try {
     await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});

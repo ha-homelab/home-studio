@@ -733,7 +733,14 @@ previewCanvas.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft') orbit.yaw -= .12; if (e.key === 'ArrowRight') orbit.yaw += .12; if (e.key === 'ArrowUp') orbit.pitch = Math.min(1.5, orbit.pitch + .1); if (e.key === 'ArrowDown') orbit.pitch = Math.max(.1, orbit.pitch - .1);
   if (e.key === '+' || e.key === '=') zoomPreview(1.15); else if (e.key === '-') zoomPreview(1 / 1.15); else requestCanvasRender();
 });
-previewCanvas.addEventListener('webglcontextlost', e => { e.preventDefault(); previewLost = true; cancelCanvasRender(); $('preview-error').hidden = false; translatedText('preview-error', 'The graphics context was lost. Reload to restore 3D. Your local draft and JSON export remain available.'); });
+previewCanvas.addEventListener('webglcontextlost', e => {
+  e.preventDefault(); previewLost = true; cancelCanvasRender();
+  // Three.js replaces its GPU caches on restoration. Dispose old scene callbacks
+  // while GL is lost, before they can delete resources from the restored context.
+  disposePreviewGeometry(); previewDirty = true;
+  if (previewSun) { previewSun.shadow.dispose(); previewSun.shadow.map = null; previewSun.shadow.mapPass = null; }
+  $('preview-error').hidden = false; translatedText('preview-error', 'The graphics context was lost. Reload to restore 3D. Your local draft and JSON export remain available.');
+});
 previewCanvas.addEventListener('webglcontextrestored', () => { previewLost = false; previewSize = ''; if (previewSun) previewSun.shadow.needsUpdate = true; $('preview-error').hidden = true; requestCanvasRender(); });
 
 // Project actions and keyboard navigation.

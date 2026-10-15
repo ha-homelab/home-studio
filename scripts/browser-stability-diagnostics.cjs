@@ -14,15 +14,20 @@ function positiveInteger(name, fallback, maximum) {
 
 function selectedEngines(value = 'chromium,firefox') {
   const engines = value.split(',').map(engine => engine.trim());
-  assert(engines.length > 0 && engines.every(engine => ['chromium', 'firefox'].includes(engine)),
-    'Select Chromium and/or Firefox; empty or unsupported engine names are not accepted');
+  assert(engines.length > 0 && engines.every(engine => ['chromium', 'firefox', 'webkit'].includes(engine)),
+    'Select Chromium, Firefox and/or WebKit; empty or unsupported engine names are not accepted');
   assert(new Set(engines).size === engines.length, 'Each browser engine must be selected only once');
   return engines;
 }
 
 function browserLaunchOptions(engine, headless) {
+  const channel = process.env.HOME_STUDIO_BROWSER_CHANNEL || undefined;
+  assert(!channel || ['chrome', 'chrome-beta', 'msedge', 'msedge-beta'].includes(channel),
+    'HOME_STUDIO_BROWSER_CHANNEL must be chrome, chrome-beta, msedge or msedge-beta');
+  assert(!channel || engine === 'chromium', 'Browser channels require the Chromium engine');
+  if (engine === 'webkit') return {headless};
   if (engine === 'chromium') {
-    return {headless, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
+    return {headless, channel, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
       args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']};
   }
   assert.equal(engine, 'firefox', 'A supported browser engine is required');
@@ -41,6 +46,105 @@ function browserLaunchOptions(engine, headless) {
     // back to Apple Software Renderer. Verify the selected backend below.
     ...(backend === 'angle' ? {'webgl.disable-angle': false} : {}),
   }};
+}
+
+// These are viewport/input profiles, not claims of testing a real Android/iOS OS.
+function browserProfile(engine, desktop) {
+  const name = process.env.HOME_STUDIO_BROWSER_PROFILE || 'desktop';
+  assert(['desktop', 'phone', 'tablet'].includes(name),
+    'HOME_STUDIO_BROWSER_PROFILE must be desktop, phone or tablet');
+  const touch = name !== 'desktop';
+  const context = touch ? {
+    viewport: name === 'phone' ? {width: 390, height: 844} : {width: 820, height: 1180},
+    deviceScaleFactor: 2, hasTouch: true, locale: 'en-US',
+    // Playwright explicitly does not support isMobile on Firefox.
+    ...(engine === 'firefox' ? {} : {isMobile: true}),
+  } : {...desktop, locale: 'en-US'};
+  return {name, context, emulated: touch, realMobileOS: false,
+    input: touch ? (engine === 'chromium' ? 'native-touch' : 'native-tap-and-mouse-drag') : 'mouse',
+    limitation: touch && engine !== 'chromium'
+      ? 'Playwright exposes native taps but no public native touch-drag transport for this engine.' : null};
+}
+
+function loadPlaywright(modulePath = process.env.HOME_STUDIO_PLAYWRIGHT_MODULE) {
+  assert(!modulePath || path.isAbsolute(modulePath), 'HOME_STUDIO_PLAYWRIGHT_MODULE must be an absolute package directory');
+  const resolved = modulePath || 'playwright';
+  return {playwright: require(resolved), version: require(path.join(resolved, 'package.json')).version};
+}
+
+// Persist actual platform/UA independently from the requested channel/profile.
+async function browserIdentity(page, engine, launch, version) {
+  const identity = await page.evaluate(() => ({userAgent: navigator.userAgent,
+    platform: navigator.platform, maxTouchPoints: navigator.maxTouchPoints,
+    userAgentData: navigator.userAgentData?.toJSON() || null}));
+  const ua = identity.userAgent;
+  const brands = identity.userAgentData?.brands?.map(value => value.brand) || [];
+  const product = /Edg\//.test(ua) ? 'Microsoft Edge' : /(?:Chrome|HeadlessChrome)\//.test(ua)
+    ? (brands.includes('Google Chrome') ? 'Google Chrome' : 'Chromium-compatible')
+    : /Firefox\//.test(ua) ? 'Firefox' : engine === 'webkit' ? 'Playwright WebKit' : 'unknown';
+  const expected = process.env.HOME_STUDIO_EXPECT_BROWSER_MAJOR;
+  if (expected) {
+    assert(/^[1-9]\d*$/.test(expected), 'HOME_STUDIO_EXPECT_BROWSER_MAJOR must be a positive integer');
+    assert.equal(Number(version.split('.')[0]), Number(expected), 'Actual browser major must match the pinned browser major');
+  }
+  const expectedVersion = process.env.HOME_STUDIO_EXPECT_BROWSER_VERSION;
+  if (expectedVersion) assert.equal(version, expectedVersion, 'Actual browser version must match the complete pinned browser version');
+  if (launch.channel?.startsWith('msedge')) assert(/Edg\//.test(ua), 'The requested Edge executable must identify itself as Edge');
+  if (launch.channel?.startsWith('chrome')) assert(/(?:Chrome|HeadlessChrome)\//.test(ua) && !/Edg\//.test(ua),
+    'The requested Chrome executable must identify itself as Chrome');
+  if (launch.channel?.startsWith('chrome') && brands.length) assert(brands.includes('Google Chrome'),
+    'The requested Chrome channel must report its actual Google Chrome brand');
+  return {...identity, product, engine, browserVersion: version, requestedChannel: launch.channel || null};
+}
+
+function inputInstrumentation() {
+  window.__acceptanceInput = {trustedTouchStarts: 0, trustedTouchMoves: 0, trustedTouchEnds: 0,
+    trustedTouchPointerDowns: 0, trustedTouchPointerMoves: 0, trustedMousePointerDowns: 0};
+  const counts = window.__acceptanceInput;
+  for (const [event, key] of [['touchstart', 'trustedTouchStarts'], ['touchmove', 'trustedTouchMoves'], ['touchend', 'trustedTouchEnds']]) {
+    window.addEventListener(event, value => { if (value.isTrusted) counts[key]++; }, {capture: true, passive: true});
+  }
+  window.addEventListener('pointerdown', value => {
+    if (value.isTrusted && value.pointerType === 'touch') counts.trustedTouchPointerDowns++;
+    if (value.isTrusted && value.pointerType === 'mouse') counts.trustedMousePointerDowns++;
+  }, true);
+  window.addEventListener('pointermove', value => {
+    if (value.isTrusted && value.pointerType === 'touch') counts.trustedTouchPointerMoves++;
+  }, true);
+}
+
+async function createInputDriver(page, engine, profile) {
+  const touch = profile.input === 'native-touch';
+  assert(!touch || engine === 'chromium', 'Native touch drags require the Chromium CDP transport');
+  const cdp = touch ? await page.context().newCDPSession(page) : null;
+  return {
+    tap: locator => profile.emulated ? locator.tap() : locator.click(),
+    async drag(from, to, beforeRelease) {
+      const marks = [Date.now()];
+      if (touch) {
+        marks.push(Date.now());
+        await cdp.send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [{x: from.x, y: from.y, id: 0}]});
+      } else {
+        await page.mouse.move(from.x, from.y); marks.push(Date.now());
+        await page.mouse.down();
+      }
+      marks.push(Date.now());
+      try {
+        if (touch) {
+          for (let step = 1; step <= 12; step++) await cdp.send('Input.dispatchTouchEvent', {
+            type: 'touchMove', touchPoints: [{x: from.x + (to.x-from.x)*step/12, y: from.y + (to.y-from.y)*step/12, id: 0}],
+          });
+        } else await page.mouse.move(to.x, to.y, {steps: 12});
+        marks.push(Date.now());
+        if (beforeRelease) await beforeRelease();
+      } finally {
+        if (touch) await cdp.send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []});
+        else await page.mouse.up();
+      }
+      marks.push(Date.now());
+      return Object.fromEntries(['hoverMs', 'pressMs', 'moveMs', 'releaseMs'].map((key, i) => [key, marks[i+1]-marks[i]]));
+    },
+  };
 }
 
 function errorDetails(error) {
@@ -89,7 +193,9 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       schemaVersion: 1, suite: name, engine, status: 'running', startedAt: new Date().toISOString(),
       os: summary.os, nodeVersion: process.version, browserVersion: null, playwrightVersion: null,
       reportOnly: options.reportOnly, fixture: options.fixture, sourceRevision, sourceHash: options.sourceHash || null,
-      launch: {headless: options.launch.headless, args: options.launch.args || [],
+      profile: options.profile || {name: 'desktop', emulated: false, realMobileOS: false}, identity: null,
+      launch: {headless: options.launch.headless, channel: options.launch.channel || null,
+        executablePath: options.launch.executablePath || null, args: options.launch.args || [],
         firefoxUserPrefs: options.launch.firefoxUserPrefs || {}},
       browserContext: options.context, gpu: null, samples: [], errors: [], crashes: [], consoleErrors: [],
       consoleErrorDetails: [], httpErrors: [], requestFailures: [],
@@ -124,6 +230,7 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
           return {
             url: location.href === 'about:srcdoc' ? 'about:srcdoc' : location.pathname,
             userAgent: navigator.userAgent, devicePixelRatio: window.devicePixelRatio,
+            input: window.__acceptanceInput || null,
             stats: window.__browserStability || window.__plannerStats || null, scene, sceneError,
           };
         }))), 2500, 'Failure snapshot');
@@ -154,8 +261,9 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
         }, options.deadlineMs);
       });
       await Promise.race([deadline, (async () => {
-        const playwright = dependencies.playwright || require('playwright');
-        record.playwrightVersion = dependencies.playwright ? 'test-double' : require('playwright/package.json').version;
+        const loaded = dependencies.playwright ? {playwright: dependencies.playwright, version: 'test-double'} : loadPlaywright();
+        const {playwright} = loaded;
+        record.playwrightVersion = loaded.version;
         launchPending = true;
         try { browser = await playwright[engine].launch({...options.launch, timeout: 30000}); }
         finally { launchPending = false; }
@@ -163,9 +271,12 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
         record.browserVersion = browser.version();
         save();
         context = await browser.newContext(options.context);
+        await context.addInitScript(inputInstrumentation);
         if (options.instrument) await context.addInitScript(options.instrument);
         page = await context.newPage();
         page.setDefaultTimeout(30000);
+        record.identity = await browserIdentity(page, engine, options.launch, record.browserVersion);
+        save();
         page.on('pageerror', error => { record.errors.push(String(error)); save(); });
         page.on('crash', () => { record.crashes.push('Page crashed'); save(); });
         page.on('console', message => {
@@ -198,6 +309,9 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
           save();
         });
         await execute({browser, context, page, record, check, save});
+        // Chromium exposes UA client-hint brands only after a secure navigation.
+        record.identity = await browserIdentity(page, engine, options.launch, record.browserVersion);
+        save();
         if (process.platform === 'darwin' && options.launch.firefoxUserPrefs?.['webgl.disable-angle'] === false) {
           check(/ANGLE Metal Renderer/i.test(record.gpu?.unmaskedRenderer || record.gpu?.renderer || ''),
             'The requested Firefox Metal ANGLE backend must be confirmed by the actual renderer');
@@ -262,4 +376,4 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
   };
 }
 
-module.exports = {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions};
+module.exports = {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver};
