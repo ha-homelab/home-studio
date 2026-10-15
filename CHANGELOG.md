@@ -14,8 +14,13 @@
   Chromium/SwiftShader. Three edit/preview cycles retained the geometry and
   stable live resource counts, coalesced wheel input, and recovered from context
   loss with 2D editing, JSON export, and the local draft intact. The software
-  renderer still took 2.1 to 2.8 seconds for tested 2D gestures; Waterfox remains
-  untested.
+  renderer still took 2.1 to 2.8 seconds for tested 2D gestures.
+- Verify a limited planner smoke check in official Waterfox 6.7.6 with a clean
+  temporary profile and native Apple M1 WebGL 2: load 256 items, drag furniture,
+  open both floors, and orbit without recorded rendering errors or context loss.
+  This does not cover the full Waterfox lifecycle suite, generated viewer, or
+  the user's existing browser configuration; the reported crash cause remains
+  unverified.
 - In the generated viewer, limit shadow-casting point lights to eight for
   native/unidentified renderers and two for positively identified software
   renderers. Reserve four fragment texture units for other maps, preventing the
@@ -43,8 +48,8 @@
   Firefox 157 and Chromium/SwiftShader on macOS passed the final eighteen-light
   regression, including stable shader counts across light state changes,
   context restoration after resizing, and two iframe load cycles. Software
-  startup still took 6.6 to 8.2 seconds in this fixture. Waterfox was not tested,
-  and the cause of its reported browser crash remains unverified.
+  startup still took 6.6 to 8.2 seconds in this fixture. The generated viewer
+  was not tested in Waterfox.
 - Include the rounded translucent walls introduced after the previous stable
   release: preserve opening dimensions and exact shadow blockers, cache bounded
   geometry variants, and advance the subtle tint only on requested frames.

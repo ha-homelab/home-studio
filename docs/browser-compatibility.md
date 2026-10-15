@@ -54,8 +54,29 @@ external request. Intentional context loss left 2D editing and JSON export
 usable; resizing and restoring recovered the preview, and reloading preserved
 the local draft. Deterministic handler tests separately cover hidden-page and
 back/forward-cache suspension, discard cleanup, shadow invalidation, drag
-cancellation, undo/redo, and rejected moves. Waterfox was not tested, and these
-results do not identify the cause of its reported crash.
+cancellation, undo/redo, and rejected moves. These results do not identify the
+cause of the reported Waterfox crash.
+
+### Waterfox planner smoke check
+
+A separate smoke check on 2026-10-15 used the official Waterfox 6.7.6 macOS
+application, reporting Gecko 153.5.0 and build `20261013130543`, with a temporary
+clean profile. It ran headless through direct Marionette and W3C pointer
+actions, without Playwright patches, on WebGL 2 with reported renderer
+`Apple M1, or similar` and device scale 1.
+
+The same 256-item planner fixture loaded from its local draft in 52 ms. A real
+pointer drag moved a furniture item's X coordinate from 1 to 1.5 metres in
+287 ms; opening the two-floor preview took 367 ms, and pointer orbit took
+303 ms. All 256 items remained in the preview, with no recorded rendering
+errors or context losses. The buffer was 870 by 730 pixels, with a 2048 by 2048
+sun shadow map. The gestures used twelve pointer steps of 16 ms each, so these
+times are not directly comparable to the Playwright runs at device scale 2.
+
+This was a single planner smoke check. It did not exercise Waterfox's full
+context-loss/lifecycle suite, the generated Home Assistant viewer, or the
+user's existing profile and configuration. It does not reproduce or establish
+the cause of the reported crash, or certify long-running Waterfox stability.
 
 ### Generated viewer
 
@@ -90,13 +111,14 @@ and resumed with the new size after restoration. Screenshots were captured only
 after the latency checks. Software startup still took 6.6 to 8.2 seconds in this
 fixture; this is not a claim of instant loading on CPU renderers. Timings include
 first-use work and are not steady-state frame-time percentiles or a long-running
-stability certification. Waterfox was not installed or tested.
+stability certification. The generated viewer was not tested in Waterfox.
 
 Passing a Playwright Firefox run is evidence for that bundled Firefox build,
 operating system, and graphics backend. It does not certify Waterfox. Likewise,
 Chromium with SwiftShader exercises software WebGL rather than physical GPU
-performance. Safari, mobile browsers, and native Waterfox need their own target
-browser acceptance runs before compatibility or performance is claimed.
+performance. Safari and mobile browsers still need their own target-browser
+acceptance runs. Waterfox evidence is limited to the separate planner smoke
+check above; broader compatibility and performance remain unverified.
 
 No exact cause of a reported Waterfox browser crash has been established by the
 code changes alone. A render timeout, shader error, context loss, browser-process
