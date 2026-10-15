@@ -54,7 +54,8 @@ class PlatformAcceptanceTests(unittest.TestCase):
                     self.assertNotIn('continue-on-error', step)
                 if 'strategy' in job:
                     self.assertEqual(job['strategy']['fail-fast'], 'false')
-                    self.assertLessEqual(int(job['strategy']['max-parallel']), 6)
+                    self.assertEqual(int(job['strategy']['max-parallel']),
+                                     {'install': 3, 'browser': 10, 'native-browser': 3}[name])
         jobs = acceptance['jobs']
         self.assertEqual(set(jobs['install']['strategy']['matrix']['os']), PLATFORMS)
         manifest = json.loads((ROOT / 'scripts/browser-matrix.json').read_text())

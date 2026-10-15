@@ -44,11 +44,12 @@ WebKit **27.2**. Playwright **1.63.0** pins Chromium **153.0.8010.12**, Firefox
 **155.0**, and WebKit **26.6**. Playwright **1.62.1** pins Chromium
 **151.0.7922.34**, Firefox **153.0**, and WebKit **26.5**.
 
-At most six Playwright rows, three native Firefox/Waterfox rows, three package
+At most ten Playwright rows, three native Firefox/Waterfox rows, three package
 rows, and one Safari row run concurrently. These are GitHub-hosted OS runners,
 not Linux containers with a different user agent. The existing focused Linux
 package suite continues to run localization, model, render-budget, component,
-and fuzz-regression checks.
+and fuzz-regression checks. The ten-row browser limit shortens the full gate
+while keeping each row's fixture and timing limits unchanged.
 
 The Playwright versions above are three snapshots, **not three consecutive
 browser majors**. Their versions and revisions come from each release's
