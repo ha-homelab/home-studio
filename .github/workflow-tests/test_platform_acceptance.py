@@ -78,7 +78,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
             self.assertIn(script, install)
         steps = jobs['browser']['steps']
         viewer = [step for step in steps if 'node scripts/test-browser-stability.cjs' in step.get('run', '')]
-        planner = [step for step in steps if 'node scripts/test-planner-stability.cjs' in step.get('run', '')]
+        planner = [step for step in steps if step.get('id') == 'planner_acceptance']
         self.assertEqual(len(viewer), 2)
         self.assertEqual(len(planner), 1)
         self.assertEqual(viewer[1]['env']['BROWSER_STABILITY_ROOMS'], '24')
@@ -94,6 +94,25 @@ class PlatformAcceptanceTests(unittest.TestCase):
         self.assertIn('scripts/setup-browser-toolchain.py', runs)
         self.assertIn('scripts/setup-chrome-for-testing.py', runs)
         self.assertIn('"$HOME_STUDIO_PLAYWRIGHT_MODULE/cli.js"', runs)
+
+    def test_windows_webkit_settled_layout_is_failure_only_diagnostic(self):
+        steps = workflow('platform-acceptance.yml')['jobs']['browser']['steps']
+        primary = next(step for step in steps if step.get('id') == 'planner_acceptance')
+        diagnostic = [step for step in steps if 'PLANNER_STABILITY_RESTORE_LAYOUT' in step.get('env', {})]
+        self.assertEqual(len(diagnostic), 1)
+        diagnostic = diagnostic[0]
+        self.assertEqual(primary['if'], '${{ !cancelled() }}')
+        self.assertNotIn('PLANNER_STABILITY_RESTORE_LAYOUT', primary['env'])
+        self.assertIn('node scripts/test-planner-stability.cjs', primary['run'])
+        self.assertEqual(diagnostic['if'], "${{ !cancelled() && steps.planner_acceptance.outcome == 'failure' && matrix.engine == 'webkit' && matrix.os == 'windows-2022' }}")
+        self.assertEqual(diagnostic['env'], {
+            'HOME_STUDIO_DIAGNOSTICS_DIR': 'acceptance-artifacts/diagnostics/planner-settled',
+            'PLANNER_STABILITY_RESTORE_LAYOUT': 'settled',
+        })
+        self.assertEqual(diagnostic['run'], 'node scripts/test-planner-stability.cjs')
+        self.assertLess(steps.index(primary), steps.index(diagnostic))
+        for step in (primary, diagnostic):
+            self.assertNotIn('continue-on-error', step)
 
     def test_native_browsers_use_exact_verified_downloads_and_versions(self):
         job = workflow('platform-acceptance.yml')['jobs']['native-browser']

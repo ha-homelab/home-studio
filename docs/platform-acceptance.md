@@ -128,6 +128,14 @@ information, observations, and failures. Failed runs attempt screenshots;
 a crashed or unresponsive browser may not produce one. Job logs remain the
 evidence for dependency failures and runner-level timeouts.
 
+If the primary planner check fails on Windows WebKit, the job runs one
+additional diagnostic with `PLANNER_STABILITY_RESTORE_LAYOUT=settled` and
+saves it under `diagnostics/planner-settled` in the same artifact. It compares
+restoration after layout settles with the required immediate-restoration
+check, to investigate the extra context loss observed on this port. The
+primary failure still fails the job even if this comparison passes; the
+diagnostic does not replace an acceptance check or suppress any errors.
+
 Check the first failed assertion and actual renderer before comparing timings.
 Chromium uses SwiftShader to exercise software rendering. Linux runs headed
 browsers under Xvfb with software GL. Firefox profiles force WebGL enablement

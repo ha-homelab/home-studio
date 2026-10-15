@@ -137,6 +137,7 @@ jobs:
             node scripts/test-browser-stability.cjs
           fi
       - name: Test drawing and 3D preview with 2 floors and 256 items
+        id: planner_acceptance
         if: ${{ !cancelled() }}
         env:
           HOME_STUDIO_DIAGNOSTICS_DIR: acceptance-artifacts/planner
@@ -146,6 +147,12 @@ jobs:
           else
             node scripts/test-planner-stability.cjs
           fi
+      - name: Compare settled layout after Windows WebKit planner failure
+        if: ${{ !cancelled() && steps.planner_acceptance.outcome == 'failure' && matrix.engine == 'webkit' && matrix.os == 'windows-2022' }}
+        env:
+          HOME_STUDIO_DIAGNOSTICS_DIR: acceptance-artifacts/diagnostics/planner-settled
+          PLANNER_STABILITY_RESTORE_LAYOUT: settled
+        run: node scripts/test-planner-stability.cjs
       - name: Preserve synthetic browser diagnostics and toolchain identity
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
