@@ -416,3 +416,73 @@ test('planner records the phase and lost state of failed restored shader links',
   assert.equal(stats.contextEvents[2].statusMessage,'driver reset');
   assert.deepEqual(stats.contextEvents[2].buffer,[1462,1367]);
 });
+
+test('planner recovery variants select real actions and retain restoration checks', async () => {
+  const source = fs.readFileSync(path.join(__dirname, 'test-planner-stability.cjs'), 'utf8');
+  const settings = source.slice(source.indexOf('const restoreLayout ='), source.indexOf('const diagnostics ='));
+  const recoveryBlock = source.slice(source.indexOf('    let recovery=null;'), source.indexOf('    record.input='));
+  assert(settings && recoveryBlock, 'Exercise the actual selector and recovery sequence');
+  for (const value of ['', 'typo', 'edit,resize']) {
+    assert.throws(() => vm.runInNewContext(settings, {assert, process:{env:{PLANNER_STABILITY_RECOVERY_ACTIONS:value}}}), /RECOVERY_ACTIONS must be/);
+  }
+  async function recover(actions, layoutMode, secondLoss = false) {
+    const env = {PLANNER_STABILITY_RESTORE_LAYOUT:layoutMode};
+    if (actions !== undefined) env.PLANNER_STABILITY_RECOVERY_ACTIONS=actions;
+    const trace = [], record = {}, checks = [], stats = {contextLosses:0,shaderErrors:[]};
+    const project = {floors:[{items:[{position_m:{x:2,z:1}}]}]};
+    const memory = {geometries:2077,textures:1};
+    let lost=false, renderCount=1, viewport={width:1440,height:1000}, exported;
+    const copy = value => JSON.parse(JSON.stringify(value));
+    const current = () => copy({stats,preview:{renderCount,catalogItems:256,viewport},
+      scene:{memory,pixelRatio:1,buffer:[viewport.width,viewport.height]}});
+    const extension = {
+      loseContext() {lost=true;stats.contextLosses++;trace.push('lose');},
+      restoreContext() {assert(lost);lost=false;if(secondLoss)stats.contextLosses++;trace.push('restore');},
+    };
+    const window = {__plannerStats:stats,planner:{getPreviewMetadata:()=>current().preview},
+      __plannerScene:()=>({layout:viewport})};
+    const document = {querySelector: selector => selector === '.canvas-shell'
+      ? {getBoundingClientRect:()=>viewport}
+      : {getContext:()=>({getExtension:()=>extension})}};
+    const page = {
+      locator: selector => selector,
+      evaluate: async (callback, argument) => callback(argument),
+      waitForFunction: async (callback, argument) => assert(callback(argument)),
+      waitForEvent: async event => {assert.equal(event,'download');return {path:async ()=>'fixture-export.json'};},
+      setViewportSize: async size => {assert(lost);trace.push('resize');viewport=copy(size);},
+    };
+    const input = {tap:async selector => {
+      if(selector==='#preview-tab'&&!lost)renderCount++;
+      if(selector==='#export-project'){assert(lost);trace.push('export');exported=copy(project);}
+    }};
+    const crossRealmAssert = Object.assign((...args)=>assert(...args), assert, {
+      deepEqual:(actual,expected,message)=>assert.deepEqual(copy(actual),copy(expected),message),
+    });
+    const context = {assert:crossRealmAssert,process:{env},record,reportOnly:false,page,input,window,document,
+      frames:async()=>{},save(){},getProject:async()=>copy(project),snapshot:async()=>current(),
+      profile:{emulated:false},consoleErrors:[],samples:[{scene:{memory}}],
+      fs:{readFileSync:()=>JSON.stringify(exported)},
+      check:(condition,message)=>{checks.push(message);assert(condition,message);},
+      burst:async()=>assert(lost),
+      dragWorld:async (from,to)=>{assert(lost);trace.push('edit');project.floors[0].items[0].position_m={x:to[0],z:to[1]};},
+    };
+    Object.defineProperties(context, {innerWidth:{get:()=>viewport.width},innerHeight:{get:()=>viewport.height}});
+    await vm.runInNewContext(settings + '\n(async()=>{\n' + recoveryBlock + '\n})()', context);
+    return {trace,record,checks,project,exported};
+  }
+  for (const actions of [undefined,'all','none','edit','resize']) {
+    for (const layout of ['immediate','settled']) {
+      const {trace,record,checks,project,exported}=await recover(actions,layout);
+      const mode=actions??'all', edit=['all','edit'].includes(mode), resize=['all','resize'].includes(mode);
+      assert.deepEqual(trace,['lose',...(edit?['edit']:[]),'export',...(resize?['resize']:[]),'restore']);
+      assert.equal(record.recovery.actions,mode);
+      assert.equal(record.recovery.layoutMode,layout);
+      assert.equal(Boolean(record.recovery.settledLayout),layout==='settled');
+      assert.equal(project.floors[0].items[0].position_m.x,edit?1.5:2);
+      assert.deepEqual(project,exported,'Each selected sequence preserves its own exported project');
+      assert(checks.includes('Restoration must not lose the graphics context again'));
+      assert(checks.includes('Restored preview shaders link successfully'));
+    }
+    await assert.rejects(recover(actions,'immediate',true), /must not lose the graphics context again/);
+  }
+});

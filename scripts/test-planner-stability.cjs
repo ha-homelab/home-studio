@@ -2,6 +2,7 @@
 // npx playwright install chromium firefox webkit
 // PLANNER_STABILITY_ENGINES=firefox,chromium node scripts/test-planner-stability.cjs
 // PLANNER_STABILITY_SOURCE_ROOT=/path/to/baseline PLANNER_STABILITY_REPORT_ONLY=1 ...
+// PLANNER_STABILITY_RECOVERY_ACTIONS=none|edit|resize isolates recovery diagnostics (default: all).
 // HOME_STUDIO_DIAGNOSTICS_DIR (or PLANNER_STABILITY_DIAGNOSTICS_DIR) keeps JSON/failure PNGs.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -15,6 +16,10 @@ const reportOnly = process.env.PLANNER_STABILITY_REPORT_ONLY === '1';
 const fixtureOnly = process.env.HOME_STUDIO_FIXTURE_ONLY === '1';
 const restoreLayout = process.env.PLANNER_STABILITY_RESTORE_LAYOUT || 'immediate';
 assert(['immediate','settled'].includes(restoreLayout), 'PLANNER_STABILITY_RESTORE_LAYOUT must be immediate or settled');
+const recoveryActions = process.env.PLANNER_STABILITY_RECOVERY_ACTIONS ?? 'all';
+assert(['all','none','edit','resize'].includes(recoveryActions), 'PLANNER_STABILITY_RECOVERY_ACTIONS must be all, none, edit, or resize');
+const recoveryEdit = recoveryActions === 'all' || recoveryActions === 'edit';
+const recoveryResize = recoveryActions === 'all' || recoveryActions === 'resize';
 const diagnostics = fixtureOnly ? null : createDiagnostics('planner', 'PLANNER_STABILITY', root);
 let cycles, catalog, editor, sourceHash, project;
 
@@ -223,7 +228,7 @@ async function run(engine,origin) {
     if(!reportOnly) {
       await input.tap(page.locator('#preview-tab'));await frames();
       const saved=await getProject(),before=await snapshot();
-      recovery=record.recovery={savedItems:saved.floors.flatMap(f=>f.items).length,layoutMode:restoreLayout,steps:[]};
+      recovery=record.recovery={savedItems:saved.floors.flatMap(f=>f.items).length,layoutMode:restoreLayout,actions:recoveryActions,steps:[]};
       const checkpoint=async phase=>{
         await page.evaluate(value=>{window.__plannerRecoveryPhase=value;},phase);
         recovery.steps.push({phase,snapshot:await snapshot()});save();
@@ -231,14 +236,19 @@ async function run(engine,origin) {
       await checkpoint('request-loss');
       await page.evaluate(()=>{const extension=document.querySelector('#preview-canvas').getContext('webgl2').getExtension('WEBGL_lose_context');if(!extension)throw Error('WEBGL_lose_context required');window.__restorePlanner=()=>extension.restoreContext();extension.loseContext();});
       await page.waitForFunction(()=>window.__plannerStats.contextLosses===1);
-      await checkpoint('edit-while-lost');
+      await checkpoint(recoveryEdit ? 'edit-while-lost' : 'plan-while-lost');
       await burst('preview-canvas');check((await snapshot()).preview.renderCount===before.preview.renderCount,'Lost contexts suppress preview draws');
-      await input.tap(page.locator('#plan-tab'));const drag=(await getProject()).floors[0].items[0].position_m;await dragWorld([drag.x,drag.z],[drag.x-.5,drag.z]);
-      assert.equal((await getProject()).floors[0].items[0].position_m.x,drag.x-.5,'Furniture remains editable while the graphics context is lost');
+      await input.tap(page.locator('#plan-tab'));
+      if(recoveryEdit) {
+        const drag=(await getProject()).floors[0].items[0].position_m;await dragWorld([drag.x,drag.z],[drag.x-.5,drag.z]);
+        assert.equal((await getProject()).floors[0].items[0].position_m.x,drag.x-.5,'Furniture remains editable while the graphics context is lost');
+      } else assert.deepEqual(await getProject(),saved,'Recovery without an edit preserves the complete project');
       const [download]=await Promise.all([page.waitForEvent('download'),input.tap(page.locator('#export-project'))]);
       const exported=JSON.parse(fs.readFileSync(await download.path(),'utf8'));assert.deepEqual(exported,await getProject(),'JSON export remains intact while the graphics context is lost');
-      await checkpoint('resize-while-lost');
-      await page.setViewportSize(profile.emulated ? {width:profile.context.viewport.width-40,height:profile.context.viewport.height-80} : {width:1280,height:900});
+      if(recoveryResize) {
+        await checkpoint('resize-while-lost');
+        await page.setViewportSize(profile.emulated ? {width:profile.context.viewport.width-40,height:profile.context.viewport.height-80} : {width:1280,height:900});
+      }
       // Keep the immediate resize/restore race in the normal acceptance run.
       // The explicit settled variant isolates pending ResizeObserver work.
       if(restoreLayout==='settled') {
@@ -248,9 +258,9 @@ async function run(engine,origin) {
           return {actual:window.__plannerScene().layout,expected:{width:box.width,height:box.height},viewport:[innerWidth,innerHeight]};
         });
         recovery.settledLayout=layout;save();
-        check(['width','height'].every(key=>Math.abs(layout.actual[key]-layout.expected[key])<1),'Settled recovery uses the actual resized canvas layout');
+        check(['width','height'].every(key=>Math.abs(layout.actual[key]-layout.expected[key])<1),'Settled recovery uses the actual canvas layout');
       }
-      check((await snapshot()).preview.renderCount===before.preview.renderCount,'Resizing while the graphics context is lost must not draw');
+      check((await snapshot()).preview.renderCount===before.preview.renderCount,'Recovery actions while the graphics context is lost must not draw');
       await checkpoint('request-restore');await page.evaluate(()=>window.__restorePlanner());
       await input.tap(page.locator('#preview-tab'));await page.waitForFunction(count=>window.planner.getPreviewMetadata().renderCount>count,before.preview.renderCount);await frames();
       recovery.after=await snapshot();save();
@@ -258,10 +268,10 @@ async function run(engine,origin) {
       check(recovery.after.stats.shaderErrors.length===0,'Restored preview shaders link successfully');
       const restored=recovery.after;
       check(consoleErrors.length===0,'Restoring and rebuilding preview geometry produces no browser graphics errors');
-      check(restored.preview.catalogItems===256,'Restoration rebuilds every catalog item after edits made while the context was lost');
+      check(restored.preview.catalogItems===256,'Restoration rebuilds every catalog item after the selected recovery actions');
       assert.deepEqual(restored.scene.memory,samples[0].scene.memory,'Restoration rebuilds the scene without leaking or omitting GPU resources');
-      assert.deepEqual(restored.scene.buffer,[Math.floor(restored.preview.viewport.width*restored.scene.pixelRatio),Math.floor(restored.preview.viewport.height*restored.scene.pixelRatio)],'Restoration uses the viewport size changed while the context was lost');
-      assert.deepEqual(await getProject(),exported,'Graphics restoration preserves the edited project');
+      assert.deepEqual(restored.scene.buffer,[Math.floor(restored.preview.viewport.width*restored.scene.pixelRatio),Math.floor(restored.preview.viewport.height*restored.scene.pixelRatio)],'Restoration uses the current viewport size');
+      assert.deepEqual(await getProject(),exported,'Graphics restoration preserves the exported project');
     }
     record.input=await page.evaluate(()=>window.__acceptanceInput);
     if(profile.emulated) check(record.input.trustedTouchStarts>0&&record.input.trustedTouchEnds>0,
