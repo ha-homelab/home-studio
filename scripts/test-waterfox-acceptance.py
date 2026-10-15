@@ -372,9 +372,17 @@ def planner(client, origin, project, record, save):
 def browser_preferences(port):
     backend = os.environ.get('FIREFOX_WEBGL_BACKEND', 'default')
     require(backend in ('default', 'angle'), 'FIREFOX_WEBGL_BACKEND must be default or angle')
+    compositor = os.environ.get('FIREFOX_COMPOSITOR_BACKEND', 'default')
+    require(compositor in ('default', 'software'), 'FIREFOX_COMPOSITOR_BACKEND must be default or software')
     prefs = {'marionette.port': port, 'browser.shell.checkDefaultBrowser': False, 'browser.aboutwelcome.enabled': False, 'browser.startup.homepage': 'about:blank', 'browser.startup.homepage_override.mstone': 'ignore', 'browser.startup.firstrunSkipsHomepage': True, 'browser.migrate.automigrate.enabled': False, 'app.update.auto': False, 'app.update.enabled': False, 'webgl.force-enabled': True, 'webgl.forbid-software': False, 'webgl.sanitize-unmasked-renderer': False}
     if backend == 'angle':
         prefs['webgl.disable-angle'] = False
+    if compositor == 'software':
+        # Legacy Gecko on macOS VMs can stall while its GPU compositor fails
+        # over to SW-WR. Request that compositor directly in this test profile.
+        # This does not select the WebGL renderer or relax graphics assertions.
+        # https://github.com/mozilla-firefox/firefox/blob/esr153/modules/libpref/init/StaticPrefList.yaml
+        prefs['gfx.webrender.software'] = True
     return prefs
 
 

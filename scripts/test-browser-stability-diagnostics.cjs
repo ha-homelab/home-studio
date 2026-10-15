@@ -99,6 +99,34 @@ test('launch failures persist and do not prevent the next selected engine from r
   assert.equal(read(diagnostics, 'summary.json').browsers.length, 2);
 });
 
+test('software compositor opt-in reaches Firefox and its receipt without changing WebGL', async () => {
+  const previous = process.env.FIREFOX_COMPOSITOR_BACKEND;
+  try {
+    process.env.FIREFOX_COMPOSITOR_BACKEND = 'default';
+    const baseline = browserLaunchOptions('firefox', false);
+    assert.equal(baseline.firefoxUserPrefs['gfx.webrender.software'], undefined);
+    process.env.FIREFOX_COMPOSITOR_BACKEND = 'software';
+    const launch = browserLaunchOptions('firefox', false);
+    assert.deepEqual(launch.firefoxUserPrefs, {...baseline.firefoxUserPrefs, 'gfx.webrender.software': true});
+    const fake = fakeBrowser();
+    let launched;
+    const diagnostics = suite('software-compositor', {firefox: {launch: async value => {
+      launched = value;
+      return fake.browser;
+    }}});
+    await diagnostics.run('firefox', {...options, launch}, async () => {});
+    assert.deepEqual(launched.firefoxUserPrefs, launch.firefoxUserPrefs);
+    assert.deepEqual(read(diagnostics).launch.firefoxUserPrefs, launch.firefoxUserPrefs);
+    assert.equal(browserLaunchOptions('chromium', false).firefoxUserPrefs, undefined);
+    assert.deepEqual(browserLaunchOptions('webkit', false), {headless: false});
+    process.env.FIREFOX_COMPOSITOR_BACKEND = 'typo';
+    assert.throws(() => browserLaunchOptions('firefox', false), /must be default or software/);
+  } finally {
+    if (previous === undefined) delete process.env.FIREFOX_COMPOSITOR_BACKEND;
+    else process.env.FIREFOX_COMPOSITOR_BACKEND = previous;
+  }
+});
+
 test('the Metal profile is explicit and rejects an unconfirmed macOS backend', async () => {
   const previous = process.env.FIREFOX_WEBGL_BACKEND;
   try {

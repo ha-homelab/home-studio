@@ -33,6 +33,8 @@ function browserLaunchOptions(engine, headless) {
   assert.equal(engine, 'firefox', 'A supported browser engine is required');
   const backend = process.env.FIREFOX_WEBGL_BACKEND || 'default';
   assert(['default', 'angle'].includes(backend), 'FIREFOX_WEBGL_BACKEND must be default or angle');
+  const compositor = process.env.FIREFOX_COMPOSITOR_BACKEND || 'default';
+  assert(['default', 'software'].includes(compositor), 'FIREFOX_COMPOSITOR_BACKEND must be default or software');
   // GPU-less Windows runners otherwise block WebGL2 before creating a context.
   // This allows the real software backend; all rendering assertions still run.
   // https://bugzilla.mozilla.org/show_bug.cgi?id=1970486
@@ -45,6 +47,10 @@ function browserLaunchOptions(engine, headless) {
     // Opt-in for macOS virtual machines whose native CGL implementation falls
     // back to Apple Software Renderer. Verify the selected backend below.
     ...(backend === 'angle' ? {'webgl.disable-angle': false} : {}),
+    // Isolate the legacy macOS VM compositor fallback experiment from WebGL.
+    // The requested preference is preserved in launch diagnostics; the actual
+    // WebGL renderer and all acceptance assertions remain independently checked.
+    ...(compositor === 'software' ? {'gfx.webrender.software': true} : {}),
   }};
 }
 

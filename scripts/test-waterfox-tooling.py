@@ -98,6 +98,19 @@ class ToolingTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'differs from the verified package'):
                     setup.validate_installation(installation, 'firefox', '153.5.0esr')
 
+    def test_software_compositor_is_explicit_and_preserves_webgl_preferences(self):
+        with patch.dict(acceptance.os.environ, {'FIREFOX_WEBGL_BACKEND': 'angle', 'FIREFOX_COMPOSITOR_BACKEND': 'default'}):
+            baseline = acceptance.browser_preferences(2828)
+        self.assertNotIn('gfx.webrender.software', baseline)
+        with patch.dict(acceptance.os.environ, {'FIREFOX_WEBGL_BACKEND': 'angle', 'FIREFOX_COMPOSITOR_BACKEND': 'software'}):
+            requested = acceptance.browser_preferences(2828)
+        self.assertEqual(requested, {**baseline, 'gfx.webrender.software': True})
+        self.assertTrue(requested['webgl.force-enabled'])
+        self.assertFalse(requested['webgl.disable-angle'])
+        self.assertFalse(requested['webgl.sanitize-unmasked-renderer'])
+        with patch.dict(acceptance.os.environ, {'FIREFOX_COMPOSITOR_BACKEND': 'typo'}), self.assertRaisesRegex(AssertionError, 'must be default or software'):
+            acceptance.browser_preferences(2828)
+
     def test_requested_macos_backend_requires_real_metal_renderer(self):
         with patch.dict(acceptance.os.environ, {'FIREFOX_WEBGL_BACKEND': 'angle'}):
             prefs = acceptance.browser_preferences(2828)
