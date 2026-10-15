@@ -2,9 +2,24 @@
 
 ## [0.6.3] - Development line
 
-- Limit shadow-casting point lights to eight for native/unidentified renderers
-  and two for positively identified software renderers. Reserve four fragment
-  texture units for other maps, preventing the reproduced eighteen-light
+- Fix the browser drawing tool's separate rendering path: combine rapid 2D
+  drag/wheel and 3D orbit/wheel input into one frame, clone the project once per
+  drag, and preserve exact movement, cancellation, and undo behavior.
+- Bound the planner's 2D canvas to 4,000,000 pixels, and its 3D preview to
+  2,000,000 pixels with a cached 2048-pixel sun shadow map. Positively identified
+  software renderers use a 250,000-pixel preview and a 512-pixel sun shadow.
+  Avoid buffer reallocations and shadow redraws on orbit; suspend hidden/lost
+  preview drawing, restore the current size, and release discarded resources.
+- Add a separate two-floor, 256-item planner regression in Firefox 157 and
+  Chromium/SwiftShader. Three edit/preview cycles retained the geometry and
+  stable live resource counts, coalesced wheel input, and recovered from context
+  loss with 2D editing, JSON export, and the local draft intact. The software
+  renderer still took 2.1 to 2.8 seconds for tested 2D gestures; Waterfox remains
+  untested.
+- In the generated viewer, limit shadow-casting point lights to eight for
+  native/unidentified renderers and two for positively identified software
+  renderers. Reserve four fragment texture units for other maps, preventing the
+  reproduced eighteen-light
   Firefox shader sampler overflow. All fixtures retain illumination and room
   confinement; fixtures beyond the shadow budget do not cast occlusion shadows.
 - Cap combined point-shadow atlases at 8,388,608 pixels and the canvas drawing
@@ -23,7 +38,7 @@
 - Combine rapid pointer and wheel input into one pending frame without an idle
   loop. Pause hidden/context-lost draws, restore the current viewport size after
   context recovery, and release renderer resources when the page is discarded.
-- Add isolated browser stability coverage with a fictional multi-room,
+- Add isolated generated-viewer stability coverage with a fictional multi-room,
   multi-light home and document the evidence required for browser acceptance.
   Firefox 157 and Chromium/SwiftShader on macOS passed the final eighteen-light
   regression, including stable shader counts across light state changes,
@@ -36,7 +51,11 @@
 
 ### Upgrade
 
-Rebuild generated viewers from the selected candidate to receive these changes.
+Rebuild generated viewers from the selected candidate to receive viewer changes.
+The browser drawing tool is a separate application: use the updated hosted
+planner after its GitHub Pages deployment, or serve the selected candidate's
+source directory locally and open `/planner/`. Export project JSON before
+switching between hosted and local origins, which keep separate browser drafts.
 Back up project JSON and Home Assistant configuration, keep private files outside
 the public source archive, and run the installer dry-run before replacing an
 installed component. Existing project identifiers and device bindings remain
@@ -45,8 +64,9 @@ production use; publication does not update an installed home automatically.
 
 ### Security
 
-Browser regressions use fictional projects and a disconnected message bridge;
-they issue no physical-device commands. The public package retains its reviewed
+Browser regressions use fictional projects; the generated-viewer fixture uses
+a disconnected message bridge. They issue no physical-device commands.
+The public package retains its reviewed
 file allowlist. This release does not claim a security vulnerability fix or
 change the Home Assistant authentication boundary.
 

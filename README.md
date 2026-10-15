@@ -209,7 +209,9 @@ For browser regression checks, install Node.js 22 or newer, run
 `npm run test:planner`. On a Linux CI host, use
 `npx playwright install --with-deps chromium firefox`. Run
 `node scripts/test-browser-stability.cjs` for multi-light interaction and WebGL
-recovery checks in both engines. See [browser compatibility](docs/browser-compatibility.md)
+recovery checks in both engines. Run `node scripts/test-planner-stability.cjs`
+for two-floor drawing, furniture dragging, preview orbit, and graphics recovery
+in the browser editor. See [browser compatibility](docs/browser-compatibility.md)
 for rendering budgets, measured coverage, and a safe bug-report checklist.
 These are development tools only;
 users do not need Node.js or Playwright to draw, compile, or install a plan.

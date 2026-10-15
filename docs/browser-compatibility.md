@@ -1,10 +1,16 @@
 # Browser compatibility and rendering acceptance
 
-The generated viewer uses the vendored Three.js r169 renderer and requires
-WebGL 2 for 3D. A browser name or user-agent string is not a capability test:
+Home Studio has two separate browser rendering paths. The hosted drawing tool
+at `/planner/` runs `planner/editor.js`, with a 2D canvas and its own 3D preview.
+The compiler creates a separate viewer from `viewer.js` and the Home view
+modules, for local preview or installation in Home Assistant. Testing or fixing
+one path does not establish that the other works.
+
+Both 3D paths use the vendored Three.js r169 renderer and require WebGL 2.
+A browser name or user-agent string is not a capability test:
 graphics drivers, hardware acceleration, browser settings, and the size of the
-loaded project also matter. The 2D plan and JSON export remain the recovery path
-when 3D cannot start.
+loaded project also matter. The planner's 2D drawing and JSON export remain the
+recovery path when its 3D preview cannot start.
 
 ## Evidence and limits
 
@@ -13,6 +19,45 @@ furnishing, installation, localization, and the installed viewer. The isolated
 browser stability fixture additionally exercises a generated, fictional six-room
 home with eighteen linked lights. It uses a sandboxed iframe and a MessageChannel
 to reproduce the panel boundary without connecting to Home Assistant.
+
+### Browser planner
+
+On 2026-10-15, the separate planner regression completed three edit/preview
+cycles on macOS arm64 with two fictional floors, sixteen rooms, and 256 catalog
+items, at a 1440 by 1000 viewport and device scale 2. The first preview opened
+the active floor's 128 items, then enabled all floors; later previews retained
+all 256 items.
+
+- Playwright Firefox 157.0, WebGL 2 with reported renderer `Apple M1, or similar`:
+  drawing a room and wall took 138 and 143 ms. Item moves took 126 to 135 ms,
+  preview opening 147 to 156 ms, and orbit gestures 122 to 129 ms. Enabling all
+  floors took 175 ms. The preview buffer was 1505 by 1328 pixels, with a 2048 by
+  2048 sun shadow map.
+- Playwright Chromium 156.0.8078.4, WebGL 2 through ANGLE/SwiftShader: drawing a
+  room and wall took 2,083 and 2,305 ms. Item moves took 2,247 to 2,774 ms,
+  preview opening 455 to 495 ms, and orbit gestures 780 to 803 ms. Enabling all
+  floors took 600 ms. The preview buffer was 532 by 469 pixels, with a 512 by
+  512 sun shadow map.
+
+These are end-to-end test-operation times, including input dispatch and frame
+waits. The software-rendered 2D gestures still took 2.1 to 2.8 seconds; passing
+the regression does not make that interaction smooth. Both engines retained
+all items, used one WebGL context, and kept live resource counts at 2,077
+geometries, one texture, and four programs after each all-floor rebuild.
+Rebuilds can compile replacement programs; the cumulative link count is not
+the live program count. Forty-event wheel bursts produced one draw and no
+synchronous draws in both 2D and 3D. Orbiting did not resize the drawing buffer,
+and the idle or closed preview stopped drawing.
+
+Both runs reported no browser crash, uncaught page error, shader-link error, or
+external request. Intentional context loss left 2D editing and JSON export
+usable; resizing and restoring recovered the preview, and reloading preserved
+the local draft. Deterministic handler tests separately cover hidden-page and
+back/forward-cache suspension, discard cleanup, shadow invalidation, drag
+cancellation, undo/redo, and rejected moves. Waterfox was not tested, and these
+results do not identify the cause of its reported crash.
+
+### Generated viewer
 
 On 2026-10-15, the baseline viewer exceeded Firefox's fragment-sampler limit with
 this eighteen-light fixture: the program required nineteen samplers on a WebGL 2
@@ -58,7 +103,40 @@ code changes alone. A render timeout, shader error, context loss, browser-proces
 crash, and Home Assistant connection failure are distinct observations; retain
 the actual failure and environment when reporting a regression.
 
-## Bounded rendering work
+## Browser planner rendering bounds
+
+The drawing tool combines rapid 2D drag/wheel input and 3D orbit/wheel input
+into one pending animation frame, without an idle rendering loop. Moving a
+shape or item clones the project once per gesture and derives each position
+from its original coordinates; cancelling and undoing preserve the original
+project.
+
+The 2D drawing buffer is capped at 4,000,000 pixels and device pixel ratio 2.
+It releases the old bitmap before applying a new orientation, avoiding an
+oversized intermediate buffer. The separate 3D preview uses at most 2,000,000
+pixels and device pixel ratio 2, with a 2048 by 2048 sun shadow map. Positively
+identified software renderers use at most 250,000 drawing pixels and a 512 by
+512 sun shadow map. Native and unidentified renderers retain the normal
+profile. HTML controls retain their normal resolution.
+
+Orbiting reuses the existing drawing buffer and sun shadow map. Geometry
+changes and context restoration invalidate the shadow; they do not start a
+continuous rendering loop. The planner has its own directional lighting and
+does not use the generated viewer's room-light or point-shadow budget.
+
+Hidden pages suspend drawing. A lost WebGL context pauses the 3D preview while
+2D editing and JSON export remain available. When the browser restores the
+context, the preview redraws at the current viewport size. Discarding a page
+disconnects the resize observer, disposes preview geometry, materials, shadows,
+and the renderer, and releases the context. A retained back/forward-cache page
+suspends and resumes instead of disposing its scene.
+
+These limits reduce drawing and shadow work; they do not make every valid
+project equally cheap to render. Showing all floors still builds all their
+geometry, and catalog items can contain multiple meshes. The existing project
+validation limits remain unchanged.
+
+## Generated viewer rendering bounds
 
 Native and unidentified renderers allow at most eight point lights to cast
 occlusion shadows; positively identified software renderers allow at most two.
@@ -127,6 +205,8 @@ npx playwright install chromium firefox
 node scripts/test-home-render-budget.cjs
 node scripts/test-render-lifecycle.cjs
 node scripts/test-browser-stability.cjs
+node scripts/test-planner-render-budget.cjs
+node scripts/test-planner-stability.cjs
 ```
 
 Use `BROWSER_STABILITY_ENGINES=firefox` or
@@ -136,9 +216,17 @@ with the results. A WebGL-unavailable environment is not a passing 3D run.
 `BROWSER_STABILITY_LIGHTS_PER_ROOM=2` selects the lighter twelve-light comparison
 fixture; the default is three lights in each of six rooms.
 
+The separate planner stress test accepts `PLANNER_STABILITY_ENGINES=firefox`
+or `PLANNER_STABILITY_ENGINES=chromium`. It uses two fictional floors, sixteen
+rooms, and 256 catalog items at device scale 2. The deterministic planner render
+test also exercises hidden-page suspension, discard, drag cancellation, undo,
+redo, and invalid-move rollback without a GPU.
+
 For a target-browser acceptance run, use a fictional project or a private local
-copy of the affected project. Check initial Home drawing, multiple active lights,
-rapid drag/zoom, room focus, editor/Home switching, window resizing, idle frames,
+copy of the affected project. In the planner, draw rooms and walls, move and undo
+items, orbit and zoom the preview, switch between individual and all floors,
+resize, and export/reopen JSON. Separately, check initial Home drawing, multiple
+active lights, rapid drag/zoom, room focus, editor/Home switching, window resizing, idle frames,
 context loss/restoration, and closing/reopening the viewer. Confirm that controls
 and labels remain aligned, that frame counts settle while idle, and that no
 shader-link errors or unexpected context losses occur. Use a disconnected mock
@@ -160,5 +248,10 @@ configured offline fuzz campaigns and source-bound release evidence.
 
 Candidates are prereleases. Publishing one does not establish Waterfox or
 physical-device acceptance and does not deploy a Home Assistant installation.
+The hosted drawing tool follows a separate GitHub Pages workflow: a push to
+`main` stages the allowlisted website, including `planner/editor.js`, and
+deploys it. Publishing a beta or RC is not a gate on that website deployment.
+Downloaded source packages contain the same planner files; serve their root
+directory locally and open `/planner/` to test the packaged drawing tool.
 See [the release workflow](release-workflow.md) and
 [version plans](VERSIONING.md) for publication and promotion requirements.

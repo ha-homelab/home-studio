@@ -78,5 +78,12 @@ jobs:
           BROWSER_STABILITY_HEADED: '1'
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: xvfb-run -a node scripts/test-browser-stability.cjs
+      - name: Test planner drawing and preview resource budgets
+        run: node scripts/test-planner-render-budget.cjs
+      - name: Test large-plan drawing and 3D preview in Chromium and Firefox
+        env:
+          PLANNER_STABILITY_HEADED: '1'
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: xvfb-run -a node scripts/test-planner-stability.cjs
       - name: Test deterministic public source release
         run: python3 scripts/test_package_release.py
