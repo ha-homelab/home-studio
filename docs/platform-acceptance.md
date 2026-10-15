@@ -1,187 +1,226 @@
 # Cross-platform acceptance
 
-The **public `ha-homelab/home-studio` repository** validates its source package
-and both browser experiences on Linux, Windows, and macOS. These tests use
-fictional homes and a loopback-only simulated Home Assistant panel. They never
-need a household's plan, Home Assistant token, live server, or device commands.
+The public `ha-homelab/home-studio` repository validates its source package,
+generated viewer, and drawing tool on native Linux, Windows, and macOS runners.
+All fixtures describe fictional homes and use a loopback-only simulated Home
+Assistant panel. No household plan, Home Assistant token, live server, or device
+command is needed.
 
-## What blocks a PR or release
+## Required coverage
 
-`quality-gate.yml` calls `package.yml`, which calls
-`platform-acceptance.yml`. The release pipeline calls the same quality gate
-with full validation enabled. A failed platform job fails the parent workflow;
-there is no report-only or allowed-failure platform. The generated release
-workflows stay managed by the shared release toolkit.
+`quality-gate.yml` calls `package.yml`, which calls the reusable
+`platform-acceptance.yml`. Release validation calls the same quality gate with
+full validation enabled. Every row below is required: there is no optional
+extended tier, report-only browser, or allowed failure. A download failure,
+missing WebGL, browser crash, timeout, or failed assertion fails the gate.
+`fail-fast: false` lets the remaining rows finish and preserve their evidence.
 
-Eleven native jobs run: the existing nine platform jobs plus two exact-version
-Waterfox jobs. At most three package jobs, three Playwright jobs, and two
-Waterfox jobs run in parallel:
+The reviewed inventory is `scripts/browser-matrix.json`, checked on
+2026-10-15. Its expansion produces **73 acceptance executions**, plus one
+inventory-validation job:
 
-- **Package and install:** Ubuntu 24.04 x64, Windows Server 2022 x64, and
+- **3 package/install rows:** Ubuntu 24.04 x64, Windows Server 2022 x64, and
   macOS 15 ARM64, with Python 3.13 and UTF-8 mode.
-- **Browsers:** Chromium and Firefox on each of those three operating systems,
-  with Node.js 22 and browser builds pinned by the Playwright lockfile.
-- **Waterfox versions:** 6.7.5 and 6.7.6 on Windows Server 2022 x64. Both
-  versions are required, including 6.7.6 from the reported issue. A green
-  Playwright Firefox job cannot substitute for either Waterfox result.
+- **27 desktop engine rows:** all three operating systems, all three engines,
+  and each of three pinned Playwright snapshots listed below.
+- **12 branded desktop rows:** Google Chrome stable/beta and Microsoft Edge
+  stable/beta on every operating system. These channels track the vendor's
+  available release at installation time; their actual version is recorded.
+- **6 historical Chrome for Testing rows:** **153.0.8010.52** and
+  **154.0.8037.92** on every operating system. These were the two preceding
+  Chrome majors when Google's catalog reported stable **155.0.8059.84**.
+- **12 touch-emulation rows:** current pinned Chromium and WebKit, each with
+  phone and tablet profiles, on every operating system.
+- **6 native Firefox rows:** official Firefox stable **158.0** and ESR
+  **153.5.0esr**, on every operating system, independently of Playwright Firefox.
+- **6 native Waterfox rows:** official **6.7.5** and **6.7.6**, on every
+  operating system, including the version from the original freeze report.
+- **1 native Safari row:** the Safari installed on the macOS 15 runner, driven
+  through Apple's `safaridriver`. Its runtime version is recorded separately
+  from the WebKit engine rows.
 
-These are standard GitHub-hosted runners. A Linux container pretending to be
-Windows or macOS is not used. Job names identify the OS and browser, and
-`fail-fast: false` lets other matrix jobs finish after a failure.
+Playwright **1.64.0** pins Chromium **156.0.8078.4**, Firefox **157.0**, and
+WebKit **27.2**. Playwright **1.63.0** pins Chromium **153.0.8010.12**, Firefox
+**155.0**, and WebKit **26.6**. Playwright **1.62.1** pins Chromium
+**151.0.7922.34**, Firefox **153.0**, and WebKit **26.5**.
 
-The existing Linux package job still runs localization, model, rendering-budget,
-fuzz-regression, and component checks. Platform jobs add coverage rather than
-replacing these focused checks.
+At most six Playwright rows, three native Firefox/Waterfox rows, three package
+rows, and one Safari row run concurrently. These are GitHub-hosted OS runners,
+not Linux containers with a different user agent. The existing focused Linux
+package suite continues to run localization, model, render-budget, component,
+and fuzz-regression checks.
 
-## What the tests do
+The Playwright versions above are three snapshots, **not three consecutive
+browser majors**. Their versions and revisions come from each release's
+[`browsers.json`](https://github.com/microsoft/playwright/blob/v1.64.0/packages/playwright-core/browsers.json),
+with historical metadata for
+[1.63.0](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/browsers.json)
+and [1.62.1](https://github.com/microsoft/playwright/blob/v1.62.1/packages/playwright-core/browsers.json).
+Historical Chrome pins come from Google's
+[Chrome for Testing catalog](https://googlechromelabs.github.io/chrome-for-testing/latest-versions-per-milestone-with-downloads.json).
+Updating a snapshot requires reviewing the manifest and its coverage tests,
+not merely changing a job label.
 
-The installer suite validates archives, rejects unsafe paths and links, checks
-replacement and rollback, and preserves unrelated Home Assistant files. The
-distribution test compiles an invented home, installs that exact generated
-archive in a temporary config directory, and checks its contents. Release tests
-check the public allowlist and repeatable ZIP bytes on each host. LF checkout
-rules and canonical ZIP metadata avoid platform-dependent source packaging;
-same-host repeatability is not a claim of byte equality between different
-compression-library versions.
+## What the tests exercise
 
-Each Playwright browser job exercises:
+The installer suite rejects unsafe archives, checks replacement and rollback,
+and preserves unrelated Home Assistant files. The package suite compiles a
+fictional home, installs the generated archive into a temporary config
+folder, and checks its contents. Release tests check the public allowlist and
+repeatable ZIP bytes on each host. Same-host repeatability is not a claim of
+identical compressed bytes across different compression-library versions.
 
-1. A generated **6-room, 18-light** viewer inside an isolated panel iframe.
-2. A larger **24-room, 72-light** viewer, using the same assertions.
-3. The drawing tool with **2 floors, 16 rooms, and 256 furniture items**.
+Every Playwright row exercises the generated **6-room/18-light** viewer, the
+larger **24-room/72-light** viewer, and the drawing tool with **2 floors,
+16 rooms, and 256 furniture items**. Checks include real rendering,
+interaction, light-state changes without repeated shader compilation,
+intentional WebGL context loss/restoration, resource cleanup, preview
+rebuilds, continued editing/export, and draft preservation. A working 2D
+fallback does not count as a successful 3D test.
 
-The viewer checks real loading, drag/orbit, rapid zoom input, light-state
-changes without repeated shader compilation, and intentional WebGL context
-loss/restoration. Closing the iframe must release its browsing context and
-leave the containing page responsive.
+Phone and tablet profiles use **390 × 844** and **820 × 1180** CSS pixels,
+respectively, at device scale factor 2, with touch enabled. They retain the
+actual desktop operating-system identity. Chromium exercises native touch
+drags; the WebKit touch profile exercises native taps, with mouse-driven
+scene drags where the public automation protocol lacks native touch-drag
+support. Diagnostics disclose this limitation. These rows test responsive
+layout and available touch-input paths; they are not Android or iOS devices.
 
-The planner checks drawing and moving objects, opening and orbiting the 3D
-preview, repeated rebuilds without resource growth, recovery after context
-loss, continued 2D editing/export, and preservation of the draft after reload.
-Missing WebGL, a browser crash, shader errors, or an assertion/timeout fails
-acceptance. A successful fallback to 2D does not count as a successful 3D run.
+The native Firefox, Waterfox, and Safari runners separately load both viewer
+sizes and the 256-item planner, exercise interaction and rendering recovery,
+and check draft preservation. They use the actual installed browser protocol
+and record the browser's reported identity. These suites are separate evidence
+from Playwright's patched browser builds and do not claim assertion-for-assertion
+identity with the Playwright runner.
 
-The Waterfox jobs use the official Windows binaries for each pinned version,
-verified against the hashes in `scripts/waterfox-versions.json`. The setup
-script extracts the installer into the runner's temporary directory; it does
-not replace a system browser. A separate runner drives Waterfox through its
-Marionette interface with an isolated profile. These results identify the
-actual Waterfox version, independently of the Playwright Firefox results.
-The separate suite loads both the 6-room/18-light and 24-room/72-light viewers
-twice, drags their Home view, changes light states, restores a deliberately
-lost WebGL context, and closes the panel. Its 256-item planner check moves
-furniture, orbits the two-floor preview, restores its graphics context, and
-checks that reopening preserves the edited draft. These are the Waterfox
-checks; the additional Playwright assertions above remain separate coverage.
+## Reproducibility and evidence
 
-## Read the evidence
+Each Playwright snapshot installs in a separate temporary directory using an
+exact generated npm lock, SHA-512 package integrity, disabled install scripts,
+and no optional packages. Setup verifies the installed package versions and
+`browsers.json` revisions against the inventory before installing browsers.
+The source checkout's lockfile is not rewritten. Pinned browser rows also
+check the actual browser version and major at launch.
 
-Open the **Quality gate** or **Release pipeline** run in GitHub Actions. Each
-Playwright browser job uploads `acceptance-<OS>-<engine>` for 14 days, even
-after a failure. The artifact separates the small viewer, large viewer,
-and planner runs.
-JSON records include the source revision, actual browser version, platform,
-graphics information, observations, and failures. Failed runs attempt a
-screenshot; a crashed or unresponsive browser may not produce one. The job log
-remains the source for dependency-install failures and runner-level timeouts.
-Planner drag records also separate hover, press, movement, release, and final
-frame latency to help distinguish event handling from a slow redraw.
+Historical Chrome archives have exact official URLs and reviewed SHA-256
+hashes. Native Firefox and Waterfox use exact official release URLs and
+SHA-512 hashes from `scripts/firefox-versions.json` and
+`scripts/waterfox-versions.json`. Their extracted applications and test profiles
+live in temporary directories, and the native runners verify the requested
+product and release. macOS application signatures are checked where supported;
+preferences belong in disposable profiles, never inside signed bundles.
 
-Waterfox jobs upload `acceptance-windows-2022-waterfox-<version>` for the same
-retention period. Read each version's report separately: success on one
-version does not satisfy the other version's gate.
+Chrome and Edge stable/beta channels and the runner-installed Safari are
+intentionally **rolling coverage**, not byte-pinned releases. Playwright's
+[documented channel installer](https://playwright.dev/docs/browsers#installing-google-chrome--microsoft-edge)
+can replace the corresponding system browser, so these installs run only on
+disposable CI hosts. The Safari job enables remote automation only on its
+disposable runner. Local focused runs should use an existing browser or an
+isolated pinned download.
 
-Check the first failed assertion and reported renderer before comparing
-timings. Chromium deliberately uses SwiftShader to cover software rendering.
-Linux runs headed browsers under Xvfb with software GL. Playwright Firefox uses
-`webgl.force-enabled=true` so the GPU-less Windows VM can attempt its real
-software WebGL backend. The diagnostics record this preference and the actual
-renderer. Its disposable profile also sets `webgl.sanitize-unmasked-renderer=false`
-so Firefox reports the backend's actual name: otherwise it can hide an Apple
-software renderer behind "Apple M1, or similar". This changes the reported name,
-not the selected graphics backend. See the [Firefox implementation](https://github.com/mozilla-firefox/firefox/blob/FIREFOX_157_0_RELEASE/dom/canvas/ClientWebGLContext.cpp#L2513).
-The macOS Firefox job explicitly selects `FIREFOX_WEBGL_BACKEND=angle`, adding
-`webgl.disable-angle=false` to its temporary profile. Firefox packages
-[Metal ANGLE on macOS](https://bugzilla.mozilla.org/show_bug.cgi?id=2055532#c5).
-This avoids the hosted VM's native CGL fallback, `Apple Software Renderer`,
-which exceeded first-render deadlines even with the smaller software-rendering
-budget. The test requires the reported renderer to confirm `ANGLE Metal Renderer`;
-silently falling back to CGL cannot pass. This configured Metal path does not
-establish that the VM's default CGL path works. Local tests retain the default
-backend unless the variable is explicitly set.
-All shader, context, and rendering assertions still apply. This is
-coverage of that configured VM backend, not certification of Firefox's default
-graphics settings. Waterfox's isolated profile also permits software WebGL and
-forces WebGL enablement, with those preferences saved in each report. These
-tests are bounded regression checks, not frame-rate, battery-life, or
-long-duration benchmarks.
+Every browser job uploads a distinct `acceptance-<OS>-<target>` artifact for
+14 days, including failed test runs. Playwright artifacts separate the small
+viewer, large viewer, and planner; they also retain the installed toolchain
+metadata and any historical Chrome receipt. Native artifacts identify the
+product, pinned release where applicable, and browser session. JSON evidence
+records the source revision, actual browser version, platform, graphics
+information, observations, and failures. Failed runs attempt screenshots;
+a crashed or unresponsive browser may not produce one. Job logs remain the
+evidence for dependency failures and runner-level timeouts.
 
-## Reproduce one browser locally
+Check the first failed assertion and actual renderer before comparing timings.
+Chromium uses SwiftShader to exercise software rendering. Linux runs headed
+browsers under Xvfb with software GL. Firefox profiles force WebGL enablement
+and disclose the actual renderer rather than a sanitized GPU name. Current
+Playwright Firefox 157 and native Firefox 158 rows on macOS select
+`FIREFOX_WEBGL_BACKEND=angle` and require the reported renderer to confirm Metal
+ANGLE. Historical Firefox snapshots, ESR, and Waterfox retain their default
+backend because older releases do not necessarily provide that Metal path.
+The configured ANGLE path avoids the hosted VM's slow native CGL fallback; it
+does not certify Firefox's default graphics configuration. Historical rows
+still have to meet the same acceptance assertions on their available backend.
+Waterfox profiles also permit software WebGL. These are bounded
+regression checks, not frame-rate, battery-life, or long-duration benchmarks.
 
-Install Python 3.13 and Node.js 22, then in a checkout:
+## Reproduce a focused row
+
+With Python 3.13 and Node.js 22 installed, inspect the required inventory or
+check its contracts without downloading browsers:
 
 ```sh
-npm ci --ignore-scripts --no-audit --no-fund
-npx playwright install chromium firefox
-python3 scripts/test-install-home-assistant.py
-python3 scripts/test-public-package.py
+python3 scripts/test-browser-matrix.py
+python3 scripts/browser-matrix.py
+```
+
+For a pinned snapshot, choose an empty directory outside the checkout. The
+setup command prints the absolute module path for the environment variable:
+
+```sh
+python3 scripts/setup-browser-toolchain.py --version 1.63.0 --output /tmp/home-studio-pw-1.63.0
+export HOME_STUDIO_PLAYWRIGHT_MODULE=/tmp/home-studio-pw-1.63.0/node_modules/playwright
+export PLAYWRIGHT_BROWSERS_PATH=/tmp/home-studio-pw-1.63.0/browsers
+node "$HOME_STUDIO_PLAYWRIGHT_MODULE/cli.js" install chromium
+export BROWSER_STABILITY_ENGINES=chromium
+export PLANNER_STABILITY_ENGINES=chromium
+export HOME_STUDIO_EXPECT_BROWSER_MAJOR=153
+export HOME_STUDIO_DIAGNOSTICS_DIR=acceptance-artifacts/local
 node scripts/test-browser-stability.cjs
+BROWSER_STABILITY_ROOMS=24 node scripts/test-browser-stability.cjs
 node scripts/test-planner-stability.cjs
 ```
 
-On Linux, use `npx playwright install --with-deps chromium firefox` to install
-system dependencies. For the same headed mode as CI, set the relevant
-`*_HEADED=1` variable and prefix the Node command with `xvfb-run -a`.
+Use your shell's normal environment syntax on Windows. On Linux, installing
+system libraries may require `install --with-deps`; headed CI parity also
+requires `BROWSER_STABILITY_HEADED=1`, `PLANNER_STABILITY_HEADED=1`, and
+`xvfb-run -a`. `PYTHON` selects the compiler interpreter, and `PYTHONUTF8=1`
+matches CI. Change both engine variables together; `webkit` and `firefox` are
+also supported. Select `HOME_STUDIO_BROWSER_PROFILE=phone` or `tablet` for
+emulation, or leave the default `desktop` profile. For an already-installed
+branded browser, `HOME_STUDIO_BROWSER_CHANNEL=chrome`, `chrome-beta`, `msedge`,
+or `msedge-beta` selects its channel; omit the pinned-major expectation for a
+rolling channel.
 
-Use these environment variables for a focused run (set them with your shell's
-normal environment-variable syntax):
+For isolated historical Chrome, run `setup-chrome-for-testing.py --version
+154.0.8037.92 --output <empty-directory>`, then set
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` to the printed binary and the expected major to
+154. Keep the browser channel unset.
 
-- `BROWSER_STABILITY_ENGINES=firefox` and `PLANNER_STABILITY_ENGINES=firefox`
-  select Firefox; `chromium` selects Chromium.
-- `BROWSER_STABILITY_ROOMS=24` selects the larger generated viewer.
-- `HOME_STUDIO_DIAGNOSTICS_DIR=acceptance-artifacts/local` saves diagnostics.
-- `PYTHON` can point to the exact Python executable used by the compiler.
-- `PYTHONUTF8=1` matches CI's explicit UTF-8 mode.
-- `FIREFOX_WEBGL_BACKEND=angle` selects the CI macOS Firefox Metal path; omit
-  it or use `default` to test Firefox's default backend. Both retain all scene,
-  interaction, timing, and context-recovery assertions.
-
-The default generated viewer has six rooms and three lights per room. Only
-use synthetic projects when publishing screenshots or diagnostic files.
-
-### Reproduce a pinned Waterfox version
-
-The native Waterfox checks do not use Playwright. From the same checkout,
-with Python 3.13 or newer and Node.js 22 installed:
+The native Firefox/Waterfox runners use the normal fixture dependencies:
 
 ```sh
-python3 scripts/setup-waterfox.py --version 6.7.6 --output acceptance-artifacts/waterfox-6.7.6
-python3 scripts/test-waterfox-acceptance.py --installation acceptance-artifacts/waterfox-6.7.6/install.json --output acceptance-artifacts/waterfox-results
+npm ci --ignore-scripts --no-audit --no-fund
+python3 scripts/setup-native-browser.py --product firefox --version 153.5.0esr --output /tmp/home-studio-firefox-esr
+python3 scripts/test-native-browser-acceptance.py --product firefox --expected-version 153.5.0esr --installation /tmp/home-studio-firefox-esr/install.json --output acceptance-artifacts/firefox-esr
 ```
 
-Use an empty installation directory. To compare 6.7.5, change the version and
-directory in both commands. On Windows, use `py -3.13` if `python3` is not on
-your PATH; extraction also requires 7-Zip. The setup chooses the pinned archive
-for the current OS. Only the Windows versions are in the required CI matrix;
-running another OS locally produces additional evidence.
+For Waterfox, change the product to `waterfox` and the version to `6.7.5` or
+`6.7.6`; the older `setup-waterfox.py` and `test-waterfox-acceptance.py` commands
+remain available. Windows extraction requires 7-Zip. On macOS, the Firefox 158 CI
+configuration additionally sets `FIREFOX_WEBGL_BACKEND=angle`; ESR retains the
+default backend. Keep application
+bundles unmodified so their signatures remain valid.
 
-The browser uses disposable profiles and leaves installed browsers untouched.
-Keep the extracted application bundle unmodified: runtime preferences belong
-in those profiles. On macOS, setup verifies the application signature. Adding
-files inside `Waterfox.app` invalidates its sealed resources and can produce a
-"damaged" warning; extract a fresh verified copy instead of changing its bundle.
+## Boundaries of a green result
 
-## What a green matrix does not prove
+A successful matrix covers the inventory above, not every past browser or
+hardware combination. Windows Server 2022 is not the reporter's Windows 11
+machine. ARM64 macOS coverage does not establish Intel Mac behavior. Hosted
+VM renderers do not reproduce all GPUs, drivers, extensions, browser policies,
+or hardware-acceleration settings.
 
-Playwright Firefox is not Waterfox; its pinned browser build and the two
-separately pinned Waterfox versions are distinct acceptance targets. Windows
-Server 2022 is not the reporter's Windows 11 machine, and a hosted VM cannot
-reproduce every GPU, driver, extension, or hardware-acceleration setting.
-macOS ARM64 coverage does not establish Intel Mac or Safari compatibility.
-Mobile browsers and real Home
-Assistant authentication/device integrations need their own acceptance.
+Playwright WebKit is a patched engine build, not Safari. The separate Safari
+row adds actual desktop Safari coverage for the runner's installed version;
+it does not cover all older Safari/macOS pairs, iOS Safari, or embedded iOS
+WebViews. Touch emulation does not run mobile operating systems, actual mobile
+GPUs, keyboards, browser chrome, or Home Assistant companion WebViews. Firefox
+ESR is one explicitly pinned supported ESR release, not all historical ESRs.
+The versioned engine snapshots and two historical Chrome majors are regression
+targets, not recommendations to run obsolete browsers.
 
-For a reported browser freeze, collect the exact browser/OS version, graphics
-backend, whether it happens in the drawing tool or installed viewer, and a
-sanitized reproduction. See [browser compatibility](browser-compatibility.md)
-for existing measurements and the safe bug-report checklist.
+Real Android/iOS devices, additional OS/architecture pairs, and real Home
+Assistant authentication/device integrations need their own acceptance
+infrastructure. No successful desktop or emulation row substitutes for those
+missing results. For a freeze report, collect the exact browser/OS versions,
+graphics backend, affected viewer or drawing-tool path, and a sanitized
+reproduction. See [browser compatibility](browser-compatibility.md) for prior
+measurements and the safe bug-report checklist.

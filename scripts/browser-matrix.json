@@ -1,0 +1,171 @@
+{
+  "schema": 1,
+  "checked_at": "2026-10-15",
+  "current_playwright": "1.64.0",
+  "platforms": {
+    "ubuntu-24.04": {
+      "system": "linux",
+      "architecture": "x64",
+      "cft": "linux64"
+    },
+    "windows-2022": {
+      "system": "windows",
+      "architecture": "x64",
+      "cft": "win64"
+    },
+    "macos-15": {
+      "system": "macos",
+      "architecture": "arm64",
+      "cft": "mac-arm64"
+    }
+  },
+  "playwright": {
+    "1.64.0": {
+      "metadata_source": "https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/browsers.json",
+      "browsers": {
+        "chromium": {
+          "version": "156.0.8078.4",
+          "revision": "1248"
+        },
+        "firefox": {
+          "version": "157.0",
+          "revision": "1555"
+        },
+        "webkit": {
+          "version": "27.2",
+          "revision": "2370"
+        }
+      },
+      "packages": {
+        "playwright": {
+          "integrity": "sha512-kVzTnYFYEyQ9RGzBjNCd2+yEqWmVbxl3AHPynv3qQ6JTjv4a+kwRcnqQwIpuP3NnrnIrE/Q6wWAIAvMfIE2/Yg=="
+        },
+        "playwright-core": {
+          "integrity": "sha512-T9r+MZkTECl2+oUcZ26YgZzTrYidTsIhYYkJix+6iDOymOb1FB2RLLSOxRGnZGv5DStt+aduIVbt+E8WygXYpg=="
+        }
+      }
+    },
+    "1.63.0": {
+      "metadata_source": "https://raw.githubusercontent.com/microsoft/playwright/v1.63.0/packages/playwright-core/browsers.json",
+      "browsers": {
+        "chromium": {
+          "version": "153.0.8010.12",
+          "revision": "1243"
+        },
+        "firefox": {
+          "version": "155.0",
+          "revision": "1543"
+        },
+        "webkit": {
+          "version": "26.6",
+          "revision": "2359"
+        }
+      },
+      "packages": {
+        "playwright": {
+          "integrity": "sha512-+7ziBLidS4NaNCdt57SUDT+wYmmd5fmiQejUic/kb+YsYSCPyOOE9sebzMjNmQrsnNpDJqd4WHvV/8lfKfUDUg=="
+        },
+        "playwright-core": {
+          "integrity": "sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg=="
+        }
+      }
+    },
+    "1.62.1": {
+      "metadata_source": "https://raw.githubusercontent.com/microsoft/playwright/v1.62.1/packages/playwright-core/browsers.json",
+      "browsers": {
+        "chromium": {
+          "version": "151.0.7922.34",
+          "revision": "1234"
+        },
+        "firefox": {
+          "version": "153.0",
+          "revision": "1538"
+        },
+        "webkit": {
+          "version": "26.5",
+          "revision": "2336"
+        }
+      },
+      "packages": {
+        "playwright": {
+          "integrity": "sha512-0M+L3LAD8/nm554LOla9Ayx0j0tmFZ0FBcoQ7F1VuVHpM/XpiC8RcDzBQB8W5+hA8L22THxELzeF+2WcUzvcLg==",
+          "optionalDependencies": {
+            "fsevents": "2.3.2"
+          }
+        },
+        "fsevents": {
+          "version": "2.3.2",
+          "integrity": "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==",
+          "optional": true,
+          "os": [
+            "darwin"
+          ]
+        },
+        "playwright-core": {
+          "integrity": "sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw=="
+        }
+      }
+    }
+  },
+  "channels": [
+    "chrome",
+    "chrome-beta",
+    "msedge",
+    "msedge-beta"
+  ],
+  "touch_engines": [
+    "chromium",
+    "webkit"
+  ],
+  "touch_profiles": [
+    "phone",
+    "tablet"
+  ],
+  "native": {
+    "firefox": [
+      "158.0",
+      "153.5.0esr"
+    ],
+    "waterfox": [
+      "6.7.5",
+      "6.7.6"
+    ]
+  },
+  "safari": [
+    "macos-15"
+  ],
+  "chrome_for_testing": {
+    "catalog": "https://googlechromelabs.github.io/chrome-for-testing/latest-versions-per-milestone-with-downloads.json",
+    "stable_at_review": "155.0.8059.84",
+    "versions": {
+      "153.0.8010.52": {
+        "linux64": {
+          "url": "https://storage.googleapis.com/chrome-for-testing-public/153.0.8010.52/linux64/chrome-linux64.zip",
+          "sha256": "e66f66d4802a46d4a022667e668aa950e277cadbfbed4b3777915b47413a0ef9"
+        },
+        "mac-arm64": {
+          "url": "https://storage.googleapis.com/chrome-for-testing-public/153.0.8010.52/mac-arm64/chrome-mac-arm64.zip",
+          "sha256": "6f67faa4b34dd551b53abb6fee24edeae470ab695b0b100ddc4885ff0be6724a"
+        },
+        "win64": {
+          "url": "https://storage.googleapis.com/chrome-for-testing-public/153.0.8010.52/win64/chrome-win64.zip",
+          "sha256": "df4854428c509fcf2f790ac448bca3f994151bcff22008236fa7c4587294fbe1"
+        }
+      },
+      "154.0.8037.92": {
+        "linux64": {
+          "url": "https://storage.googleapis.com/chrome-for-testing-public/154.0.8037.92/linux64/chrome-linux64.zip",
+          "sha256": "ff43322f335e436b2f4dcdfeeec5db032299e335a7e8c1c618b326e100ce8732"
+        },
+        "mac-arm64": {
+          "url": "https://storage.googleapis.com/chrome-for-testing-public/154.0.8037.92/mac-arm64/chrome-mac-arm64.zip",
+          "sha256": "b62e904b6571c5ff5108ed7812cf93ac6d1c4027f10ae47ac34d8e229ed88001"
+        },
+        "win64": {
+          "url": "https://storage.googleapis.com/chrome-for-testing-public/154.0.8037.92/win64/chrome-win64.zip",
+          "sha256": "b897ef3601c947ac0620c784556dec719ac602b0159ce105927acf645ee0f598"
+        }
+      }
+    }
+  }
+}
