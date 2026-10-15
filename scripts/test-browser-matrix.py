@@ -72,6 +72,15 @@ class BrowserMatrixTests(unittest.TestCase):
                 self.assertEqual(url.path, f'/chrome-for-testing-public/{version}/{platform}/chrome-{platform}.zip')
                 self.assertRegex(entry['sha256'], r'^[a-f0-9]{64}$')
 
+    def test_targets_visit_each_os_before_starting_the_next_browser(self):
+        platforms = list(self.manifest['platforms'])
+        for matrix_rows in self.rows.values():
+            rows = matrix_rows['include']
+            for start in range(0, len(rows), len(platforms)):
+                batch = rows[start:start + len(platforms)]
+                self.assertEqual([row['os'] for row in batch], platforms)
+                self.assertEqual(len({row['id'] for row in batch}), 1)
+
     def test_npm_locks_use_only_exact_integrity_pinned_dependencies(self):
         for version, toolchain in self.manifest['playwright'].items():
             package, lock = setup.lockfile(version, toolchain)

@@ -63,6 +63,11 @@ def expand(manifest):
         identities = {(row['os'], row['id']) for row in rows}
         if len(identities) != len(rows) or not 1 <= len(rows) <= 256:
             raise ValueError('Matrix must have unique rows within the GitHub job limit')
+        # Reach every native OS early instead of spending the first batch on Linux.
+        targets = {}
+        for row in rows:
+            targets.setdefault(row['id'], []).append(row)
+        rows[:] = [row for target in targets.values() for row in target]
     return {'browser': {'include': browser}, 'native': {'include': native}}
 
 
