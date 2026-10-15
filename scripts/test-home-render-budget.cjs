@@ -56,7 +56,7 @@ const root = path.resolve(__dirname, '..');
   assert(shader.fragmentShader.includes(lightChunk.slice(0, pointStart)), 'Lighting initialization is unchanged');
   assert(shader.fragmentShader.includes(lightChunk.slice(pointEnd)), 'Spot, directional, area and indirect lighting remain byte-identical');
   assert.doesNotMatch(guardedPoints, /homeRoomTransmission\(/, 'Point-light slots only index the cache');
-  assert(shader.fragmentShader.indexOf('homeRoomTransmissions[1] = homeLitRooms[0] != 0 ? homeRoomTransmission(homeRoomDistance1()) : 0.0;') < guardedStart,
+  assert(shader.fragmentShader.indexOf('homeRoomTransmissions[1] = homeLitRooms[0] != 0 && homeRoomNearby1() ? homeRoomTransmission(homeRoomDistance1()) : 0.0;') < guardedStart,
     'Literal room transmission is initialized once before the point-light loop');
 
   // Compare room uniform order to the exact comparator shipped with Three.
@@ -155,9 +155,9 @@ const root = path.resolve(__dirname, '..');
     assert.deepEqual(edges, polygon.map((point, i) => [point, polygon[(i + 1) % polygon.length]]),
       'Each specialized function keeps its exact room edges, winding and closing edge');
     assert.match(match[2], /vec2 p = homeWorldPosition\.xz;/);
-    assert.match(match[2], /float distanceToRoom = 10000\.0;\s+bool inside = false;/);
-    assert.match(match[2], /return inside \? -distanceToRoom : distanceToRoom;/);
-    assert(orderedShader.fragmentShader.includes(`homeRoomTransmissions[${index + 1}] = homeLitRooms[${index}] != 0 ? homeRoomTransmission(homeRoomDistance${index + 1}()) : 0.0;`),
+    assert.match(match[2], /float distanceToRoom = 100000000\.0;\s+bool inside = false;/);
+    assert.match(match[2], /float distance = sqrt\(distanceToRoom\);\s+return inside \? -distance : distance;/);
+    assert(orderedShader.fragmentShader.includes(`homeRoomTransmissions[${index + 1}] = homeLitRooms[${index}] != 0 && homeRoomNearby${index + 1}() ? homeRoomTransmission(homeRoomDistance${index + 1}()) : 0.0;`),
       'Every room transmission uses only its corresponding polygon');
   }
   const exteriorRooms = [...orderedShader.fragmentShader.matchAll(/exterior = max\(exterior, 1\.0-smoothstep\(0\.0,0\.04,homeRoomDistance(\d+)\(\)\)\);/g)]
@@ -166,6 +166,68 @@ const root = path.resolve(__dirname, '..');
   const windowRooms = [...orderedShader.fragmentShader.matchAll(/if \(homeRoomDistance(\d+)\(\) <= 0\.015\)/g)]
     .map(match => Number(match[1]));
   assert.deepEqual(windowRooms, [6, 21], 'Window spill retains each opening\'s own room');
+
+  // Validate the broad phase against exact polygon distance, including concave
+  // rooms, reversed winding, negative coordinates and the 0.55 m cutoff.
+  const polygons = [
+    [[0, 0], [4, 0], [4, 3], [0, 3]],
+    [[0, 0], [4, 0], [4, 1], [1, 1], [1, 4], [0, 4]],
+    [[-3.25, -1.75], [-.25, -3.75], [1.75, -.75], [-1.25, 1.25]],
+  ];
+  const probeRooms = polygons.flatMap((polygon, i) => [polygon, [...polygon].reverse()]
+    .map((points, winding) => ({id: `probe-${i}-${winding}`, polygon: points})));
+  const probeMaterial = new THREE.MeshStandardMaterial();
+  lighting.createRoomLighting(THREE, probeRooms, 1, [])
+    .attach({traverse: visit => visit({material: probeMaterial, userData: {}})}, true);
+  const probeShader = {uniforms: {}, vertexShader: THREE.ShaderLib.standard.vertexShader, fragmentShader: THREE.ShaderLib.standard.fragmentShader};
+  probeMaterial.onBeforeCompile(probeShader);
+  const boundFunctions = [...probeShader.fragmentShader.matchAll(/bool homeRoomNearby(\d+)\(\) \{[\s\S]*?greaterThanEqual\(p, vec2\(([^)]+)\) - vec2\(([^)]+)\)\)[\s\S]*?lessThanEqual\(p, vec2\(([^)]+)\) \+ vec2\(([^)]+)\)\)/g)];
+  assert.equal(boundFunctions.length, probeRooms.length, 'Every room gets its own constant bounds');
+  assert.match(probeShader.fragmentShader, /vec2 delta = p - a - edge \* clamp/);
+  assert.match(probeShader.fragmentShader, /d = min\(d, dot\(delta, delta\)\);/,
+    'Each edge accumulates squared distance without a square root');
+  const referenceDistance = (polygon, p, squared) => {
+    let distance = squared ? 100000000 : 10000, inside = false;
+    for (let i = 0; i < polygon.length; i++) {
+      const a = polygon[i], b = polygon[(i + 1) % polygon.length];
+      const edge = [b[0] - a[0], b[1] - a[1]];
+      const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * edge[0] + (p[1] - a[1]) * edge[1]) / (edge[0] ** 2 + edge[1] ** 2)));
+      const delta = [p[0] - a[0] - edge[0] * t, p[1] - a[1] - edge[1] * t];
+      distance = Math.min(distance, squared ? delta[0] ** 2 + delta[1] ** 2 : Math.hypot(...delta));
+      if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) inside = !inside;
+    }
+    if (squared) distance = Math.sqrt(distance);
+    return inside ? -distance : distance;
+  };
+  const transmission = distance => {
+    if (distance <= 0) return 1;
+    const t = Math.max(0, Math.min(1, (distance - .1) / (.55 - .1)));
+    return Math.exp(-8 * distance) * (1 - t * t * (3 - 2 * t));
+  };
+  let skippedPolygons = 0, checkedPoints = 0;
+  for (const [index, match] of boundFunctions.entries()) {
+    const polygon = probeRooms[index].polygon, min = match[2].split(',').map(Number), max = match[4].split(',').map(Number);
+    const lowerPadding = Number(match[3]), upperPadding = Number(match[5]);
+    assert.equal(Number(match[1]), index + 1);
+    assert.deepEqual(min, [Math.min(...polygon.map(p => p[0])), Math.min(...polygon.map(p => p[1]))]);
+    assert.deepEqual(max, [Math.max(...polygon.map(p => p[0])), Math.max(...polygon.map(p => p[1]))]);
+    assert(lowerPadding > .55 && upperPadding > .55, 'Bounds conservatively include the entire nonzero spill');
+    const positions = [];
+    for (let x = min[0] - 2; x <= max[0] + 2; x += .19) for (let z = min[1] - 2; z <= max[1] + 2; z += .23) positions.push([x, z]);
+    for (const vertex of polygon) for (const d of [0, .0149, .0151, .0399, .0401, .1, .54999, .55, .55001, .56, .56001]) {
+      for (const axis of [0, 1]) for (const sign of [-1, 1]) {const p = [...vertex]; p[axis] += sign * d; positions.push(p);}
+    }
+    for (const p of positions) {
+      checkedPoints++;
+      const distance = referenceDistance(polygon, p, false), optimized = referenceDistance(polygon, p, true);
+      assert(Math.abs(distance - optimized) < 1e-10, 'One final square root retains signed polygon distance');
+      const nearby = p.every((value, axis) => value >= min[axis] - lowerPadding && value <= max[axis] + upperPadding);
+      if (!nearby) {skippedPolygons++; assert.equal(transmission(distance), 0, 'A culled fragment has exactly zero room transmission');}
+      assert(Math.abs(transmission(distance) - (nearby ? transmission(optimized) : 0)) < 1e-12,
+        'Broad-phase culling preserves all room light, including concave notches and doorway spill');
+    }
+  }
+  assert(checkedPoints > 5000 && skippedPolygons > checkedPoints / 4, 'The bounds avoid measurable polygon work on the probe grid');
 
   let allocations = 0;
   class TrackedVector extends THREE.Vector3 { constructor(...args) { super(...args); allocations++; } }

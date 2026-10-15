@@ -91,11 +91,23 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
   // compiler from inlining every room's branch chain at every literal call.
   const roomDistances = rooms.map((room, i) => `float homeRoomDistance${i + 1}() {
     vec2 p = homeWorldPosition.xz;
-    float distanceToRoom = 10000.0;
+    float distanceToRoom = 100000000.0;
     bool inside = false;
     ${room.polygon.map((a, j) => `homeRoomEdge(p, ${glslVector(a)}, ${glslVector(room.polygon[(j + 1) % room.polygon.length])}, distanceToRoom, inside);`).join('\n')}
-    return inside ? -distanceToRoom : distanceToRoom;
+    float distance = sqrt(distanceToRoom);
+    return inside ? -distance : distance;
   }`).join('\n');
+  // Transmission reaches exactly zero at 0.55 m from a room. A slightly
+  // wider axis-aligned bound rejects distant rooms before their polygon edges
+  // are evaluated, retaining concave shapes and every doorway-spill fragment.
+  const roomBounds = rooms.map((room, i) => {
+    const xs = room.polygon.map(p => p[0]), zs = room.polygon.map(p => p[1]);
+    return `bool homeRoomNearby${i + 1}() {
+      vec2 p = homeWorldPosition.xz;
+      return all(greaterThanEqual(p, ${glslVector([Math.min(...xs), Math.min(...zs)])} - vec2(0.56))) &&
+        all(lessThanEqual(p, ${glslVector([Math.max(...xs), Math.max(...zs)])} + vec2(0.56)));
+    }`;
+  }).join('\n');
   const fragment = `
     varying vec3 homeWorldPosition;
     uniform int homePointRooms[${capacity}];
@@ -105,12 +117,14 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
     uniform float homeWindowTransmission[${Math.max(1, windows.length)}];
     void homeRoomEdge(vec2 p, vec2 a, vec2 b, inout float d, inout bool inside) {
       vec2 edge = b - a;
-      d = min(d, length(p - a - edge * clamp(dot(p - a, edge) / dot(edge, edge), 0.0, 1.0)));
+      vec2 delta = p - a - edge * clamp(dot(p - a, edge) / dot(edge, edge), 0.0, 1.0);
+      d = min(d, dot(delta, delta));
       if ((a.y > p.y) != (b.y > p.y)) {
         if (p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
       }
     }
     ${roomDistances}
+    ${roomBounds}
     float homeRoomTransmission(float distanceToRoom) {
       if (distanceToRoom <= 0.0) return 1.0;
       return exp(-8.0 * distanceToRoom) * (1.0 - smoothstep(0.1, 0.55, distanceToRoom));
@@ -143,7 +157,7 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
     #if NUM_POINT_LIGHTS > 0
       float homeRoomTransmissions[${rooms.length + 1}];
       homeRoomTransmissions[0] = 1.0;
-      ${rooms.map((_, i) => `homeRoomTransmissions[${i + 1}] = homeLitRooms[${i}] != 0 ? homeRoomTransmission(homeRoomDistance${i + 1}()) : 0.0;`).join('\n')}
+      ${rooms.map((_, i) => `homeRoomTransmissions[${i + 1}] = homeLitRooms[${i}] != 0 && homeRoomNearby${i + 1}() ? homeRoomTransmission(homeRoomDistance${i + 1}()) : 0.0;`).join('\n')}
     #endif
   `;
   const lightChunk = THREE.ShaderChunk.lights_fragment_begin;

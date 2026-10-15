@@ -141,12 +141,18 @@ async function run(browserName, origin, project, sourceHash) {
       await page.waitForTimeout(350);
       check((await snapshot()).renderCount===idleBefore, 'An idle Home view does not continuously render');
       const canvas = frame.locator('#homeStage canvas');
+      const homeCameraBefore = (await snapshot()).scene.camera;
       const dragMs = await dragCanvas(canvas,child);
       sample.dragMs = dragMs;
       sample.readyAfterDragMs = Date.now()-started;
       console.log(`${browserName}: Home drag and frame completion in ${dragMs} ms`);
-      check((await snapshot()).errors.length===0, `No rendering errors after Home drag: ${(await snapshot()).errors.join('; ')}`);
-      check((await snapshot()).renderCount>idleBefore, 'Dragging Home updates the rendered scene');
+      const afterHomeDrag = await snapshot();
+      sample.homeCameraChanged = Boolean(homeCameraBefore && afterHomeDrag.scene.camera &&
+        JSON.stringify(homeCameraBefore) !== JSON.stringify(afterHomeDrag.scene.camera));
+      save();
+      check(afterHomeDrag.errors.length===0, `No rendering errors after Home drag: ${afterHomeDrag.errors.join('; ')}`);
+      check(afterHomeDrag.renderCount>idleBefore, 'Dragging Home updates the rendered scene');
+      check(sample.homeCameraChanged, 'Dragging Home changes the camera used to draw the scene');
       await frame.locator('#editLayout').click();
       await child.waitForFunction(() => !window.floorplan.homeMode);
       // Exercise a burst of editor wheel events in a single task, as high-frequency
@@ -195,8 +201,14 @@ async function run(browserName, origin, project, sourceHash) {
       });
       sample.burst = burst;
       check(burst.synchronousDraws<=1 && burst.totalDraws>0 && burst.totalDraws<=2, 'Wheel bursts coalesce into at most one scheduled scene draw');
+      const editorCameraBefore = (await snapshot()).scene.camera;
       const editorDragMs = await dragCanvas(frame.locator('#view3d canvas'),child);
       sample.editorDragMs = editorDragMs;
+      const editorCameraAfter = (await snapshot()).scene.camera;
+      sample.editorCameraChanged = Boolean(editorCameraBefore && editorCameraAfter &&
+        JSON.stringify(editorCameraBefore) !== JSON.stringify(editorCameraAfter));
+      save();
+      check(sample.editorCameraChanged, 'Dragging the editor changes the camera used to draw the scene');
       await frame.locator('#openHome').click();
       await child.waitForFunction(() => window.floorplan.homeMode);
       await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));

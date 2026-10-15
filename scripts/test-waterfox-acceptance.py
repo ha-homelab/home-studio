@@ -44,6 +44,24 @@ def stop(process):
             process.wait(timeout=10)
 
 
+def shutdown_browser(client, process, record):
+    """Quit the app and release profile databases before directory removal."""
+    started = time.monotonic()
+    try:
+        # Stock Waterfox's own marionette_driver uses this command for in-app
+        # shutdown. DeleteSession alone only disconnects automation.
+        # https://github.com/BrowserWorks/Waterfox/blob/6.7.6/testing/marionette/client/marionette_driver/marionette.py
+        details = client.call('Marionette:Quit')
+        record['shutdown'] = details
+        client.connection.close()
+        require(details.get('cause') == 'shutdown', 'Waterfox did not acknowledge normal application shutdown')
+        require(details.get('forced') is False, 'Waterfox had to force application shutdown')
+        returncode = process.wait(timeout=15)
+        require(returncode == 0, f'Waterfox exited abnormally during shutdown: {returncode}')
+    finally:
+        record['shutdownMs'] = round((time.monotonic() - started) * 1000)
+
+
 class Marionette:
     """The version-3 length-prefixed transport used by stock Gecko browsers."""
     def __init__(self, connection):
@@ -127,6 +145,12 @@ def assert_graphics(stats):
     require(not stats['errors'], 'Browser errors: ' + str(stats['errors']))
 
 
+def assert_recovered_interaction(before_count, after_count, before_camera, after_camera, stats):
+    require(after_count > before_count, 'Recovered pointer input must produce a new frame')
+    require(after_camera != before_camera, 'Recovered pointer input must change the camera')
+    assert_graphics(stats)
+
+
 def viewer(client, origin, project, record, save):
     client.call('WebDriver:Navigate', {'url': origin})
     items = project['floors'][0]['items']
@@ -183,6 +207,9 @@ def viewer(client, origin, project, record, save):
             sample['recovery'] = snapshot()
             assert_graphics(sample['recovery'])
             sample['recoveryDragMs'] = client.canvas_drag('#homeStage canvas')
+            client.wait(f'window.floorplan.renderCount>{sample["recovery"]["renderCount"]}')
+            sample['afterRecoveryDrag'] = after = snapshot()
+            assert_recovered_interaction(sample['recovery']['renderCount'], after['renderCount'], sample['recovery']['scene']['camera'], after['scene']['camera'], after)
         sample['final'] = snapshot()
         assert_graphics(sample['final'])
         require(sample['final']['contextLosses'] == cycle, 'No unexpected WebGL context loss')
@@ -235,6 +262,9 @@ def planner(client, origin, project, record, save):
     require(client.execute('return window.planner.getProject();') == saved, 'Graphics recovery preserves edited furniture')
     sample['recoveryOrbitMs'] = client.canvas_drag('#preview-canvas')
     require(sample['recoveryOrbitMs'] < 10000, 'Recovered planner orbit exceeded 10 seconds')
+    client.wait(f'window.planner.getPreviewMetadata().renderCount>{sample["recovery"]["preview"]["renderCount"]}')
+    sample['afterRecoveryOrbit'] = after = snapshot()
+    assert_recovered_interaction(sample['recovery']['preview']['renderCount'], after['preview']['renderCount'], sample['recovery']['scene']['orbit'], after['scene']['orbit'], after['stats'])
     save()
     client.screenshot(Path(record['output']) / 'planner-recovered.png')
     client.call('WebDriver:Navigate', {'url': url})
@@ -331,12 +361,9 @@ def run_case(installation, output, name, headless):
         record['userAgent'] = client.execute('return navigator.userAgent;')
         save()
         (planner if name == 'planner-256' else viewer)(client, info['origin'], project, record, save)
-        record['status'] = 'passed'
-        # Shut down before removing the isolated profile, especially on Windows.
-        client.call('WebDriver:DeleteSession')
-        client.connection.close()
+        shutdown_browser(client, browser, record)
         client = None
-        stop(browser)
+        record['status'] = 'passed'
         stop(server)
     except Exception as error:
         record['status'] = 'failed'

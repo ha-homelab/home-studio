@@ -78,7 +78,7 @@ errors or context losses. The buffer was 870 by 730 pixels, with a 2048 by 2048
 sun shadow map. The gestures used twelve pointer steps of 16 ms each, so these
 times are not directly comparable to the Playwright runs at device scale 2.
 
-This was a single planner smoke check. It did not exercise Waterfox's full
+This earlier measurement was a single planner smoke check. It did not exercise Waterfox's full
 context-loss/lifecycle suite, the generated Home Assistant viewer, or the
 user's existing profile and configuration. It does not reproduce or establish
 the cause of the reported crash, or certify long-running Waterfox stability.
@@ -116,14 +116,17 @@ and resumed with the new size after restoration. Screenshots were captured only
 after the latency checks. Software startup still took 6.6 to 8.2 seconds in this
 fixture; this is not a claim of instant loading on CPU renderers. Timings include
 first-use work and are not steady-state frame-time percentiles or a long-running
-stability certification. The generated viewer was not tested in Waterfox.
+stability certification. These particular measurements did not include the
+generated viewer in Waterfox. The later native version suite covers both
+generated viewers and planner recovery; see [cross-platform acceptance](platform-acceptance.md).
 
 Passing a Playwright Firefox run is evidence for that bundled Firefox build,
 operating system, and graphics backend. It does not certify Waterfox. Likewise,
 Chromium with SwiftShader exercises software WebGL rather than physical GPU
 performance. Safari and mobile browsers still need their own target-browser
-acceptance runs. Waterfox evidence is limited to the separate planner smoke
-check above; broader compatibility and performance remain unverified.
+acceptance runs. Read the native Waterfox job's own version, platform, graphics
+backend, and outcome when assessing the expanded coverage. Neither these
+earlier measurements nor a hosted CI result certifies every user's environment.
 
 No exact cause of a reported Waterfox browser crash has been established by the
 code changes alone. A render timeout, shader error, context loss, browser-process
@@ -220,6 +223,11 @@ edges. Transmission, daylight, and exterior-light calls select that function
 directly. This prevents software shader compilers from expanding a full
 room-selection branch chain at every call, while preserving the same boundary,
 distance, and doorway-spill calculations.
+For point-light transmission, an axis-aligned room bound expanded by 0.56 m
+rejects distant fragments before evaluating the polygon: the existing spill
+already reaches zero at 0.55 m. In-range and concave boundaries still use the
+exact polygon. Edge calculations retain squared distance until one final square
+root per room. Daylight and exterior boundaries keep their original tests.
 
 Home reuses the room camera fit until the selected room or viewport orientation
 changes. Pan, zoom, and resize continue to update the camera. Rounded-wall tint

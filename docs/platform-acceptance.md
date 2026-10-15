@@ -131,6 +131,28 @@ normal environment-variable syntax):
 The default generated viewer has six rooms and three lights per room. Only
 use synthetic projects when publishing screenshots or diagnostic files.
 
+### Reproduce a pinned Waterfox version
+
+The native Waterfox checks do not use Playwright. From the same checkout,
+with Python 3.13 or newer and Node.js 22 installed:
+
+```sh
+python3 scripts/setup-waterfox.py --version 6.7.6 --output acceptance-artifacts/waterfox-6.7.6
+python3 scripts/test-waterfox-acceptance.py --installation acceptance-artifacts/waterfox-6.7.6/install.json --output acceptance-artifacts/waterfox-results
+```
+
+Use an empty installation directory. To compare 6.7.5, change the version and
+directory in both commands. On Windows, use `py -3.13` if `python3` is not on
+your PATH; extraction also requires 7-Zip. The setup chooses the pinned archive
+for the current OS. Only the Windows versions are in the required CI matrix;
+running another OS locally produces additional evidence.
+
+The browser uses disposable profiles and leaves installed browsers untouched.
+Keep the extracted application bundle unmodified: runtime preferences belong
+in those profiles. On macOS, setup verifies the application signature. Adding
+files inside `Waterfox.app` invalidates its sealed resources and can produce a
+"damaged" warning; extract a fresh verified copy instead of changing its bundle.
+
 ## What a green matrix does not prove
 
 Playwright Firefox is not Waterfox; its pinned browser build and the two

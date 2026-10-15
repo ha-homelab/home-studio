@@ -9,7 +9,7 @@ import plistlib
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 def load(name):
@@ -110,6 +110,45 @@ class ToolingTests(unittest.TestCase):
             self.assertEqual(actual, expected, 'No file may be added or changed in the signed bundle')
             self.assertTrue(any(args[:4] == ['codesign', '--verify', '--deep', '--strict'] for args in calls))
 
+    def test_browser_quits_before_profile_cleanup(self):
+        events = []
+        client = Mock()
+        def command(name):
+            events.append(name)
+            return {'cause': 'shutdown', 'forced': False, 'in_app': True}
+        client.call.side_effect = command
+        client.connection.close.side_effect = lambda: events.append('socket closed')
+        process = Mock()
+        def wait(timeout):
+            self.assertEqual(timeout, 15)
+            events.append('process exited')
+            return 0
+        process.wait.side_effect = wait
+        record = {}
+        acceptance.shutdown_browser(client, process, record)
+        self.assertEqual(events, ['Marionette:Quit', 'socket closed', 'process exited'])
+        self.assertEqual(record['shutdown']['cause'], 'shutdown')
+        self.assertIn('shutdownMs', record)
+
+    def test_shutdown_timeout_remains_a_failure(self):
+        client = Mock()
+        client.call.return_value = {'cause': 'shutdown', 'forced': False}
+        process = Mock()
+        process.wait.side_effect = acceptance.subprocess.TimeoutExpired('waterfox', 15)
+        record = {}
+        with self.assertRaises(acceptance.subprocess.TimeoutExpired):
+            acceptance.shutdown_browser(client, process, record)
+        self.assertIn('shutdownMs', record)
+
+    def test_forced_or_abnormal_shutdown_remains_a_failure(self):
+        for details, returncode in [({'cause': 'restart', 'forced': False}, 0), ({'cause': 'shutdown', 'forced': True}, 0), ({'cause': 'shutdown', 'forced': False}, 1)]:
+            with self.subTest(details=details, returncode=returncode):
+                client, process = Mock(), Mock()
+                client.call.return_value = details
+                process.wait.return_value = returncode
+                with self.assertRaises(AssertionError):
+                    acceptance.shutdown_browser(client, process, {})
+
     def test_failure_receipt_survives_cleanup_error(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
@@ -119,6 +158,13 @@ class ToolingTests(unittest.TestCase):
             self.assertEqual(result['status'], 'failed')
             self.assertEqual(saved['error'], 'fixture launch failed')
             self.assertIn('cleanup failed', saved['cleanupErrors'])
+
+    def test_recovered_pointer_input_must_render_and_move(self):
+        stats = {'contexts': 1, 'gpu': {'version': 'WebGL 2.0'}, 'linkedPrograms': 2, 'shaderErrors': [], 'errors': []}
+        acceptance.assert_recovered_interaction(4, 5, [0, 1], [1, 2], stats)
+        for after_count, after_camera, after_stats in [(4, [1, 2], stats), (5, [0, 1], stats), (5, [1, 2], {**stats, 'errors': ['recovered input failed']})]:
+            with self.subTest(after_count=after_count, after_camera=after_camera), self.assertRaises(AssertionError):
+                acceptance.assert_recovered_interaction(4, after_count, [0, 1], after_camera, after_stats)
 
     def test_graphics_failure_cannot_be_skipped(self):
         stats = {'contexts': 1, 'gpu': {'version': 'WebGL 2.0'}, 'linkedPrograms': 1, 'shaderErrors': [], 'errors': []}
