@@ -15,6 +15,7 @@ function exercise(embedded, {hidden = false, initialRoom = null, failRender = fa
     console: {error(error) { errors.push(error.message); }},
     requestAnimationFrame(callback) { frames.push(callback); },
     updateWallOutlines() {}, updateEditorCamera() {},
+    wallSheenMotion: {beforeRender() {}, afterRender() {}},
     $(id) { return id === 'loadError' ? loadError : {getBoundingClientRect: () => box}; },
     renderer: {
       setSize(width, height) { sizes.push([width, height]); },
@@ -26,9 +27,10 @@ function exercise(embedded, {hidden = false, initialRoom = null, failRender = fa
   const lines = source.split('\n');
   const declaration = lines.find(line => line.startsWith('let initialViewReady='));
   const render = lines.find(line => line.startsWith('function render(){'));
+  const drawScene = lines.find(line => line.startsWith('function drawScene('));
   const resize = lines.find(line => line.startsWith("let viewSize='';")).split(';const observer=')[0] + ';';
   const report = lines.find(line => line.startsWith('function report3DError('));
-  vm.runInContext([declaration, report, render, resize].join('\n'), c);
+  vm.runInContext([declaration, report, drawScene, render, resize].join('\n'), c);
   c.window.resizeModel(); // The existing resize before Home is initialized.
   c.homeView = {
     active: false,
