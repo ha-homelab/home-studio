@@ -81,6 +81,8 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
   const roomIds = new Map(rooms.map((room, i) => [room.id, i + 1]));
   const uniforms = {
     homePointRooms: {value: new Int32Array(capacity)},
+    homeLightRunEnds: {value: new Int32Array(capacity)},
+    homeLightRunCount: {value: 0},
     homeLitRooms: {value: new Int32Array(Math.max(1, rooms.length))},
     homeDaylight: {value: 0},
     homeWindowTransmission: {value: new Float32Array(Math.max(1, windows.length)).fill(1)}
@@ -111,6 +113,8 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
   const fragment = `
     varying vec3 homeWorldPosition;
     uniform int homePointRooms[${capacity}];
+    uniform int homeLightRunEnds[${capacity}];
+    uniform int homeLightRunCount;
     uniform int homeLitRooms[${Math.max(1, rooms.length)}];
     uniform float homeDaylight;
     uniform float homeExteriorSurface;
@@ -177,15 +181,31 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
       directLight.visible = (directLight.color != vec3(0.0));
     }`
   ).replace(directCall, 'if (directLight.visible) ' + directCall + '\n}');
-  // Only shadow samplers require literal indices. Keep their bounded prefix
-  // unrolled, then use one runtime loop for all remaining lights. Expanding a
-  // complete PBR block per unshadowed fixture stalls software shader compilers.
-  const unshadowedBody = pointLighting.slice(pointLighting.indexOf('if (homeRoomTransmissions'), pointLighting.indexOf('#pragma unroll_loop_end'))
-    .replace(/#if defined\( USE_SHADOWMAP \) && \( UNROLLED_LOOP_INDEX < NUM_POINT_LIGHT_SHADOWS \)[\s\S]*?#endif/, '');
+  // Shadow samplers keep their bounded literal prefix. Consecutive lights in
+  // the same room share one transmission lookup; skip their entire runtime
+  // range when it contributes nothing. Runs retain Three's exact light order,
+  // and one shared PBR body avoids expanding it for every room or fixture.
+  const guardedDirectCall = 'if (directLight.visible) ' + directCall;
+  const unshadowedBody = pointLighting.slice(pointLighting.indexOf('pointLight = pointLights'),
+    pointLighting.indexOf(guardedDirectCall) + guardedDirectCall.length)
+    .replace(/#if defined\( USE_SHADOWMAP \) && \( UNROLLED_LOOP_INDEX < NUM_POINT_LIGHT_SHADOWS \)[\s\S]*?#endif/, '')
+    .replaceAll('homeRoomTransmissions[homePointRooms[ i ]]', 'homeRunTransmission');
   const boundedPointLighting = pointLighting.replace('i < NUM_POINT_LIGHTS', 'i < NUM_POINT_LIGHT_SHADOWS')
     .replace('#pragma unroll_loop_end', `#pragma unroll_loop_end
-    for ( int i = NUM_POINT_LIGHT_SHADOWS; i < NUM_POINT_LIGHTS; i ++ ) {
-      ${unshadowedBody}`);
+    int homeRunStart = 0;
+    for ( int homeRun = 0; homeRun < homeLightRunCount; homeRun ++ ) {
+      int homeRunEnd = min(homeLightRunEnds[homeRun], NUM_POINT_LIGHTS);
+      int homeFirstLight = max(homeRunStart, NUM_POINT_LIGHT_SHADOWS);
+      if (homeFirstLight < homeRunEnd) {
+        float homeRunTransmission = homeRoomTransmissions[homePointRooms[homeFirstLight]];
+        if (homeRunTransmission != 0.0) {
+          for ( int i = homeFirstLight; i < homeRunEnd; i ++ ) {
+            ${unshadowedBody}
+          }
+        }
+      }
+      homeRunStart = homeRunEnd;
+    }`);
   const lighting = transmissionCache + lightChunk.slice(0, pointStart) + boundedPointLighting + lightChunk.slice(pointEnd);
   return {
     capacity,
@@ -227,6 +247,16 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
           if (room && point.light.intensity > 0) uniforms.homeLitRooms.value[room - 1] = 1;
         }
       }
+      // Include shadowed slots in the runs, then clip them against the actual
+      // shader prefix above. This also covers rendering with shadow maps off.
+      // Reuse fixed storage; changing HA state never changes the shader layout.
+      const runs = uniforms.homeLightRunEnds.value, pointRooms = uniforms.homePointRooms.value;
+      runs.fill(0);
+      let runCount = 0;
+      for (let i = 1; i <= slot; i++) {
+        if (i === slot || pointRooms[i] !== pointRooms[i - 1]) runs[runCount++] = i;
+      }
+      uniforms.homeLightRunCount.value = runCount;
     }
   };
 }

@@ -213,8 +213,11 @@ Nonzero contributions retain the same lighting calculation.
 The 24-room, 72-light acceptance fixture exposed excessive software shader
 compilation from expanding a full lighting block for every fixture. Only the
 bounded shadow-casting prefix is now expanded into literal shader indices, as
-required for its shadow samplers. A normal loop evaluates every remaining point
-light in the same order, with the same room confinement and material response.
+required for its shadow samplers. Consecutive unshadowed lights from the same room share a runtime range. A
+fragment outside that room skips the whole range; otherwise one shared loop
+evaluates every light in its original order, with the same room confinement
+and material response. Range ends use one preallocated integer array, and state
+updates do not change the shader layout.
 No light is dropped or merged. Total light count and generated room/window shader
 size remain unbounded by the rendering profile, so larger projects still need
 testing against the target GPU's limits.

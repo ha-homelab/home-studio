@@ -77,8 +77,12 @@ const root = path.resolve(__dirname, '..');
     const expanded = unroll(guardedPoints.replaceAll('NUM_POINT_LIGHT_SHADOWS', String(shadowCount))
       .replaceAll('NUM_POINT_LIGHTS', String(count)));
     assert.doesNotMatch(expanded, /#pragma unroll_loop/, 'The shadow loop is consumed by Three');
-    assert.match(expanded, new RegExp(`for \\( int i = ${shadowCount}; i < ${count}; i \\+\\+ \\)`),
-      'The runtime loop covers every unshadowed slot through the original total light count');
+    assert.match(expanded, new RegExp(`int homeFirstLight = max\\(homeRunStart, ${shadowCount}\\)`),
+      'The runtime range starts after the exact statically sampled shadow prefix');
+    assert.match(expanded, new RegExp(`int homeRunEnd = min\\(homeLightRunEnds\\[homeRun\\], ${count}\\)`),
+      'Runtime ranges cannot extend beyond the actual Three point-light count');
+    assert.match(expanded, /for \( int i = homeFirstLight; i < homeRunEnd; i \+\+ \)/,
+      'One shared runtime body visits each slot in a contributing room run');
     const samplers = [...expanded.matchAll(/getPointShadow\( pointShadowMap\[ (\d+) \]/g)].map(match => Number(match[1]));
     assert.deepEqual(samplers, Array.from({length: shadowCount}, (_, i) => i),
       'Every shadow sampler keeps exactly one literal index, in original order');
@@ -89,6 +93,12 @@ const root = path.resolve(__dirname, '..');
     assert.equal((expanded.match(/if \(directLight.visible\) RE_Direct\(/g) || []).length, shadowCount + 1,
       'Every static or runtime light body retains the full nonzero direct-light calculation');
   }
+  assert.equal((runtimePoints.match(/homeRoomTransmissions\[/g) || []).length, 1,
+    'The runtime loop looks up transmission once per run, not once per fixture');
+  assert(runtimePoints.indexOf('if (homeRunTransmission != 0.0)') < runtimePoints.indexOf('for ( int i = homeFirstLight'),
+    'A zero-transmission room skips its entire light range');
+  assert.match(runtimePoints, /directLight.color \*= homeRunTransmission;/,
+    'Every admitted light keeps the exact nonzero doorway transmission');
   const comparatorSource = vendor.match(/function \w+\(t,e\)\{return\(e\.castShadow\?2:0\)-\(t\.castShadow\?2:0\)\+\(e\.map\?1:0\)-\(t\.map\?1:0\)\}/)?.[0];
   assert(comparatorSource, 'Pinned Three comparator must still sort shadow casters first');
   const compareLights = vm.runInNewContext('(' + comparatorSource + ')');
@@ -119,13 +129,35 @@ const root = path.resolve(__dirname, '..');
   const points = lights.map((light, i) => ({light, item: {room: rooms[i % rooms.length].id}}));
   points.sort((a, b) => (a.light.intensity % 8) - (b.light.intensity % 8));
   points.splice(4, 0, {item: {room: 'no-light'}});
-  const checkOrder = () => {
-    orderedLighting.update(points);
-    const expected = points.filter(point => point.light?.visible).sort((a, b) => compareLights(a.light, b.light))
-      .map(point => rooms.findIndex(room => room.id === point.item.room) + 1);
-    expected.push(...Array(lights.length - expected.length).fill(0));
-    assert.deepEqual(Array.from(orderedShader.uniforms.homePointRooms.value), expected,
+  const checkOrder = (currentPoints = points) => {
+    orderedLighting.update(currentPoints);
+    const ordered = currentPoints.filter(point => point.light?.visible).sort((a, b) => compareLights(a.light, b.light));
+    const expected = ordered.map(point => rooms.findIndex(room => room.id === point.item.room) + 1);
+    assert.deepEqual(Array.from(orderedShader.uniforms.homePointRooms.value),
+      expected.concat(Array(lights.length - expected.length).fill(0)),
       'Every visible light retains the correct room after Three sorts shadow casters');
+    const expectedEnds = [];
+    for (let i = 1; i <= expected.length; i++) if (i === expected.length || expected[i] !== expected[i - 1]) expectedEnds.push(i);
+    const runCount = orderedShader.uniforms.homeLightRunCount.value;
+    const ends = Array.from(orderedShader.uniforms.homeLightRunEnds.value);
+    assert.equal(runCount, expectedEnds.length);
+    assert.deepEqual(ends, expectedEnds.concat(Array(lights.length - runCount).fill(0)),
+      'Contiguous runs cover the actual sorted visible slots once, with no stale suffix');
+    // Actual shadows, globally disabled shadows, and an all-shadow prefix use
+    // the same runs. Preserve summation order even for interleaved rooms.
+    for (const prefix of [0, ordered.filter(point => point.light.castShadow).length, ordered.length]) {
+      for (const contributes of [() => true, room => room === 0, room => room % 2 === 0]) {
+        const visited = Array.from({length: prefix}, (_, i) => i).filter(i => contributes(expected[i]));
+        let start = 0;
+        for (const end of ends.slice(0, runCount)) {
+          const first = Math.max(start, prefix);
+          if (first < end && contributes(expected[first])) for (let i = first; i < end; i++) visited.push(i);
+          start = end;
+        }
+        assert.deepEqual(visited, expected.flatMap((room, i) => contributes(room) ? [i] : []),
+          'Shadow prefix plus runtime runs retain every contributing slot in its original order');
+      }
+    }
   };
   checkOrder();
   lights[1].visible = false; lights[15].visible = false; checkOrder();
@@ -133,14 +165,45 @@ const root = path.resolve(__dirname, '..');
   lighting.configurePointShadows(lights, {maxTextures: 5}); checkOrder();
   assert.deepEqual(Array.from(orderedShader.uniforms.homeLitRooms.value), Array(24).fill(1));
   lights.forEach(light => { light.intensity = 0; });
-  orderedLighting.update(points);
+  checkOrder();
   assert.deepEqual(Array.from(orderedShader.uniforms.homeLitRooms.value), Array(24).fill(0),
     'Zero-intensity rooms skip polygon work while keeping their point-light slots');
   assert.equal(Array.from(orderedShader.uniforms.homePointRooms.value).filter(Boolean).length, 72);
   lights[3].intensity = 1; lights[8].intensity = .5; lights[8].visible = false;
-  orderedLighting.update(points);
+  checkOrder();
   assert.deepEqual(Array.from(orderedShader.uniforms.homeLitRooms.value), Array.from({length: 24}, (_, i) => Number(i === 3)),
     'Only rooms with visible contributing lights enable transmission calculations');
+  const savedRooms = [points[0].item.room, points[1].item.room];
+  points[0].item.room = 'unassigned'; delete points[1].item.room; checkOrder();
+  [points[0].item.room, points[1].item.room] = savedRooms;
+  const runStorage = orderedShader.uniforms.homeLightRunEnds.value;
+  orderedLighting.update([]);
+  assert.equal(orderedShader.uniforms.homeLightRunCount.value, 0);
+  assert(runStorage.every(end => end === 0), 'Removing every light clears all run data');
+  checkOrder();
+  assert.equal(orderedShader.uniforms.homeLightRunEnds.value, runStorage, 'State updates reuse the fixed run storage');
+  lights.forEach(light => {light.visible = true;});
+  lighting.configurePointShadows(lights, {maxTextures: 6});
+  const groupedPoints = lights.map((light, i) => ({light, item: {room: rooms[Math.floor(i / 3)].id}}));
+  // Two shadowed lights split the first three-light room run. Exercise the
+  // complete coverage/order assertion across that boundary as well.
+  checkOrder(groupedPoints);
+  assert.equal(orderedShader.uniforms.homeLightRunCount.value, 24,
+    'The 72-light fixture needs only 24 transmission lookups in its runtime light loop');
+  assert.deepEqual(Array.from(runStorage.slice(0, 24)), Array.from({length: 24}, (_, i) => (i + 1) * 3));
+  lights.forEach(light => {light.castShadow = true;}); checkOrder();
+  lights.forEach(light => {light.castShadow = false;}); checkOrder();
+  const unassignedMaterial = new THREE.MeshStandardMaterial();
+  const unassignedLighting = lighting.createRoomLighting(THREE, [], 3, []);
+  unassignedLighting.attach({traverse: visit => visit({material: unassignedMaterial, userData: {}})}, true);
+  const unassignedShader = {uniforms: {}, vertexShader: THREE.ShaderLib.standard.vertexShader, fragmentShader: THREE.ShaderLib.standard.fragmentShader};
+  unassignedMaterial.onBeforeCompile(unassignedShader);
+  unassignedLighting.update(lights.slice(0, 3).map(light => ({light, item: {}})));
+  assert.deepEqual(Array.from(unassignedShader.uniforms.homePointRooms.value), [0, 0, 0]);
+  assert.equal(unassignedShader.uniforms.homeLightRunCount.value, 1);
+  assert.deepEqual(Array.from(unassignedShader.uniforms.homeLightRunEnds.value), [3, 0, 0]);
+  assert.match(unassignedShader.fragmentShader, /homeRoomTransmissions\[0\] = 1\.0;/,
+    'A scene with no rooms retains every unassigned light at full transmission');
   const cacheAssignments = orderedShader.fragmentShader.match(/homeRoomTransmissions\[\d+\] = homeLitRooms/g) || [];
   assert.equal(cacheAssignments.length, rooms.length, 'Cache size and work grow with rooms, not the light count');
   const distanceFunctions = [...orderedShader.fragmentShader.matchAll(/float homeRoomDistance(\d+)\(\) \{([\s\S]*?)\n  \}/g)];
