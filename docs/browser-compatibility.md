@@ -123,9 +123,11 @@ generated viewers and planner recovery; see [cross-platform acceptance](platform
 Passing a Playwright Firefox run is evidence for that bundled Firefox build,
 operating system, and graphics backend. It does not certify Waterfox. Likewise,
 Chromium with SwiftShader exercises software WebGL rather than physical GPU
-performance. Safari and mobile browsers still need their own target-browser
-acceptance runs. Read the native Waterfox job's own version, platform, graphics
-backend, and outcome when assessing the expanded coverage. Neither these
+performance. Native Safari has a separate macOS WebDriver job; Playwright WebKit
+is not a substitute for that job. Phone and tablet viewport profiles do not
+certify physical iPhones, iPads, or Android devices. Read each native browser
+job's own version, platform, graphics backend, and outcome when assessing the
+expanded coverage. Neither these
 earlier measurements nor a hosted CI result certifies every user's environment.
 
 No exact cause of a reported Waterfox browser crash has been established by the

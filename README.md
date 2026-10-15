@@ -214,8 +214,11 @@ for two-floor drawing, furniture dragging, preview orbit, and graphics recovery
 in the browser editor. See [browser compatibility](docs/browser-compatibility.md)
 for rendering budgets, measured coverage, and a safe bug-report checklist.
 The public CI gate also requires [cross-platform acceptance](docs/platform-acceptance.md):
-package installation on Linux, Windows, and macOS, plus Chromium and Firefox
-checks of both the drawing tool and generated viewer on each OS.
+package installation on Linux, Windows, and macOS; pinned Chromium, Firefox,
+and WebKit generations; Chrome and Edge channels; native Firefox and Waterfox;
+and native Safari on macOS. Phone and tablet viewport checks supplement desktop
+coverage. The linked matrix distinguishes emulation from physical-device testing
+and records the exact versions actually launched.
 These are development tools only;
 users do not need Node.js or Playwright to draw, compile, or install a plan.
 The browser test exports a real drawing and installs that exact file's package
