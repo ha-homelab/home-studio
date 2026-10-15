@@ -42,7 +42,7 @@ function fixture() {
 }
 
 function instrument() {
-  const stats=window.__plannerStats={planDraws:0,canvasResizes:0,contexts:0,contextLosses:0,linkedPrograms:0,shaderErrors:[],errors:[]};
+  const stats=window.__plannerStats={planDraws:0,canvasResizes:0,contexts:0,contextLosses:0,linkedPrograms:0,shaderErrors:[],errors:[],contextEvents:[],linkFailures:[]};
   window.addEventListener('error', event=>stats.errors.push(event.message || String(event.error)));
   window.addEventListener('unhandledrejection', event=>stats.errors.push(String(event.reason)));
   const originalError=console.error.bind(console);
@@ -65,8 +65,17 @@ function instrument() {
       stats.gpu={version:context.getParameter(context.VERSION),renderer:info?context.getParameter(info.UNMASKED_RENDERER_WEBGL):context.getParameter(context.RENDERER)};
       console.info('[home-studio-test-gpu]' + JSON.stringify(stats.gpu));
       const link=context.linkProgram.bind(context);
-      context.linkProgram=program=>{link(program);stats.linkedPrograms++;if(!context.getProgramParameter(program,context.LINK_STATUS))stats.shaderErrors.push(context.getProgramInfoLog(program));};
-      this.addEventListener('webglcontextlost',()=>stats.contextLosses++);
+      context.linkProgram=program=>{
+        link(program);stats.linkedPrograms++;
+        if(!context.getProgramParameter(program,context.LINK_STATUS)) {
+          const log=context.getProgramInfoLog(program);stats.shaderErrors.push(log);
+          stats.linkFailures.push({log,lost:context.isContextLost(),program:stats.linkedPrograms,phase:window.__plannerRecoveryPhase||'edit-and-preview',time:performance.now()});
+        }
+      };
+      for(const type of ['webglcontextlost','webglcontextrestored']) this.addEventListener(type,event=>{
+        if(type==='webglcontextlost')stats.contextLosses++;
+        stats.contextEvents.push({type,statusMessage:event.statusMessage||'',lost:context.isContextLost(),phase:window.__plannerRecoveryPhase||'edit-and-preview',time:performance.now(),buffer:[this.width,this.height],view:window.planner?.getView(),linkedPrograms:stats.linkedPrograms});
+      });
     }
     return context;
   };
@@ -212,16 +221,25 @@ async function run(engine,origin) {
     if(!reportOnly) {
       await input.tap(page.locator('#preview-tab'));await frames();
       const saved=await getProject(),before=await snapshot();
+      recovery=record.recovery={savedItems:saved.floors.flatMap(f=>f.items).length,steps:[]};
+      const checkpoint=async phase=>{
+        await page.evaluate(value=>{window.__plannerRecoveryPhase=value;},phase);
+        recovery.steps.push({phase,snapshot:await snapshot()});save();
+      };
+      await checkpoint('request-loss');
       await page.evaluate(()=>{const extension=document.querySelector('#preview-canvas').getContext('webgl2').getExtension('WEBGL_lose_context');if(!extension)throw Error('WEBGL_lose_context required');window.__restorePlanner=()=>extension.restoreContext();extension.loseContext();});
       await page.waitForFunction(()=>window.__plannerStats.contextLosses===1);
+      await checkpoint('edit-while-lost');
       await burst('preview-canvas');check((await snapshot()).preview.renderCount===before.preview.renderCount,'Lost contexts suppress preview draws');
       await input.tap(page.locator('#plan-tab'));const drag=(await getProject()).floors[0].items[0].position_m;await dragWorld([drag.x,drag.z],[drag.x-.5,drag.z]);
       assert.equal((await getProject()).floors[0].items[0].position_m.x,drag.x-.5,'Furniture remains editable while the graphics context is lost');
       const [download]=await Promise.all([page.waitForEvent('download'),input.tap(page.locator('#export-project'))]);
       const exported=JSON.parse(fs.readFileSync(await download.path(),'utf8'));assert.deepEqual(exported,await getProject(),'JSON export remains intact while the graphics context is lost');
-      await page.setViewportSize(profile.emulated ? {width:profile.context.viewport.width-40,height:profile.context.viewport.height-80} : {width:1280,height:900});await page.evaluate(()=>window.__restorePlanner());
+      await checkpoint('resize-while-lost');
+      await page.setViewportSize(profile.emulated ? {width:profile.context.viewport.width-40,height:profile.context.viewport.height-80} : {width:1280,height:900});await checkpoint('request-restore');await page.evaluate(()=>window.__restorePlanner());
       await input.tap(page.locator('#preview-tab'));await page.waitForFunction(count=>window.planner.getPreviewMetadata().renderCount>count,before.preview.renderCount);await frames();
-      recovery={savedItems:saved.floors.flatMap(f=>f.items).length,after:await snapshot()};
+      recovery.after=await snapshot();save();
+      check(recovery.after.stats.contextLosses===1,'Restoration must not lose the graphics context again');
       check(recovery.after.stats.shaderErrors.length===0,'Restored preview shaders link successfully');
       const restored=recovery.after;
       check(consoleErrors.length===0,'Restoring and rebuilding preview geometry produces no browser graphics errors');

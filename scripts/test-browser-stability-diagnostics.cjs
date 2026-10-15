@@ -360,3 +360,31 @@ test('planner disposes geometry and shadow callbacks before restoring the GL con
   assert.equal(error.hidden, true);
   assert.equal(vm.runInContext("!previewLost && previewSize === '' && previewDirty", context), true);
 });
+
+test('planner records the phase and lost state of failed restored shader links', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'test-planner-stability.cjs'), 'utf8');
+  const instrument = source.slice(source.indexOf('function instrument()'), source.indexOf('const server='));
+  let lost = false;
+  const gl = {VERSION:1,RENDERER:2,LINK_STATUS:3,getExtension:()=>null,getParameter:()=> 'WebGL 2.0',
+    linkProgram() {},getProgramParameter:()=>!lost,getProgramInfoLog:()=>null,isContextLost:()=>lost};
+  class Canvas extends EventEmitter {
+    get width() {return 1462;} set width(value) {}
+    get height() {return 1367;} set height(value) {}
+    getContext() {return gl;}
+    addEventListener(name, callback) {this.on(name, callback);}
+  }
+  const window = {addEventListener() {},planner:{getView:()=> 'preview'}};
+  const context = vm.createContext({window,HTMLCanvasElement:Canvas,performance:{now:()=>100},console:{error() {},info() {}}});
+  vm.runInContext(instrument + '\ninstrument();', context);
+  const canvas = new Canvas();canvas.getContext('webgl2');
+  window.__plannerRecoveryPhase='request-loss';lost=true;canvas.emit('webglcontextlost',{statusMessage:''});
+  window.__plannerRecoveryPhase='request-restore';lost=false;canvas.emit('webglcontextrestored',{statusMessage:''});
+  lost=true;gl.linkProgram({});canvas.emit('webglcontextlost',{statusMessage:'driver reset'});
+  const stats=JSON.parse(JSON.stringify(window.__plannerStats));
+  assert.equal(stats.contextLosses,2);
+  assert.deepEqual(stats.shaderErrors,[null],'A null driver log remains a failed shader link');
+  assert.deepEqual(stats.linkFailures,[{log:null,lost:true,program:1,phase:'request-restore',time:100}]);
+  assert.equal(stats.contextEvents[2].phase,'request-restore');
+  assert.equal(stats.contextEvents[2].statusMessage,'driver reset');
+  assert.deepEqual(stats.contextEvents[2].buffer,[1462,1367]);
+});
