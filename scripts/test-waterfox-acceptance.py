@@ -26,6 +26,88 @@ from native_browser import PRODUCTS, validate_installation, validate_metadata
 ROOT = Path(__file__).resolve().parents[1]
 
 
+# Installed before WebGL creation. Read the real GL error flag only at snapshots,
+# context loss and teardown; never issue synchronous GPU queries for each draw.
+NATIVE_GL_DIAGNOSTICS = r"""
+(() => {
+  const contexts = [], seen = new WeakSet(), extensions = new WeakSet();
+  const evidence = {contexts: 0, samples: [], errors: []};
+  const remember = (code, label) => { if (code !== 0) evidence.errors.push({code, label}); };
+  const sample = window.__sampleNativeGraphics = label => {
+    const states = contexts.map(({gl, read}) => {
+      const lost = gl.isContextLost();
+      if (!lost) {
+        for (let n = 0; n < 32; n++) {
+          const code = read();
+          if (code === gl.NO_ERROR) break;
+          remember(code, label);
+          if (n === 31) throw Error('WebGL error queue did not drain');
+        }
+      }
+      return {lost};
+    });
+    evidence.samples.push({label, states});
+    return JSON.parse(JSON.stringify(evidence));
+  };
+  const original = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (...args) {
+    const gl = original.apply(this, args);
+    if (!gl || !String(args[0]).startsWith('webgl') || seen.has(gl)) return gl;
+    seen.add(gl); evidence.contexts++; const read = gl.getError.bind(gl);
+    contexts.push({gl, read});
+    gl.getError = () => { const code = read(); if (!gl.isContextLost()) remember(code, 'application-getError'); return code; };
+    const getExtension = gl.getExtension.bind(gl);
+    gl.getExtension = name => {
+      const extension = getExtension(name);
+      if (name === 'WEBGL_lose_context' && extension && !extensions.has(extension)) {
+        extensions.add(extension); const lose = extension.loseContext.bind(extension);
+        // forceContextLoss at teardown clears GL errors. Preserve them first.
+        extension.loseContext = () => { sample('before-context-loss'); return lose(); };
+      }
+      return extension;
+    };
+    return gl;
+  };
+  const arm = () => window.addEventListener('pagehide', () => {
+    const value = sample('pagehide');
+    if (parent !== window) parent.postMessage({type:'native-gl-teardown', token:window.__nativeGraphicsToken, evidence:value}, '*');
+    else sessionStorage.setItem('home-studio.native-gl-teardown', JSON.stringify(value));
+  });
+  // The cleanup listener must run after the application's own pagehide handler.
+  if (document.readyState === 'complete') arm(); else window.addEventListener('load', arm, {once:true});
+})();
+"""
+
+
+NATIVE_VIEWER_FRAME_DIAGNOSTICS = r"""
+if (renderer) {
+  const nativeRender = renderer.render.bind(renderer);
+  renderer.render = (scene, camera) => {
+    const result = nativeRender(scene, camera);
+    window.__nativeRenderedLights = window.__browserScene().activePointLights;
+    return result;
+  };
+}
+"""
+
+
+def assert_native_graphics(evidence, teardown=False):
+    require(isinstance(evidence, dict) and evidence.get('contexts') == 1, 'Native GL diagnostics must observe the real context')
+    require(bool(evidence.get('samples')), 'Native GL diagnostics must sample the actual error queue')
+    require(isinstance(evidence.get('errors'), list), 'Native GL diagnostics must contain an error list')
+    require(not evidence['errors'], 'Actual WebGL errors: ' + str(evidence['errors']))
+    if teardown:
+        require(evidence['samples'][-1].get('label') == 'pagehide', 'Actual navigation/teardown must finish before checking GL errors')
+
+
+def update_viewer_state(client, states, active):
+    before = client.execute('return window.floorplan.renderCount;')
+    client.call('WebDriver:SwitchToFrame', {'id': None})
+    client.execute("window.viewerPort.postMessage({type:'states',connected:true,states:arguments[0]});return true;", states)
+    client.call('WebDriver:SwitchToFrame', {'id': 0})
+    client.wait(f'window.__nativeRenderedLights==={active} && window.floorplan.renderCount>{before}')
+
+
 def require(condition, message):
     if not condition:
         raise AssertionError(message)
@@ -145,6 +227,7 @@ def assert_graphics(stats):
     require(stats['linkedPrograms'] > 0, 'Actual WebGL programs must link')
     require(not stats['shaderErrors'], 'Shader link errors: ' + str(stats['shaderErrors']))
     require(not stats['errors'], 'Browser errors: ' + str(stats['errors']))
+    assert_native_graphics(stats.get('nativeGraphics'))
 
 
 def assert_recovered_interaction(before_count, after_count, before_camera, after_camera, stats):
@@ -155,25 +238,30 @@ def assert_recovered_interaction(before_count, after_count, before_camera, after
 
 def viewer(client, origin, project, record, save):
     client.call('WebDriver:Navigate', {'url': origin})
+    client.execute('''window.addEventListener('message', event => {
+      if (event.data?.type === 'native-gl-teardown' && event.data.token === window.nativeGraphicsToken) window.nativeTeardown = event.data.evidence;
+    });return true;''')
     items = project['floors'][0]['items']
     states = {item['entity_id']: {'state': 'on', 'name': item['name'], 'light': {'brightness': 180, 'color_mode': 'color_temp', 'color_temp_kelvin': 3000}} for item in items}
     states['sun.sun'] = {'state': 'above_horizon', 'elevation': 30}
     for cycle in range(2):
         started = time.monotonic()
-        client.execute('''const [items,states]=arguments; window.fixtureLoaded=false;
-          fetch('/viewer').then(r=>r.text()).then(html=>{const iframe=document.createElement('iframe');
+        client.execute('''const [items,states,diagnostics,frameDiagnostics]=arguments; window.fixtureLoaded=false;window.nativeTeardown=null;window.nativeGraphicsToken=crypto.randomUUID();
+          fetch('/viewer').then(r=>r.text()).then(html=>{html=html.replace('<head>','<head><script>window.__nativeGraphicsToken='+JSON.stringify(window.nativeGraphicsToken)+';'+diagnostics+'</script>');
+            html=html.replace('</script></body>', frameDiagnostics+'</script></body>');
+            const iframe=document.createElement('iframe');
             iframe.id='viewer';iframe.sandbox='allow-scripts allow-downloads allow-forms';
             iframe.style.cssText='width:100%;height:740px;border:0';
-            iframe.onload=()=>{const channel=new MessageChannel();window.viewerPort=channel.port1;
+            iframe.onload=()=>{window.nativeViewer=iframe.contentWindow;const channel=new MessageChannel();window.viewerPort=channel.port1;
               channel.port1.onmessage=e=>{if(e.data.type==='model_config')channel.port1.postMessage({type:'states',connected:true,states});};
               iframe.contentWindow.postMessage({type:'home-floorplan:init',items,preferences:{}},'*',[channel.port2]);window.fixtureLoaded=true;};
-            iframe.srcdoc=html;document.body.append(iframe);}); return true;''', items, states)
+            iframe.srcdoc=html;document.body.append(iframe);}); return true;''', items, states, NATIVE_GL_DIAGNOSTICS, NATIVE_VIEWER_FRAME_DIAGNOSTICS)
         client.wait('window.fixtureLoaded')
         client.call('WebDriver:SwitchToFrame', {'id': 0})
         client.wait("window.floorplan?.renderCount>0 && document.querySelector('#homeConnection')?.dataset.connected==='true'")
         sample = {'cycle': cycle, 'loadMs': round((time.monotonic() - started) * 1000)}
         record['samples'].append(sample)
-        snapshot = lambda: client.execute('return {...window.__browserStability,renderCount:window.floorplan.renderCount,scene:window.__browserScene()};')
+        snapshot = lambda: client.execute('return {...window.__browserStability,nativeGraphics:window.__sampleNativeGraphics("viewer-snapshot"),renderedLights:window.__nativeRenderedLights,renderCount:window.floorplan.renderCount,scene:window.__browserScene()};')
         sample['initial'] = initial = snapshot()
         save()
         require(sample['loadMs'] < 30000, 'Viewer connected draw exceeded 30 seconds')
@@ -189,13 +277,11 @@ def viewer(client, origin, project, record, save):
             next_states = json.loads(json.dumps(states))
             for index, item in enumerate(items):
                 next_states[item['entity_id']]['state'] = 'on' if index < active else 'off'
-            client.call('WebDriver:SwitchToFrame', {'id': None})
-            client.execute("window.viewerPort.postMessage({type:'states',connected:true,states:arguments[0]});return true;", next_states)
-            client.call('WebDriver:SwitchToFrame', {'id': 0})
-            client.wait(f'window.__browserScene().activePointLights==={active}')
+            update_viewer_state(client, next_states, active)
             value = snapshot()
             require(value['scene']['pointLights'] == len(items), 'State updates retain every light slot')
-            sample['states'].append({'active': active, 'linkedPrograms': value['linkedPrograms']})
+            sample['states'].append({'active': active, 'linkedPrograms': value['linkedPrograms'], 'renderCount': value['renderCount'], 'renderedLights': value['renderedLights']})
+            assert_graphics(value)
         require(len({value['linkedPrograms'] for value in sample['states']}) == 1, 'State changes must not compile new shader variants')
         if cycle == 1:
             before = snapshot()['renderCount']
@@ -220,6 +306,10 @@ def viewer(client, origin, project, record, save):
         client.screenshot(Path(record['output']) / f'viewer-cycle-{cycle + 1}.png')
         client.execute("window.viewerPort.close();document.querySelector('#viewer').remove();return true;")
         require(client.execute('return document.querySelectorAll("iframe").length===0 && 6*7===42;'), 'Dashboard remains responsive after closing viewer')
+        client.wait('window.nativeTeardown !== null')
+        sample['teardownGraphics'] = client.execute('return window.nativeTeardown;')
+        save()
+        assert_native_graphics(sample['teardownGraphics'], teardown=True)
 
 
 def planner(client, origin, project, record, save):
@@ -233,6 +323,8 @@ def planner(client, origin, project, record, save):
     sample = {'loadMs': round((time.monotonic() - started) * 1000)}
     record['samples'].append(sample)
     require(sample['loadMs'] < 30000, 'Planner load exceeded 30 seconds')
+    client.execute(NATIVE_GL_DIAGNOSTICS)
+    client.execute("sessionStorage.removeItem('home-studio.native-gl-teardown');return true;")
     require(client.execute('return window.planner.getProject().floors.reduce((n,f)=>n+f.items.length,0);') == 256, 'All 256 furniture items load')
     points = client.execute("const c=document.querySelector('#plan-canvas').getBoundingClientRect();return [[1,1],[1.5,1]].map(p=>window.planner.worldToScreen(p).map((v,i)=>v+(i?c.y:c.x)));")
     sample['itemDragMs'] = client.drag(*points)
@@ -242,7 +334,7 @@ def planner(client, origin, project, record, save):
     client.execute("document.querySelector('#preview-tab').click();document.querySelector('#all-floors').click();return true;")
     client.wait('window.planner.getPreviewMetadata().items===256 && window.planner.getPreviewMetadata().renderCount>0')
     sample['previewLoadMs'] = round((time.monotonic() - started) * 1000)
-    snapshot = lambda: client.execute('return {stats:window.__plannerStats,preview:window.planner.getPreviewMetadata(),scene:window.__plannerScene()};')
+    snapshot = lambda: client.execute('return {stats:{...window.__plannerStats,nativeGraphics:window.__sampleNativeGraphics("planner-snapshot")},preview:window.planner.getPreviewMetadata(),scene:window.__plannerScene()};')
     sample['initial'] = initial = snapshot()
     save()
     require(sample['previewLoadMs'] < 30000, 'Planner preview exceeded 30 seconds')
@@ -272,6 +364,9 @@ def planner(client, origin, project, record, save):
     client.call('WebDriver:Navigate', {'url': url})
     client.wait('window.planner')
     require(client.execute('return window.planner.getProject();') == saved, 'Reopening the planner restores its edited draft')
+    sample['teardownGraphics'] = client.execute("return JSON.parse(sessionStorage.getItem('home-studio.native-gl-teardown'));")
+    save()
+    assert_native_graphics(sample['teardownGraphics'], teardown=True)
 
 
 def browser_preferences(port):

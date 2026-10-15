@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import plistlib
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -251,15 +252,89 @@ class ToolingTests(unittest.TestCase):
             self.assertEqual(saved['error'], 'fixture launch failed')
             self.assertIn('cleanup failed', saved['cleanupErrors'])
 
+    def test_viewer_state_waits_for_the_new_frame(self):
+        client = Mock()
+        client.execute.return_value = 41
+        acceptance.update_viewer_state(client, {'light.fixture': {'state': 'off'}}, 0)
+        client.wait.assert_called_once_with('window.__nativeRenderedLights===0 && window.floorplan.renderCount>41')
+        self.assertEqual(client.method_calls[0], unittest.mock.call.execute('return window.floorplan.renderCount;'))
+        self.assertEqual(client.method_calls[-1][0], 'wait')
+
+    def test_frame_marker_updates_only_after_real_render(self):
+        javascript = r"""
+const assert = require('node:assert/strict'), vm = require('node:vm'), fs = require('node:fs');
+let active = 18, fail = false;
+const env = {renderer:{render(){if(fail)throw Error('draw failed');return 42;}},
+  __browserScene:()=>({activePointLights:active})};
+env.window=env;
+vm.runInNewContext(fs.readFileSync(0,'utf8'),env);
+assert.equal(env.renderer.render(),42);
+active=0;
+assert.equal(env.__nativeRenderedLights,18,'A CPU state update must not count as a frame');
+env.renderer.render();
+assert.equal(env.__nativeRenderedLights,0);
+active=9;fail=true;
+assert.throws(()=>env.renderer.render());
+assert.equal(env.__nativeRenderedLights,0,'A failed draw must not count as the new state');
+"""
+        result = subprocess.run(['node', '-e', javascript], input=acceptance.NATIVE_VIEWER_FRAME_DIAGNOSTICS,
+                                text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_native_graphics_requires_real_error_evidence(self):
+        for evidence in (None, {}, {'contexts':1, 'samples':[{}]}, {'contexts':1, 'samples':[], 'errors':[]},
+                         {'contexts':1, 'samples':[{}], 'errors':[{'code':1282, 'label':'pagehide'}]}):
+            with self.subTest(evidence=evidence), self.assertRaises(AssertionError):
+                acceptance.assert_native_graphics(evidence)
+
+    def test_teardown_requires_a_real_pagehide_sample(self):
+        with self.assertRaises(AssertionError):
+            acceptance.assert_native_graphics({'contexts':1, 'samples':[{'label':'snapshot'}], 'errors':[]}, teardown=True)
+
+    def test_gl_errors_survive_context_loss_and_navigation(self):
+        # Execute the exact injected JS against GL flags that behave like a
+        # driver: loseContext clears pending flags before pagehide can read them.
+        javascript = r"""
+const assert = require('node:assert/strict'), vm = require('node:vm'), fs = require('node:fs');
+const source = fs.readFileSync(0, 'utf8');
+for (const child of [false, true]) {
+  let lost = false, reads = 0, flags = [], stored, posted;
+  const extension = {loseContext() {lost = true; flags = [];}};
+  const gl = {NO_ERROR:0, isContextLost:()=>lost, getError:()=>{reads++;return flags.shift()||0;}, getExtension:()=>extension};
+  const events = [];
+  class Canvas { getContext() {return gl;} }
+  const env = {HTMLCanvasElement:Canvas, document:{readyState:'complete'},
+    addEventListener: (name, fn) => {if(name==='pagehide')events.push(fn);},
+    sessionStorage:{setItem(key,value){stored=JSON.parse(value);}}};
+  env.window=env;env.parent=child?{postMessage(value){posted=value.evidence;}}:env;
+  vm.runInNewContext(source, env);
+  new Canvas().getContext('webgl2');
+  assert.equal(reads,0,'Installing diagnostics must not poll GL on draws');
+  flags.push(1282);assert.equal(gl.getError(),1282,'Application getError semantics remain intact');
+  flags.push(1281);gl.getExtension('WEBGL_lose_context').loseContext();
+  assert.equal(flags.length,0);
+  lost=false;env.__sampleNativeGraphics('restored');
+  flags.push(1282);gl.getExtension('WEBGL_lose_context').loseContext();
+  for(const handler of events)handler();
+  const evidence=child?posted:stored;
+  assert.equal(evidence.contexts,1);
+  assert.deepEqual(Array.from(evidence.errors,value=>value.code),[1282,1281,1282]);
+  assert.equal(evidence.samples.at(-1).label,'pagehide');
+}
+"""
+        result = subprocess.run(['node', '-e', javascript], input=acceptance.NATIVE_GL_DIAGNOSTICS,
+                                text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_recovered_pointer_input_must_render_and_move(self):
-        stats = {'contexts': 1, 'gpu': {'version': 'WebGL 2.0'}, 'linkedPrograms': 2, 'shaderErrors': [], 'errors': []}
+        stats = {'contexts': 1, 'gpu': {'version': 'WebGL 2.0'}, 'linkedPrograms': 2, 'shaderErrors': [], 'errors': [], 'nativeGraphics': {'contexts': 1, 'samples': [{'label':'test'}], 'errors': []}}
         acceptance.assert_recovered_interaction(4, 5, [0, 1], [1, 2], stats)
         for after_count, after_camera, after_stats in [(4, [1, 2], stats), (5, [0, 1], stats), (5, [1, 2], {**stats, 'errors': ['recovered input failed']})]:
             with self.subTest(after_count=after_count, after_camera=after_camera), self.assertRaises(AssertionError):
                 acceptance.assert_recovered_interaction(4, after_count, [0, 1], after_camera, after_stats)
 
     def test_graphics_failure_cannot_be_skipped(self):
-        stats = {'contexts': 1, 'gpu': {'version': 'WebGL 2.0'}, 'linkedPrograms': 1, 'shaderErrors': [], 'errors': []}
+        stats = {'contexts': 1, 'gpu': {'version': 'WebGL 2.0'}, 'linkedPrograms': 1, 'shaderErrors': [], 'errors': [], 'nativeGraphics': {'contexts': 1, 'samples': [{'label':'test'}], 'errors': []}}
         acceptance.assert_graphics(stats)
         for changed in ({'contexts': 0}, {'linkedPrograms': 0}, {'gpu': {'version': 'WebGL 1.0'}}, {'shaderErrors': ['failed']}, {'errors': ['uncaught']}):
             with self.subTest(changed=changed), self.assertRaises(AssertionError):
