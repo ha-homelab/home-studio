@@ -26,7 +26,7 @@ const root = path.resolve(__dirname, '..');
     assert.equal((wallShader.vertexShader.match(/varying vec3 wallSheen;/g) || []).length, 1);
     assert.match(wallShader.fragmentShader, /#include <clipping_planes_fragment>/);
     assert.equal(wallShader.vertexShader.includes('homeWorldPosition ='), enabled);
-    assert.equal(wallShader.fragmentShader.includes('homeRoomTransmission(homePointRooms'), enabled);
+    assert.equal(wallShader.fragmentShader.includes('homeRoomTransmissions[homePointRooms'), enabled);
     assert.notEqual(walls[0].material.customProgramCacheKey(), floor.material.customProgramCacheKey());
     assert.equal(walls[0].material.customProgramCacheKey(), walls[1].material.customProgramCacheKey());
     keys.add(walls[0].material.customProgramCacheKey());

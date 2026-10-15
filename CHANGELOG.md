@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.6.3] - Development line
+
+- Limit shadow-casting point lights to eight for native/unidentified renderers
+  and two for positively identified software renderers. Reserve four fragment
+  texture units for other maps, preventing the reproduced eighteen-light
+  Firefox shader sampler overflow. All fixtures retain illumination and room
+  confinement; fixtures beyond the shadow budget do not cast occlusion shadows.
+- Cap combined point-shadow atlases at 8,388,608 pixels and the canvas drawing
+  buffer at 2,000,000 pixels with device pixel ratio at most two. Positively
+  identified software renderers use a 250,000-pixel canvas, point-shadow faces
+  up to 128 pixels, and a 512-pixel directional shadow map while retaining sharp
+  HTML labels and full material lighting. Native/unidentified renderers keep
+  point-shadow faces up to 512 pixels and a 2048-pixel directional map. Resize
+  dimensions and pixel ratio together to avoid an oversized intermediate ratio
+  update.
+- Reuse Home camera fitting geometry, retain light shader slots across on/off
+  changes, and avoid rebuilding an unchanged initial host inventory. Cache room
+  transmission per lit room and recalculate light visibility after attenuation
+  so exactly zero contributions avoid shadow lookups and direct
+  surface-reflectance work.
+- Combine rapid pointer and wheel input into one pending frame without an idle
+  loop. Pause hidden/context-lost draws, restore the current viewport size after
+  context recovery, and release renderer resources when the page is discarded.
+- Add isolated browser stability coverage with a fictional multi-room,
+  multi-light home and document the evidence required for browser acceptance.
+  Firefox 157 and Chromium/SwiftShader on macOS passed the final eighteen-light
+  regression, including stable shader counts across light state changes,
+  context restoration after resizing, and two iframe load cycles. Software
+  startup still took 6.6 to 8.2 seconds in this fixture. Waterfox was not tested,
+  and the cause of its reported browser crash remains unverified.
+- Include the rounded translucent walls introduced after the previous stable
+  release: preserve opening dimensions and exact shadow blockers, cache bounded
+  geometry variants, and advance the subtle tint only on requested frames.
+
+### Upgrade
+
+Rebuild generated viewers from the selected candidate to receive these changes.
+Back up project JSON and Home Assistant configuration, keep private files outside
+the public source archive, and run the installer dry-run before replacing an
+installed component. Existing project identifiers and device bindings remain
+compatible. Beta and RC packages require target-browser acceptance before
+production use; publication does not update an installed home automatically.
+
+### Security
+
+Browser regressions use fictional projects and a disconnected message bridge;
+they issue no physical-device commands. The public package retains its reviewed
+file allowlist. This release does not claim a security vulnerability fix or
+change the Home Assistant authentication boundary.
+
 ## [0.6.2] - Development line
 
 - Recognize expected project validation failures during fuzzing while retaining

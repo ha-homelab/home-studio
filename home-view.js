@@ -1,7 +1,8 @@
 // Embedded offline/HA view; see docs/architecture.md.
 homeView = (() => {
   let active = false, camera, overlayGroup, roomLighting, selected = '', bindings = [], points = [], labels = [];
-  let assumedZones, signalZone='';
+  let assumedZones, signalZone='', cameraFit;
+  const projectedPosition = new THREE.Vector3(), projectedForward = new THREE.Vector3();
   let showLowerFloor=true;
   $('homeFloorContext').hidden=!lowerFloorContext;
   $('homeFloorContext').onclick=()=>{
@@ -226,13 +227,13 @@ homeView = (() => {
           fragmentShader:'varying vec3 world; uniform vec2 center; uniform vec3 lightColor; uniform float brightness; void main(){float a=.22*brightness*exp(-.13*dot(world.xz-center,world.xz-center));gl_FragColor=vec4(lightColor,a);\n#include <tonemapping_fragment>\n#include <colorspace_fragment>\n}' });
         const overlay = new THREE.Mesh(new THREE.ShapeGeometry(shape),material); overlay.rotation.x=-Math.PI/2; overlay.position.y=.035; overlay.renderOrder=2;
         const light = new THREE.PointLight(0xfff4e2,0,7,2); light.position.copy(position); light.position.y=Math.min(2.3,Math.max(.12,position.y));
-        light.castShadow=true; light.shadow.mapSize.set(1024,1024);
         light.shadow.camera.near=.05; light.shadow.bias=-.0001; light.shadow.normalBias=.015;
         // Reuse shadow maps until their casters change.
         overlayGroup.add(overlay,light); point.overlay=overlay; point.light=light;
       }
     }
-    const lightCount=points.filter(point=>point.light).length;
+    const lights=points.filter(point=>point.light).map(point=>point.light),lightCount=lights.length;
+    configurePointShadows(lights, renderer?.capabilities, renderProfile);
     if(!roomLighting || roomLighting.capacity<lightCount)roomLighting=createRoomLighting(THREE,model.rooms.map(room=>({...room,exterior:(model.exterior_rooms||[]).includes(room.id),polygon:room.polygon.map(([x,z])=>[xm(x),zm(z)])})),lightCount,daylightWindows);
     roomLighting.attach(root,active);roomLighting.attach(objectGroup,active);
     updateFixtureShadows();
@@ -332,10 +333,12 @@ homeView = (() => {
       }
       if (point.overlay) {
         const color=new THREE.Color().setRGB(...appearance.rgb.map(c=>c/255),THREE.SRGBColorSpace);
-        point.light.color.copy(color); point.light.intensity=12*appearance.brightness;
+        // Keep a stable shader slot for every fixture. Hiding a point light
+        // changes Three's light/shadow counts and recompiles material programs.
+        point.light.color.copy(color); point.light.intensity=state==='on'?12*appearance.brightness:0;
         point.overlay.material.uniforms.lightColor.value.copy(color);
         point.overlay.material.uniforms.brightness.value=appearance.brightness;
-        point.overlay.visible=point.light.visible=state==='on';
+        point.overlay.visible=state==='on';
       }
       if (visible && !counted.has(item.entity_id)) { counted.add(item.entity_id);total++; if(state==='on'){if(isMotion(item))motion++;else on++;} if(!enabled)unavailable++; }
     }
@@ -492,18 +495,24 @@ homeView = (() => {
     if(!active || !renderer)return;
     const rect=$('homeStage').getBoundingClientRect(); if(!rect.width || !rect.height)return;
     camera ??= new THREE.OrthographicCamera(-1,1,1,-1,.1,Math.max(150,planRadius*5));
-    const rooms=selected ? model.rooms.filter(r=>r.id===selected) : model.rooms;
-    const vertices=rooms.flatMap(r=>r.polygon.map(([x,z])=>new THREE.Vector3(xm(x),0,zm(z))));
-    const box=new THREE.Box3().setFromPoints(vertices), center=box.getCenter(new THREE.Vector3()); center.y=planBounds?model.ceiling_height_m/2:.6;
-    // Opposite-side view: fit landscape sideways and phones lengthwise, with labels upright.
+    // Room geometry is fixed for this viewer. Panning, live states and media
+    // frames reuse its fit instead of allocating/projecting every vertex again.
     const landscape=rect.width>rect.height*1.2;
-    const offset=landscape ? new THREE.Vector3(-22,27,-7) : new THREE.Vector3(-6,28,-18);
-    if(planBounds)offset.multiplyScalar(Math.max(1,planRadius/32));
-    camera.up.set(0,1,0); camera.position.copy(center).add(offset); camera.lookAt(center); camera.updateMatrixWorld();
-    const bounds=new THREE.Box3().setFromPoints(vertices.flatMap(v=>[v,v.clone().setY(model.ceiling_height_m)]).map(v=>v.applyMatrix4(camera.matrixWorldInverse)));
-    const aspect=rect.width/rect.height, width=bounds.max.x-bounds.min.x, height=bounds.max.y-bounds.min.y;
-    const half=Math.max(height/2,width/aspect/2)*1.15/zoom;
-    const cx=(bounds.min.x+bounds.max.x)/2+panX, cy=(bounds.min.y+bounds.max.y)/2+panY;
+    if (!cameraFit || cameraFit.room!==selected || cameraFit.landscape!==landscape) {
+      const rooms=selected ? model.rooms.filter(r=>r.id===selected) : model.rooms;
+      const vertices=rooms.flatMap(r=>r.polygon.map(([x,z])=>new THREE.Vector3(xm(x),0,zm(z))));
+      const box=new THREE.Box3().setFromPoints(vertices), center=box.getCenter(new THREE.Vector3()); center.y=planBounds?model.ceiling_height_m/2:.6;
+      // Opposite-side view: fit landscape sideways and phones lengthwise, with labels upright.
+      const offset=landscape ? new THREE.Vector3(-22,27,-7) : new THREE.Vector3(-6,28,-18);
+      if(planBounds)offset.multiplyScalar(Math.max(1,planRadius/32));
+      camera.up.set(0,1,0); camera.position.copy(center).add(offset); camera.lookAt(center); camera.updateMatrixWorld();
+      const bounds=new THREE.Box3().setFromPoints(vertices.flatMap(v=>[v,v.clone().setY(model.ceiling_height_m)]).map(v=>v.applyMatrix4(camera.matrixWorldInverse)));
+      cameraFit={room:selected,landscape,width:bounds.max.x-bounds.min.x,height:bounds.max.y-bounds.min.y,
+        x:(bounds.min.x+bounds.max.x)/2,y:(bounds.min.y+bounds.max.y)/2};
+    }
+    const aspect=rect.width/rect.height;
+    const half=Math.max(cameraFit.height/2,cameraFit.width/aspect/2)*1.15/zoom;
+    const cx=cameraFit.x+panX, cy=cameraFit.y+panY;
     camera.left=cx-half*aspect;camera.right=cx+half*aspect;camera.top=cy+half;camera.bottom=cy-half;camera.updateProjectionMatrix();
     roomLighting?.update(points);
     if(lowerFloorContext)lowerFloorContext.visible=showLowerFloor&&!selected;
@@ -512,7 +521,7 @@ homeView = (() => {
     drawScene(camera);renderCount++;
     for(const label of labels) label.el.textContent=(rect.width<600 ? roomCode(label.room) : roomName(label.room))+(label.power?' · '+label.power:'');
     for(const point of [...labels,...points.map(p=>({el:p.marker,position:p.anchor||(!isCover(p.item)&&model.control_groups?.[p.item.id]?p.position.clone().setY(p.item.position_m.y+p.item.dimensions_m.height):p.position)}))]) {
-      const p=point.position.clone().project(camera);
+      const p=projectedPosition.copy(point.position).project(camera);
       point.el.style.left=((p.x+1)*rect.width/2)+'px'; point.el.style.top=((1-p.y)*rect.height/2)+'px';
     }
     // Separate controls for two bulbs in one fitting without moving its geometry.
@@ -520,7 +529,7 @@ homeView = (() => {
     for(const point of points){const group=model.control_groups?.[point.item.id];if(group&&!isCover(point.item)){if(!groups.has(group))groups.set(group,[]);groups.get(group).push(point);}}
     for(const group of groups.values())group.forEach((point,i)=>point.marker.style.left=(parseFloat(point.marker.style.left)+(i-(group.length-1)/2)*28)+'px');
     for(const point of points)for(const step of point.steps||[]){
-      const p=step.position.clone().project(camera),q=step.forward.clone().project(camera);
+      const p=projectedPosition.copy(step.position).project(camera),q=projectedForward.copy(step.forward).project(camera);
       step.el.style.left=((p.x+1)*rect.width/2)+'px';step.el.style.top=((1-p.y)*rect.height/2)+'px';
       step.el.style.setProperty('--angle',(Math.atan2(-(q.y-p.y)*rect.height,(q.x-p.x)*rect.width)*180/Math.PI+90)+'deg');
     }
@@ -578,7 +587,7 @@ homeView = (() => {
     renderer.domElement.addEventListener('pointerdown',e=>{if(active && e.button===0){start={x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY};renderer.domElement.setPointerCapture(e.pointerId);}});
     renderer.domElement.addEventListener('pointermove',e=>{if(!start || !active || !camera)return;
       if(Math.hypot(e.clientX-start.x,e.clientY-start.y)>6)start.moved=true;
-      if(start.moved){const rect=renderer.domElement.getBoundingClientRect();panX-=(e.clientX-start.lastX)*(camera.right-camera.left)/rect.width;panY+=(e.clientY-start.lastY)*(camera.top-camera.bottom)/rect.height;window.renderModel?.();}
+      if(start.moved){const rect=renderer.domElement.getBoundingClientRect();panX-=(e.clientX-start.lastX)*(camera.right-camera.left)/rect.width;panY+=(e.clientY-start.lastY)*(camera.top-camera.bottom)/rect.height;window.requestModelRender?.();}
       start.lastX=e.clientX;start.lastY=e.clientY;});
     renderer.domElement.addEventListener('pointercancel',()=>start=null);
     renderer.domElement.addEventListener('pointerup',e=>{

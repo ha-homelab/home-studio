@@ -52,6 +52,28 @@ function applyWallSheen(shader) {
   ).replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += wallSheen*0.16;');
 }
 
+// Point shadows use a 4-by-2 atlas, not one mapSize-sized texture. Keep the
+// combined atlas allocation bounded as the number of linked fixtures grows.
+function pointShadowMapSize(lightCount, maxTextureSize = 4096, maxFaceSize = 512) {
+  const maxFace = Math.max(1, Math.min(maxFaceSize, Math.floor(maxTextureSize / 4)));
+  let size = 2 ** Math.floor(Math.log2(maxFace));
+  const pixelBudget = 8 * 1024 * 1024;
+  while (size > 1 && Math.max(1, lightCount) * 8 * size * size > pixelBudget) size /= 2;
+  return size;
+}
+
+// Configure newly built lights once. Reserve fragment texture units for the
+// directional shadow and material maps; extra fixtures still illuminate rooms.
+function configurePointShadows(lights, capabilities = {}, profile = {}) {
+  const maxTextures = Number.isFinite(capabilities.maxTextures) ? capabilities.maxTextures : 8;
+  const shadowCount = Math.max(0, Math.min(lights.length, profile.pointShadows ?? 8, Math.floor(maxTextures) - 4));
+  const size = pointShadowMapSize(shadowCount, capabilities.maxTextureSize, profile.pointShadowSize);
+  lights.forEach((light, i) => {
+    light.castShadow = i < shadowCount;
+    light.shadow.mapSize.set(size, size);
+  });
+}
+
 // Softly confine each fixture's direct light to its room, retaining a short
 // doorway spill. Full-height shadow geometry still blocks opaque walls/doors.
 function createRoomLighting(THREE, rooms, capacity, windows) {
@@ -59,6 +81,7 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
   const roomIds = new Map(rooms.map((room, i) => [room.id, i + 1]));
   const uniforms = {
     homePointRooms: {value: new Int32Array(capacity)},
+    homeLitRooms: {value: new Int32Array(Math.max(1, rooms.length))},
     homeDaylight: {value: 0},
     homeWindowTransmission: {value: new Float32Array(Math.max(1, windows.length)).fill(1)}
   };
@@ -70,6 +93,7 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
   const fragment = `
     varying vec3 homeWorldPosition;
     uniform int homePointRooms[${capacity}];
+    uniform int homeLitRooms[${Math.max(1, rooms.length)}];
     uniform float homeDaylight;
     uniform float homeExteriorSurface;
     uniform float homeWindowTransmission[${Math.max(1, windows.length)}];
@@ -114,10 +138,32 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
         (homeDaylight * min(incoming,1.05) + exterior * (0.16 + 1.1*homeDaylight));
     }
   `;
-  const lighting = THREE.ShaderChunk.lights_fragment_begin.replace(
+  // Use literal room indices so each polygon is evaluated at most once per
+  // fragment, instead of being inlined into every unrolled point-light slot.
+  // Unlit rooms are skipped without changing the shader's fixed light count.
+  const transmissionCache = `
+    #if NUM_POINT_LIGHTS > 0
+      float homeRoomTransmissions[${rooms.length + 1}];
+      homeRoomTransmissions[0] = 1.0;
+      ${rooms.map((_, i) => `homeRoomTransmissions[${i + 1}] = homeLitRooms[${i}] != 0 ? homeRoomTransmission(${i + 1}) : 0.0;`).join('\n')}
+    #endif
+  `;
+  const lightChunk = THREE.ShaderChunk.lights_fragment_begin;
+  const pointStart = lightChunk.indexOf('#if ( NUM_POINT_LIGHTS > 0 ) && defined( RE_Direct )');
+  const pointEnd = lightChunk.indexOf('#if ( NUM_SPOT_LIGHTS > 0 ) && defined( RE_Direct )', pointStart);
+  const directCall = 'RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
+  // Room attenuation can remove an in-range light entirely. Mark it invisible
+  // before Three samples its shadow, and skip its zero-contribution BRDF work.
+  // Limit these changes to point lights; other light types retain Three's code.
+  const pointLighting = lightChunk.slice(pointStart, pointEnd).replace(
     'getPointLightInfo( pointLight, geometryPosition, directLight );',
-    'getPointLightInfo( pointLight, geometryPosition, directLight );\n directLight.color *= homeRoomTransmission(homePointRooms[ i ]);'
-  );
+    `getPointLightInfo( pointLight, geometryPosition, directLight );
+    if (directLight.visible) {
+      directLight.color *= homeRoomTransmissions[homePointRooms[ i ]];
+      directLight.visible = (directLight.color != vec3(0.0));
+    }`
+  ).replace(directCall, 'if (directLight.visible) ' + directCall);
+  const lighting = transmissionCache + lightChunk.slice(0, pointStart) + pointLighting + lightChunk.slice(pointEnd);
   return {
     capacity,
     attach(group, enabled) {
@@ -145,13 +191,18 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
       transmission.forEach((value,i)=>uniforms.homeWindowTransmission.value[i]=value);
     },
     update(points) {
-      // These are all scene point lights, in traversal order. Every emitter
-      // casts shadows, so Three.js's stable shadow/map sort preserves this order.
-      // Rebuild on every render: switching a light off removes its shader slot.
+      // Three.js stably sorts shadow casters before unshadowed point lights.
+      // These lights have no projection maps, so traversal order breaks ties.
+      // Zero-intensity fixtures retain their slots across on/off state changes.
       uniforms.homePointRooms.value.fill(0);
+      uniforms.homeLitRooms.value.fill(0);
       let slot = 0;
-      for (const point of points) if (point.light?.visible) {
-        uniforms.homePointRooms.value[slot++] = roomIds.get(point.item.room) || 0;
+      for (const shadowed of [true, false]) for (const point of points) {
+        if (point.light?.visible && Boolean(point.light.castShadow) === shadowed) {
+          const room = roomIds.get(point.item.room) || 0;
+          uniforms.homePointRooms.value[slot++] = room;
+          if (room && point.light.intensity > 0) uniforms.homeLitRooms.value[room - 1] = 1;
+        }
       }
     }
   };

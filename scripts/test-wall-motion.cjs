@@ -110,6 +110,7 @@ assert.equal((home.match(/drawScene\(camera\)/g) || []).length, 2);
 const calls = [];
 const context = vm.createContext({
   scene: {},
+  renderSuspended: false, renderLost: false, document: {hidden: false},
   wallSheenMotion: {beforeRender: () => calls.push('before'), afterRender: () => calls.push('after')},
   renderer: {render: () => { calls.push('draw'); throw Error('GPU context unavailable'); }},
 });
