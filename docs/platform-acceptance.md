@@ -131,11 +131,14 @@ evidence for dependency failures and runner-level timeouts.
 Check the first failed assertion and actual renderer before comparing timings.
 Chromium uses SwiftShader to exercise software rendering. Linux runs headed
 browsers under Xvfb with software GL. Firefox profiles force WebGL enablement
-and disclose the actual renderer rather than a sanitized GPU name. Current
-Playwright Firefox 157 and native Firefox 158 rows on macOS select
+and disclose the actual renderer rather than a sanitized GPU name. Playwright
+Firefox 155/157 and native Firefox 158 rows on macOS select
 `FIREFOX_WEBGL_BACKEND=angle` and require the reported renderer to confirm Metal
-ANGLE. Historical Firefox snapshots, ESR, and Waterfox retain their default
-backend because older releases do not necessarily provide that Metal path.
+ANGLE. Playwright Firefox 153, native ESR 153, and Waterfox retain their default
+WebGL backend and select `FIREFOX_COMPOSITOR_BACKEND=software` on macOS because
+those releases precede the Metal ANGLE path. This changes the browser compositor,
+not the WebGL rendering budget; the real graphics renderer is still recorded
+and all rendering/recovery assertions remain required.
 The configured ANGLE path avoids the hosted VM's slow native CGL fallback; it
 does not certify Firefox's default graphics configuration. Historical rows
 still have to meet the same acceptance assertions on their available backend.
@@ -196,8 +199,9 @@ python3 scripts/test-native-browser-acceptance.py --product firefox --expected-v
 For Waterfox, change the product to `waterfox` and the version to `6.7.5` or
 `6.7.6`; the older `setup-waterfox.py` and `test-waterfox-acceptance.py` commands
 remain available. Windows extraction requires 7-Zip. On macOS, the Firefox 158 CI
-configuration additionally sets `FIREFOX_WEBGL_BACKEND=angle`; ESR retains the
-default backend. Keep application
+configuration additionally sets `FIREFOX_WEBGL_BACKEND=angle`. The macOS ESR
+and Waterfox rows use `FIREFOX_COMPOSITOR_BACKEND=software` with the default
+WebGL backend. These settings apply only to disposable test profiles. Keep application
 bundles unmodified so their signatures remain valid.
 
 ## Boundaries of a green result

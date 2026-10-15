@@ -121,6 +121,19 @@ class PlatformAcceptanceTests(unittest.TestCase):
         self.assertIn('scripts/test-safari-tooling.py', runs)
         self.assertIn('scripts/test-safari-acceptance.py --output acceptance-artifacts/safari', runs)
 
+    def test_macos_gecko_backends_are_scoped_to_the_supported_versions(self):
+        jobs = workflow('platform-acceptance.yml')['jobs']
+        browser = jobs['browser']['env']
+        native = jobs['native-browser']['env']
+        self.assertEqual(browser['FIREFOX_WEBGL_BACKEND'],
+                         "${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && (matrix.playwright == '1.63.0' || matrix.playwright == '1.64.0') && 'angle' || 'default' }}")
+        self.assertEqual(browser['FIREFOX_COMPOSITOR_BACKEND'],
+                         "${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && matrix.playwright == '1.62.1' && 'software' || 'default' }}")
+        self.assertEqual(native['FIREFOX_WEBGL_BACKEND'],
+                         "${{ matrix.os == 'macos-15' && matrix.product == 'firefox' && matrix.version == '158.0' && 'angle' || 'default' }}")
+        self.assertEqual(native['FIREFOX_COMPOSITOR_BACKEND'],
+                         "${{ matrix.os == 'macos-15' && (matrix.product == 'waterfox' || (matrix.product == 'firefox' && matrix.version == '153.5.0esr')) && 'software' || 'default' }}")
+
     def test_every_browser_lane_preserves_failure_evidence(self):
         jobs = workflow('platform-acceptance.yml')['jobs']
         for name in ('browser', 'native-browser', 'safari'):

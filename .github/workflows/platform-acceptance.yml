@@ -76,7 +76,8 @@ jobs:
       HOME_STUDIO_EXPECT_BROWSER_VERSION: ${{ matrix.browser_version }}
       CFT_VERSION: ${{ matrix.cft }}
       PLAYWRIGHT_VERSION: ${{ matrix.playwright }}
-      FIREFOX_WEBGL_BACKEND: ${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && matrix.playwright == '1.64.0' && 'angle' || 'default' }}
+      FIREFOX_WEBGL_BACKEND: ${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && (matrix.playwright == '1.63.0' || matrix.playwright == '1.64.0') && 'angle' || 'default' }}
+      FIREFOX_COMPOSITOR_BACKEND: ${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && matrix.playwright == '1.62.1' && 'software' || 'default' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -169,6 +170,7 @@ jobs:
       NATIVE_BROWSER_VERSION: ${{ matrix.version }}
       NATIVE_BROWSER_DIAGNOSTICS_DIR: acceptance-artifacts/${{ matrix.id }}
       FIREFOX_WEBGL_BACKEND: ${{ matrix.os == 'macos-15' && matrix.product == 'firefox' && matrix.version == '158.0' && 'angle' || 'default' }}
+      FIREFOX_COMPOSITOR_BACKEND: ${{ matrix.os == 'macos-15' && (matrix.product == 'waterfox' || (matrix.product == 'firefox' && matrix.version == '153.5.0esr')) && 'software' || 'default' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
