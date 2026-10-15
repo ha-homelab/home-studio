@@ -88,6 +88,126 @@ let renderer,scene,camera,objectGroup,root,hemisphere,sun,ground,grid,homeView=n
 // Defer embedded drawing to the next frame.
 let initialViewReady=!embedded;
 function invalidateShadows(){scene?.traverse(o=>{if(o.shadow){o.shadow.autoUpdate=false;o.shadow.needsUpdate=true}})}
+// Accept only complete rectangular prisms, including the compiler's rotated walls.
+// Unrecognized geometry keeps its original shape; an AABB would fill real openings.
+function wallPrism(mesh,preferredAxis){
+  if(mesh.kind!=='walls'||mesh.indices.length!==36||mesh.vertices.length>36)return null;
+  const epsilon=1e-6,unique=[];
+  for(const p of mesh.vertices){
+    if(p.length!==3||!p.every(Number.isFinite))return null;
+    if(!unique.some(q=>p.every((v,i)=>Math.abs(v-q[i])<epsilon)))unique.push(p);
+  }
+  if(unique.length!==8)return null;
+  const bottom=Math.min(...unique.map(p=>p[1])),top=Math.max(...unique.map(p=>p[1]));
+  if(top-bottom<epsilon||unique.some(p=>Math.min(Math.abs(p[1]-bottom),Math.abs(p[1]-top))>epsilon))return null;
+  const footprint=unique.filter(p=>Math.abs(p[1]-bottom)<epsilon);
+  if(footprint.length!==4)return null;
+  const center=[0,1,2].map(i=>unique.reduce((sum,p)=>sum+p[i],0)/8);
+  footprint.sort((a,b)=>Math.atan2(a[2]-center[2],a[0]-center[0])-Math.atan2(b[2]-center[2],b[0]-center[0]));
+  let axis=preferredAxis;
+  if(!axis){
+    const edges=footprint.map((p,i)=>{const q=footprint[(i+1)%4];return[q[0]-p[0],q[2]-p[2]]});
+    axis=edges.reduce((a,b)=>Math.hypot(...a)>Math.hypot(...b)?a:b);
+    const length=Math.hypot(...axis);if(length<epsilon)return null;
+    axis=axis.map(v=>v/length);
+  }
+  const local=mesh.vertices.map(p=>[(p[0]-center[0])*axis[0]+(p[2]-center[2])*axis[1],p[1]-center[1],-(p[0]-center[0])*axis[1]+(p[2]-center[2])*axis[0]]);
+  const half=[0,1,2].map(i=>Math.max(...local.map(p=>Math.abs(p[i]))));
+  if(half.some(v=>v<epsilon)||local.some(p=>p.some((v,i)=>Math.abs(Math.abs(v)-half[i])>epsilon)))return null;
+  // Six complete faces, each split along a diagonal. Reject missing/duplicate faces.
+  const faces=new Map();
+  for(let i=0;i<36;i+=3){
+    const ids=mesh.indices.slice(i,i+3);
+    if(ids.some(j=>!Number.isInteger(j)||j<0||j>=local.length))return null;
+    const tri=ids.map(j=>local[j]);
+    const plane=[0,1,2].find(j=>tri.every(p=>Math.abs(p[j]-tri[0][j])<epsilon));
+    if(plane===undefined)return null;
+    const corners=tri.map(p=>p.map(v=>v>0?1:0).join(''));
+    if(new Set(corners).size!==3)return null;
+    const key=plane+':'+(tri[0][plane]>0?1:0),face=faces.get(key)||[];
+    face.push(corners);faces.set(key,face);
+  }
+  if(faces.size!==6)return null;
+  for(const face of faces.values()){
+    if(face.length!==2||new Set(face.flat()).size!==4)return null;
+    const shared=face[0].filter(p=>face[1].includes(p));
+    if(shared.length!==2||[0,1,2].filter(i=>shared[0][i]!==shared[1][i]).length!==2)return null;
+  }
+  return {center,axis,length:half[0]*2,depth:half[2]*2,bottom,top};
+}
+// Opening endpoints retain the authored wall direction even when a full-height
+// passage leaves only piers narrower than the wall thickness.
+function wallCenterlineAxes(meshes,openings){
+  const longest=new Map(),axes=new Map();
+  for(const mesh of meshes){
+    const shape=mesh.wall_id&&wallPrism(mesh);
+    if(shape&&(!longest.has(mesh.wall_id)||shape.length>longest.get(mesh.wall_id).length))longest.set(mesh.wall_id,shape);
+  }
+  for(const [id,shape] of longest)axes.set(id,shape.axis);
+  for(const opening of openings||[]){
+    const a=opening.start_m,b=opening.end_m;
+    if(!opening.wall_id||!a||!b||a.length!==2||b.length!==2||![...a,...b].every(Number.isFinite))continue;
+    const dx=b[0]-a[0],dz=b[1]-a[1],length=Math.hypot(dx,dz);
+    if(length>1e-6)axes.set(opening.wall_id,[dx/length,dz/length]);
+  }
+  return axes;
+}
+// Round across thickness, while keeping longitudinal ends and elevations exact.
+// The original solid is contained in this profile: joins cannot open up, and
+// jambs/lintels never expand into the width or height of a door or window.
+function roundedWallData(shape,limit){
+  const {center,axis,length,depth,bottom}=shape,top=Math.min(shape.top,limit);
+  const data={vertices:[],normals:[],indices:[]};
+  if(top<=bottom+1e-6)return data;
+  const swell=Math.min(.075,depth*.32),rise=Math.min(.9,(top-bottom)*.4),profile=[];
+  for(const [side,upper,start] of [[1,1,0],[-1,1,Math.PI/2],[-1,0,Math.PI],[1,0,Math.PI*1.5]]){
+    for(let step=0;step<=3;step++){
+      const angle=start+step*Math.PI/6,c=Math.cos(angle),s=Math.sin(angle),normalLength=Math.hypot(c/swell,s/rise);
+      profile.push({z:side*depth/2+swell*c,y:(upper?top-rise:bottom+rise)+rise*s,nz:c/swell/normalLength,ny:s/rise/normalLength});
+    }
+  }
+  const vertex=(u,p,normal)=>{
+    data.vertices.push([center[0]+axis[0]*u-axis[1]*p.z,p.y,center[2]+axis[1]*u+axis[0]*p.z]);
+    data.normals.push(normal);
+    return data.vertices.length-1;
+  };
+  const count=profile.length;
+  for(const u of [-length/2,length/2])for(const p of profile)vertex(u,p,[-axis[1]*p.nz,p.ny,axis[0]*p.nz]);
+  for(let i=0;i<count;i++){const j=(i+1)%count;data.indices.push(i,count+i,count+j,i,count+j,j)}
+  for(const sign of [-1,1]){
+    const normal=[sign*axis[0],0,sign*axis[1]],cap=vertex(sign*length/2,{z:0,y:(bottom+top)/2},normal),offset=data.vertices.length;
+    for(const p of profile)vertex(sign*length/2,p,normal);
+    for(let i=0;i<count;i++){const a=offset+i,b=offset+(i+1)%count;data.indices.push(cap,sign<0?a:b,sign<0?b:a)}
+  }
+  return data;
+}
+function wallDisplayGeometry(source,shape,limit){
+  const display=roundedWallData(shape,limit),offset=source.vertices.length,geometry=new THREE.BufferGeometry();
+  geometry.setAttribute('position',new THREE.Float32BufferAttribute([...source.vertices,...display.vertices].flat(),3));
+  geometry.setAttribute('normal',new THREE.Float32BufferAttribute([...source.normals,...display.normals].flat(),3));
+  geometry.setIndex([...source.indices,...display.indices.map(i=>i+offset)]);
+  geometry.userData.wallShadowCount=source.indices.length;
+  geometry.userData.wallDisplayCount=display.indices.length;
+  geometry.setDrawRange(source.indices.length,display.indices.length);
+  return geometry;
+}
+const roundedWalls=[];
+function updateRoundedWallGeometry(limit){
+  for(const wall of roundedWalls){
+    const key=Math.min(wall.shape.top,limit);
+    let geometry=wall.cache.get(key);
+    if(!geometry){
+      geometry=wallDisplayGeometry(wall.source,wall.shape,limit);
+      // Full height, editor cutaway and Home are the only three active variants.
+      // Keep the same bound if a future view introduces another clipping height.
+      if(wall.cache.size===3){const oldest=wall.cache.keys().next().value;wall.cache.get(oldest).dispose();wall.cache.delete(oldest)}
+      wall.cache.set(key,geometry);
+    }
+    wall.mesh.geometry=geometry;
+  }
+}
+function beginWallShadow(_renderer,_object,_camera,_shadowCamera,geometry){geometry.setDrawRange(0,geometry.userData.wallShadowCount)}
+function endWallShadow(_renderer,_object,_camera,_shadowCamera,geometry){geometry.setDrawRange(geometry.userData.wallShadowCount,geometry.userData.wallDisplayCount)}
 // Intersect wall sides with their visible top or base, including the cutaway.
 // Ignore coplanar face triangles so their triangulation never becomes a diagonal.
 function wallBoundarySegments(meshes,limit,atBase=false){
@@ -133,6 +253,7 @@ function buildLowerFloorContext(){
 function updateWallOutlines(){
   if(!root||wallOutlineHeight===clipping.constant)return;
   wallOutlineHeight=clipping.constant;
+  updateRoundedWallGeometry(wallOutlineHeight);
   if(wallOutlines){wallOutlines.traverse(o=>{o.geometry?.dispose();o.material?.dispose()});root.remove(wallOutlines);}
   wallOutlines=new THREE.Group();wallOutlines.name='Visible wall boundaries';
   // Draw after the translucent wall fill, while opaque furniture still occludes.
@@ -154,6 +275,8 @@ function updateWallOutlines(){
   }
   root.add(wallOutlines);
 }
+const wallSheenMotion=createWallSheenMotion();
+function drawScene(camera){wallSheenMotion.beforeRender();try{renderer.render(scene,camera)}finally{wallSheenMotion.afterRender()}}
 function report3DError(e){$('loadError').style.display='block';$('loadError').textContent='3D view could not start: '+e.message+'. Plan placement and JSON export are still available.';console.error(e)}
 try{
 scene=new THREE.Scene();scene.background=new THREE.Color('#e7e8df');camera=new THREE.PerspectiveCamera(42,1,.1,Math.max(150,planRadius*5));
@@ -161,11 +284,26 @@ renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});re
 hemisphere=new THREE.HemisphereLight(0xffffff,0xa6aaa1,1.8);scene.add(hemisphere);sun=new THREE.DirectionalLight(0xfff9ee,2.3);sun.position.set(-7,22,12);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-16,right:16,top:22,bottom:-22,near:1,far:65});sun.shadow.normalBias=.035;sun.target.position.set(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]);scene.add(sun,sun.target);
 if(planBounds){const scale=Math.max(1,planRadius/32);sun.position.copy(sun.target.position).add(new THREE.Vector3(-7,22,12).multiplyScalar(scale));Object.assign(sun.shadow.camera,{left:-planRadius,right:planRadius,top:planRadius,bottom:-planRadius,far:Math.max(65,planRadius*4)});sun.shadow.camera.updateProjectionMatrix();}
 root=new THREE.Group();objectGroup=new THREE.Group();scene.add(root,objectGroup);buildLowerFloorContext();
-for(const m of model.meshes){const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(m.vertices.flat(),3));geometry.setAttribute('normal',new THREE.Float32BufferAttribute(m.normals.flat(),3));geometry.setIndex(m.indices);const col=model.materials[m.material];const mat=new THREE.MeshStandardMaterial({color:m.kind==='walls'?0xb2d8d2:m.kind==='frames'?0x9abfcb:new THREE.Color(...col.slice(0,3)),roughness:.8,emissive:m.kind==='walls'?0x315d59:m.kind==='frames'?0x18333d:m.kind==='vehicles'?0x10181b:0,metalness:m.material==='steel'||m.kind==='vehicles'?.35:0,transparent:m.kind==='walls'||col[3]<1,opacity:m.kind==='walls'?.16:col[3],depthWrite:m.kind!=='walls',forceSinglePass:m.kind==='walls',side:THREE.DoubleSide});if(m.kind==='walls')mat.onBeforeCompile=applyWallSheen;if(['walls','frames','doors','windows'].includes(m.kind)){mat.clippingPlanes=[clipping];mat.clipShadows=false}const mesh=new THREE.Mesh(geometry,mat);mesh.name=m.name;mesh.userData.category=m.kind;mesh.castShadow=col[3]===1;mesh.receiveShadow=true;root.add(mesh)}
+// A wall_id shares one centerline, even when a short pier is narrower than its depth.
+const wallAxes=wallCenterlineAxes(model.meshes,model.openings);
+for(const m of model.meshes){
+const candidate=wallPrism(m,wallAxes.get(m.wall_id));
+// Legacy square blocks have no reliable longitudinal direction; keep them intact.
+const shape=candidate&&(m.wall_id||candidate.length>=candidate.depth*1.25)?candidate:null;
+const geometry=shape?wallDisplayGeometry(m,shape,clipping.constant):new THREE.BufferGeometry();
+if(!shape){geometry.setAttribute('position',new THREE.Float32BufferAttribute(m.vertices.flat(),3));geometry.setAttribute('normal',new THREE.Float32BufferAttribute(m.normals.flat(),3));geometry.setIndex(m.indices)}
+const col=model.materials[m.material];const mat=new THREE.MeshStandardMaterial({color:m.kind==='walls'?0xb2d8d2:m.kind==='frames'?0x9abfcb:new THREE.Color(...col.slice(0,3)),roughness:.8,emissive:m.kind==='walls'?0x315d59:m.kind==='frames'?0x18333d:m.kind==='vehicles'?0x10181b:0,metalness:m.material==='steel'||m.kind==='vehicles'?.35:0,transparent:m.kind==='walls'||col[3]<1,opacity:m.kind==='walls'?.16:col[3],depthWrite:m.kind!=='walls',forceSinglePass:m.kind==='walls',side:THREE.DoubleSide});if(m.kind==='walls')mat.onBeforeCompile=applyWallSheen;if(['walls','frames','doors','windows'].includes(m.kind)){mat.clippingPlanes=[clipping];mat.clipShadows=false}const mesh=new THREE.Mesh(geometry,mat);mesh.name=m.name;mesh.userData.category=m.kind;mesh.castShadow=col[3]===1;mesh.receiveShadow=true;
+if(shape){
+  // The same draw uses the exact original 12 triangles for all shadow passes.
+  // Three reads drawRange after onBeforeShadow; no buffers or materials change.
+  mesh.onBeforeShadow=beginWallShadow;mesh.onAfterShadow=endWallShadow;
+  roundedWalls.push({mesh,source:m,shape,cache:new Map([[Math.min(shape.top,clipping.constant),geometry]])});
+}
+root.add(mesh)}
 ground=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(60,planRadius*2),Math.max(65,planRadius*2)),new THREE.MeshStandardMaterial({color:'#dfe3d8',roughness:1}));ground.rotation.x=-Math.PI/2;ground.position.set(planCenter[0],-1.97,planCenter[1]);ground.receiveShadow=true;scene.add(ground);grid=new THREE.GridHelper(44,44,0xc0cabe,0xd0d7cb);grid.position.set(planCenter[0],-1.96,planCenter[1]);scene.add(grid);
 renderer.domElement.addEventListener('webglcontextrestored',()=>{invalidateShadows();render()});
 function updateEditorCamera(){camera.position.set(target.x+radius*Math.sin(polar)*Math.sin(azimuth),target.y+radius*Math.cos(polar),target.z+radius*Math.sin(polar)*Math.cos(azimuth));camera.lookAt(target)}
-function render(){if(!initialViewReady)return;updateWallOutlines();if(homeView?.active){homeView.render();return}updateEditorCamera();renderer.render(scene,camera);renderCount++}window.renderModel=render;
+function render(){if(!initialViewReady)return;updateWallOutlines();if(homeView?.active){homeView.render();return}updateEditorCamera();drawScene(camera);renderCount++}window.renderModel=render;
 let viewSize='';const resize=()=>{if(!initialViewReady)return;const b=$(homeView?.active?'homeStage':'view3d').getBoundingClientRect(),size=[homeView?.active,b.width,b.height].join();if(b.width&&b.height&&size!==viewSize){viewSize=size;renderer.setSize(b.width,b.height,false);camera.aspect=b.width/b.height;camera.updateProjectionMatrix();render()}};window.resizeModel=resize;const observer=new ResizeObserver(resize);observer.observe($('view3d'));observer.observe($('homeStage'));
 let drag=null;renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());renderer.domElement.addEventListener('pointerdown',e=>{if(homeView?.active)return;drag={x:e.clientX,y:e.clientY,button:e.button};renderer.domElement.setPointerCapture(e.pointerId)});renderer.domElement.addEventListener('pointermove',e=>{if(homeView?.active||!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(drag.button===2||e.shiftKey){const scale=radius*.0018;target.x-=dx*scale*Math.cos(azimuth);target.z+=dx*scale*Math.sin(azimuth);target.x-=dy*scale*Math.sin(azimuth);target.z-=dy*scale*Math.cos(azimuth)}else{azimuth-=dx*.006;polar=Math.max(.02,Math.min(1.46,polar+dy*.006))}drag.x=e.clientX;drag.y=e.clientY;render()});renderer.domElement.addEventListener('pointerup',()=>drag=null);renderer.domElement.addEventListener('pointercancel',()=>drag=null);renderer.domElement.addEventListener('wheel',e=>{if(homeView?.active)return;e.preventDefault();radius=Math.max(3,Math.min(Math.max(65,planRadius*2),radius*Math.exp(e.deltaY*.001)));render()},{passive:false});
 $('resetView').onclick=()=>{$('focusRoom').value='';target.set(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]);radius=planRadius;azimuth=.57;polar=.48;render()};$('topView').onclick=()=>{if($('focusRoom').value)focusRoom($('focusRoom').value);else{target.set(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]);radius=planRadius*.91}polar=.001;azimuth=0;render()};$('zoomIn').onclick=()=>{radius=Math.max(3,radius/1.15);render()};$('zoomOut').onclick=()=>{radius=Math.min(Math.max(65,planRadius*2),radius*1.15);render()};

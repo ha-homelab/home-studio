@@ -21,6 +21,12 @@ Assistant. **Export JSON** saves your editable project; **Open JSON** restores i
 The local compiler turns that project into a separate viewer, 3D exports, and an
 installable Home Assistant package. Examples and guide screenshots are fictional.
 
+The compiled Home Assistant viewer gives walls a soft, rounded profile with a
+transparent teal finish, cyan upper edges and blue lower edges. It keeps door
+and window openings clear. Subtle color drift reuses existing desktop frames;
+mobile devices and an idle plan stay still. See [wall rendering and resource
+limits](docs/rounded-walls.md). Your measured drawing and exported geometry are unchanged.
+
 ## Choose your language
 
 The drawing editor supports **24 languages**, including translated tools,

@@ -1,13 +1,51 @@
-// Compute the view-dependent palette per vertex; no clock, texture or extra pass.
+const wallSheenPhase = {value: 0};
+
+// Advance only during nearby, already requested frames. Idle/hidden time never
+// accumulates and this helper never schedules a frame. Capability checks are
+// conservative hints, not a hardware benchmark; expensive CPU frames also stop it.
+function createWallSheenMotion(host = globalThis) {
+  const nav = host.navigator || {};
+  const reduced = host.matchMedia?.('(prefers-reduced-motion: reduce)');
+  const coarse = host.matchMedia?.('(any-pointer: coarse)');
+  const limited = !reduced || !coarse || !nav.hardwareConcurrency || nav.hardwareConcurrency <= 4 ||
+    (nav.deviceMemory !== undefined && nav.deviceMemory <= 4) || nav.userAgentData?.mobile ||
+    /Android|iPhone|iPad|iPod/i.test(nav.userAgent || '');
+  let previous = null, started = null, slowFrames = 0, stopped = false;
+  return {
+    beforeRender() {
+      if (limited || stopped || reduced.matches || coarse.matches || host.document?.hidden || nav.connection?.saveData) {
+        previous = started = null;
+        return;
+      }
+      const now = host.performance.now();
+      const elapsed = previous === null ? 0 : now - previous;
+      if (elapsed > 0 && elapsed <= 100) {
+        // A 90-second active cycle, with no jump on sparse updates or resume.
+        wallSheenPhase.value = (wallSheenPhase.value + Math.min(elapsed, 32) * Math.PI * 2 / 90000) % (Math.PI * 2);
+      }
+      previous = started = now;
+    },
+    afterRender() {
+      if (started === null) return;
+      slowFrames = host.performance.now() - started > 32 ? slowFrames + 1 : 0;
+      if (slowFrames >= 3) stopped = true;
+      started = null;
+    }
+  };
+}
+
+// Compute the view-dependent palette per vertex; no texture or extra pass.
 function applyWallSheen(shader) {
-  shader.vertexShader = 'varying vec3 wallSheen;\n' + shader.vertexShader.replace(
+  shader.uniforms.wallSheenPhase = wallSheenPhase;
+  shader.vertexShader = 'uniform float wallSheenPhase;\nvarying vec3 wallSheen;\n' + shader.vertexShader.replace(
     '#include <project_vertex>', `#include <project_vertex>
     vec3 wallView = isOrthographic ? vec3(0.0,0.0,1.0) : normalize(-mvPosition.xyz);
     float grazing = 1.0-abs(dot(normalize(transformedNormal),wallView));
-    float band = 0.5+0.5*sin(dot(position,vec3(0.35,0.65,0.25)));
+    float band = 0.5+0.5*sin(dot(position,vec3(0.35,0.65,0.25))+wallSheenPhase);
     float tint = clamp(0.75*grazing+0.25*band,0.0,1.0);
     wallSheen = mix(vec3(0.10,0.72,0.56),vec3(0.15,0.40,0.85),smoothstep(0.0,0.65,tint));
-    wallSheen = mix(wallSheen,vec3(0.55,0.36,0.75),smoothstep(0.65,1.0,tint));`
+    wallSheen = mix(wallSheen,vec3(0.55,0.36,0.75),smoothstep(0.65,1.0,tint));
+    wallSheen = mix(wallSheen,vec3(0.65,0.95,1.0),0.4*clamp(grazing*grazing,0.0,1.0));`
   );
   shader.fragmentShader = 'varying vec3 wallSheen;\n' + shader.fragmentShader.replace(
     '#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb,wallSheen,0.48);'
@@ -98,7 +136,7 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
           );
           shader.fragmentShader = fragment + shader.fragmentShader.replace('#include <lights_fragment_begin>', lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
         };
-        mesh.material.customProgramCacheKey = () => (enabled ? fragment : 'home-editor') + (wall ? ':wall-sheen-v1' : '');
+        mesh.material.customProgramCacheKey = () => (enabled ? fragment : 'home-editor') + (wall ? ':wall-sheen-v2' : '');
         mesh.material.needsUpdate = true;
       });
     },

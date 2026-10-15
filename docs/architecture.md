@@ -320,24 +320,67 @@ window jambs and the upper frame remain visible. Blue-grey structural frames
 with a low emissive contribution stay legible in unlit rooms. The editor retains
 its separate 1.15 m cutaway toggle; exported dimensions remain unchanged.
 
-### Passive iridescent wall fill
+### Rounded wall cross-sections
+
+`wallPrism` recognizes complete rectangular wall spans, retaining the original
+geometry for unsupported shapes. `wallCenterlineAxes` uses authored opening
+endpoints when available so narrow piers beside a full-height passage retain the
+wall's longitudinal direction. `roundedWallData` adds a soft cross-section across
+thickness without extending longitudinal ends or changing top/base elevations.
+Swell is limited to 75 mm per side and 32% of original thickness; each rounded
+shoulder covers up to 40% of visible height, capped at 0.9 m. The top and base
+retain their original rectangular footprints, keeping the existing contours
+aligned and openings clear.
+
+Each accepted span has 64 visible triangles and still uses one mesh and material.
+`wallDisplayGeometry` packs the original indices followed by the rounded indices
+in one buffer. The normal draw range selects the rounded surface. Three.js calls
+`onBeforeShadow` before reading that range, so `beginWallShadow` selects the exact
+original 12-triangle box for every shadow draw; `endWallShadow` restores the
+rounded range afterward. This preserves full-height shadow occlusion without a
+second mesh, extra draw call, or per-frame buffer upload. Unchanged source model
+data still drives exports and contours.
+
+`updateRoundedWallGeometry` runs with contour updates when clipping height changes.
+Each wall retains at most three cached variants, disposing a buffer when evicted.
+Ordinary camera, light-state, and idle frames reuse the existing buffers. See
+[rounded wall acceptance](rounded-walls.md) for geometry, shadow-range, idle,
+resource-stability, and device-validation checks.
+
+### Iridescent wall fill and optional motion
 
 `applyWallSheen` in `room-lighting.js` adds a teal-to-blue tint with a subtle
-violet edge to the existing wall material. The palette depends on viewing angle
+violet edge and a modest pale-cyan grazing highlight to the existing wall material.
+The highlight blends at most 40%, retaining the existing 16% material opacity.
+The palette depends on viewing angle
 and a broad spatial band, computed per vertex and interpolated across each face.
 Fragments only blend that color into diffuse and emissive terms. Perspective
 views use the eye-to-vertex direction; orthographic views use a constant viewing
 direction, so panning does not make the tint swim across a flat wall.
 
-This is view-dependent iridescence, not time animation: a stationary plan stays
-stationary, including with reduced-motion preferences. It adds no frame loop,
-timer, texture, geometry, light, render pass or network request. There is a small
-amount of extra shader arithmetic during already-requested frames. Wall opacity,
-blue base contours, cyan top contours, clipping and shadow occlusion are retained.
+The optional spatial-band drift advances only during adjacent, already requested
+frames; a stationary plan stays stationary. A shared scalar uniform completes a
+cycle over 90 seconds of accumulated active time. Gaps over 100 ms add nothing,
+and each update is capped at 32 ms, so sparse state events and tab resumes cannot
+jump the palette. There is no frame loop, timer, texture, light, render pass or
+network request. All scene draw paths share the same update and keep their
+existing render frequency.
+
+Reduced motion, hidden documents, coarse-pointer devices, mobile browsers,
+data-saving mode, four or fewer logical processors, or four GB or less reported
+device memory freeze the drift. Missing capability information also defaults to
+static when motion preferences or processor count are unavailable. Three
+consecutive CPU render submissions over 32 ms disable drift for that viewer
+session. These are conservative guards, not an Android benchmark or a GPU timing
+claim. The static tint and rounded geometry remain visible on all devices.
+Shader work stays per vertex apart from the existing fragment color blend;
+clipping and shadow occlusion are retained.
 The patch runs both on initial material compilation and when room lighting is
 attached; wall and non-wall shader cache keys remain distinct in Home and editor
 modes. `node scripts/test-wall-sheen.cjs` checks that composition against the
-vendored Three.js shader. Browser checks should also compare idle render counts,
+vendored Three.js shader. `node scripts/test-wall-motion.cjs` checks the bounded
+phase clock, preference/device guards, slow-render fallback, and zero scheduled
+frames with deterministic clocks. Browser checks should also compare idle render counts,
 draw calls and texture/geometry counts with the same scene before and after.
 
 ## TV frame refresh failures

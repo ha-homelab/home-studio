@@ -486,7 +486,7 @@ homeView = (() => {
   function drawSignalFrame(redraw){
     if(!active||!camera||!renderer)return;
     refreshSignalStatus();
-    if(redraw){renderer.render(scene,camera);renderCount++;}
+    if(redraw){drawScene(camera);renderCount++;}
   }
   function render() {
     if(!active || !renderer)return;
@@ -509,7 +509,7 @@ homeView = (() => {
     if(lowerFloorContext)lowerFloorContext.visible=showLowerFloor&&!selected;
     $('homeFloorContext').disabled=!!selected;
     assumedZones?.render(selected,signalZone);refreshSignalStatus();
-    renderer.render(scene,camera);renderCount++;
+    drawScene(camera);renderCount++;
     for(const label of labels) label.el.textContent=(rect.width<600 ? roomCode(label.room) : roomName(label.room))+(label.power?' · '+label.power:'');
     for(const point of [...labels,...points.map(p=>({el:p.marker,position:p.anchor||(!isCover(p.item)&&model.control_groups?.[p.item.id]?p.position.clone().setY(p.item.position_m.y+p.item.dimensions_m.height):p.position)}))]) {
       const p=point.position.clone().project(camera);

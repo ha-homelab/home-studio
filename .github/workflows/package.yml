@@ -54,8 +54,11 @@ jobs:
         run: node scripts/test-module-expiry.cjs
       - name: Test visible wall outlines and doorway gaps
         run: node scripts/test-wall-tops.cjs
-      - name: Test passive wall sheen and lighting composition
-        run: node scripts/test-wall-sheen.cjs
+      - name: Test rounded walls, exact shadow geometry and demand-only sheen
+        run: |
+          node scripts/test-rounded-walls.cjs
+          node scripts/test-wall-sheen.cjs
+          node scripts/test-wall-motion.cjs
       - name: Test dimmed light indicators and color interpretation
         run: node --test scripts/test-light-state.cjs
       - name: Test TV frame retention and disposal
