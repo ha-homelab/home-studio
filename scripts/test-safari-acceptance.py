@@ -119,6 +119,7 @@ def fixture_server(name, log):
 def run_case(output, name, driver_path):
     output.mkdir(parents=True, exist_ok=True)
     record = {'schema': 1, 'suite': name, 'status': 'running', 'product': 'Safari',
+              'output': str(output.resolve()),
               'sourceRevision': os.environ.get('GITHUB_SHA'), 'samples': [],
               'os': {'platform': sys.platform, 'release': platform.release(), 'machine': platform.machine()},
               'headless': False, 'emulatedMobile': False, 'cleanupErrors': []}
