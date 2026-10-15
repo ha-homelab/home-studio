@@ -169,6 +169,32 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
       assert.equal(p.project, committed, 'Invalid movement rolls back without mutating the committed project');
       assert.equal(saves, savedBeforeInvalid);
     }
+    // Real snap spacing and separated animation frames: most pointer events in
+    // a half-metre gesture stay in the same cell and must not repaint the floor.
+    let snappedDraws = 0;
+    p.snap = value => Math.round(value * 4) / 4;
+    p.renderPlan = () => { p.cancelCanvasRender(); snappedDraws++; };
+    p.renderPreview = () => { throw Error('A hidden preview must not rebuild during a 2D drag'); };
+    p.previewDirty = false;
+    const beforeSnapped = p.project, savesBeforeSnapped = saves, historyBeforeSnapped = history.length;
+    plan.events.pointerdown(event(1, 1));
+    const drawsBeforeMoves = snappedDraws;
+    for (let step = 1; step <= 12; step++) {
+      plan.events.pointermove(event(1 + step / 24, 1));
+      gestureClock.flush();
+    }
+    assert.equal(snappedDraws - drawsBeforeMoves, 2, kind + ' repaints only the two changed snap positions');
+    plan.events.pointerup(event(1.5, 1));
+    assert.equal(saves, savesBeforeSnapped + 1);
+    assert.equal(history.length, historyBeforeSnapped + 1);
+    assert.equal(history.at(-1), beforeSnapped, 'Snapped drag retains its exact undo snapshot');
+    assert.equal(p.previewDirty, true, 'Committed 2D movement invalidates the next visible preview');
+    const snapped = p.project.floors[0][kind][0], previous = beforeSnapped.floors[0][kind][0];
+    if (kind === 'rooms') assert.equal(snapped.polygon[0][0], previous.polygon[0][0] + .5);
+    if (kind === 'walls') assert.equal(snapped.start[0], previous.start[0] + .5);
+    if (kind === 'items') assert.equal(snapped.position_m.x, previous.position_m.x + .5);
+    if (kind === 'openings') assert.equal(snapped.offset_m, previous.offset_m + .5);
+    p.snap = value => value;
     if (kind === 'items') {
       p.nextId = model.nextId; p.setTool = value => { p.tool = value; }; p.renderInspector = () => {};
       vm.runInContext(section('function transact(', 'function replaceProject('), p);

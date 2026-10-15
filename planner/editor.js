@@ -530,7 +530,7 @@ planCanvas.addEventListener('pointerdown', event => {
   selection = hitTest(world); renderUI(); renderPlan();
   if (selection) {
     // Keep one immutable undo snapshot; only the selected object changes while dragging.
-    drag = { kind: 'move', startWorld: world, original: project, selection: { ...selection }, moved: false };
+    drag = { kind: 'move', startWorld: world, original: project, selection: { ...selection }, moved: false, offset: [0, 0] };
     project = clone(project);
   }
   else drag = { kind: 'pan', screen, map: { ...map } };
@@ -542,6 +542,10 @@ planCanvas.addEventListener('pointermove', event => {
   if (drag.kind === 'draw') drag.endWorld = world.map(snap);
   if (drag.kind === 'move') {
     const dx = snap(world[0] - drag.startWorld[0]), dz = snap(world[1] - drag.startWorld[1]);
+    // Pointer events within one snap cell do not change the plan. Avoid repainting
+    // every catalog surface until the object's visible position actually changes.
+    if (dx === drag.offset[0] && dz === drag.offset[1]) return;
+    drag.offset = [dx, dz];
     if (dx || dz) drag.moved = true; const object = selected();
     const original = drag.original.floors.find(f => f.id === activeFloorId)[selection.kind].find(o => o.id === selection.id);
     if (selection.kind === 'rooms') object.polygon = original.polygon.map(p => [round(p[0] + dx), round(p[1] + dz)]);

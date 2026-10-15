@@ -139,7 +139,9 @@ The drawing tool combines rapid 2D drag/wheel input and 3D orbit/wheel input
 into one pending animation frame, without an idle rendering loop. Moving a
 shape or item clones the project once per gesture and derives each position
 from its original coordinates; cancelling and undoing preserve the original
-project.
+project. With grid snapping enabled, repeated pointer events inside one grid
+cell do not redraw the plan. The snapped coordinates, completed edits, save
+behavior, and undo history are unchanged.
 
 The 2D drawing buffer is capped at 4,000,000 pixels and device pixel ratio 2.
 It releases the old bitmap before applying a new orientation, avoiding an
