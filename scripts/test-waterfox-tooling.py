@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import plistlib
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,7 +20,7 @@ def load(name):
     return module
 
 
-setup = load('setup-waterfox')
+setup = load('native_browser')
 acceptance = load('test-waterfox-acceptance')
 
 
@@ -43,6 +44,72 @@ class Socket:
 
 
 class ToolingTests(unittest.TestCase):
+    def firefox_installation(self, version='153.5.0esr'):
+        return {
+            'product': 'Firefox', 'release': version, 'platform': 'linux-x64',
+            'source': setup.manifest_for('firefox')['versions'][version]['linux-x64'],
+            'metadata': {'application.ini': {'App': {'Name': 'Firefox', 'Version': version.removesuffix('esr'), 'BuildID': '20261012115900'}}, 'platform.ini': {'Build': {'BuildID': '20261012115900'}}},
+        }
+
+    def test_official_firefox_pins_cover_stable_esr_and_three_platforms(self):
+        manifest = setup.manifest_for('firefox')
+        self.assertEqual(set(manifest['versions']), {manifest['latest_stable'], manifest['supported_esr']})
+        for version, platforms in manifest['versions'].items():
+            self.assertEqual(set(platforms), {'windows-x64', 'linux-x64', 'macos'})
+            for entry in platforms.values():
+                self.assertTrue(entry['url'].startswith(f'https://archive.mozilla.org/pub/firefox/releases/{version}/'))
+                self.assertRegex(entry['sha512'], r'^[0-9a-f]{128}$')
+
+    def test_native_identity_checks_product_version_and_build(self):
+        installation = self.firefox_installation()
+        capabilities = {'browserName': 'firefox', 'browserVersion': '153.5.0', 'moz:buildID': '20261012115900'}
+        acceptance.assert_browser_identity(installation, capabilities)
+        for changed in ({'browserName': 'waterfox'}, {'browserVersion': '158.0'}, {'moz:buildID': '20261001115900'}):
+            with self.subTest(changed=changed), self.assertRaises(AssertionError):
+                acceptance.assert_browser_identity(installation, {**capabilities, **changed})
+
+    def test_firefox_metadata_cannot_be_relabelled_from_another_package(self):
+        for changed in ({'Name': 'Waterfox'}, {'Version': '158.0'}, {'BuildID': ''}):
+            installation = self.firefox_installation()
+            installation['metadata']['application.ini']['App'].update(changed)
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                setup.validate_metadata(installation)
+        for version in ('158.0', '153.5.0esr'):
+            setup.validate_metadata(self.firefox_installation(version))
+
+    def test_receipt_cannot_select_wrong_product_release_or_archive(self):
+        installation = self.firefox_installation()
+        for product, version, changed in [('waterfox', '153.5.0esr', {}), ('firefox', '158.0', {}), ('firefox', '153.5.0esr', {'source': {'url': 'https://example.invalid'}})]:
+            with self.subTest(product=product, version=version, changed=changed), self.assertRaises(ValueError):
+                setup.validate_installation({**installation, **changed}, product, version)
+
+    def test_installed_metadata_is_rechecked_before_launch(self):
+        installation = self.firefox_installation()
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / 'firefox'
+            binary.write_bytes(b'fixture')
+            installation['binary'] = str(binary)
+            for name, sections in installation['metadata'].items():
+                (binary.parent / name).write_text(''.join(f'[{section}]\n' + ''.join(f'{key}={value}\n' for key, value in items.items()) for section, items in sections.items()), encoding='utf-8')
+            with patch.object(setup, 'platform_key', return_value='linux-x64'):
+                setup.validate_installation(installation, 'firefox', '153.5.0esr')
+                (binary.parent / 'application.ini').write_text('[App]\nName=Waterfox\n', encoding='utf-8')
+                with self.assertRaisesRegex(ValueError, 'differs from the verified package'):
+                    setup.validate_installation(installation, 'firefox', '153.5.0esr')
+
+    def test_requested_macos_backend_requires_real_metal_renderer(self):
+        with patch.dict(acceptance.os.environ, {'FIREFOX_WEBGL_BACKEND': 'angle'}):
+            prefs = acceptance.browser_preferences(2828)
+        self.assertFalse(prefs['webgl.disable-angle'])
+        self.assertFalse(prefs['webgl.sanitize-unmasked-renderer'])
+        record = {'os': {'platform': 'darwin'}, 'preferences': prefs, 'samples': [{'initial': {'gpu': {'unmaskedRenderer': 'ANGLE Metal Renderer: Apple M1'}}}]}
+        acceptance.assert_requested_backend(record)
+        record['samples'][0]['initial']['gpu']['unmaskedRenderer'] = 'Apple Software Renderer'
+        with self.assertRaises(AssertionError):
+            acceptance.assert_requested_backend(record)
+        with patch.dict(acceptance.os.environ, {'FIREFOX_WEBGL_BACKEND': 'pretend'}), self.assertRaises(AssertionError):
+            acceptance.browser_preferences(2828)
+
     def test_fragmented_protocol_and_unicode(self):
         sock = Socket({'marionetteProtocol': 3}, [1, 1, None, {'value': 'Room \u00e9'}])
         client = acceptance.Marionette(sock)
@@ -109,6 +176,31 @@ class ToolingTests(unittest.TestCase):
             actual = {str(path.relative_to(output / 'Waterfox.app')): path.read_bytes() for path in (output / 'Waterfox.app').rglob('*') if path.is_file()}
             self.assertEqual(actual, expected, 'No file may be added or changed in the signed bundle')
             self.assertTrue(any(args[:4] == ['codesign', '--verify', '--deep', '--strict'] for args in calls))
+
+    def test_native_firefox_linux_and_windows_archive_layouts(self):
+        for platform in ('linux-x64', 'windows-x64'):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / 'installation'
+                app = '[App]\nName=Firefox\nVersion=158.0\nBuildID=20261012115900\n'
+                def create_core(target):
+                    target.mkdir(parents=True)
+                    (target / ('firefox.exe' if platform == 'windows-x64' else 'firefox')).write_bytes(b'fixture binary')
+                    (target / 'application.ini').write_text(app, encoding='utf-8')
+                    (target / 'platform.ini').write_text('[Build]\nBuildID=20261012115900\n', encoding='utf-8')
+                def download(_entry, archive):
+                    if platform == 'linux-x64':
+                        source = Path(directory) / 'source/firefox'
+                        create_core(source)
+                        with tarfile.open(archive, 'w:xz') as package:
+                            package.add(source, arcname='firefox')
+                def command(args, **_kwargs):
+                    self.assertEqual(args[1:3], ['x', '-y'], 'Windows installers are extracted, never installed system-wide')
+                    create_core(output / 'core')
+                with patch.object(setup, 'platform_key', return_value=platform), patch.object(setup, 'download', side_effect=download), patch.object(setup.subprocess, 'run', side_effect=command), contextlib.redirect_stdout(io.StringIO()):
+                    receipt = setup.install('158.0', output, 'firefox')
+                    setup.validate_installation(receipt, 'firefox', '158.0')
+                self.assertEqual(receipt['product'], 'Firefox')
+                self.assertEqual(receipt['metadata']['application.ini']['App']['Version'], '158.0')
 
     def test_browser_quits_before_profile_cleanup(self):
         events = []

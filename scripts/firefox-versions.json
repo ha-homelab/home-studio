@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "checked_at": "2026-10-15",
+  "catalog_url": "https://product-details.mozilla.org/1.0/firefox_versions.json",
+  "latest_stable": "158.0",
+  "supported_esr": "153.5.0esr",
+  "checksum_urls": {
+    "158.0": "https://archive.mozilla.org/pub/firefox/releases/158.0/SHA512SUMS",
+    "153.5.0esr": "https://archive.mozilla.org/pub/firefox/releases/153.5.0esr/SHA512SUMS"
+  },
+  "versions": {
+    "158.0": {
+      "windows-x64": {
+        "url": "https://archive.mozilla.org/pub/firefox/releases/158.0/win64/en-US/Firefox%20Setup%20158.0.exe",
+        "sha512": "45480d848c055b807b1dff3551d5787b8481bf710e0ad5760d42d69dc8a8cc200e5a1eb3e41be2386c4ab521971433815babcf0c4b9d4c35322783ba54a41b75"
+      },
+      "linux-x64": {
+        "url": "https://archive.mozilla.org/pub/firefox/releases/158.0/linux-x86_64/en-US/firefox-158.0.tar.xz",
+        "sha512": "da90b8c7c6f391935508f99a54d730e5141044c0ce0e915900ecb3f208e840f10a4cf8d38d76852335e6c436bbe2a16e1bf72945fe067340ad94d9ae98f41c59"
+      },
+      "macos": {
+        "url": "https://archive.mozilla.org/pub/firefox/releases/158.0/mac/en-US/Firefox%20158.0.dmg",
+        "sha512": "91a4bc4a84749c0f184a1d4db691e9db17ac18035f90919fa260266ed276a4d1143e9bd3a4cbeb18e576eac9bac75fe304b38a45e3866717211e48ca40a8859f"
+      }
+    },
+    "153.5.0esr": {
+      "windows-x64": {
+        "url": "https://archive.mozilla.org/pub/firefox/releases/153.5.0esr/win64/en-US/Firefox%20Setup%20153.5.0esr.exe",
+        "sha512": "a21e0ddb2862b12ba9d8245cf4e9e6840eb64c1d966829f6a639c9ce725627f5329b17550d8b4e6c2f3457938d67ae71a22651edde3cce23c1988a77e09bb84c"
+      },
+      "linux-x64": {
+        "url": "https://archive.mozilla.org/pub/firefox/releases/153.5.0esr/linux-x86_64/en-US/firefox-153.5.0esr.tar.xz",
+        "sha512": "322c4c9f1768e1406bac8ae12b407c504727f3747c2d462ee4c7ab1aee4e308caf837c6d516ba72c40b9f3bb3ec07bf22431bfb2f3e3f0abf08a797baeae01c1"
+      },
+      "macos": {
+        "url": "https://archive.mozilla.org/pub/firefox/releases/153.5.0esr/mac/en-US/Firefox%20153.5.0esr.dmg",
+        "sha512": "1ff35e17caa7f4f84a1496e5be7b323003cb5728a87490c345a17f8aa6ccdc1d0cd0a694860492ea4a99e104e91f3e3e0d6ccb8325927a29dbb58711eb81bd49"
+      }
+    }
+  }
+}

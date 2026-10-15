@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run real, pinned Waterfox acceptance through its native Marionette protocol.
+"""Run real, pinned Firefox or Waterfox acceptance through its native Marionette protocol.
 
 The stock browser does not implement Playwright's patched Firefox transport.
 Each fictional scene gets a new profile; no user browser/profile is touched.
@@ -20,6 +20,8 @@ import time
 import traceback
 import urllib.request
 from pathlib import Path
+
+from native_browser import PRODUCTS, validate_installation, validate_metadata
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -54,10 +56,10 @@ def shutdown_browser(client, process, record):
         details = client.call('Marionette:Quit')
         record['shutdown'] = details
         client.connection.close()
-        require(details.get('cause') == 'shutdown', 'Waterfox did not acknowledge normal application shutdown')
-        require(details.get('forced') is False, 'Waterfox had to force application shutdown')
+        require(details.get('cause') == 'shutdown', 'Browser did not acknowledge normal application shutdown')
+        require(details.get('forced') is False, 'Browser had to force application shutdown')
         returncode = process.wait(timeout=15)
-        require(returncode == 0, f'Waterfox exited abnormally during shutdown: {returncode}')
+        require(returncode == 0, f'Browser exited abnormally during shutdown: {returncode}')
     finally:
         record['shutdownMs'] = round((time.monotonic() - started) * 1000)
 
@@ -87,7 +89,7 @@ class Marionette:
     def read(self):
         chunk = self.connection.recv(65536)
         if not chunk:
-            raise ConnectionError('Waterfox closed the Marionette connection')
+            raise ConnectionError('Browser closed the Marionette connection')
         self.buffer += chunk
 
     def call(self, name, data=None):
@@ -272,6 +274,34 @@ def planner(client, origin, project, record, save):
     require(client.execute('return window.planner.getProject();') == saved, 'Reopening the planner restores its edited draft')
 
 
+def browser_preferences(port):
+    backend = os.environ.get('FIREFOX_WEBGL_BACKEND', 'default')
+    require(backend in ('default', 'angle'), 'FIREFOX_WEBGL_BACKEND must be default or angle')
+    prefs = {'marionette.port': port, 'browser.shell.checkDefaultBrowser': False, 'browser.aboutwelcome.enabled': False, 'browser.startup.homepage': 'about:blank', 'browser.startup.homepage_override.mstone': 'ignore', 'browser.startup.firstrunSkipsHomepage': True, 'browser.migrate.automigrate.enabled': False, 'app.update.auto': False, 'app.update.enabled': False, 'webgl.force-enabled': True, 'webgl.forbid-software': False, 'webgl.sanitize-unmasked-renderer': False}
+    if backend == 'angle':
+        prefs['webgl.disable-angle'] = False
+    return prefs
+
+
+def assert_requested_backend(record):
+    if record['os']['platform'] == 'darwin' and record['preferences'].get('webgl.disable-angle') is False:
+        for sample in record['samples']:
+            initial = sample['initial']
+            gpu = initial.get('stats', initial)['gpu']
+            renderer = gpu.get('unmaskedRenderer') or gpu.get('renderer', '')
+            require('angle metal renderer' in renderer.lower(), 'The requested Metal ANGLE backend must be confirmed by the actual renderer')
+
+
+def assert_browser_identity(installation, capabilities):
+    """Use native session capabilities, never a spoofable user agent label."""
+    validate_metadata(installation)
+    product = installation['product']
+    app = installation['metadata']['application.ini']['App']
+    require(capabilities['browserName'].lower() == product.lower(), f'The loaded browser must identify itself as {product}')
+    require(capabilities['browserVersion'] == app['Version'], 'Loaded browser version must match the verified package')
+    require(capabilities['moz:buildID'] == app['BuildID'], 'Loaded browser build must match the verified package')
+
+
 def run_case(installation, output, name, headless):
     output.mkdir(parents=True, exist_ok=True)
     record = {'schema': 1, 'suite': name, 'status': 'running', 'installation': installation,
@@ -286,7 +316,7 @@ def run_case(installation, output, name, headless):
     resources = contextlib.ExitStack()
     started = time.monotonic()
     try:
-        directory = resources.enter_context(tempfile.TemporaryDirectory(prefix='home-studio-waterfox-'))
+        directory = resources.enter_context(tempfile.TemporaryDirectory(prefix='home-studio-native-browser-'))
         browser_log = resources.enter_context((output / 'browser.log').open('w', encoding='utf-8'))
         fixture_log = resources.enter_context((output / 'fixture.log').open('w', encoding='utf-8'))
         scratch = Path(directory)
@@ -325,7 +355,7 @@ def run_case(installation, output, name, headless):
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 0))
             port = probe.getsockname()[1]
-        prefs = {'marionette.port': port, 'browser.shell.checkDefaultBrowser': False, 'browser.aboutwelcome.enabled': False, 'browser.startup.homepage': 'about:blank', 'browser.startup.homepage_override.mstone': 'ignore', 'browser.startup.firstrunSkipsHomepage': True, 'browser.migrate.automigrate.enabled': False, 'app.update.auto': False, 'app.update.enabled': False, 'webgl.force-enabled': True, 'webgl.forbid-software': False}
+        prefs = browser_preferences(port)
         record['preferences'] = prefs
         (profile / 'user.js').write_text('\n'.join(f'user_pref({json.dumps(key)},{json.dumps(value)});' for key, value in prefs.items()), encoding='utf-8')
         command = [installation['binary'], '--no-remote', '--profile', str(profile), '--marionette', 'about:blank']
@@ -341,26 +371,24 @@ def run_case(installation, output, name, headless):
         deadline = time.monotonic() + 45
         connection = None
         while time.monotonic() < deadline:
-            require(browser.poll() is None, f'Waterfox exited before connecting: {browser.returncode}')
+            require(browser.poll() is None, f'Browser exited before connecting: {browser.returncode}')
             try:
                 connection = socket.create_connection(('127.0.0.1', port), timeout=.2)
                 break
             except OSError:
                 time.sleep(.1)
-        require(connection is not None, 'Waterfox Marionette startup timed out')
+        require(connection is not None, 'Browser Marionette startup timed out')
         client = Marionette(connection)
         record['protocol'] = client.hello
         record['session'] = session = client.call('WebDriver:NewSession', {'capabilities': {}})
         capabilities = session.get('capabilities', session)
-        require(capabilities['browserName'].lower() == 'waterfox', 'The loaded browser must identify itself as Waterfox')
-        app = installation['metadata']['application.ini']['App']
-        require(capabilities['browserVersion'] == app['Version'], 'Loaded Gecko version must match the verified package')
-        require(capabilities['moz:buildID'] == app['BuildID'], 'Loaded browser build must match the verified package')
+        assert_browser_identity(installation, capabilities)
         client.call('WebDriver:SetTimeouts', {'script': 30000, 'pageLoad': 30000, 'implicit': 0})
         client.call('WebDriver:SetWindowRect', {'width': 1440, 'height': 1000})
         record['userAgent'] = client.execute('return navigator.userAgent;')
         save()
         (planner if name == 'planner-256' else viewer)(client, info['origin'], project, record, save)
+        assert_requested_backend(record)
         shutdown_browser(client, browser, record)
         client = None
         record['status'] = 'passed'
@@ -403,15 +431,16 @@ def run_case(installation, output, name, headless):
     return record
 
 
-def main():
+def main(default_product='waterfox'):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--product', choices=PRODUCTS, default=default_product, required=default_product is None)
+    parser.add_argument('--expected-version', required=default_product is None)
     parser.add_argument('--installation', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--headless', action='store_true')
     args = parser.parse_args()
     installation = json.loads(args.installation.read_text(encoding='utf-8'))
-    manifest = json.loads((ROOT / 'scripts/waterfox-versions.json').read_text(encoding='utf-8'))
-    require(installation['source'] == manifest['versions'][installation['release']][installation['platform']], 'Installation receipt must match a pinned release')
+    validate_installation(installation, args.product, args.expected_version)
     if sys.platform == 'darwin':
         subprocess.run(['codesign', '--verify', '--deep', '--strict', str(Path(installation['binary']).parents[2])], check=True, timeout=60)
     results = [run_case(installation, args.output.resolve() / name, name, args.headless) for name in ('viewer-6', 'viewer-24', 'planner-256')]
