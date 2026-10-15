@@ -304,6 +304,52 @@ assert.equal(env.__nativeRenderedLights,0,'A failed draw must not count as the n
         with self.assertRaises(AssertionError):
             acceptance.assert_native_graphics({'contexts':1, 'samples':[{'label':'snapshot'}], 'errors':[]}, teardown=True)
 
+    def test_teardown_preserves_late_application_errors(self):
+        javascript = r"""
+const vm = require('node:vm'), fs = require('node:fs');
+const source = fs.readFileSync(0, 'utf8'), receipts = [];
+for (const name of ['__plannerStats', '__browserStability']) {
+  const stats = {errors:[], shaderErrors:[], contextLosses:1}, events = [];
+  let lost = false, receipt;
+  const gl = {NO_ERROR:0, isContextLost:()=>lost, getError:()=>0, getExtension:()=>null};
+  class Canvas { getContext() {return gl;} }
+  const env = {HTMLCanvasElement:Canvas, document:{readyState:'complete'}, [name]:stats,
+    addEventListener:(name,fn)=>{if(name==='pagehide')events.push(fn);},
+    sessionStorage:{setItem(key,value){receipt=JSON.parse(value);}}};
+  env.window=env;
+  env.parent=name==='__browserStability'?{postMessage(value){receipt=JSON.parse(JSON.stringify(value.evidence));}}:env;
+  // These failures occur in app cleanup, after its final successful snapshot.
+  events.push(()=>{stats.errors.push('disposePreview failed');stats.shaderErrors.push('late shader failure');stats.contextLosses++;lost=true;});
+  vm.runInNewContext(source, env);
+  new Canvas().getContext('webgl2');
+  const before = env.__sampleNativeGraphics('last-snapshot');
+  for(const handler of events)handler();
+  receipts.push({before, receipt});
+}
+process.stdout.write(JSON.stringify(receipts));
+"""
+        result = subprocess.run(['node', '-e', javascript], input=acceptance.NATIVE_GL_DIAGNOSTICS,
+                                text=True, capture_output=True, timeout=10, check=True)
+        for case in json.loads(result.stdout):
+            acceptance.assert_native_graphics(case['before'])
+            evidence = case['receipt']
+            self.assertEqual(evidence['application']['errors'], ['disposePreview failed'])
+            self.assertEqual(evidence['application']['shaderErrors'], ['late shader failure'])
+            with self.assertRaisesRegex(AssertionError, 'disposePreview failed'):
+                acceptance.assert_native_graphics(evidence, teardown=True)
+            evidence['application']['errors'] = []
+            with self.assertRaisesRegex(AssertionError, 'late shader failure'):
+                acceptance.assert_native_graphics(evidence, teardown=True)
+            evidence['application']['shaderErrors'] = []
+            self.assertEqual(evidence['application']['contextLosses'], 2)
+            acceptance.assert_native_graphics(evidence, teardown=True)
+
+    def test_teardown_requires_application_error_evidence(self):
+        evidence = {'contexts':1, 'samples':[{'label':'pagehide'}], 'errors':[]}
+        for application in (None, {}, {'errors':[]}, {'shaderErrors':[]}):
+            with self.subTest(application=application), self.assertRaises(AssertionError):
+                acceptance.assert_native_graphics({**evidence, 'application':application}, teardown=True)
+
     def test_gl_errors_survive_context_loss_and_navigation(self):
         # Execute the exact injected JS against GL flags that behave like a
         # driver: loseContext clears pending flags before pagehide can read them.
@@ -340,11 +386,17 @@ for (const child of [false, true]) {
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_recovered_pointer_input_must_render_and_move(self):
-        stats = {'contexts': 1, 'gpu': {'version': 'WebGL 2.0'}, 'linkedPrograms': 2, 'shaderErrors': [], 'errors': [], 'nativeGraphics': {'contexts': 1, 'samples': [{'label':'test'}], 'errors': []}}
+        stats = {'contexts': 1, 'contextLosses': 1, 'gpu': {'version': 'WebGL 2.0'}, 'linkedPrograms': 2, 'shaderErrors': [], 'errors': [], 'nativeGraphics': {'contexts': 1, 'samples': [{'label':'test'}], 'errors': []}}
         acceptance.assert_recovered_interaction(4, 5, [0, 1], [1, 2], stats)
         for after_count, after_camera, after_stats in [(4, [1, 2], stats), (5, [0, 1], stats), (5, [1, 2], {**stats, 'errors': ['recovered input failed']})]:
             with self.subTest(after_count=after_count, after_camera=after_camera), self.assertRaises(AssertionError):
                 acceptance.assert_recovered_interaction(4, after_count, [0, 1], after_camera, after_stats)
+
+    def test_recovery_rejects_extra_context_loss_even_if_frames_resume(self):
+        stats = {'contexts':1, 'contextLosses':2, 'gpu':{'version':'WebGL 2.0'}, 'linkedPrograms':3,
+                 'shaderErrors':[], 'errors':[], 'nativeGraphics':{'contexts':1, 'samples':[{'label':'restored'}], 'errors':[]}}
+        with self.assertRaisesRegex(AssertionError, 'context loss'):
+            acceptance.assert_recovered_interaction(4, 5, [0, 1], [1, 2], stats)
 
     def test_graphics_failure_cannot_be_skipped(self):
         stats = {'contexts': 1, 'gpu': {'version': 'WebGL 2.0'}, 'linkedPrograms': 1, 'shaderErrors': [], 'errors': [], 'nativeGraphics': {'contexts': 1, 'samples': [{'label':'test'}], 'errors': []}}

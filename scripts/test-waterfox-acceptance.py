@@ -70,6 +70,8 @@ NATIVE_GL_DIAGNOSTICS = r"""
   };
   const arm = () => window.addEventListener('pagehide', () => {
     const value = sample('pagehide');
+    const stats = window.__plannerStats || window.__browserStability;
+    value.application = stats ? {errors:stats.errors, shaderErrors:stats.shaderErrors, contextLosses:stats.contextLosses} : null;
     if (parent !== window) parent.postMessage({type:'native-gl-teardown', token:window.__nativeGraphicsToken, evidence:value}, '*');
     else sessionStorage.setItem('home-studio.native-gl-teardown', JSON.stringify(value));
   });
@@ -98,6 +100,14 @@ def assert_native_graphics(evidence, teardown=False):
     require(not evidence['errors'], 'Actual WebGL errors: ' + str(evidence['errors']))
     if teardown:
         require(evidence['samples'][-1].get('label') == 'pagehide', 'Actual navigation/teardown must finish before checking GL errors')
+        application = evidence.get('application')
+        require(isinstance(application, dict), 'Teardown must retain application error evidence')
+        require(isinstance(application.get('errors'), list), 'Teardown must retain browser errors')
+        require(isinstance(application.get('shaderErrors'), list), 'Teardown must retain shader errors')
+        require(not application['errors'], 'Browser errors during teardown: ' + str(application['errors']))
+        require(not application['shaderErrors'], 'Shader errors during teardown: ' + str(application['shaderErrors']))
+        # App disposal intentionally loses its context; recovery counts are
+        # asserted before navigation, not after this final cleanup.
 
 
 def update_viewer_state(client, states, active):
@@ -230,10 +240,15 @@ def assert_graphics(stats):
     assert_native_graphics(stats.get('nativeGraphics'))
 
 
+def assert_recovered_graphics(stats):
+    assert_graphics(stats)
+    require(stats.get('contextLosses') == 1, 'Recovery must have exactly the one deliberate context loss')
+
+
 def assert_recovered_interaction(before_count, after_count, before_camera, after_camera, stats):
     require(after_count > before_count, 'Recovered pointer input must produce a new frame')
     require(after_camera != before_camera, 'Recovered pointer input must change the camera')
-    assert_graphics(stats)
+    assert_recovered_graphics(stats)
 
 
 def viewer(client, origin, project, record, save):
@@ -293,7 +308,7 @@ def viewer(client, origin, project, record, save):
             client.execute('window.restoreTestContext();return true;')
             client.wait(f'window.floorplan.renderCount>{before}')
             sample['recovery'] = snapshot()
-            assert_graphics(sample['recovery'])
+            assert_recovered_graphics(sample['recovery'])
             sample['recoveryDragMs'] = client.canvas_drag('#homeStage canvas')
             client.wait(f'window.floorplan.renderCount>{sample["recovery"]["renderCount"]}')
             sample['afterRecoveryDrag'] = after = snapshot()
@@ -352,7 +367,7 @@ def planner(client, origin, project, record, save):
     client.execute('window.restoreTestContext();return true;')
     client.wait(f'window.planner.getPreviewMetadata().renderCount>{before}')
     sample['recovery'] = snapshot()
-    assert_graphics(sample['recovery']['stats'])
+    assert_recovered_graphics(sample['recovery']['stats'])
     require(client.execute('return window.planner.getProject();') == saved, 'Graphics recovery preserves edited furniture')
     sample['recoveryOrbitMs'] = client.canvas_drag('#preview-canvas')
     require(sample['recoveryOrbitMs'] < 10000, 'Recovered planner orbit exceeded 10 seconds')
