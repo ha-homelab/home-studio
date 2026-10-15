@@ -205,9 +205,15 @@ python3 scripts/validate-site.py --output _site
 ```
 
 For browser regression checks, install Node.js 22 or newer, run
-`npm ci --ignore-scripts`, then `npx playwright install chromium` and
+`npm ci --ignore-scripts`, then `npx playwright install chromium firefox` and
 `npm run test:planner`. On a Linux CI host, use
-`npx playwright install --with-deps chromium`. These are development tools only;
+`npx playwright install --with-deps chromium firefox`. Run
+`node scripts/test-browser-stability.cjs` for multi-light interaction and WebGL
+recovery checks in both engines. Run `node scripts/test-planner-stability.cjs`
+for two-floor drawing, furniture dragging, preview orbit, and graphics recovery
+in the browser editor. See [browser compatibility](docs/browser-compatibility.md)
+for rendering budgets, measured coverage, and a safe bug-report checklist.
+These are development tools only;
 users do not need Node.js or Playwright to draw, compile, or install a plan.
 The browser test exports a real drawing and installs that exact file's package
 into a temporary config directory without contacting a live HA instance.

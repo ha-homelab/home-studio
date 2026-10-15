@@ -17,6 +17,15 @@ const HINTS = { select: 'Drag a shape to move, or empty space to pan.', room: 'D
 const planCanvas = $('plan-canvas'), ctx = planCanvas.getContext('2d');
 let project = blankProject(), activeFloorId, selection = null, tool = 'select', view = 'plan', history = [], future = [], drag = null;
 let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, spaceHeld = false, saveFailed = false, previewDirty = true;
+let canvasFrame = 0, canvasSuspended = false;
+function cancelCanvasRender() { if (canvasFrame) cancelAnimationFrame(canvasFrame); canvasFrame = 0; }
+function requestCanvasRender() {
+  if (canvasFrame || canvasSuspended || document.hidden) return;
+  canvasFrame = requestAnimationFrame(() => { canvasFrame = 0; if (view === 'preview') renderPreview(); else renderPlan(); });
+}
+function canvasPixelRatio(width, height, pixels) {
+  return Math.min(Number.isFinite(devicePixelRatio) && devicePixelRatio > 0 ? devicePixelRatio : 1, 2, Math.sqrt(pixels / Math.max(1, width * height)));
+}
 let startupMessage = '';
 let lastStatus = null;
 let buildValidationText = null;
@@ -422,12 +431,13 @@ function fitPlan() {
   map.x = (size.width - (b.minX + b.maxX) * map.scale) / 2; map.y = (size.height - (b.minZ + b.maxZ) * map.scale) / 2; updateZoom();
 }
 function zoomPlan(factor, anchor = [size.width / 2, size.height / 2]) {
-  const world = toWorld(anchor); map.scale = Math.max(4, Math.min(280, map.scale * factor)); map.x = anchor[0] - world[0] * map.scale; map.y = anchor[1] - world[1] * map.scale; renderPlan(); updateZoom();
+  const world = toWorld(anchor); map.scale = Math.max(4, Math.min(280, map.scale * factor)); map.x = anchor[0] - world[0] * map.scale; map.y = anchor[1] - world[1] * map.scale; requestCanvasRender(); updateZoom();
 }
 function updateZoom() { $('zoom-value').textContent = view === 'plan' ? `${Math.round(map.scale / 55 * 100)}%` : `${Math.round(orbit.baseRadius / orbit.radius * 100)}%`; }
 function path(points, close = false) { ctx.beginPath(); points.forEach((p, i) => { const [x, y] = toScreen(p); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); if (close) ctx.closePath(); }
 function renderPlan() {
-  if (view !== 'plan') return;
+  if (view !== 'plan' || canvasSuspended || document.hidden) return;
+  cancelCanvasRender();
   ctx.clearRect(0, 0, size.width, size.height); ctx.fillStyle = '#f2f4ed'; ctx.fillRect(0, 0, size.width, size.height);
   const top = toWorld([0, 0]), bottom = toWorld([size.width, size.height]), gridStep = map.scale > 22 ? 1 : 5;
   ctx.lineWidth = 1;
@@ -518,7 +528,11 @@ planCanvas.addEventListener('pointerdown', event => {
   if (tool === 'door' || tool === 'window') { const near = wallAt(world); if (near) addOpening(near.wall, near.hit.offset, tool); else status(() => t('Click directly on an existing wall to add an opening.'), true); return; }
   if (tool === 'item') { addItem(world); return; }
   selection = hitTest(world); renderUI(); renderPlan();
-  if (selection) drag = { kind: 'move', startWorld: world, original: clone(project), selection: { ...selection }, moved: false };
+  if (selection) {
+    // Keep one immutable undo snapshot; only the selected object changes while dragging.
+    drag = { kind: 'move', startWorld: world, original: project, selection: { ...selection }, moved: false };
+    project = clone(project);
+  }
   else drag = { kind: 'pan', screen, map: { ...map } };
 });
 planCanvas.addEventListener('pointermove', event => {
@@ -528,13 +542,14 @@ planCanvas.addEventListener('pointermove', event => {
   if (drag.kind === 'draw') drag.endWorld = world.map(snap);
   if (drag.kind === 'move') {
     const dx = snap(world[0] - drag.startWorld[0]), dz = snap(world[1] - drag.startWorld[1]);
-    if (dx || dz) drag.moved = true; project = clone(drag.original); const object = selected();
-    if (selection.kind === 'rooms') object.polygon = object.polygon.map(p => [round(p[0] + dx), round(p[1] + dz)]);
-    if (selection.kind === 'walls') { object.start = [round(object.start[0] + dx), round(object.start[1] + dz)]; object.end = [round(object.end[0] + dx), round(object.end[1] + dz)]; }
-    if (selection.kind === 'items') { object.position_m.x = round(object.position_m.x + dx); object.position_m.z = round(object.position_m.z + dz); }
-    if (selection.kind === 'openings') { const wall = floor().walls.find(w => w.id === object.wall_id), len = distance(wall.start, wall.end); const along = (dx * (wall.end[0] - wall.start[0]) + dz * (wall.end[1] - wall.start[1])) / len; object.offset_m = round(Math.max(0, Math.min(len - object.width_m, object.offset_m + along))); }
+    if (dx || dz) drag.moved = true; const object = selected();
+    const original = drag.original.floors.find(f => f.id === activeFloorId)[selection.kind].find(o => o.id === selection.id);
+    if (selection.kind === 'rooms') object.polygon = original.polygon.map(p => [round(p[0] + dx), round(p[1] + dz)]);
+    if (selection.kind === 'walls') { object.start = [round(original.start[0] + dx), round(original.start[1] + dz)]; object.end = [round(original.end[0] + dx), round(original.end[1] + dz)]; }
+    if (selection.kind === 'items') { object.position_m.x = round(original.position_m.x + dx); object.position_m.z = round(original.position_m.z + dz); }
+    if (selection.kind === 'openings') { const wall = floor().walls.find(w => w.id === object.wall_id), len = distance(wall.start, wall.end); const along = (dx * (wall.end[0] - wall.start[0]) + dz * (wall.end[1] - wall.start[1])) / len; object.offset_m = round(Math.max(0, Math.min(len - object.width_m, original.offset_m + along))); }
   }
-  renderPlan();
+  requestCanvasRender();
 });
 function finishPointer(event, cancel = false) {
   if (!drag) return; const current = drag; drag = null; planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
@@ -563,17 +578,28 @@ planCanvas.addEventListener('wheel', e => { e.preventDefault(); zoomPlan(Math.ex
 
 // On-demand 3D rendering. Opening cuts and solid wall pieces use the same metric project.
 let renderer = null, scene = null, camera = null, worldGroup = null, previewSun = null, previewUnavailable = false, previewMetadata = {};
+let previewLost = false, previewSize = '', previewPixels = 2000000;
 const orbit = { yaw: -Math.PI / 3, pitch: .8, radius: 17, baseRadius: 17, target: new THREE.Vector3(4, 0, 3), pointer: null };
+function previewRenderProfile(gl) {
+  try {
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    if (info && /swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe/i.test(gl.getParameter(info.UNMASKED_RENDERER_WEBGL))) return { pixels: 250000, shadowSize: 512 };
+  } catch { /* A hidden renderer name keeps the normal rendering profile. */ }
+  return { pixels: 2000000, shadowSize: 2048 };
+}
 function initPreview() {
   if (renderer || previewUnavailable) return;
   try {
-    renderer = new THREE.WebGLRenderer({ canvas: $('preview-canvas'), antialias: true, alpha: false }); renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2)); renderer.setClearColor(0xf2f4ed); renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer = new THREE.WebGLRenderer({ canvas: $('preview-canvas'), antialias: true, alpha: false }); renderer.setClearColor(0xf2f4ed); renderer.outputColorSpace = THREE.SRGBColorSpace;
+    const profile = previewRenderProfile(renderer.getContext()); previewPixels = profile.pixels;
     renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = .9; renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(40, 1, .02, 1500); scene.add(new THREE.HemisphereLight(0xffffff, 0xc7cfbc, 1.7));
-    previewSun = new THREE.DirectionalLight(0xfff6e6, 2.5); previewSun.castShadow = true; previewSun.shadow.mapSize.set(2048, 2048); previewSun.shadow.normalBias = .025; previewSun.shadow.bias = -.0002; scene.add(previewSun); scene.add(previewSun.target);
+    previewSun = new THREE.DirectionalLight(0xfff6e6, 2.5); previewSun.castShadow = true; previewSun.shadow.mapSize.set(profile.shadowSize, profile.shadowSize); previewSun.shadow.normalBias = .025; previewSun.shadow.bias = -.0002; scene.add(previewSun); scene.add(previewSun.target);
+    // Orbiting moves only the camera. Reuse shadows until scene geometry changes.
+    previewSun.shadow.autoUpdate = false; previewSun.shadow.needsUpdate = true;
     const fill = new THREE.DirectionalLight(0xdce9f2, .5); fill.position.set(12, 10, -10); scene.add(fill);
     worldGroup = new THREE.Group(); scene.add(worldGroup); fitPreview();
-  } catch (error) { previewUnavailable = true; $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
+  } catch (error) { renderer?.dispose(); renderer?.forceContextLoss(); previewUnavailable = true; $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
 }
 function previewFloors() { return $('all-floors').checked ? project.floors : [floor()]; }
 function fitPreview() {
@@ -583,10 +609,14 @@ function fitPreview() {
   const sphereRadius = Math.hypot(maxX - minX, maxZ - minZ, high - low) / 2;
   orbit.target.set((minX + maxX) / 2, (low + high) / 2, (minZ + maxZ) / 2);
   orbit.radius = Math.max(6, sphereRadius / Math.sin(Math.min(verticalFov, horizontalFov) / 2) * 1.12); orbit.baseRadius = orbit.radius;
-  if (view === 'preview' && renderer) drawPreview();
+  if (view === 'preview' && renderer) requestCanvasRender();
+}
+function disposePreviewGeometry() {
+  if (!worldGroup) return;
+  while (worldGroup.children.length) { const child = worldGroup.children[0]; worldGroup.remove(child); child.traverse(obj => { obj.geometry?.dispose(); if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose()); else obj.material?.dispose(); }); }
 }
 function rebuildPreview() {
-  while (worldGroup.children.length) { const child = worldGroup.children[0]; worldGroup.remove(child); child.traverse(obj => { obj.geometry?.dispose(); if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose()); else obj.material?.dispose(); }); }
+  disposePreviewGeometry();
   let wallMeshCount = 0, openingCount = 0, roomCount = 0, itemCount = 0, catalogItemCount = 0, itemMeshCount = 0;
   const box = (width, height, depth, position, color, rotation = 0, opacity = 1) => {
     const geometry = new THREE.BoxGeometry(width, height, depth), material = new THREE.MeshStandardMaterial({ color, roughness: .78, transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
@@ -639,11 +669,15 @@ function rebuildPreview() {
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(span * 8, span * 8), new THREE.ShadowMaterial({ color: '#54654c', opacity: .14 })); ground.rotation.x = -Math.PI / 2; ground.position.set(cx, low - .081, cz); ground.receiveShadow = true; worldGroup.add(ground);
   let meshCount = 0; worldGroup.traverse(object => { if (object.isMesh) meshCount++; });
   previewMetadata = { floors: previewFloors().map(f => f.id), rooms: roomCount, wallSolidPieces: wallMeshCount, openings: openingCount, items: itemCount, catalogItems: catalogItemCount, itemMeshes: itemMeshCount, meshes: meshCount, renderCount: previewMetadata.renderCount || 0 };
+  previewSun.shadow.needsUpdate = true;
   previewDirty = false;
 }
 function drawPreview() {
-  if (!renderer || view !== 'preview') return;
-  const width = size.width, height = size.height; renderer.setSize(width, height, false); camera.aspect = width / height; camera.updateProjectionMatrix();
+  if (!renderer || previewLost || previewUnavailable || view !== 'preview' || canvasSuspended || document.hidden) return;
+  cancelCanvasRender();
+  const width = size.width, height = size.height, ratio = canvasPixelRatio(width, height, previewPixels), nextSize = [width, height, ratio].join();
+  // Setting canvas dimensions, even to the same values, resets its drawing buffer.
+  if (nextSize !== previewSize) { renderer.setDrawingBufferSize(width, height, ratio); previewSize = nextSize; camera.aspect = width / height; camera.updateProjectionMatrix(); }
   const horiz = Math.cos(orbit.pitch) * orbit.radius; camera.position.set(orbit.target.x + Math.cos(orbit.yaw) * horiz, orbit.target.y + Math.sin(orbit.pitch) * orbit.radius, orbit.target.z + Math.sin(orbit.yaw) * horiz); camera.lookAt(orbit.target); renderer.render(scene, camera); previewMetadata.renderCount = (previewMetadata.renderCount || 0) + 1;
   const corners = previewFloors().flatMap(f => {
     const b = floorBounds(f), out = [];
@@ -653,19 +687,20 @@ function drawPreview() {
   previewMetadata.projectedBounds = { minX: Math.min(...corners.map(p => p.x)), maxX: Math.max(...corners.map(p => p.x)), minY: Math.min(...corners.map(p => p.y)), maxY: Math.max(...corners.map(p => p.y)) };
   previewMetadata.viewport = { width, height }; updateZoom();
 }
-function renderPreview() { initPreview(); if (!renderer) return; if (previewDirty) rebuildPreview(); drawPreview(); }
-function zoomPreview(factor) { orbit.radius = Math.max(1, Math.min(600, orbit.radius / factor)); drawPreview(); }
+function renderPreview() { if (view !== 'preview' || canvasSuspended || document.hidden || previewLost) return; initPreview(); if (!renderer || previewUnavailable) return; if (previewDirty) rebuildPreview(); drawPreview(); }
+function zoomPreview(factor) { orbit.radius = Math.max(1, Math.min(600, orbit.radius / factor)); requestCanvasRender(); }
 const previewCanvas = $('preview-canvas');
 previewCanvas.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); previewCanvas.focus(); orbit.pointer = { x: e.clientX, y: e.clientY, yaw: orbit.yaw, pitch: orbit.pitch }; previewCanvas.setPointerCapture(e.pointerId); });
-previewCanvas.addEventListener('pointermove', e => { if (!orbit.pointer) return; orbit.yaw = orbit.pointer.yaw - (e.clientX - orbit.pointer.x) * .007; orbit.pitch = Math.max(.1, Math.min(1.5, orbit.pointer.pitch + (e.clientY - orbit.pointer.y) * .007)); drawPreview(); });
+previewCanvas.addEventListener('pointermove', e => { if (!orbit.pointer) return; orbit.yaw = orbit.pointer.yaw - (e.clientX - orbit.pointer.x) * .007; orbit.pitch = Math.max(.1, Math.min(1.5, orbit.pointer.pitch + (e.clientY - orbit.pointer.y) * .007)); requestCanvasRender(); });
 for (const event of ['pointerup', 'pointercancel']) previewCanvas.addEventListener(event, e => { orbit.pointer = null; if (previewCanvas.hasPointerCapture(e.pointerId)) previewCanvas.releasePointerCapture(e.pointerId); });
 previewCanvas.addEventListener('wheel', e => { e.preventDefault(); zoomPreview(Math.exp(-e.deltaY * .0015)); }, { passive: false });
 previewCanvas.addEventListener('keydown', e => {
   if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-'].includes(e.key)) return; e.preventDefault();
   if (e.key === 'ArrowLeft') orbit.yaw -= .12; if (e.key === 'ArrowRight') orbit.yaw += .12; if (e.key === 'ArrowUp') orbit.pitch = Math.min(1.5, orbit.pitch + .1); if (e.key === 'ArrowDown') orbit.pitch = Math.max(.1, orbit.pitch - .1);
-  if (e.key === '+' || e.key === '=') zoomPreview(1.15); else if (e.key === '-') zoomPreview(1 / 1.15); else drawPreview();
+  if (e.key === '+' || e.key === '=') zoomPreview(1.15); else if (e.key === '-') zoomPreview(1 / 1.15); else requestCanvasRender();
 });
-previewCanvas.addEventListener('webglcontextlost', e => { e.preventDefault(); $('preview-error').hidden = false; translatedText('preview-error', 'The graphics context was lost. Reload to restore 3D. Your local draft and JSON export remain available.'); });
+previewCanvas.addEventListener('webglcontextlost', e => { e.preventDefault(); previewLost = true; cancelCanvasRender(); $('preview-error').hidden = false; translatedText('preview-error', 'The graphics context was lost. Reload to restore 3D. Your local draft and JSON export remain available.'); });
+previewCanvas.addEventListener('webglcontextrestored', () => { previewLost = false; previewSize = ''; if (previewSun) previewSun.shadow.needsUpdate = true; $('preview-error').hidden = true; requestCanvasRender(); });
 
 // Project actions and keyboard navigation.
 function exportProject() {
@@ -742,16 +777,31 @@ window.addEventListener('keydown', e => {
   }
 });
 window.addEventListener('keyup', e => { if (e.code === 'Space') { spaceHeld = false; planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair'; } });
-window.addEventListener('blur', () => { spaceHeld = false; if (drag) finishPointer(null, true); });
+window.addEventListener('blur', () => { spaceHeld = false; orbit.pointer = null; if (drag) finishPointer(null, true); });
 window.addEventListener('beforeunload', e => { if (saveFailed && hasContent()) { e.preventDefault(); e.returnValue = ''; } });
-let firstResize = true;
-new ResizeObserver(entries => {
-  const rect = entries[0].contentRect; if (rect.width < 1 || rect.height < 1) return;
-  const old = { ...size }; size = { width: rect.width, height: rect.height }; const dpr = Math.min(devicePixelRatio || 1, 2);
-  planCanvas.width = Math.round(size.width * dpr); planCanvas.height = Math.round(size.height * dpr); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+let firstResize = true, planSize = '';
+function resizeCanvases(rect) {
+  if (rect.width < 1 || rect.height < 1) return;
+  const old = { ...size }; size = { width: rect.width, height: rect.height };
+  const dpr = canvasPixelRatio(size.width, size.height, 4000000), nextSize = [size.width, size.height, dpr].join();
+  if (!canvasSuspended && !document.hidden && nextSize !== planSize) {
+    // Release the old bitmap before changing orientation: mixing old height
+    // and new width can otherwise exceed the budget during the resize itself.
+    planCanvas.width = 0; planCanvas.height = Math.floor(size.height * dpr); planCanvas.width = Math.floor(size.width * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); planSize = nextSize;
+  }
   if (firstResize) { firstResize = false; fitPlan(); } else { map.x += (size.width - old.width) / 2; map.y += (size.height - old.height) / 2; }
-  renderPlan(); if (view === 'preview') { const ratio = orbit.baseRadius / orbit.radius; fitPreview(); orbit.radius = orbit.baseRadius / ratio; renderPreview(); }
-}).observe(document.querySelector('.canvas-shell'));
+  if (view === 'preview') { const ratio = orbit.baseRadius / orbit.radius; fitPreview(); orbit.radius = orbit.baseRadius / ratio; }
+  requestCanvasRender();
+}
+const canvasObserver = new ResizeObserver(entries => resizeCanvases(entries[0].contentRect));
+canvasObserver.observe(document.querySelector('.canvas-shell'));
+document.addEventListener('visibilitychange', () => { if (document.hidden) cancelCanvasRender(); else { resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); } });
+window.addEventListener('pagehide', event => {
+  canvasSuspended = true; cancelCanvasRender();
+  if (!event.persisted) { canvasObserver.disconnect(); disposePreviewGeometry(); previewSun?.shadow.dispose(); renderer?.dispose(); renderer?.forceContextLoss(); }
+});
+window.addEventListener('pageshow', () => { canvasSuspended = false; resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); });
 window.planner = Object.freeze({ getProject: () => clone(project), getPreviewMetadata: () => ({ ...previewMetadata }), getView: () => view, getSelection: () => selection && { ...selection }, worldToScreen: point => toScreen(point), validate: () => validateProject(clone(project), { complete: true }) });
 updatePlacement(); renderUI(); fitPlan(); renderPlan();
 if (startupMessage) status(startupMessage, saveFailed);
