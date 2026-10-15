@@ -202,12 +202,18 @@ instead of changing the compiled light count. An initial host inventory identica
 to the viewer's current inventory does not rebuild the scene.
 
 The room-light shader evaluates room transmission at most once per lit room per
-fragment and skips unlit rooms. After applying that cached transmission to each
-point light, it recalculates visibility; an exactly zero contribution skips
-shadow lookup and direct surface-reflectance calculation. Nonzero contributions
-retain the same lighting calculation. The limits do not bound the total light
-count or generated room/window shader size; large projects still need testing
-against the target GPU's limits.
+fragment and skips unlit rooms. An exactly zero cached transmission skips that
+light's distance, attenuation, shadow, and direct surface-reflectance work.
+Nonzero contributions retain the same lighting calculation.
+
+The 24-room, 72-light acceptance fixture exposed excessive software shader
+compilation from expanding a full lighting block for every fixture. Only the
+bounded shadow-casting prefix is now expanded into literal shader indices, as
+required for its shadow samplers. A normal loop evaluates every remaining point
+light in the same order, with the same room confinement and material response.
+No light is dropped or merged. Total light count and generated room/window shader
+size remain unbounded by the rendering profile, so larger projects still need
+testing against the target GPU's limits.
 
 Home reuses the room camera fit until the selected room or viewport orientation
 changes. Pan, zoom, and resize continue to update the camera. Rounded-wall tint

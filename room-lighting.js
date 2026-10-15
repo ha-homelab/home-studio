@@ -152,18 +152,29 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
   const pointStart = lightChunk.indexOf('#if ( NUM_POINT_LIGHTS > 0 ) && defined( RE_Direct )');
   const pointEnd = lightChunk.indexOf('#if ( NUM_SPOT_LIGHTS > 0 ) && defined( RE_Direct )', pointStart);
   const directCall = 'RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
-  // Room attenuation can remove an in-range light entirely. Mark it invisible
-  // before Three samples its shadow, and skip its zero-contribution BRDF work.
-  // Limit these changes to point lights; other light types retain Three's code.
+  // A room with zero transmission cannot receive this light. Cull it before
+  // distance/attenuation work, while retaining every nonzero contribution.
   const pointLighting = lightChunk.slice(pointStart, pointEnd).replace(
+    'pointLight = pointLights[ i ];',
+    'if (homeRoomTransmissions[homePointRooms[ i ]] != 0.0) {\npointLight = pointLights[ i ];'
+  ).replace(
     'getPointLightInfo( pointLight, geometryPosition, directLight );',
     `getPointLightInfo( pointLight, geometryPosition, directLight );
     if (directLight.visible) {
       directLight.color *= homeRoomTransmissions[homePointRooms[ i ]];
       directLight.visible = (directLight.color != vec3(0.0));
     }`
-  ).replace(directCall, 'if (directLight.visible) ' + directCall);
-  const lighting = transmissionCache + lightChunk.slice(0, pointStart) + pointLighting + lightChunk.slice(pointEnd);
+  ).replace(directCall, 'if (directLight.visible) ' + directCall + '\n}');
+  // Only shadow samplers require literal indices. Keep their bounded prefix
+  // unrolled, then use one runtime loop for all remaining lights. Expanding a
+  // complete PBR block per unshadowed fixture stalls software shader compilers.
+  const unshadowedBody = pointLighting.slice(pointLighting.indexOf('if (homeRoomTransmissions'), pointLighting.indexOf('#pragma unroll_loop_end'))
+    .replace(/#if defined\( USE_SHADOWMAP \) && \( UNROLLED_LOOP_INDEX < NUM_POINT_LIGHT_SHADOWS \)[\s\S]*?#endif/, '');
+  const boundedPointLighting = pointLighting.replace('i < NUM_POINT_LIGHTS', 'i < NUM_POINT_LIGHT_SHADOWS')
+    .replace('#pragma unroll_loop_end', `#pragma unroll_loop_end
+    for ( int i = NUM_POINT_LIGHT_SHADOWS; i < NUM_POINT_LIGHTS; i ++ ) {
+      ${unshadowedBody}`);
+  const lighting = transmissionCache + lightChunk.slice(0, pointStart) + boundedPointLighting + lightChunk.slice(pointEnd);
   return {
     capacity,
     attach(group, enabled) {

@@ -50,6 +50,8 @@ const root = path.resolve(__dirname, '..');
   const brdf = guardedPoints.indexOf('if (directLight.visible) ' + originalCall);
   assert(attenuation >= 0 && visibility > attenuation && shadow > visibility && brdf > shadow,
     'Room visibility is updated before shadow sampling and the point BRDF is conditional');
+  assert(guardedPoints.indexOf('if (homeRoomTransmissions[homePointRooms[ i ]] != 0.0)') < guardedPoints.indexOf('getPointLightInfo('),
+    'Exact-zero room transmission skips point-light distance and attenuation work too');
   assert.match(guardedPoints, /directLight.visible && receiveShadow/, 'Three shadow lookup honors the updated visibility');
   assert(shader.fragmentShader.includes(lightChunk.slice(0, pointStart)), 'Lighting initialization is unchanged');
   assert(shader.fragmentShader.includes(lightChunk.slice(pointEnd)), 'Spot, directional, area and indirect lighting remain byte-identical');
@@ -59,10 +61,38 @@ const root = path.resolve(__dirname, '..');
 
   // Compare room uniform order to the exact comparator shipped with Three.
   const vendor = fs.readFileSync(path.join(root, 'vendor/three.module.min.js'), 'utf8');
+  // Use the pinned renderer's real unroller, so shadow sampler indices and the
+  // retained runtime loop are checked after the same transform used by WebGL.
+  const unrollStart = vendor.lastIndexOf('const ', vendor.indexOf('/#pragma unroll_loop_start'));
+  const unrollEnd = vendor.indexOf('return r}', unrollStart) + 'return r}'.length;
+  const unrollSource = vendor.slice(unrollStart, unrollEnd);
+  const unrollName = unrollSource.match(/function (\w+)\(t\)\{return t\.replace/)?.[1];
+  assert(unrollStart >= 0 && unrollName, 'The pinned renderer exposes its expected loop unroller');
+  const unroll = vm.runInNewContext(unrollSource + ';' + unrollName);
+  const runtimePoints = guardedPoints.slice(guardedPoints.indexOf('#pragma unroll_loop_end'));
+  assert.doesNotMatch(runtimePoints, /getPointShadow|pointShadowMap|pointLightShadow|vPointShadowCoord/,
+    'The runtime loop contains no dynamically indexed shadow samplers or shadow uniforms');
+  for (const count of [0, 1, 18, 72, 256]) for (const budget of [0, 2, 8]) {
+    const shadowCount = Math.min(count, budget);
+    const expanded = unroll(guardedPoints.replaceAll('NUM_POINT_LIGHT_SHADOWS', String(shadowCount))
+      .replaceAll('NUM_POINT_LIGHTS', String(count)));
+    assert.doesNotMatch(expanded, /#pragma unroll_loop/, 'The shadow loop is consumed by Three');
+    assert.match(expanded, new RegExp(`for \\( int i = ${shadowCount}; i < ${count}; i \\+\\+ \\)`),
+      'The runtime loop covers every unshadowed slot through the original total light count');
+    const samplers = [...expanded.matchAll(/getPointShadow\( pointShadowMap\[ (\d+) \]/g)].map(match => Number(match[1]));
+    assert.deepEqual(samplers, Array.from({length: shadowCount}, (_, i) => i),
+      'Every shadow sampler keeps exactly one literal index, in original order');
+    const staticLights = [...expanded.matchAll(/pointLight = pointLights\[ (\d+) \]/g)].map(match => Number(match[1]));
+    assert.deepEqual(staticLights, samplers, 'Only the shadowed prefix expands into literal light slots');
+    assert.equal((expanded.match(/getPointLightInfo\(/g) || []).length, shadowCount + 1,
+      'Shader light work expands with shadow budget, not the total fixture count');
+    assert.equal((expanded.match(/if \(directLight.visible\) RE_Direct\(/g) || []).length, shadowCount + 1,
+      'Every static or runtime light body retains the full nonzero direct-light calculation');
+  }
   const comparatorSource = vendor.match(/function \w+\(t,e\)\{return\(e\.castShadow\?2:0\)-\(t\.castShadow\?2:0\)\+\(e\.map\?1:0\)-\(t\.map\?1:0\)\}/)?.[0];
   assert(comparatorSource, 'Pinned Three comparator must still sort shadow casters first');
   const compareLights = vm.runInNewContext('(' + comparatorSource + ')');
-  const lights = Array.from({length: 24}, (_, i) => new THREE.PointLight(0xffffff, i + 1));
+  const lights = Array.from({length: 72}, (_, i) => new THREE.PointLight(0xffffff, i + 1));
   for (const [maxTextures, expected] of [[0, 0], [3, 0], [4, 0], [5, 1], [8, 4], [12, 8], [16, 8], [32, 8], [undefined, 4]]) {
     lighting.configurePointShadows(lights, {maxTextures, maxTextureSize: 1024});
     assert.equal(lights.filter(light => light.castShadow).length, expected, 'Reserve four fragment samplers and cap point shadows at eight');
@@ -77,14 +107,14 @@ const root = path.resolve(__dirname, '..');
   lighting.configurePointShadows(fewLights, {maxTextures: 8, maxTextureSize: 4096});
   assert(fewLights.every(light => light.castShadow), 'Small scenes retain every point shadow');
   lighting.configurePointShadows(lights, {maxTextures: 16, maxTextureSize: 4096});
-  const rooms = lights.map((_, i) => ({id: 'room-' + i, polygon: [[0, 0], [1, 0], [0, 1]]}));
+  const rooms = Array.from({length: 24}, (_, i) => ({id: 'room-' + i, polygon: [[0, 0], [1, 0], [0, 1]]}));
   const orderedLighting = lighting.createRoomLighting(THREE, rooms, lights.length, []);
   const orderedMaterial = new THREE.MeshStandardMaterial();
   orderedLighting.attach({traverse: visit => visit({material: orderedMaterial, userData: {}})}, true);
   const orderedShader = {uniforms: {}, vertexShader: THREE.ShaderLib.standard.vertexShader, fragmentShader: THREE.ShaderLib.standard.fragmentShader};
   orderedMaterial.onBeforeCompile(orderedShader);
   // Interleave shadowed and unshadowed lights to detect accidental traversal-only order.
-  const points = lights.map((light, i) => ({light, item: {room: rooms[i].id}}));
+  const points = lights.map((light, i) => ({light, item: {room: rooms[i % rooms.length].id}}));
   points.sort((a, b) => (a.light.intensity % 8) - (b.light.intensity % 8));
   points.splice(4, 0, {item: {room: 'no-light'}});
   const checkOrder = () => {
@@ -104,7 +134,7 @@ const root = path.resolve(__dirname, '..');
   orderedLighting.update(points);
   assert.deepEqual(Array.from(orderedShader.uniforms.homeLitRooms.value), Array(24).fill(0),
     'Zero-intensity rooms skip polygon work while keeping their point-light slots');
-  assert.equal(Array.from(orderedShader.uniforms.homePointRooms.value).filter(Boolean).length, 24);
+  assert.equal(Array.from(orderedShader.uniforms.homePointRooms.value).filter(Boolean).length, 72);
   lights[3].intensity = 1; lights[8].intensity = .5; lights[8].visible = false;
   orderedLighting.update(points);
   assert.deepEqual(Array.from(orderedShader.uniforms.homeLitRooms.value), Array.from({length: 24}, (_, i) => Number(i === 3)),
