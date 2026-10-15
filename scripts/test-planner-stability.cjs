@@ -43,6 +43,8 @@ function fixture() {
 
 function instrument() {
   const stats=window.__plannerStats={planDraws:0,canvasResizes:0,contexts:0,contextLosses:0,linkedPrograms:0,shaderErrors:[],errors:[]};
+  window.addEventListener('error', event=>stats.errors.push(event.message || String(event.error)));
+  window.addEventListener('unhandledrejection', event=>stats.errors.push(String(event.reason)));
   const originalError=console.error.bind(console);
   console.error=(...args)=>{stats.errors.push(args.map(value=>value?.message || String(value)).join(' '));originalError(...args);};
   for(const property of ['width','height']) {

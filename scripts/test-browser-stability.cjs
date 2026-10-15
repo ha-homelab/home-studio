@@ -44,6 +44,8 @@ function fixture() {
 
 function instrumentation() {
   const stats = window.__browserStability = { shaderErrors:[], errors:[], linkedPrograms:0, contexts:0, contextLosses:0 };
+  window.addEventListener('error', event=>stats.errors.push(event.message || String(event.error)));
+  window.addEventListener('unhandledrejection', event=>stats.errors.push(String(event.reason)));
   const logError = console.error.bind(console);
   console.error = (...args) => {stats.errors.push(args.map(value=>value?.message || String(value)).join(' '));logError(...args);};
   const original = HTMLCanvasElement.prototype.getContext;
@@ -282,7 +284,7 @@ async function run(browserName, origin, project, sourceHash) {
   assert.equal(built.status,0,built.stderr || built.stdout || `Python builder exited with signal ${built.signal}`);
   let html = fs.readFileSync(path.join(output,'main/index.html'),'utf8');
   html = html.replace('<head>',`<head><script>window.__HOME_FLOORPLAN_EMBED__=true;(${instrumentation.toString()})();</script>`);
-  html = html.replace('</script></body>', `window.__browserScene=()=>({drawingBuffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),programs:renderer.info.programs.length,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,triangles:renderer.info.render.triangles,drawCalls:renderer.info.render.calls,shadowMaps:(()=>{const sizes=[];scene.traverse(o=>{if(o.castShadow&&o.shadow)sizes.push([o.type,o.shadow.mapSize.x,o.shadow.mapSize.y])});return sizes})(),pointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible)n++});return n})(),activePointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible&&o.intensity>0)n++});return n})()});\n</script></body>`);
+  html = html.replace('</script></body>', `if(renderer){const captureRender=renderer.render.bind(renderer);renderer.render=(scene,camera)=>{const result=captureRender(scene,camera);window.__browserCamera={projection:camera.projectionMatrix.toArray(),world:camera.matrixWorld.toArray()};return result;};}window.__browserScene=()=>({camera:window.__browserCamera,drawingBuffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),programs:renderer.info.programs.length,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,triangles:renderer.info.render.triangles,drawCalls:renderer.info.render.calls,shadowMaps:(()=>{const sizes=[];scene.traverse(o=>{if(o.castShadow&&o.shadow)sizes.push([o.type,o.shadow.mapSize.x,o.shadow.mapSize.y])});return sizes})(),pointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible)n++});return n})(),activePointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible&&o.intensity>0)n++});return n})()});\n</script></body>`);
   const sourceHash = crypto.createHash('sha256').update(html).digest('hex');
   const server = http.createServer((request,response) => {
     if(request.url==='/fixture.json'){response.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify(project));return;}

@@ -13,12 +13,17 @@ with full validation enabled. A failed platform job fails the parent workflow;
 there is no report-only or allowed-failure platform. The generated release
 workflows stay managed by the shared release toolkit.
 
-Nine native jobs run, with at most three jobs of each kind in parallel:
+Eleven native jobs run: the existing nine platform jobs plus two exact-version
+Waterfox jobs. At most three package jobs, three Playwright jobs, and two
+Waterfox jobs run in parallel:
 
 - **Package and install:** Ubuntu 24.04 x64, Windows Server 2022 x64, and
   macOS 15 ARM64, with Python 3.13 and UTF-8 mode.
 - **Browsers:** Chromium and Firefox on each of those three operating systems,
   with Node.js 22 and browser builds pinned by the Playwright lockfile.
+- **Waterfox versions:** 6.7.5 and 6.7.6 on Windows Server 2022 x64. Both
+  versions are required, including 6.7.6 from the reported issue. A green
+  Playwright Firefox job cannot substitute for either Waterfox result.
 
 These are standard GitHub-hosted runners. A Linux container pretending to be
 Windows or macOS is not used. Job names identify the OS and browser, and
@@ -39,7 +44,7 @@ rules and canonical ZIP metadata avoid platform-dependent source packaging;
 same-host repeatability is not a claim of byte equality between different
 compression-library versions.
 
-Each browser job exercises:
+Each Playwright browser job exercises:
 
 1. A generated **6-room, 18-light** viewer inside an isolated panel iframe.
 2. A larger **24-room, 72-light** viewer, using the same assertions.
@@ -56,21 +61,45 @@ loss, continued 2D editing/export, and preservation of the draft after reload.
 Missing WebGL, a browser crash, shader errors, or an assertion/timeout fails
 acceptance. A successful fallback to 2D does not count as a successful 3D run.
 
+The Waterfox jobs use the official Windows binaries for each pinned version,
+verified against the hashes in `scripts/waterfox-versions.json`. The setup
+script extracts the installer into the runner's temporary directory; it does
+not replace a system browser. A separate runner drives Waterfox through its
+Marionette interface with an isolated profile. These results identify the
+actual Waterfox version, independently of the Playwright Firefox results.
+The separate suite loads both the 6-room/18-light and 24-room/72-light viewers
+twice, drags their Home view, changes light states, restores a deliberately
+lost WebGL context, and closes the panel. Its 256-item planner check moves
+furniture, orbits the two-floor preview, restores its graphics context, and
+checks that reopening preserves the edited draft. These are the Waterfox
+checks; the additional Playwright assertions above remain separate coverage.
+
 ## Read the evidence
 
 Open the **Quality gate** or **Release pipeline** run in GitHub Actions. Each
-browser job uploads `acceptance-<OS>-<engine>` for 14 days, even after a failure.
-The artifact separates the small viewer, large viewer, and planner runs.
+Playwright browser job uploads `acceptance-<OS>-<engine>` for 14 days, even
+after a failure. The artifact separates the small viewer, large viewer,
+and planner runs.
 JSON records include the source revision, actual browser version, platform,
 graphics information, observations, and failures. Failed runs attempt a
 screenshot; a crashed or unresponsive browser may not produce one. The job log
 remains the source for dependency-install failures and runner-level timeouts.
 
+Waterfox jobs upload `acceptance-windows-2022-waterfox-<version>` for the same
+retention period. Read each version's report separately: success on one
+version does not satisfy the other version's gate.
+
 Check the first failed assertion and reported renderer before comparing
 timings. Chromium deliberately uses SwiftShader to cover software rendering.
-Linux runs headed browsers under Xvfb with software GL; Firefox's backend on
-the other hosts depends on the runner. These tests are bounded regression
-checks, not frame-rate, battery-life, or long-duration benchmarks.
+Linux runs headed browsers under Xvfb with software GL. Playwright Firefox uses
+`webgl.force-enabled=true` so the GPU-less Windows VM can attempt its real
+software WebGL backend. The diagnostics record this preference and the actual
+renderer; all shader, context, and rendering assertions still apply. This is
+coverage of that configured VM backend, not certification of Firefox's default
+graphics settings. Waterfox's isolated profile also permits software WebGL and
+forces WebGL enablement, with those preferences saved in each report. These
+tests are bounded regression checks, not frame-rate, battery-life, or
+long-duration benchmarks.
 
 ## Reproduce one browser locally
 
@@ -104,10 +133,12 @@ use synthetic projects when publishing screenshots or diagnostic files.
 
 ## What a green matrix does not prove
 
-Playwright Firefox is not Waterfox. Windows Server 2022 is not the reporter's
-Windows 11 machine, and a hosted VM cannot reproduce every GPU, driver,
-extension, or hardware-acceleration setting. macOS ARM64 coverage does not
-establish Intel Mac or Safari compatibility. Mobile browsers and real Home
+Playwright Firefox is not Waterfox; its pinned browser build and the two
+separately pinned Waterfox versions are distinct acceptance targets. Windows
+Server 2022 is not the reporter's Windows 11 machine, and a hosted VM cannot
+reproduce every GPU, driver, extension, or hardware-acceleration setting.
+macOS ARM64 coverage does not establish Intel Mac or Safari compatibility.
+Mobile browsers and real Home
 Assistant authentication/device integrations need their own acceptance.
 
 For a reported browser freeze, collect the exact browser/OS version, graphics
