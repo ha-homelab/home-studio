@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.6.4] - Development line
+
+- Require native Linux, Windows and macOS package/install acceptance and an
+  expanded browser matrix for pull requests and releases. Keep browser families,
+  pinned historical builds, release channels and emulated touch profiles
+  explicit in the retained evidence rather than treating them as interchangeable.
+- Add native Firefox Stable/ESR and Safari acceptance alongside Waterfox, using
+  official browser binaries and supported browser automation protocols. Browser
+  identity, source revision, rendering errors and cleanup remain release gates.
+- Reduce room-lighting shader compilation and fragment work while preserving
+  light order, every illuminated fixture and nonzero light through doorways.
+- Reuse planner outlines and selection controls, and avoid redrawing unchanged
+  snapped positions. Preserve exact furniture overlap, appearance, undo and drag
+  cancellation. Bound software-renderer resolution without reducing sharp HTML
+  controls or treating a 2D fallback as a successful 3D test.
+- Fix portable package metadata, Unicode paths and Windows installer path checks.
+  Preserve backups, rollback and files belonging to other Home Assistant features.
+
+### Upgrade and coverage
+
+Export project JSON before changing planner origins and keep a Home Assistant
+configuration backup. Rebuild an existing generated viewer with this version to
+receive its rendering changes; publishing a release does not update a private
+home automatically. Project identifiers and entity bindings remain compatible.
+
+See [platform acceptance](docs/platform-acceptance.md) for the exact mandatory
+matrix and [browser compatibility](docs/browser-compatibility.md) for limits.
+Hosted graphics backends and emulated mobile viewports do not certify every GPU,
+extension, device, Safari version, Android WebView or physical mobile browser.
+All automated fixtures use fictional homes and send no live device commands.
+
 ## [0.6.3] - Development line
 
 - Fix the browser drawing tool's separate rendering path: combine rapid 2D
