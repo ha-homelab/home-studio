@@ -63,6 +63,7 @@ function instrument() {
       stats.contexts++;
       const info=context.getExtension('WEBGL_debug_renderer_info');
       stats.gpu={version:context.getParameter(context.VERSION),renderer:info?context.getParameter(info.UNMASKED_RENDERER_WEBGL):context.getParameter(context.RENDERER)};
+      console.info('[home-studio-test-gpu]' + JSON.stringify(stats.gpu));
       const link=context.linkProgram.bind(context);
       context.linkProgram=program=>{link(program);stats.linkedPrograms++;if(!context.getProgramParameter(program,context.LINK_STATUS))stats.shaderErrors.push(context.getProgramInfoLog(program));};
       this.addEventListener('webglcontextlost',()=>stats.contextLosses++);

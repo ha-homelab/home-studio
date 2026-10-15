@@ -57,6 +57,7 @@ function instrumentation() {
     const debug = gl.getExtension('WEBGL_debug_renderer_info');
     stats.gpu = {version:gl.getParameter(gl.VERSION),renderer:gl.getParameter(gl.RENDERER),
       unmaskedRenderer:debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : null,textureUnits:gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS)};
+    console.info('[home-studio-test-gpu]' + JSON.stringify(stats.gpu));
     this.addEventListener('webglcontextlost', () => stats.contextLosses++);
     const link = gl.linkProgram.bind(gl);
     gl.linkProgram = program => {

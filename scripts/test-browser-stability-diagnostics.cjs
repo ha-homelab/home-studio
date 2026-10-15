@@ -158,13 +158,16 @@ test('resource failures retain the request URL and console location', async () =
   const request = {url: () => url, method: () => 'GET', resourceType: () => 'script',
     failure: () => ({errorText: 'net::ERR_FAILED'})};
   const location = {url, lineNumber: 0, columnNumber: 0};
+  const gpu = {version: 'WebGL 2.0', renderer: 'Fixture renderer'};
   await assert.rejects(diagnostics.run('firefox', options, async ({page, check}) => {
+    page.emit('console', {type: () => 'info', text: () => '[home-studio-test-gpu]' + JSON.stringify(gpu)});
     page.emit('console', {type: () => 'error', text: () => 'Resource failed', location: () => location});
     page.emit('response', {url: () => url, status: () => 404, request: () => request});
     page.emit('requestfailed', request);
     check(false, 'Resource failure remains a test failure');
   }), /Resource failure remains/);
   const record = read(diagnostics);
+  assert.deepEqual(record.gpu, gpu, 'Renderer evidence survives a failure before the first scene snapshot');
   assert.deepEqual(record.consoleErrors, ['Resource failed']);
   assert.deepEqual(record.consoleErrorDetails, [{text: 'Resource failed', location}]);
   assert.deepEqual(record.httpErrors, [{url, status: 404, method: 'GET', resourceType: 'script'}]);

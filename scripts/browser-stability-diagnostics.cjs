@@ -158,6 +158,14 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
         page.on('pageerror', error => { record.errors.push(String(error)); save(); });
         page.on('crash', () => { record.crashes.push('Page crashed'); save(); });
         page.on('console', message => {
+          // Persist the renderer before first-draw shader work can stall the
+          // content process and prevent an evaluate-based failure snapshot.
+          const text = message.text();
+          const gpuPrefix = '[home-studio-test-gpu]';
+          if (message.type() === 'info' && text.startsWith(gpuPrefix)) {
+            try { record.gpu = JSON.parse(text.slice(gpuPrefix.length)); save(); }
+            catch { /* Other console output must not break diagnostics. */ }
+          }
           if (message.type() === 'error') {
             const text = message.text().slice(0, 1600);
             record.consoleErrors.push(text);
