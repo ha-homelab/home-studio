@@ -143,6 +143,15 @@ project. With grid snapping enabled, repeated pointer events inside one grid
 cell do not redraw the plan. The snapped coordinates, completed edits, save
 behavior, and undo history are unchanged.
 
+Changing selection reuses the object list; reselecting the same item does not
+rebuild its inspector. A completed move refreshes the coordinates and undo
+controls without repainting geometry that is already current. The plan uses
+an opaque canvas and caches one scaled `Path2D` per furniture surface. Moving
+an item reuses its outlines; resizing or zooming replaces them. Weak references
+let discarded appearances release their outlines. Surfaces keep their global
+elevation order and fixed-width strokes, including rugs below tables and lamps
+above them.
+
 The 2D drawing buffer is capped at 4,000,000 pixels and device pixel ratio 2.
 It releases the old bitmap before applying a new orientation, avoiding an
 oversized intermediate buffer. The separate 3D preview uses at most 2,000,000

@@ -101,12 +101,17 @@ async function run(engine,origin) {
   const frames=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   const snapshot=()=>page.evaluate(()=>({stats:window.__plannerStats,preview:window.planner.getPreviewMetadata(),scene:window.__plannerScene()}));
   const getProject=()=>page.evaluate(()=>window.planner.getProject());
+  let dragPhases;
   async function dragWorld(from,to) {
     const points=await page.evaluate(({from,to})=>[window.planner.worldToScreen(from),window.planner.worldToScreen(to)],{from,to});
     const box=await page.locator('#plan-canvas').boundingBox();
     const start=Date.now();
-    await page.mouse.move(box.x+points[0][0],box.y+points[0][1]);await page.mouse.down();
-    await page.mouse.move(box.x+points[1][0],box.y+points[1][1],{steps:12});await page.mouse.up();await frames();
+    const marks=[start];
+    await page.mouse.move(box.x+points[0][0],box.y+points[0][1]);marks.push(Date.now());
+    await page.mouse.down();marks.push(Date.now());
+    await page.mouse.move(box.x+points[1][0],box.y+points[1][1],{steps:12});marks.push(Date.now());
+    await page.mouse.up();marks.push(Date.now());await frames();marks.push(Date.now());
+    dragPhases=Object.fromEntries(['hoverMs','pressMs','moveMs','releaseMs','framesMs'].map((key,i)=>[key,marks[i+1]-marks[i]]));
     return Date.now()-start;
   }
   async function burst(canvasId) {
@@ -144,7 +149,7 @@ async function run(engine,origin) {
       const sample={cycle};samples.push(sample);save();
       const item=(await getProject()).floors[0].items[0],before=[item.position_m.x,item.position_m.z];
       const itemDragMs=await dragWorld(before,[before[0]+.5,before[1]]);
-      sample.itemDragMs=itemDragMs;save();
+      sample.itemDragMs=itemDragMs;sample.itemDragPhases=dragPhases;save();
       const moved=(await getProject()).floors[0].items[0];assert.equal(moved.position_m.x,before[0]+.5,'Pointer dragging moves the intended catalog furniture');
       const previewStart=Date.now();await page.locator('#preview-tab').click();await page.waitForFunction(()=>window.planner.getPreviewMetadata().items>0);await frames();
       const previewLoadMs=Date.now()-previewStart;

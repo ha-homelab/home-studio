@@ -14,7 +14,7 @@ const BUILD_COMMAND = 'python3 scripts/build-planner-project.py --project /path/
 const LABELS = { furniture: 'Furniture', lamp: 'Lamp', chandelier: 'Ceiling light', tv: 'TV / display', appliance: 'Appliance', switch: 'Switch', outlet: 'Outlet', sensor: 'Sensor' };
 const COLORS = { floor: '#e7dac2', tile: '#e0e8df', deck: '#d8dfbe', furniture: '#96aca6', lamp: '#d9ae68', chandelier: '#d9ae68', tv: '#677d89', appliance: '#a1abb0', switch: '#b4c39d', outlet: '#b4c39d', sensor: '#c4b09a' };
 const HINTS = { select: 'Drag a shape to move, or empty space to pan.', room: 'Drag a rectangle to create a room. Add walls separately.', wall: 'Drag from one wall endpoint to the other.', door: 'Click a wall to cut a door opening.', window: 'Click a wall to cut a window opening.', item: 'Click to place your item. Refine its position in the inspector.' };
-const planCanvas = $('plan-canvas'), ctx = planCanvas.getContext('2d');
+const planCanvas = $('plan-canvas'), ctx = planCanvas.getContext('2d', { alpha: false });
 let project = blankProject(), activeFloorId, selection = null, tool = 'select', view = 'plan', history = [], future = [], drag = null;
 let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, spaceHeld = false, saveFailed = false, previewDirty = true;
 let canvasFrame = 0, canvasSuspended = false;
@@ -31,6 +31,7 @@ let lastStatus = null;
 let buildValidationText = null;
 let placementModelId = CATALOG.models[0].id;
 const assetCache = new Map(), planShapeCache = new Map(), thumbnailCache = new Map();
+const planPathCache = new WeakMap();
 const LIBRARY_PAGE_SIZE = 24, THUMBNAIL_CACHE_LIMIT = 32;
 let libraryShown = 0;
 // Keep a fully populated floor plus catalog thumbnails without clearing every
@@ -231,7 +232,8 @@ function renderUI() {
   let count = 0;
   for (const [kind, icon] of [['rooms', '▱'], ['walls', '╱'], ['openings', '⊟'], ['items', '▣']]) for (const object of floor()[kind]) {
     count++;
-    const b = button('', () => { selection = { kind, id: object.id }; setTool('select'); renderUI(); renderPlan(); }, 'object-button');
+    const b = button('', () => { setTool('select'); setSelection({ kind, id: object.id }); }, 'object-button');
+    b.dataset.objectKind = kind; b.dataset.objectId = object.id;
     b.setAttribute('aria-pressed', String(selection?.kind === kind && selection?.id === object.id));
     b.append(node('span', 'object-icon', icon), node('span', '', object.name || (kind === 'openings' ? `${t(object.type)} · ${object.id}` : object.id.replaceAll('_', ' '))));
     b.title = t('{kind}: {name}', { kind: t(kind === 'openings' ? 'opening' : kind.slice(0, -1)), name: object.name || object.id }); $('object-list').append(b);
@@ -240,6 +242,15 @@ function renderUI() {
   if (!count) $('object-list').append(node('p', 'object-empty', t('Your rooms, walls, and items will appear here.')));
   $('empty-state').hidden = count > 0 || tool !== 'select' || view !== 'plan';
   renderInspector(); if (view === 'preview') renderPreview();
+}
+function setSelection(next) {
+  if (selection?.kind === next?.kind && selection?.id === next?.id) return;
+  selection = next;
+  // Selection changes do not alter floor names, object labels, or their order.
+  for (const b of $('object-list').children) if (b.dataset.objectId) {
+    b.setAttribute('aria-pressed', String(b.dataset.objectKind === selection?.kind && b.dataset.objectId === selection?.id));
+  }
+  renderInspector(); requestCanvasRender();
 }
 function field(parent, label, value, onChange, { type = 'text', min, max, step = '0.05', help, options, rows, readOnly = false, dir } = {}) {
   const wrap = node('label', 'field'), title = node('span', '', label);
@@ -435,6 +446,18 @@ function zoomPlan(factor, anchor = [size.width / 2, size.height / 2]) {
 }
 function updateZoom() { $('zoom-value').textContent = view === 'plan' ? `${Math.round(map.scale / 55 * 100)}%` : `${Math.round(orbit.baseRadius / orbit.radius * 100)}%`; }
 function path(points, close = false) { ctx.beginPath(); points.forEach((p, i) => { const [x, y] = toScreen(p); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); if (close) ctx.closePath(); }
+function planShapePath(shape, width, depth) {
+  let cached = planPathCache.get(shape);
+  if (!cached || cached.width !== width || cached.depth !== depth) {
+    const outline = new Path2D();
+    shape.points.forEach(([x, z], i) => { if (i) outline.lineTo(x * width, z * depth); else outline.moveTo(x * width, z * depth); });
+    outline.closePath();
+    // Keep one scaled outline per cached surface. Translation and rotation
+    // remain in the context, preserving fixed-width strokes and layer order.
+    cached = { width, depth, outline }; planPathCache.set(shape, cached);
+  }
+  return cached.outline;
+}
 function renderPlan() {
   if (view !== 'plan' || canvasSuspended || document.hidden) return;
   cancelCanvasRender();
@@ -483,7 +506,7 @@ function renderPlan() {
     ctx.fillStyle = COLORS[item.type]; ctx.strokeStyle = '#637f78'; ctx.lineWidth = 1; ctx.shadowColor = '#293c3315'; ctx.shadowBlur = 5;
     if (shape) {
       ctx.shadowBlur = 0; ctx.lineWidth = .65; ctx.strokeStyle = '#33453f55';
-      ctx.beginPath(); shape.points.forEach(([px, pz], index) => { if (index) ctx.lineTo(px * w, pz * d); else ctx.moveTo(px * w, pz * d); }); ctx.closePath(); ctx.fillStyle = shape.color; ctx.fill(); if (!shape.triangle) ctx.stroke();
+      const outline = planShapePath(shape, w, d); ctx.fillStyle = shape.color; ctx.fill(outline); if (!shape.triangle) ctx.stroke(outline);
     } else if (['chandelier', 'lamp', 'sensor'].includes(item.type)) { ctx.beginPath(); ctx.ellipse(0, 0, w / 2, d / 2, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
     else { ctx.fillRect(-w / 2, -d / 2, w, d); ctx.strokeRect(-w / 2, -d / 2, w, d); if (item.type === 'furniture' && w > 28 && d > 20) { ctx.strokeStyle = '#ffffff66'; ctx.strokeRect(-w / 2 + 4, -d / 2 + 4, w - 8, d - 8); } }
     ctx.restore();
@@ -527,7 +550,7 @@ planCanvas.addEventListener('pointerdown', event => {
   if (tool === 'room' || tool === 'wall') { const p = world.map(snap); drag = { kind: 'draw', startWorld: p, endWorld: p, screen }; return; }
   if (tool === 'door' || tool === 'window') { const near = wallAt(world); if (near) addOpening(near.wall, near.hit.offset, tool); else status(() => t('Click directly on an existing wall to add an opening.'), true); return; }
   if (tool === 'item') { addItem(world); return; }
-  selection = hitTest(world); renderUI(); renderPlan();
+  setSelection(hitTest(world));
   if (selection) {
     // Keep one immutable undo snapshot; only the selected object changes while dragging.
     drag = { kind: 'move', startWorld: world, original: project, selection: { ...selection }, moved: false, offset: [0, 0] };
@@ -573,7 +596,14 @@ function finishPointer(event, cancel = false) {
       try { validateProject(project); serializeProject(project); historyPush(current.original); previewDirty = true; status(() => t('Object moved.')); save(); }
       catch (error) { project = current.original; status(() => t('Move cancelled: {error}', { error: formatValidationError(error, t) }), true); }
     }
-    renderUI();
+    if (project !== current.original) {
+      $('undo').disabled = history.length === 0; $('redo').disabled = future.length === 0;
+      renderInspector();
+    }
+    // The movement frame already contains the final geometry, or is still
+    // queued. Only a rollback needs another paint to restore the original.
+    if (project === current.original && current.moved) renderPlan();
+    return;
   }
   renderPlan();
 }

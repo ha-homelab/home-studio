@@ -84,6 +84,8 @@ JSON records include the source revision, actual browser version, platform,
 graphics information, observations, and failures. Failed runs attempt a
 screenshot; a crashed or unresponsive browser may not produce one. The job log
 remains the source for dependency-install failures and runner-level timeouts.
+Planner drag records also separate hover, press, movement, release, and final
+frame latency to help distinguish event handling from a slow redraw.
 
 Waterfox jobs upload `acceptance-windows-2022-waterfox-<version>` for the same
 retention period. Read each version's report separately: success on one
