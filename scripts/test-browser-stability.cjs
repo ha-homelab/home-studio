@@ -213,8 +213,14 @@ async function run(browserName, origin, project) {
         await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
         await page.screenshot({path:path.join(process.env.BROWSER_STABILITY_SCREENSHOT_DIR,`${browserName}-${cycle+1}.png`)});
       }
-      await page.evaluate(() => {window.viewerPort.close();window.viewerPort=null;document.querySelector('#viewer').remove();});
-      await page.waitForTimeout(150);
+      // Browser teardown and Playwright's frame registry update asynchronously.
+      // Subscribe before removing the iframe so even a fast detach is observed.
+      const detachStarted = Date.now();
+      await Promise.all([
+        page.waitForEvent('framedetached',{predicate:detached=>detached===child,timeout:30000}),
+        page.evaluate(() => {window.viewerPort.close();window.viewerPort=null;document.querySelector('#viewer').remove();})
+      ]);
+      sample.detachMs = Date.now()-detachStarted;
       assert.equal(page.frames().length,1,'Removing the floorplan releases its browsing context');
       assert.equal(await page.evaluate(() => 6*7),42,'The dashboard remains responsive after closing the floorplan');
     }
