@@ -29,6 +29,23 @@ def inventory():
 
 
 class PlatformAcceptanceTests(unittest.TestCase):
+    def test_native_program_isolation_proof_is_unconditional_and_packaged(self):
+        steps = workflow('package.yml')['jobs']['package']['steps']
+        command = 'node scripts/test-native-viewer-programs.cjs'
+        matches = [step for step in steps if command in step.get('run', '')]
+        self.assertEqual(len(matches), 1)
+        self.assertIn(command, [line.strip() for line in matches[0]['run'].splitlines()])
+        self.assertNotIn('if', matches[0])
+        self.assertNotIn('continue-on-error', matches[0])
+        spec = importlib.util.spec_from_file_location('site_inventory', ROOT / 'scripts/validate-site.py')
+        site = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(site)
+        for name in ('native-viewer-program-diagnostics.js', 'test-native-viewer-programs.cjs'):
+            self.assertIn('scripts/' + name, site.REPO_FILES)
+        replay = (ROOT / 'scripts/test_source_replay.py').read_text()
+        self.assertIn("['scripts/test-native-viewer-programs.cjs']", replay)
+        self.assertIn("'scripts/test-waterfox-tooling.py'", replay)
+
     def test_scalar_lambert_accumulators_cpu_proof_is_unconditional(self):
         steps = workflow('package.yml')['jobs']['package']['steps']
         command = 'node scripts/test-scalar-lambert-accumulators.cjs'

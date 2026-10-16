@@ -296,6 +296,22 @@ either assertion. CPU checks exercise both diffuse and physically based software
 paths, including continuous input across several deadlines. Physically based
 software frames remain full-resolution direct draws without a copy pass.
 
+The diffuse interaction helper prepares its framebuffer-copy texture and
+program on the first actual motion frame. Initial, resized and restored full
+frames draw the scene directly without allocating or compiling unused copy
+resources. The motion viewport, copy shader, filtering, frame statistics,
+release frame and disposal behavior are unchanged. A later motion frame sizes
+the texture from the current drawing buffer before copying.
+This defers one copy-texture initialization and one copy-program compile
+request; the helper's CPU-side camera, geometry and material still exist and
+retain their original cleanup.
+
+This moves copy preparation into the first gesture; it does not remove that
+work or establish a speedup. The original first-drag, load and recovery limits
+remain mandatory. CPU checks cover cold full frames, first-motion preparation,
+resize, reconstruction, errors and cleanup; real driver timing and pixels still
+require browser validation.
+
 The packed daylight path omits loops for absent exterior rooms or windows and
 rejects rooms outside the existing conservative spatial bound before calculating
 polygon distance. The bound contains the full daylight and exterior transition;
@@ -738,3 +754,24 @@ retain the original aggregate locals. PBR, editor, inactive transport and
 custom callbacks also retain their original paths. No resources, uniforms, budgets or browser requirements change. A
 compiler may already flatten these aggregates, so the CPU source and binary32
 proofs establish no GPU equivalence or performance gain.
+
+
+### Native shader initialization and light-state isolation
+
+The native viewer keeps the startup and post-gesture shader inventories separately.
+The previous state-stability assertion seeded its reference before the first gesture,
+so it conflated first use of the interaction-copy program with a later Home Assistant
+light-state update. The revised contract permits at most one new program during the
+first diffuse-renderer gesture: its full vertex and fragment sources must exactly match
+the pinned copy shader, it must be a new program rather than a relink, and an actual
+copy-pass draw must use it. No other program receives this exception. Eager preparation
+with no new program remains valid. A bounded observer records link identities and tiny
+recognized copy sources without extra GL queries or draws; incomplete evidence fails.
+Every subsequent off, partial and on update is checked against the immediately preceding
+snapshot and must add no link or relink, including a relink of identical source. The
+original light, graphics, load, gesture, recovery and teardown assertions remain in force.
+This is an explicit test-contract revision, not a passing reinterpretation of the saved
+lazy-copy failure. Existing failure evidence remains valid under its original contract;
+new source and browser evidence are required before adoption. Context restoration starts
+a new program epoch; the existing recovery gesture receives the same exact-copy check
+while all prior link history remains recorded. First-gesture initialization still falls inside the original 15-second budget, and no timing limit changes.

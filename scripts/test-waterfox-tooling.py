@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Offline tests for pinned downloads and stock Gecko transport validation."""
 import contextlib
+import copy
+import inspect
+import textwrap
 import hashlib
 import importlib.util
 import io
@@ -60,6 +63,100 @@ class Socket:
 
     def sendall(self, data):
         self.sent.append(data)
+
+
+def program_stats(count=6, copy=False):
+    links = [{'ordinal': i + 1, 'program': i + 1, 'epoch': 0, 'exactCopy': False,
+              'copyDraws': 0, 'outsideCopyDraw': True} for i in range(count)]
+    if copy:
+        links[-1].update(exactCopy=True, sources=acceptance.COPY_SOURCES,
+                         copyDraws=3, outsideCopyDraw=False)
+    return {'linkedPrograms': count, 'programLedger': {'errors': [], 'contexts': [{'id': 1, 'epoch': 0, 'links': links}]},
+            'gpu': {'renderer': 'Apple Software Renderer'},
+            'scene': {'renderPasses': {'copy': 3 if copy else 0}, 'pointLights': 72}}
+
+
+class ProgramIsolationTests(unittest.TestCase):
+    def test_eager_and_deferred_exact_copy_both_retain_strict_state_checks(self):
+        eager = program_stats(7)
+        acceptance.assert_first_motion_programs(eager, copy.deepcopy(eager))
+        before, after = program_stats(), program_stats(7, True)
+        acceptance.assert_first_motion_programs(before, after)
+        acceptance.assert_state_programs(after, copy.deepcopy(after))
+        self.assertEqual(before['linkedPrograms'], 6)
+        self.assertEqual(after['linkedPrograms'], 7)
+
+    def test_first_motion_rejects_every_non_copy_exception(self):
+        before = program_stats()
+        for mutation in [
+            lambda a: a['programLedger']['contexts'][0]['links'][-1].update(exactCopy=False),
+            lambda a: a['programLedger']['contexts'][0]['links'][-1].update(copyDraws=0),
+            lambda a: a['programLedger']['contexts'][0]['links'][-1].update(outsideCopyDraw=True),
+            lambda a: a['programLedger']['contexts'][0]['links'][-1].update(program=1),
+            lambda a: a['programLedger']['contexts'][0]['links'][-1].update(sources={**acceptance.COPY_SOURCES, 'fragment': 'changed'}),
+            lambda a: a['gpu'].update(renderer='Unexpected hardware'),
+            lambda a: a['scene']['renderPasses'].update(copy=0),
+            lambda a: a['programLedger']['contexts'][0].update(epoch=1),
+            lambda a: a['programLedger']['errors'].append('overflow'),
+            lambda a: a['programLedger']['contexts'][0]['links'].pop(),
+        ]:
+            after = program_stats(7, True); mutation(after)
+            with self.subTest(mutation=mutation), self.assertRaises(AssertionError):
+                acceptance.assert_first_motion_programs(before, after)
+        with self.assertRaises(AssertionError):
+            acceptance.assert_first_motion_programs(before, program_stats(8, True))
+        before['scene']['renderPasses']['copy'] = 1
+        before['programLedger']['contexts'][0]['links'][0]['copyDraws'] = 1
+        with self.assertRaises(AssertionError):
+            acceptance.assert_first_motion_programs(before, program_stats(7, True))
+
+    def test_first_motion_of_restored_epoch_keeps_all_old_links(self):
+        before = program_stats(7, True)
+        before['programLedger']['contexts'][0]['epoch'] = 1
+        after = copy.deepcopy(before)
+        event = copy.deepcopy(after['programLedger']['contexts'][0]['links'][-1])
+        event.update(ordinal=8, program=8, epoch=1)
+        after['programLedger']['contexts'][0]['links'].append(event)
+        after['linkedPrograms'] = 8
+        after['scene']['renderPasses']['copy'] = 6
+        acceptance.assert_first_motion_programs(before, after)
+        acceptance.assert_state_programs(after, copy.deepcopy(after))
+        event['epoch'] = 0
+        with self.assertRaises(AssertionError): acceptance.assert_first_motion_programs(before, after)
+
+    def test_state_addition_and_identical_source_relink_both_fail(self):
+        before = program_stats(7, True)
+        for relink in (False, True):
+            after = copy.deepcopy(before)
+            event = copy.deepcopy(after['programLedger']['contexts'][0]['links'][-1])
+            event.update(ordinal=8, program=7 if relink else 8)
+            after['programLedger']['contexts'][0]['links'].append(event)
+            after['linkedPrograms'] = 8
+            with self.subTest(relink=relink), self.assertRaisesRegex(AssertionError, 'link or relink'):
+                acceptance.assert_state_programs(before, after)
+
+    def test_actual_viewer_state_loop_uses_post_gesture_then_rejects_a_state_link(self):
+        source = inspect.getsource(acceptance.viewer)
+        start = source.index('        # Send real bridge state updates')
+        end = source.index('        if cycle == 1:', start)
+        block = textwrap.dedent(source[start:end])
+        for bad in (False, True):
+            values = [program_stats(7, True) for _ in range(3)]
+            for value in values: value.update(renderCount=2, renderedLights=72)
+            if bad:
+                values[1] = program_stats(8, True); values[1].update(renderCount=3, renderedLights=36)
+            updates = []
+            env = {**vars(acceptance), 'sample': {}, 'items': [{'entity_id': 'light.' + str(i)} for i in range(72)],
+                   'states': {'light.' + str(i): {'state': 'on'} for i in range(72)},
+                   'after_drag': program_stats(7, True), 'initial': program_stats(), 'client': object(),
+                   'snapshot': iter(values).__next__, 'assert_graphics': lambda value: None,
+                   'update_viewer_state': lambda client, states, active: updates.append(active)}
+            if bad:
+                with self.assertRaisesRegex(AssertionError, 'link or relink'): exec(block, env)
+                self.assertEqual(updates, [0, 36])
+            else:
+                exec(block, env); self.assertEqual(updates, [0, 36, 72])
+                self.assertEqual([x['linkedPrograms'] for x in env['sample']['states']], [7] * 4)
 
 
 class ToolingTests(unittest.TestCase):
@@ -458,7 +555,7 @@ fail=true;
 assert.throws(()=>env.renderer.render());
 assert.equal(env.__nativeRenderedLights,0,'A failed draw must not count as the new state');
 """
-        result = subprocess.run(['node', '-e', javascript], input=acceptance.NATIVE_VIEWER_FRAME_DIAGNOSTICS,
+        result = subprocess.run(['node', '-e', javascript], input=acceptance.NATIVE_VIEWER_PROGRAM_DIAGNOSTICS + acceptance.NATIVE_VIEWER_FRAME_DIAGNOSTICS,
                                 text=True, capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
 
