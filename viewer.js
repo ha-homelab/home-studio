@@ -93,7 +93,7 @@ let initialViewReady=!embedded;
 let renderProfile={pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048,diffuseLighting:false};
 // Apple's legacy software rasterizer spends seconds interpreting PBR fragments.
 // Diffuse materials keep room-constrained colored light, opacity and emissive
-// surfaces, with matte highlights and unfiltered shadows on that backend only.
+// surfaces, with matte highlights and unfiltered shadows on reduced diffuse paths.
 function createSceneMaterial(options){if(!renderProfile.diffuseLighting)return new THREE.MeshStandardMaterial(options);const {roughness,metalness,...shared}=options;return new THREE.MeshLambertMaterial(shared)}
 function selectRenderProfile(gl){const capacity=getRenderCapacity(gl);const profile=capacity.reduced?{pixels:250000,pointShadows:2,pointShadowSize:128,sunShadowSize:512,diffuseLighting:capacity.diffuseLighting}:{pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048,diffuseLighting:false};if(capacity.rasterProbe)profile.rasterProbe=capacity.rasterProbe;return profile}
 let renderRequest=0,renderSuspended=false,renderLost=false;

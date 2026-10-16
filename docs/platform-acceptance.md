@@ -42,7 +42,6 @@ inventory-validation job:
   ESR **153.5.0esr**, and native Waterfox **6.7.6** on `macos-15-intel`. These add
   x64 evidence alongside the same required ARM64 targets; all original 73
   executions remain required.
-
 - **1 masked-renderer row:** native Firefox ESR **153.5.0esr** on macOS 15 with
   Gecko's normal renderer sanitization enabled. It repeats all three required
   suites and retains the original 76 executions. This verifies measured-capacity

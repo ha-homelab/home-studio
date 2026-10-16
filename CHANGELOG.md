@@ -22,16 +22,21 @@
   exactly once; do not carry GPU resources across rebuilds or context recovery.
 - Batch disjoint furniture parts on the identified Apple Software Renderer to
   reduce draw calls. Keep overlapping objects in their original rendering order
-  and bound the overlap search. Other software renderers, native and unidentified
-  GPU paths retain normal meshes; additional instanced shaders can add first-use
-  compilation work.
+  and bound the overlap search. Other paths retain normal meshes unless the
+  narrowly scoped masked-Apple capacity check selects the same reduced profile;
+  additional instanced shaders can add first-use compilation work.
 - Use simpler diffuse materials and unfiltered shadows on the legacy Apple
   software rasterizer, retaining every linked light, room boundary, transparent
-  surface and control. Native GPU materials remain unchanged.
+  surface and control. Native GPU materials remain unchanged unless a measured
+  slow raster path selects this profile behind Gecko's opaque Apple label. The
+  one-time check uses five tiny draws on the existing context, validates pixel
+  readback, and restores every changed graphics state.
 - Set direct touch manipulation on viewer controls while retaining page pinch
   zoom. Keep native touch interaction checks separate from mouse acceptance.
 - Reduce room-lighting shader compilation and fragment work while preserving
   light order, every illuminated fixture and nonzero light through doorways.
+  The diffuse profile uses packed room geometry with a conservative uniform
+  budget; larger plans or lower limits retain the original shader path.
 - Reuse planner outlines and selection controls, and avoid redrawing unchanged
   snapped positions. Preserve exact furniture overlap, appearance, undo and drag
   cancellation. Bound software-renderer resolution without reducing sharp HTML

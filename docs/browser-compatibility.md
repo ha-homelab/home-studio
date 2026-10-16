@@ -207,9 +207,21 @@ Lavapipe, a software rasterizer, Microsoft Basic Render, or the exact
 pixels, with the smaller point-shadow limits above and a 512 by 512 directional
 shadow map. Native and unknown renderers retain the 2,000,000-pixel cap and
 2048 by 2048 directional shadow map. HTML labels and controls retain their normal
-resolution. Both profiles retain full physically based material lighting and
-room confinement for every light; the software profile reduces canvas detail
-and shadow coverage/resolution. Size and pixel ratio are applied in one renderer
+resolution. The Apple software rasterizer uses simpler diffuse materials and
+unfiltered shadows while retaining room confinement, color and every linked
+light. Its packed room geometry is enabled only within a conservative uniform
+budget; otherwise the original geometry shader is used. Other identified
+software renderers retain physically based materials.
+
+Gecko can report both hardware and software as `Apple M1, or similar`. For that
+exact label with a Gecko user agent, a one-time, fixed 32-by-32 raster check on
+the existing context measures capacity. Five valid pixel readbacks and a best
+measured draw of at least 15 ms select the same reduced diffuse profile. This
+measures a slow path, not GPU identity. Fast, failed, unsupported, and other
+unidentified paths keep normal rendering. See the [capacity workload and
+calibration](platform-acceptance.md) for its scope and limitations.
+
+Size and pixel ratio are applied in one renderer
 call, avoiding a separate ratio update against
 the old dimensions. These are pixel budgets, not a measurement of total GPU
 memory: color/depth storage, driver overhead, directional shadows, and geometry
