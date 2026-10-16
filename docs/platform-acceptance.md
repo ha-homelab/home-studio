@@ -677,3 +677,15 @@ four-state texture/decay proof is unchanged; an additional whole-fragment
 inverse checks ready, unproved, invalid, restored, editor and independent
 fallback states. Neither standalone measurements nor a source expansion proves
 that this combination improves hosted Intel timing or compiles on every driver.
+
+The experimental `sharedOpaqueBlend` option keeps eligible alpha-one packed
+Lambert floors, frames and owned fallback boxes in the opaque draw list with
+their original depth writes. It uses explicit non-premultiplied normal blend
+factors matching the shared wall program's GPU state. At source alpha one the
+blend equation preserves the original source color and alpha; no geometry,
+lighting, shadow, render order or acceptance limit changes. Owned blend fields
+are restored before reattachment, and externally edited fields are preserved
+and reject reapplication. This is a test of possible driver state specialization,
+not an established performance improvement. Hosted first-frame records show
+substantial costs across many floor and wall draws, not two isolated compiler
+pauses; native pixel and timing evidence is still required.

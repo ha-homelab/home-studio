@@ -232,6 +232,37 @@ function prepareSharedWallProgram(THREE, mesh, role) {
   return state.enabled;
 }
 
+// Keep opaque draw-list membership and depth writes, but use the walls' exact
+// non-premultiplied blend equation when the fragment alpha is provably one.
+// Restore only owned values before the existing material preparation runs.
+const opaqueBlendMaterials = new WeakMap();
+function restoreOpaqueBlendState(material) {
+  const state = opaqueBlendMaterials.get(material);
+  if (!state?.active) return;
+  for (const key of Object.keys(state.assigned)) {
+    if (material[key] === state.assigned[key]) material[key] = state.original[key];
+    else state.rejected = true;
+  }
+  state.active = false;
+}
+function prepareOpaqueBlendState(THREE, mesh, enabled) {
+  const material = mesh.material;
+  let state = opaqueBlendMaterials.get(material);
+  if (!enabled || state?.rejected || !material.isMeshLambertMaterial ||
+      material.blending !== THREE.NoBlending || material.transparent || material.opacity !== 1 ||
+      material.premultipliedAlpha || material.map || material.alphaMap || material.vertexColors ||
+      material.alphaTest !== 0 || material.alphaHash || material.alphaToCoverage ||
+      mesh.onBeforeRender !== THREE.Object3D.prototype.onBeforeRender ||
+      material.onBeforeRender !== THREE.Material.prototype.onBeforeRender) return;
+  const assigned = {blending:THREE.CustomBlending,blendEquation:THREE.AddEquation,
+    blendSrc:THREE.SrcAlphaFactor,blendDst:THREE.OneMinusSrcAlphaFactor,
+    blendEquationAlpha:THREE.AddEquation,blendSrcAlpha:THREE.OneFactor,blendDstAlpha:THREE.OneMinusSrcAlphaFactor};
+  if (!state) {state = {active:false,rejected:false};opaqueBlendMaterials.set(material,state);}
+  state.original = Object.fromEntries(Object.keys(assigned).map(key => [key,material[key]]));
+  state.assigned = assigned;state.active = true;
+  Object.assign(material,assigned);
+}
+
 // Point shadows use a 4-by-2 atlas, not one mapSize-sized texture. Keep the
 // combined atlas allocation bounded as the number of linked fixtures grows.
 function pointShadowMapSize(lightCount, maxTextureSize = 4096, maxFaceSize = 512) {
@@ -918,11 +949,13 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
           decayState.enabled = enabled;
         }
         if (decayState) decayState.active = false;
+        restoreOpaqueBlendState(material);
         const wall = mesh.userData.category === 'walls';
         const fallbackFacing=prepareFallbackBoxProgram(THREE,mesh,Boolean(packed),!packed||materialUses.get(mesh.material)===1);
         const wallEnabled = prepareSharedWallProgram(THREE, mesh,
           fallbackFacing ? 'opaque' : !dynamicMaterials.has(mesh.material) && sharedWallRoles.get(mesh.material));
         const sharedWall = Boolean(wallEnabled);
+        prepareOpaqueBlendState(THREE,mesh,sharedWall && geometryOptions.sharedOpaqueBlend === true);
         const textureState=pointTexture?.attach(mesh,group,enabled);
         mesh.material.onBeforeCompile = shader => {
           if (sharedWall) applySharedWallSheen(shader, wallEnabled);
