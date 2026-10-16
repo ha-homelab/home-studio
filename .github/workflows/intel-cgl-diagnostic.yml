@@ -1,0 +1,98 @@
+name: Diagnostic Intel CGL source comparison
+run-name: Non-release Intel CGL comparison · ${{ github.sha }}
+
+on:
+  push:
+    branches: [diagnostic/intel-cgl-compare]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnostic-intel-cgl-compare
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  compare:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-compare' }}
+    runs-on: macos-15-intel
+    # Room for three original three-case suites and installation. Per-case
+    # deadlines remain inside the unchanged source drivers.
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: '1'
+      NATIVE_STARTUP_DIAGNOSTICS: '1'
+      FIREFOX_RENDERER_VISIBILITY: unmasked
+      FIREFOX_WEBGL_BACKEND: default
+      FIREFOX_COMPOSITOR_BACKEND: software
+      FIREFOX_GPU_PROCESS: disabled
+    steps:
+      - name: Check out the diagnostic harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: harness
+          persist-credentials: false
+      - name: Check out the exact R13 source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: b6896d8d06ab520b98488a7eca929ca8b148a31f
+          path: baseline
+          persist-credentials: false
+      - name: Check out the exact R14 source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: 8be2624a9b81b0cdce632ea651ef744ad30c8fd9
+          path: shared-glass
+          persist-credentials: false
+      - name: Check out the exact zero-point guard source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: b3ef014d0f02c99fb5e3f9a0c48c8e7e01d67d11
+          path: zero-point-guard
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+      - name: Record tooling and prepare all fixtures before any source timing
+        run: |
+          mkdir -p harness/diagnostics/intel-cgl-compare
+          {
+            python3 --version
+            node --version
+            npm --version
+            uname -sm
+            sw_vers
+          } > harness/diagnostics/intel-cgl-compare/toolchain.log 2>&1
+          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-compare/baseline-npm.log
+          npm --prefix shared-glass ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-compare/shared-glass-npm.log
+          npm --prefix zero-point-guard ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-compare/zero-point-guard-npm.log
+          python3 harness/scripts/test-intel-cgl-comparison.py
+      - name: Install one official checksum and signature verified ESR for all sources
+        env:
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-browser
+        run: |
+          python3 harness/scripts/setup-native-browser.py --product firefox --version 153.5.0esr --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-compare/install.log
+          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-compare/install.json
+      - name: Run all original native suites in order, retaining failures
+        env:
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-browser
+        run: >-
+          python3 harness/scripts/run-intel-cgl-comparison.py
+          --source-root "$GITHUB_WORKSPACE"
+          --installation "$INSTALL_DIR/install.json"
+          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-compare"
+      - name: Preserve non-release comparison evidence even when a source fails
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostic-intel-cgl-compare-${{ github.run_id }}-${{ github.run_attempt }}
+          path: harness/diagnostics/intel-cgl-compare/
+          if-no-files-found: error
+          retention-days: 14
