@@ -1,6 +1,6 @@
-# Disposable Intel initial scissor primer diagnostic
+# Disposable Intel copy program isolation diagnostic
 
-Only a push to `diagnostic/intel-cgl-initial-scissor-primer` starts this workflow. It has
+Only a push to `diagnostic/intel-cgl-copy-program-isolation` starts this workflow. It has
 read-only GitHub permissions and pinned actions. It does not invoke the 77-lane
 acceptance gate or publish a release. Its results are diagnostic evidence only.
 
@@ -11,22 +11,23 @@ preparation. Preparation does not authorize a push or launch.
 
 Two independent `macos-15-intel` jobs compare these sources in order:
 
-- Initial scissor primer candidate, first: `a943b893f320b5f0dc551409645de2447124dc2b`.
-- Baseline, second: `7491f94943ba60cc663e411bc2361745c0cc9b87`.
+- Copy deferral candidate, first: `258056dfd6426b90826f7ca75747ede77c636814`.
+- Baseline, second: `5563e3fdc147c81931389743836610ba611e7026`.
 - Candidate preflights: `node scripts/test-literal-lambert-point-body.cjs` and
   `node scripts/test-literal-lambert-directional.cjs`, plus
   `node scripts/test-scalar-shadow-point.cjs` and
   `node scripts/test-scalar-indirect-lambert.cjs`, and
   `node scripts/test-direct-shadow-uniforms.cjs`, and
   `node scripts/test-scalar-lambert-accumulators.cjs`, and
-  `node scripts/test-initial-scissor-primer.cjs` and
-  `node scripts/test-render-lifecycle.cjs`.
+  `node scripts/test-interaction-render.cjs` and
+  `node scripts/test-render-lifecycle.cjs` and `node scripts/test-native-viewer-programs.cjs`.
+- Both-arm contract checks are listed below.
 
 One job uses Firefox `153.5.0esr`; the other uses Waterfox `6.7.6`. Maximum
 parallelism is two. Each pair runs sequentially on one hosted VM and shares one
 official browser installation verified by the original installer, checksum
 catalog and signature checks. Python 3.13, Node 22 and both locked npm dependency
-installations are prepared before either suite starts. All eight selected candidate
+installations are prepared before either suite starts. All selected candidate and contract
 CPU proofs run before the browser is installed; failure stops preparation.
 
 After both sources pass preflight, the runner records `mdutil -a -s`, invokes
@@ -52,26 +53,30 @@ disabled status does not prove that existing indexing workers are idle. The
 passive CPU records remain necessary context. Both sources receive the same
 normalization. Fixed order and shared caches still limit causal conclusions.
 
-The baseline already contains scalar point, directional, indirect and main
-Lambert accumulators, plus direct shadow uniform reads. The candidate preserves
-all of those shader sources. On the positively selected Apple software profile,
-it submits the first initialized Home scene with the same full viewport and a
-2×2 physical scissor, then yields once for 2,500 ms before the ordinary complete
-current-state draw. The partial draw receives no completed-render credit.
-Unsupported state retains the original synchronous path, while hide, loss,
-pagehide or an editor switch retire the pending wait. The unchanged original
-case includes this wait within its existing load and watchdog deadlines.
+Both sources retain the explicit strict native contract introduced at
+`258056dfd6426b90826f7ca75747ede77c636814`. The eager baseline reverses only
+commit `40333d36c2a3d3ed110ebc4dc6513239b56b1aa2`: the interaction renderer,
+its CPU test and 16 documentation lines. The native driver, passive observer,
+its CPU tests and source inventory remain identical. The candidate defers the
+unused interaction-copy program and texture until actual motion; the baseline
+prepares them during the initial full draw. All other runtime files are equal.
 
-Eight CPU proofs run before browser installation: the six inherited scalar
-lighting proofs and the primer/controller plus existing render-lifecycle
-proofs. The parked BRDF-cache proof is absent because neither exact source
-contains that separate optimization. A local original 24-room case passed but
-showed no load improvement. A separate passive original-suite diagnostic
-verified both cycles actually used a 2×2 primer at full viewport, retained zero
-readiness until the ordinary full draw, and reused the exact complete linked
-texture-lighting program sources. This is not hosted Intel performance evidence
-or a promise that the fixed wait reaches native compiler readiness. Separate
-completed-frame pixel parity remains required before any launch authorization.
+The protected driver reference for this experiment is **258056d**, not the
+older 7b or 7491 driver. The original 40333 run failed the old state-program
+assertion and remains failed. This experiment does not reclassify it. The new
+contract permits at most one newly linked, exact-source copy program during
+real first motion on the positively identified software profile. It checks
+link identity, current context epoch, genuine copy draws and no outside-copy
+use. The following state changes must introduce no new links or altered
+program identities. Missing or inconsistent observer evidence fails closed.
+All original load, drag, state, 3D, restoration and shutdown limits remain.
+
+Nine candidate JavaScript proofs run before browser installation: the six
+inherited scalar-lighting proofs, interaction-render, render-lifecycle and
+native-viewer-programs. The baseline interaction and native-program proofs
+also run, together with test-waterfox-tooling.py on **both** sources. These
+checks exercise the revised contract and eager/lazy implementations; they do
+not provide browser acceptance credit. No primer or BRDF-cache option is used.
 
 The candidate runs first to expose its initial use before the baseline has warmed
 this installation. It is not a guaranteed cold-driver run: setup, OS state and
@@ -80,7 +85,7 @@ from the candidate's work. This fixed order is an intentional contrast to earlie
 baseline-first pairs, not a randomized speed estimate. No performance claim is
 made by preparing this harness.
 
-The wrapper invokes each source's original `test-native-browser-acceptance.py`
+The wrapper invokes each source's identical 258056d-contract `test-native-browser-acceptance.py`
 once, with its standard product, expected-version, installation and output
 arguments. Both original cycles of viewer 6/24 rooms, the original planner 256-item case,
 all semantic and graphics checks, 30-second load limits, 15-second viewer and 10-second planner
@@ -94,8 +99,9 @@ disabled GPU process and the original passive startup diagnostics. Actual
 renderer identities are retained in the original receipts. Unexpected inherited
 fixture overrides abort setup without logging their values.
 
-Every tracked source file is hashed before and after its suite. Native drivers,
-installers/catalogs, fixture/diagnostic helpers and npm manifests must match
+Every tracked source file is hashed before and after its suite. Fifteen protected
+files (the 12 existing drivers/dependencies plus the new
+observer, its JavaScript test and Python tooling contract tests) must match
 between arms. Source or installation-receipt mutation fails the comparison.
 Separate diagnostic artifacts retain raw reports and process logs, source
 hashes, installation/toolchain logs and the comparison manifest. That manifest
@@ -134,16 +140,16 @@ local setting change.
 Offline contract check, with no browser or network:
 
 ```sh
-python3 scripts/test-intel-cgl-initial-scissor-primer.py
+python3 scripts/test-intel-cgl-copy-program-isolation.py
 ```
 
 The workflow supplies fixed choices. Its equivalent command on the Intel host
 is:
 
 ```sh
-python3 harness/scripts/run-intel-cgl-initial-scissor-primer.py \
-  --source-root "$GITHUB_WORKSPACE" --candidate initial-scissor-primer \
+python3 harness/scripts/run-intel-cgl-copy-program-isolation.py \
+  --source-root "$GITHUB_WORKSPACE" --candidate copy-program-isolation \
   --product firefox \
-  --installation "$RUNNER_TEMP/home-studio-intel-cgl-initial-scissor-primer-browser/install.json" \
-  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-initial-scissor-primer"
+  --installation "$RUNNER_TEMP/home-studio-intel-cgl-copy-program-isolation-browser/install.json" \
+  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-copy-program-isolation"
 ```

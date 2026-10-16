@@ -15,9 +15,10 @@ import threading
 import time
 
 
-BASELINE = '7491f94943ba60cc663e411bc2361745c0cc9b87'
+BASELINE = '5563e3fdc147c81931389743836610ba611e7026'
+DRIVER_REFERENCE = '258056dfd6426b90826f7ca75747ede77c636814'
 CANDIDATES = {
-    'initial-scissor-primer': 'a943b893f320b5f0dc551409645de2447124dc2b',
+    'copy-program-isolation': '258056dfd6426b90826f7ca75747ede77c636814',
 }
 CANDIDATE_CPU_CHECKS = ('scripts/test-literal-lambert-point-body.cjs',
                         'scripts/test-literal-lambert-directional.cjs',
@@ -25,8 +26,13 @@ CANDIDATE_CPU_CHECKS = ('scripts/test-literal-lambert-point-body.cjs',
                         'scripts/test-scalar-indirect-lambert.cjs',
                         'scripts/test-direct-shadow-uniforms.cjs',
                         'scripts/test-scalar-lambert-accumulators.cjs',
-                        'scripts/test-initial-scissor-primer.cjs',
-                        'scripts/test-render-lifecycle.cjs')
+                        'scripts/test-interaction-render.cjs',
+                        'scripts/test-render-lifecycle.cjs',
+                        'scripts/test-native-viewer-programs.cjs')
+CONTRACT_CPU_CHECKS = ('node baseline/scripts/test-native-viewer-programs.cjs',
+                       'node baseline/scripts/test-interaction-render.cjs',
+                       'python3 candidate/scripts/test-waterfox-tooling.py',
+                       'python3 baseline/scripts/test-waterfox-tooling.py')
 VERSIONS = {'firefox': '153.5.0esr', 'waterfox': '6.7.6'}
 DRIVER_FILES = (
     'scripts/test-native-browser-acceptance.py', 'scripts/test-waterfox-acceptance.py',
@@ -35,6 +41,8 @@ DRIVER_FILES = (
     'scripts/test-browser-stability.cjs', 'scripts/test-planner-stability.cjs',
     'scripts/browser-stability-diagnostics.cjs', 'scripts/browser-startup-diagnostics.cjs',
     'package.json', 'package-lock.json',
+    'scripts/native-viewer-program-diagnostics.js',
+    'scripts/test-native-viewer-programs.cjs', 'scripts/test-waterfox-tooling.py',
 )
 PROFILE = {
     'NATIVE_STARTUP_DIAGNOSTICS': '1',
@@ -47,21 +55,22 @@ PROFILE = {
 
 def validate_selection():
     """The prepared template cannot run with an unset or moving source."""
-    if set(CANDIDATES) != {'initial-scissor-primer'}:
+    if set(CANDIDATES) != {'copy-program-isolation'}:
         raise ValueError('Exactly one fixed candidate is required')
-    revision = CANDIDATES['initial-scissor-primer']
+    revision = CANDIDATES['copy-program-isolation']
     if (not re.fullmatch(r'[0-9a-f]{40}', revision) or
             revision == BASELINE or revision == '0' * 40):
         raise ValueError('Select one exact non-baseline candidate SHA before running')
-    if (not isinstance(CANDIDATE_CPU_CHECKS, tuple) or len(CANDIDATE_CPU_CHECKS) != 8 or
-            len(set(CANDIDATE_CPU_CHECKS)) != 8 or
+    if (not isinstance(CANDIDATE_CPU_CHECKS, tuple) or len(CANDIDATE_CPU_CHECKS) != 9 or
+            len(set(CANDIDATE_CPU_CHECKS)) != 9 or
             any(not isinstance(proof, str) or not re.fullmatch(r'scripts/test-[a-z0-9-]+\.cjs', proof)
                 for proof in CANDIDATE_CPU_CHECKS)):
-        raise ValueError('Select eight distinct candidate CPU proofs before running')
-    workflow = Path(__file__).resolve().parents[1] / '.github/workflows/intel-cgl-initial-scissor-primer.yml'
+        raise ValueError('Select nine distinct candidate CPU proofs before running')
+    workflow = Path(__file__).resolve().parents[1] / '.github/workflows/intel-cgl-copy-program-isolation.yml'
     text = workflow.read_text(encoding='utf-8')
     if (text.count('revision: ' + revision) != 2 or
-            any(text.count('node candidate/' + proof) != 1 for proof in CANDIDATE_CPU_CHECKS)):
+            any(text.count('node candidate/' + proof) != 1 for proof in CANDIDATE_CPU_CHECKS) or
+            any(text.count(command) != 1 for command in CONTRACT_CPU_CHECKS)):
         raise ValueError('Workflow candidate pins or CPU proof disagree with the runner')
 
 
@@ -299,8 +308,10 @@ def run_comparison(source_root, installation, output, candidate, product):
     output.mkdir(parents=True, exist_ok=True)
     manifest = {
         'schema': 1, 'diagnosticOnly': True, 'releaseEligible': False, 'acceptanceStatus': 'not-run',
-        'purpose': 'Candidate-first same-host Intel initial scissor primer comparison with common Spotlight normalization; never release qualification',
+        'purpose': 'Candidate-first same-host Intel copy program isolation comparison with common Spotlight normalization; never release qualification',
         'candidate': candidate, 'product': product, 'expectedVersion': VERSIONS[product],
+        'driverReferenceRevision': DRIVER_REFERENCE,
+        'driverContract': '258056d strict copy-provenance contract, identical in both arms; prior 40333 failure is unchanged',
         'startedAt': utc_now(), 'status': 'preparing', 'arms': [],
         'order': [name for name, _ in arms],
         'cacheLimitation': 'Fixed candidate-first order; shared host and OS/driver caches are not cleared. This is not a randomized performance estimate.',

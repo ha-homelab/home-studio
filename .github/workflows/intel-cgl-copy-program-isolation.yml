@@ -1,15 +1,15 @@
-name: Diagnostic Intel CGL initial scissor primer
-run-name: Non-release Intel initial scissor primer pairs with common indexing state · ${{ github.sha }}
+name: Diagnostic Intel CGL copy program isolation
+run-name: Non-release Intel copy program isolation pairs with common indexing state · ${{ github.sha }}
 
 on:
   push:
-    branches: [diagnostic/intel-cgl-initial-scissor-primer]
+    branches: [diagnostic/intel-cgl-copy-program-isolation]
 
 permissions:
   contents: read
 
 concurrency:
-  group: diagnostic-intel-cgl-initial-scissor-primer
+  group: diagnostic-intel-cgl-copy-program-isolation
   cancel-in-progress: false
 
 defaults:
@@ -19,9 +19,9 @@ defaults:
 jobs:
   compare:
     name: ${{ matrix.product }} · ${{ matrix.candidate }}
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-initial-scissor-primer' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-copy-program-isolation' }}
     runs-on: macos-15-intel
-    # Two sequential original three-case suites per VM; their own limits
+    # Two sequential 258056d strict-contract three-case suites per VM; their own limits
     # are unchanged. Other pairs run on separate hosted VMs.
     timeout-minutes: 30
     strategy:
@@ -31,12 +31,12 @@ jobs:
         include:
           - product: firefox
             version: 153.5.0esr
-            candidate: initial-scissor-primer
-            revision: a943b893f320b5f0dc551409645de2447124dc2b
+            candidate: copy-program-isolation
+            revision: 258056dfd6426b90826f7ca75747ede77c636814
           - product: waterfox
             version: 6.7.6
-            candidate: initial-scissor-primer
-            revision: a943b893f320b5f0dc551409645de2447124dc2b
+            candidate: copy-program-isolation
+            revision: 258056dfd6426b90826f7ca75747ede77c636814
     env:
       PYTHONUTF8: '1'
       NATIVE_STARTUP_DIAGNOSTICS: '1'
@@ -51,11 +51,11 @@ jobs:
           path: harness
           persist-credentials: false
       - name: Reject an unselected or inconsistent candidate before setup
-        run: python3 harness/scripts/run-intel-cgl-initial-scissor-primer.py --validate-selection
+        run: python3 harness/scripts/run-intel-cgl-copy-program-isolation.py --validate-selection
       - name: Check out the exact common baseline
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: 7491f94943ba60cc663e411bc2361745c0cc9b87
+          ref: 5563e3fdc147c81931389743836610ba611e7026
           path: baseline
           persist-credentials: false
       - name: Check out the exact independent candidate
@@ -72,7 +72,7 @@ jobs:
           node-version: '22'
       - name: Record tooling and prepare both fixtures before timing
         run: |
-          mkdir -p harness/diagnostics/intel-cgl-initial-scissor-primer
+          mkdir -p harness/diagnostics/intel-cgl-copy-program-isolation
           {
             python3 --version
             node --version
@@ -80,42 +80,47 @@ jobs:
             uname -sm
             sw_vers
             /usr/sbin/sysctl machdep.cpu.brand_string hw.ncpu hw.memsize || true
-          } > harness/diagnostics/intel-cgl-initial-scissor-primer/toolchain.log 2>&1
-          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-initial-scissor-primer/baseline-npm.log
-          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-initial-scissor-primer/candidate-npm.log
-          python3 harness/scripts/test-intel-cgl-initial-scissor-primer.py
+          } > harness/diagnostics/intel-cgl-copy-program-isolation/toolchain.log 2>&1
+          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-copy-program-isolation/baseline-npm.log
+          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-copy-program-isolation/candidate-npm.log
+          python3 harness/scripts/test-intel-cgl-copy-program-isolation.py
           node candidate/scripts/test-literal-lambert-point-body.cjs
           node candidate/scripts/test-literal-lambert-directional.cjs
           node candidate/scripts/test-scalar-shadow-point.cjs
           node candidate/scripts/test-scalar-indirect-lambert.cjs
           node candidate/scripts/test-direct-shadow-uniforms.cjs
           node candidate/scripts/test-scalar-lambert-accumulators.cjs
-          node candidate/scripts/test-initial-scissor-primer.cjs
+          node candidate/scripts/test-interaction-render.cjs
           node candidate/scripts/test-render-lifecycle.cjs
+          node candidate/scripts/test-native-viewer-programs.cjs
+          node baseline/scripts/test-native-viewer-programs.cjs
+          node baseline/scripts/test-interaction-render.cjs
+          python3 candidate/scripts/test-waterfox-tooling.py
+          python3 baseline/scripts/test-waterfox-tooling.py
       - name: Install one original checksum and signature verified browser per pair
         env:
-          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-initial-scissor-primer-browser
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-copy-program-isolation-browser
           PRODUCT: ${{ matrix.product }}
           VERSION: ${{ matrix.version }}
         run: |
-          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-initial-scissor-primer/install.log
-          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-initial-scissor-primer/install.json
+          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-copy-program-isolation/install.log
+          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-copy-program-isolation/install.json
       - name: Normalize indexing once and run candidate before baseline
         env:
-          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-initial-scissor-primer-browser
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-copy-program-isolation-browser
           PRODUCT: ${{ matrix.product }}
           CANDIDATE: ${{ matrix.candidate }}
         run: >-
-          python3 harness/scripts/run-intel-cgl-initial-scissor-primer.py
+          python3 harness/scripts/run-intel-cgl-copy-program-isolation.py
           --source-root "$GITHUB_WORKSPACE"
           --candidate "$CANDIDATE" --product "$PRODUCT"
           --installation "$INSTALL_DIR/install.json"
-          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-initial-scissor-primer"
+          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-copy-program-isolation"
       - name: Preserve all non-release evidence even when a source fails
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: diagnostic-intel-cgl-initial-scissor-primer-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: harness/diagnostics/intel-cgl-initial-scissor-primer/
+          name: diagnostic-intel-cgl-copy-program-isolation-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: harness/diagnostics/intel-cgl-copy-program-isolation/
           if-no-files-found: error
           retention-days: 14
