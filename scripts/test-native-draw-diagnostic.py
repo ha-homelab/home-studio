@@ -68,6 +68,15 @@ class DrawDiagnosticTests(unittest.TestCase):
             self.assertEqual([e['event'] for e in diagnostic.events_from_log(log)], ['draw-before','draw-after'])
             self.assertEqual(diagnostic.events_from_log(log.with_name('missing')), [])
 
+    def test_preserves_unknown_uniforms_and_separate_pre_draw_drain(self):
+        event = {'event':'draw-after', 'draw':1, 'preDrawDrainMs':12, 'submissionMs':1,
+                 'completionMs':40, 'submittedUniforms':{'homePointLightingRequired':False,
+                                                       'homeDaylight':0, 'homeWallSurface':None}}
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / 'browser.log'
+            log.write_text('HOME_NATIVE_DRAW ' + json.dumps(event) + '\n')
+            self.assertEqual(diagnostic.events_from_log(log), [event])
+
     def test_bootstrap_is_original_once_with_no_acceptance_input_or_extra_frame(self):
         module = load('native_for_draw_test', 'test-waterfox-acceptance.py')
         original = inspect.getsource(module.viewer)
