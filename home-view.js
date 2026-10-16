@@ -234,7 +234,7 @@ homeView = (() => {
     }
     const lights=points.filter(point=>point.light).map(point=>point.light),lightCount=lights.length;
     configurePointShadows(lights, renderer?.capabilities, renderProfile);
-    if(!roomLighting || roomLighting.capacity<lightCount)roomLighting=createRoomLighting(THREE,model.rooms.map(room=>({...room,exterior:(model.exterior_rooms||[]).includes(room.id),polygon:room.polygon.map(([x,z])=>[xm(x),zm(z)])})),lightCount,daylightWindows,{packed:renderProfile.diffuseLighting===true,maxFragmentUniforms:renderer.capabilities.maxFragmentUniforms});
+    if(!roomLighting || roomLighting.capacity<lightCount)roomLighting=createRoomLighting(THREE,model.rooms.map(room=>({...room,exterior:(model.exterior_rooms||[]).includes(room.id),polygon:room.polygon.map(([x,z])=>[xm(x),zm(z)])})),lightCount,daylightWindows,{packed:renderProfile.diffuseLighting===true,pointDecayTwo:true,maxFragmentUniforms:renderer.capabilities.maxFragmentUniforms});
     roomLighting.attach(root,active,{staticGeometry:true});roomLighting.attach(objectGroup,active);
     updateFixtureShadows();
   }
