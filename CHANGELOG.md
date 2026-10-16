@@ -48,6 +48,8 @@
   fragment array; larger plans or lower limits retain the original shader path.
   Skip absent daylight topology and polygon-distance work outside its full
   spatial reach, retaining the same window and exterior lighting.
+  Fixed building geometry skips light runs with a provably zero contribution;
+  movable and unsupported geometry retain all runs in their original order.
 - Reuse planner outlines and selection controls, and avoid redrawing unchanged
   snapped positions. Preserve exact furniture overlap, appearance, undo and drag
   cancellation. Bound software-renderer resolution without reducing sharp HTML

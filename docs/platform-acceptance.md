@@ -162,8 +162,8 @@ uniform arrays, replacing repeated literal GLSL helpers with shared loops. Room
 order, doorway spill, daylight and window transmission retain the same math;
 other renderer profiles retain their original shader source. Packing is enabled
 only when the reported fragment-uniform limit covers a conservative allowance:
-128 vectors plus six per light slot, four per room, one per polygon edge and two
-per window. The guard budgets 764 of the Apple software renderer's reported
+128 vectors plus seven per light slot, four per room, one per polygon edge and two
+per window. The guard budgets 836 of the Apple software renderer's reported
 1,024 vectors for the 24-room, 72-light fixture. Lower limits and larger plans fall back to
 the original literal geometry without reducing scene contents. CPU regression
 tests cover polygon boundaries, concave rooms, window ordering and this fallback.
@@ -171,6 +171,14 @@ The packed daylight path omits loops for absent exterior rooms or windows and
 rejects rooms outside the existing conservative spatial bound before calculating
 polygon distance. The bound contains the full daylight and exterior transition;
 window accumulation order and every nonzero contribution remain unchanged.
+
+Immutable building materials also receive a conservative world-space bound.
+The packed path skips whole light runs whose room cannot contribute anywhere
+inside that bound, retaining the original order and shadow-light prefix.
+Movable furniture, deformed or unsupported geometry, and materials shared with
+movable objects retain every run. Bounds include the complete vertex buffer,
+the room's full light-transmission halo, and floating-point arithmetic slack.
+The additional uniform allowance above accounts for the selected run starts.
 
 Phone and tablet profiles use **390 × 844** and **820 × 1180** CSS pixels,
 respectively, at device scale factor 2, with touch enabled. They retain the
