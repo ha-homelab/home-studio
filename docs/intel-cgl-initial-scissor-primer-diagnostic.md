@@ -1,6 +1,6 @@
-# Disposable Intel cached Lambert diffuse diagnostic
+# Disposable Intel initial scissor primer diagnostic
 
-Only a push to `diagnostic/intel-cgl-cached-lambert-diffuse` starts this workflow. It has
+Only a push to `diagnostic/intel-cgl-initial-scissor-primer` starts this workflow. It has
 read-only GitHub permissions and pinned actions. It does not invoke the 77-lane
 acceptance gate or publish a release. Its results are diagnostic evidence only.
 
@@ -11,7 +11,7 @@ preparation. Preparation does not authorize a push or launch.
 
 Two independent `macos-15-intel` jobs compare these sources in order:
 
-- Cached Lambert diffuse candidate, first: `725ed7d23c57dc5aba65733ceb32b901d467bb6e`.
+- Initial scissor primer candidate, first: `a943b893f320b5f0dc551409645de2447124dc2b`.
 - Baseline, second: `7491f94943ba60cc663e411bc2361745c0cc9b87`.
 - Candidate preflights: `node scripts/test-literal-lambert-point-body.cjs` and
   `node scripts/test-literal-lambert-directional.cjs`, plus
@@ -19,13 +19,14 @@ Two independent `macos-15-intel` jobs compare these sources in order:
   `node scripts/test-scalar-indirect-lambert.cjs`, and
   `node scripts/test-direct-shadow-uniforms.cjs`, and
   `node scripts/test-scalar-lambert-accumulators.cjs`, and
-  `node scripts/test-cached-lambert-diffuse.cjs`.
+  `node scripts/test-initial-scissor-primer.cjs` and
+  `node scripts/test-render-lifecycle.cjs`.
 
 One job uses Firefox `153.5.0esr`; the other uses Waterfox `6.7.6`. Maximum
 parallelism is two. Each pair runs sequentially on one hosted VM and shares one
 official browser installation verified by the original installer, checksum
 catalog and signature checks. Python 3.13, Node 22 and both locked npm dependency
-installations are prepared before either suite starts. All seven selected candidate
+installations are prepared before either suite starts. All eight selected candidate
 CPU proofs run before the browser is installed; failure stops preparation.
 
 After both sources pass preflight, the runner records `mdutil -a -s`, invokes
@@ -52,13 +53,26 @@ passive CPU records remain necessary context. Both sources receive the same
 normalization. Fixed order and shared caches still limit causal conclusions.
 
 The baseline already contains scalar point, directional, indirect and main
-Lambert accumulators, plus direct shadow uniform reads. The candidate reuses
-one exact pure Lambert BRDF value only in the guarded scalar main branch.
-All contributions retain their multiplication and addition order; unsupported
-source, features or ownership retain the original per-use expression. All seven
-CPU proofs run before browser installation. The local strict case passed but
-showed no load improvement; this diagnostic tests the distinct hosted Intel
-path without predicting a gain.
+Lambert accumulators, plus direct shadow uniform reads. The candidate preserves
+all of those shader sources. On the positively selected Apple software profile,
+it submits the first initialized Home scene with the same full viewport and a
+2×2 physical scissor, then yields once for 2,500 ms before the ordinary complete
+current-state draw. The partial draw receives no completed-render credit.
+Unsupported state retains the original synchronous path, while hide, loss,
+pagehide or an editor switch retire the pending wait. The unchanged original
+case includes this wait within its existing load and watchdog deadlines.
+
+Eight CPU proofs run before browser installation: the six inherited scalar
+lighting proofs and the primer/controller plus existing render-lifecycle
+proofs. The parked BRDF-cache proof is absent because neither exact source
+contains that separate optimization. A local original 24-room case passed but
+showed no load improvement. A separate passive original-suite diagnostic
+verified both cycles actually used a 2×2 primer at full viewport, retained zero
+readiness until the ordinary full draw, and reused the exact complete linked
+texture-lighting program sources. This is not hosted Intel performance evidence
+or a promise that the fixed wait reaches native compiler readiness. Separate
+completed-frame pixel parity remains required before any launch authorization.
+
 The candidate runs first to expose its initial use before the baseline has warmed
 this installation. It is not a guaranteed cold-driver run: setup, OS state and
 persistent machine-image caches are not controlled. The later baseline can benefit
@@ -120,16 +134,16 @@ local setting change.
 Offline contract check, with no browser or network:
 
 ```sh
-python3 scripts/test-intel-cgl-cached-lambert-diffuse.py
+python3 scripts/test-intel-cgl-initial-scissor-primer.py
 ```
 
 The workflow supplies fixed choices. Its equivalent command on the Intel host
 is:
 
 ```sh
-python3 harness/scripts/run-intel-cgl-cached-lambert-diffuse.py \
-  --source-root "$GITHUB_WORKSPACE" --candidate cached-lambert-diffuse \
+python3 harness/scripts/run-intel-cgl-initial-scissor-primer.py \
+  --source-root "$GITHUB_WORKSPACE" --candidate initial-scissor-primer \
   --product firefox \
-  --installation "$RUNNER_TEMP/home-studio-intel-cgl-cached-lambert-diffuse-browser/install.json" \
-  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-cached-lambert-diffuse"
+  --installation "$RUNNER_TEMP/home-studio-intel-cgl-initial-scissor-primer-browser/install.json" \
+  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-initial-scissor-primer"
 ```

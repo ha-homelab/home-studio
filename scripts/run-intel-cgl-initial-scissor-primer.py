@@ -17,7 +17,7 @@ import time
 
 BASELINE = '7491f94943ba60cc663e411bc2361745c0cc9b87'
 CANDIDATES = {
-    'cached-lambert-diffuse': '725ed7d23c57dc5aba65733ceb32b901d467bb6e',
+    'initial-scissor-primer': 'a943b893f320b5f0dc551409645de2447124dc2b',
 }
 CANDIDATE_CPU_CHECKS = ('scripts/test-literal-lambert-point-body.cjs',
                         'scripts/test-literal-lambert-directional.cjs',
@@ -25,7 +25,8 @@ CANDIDATE_CPU_CHECKS = ('scripts/test-literal-lambert-point-body.cjs',
                         'scripts/test-scalar-indirect-lambert.cjs',
                         'scripts/test-direct-shadow-uniforms.cjs',
                         'scripts/test-scalar-lambert-accumulators.cjs',
-                        'scripts/test-cached-lambert-diffuse.cjs')
+                        'scripts/test-initial-scissor-primer.cjs',
+                        'scripts/test-render-lifecycle.cjs')
 VERSIONS = {'firefox': '153.5.0esr', 'waterfox': '6.7.6'}
 DRIVER_FILES = (
     'scripts/test-native-browser-acceptance.py', 'scripts/test-waterfox-acceptance.py',
@@ -46,18 +47,18 @@ PROFILE = {
 
 def validate_selection():
     """The prepared template cannot run with an unset or moving source."""
-    if set(CANDIDATES) != {'cached-lambert-diffuse'}:
+    if set(CANDIDATES) != {'initial-scissor-primer'}:
         raise ValueError('Exactly one fixed candidate is required')
-    revision = CANDIDATES['cached-lambert-diffuse']
+    revision = CANDIDATES['initial-scissor-primer']
     if (not re.fullmatch(r'[0-9a-f]{40}', revision) or
             revision == BASELINE or revision == '0' * 40):
         raise ValueError('Select one exact non-baseline candidate SHA before running')
-    if (not isinstance(CANDIDATE_CPU_CHECKS, tuple) or len(CANDIDATE_CPU_CHECKS) != 7 or
-            len(set(CANDIDATE_CPU_CHECKS)) != 7 or
+    if (not isinstance(CANDIDATE_CPU_CHECKS, tuple) or len(CANDIDATE_CPU_CHECKS) != 8 or
+            len(set(CANDIDATE_CPU_CHECKS)) != 8 or
             any(not isinstance(proof, str) or not re.fullmatch(r'scripts/test-[a-z0-9-]+\.cjs', proof)
                 for proof in CANDIDATE_CPU_CHECKS)):
-        raise ValueError('Select seven distinct candidate CPU proofs before running')
-    workflow = Path(__file__).resolve().parents[1] / '.github/workflows/intel-cgl-cached-lambert-diffuse.yml'
+        raise ValueError('Select eight distinct candidate CPU proofs before running')
+    workflow = Path(__file__).resolve().parents[1] / '.github/workflows/intel-cgl-initial-scissor-primer.yml'
     text = workflow.read_text(encoding='utf-8')
     if (text.count('revision: ' + revision) != 2 or
             any(text.count('node candidate/' + proof) != 1 for proof in CANDIDATE_CPU_CHECKS)):
@@ -298,7 +299,7 @@ def run_comparison(source_root, installation, output, candidate, product):
     output.mkdir(parents=True, exist_ok=True)
     manifest = {
         'schema': 1, 'diagnosticOnly': True, 'releaseEligible': False, 'acceptanceStatus': 'not-run',
-        'purpose': 'Candidate-first same-host Intel cached Lambert diffuse comparison with common Spotlight normalization; never release qualification',
+        'purpose': 'Candidate-first same-host Intel initial scissor primer comparison with common Spotlight normalization; never release qualification',
         'candidate': candidate, 'product': product, 'expectedVersion': VERSIONS[product],
         'startedAt': utc_now(), 'status': 'preparing', 'arms': [],
         'order': [name for name, _ in arms],

@@ -1,15 +1,15 @@
-name: Diagnostic Intel CGL cached Lambert diffuse
-run-name: Non-release Intel cached Lambert diffuse pairs with common indexing state · ${{ github.sha }}
+name: Diagnostic Intel CGL initial scissor primer
+run-name: Non-release Intel initial scissor primer pairs with common indexing state · ${{ github.sha }}
 
 on:
   push:
-    branches: [diagnostic/intel-cgl-cached-lambert-diffuse]
+    branches: [diagnostic/intel-cgl-initial-scissor-primer]
 
 permissions:
   contents: read
 
 concurrency:
-  group: diagnostic-intel-cgl-cached-lambert-diffuse
+  group: diagnostic-intel-cgl-initial-scissor-primer
   cancel-in-progress: false
 
 defaults:
@@ -19,7 +19,7 @@ defaults:
 jobs:
   compare:
     name: ${{ matrix.product }} · ${{ matrix.candidate }}
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-cached-lambert-diffuse' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-initial-scissor-primer' }}
     runs-on: macos-15-intel
     # Two sequential original three-case suites per VM; their own limits
     # are unchanged. Other pairs run on separate hosted VMs.
@@ -31,12 +31,12 @@ jobs:
         include:
           - product: firefox
             version: 153.5.0esr
-            candidate: cached-lambert-diffuse
-            revision: 725ed7d23c57dc5aba65733ceb32b901d467bb6e
+            candidate: initial-scissor-primer
+            revision: a943b893f320b5f0dc551409645de2447124dc2b
           - product: waterfox
             version: 6.7.6
-            candidate: cached-lambert-diffuse
-            revision: 725ed7d23c57dc5aba65733ceb32b901d467bb6e
+            candidate: initial-scissor-primer
+            revision: a943b893f320b5f0dc551409645de2447124dc2b
     env:
       PYTHONUTF8: '1'
       NATIVE_STARTUP_DIAGNOSTICS: '1'
@@ -51,7 +51,7 @@ jobs:
           path: harness
           persist-credentials: false
       - name: Reject an unselected or inconsistent candidate before setup
-        run: python3 harness/scripts/run-intel-cgl-cached-lambert-diffuse.py --validate-selection
+        run: python3 harness/scripts/run-intel-cgl-initial-scissor-primer.py --validate-selection
       - name: Check out the exact common baseline
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -72,7 +72,7 @@ jobs:
           node-version: '22'
       - name: Record tooling and prepare both fixtures before timing
         run: |
-          mkdir -p harness/diagnostics/intel-cgl-cached-lambert-diffuse
+          mkdir -p harness/diagnostics/intel-cgl-initial-scissor-primer
           {
             python3 --version
             node --version
@@ -80,41 +80,42 @@ jobs:
             uname -sm
             sw_vers
             /usr/sbin/sysctl machdep.cpu.brand_string hw.ncpu hw.memsize || true
-          } > harness/diagnostics/intel-cgl-cached-lambert-diffuse/toolchain.log 2>&1
-          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-cached-lambert-diffuse/baseline-npm.log
-          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-cached-lambert-diffuse/candidate-npm.log
-          python3 harness/scripts/test-intel-cgl-cached-lambert-diffuse.py
+          } > harness/diagnostics/intel-cgl-initial-scissor-primer/toolchain.log 2>&1
+          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-initial-scissor-primer/baseline-npm.log
+          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-initial-scissor-primer/candidate-npm.log
+          python3 harness/scripts/test-intel-cgl-initial-scissor-primer.py
           node candidate/scripts/test-literal-lambert-point-body.cjs
           node candidate/scripts/test-literal-lambert-directional.cjs
           node candidate/scripts/test-scalar-shadow-point.cjs
           node candidate/scripts/test-scalar-indirect-lambert.cjs
           node candidate/scripts/test-direct-shadow-uniforms.cjs
           node candidate/scripts/test-scalar-lambert-accumulators.cjs
-          node candidate/scripts/test-cached-lambert-diffuse.cjs
+          node candidate/scripts/test-initial-scissor-primer.cjs
+          node candidate/scripts/test-render-lifecycle.cjs
       - name: Install one original checksum and signature verified browser per pair
         env:
-          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-cached-lambert-diffuse-browser
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-initial-scissor-primer-browser
           PRODUCT: ${{ matrix.product }}
           VERSION: ${{ matrix.version }}
         run: |
-          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-cached-lambert-diffuse/install.log
-          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-cached-lambert-diffuse/install.json
+          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-initial-scissor-primer/install.log
+          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-initial-scissor-primer/install.json
       - name: Normalize indexing once and run candidate before baseline
         env:
-          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-cached-lambert-diffuse-browser
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-initial-scissor-primer-browser
           PRODUCT: ${{ matrix.product }}
           CANDIDATE: ${{ matrix.candidate }}
         run: >-
-          python3 harness/scripts/run-intel-cgl-cached-lambert-diffuse.py
+          python3 harness/scripts/run-intel-cgl-initial-scissor-primer.py
           --source-root "$GITHUB_WORKSPACE"
           --candidate "$CANDIDATE" --product "$PRODUCT"
           --installation "$INSTALL_DIR/install.json"
-          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-cached-lambert-diffuse"
+          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-initial-scissor-primer"
       - name: Preserve all non-release evidence even when a source fails
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: diagnostic-intel-cgl-cached-lambert-diffuse-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: harness/diagnostics/intel-cgl-cached-lambert-diffuse/
+          name: diagnostic-intel-cgl-initial-scissor-primer-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: harness/diagnostics/intel-cgl-initial-scissor-primer/
           if-no-files-found: error
           retention-days: 14
