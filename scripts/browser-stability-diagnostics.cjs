@@ -105,8 +105,23 @@ async function browserIdentity(page, engine, launch, version) {
 
 function inputInstrumentation() {
   window.__acceptanceInput = {trustedTouchStarts: 0, trustedTouchMoves: 0, trustedTouchEnds: 0,
-    trustedTouchPointerDowns: 0, trustedTouchPointerMoves: 0, trustedMousePointerDowns: 0};
+    trustedTouchPointerDowns: 0, trustedTouchPointerMoves: 0, trustedMousePointerDowns: 0, events: []};
   const counts = window.__acceptanceInput;
+  const record = (event, phase) => {
+    const point = event.changedTouches?.[0] || event;
+    const viewport = window.visualViewport;
+    counts.events.push({type:event.type,phase,time:Math.round(performance.now()),trusted:event.isTrusted,
+      target:{tag:event.target?.tagName||null,id:event.target?.id||null,container:event.target?.parentElement?.closest('[id]')?.id||null},
+      pointerType:event.pointerType||null,pointerId:event.pointerId??null,client:[point.clientX??null,point.clientY??null],
+      defaultPrevented:event.defaultPrevented,homeMode:window.floorplan?.homeMode??null,
+      viewport:{width:innerWidth,height:innerHeight,dpr:devicePixelRatio,scale:viewport?.scale??null,x:viewport?.offsetLeft??null,y:viewport?.offsetTop??null}});
+    if(counts.events.length>64)counts.events.shift();
+  };
+  for(const type of ['pointerdown','pointerup','pointercancel','gotpointercapture','lostpointercapture','touchstart','touchend','touchcancel','click']) {
+    window.addEventListener(type,event=>record(event,'capture'),{capture:true,passive:true});
+  }
+  // Bubble evidence shows whether a trusted click reached the app's handler.
+  window.addEventListener('click',event=>record(event,'bubble'),{passive:true});
   for (const [event, key] of [['touchstart', 'trustedTouchStarts'], ['touchmove', 'trustedTouchMoves'], ['touchend', 'trustedTouchEnds']]) {
     window.addEventListener(event, value => { if (value.isTrusted) counts[key]++; }, {capture: true, passive: true});
   }
@@ -236,6 +251,8 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
           return {
             url: location.href === 'about:srcdoc' ? 'about:srcdoc' : location.pathname,
             userAgent: navigator.userAgent, devicePixelRatio: window.devicePixelRatio,
+            viewport: {width:innerWidth,height:innerHeight,scrollX,scrollY,visual:window.visualViewport ?
+              {width:visualViewport.width,height:visualViewport.height,scale:visualViewport.scale,x:visualViewport.offsetLeft,y:visualViewport.offsetTop} : null},
             input: window.__acceptanceInput || null,
             stats: window.__browserStability || window.__plannerStats || null, scene, sceneError,
           };

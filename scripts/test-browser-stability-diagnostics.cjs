@@ -348,6 +348,30 @@ test('native touch drags use browser protocol and release a failed gesture', asy
   assert.deepEqual(commands[13].payload, {type:'touchEnd',touchPoints:[]});
 });
 
+test('input evidence retains event targets and viewport without changing native events', () => {
+  const source=fs.readFileSync(path.join(__dirname,'browser-stability-diagnostics.cjs'),'utf8');
+  const instrument=source.slice(source.indexOf('function inputInstrumentation()'),source.indexOf('async function createInputDriver'));
+  const listeners=[],target={tagName:'BUTTON',id:'openHome',parentElement:{closest:()=>({id:'toolbar'})}};
+  const window={floorplan:{homeMode:false},visualViewport:{scale:1,offsetLeft:0,offsetTop:2},
+    addEventListener:(type,callback,options)=>listeners.push({type,callback,capture:options===true||options?.capture})};
+  vm.runInNewContext(instrument+'\ninputInstrumentation();',{window,innerWidth:375,innerHeight:784,devicePixelRatio:1,performance:{now:()=>25}});
+  const emit=(type,capture)=>{
+    const event=Object.freeze({type,target,isTrusted:true,pointerType:'touch',pointerId:7,clientX:50,clientY:100,defaultPrevented:false});
+    for(const listener of listeners)if(listener.type===type&&(capture===undefined||Boolean(listener.capture)===capture))listener.callback(event);
+  };
+  emit('touchstart');emit('touchend');emit('click',true);
+  window.floorplan.homeMode=true;emit('click',false);
+  const input=JSON.parse(JSON.stringify(window.__acceptanceInput));
+  assert.equal(input.trustedTouchStarts,1);assert.equal(input.trustedTouchEnds,1);
+  const click=input.events.slice(-2);
+  assert.deepEqual(click.map(event=>[event.phase,event.homeMode]),[['capture',false],['bubble',true]]);
+  assert.deepEqual(click[0].target,{tag:'BUTTON',id:'openHome',container:'toolbar'});
+  assert.deepEqual(click[0].client,[50,100]);
+  assert.deepEqual(click[0].viewport,{width:375,height:784,dpr:1,scale:1,x:0,y:2});
+  for(let n=0;n<100;n++)emit('pointercancel');
+  assert.equal(window.__acceptanceInput.events.length,64,'Input evidence must remain bounded');
+});
+
 test('planner disposes geometry and shadow callbacks before restoring the GL context', () => {
   const source = fs.readFileSync(path.join(__dirname, '../planner/editor.js'), 'utf8');
   const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
