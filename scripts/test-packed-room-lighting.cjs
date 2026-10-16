@@ -113,6 +113,9 @@ for(const original of polygons)for(const reversed of [false,true])for(let offset
   }
 }
 assert.deepEqual(Array.from(data.windowIndices),[1,3,0],'Grouped windows retain each room’s original accumulation order');
+assert.deepEqual(Array.from(data.uniforms.homeWindowRooms.value),[0,1],
+  'The immutable window-room list retains source room order, not incoming window order');
+assert.equal(data.windowRoomCount,2);
 for(let i=0;i<rooms.length;i++)assert.deepEqual(packedEdges(data,i),edgesOf(rooms[i]));
 for(const limit of [0,1,data.uniformVectors-1,NaN,undefined])assert.equal(context.packRoomLightingGeometry(rooms,windows,9,limit),null);
 assert(context.packRoomLightingGeometry(rooms,windows,9,data.uniformVectors));
@@ -260,7 +263,7 @@ for(const p of positions) {
       'return [$1].map(channel=>3.14159265*channel*($2));');
     assert.notEqual(result,body,'Translate the unchanged vec3 irradiance expression');
     return new Function('homeExteriorSurface','homeDaylight','homeRoomExterior','homeRoomRanges',
-      'homeWindowSegments','homeWindowTransmission','homeRoomNearby','homeRoomDistance','homeWindowGlow',
+      'homeWindowRooms','homeWindowSegments','homeWindowTransmission','homeRoomNearby','homeRoomDistance','homeWindowGlow',
       'max','min','smoothstep',result.replace(/\b(?:float|int|ivec4|vec4)\s+(\w+)/g,'let $1'));
   }
   const daylightPositions=[...positions];
@@ -273,6 +276,8 @@ for(const p of positions) {
   for(const [inputRooms,inputWindows] of [
     [rooms,windows], [rooms.map(room=>({...room,exterior:false})),windows],
     [rooms.filter((_,index)=>index!==1).map(room=>({...room,exterior:true})),windows],
+    [rooms,[windows[0]]], // Leading and trailing rooms without windows.
+    [rooms,[{room:'C',a:[1,8],b:[2,8]},windows[1],windows[2],windows[3]]], // A gap and reordered windows.
     [rooms,[]], [rooms,[windows[2]]], [[],windows], [[],[]],
   ]) {
     const packedGeometry=context.packRoomLightingGeometry(inputRooms,inputWindows,9,1024);
@@ -281,7 +286,14 @@ for(const p of positions) {
     const hasExterior=inputRooms.some(room=>room.exterior===true);
     if(hasExterior)assert.match(body,/homeRoomExterior\[room\] != 0 && homeRoomNearby\(room\)/);
     else assert.doesNotMatch(body,/homeRoomExterior\[/,'No exterior topology emits no exterior loop');
-    if(packedGeometry.windowIndices.length)assert.match(body,/range\.z < range\.w && homeRoomNearby\(room\) && homeRoomDistance\(room\) <= 0\.015/);
+    if(packedGeometry.windowIndices.length) {
+      assert.match(body,/int room = homeWindowRooms\[windowRoom\];/);
+      assert.match(body,/if \(homeRoomNearby\(room\) && homeRoomDistance\(room\) <= 0\.015\)/);
+      const expectedRooms=inputRooms.flatMap((room,index)=>inputWindows.some(window=>window.room===room.id)?[index]:[]);
+      assert.deepEqual(Array.from(packedGeometry.uniforms.homeWindowRooms.value),expectedRooms);
+      assert.equal(packedGeometry.windowRoomCount,expectedRooms.length);
+      assert(body.includes(`windowRoom < ${expectedRooms.length}`),'The emitted loop visits only nonempty rooms');
+    }
     else assert.doesNotMatch(body,/homeRoomRanges\[/,'No mapped windows emit no window-room loop');
     if(!hasExterior&&!packedGeometry.windowIndices.length)assert.doesNotMatch(body,/for \(/);
     const bounds=packedGeometry.uniforms.homeRoomBounds.value;
@@ -305,12 +317,21 @@ for(const p of positions) {
       const expected=[.93,.97,1].map(channel=>3.14159265*channel*(day*Math.min(incoming,1.05)+exterior*(.16+1.1*day)));
       const nearby=index=>point[0]>=bounds[index*4]-.56&&point[1]>=bounds[index*4+1]-.56&&
         point[0]<=bounds[index*4+2]+.56&&point[1]<=bounds[index*4+3]+.56;
-      const actual=evaluateDaylight(materialExterior,day,packedGeometry.uniforms.homeRoomExterior.value,ranges,segments,
+      const visitedRanges=[];
+      const checkedRanges=new Proxy(ranges,{get(target,key){
+        const index=Number(key);assert(Number.isInteger(index)&&index>=0&&index<inputRooms.length);
+        assert(target[index].z<target[index].w,'The window loop cannot load a room without windows');
+        visitedRanges.push(index);return target[index];
+      }});
+      const actual=evaluateDaylight(materialExterior,day,packedGeometry.uniforms.homeRoomExterior.value,checkedRanges,
+        packedGeometry.uniforms.homeWindowRooms.value,segments,
         packedGeometry.windowIndices.map(index=>incomingByWindow[index]),nearby,
         index=>{assert(nearby(index),'Distance is evaluated only after the conservative bounds guard');return packedDistance(packedGeometry,index,point);},
         (a,b)=>{actualOrder.push(sourceForSegment.get(a));return glow(point,[...a,...b]);},Math.max,Math.min,smooth);
       actual.forEach((channel,index)=>near(channel,expected[index],'Actual packed daylight equals original unguarded polygon/window accumulation'));
       assert.deepEqual(actualOrder,expectedOrder,'Mapped window contribution order is unchanged');checkedDaylight++;
+      assert.deepEqual(visitedRanges,day>0?Array.from(packedGeometry.uniforms.homeWindowRooms.value).slice(0,packedGeometry.windowRoomCount):[],
+        'Every daylight evaluation visits each nonempty room once in original order');
     }
   }
   console.log(JSON.stringify({checkedDaylight,checkedRectanglePoints}));
@@ -404,6 +425,15 @@ for(const p of positions) {
   const full=Array.from({length:24},(_,i)=>{const x=i%6*4,z=Math.floor(i/6)*4;return{id:`room${i}`,polygon:[[x,z],[x+4,z],[x+4,z+4],[x,z+4]]};});
   const fullWindows=full.slice(0,6).map((r,i)=>({room:r.id,a:[i*4+1,0],b:[i*4+2.6,0]}));
   const literal=shaderFor(full,fullWindows,72),packed=shaderFor(full,fullWindows,72,{packed:true,maxFragmentUniforms:1024});
+  const fullData=context.packRoomLightingGeometry(full,fullWindows,72,1024);
+  assert.equal(fullData.windowRoomCount,6,'The 24-room fixture visits only its six window rooms');
+  assert.deepEqual(Array.from(fullData.uniforms.homeWindowRooms.value),[0,1,2,3,4,5]);
+  const previousAllowance=128+72*7+full.length*4+full.length*4+fullWindows.length*2;
+  assert.equal(fullData.uniformVectors,previousAllowance+6,'Each new int-array element reserves a full uniform vector');
+  assert.equal(context.packRoomLightingGeometry(full,fullWindows,72,fullData.uniformVectors-1),null);
+  assert(context.packRoomLightingGeometry(full,fullWindows,72,fullData.uniformVectors));
+  assert.equal(shaderFor(full,fullWindows,72,{packed:true,maxFragmentUniforms:previousAllowance}).shader.fragmentShader,
+    literal.shader.fragmentShader,'A limit fitting only the old arrays falls back to the unchanged literal shader');
   assert.equal(context.packRoomLightingGeometry(full,fullWindows,72,1024).rectanglesOnly,true);
   assert.doesNotMatch(packed.shader.fragmentShader,/for \(int edge|if \(range.y < 0\)/,'An all-rectangle plan omits the generic edge loop entirely');
   assert.match(packed.shader.fragmentShader,/return length\(max\(distanceToBox, vec2\(0.0\)\)\) \+ min\(max\(distanceToBox.x, distanceToBox.y\), 0.0\);/);

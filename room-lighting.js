@@ -131,9 +131,10 @@ function filterRoomLightingRuns(bounds, roomBounds, pointRooms, ends, count, tar
 // the same five-decimal literals as the original GLSL before Float32 storage.
 function packRoomLightingGeometry(rooms, windows, capacity, maxFragmentUniforms) {
   const edgeCount = rooms.reduce((sum, room) => sum + room.polygon.length, 0);
+  const windowRooms = rooms.flatMap((room, index) => windows.some(window => window.room === room.id) ? [index] : []);
   // Scalars in arrays may each consume a vector. Reserve the existing light,
   // shadow, material and transform uniforms before adding packed geometry.
-  const uniformVectors = 128 + capacity * 7 + rooms.length * 4 + edgeCount + windows.length * 2;
+  const uniformVectors = 128 + capacity * 7 + rooms.length * 4 + edgeCount + windows.length * 2 + Math.max(1, windowRooms.length);
   if (!Number.isFinite(maxFragmentUniforms) || uniformVectors > maxFragmentUniforms) return null;
   const edges = new Float32Array(Math.max(1, edgeCount) * 4);
   const ranges = new Int32Array(Math.max(1, rooms.length) * 4);
@@ -171,9 +172,10 @@ function packRoomLightingGeometry(rooms, windows, capacity, maxFragmentUniforms)
     ranges.set([start, rectangle ? -edge : edge, windowStart, windowIndices.length], index * 4);
     exterior[index] = room.exterior === true ? 1 : 0;
   });
-  return {edgeCount, rectanglesOnly, uniformVectors, windowIndices, windowSlots, uniforms: {
+  return {edgeCount, rectanglesOnly, uniformVectors, windowIndices, windowSlots, windowRoomCount:windowRooms.length, uniforms: {
     homeRoomEdges:{value:edges}, homeRoomRanges:{value:ranges}, homeRoomBounds:{value:bounds},
     homeRoomExterior:{value:exterior}, homeWindowSegments:{value:segments},
+    homeWindowRooms:{value:new Int32Array(windowRooms.length ? windowRooms : [0])},
   }};
 }
 
@@ -199,6 +201,7 @@ function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {
     uniform vec4 homeRoomBounds[${Math.max(1, rooms.length)}];
     uniform int homeRoomExterior[${Math.max(1, rooms.length)}];
     uniform vec4 homeWindowSegments[${Math.max(1, windows.length)}];
+    uniform int homeWindowRooms[${Math.max(1, packed.windowRoomCount)}];
   ` : '';
   const glslNumber = n => Number(n).toFixed(5);
   const glslVector = p => `vec2(${p.map(glslNumber).join(',')})`;
@@ -286,9 +289,10 @@ ${packed ? `    uniform int homeLightRunStarts[${capacity}];\n    ${geometryDecl
       }` : '') : rooms.filter(room=>room.exterior===true).map(room=>`exterior = max(exterior, 1.0-smoothstep(0.0,0.04,homeRoomDistance${roomIds.get(room.id)}()));`).join('\n')}
       float incoming = 0.0;
       if (homeDaylight > 0.0) {
-        ${packed ? (packed.windowIndices.length ? `for (int room = 0; room < ${rooms.length}; room++) {
+        ${packed ? (packed.windowIndices.length ? `for (int windowRoom = 0; windowRoom < ${packed.windowRoomCount}; windowRoom++) {
+          int room = homeWindowRooms[windowRoom];
           ivec4 range = homeRoomRanges[room];
-          if (range.z < range.w && homeRoomNearby(room) && homeRoomDistance(room) <= 0.015) {
+          if (homeRoomNearby(room) && homeRoomDistance(room) <= 0.015) {
             for (int window = range.z; window < range.w; window++) {
               vec4 segment = homeWindowSegments[window];
               incoming += homeWindowTransmission[window] * homeWindowGlow(segment.xy, segment.zw);
