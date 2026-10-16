@@ -105,3 +105,83 @@ jobs:
           path: harness/diagnostics/intel-cgl-fallback/
           if-no-files-found: error
           retention-days: 14
+
+  playwright:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-fallback' }}
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      BROWSER_STABILITY_ENGINES: firefox
+      PLANNER_STABILITY_ENGINES: firefox
+      BROWSER_STABILITY_HEADED: '1'
+      PLANNER_STABILITY_HEADED: '1'
+      HOME_STUDIO_BROWSER_CHANNEL: ''
+      HOME_STUDIO_BROWSER_PROFILE: desktop
+      HOME_STUDIO_EXPECT_BROWSER_MAJOR: '153'
+      HOME_STUDIO_EXPECT_BROWSER_VERSION: '153.0'
+      PLAYWRIGHT_VERSION: '1.62.1'
+      CFT_VERSION: ''
+      FIREFOX_WEBGL_BACKEND: default
+      FIREFOX_COMPOSITOR_BACKEND: software
+      FIREFOX_GPU_PROCESS: disabled
+    steps:
+      - name: Check out the diagnostic harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: harness
+          persist-credentials: false
+      - name: Check out the exact packed-run baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: 9b8d52b164eb1364ce8504063096a506c63100eb
+          path: baseline
+          persist-credentials: false
+      - name: Check out the exact fallback shared-program candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: f4a9ebba66b8f7ddce017535092f1885fbbfa8c0
+          path: fallback-shared
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+      - name: Validate the wrapper and record tooling before source timing
+        run: |
+          mkdir -p harness/diagnostics/intel-pw-fallback
+          {
+            python3 --version
+            node --version
+            npm --version
+            uname -sm
+            sw_vers
+          } > harness/diagnostics/intel-pw-fallback/toolchain.log 2>&1
+          python3 harness/scripts/test-intel-pw-fallback.py
+      - name: Install the reviewed isolated Playwright 1.62.1 toolchain
+        env:
+          TOOLCHAIN_DIR: ${{ runner.temp }}/home-studio-intel-pw-fallback
+        run: |
+          python3 harness/scripts/setup-browser-toolchain.py --version 1.62.1 --output "$TOOLCHAIN_DIR" --github-env "$GITHUB_ENV"
+          cp "$TOOLCHAIN_DIR/toolchain.json" harness/diagnostics/intel-pw-fallback/toolchain.json
+          cp "$TOOLCHAIN_DIR/package-lock.json" harness/diagnostics/intel-pw-fallback/toolchain-package-lock.json
+      - name: Install its pinned Firefox 153.0 build
+        run: python3 harness/scripts/install-browser-with-retry.py --output harness/diagnostics/intel-pw-fallback/browser-install
+      - name: Run both original three-case Playwright suites, retaining failures
+        env:
+          TOOLCHAIN_DIR: ${{ runner.temp }}/home-studio-intel-pw-fallback
+        run: >-
+          python3 harness/scripts/run-intel-pw-fallback.py
+          --source-root "$GITHUB_WORKSPACE"
+          --toolchain "$TOOLCHAIN_DIR"
+          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-pw-fallback"
+      - name: Preserve non-release Playwright comparison evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostic-intel-pw-fallback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: harness/diagnostics/intel-pw-fallback/
+          if-no-files-found: error
+          retention-days: 14

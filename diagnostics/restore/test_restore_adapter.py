@@ -139,7 +139,7 @@ class Tests(unittest.TestCase):
             self.assertFalse((raw/'bad-replay').exists())
 
     def test_disposable_workflow_preserves_failed_primary(self):
-        workflow=(REPOSITORY/'.github/workflows/intel-cgl-fallback.yml').read_text()
+        workflow=(REPOSITORY/'.github/workflows/intel-cgl-fallback.yml').read_text().split('\n  playwright:',1)[0]
         self.assertIn('runs-on: macos-15-intel',workflow)
         self.assertIn('ref: f4a9ebba66b8f7ddce017535092f1885fbbfa8c0',workflow)
         self.assertIn("if: ${{ failure() && steps.compare.outcome == 'failure' }}",workflow)

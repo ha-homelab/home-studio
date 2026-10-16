@@ -139,7 +139,7 @@ class IntelComparisonTests(unittest.TestCase):
             self.assertEqual(json.loads((root / 'output/comparison.json').read_text())['status'], 'infrastructure-error')
 
     def test_workflow_is_fixed_read_only_branch_diagnostic(self):
-        text = (HERE.parent / '.github/workflows/intel-cgl-fallback.yml').read_text()
+        text = (HERE.parent / '.github/workflows/intel-cgl-fallback.yml').read_text().split('\n  playwright:', 1)[0]
         self.assertIn('branches: [diagnostic/intel-cgl-fallback]', text)
         self.assertIn("github.ref == 'refs/heads/diagnostic/intel-cgl-fallback'", text)
         self.assertIn('runs-on: macos-15-intel', text)

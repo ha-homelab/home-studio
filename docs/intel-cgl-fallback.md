@@ -1,7 +1,7 @@
 # Disposable Intel CGL fallback comparison
 
-Only a push to `diagnostic/intel-cgl-fallback` starts this workflow. It runs one
-`macos-15-intel` job with read-only repository permissions and pinned actions.
+Only a push to `diagnostic/intel-cgl-fallback` starts this workflow. It runs separate native and Playwright
+`macos-15-intel` jobs with read-only repository permissions and pinned actions.
 It does not invoke the 77-lane qualification gate, publish releases, or change
 the default branch. Do not open a pull request for this temporary harness.
 
@@ -68,3 +68,35 @@ runtime hashes and the installation receipt are checked again afterward.
 This evidence has `diagnosticOnly: true`, `releaseEligible: false`, and
 `acceptanceStatus: not-run`. It never rewrites primary receipts or changes their
 exit codes. Its presence does not authorize a production change or release.
+
+## Original Playwright Firefox comparison
+
+A second independent Intel job runs the same baseline-first source pair with
+the reviewed Playwright `1.62.1` package lock and its Firefox `153.0` build
+`1538`. The existing toolchain installer writes explicit module and browser
+cache paths under the job's temporary directory. The existing download-only
+retry policy applies solely to installation, never to an acceptance case.
+
+Each source executes the original viewer script twice (6 then 24 rooms) and
+the original planner script once. No case logic is copied, and the original
+120-second viewer deadline, editor settle waits, recovery sequence, cleanup
+and all other assertions remain intact. The headed desktop configuration is
+identical to the existing Intel matrix row: default WebGL, software compositor,
+disabled GPU process, and full expected Firefox version checking. A failed case
+does not prevent the remaining cases, and any failed case keeps this job red.
+There is no restore replay in the Playwright job.
+
+The fixture scripts use Node built-ins, checked-in helpers and bundled browser
+assets; only Playwright is installed externally. No per-source npm install is
+needed. The wrapper rejects conflicting inherited engine/profile values,
+executable overrides, extra screenshot hooks and per-suite output overrides
+before launching a case. The installed module and browser cache must match the
+explicit isolated paths.
+
+Its separate `diagnostic-intel-pw-fallback-*` artifact records every original
+receipt, process log, complete source hashes before and after each arm,
+identical driver hashes, installed package metadata, package lock, Firefox
+executable path and SHA-256, and setup/download logs. Source and toolchain
+identity changes fail the wrapper. The two jobs use different Intel hosts;
+only the two source arms within one job are a same-host comparison. Fixed
+order and shared-cache limitations apply independently to each job.
