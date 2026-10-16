@@ -699,6 +699,21 @@ function literalLambertShadowPoint(THREE, prefix, decayTwo) {
     .replaceAll('directLight.color', 'homeShadowColor').replaceAll('directLight.visible', 'homeShadowVisible');
 }
 
+// Remove only the pinned Lambert indirect call boundary. A driver may already
+// inline it; this is an opt-in compiler hypothesis, not a lighting change.
+function literalLambertIndirect(THREE) {
+  const keys = ['lights_lambert_pars_fragment','lights_fragment_begin','lights_fragment_end','lights_pars_begin'];
+  const chunks = keys.map(key => THREE.ShaderChunk[key]);
+  if (!chunks.every(text => typeof text === 'string')) return null;
+  const macros = chunks.join('\n').match(/^\s*#\s*(?:define|undef)\s+RE_IndirectDiffuse\b.*$/gm) || [];
+  if (macros.length !== 1 || macros[0].trim() !== '#define RE_IndirectDiffuse\t\tRE_IndirectDiffuse_Lambert') return null;
+  const helper = 'void RE_IndirectDiffuse_Lambert( const in vec3 irradiance, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in LambertMaterial material, inout ReflectedLight reflectedLight ) {\n\treflectedLight.indirectDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );\n}';
+  const call = 'RE_IndirectDiffuse( irradiance, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
+  const original = '#if defined( RE_IndirectDiffuse )\n\t' + call + '\n#endif\n#if defined( RE_IndirectSpecular )\n\tRE_IndirectSpecular( radiance, iblIrradiance, clearcoatRadiance, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );\n#endif';
+  if (chunks[0].split(helper).length !== 2 || chunks[0].split('void RE_IndirectDiffuse_Lambert(').length !== 2 || chunks[2] !== original) return null;
+  return original.replace(call, 'reflectedLight.indirectDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );');
+}
+
 // The directional path also executes when every point is off.
 function literalLambertDirectional(THREE) {
   const compact = text => text?.replace(/\s+/g, '');
@@ -993,6 +1008,7 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
   const runFragment=runTexture ? fragment.replace(`uniform ivec4 homeLightRuns[${capacity}];`,
     'uniform highp sampler2D homeRunTexture; uniform int homeRunBlock;') : fragment;
   const directionalBody = packed && geometryOptions.literalLambertDirectional === true ? literalLambertDirectional(THREE) : null;
+  const indirectBody = packed && pointTexture && geometryOptions.literalLambertIndirect === true ? literalLambertIndirect(THREE) : null;
   const geometryFragment=geometryTexture ? geometryTexture.fragment(runFragment) : runFragment;
   const textureFragment=pointTexture ? pointTexture.fragment(geometryFragment) : geometryFragment;
   return {
@@ -1084,13 +1100,15 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
             selectedLighting = selectedLighting.replace(shadowPrefix,literalShadowPrefixes[decayState?.active?1:0]);
           }
           const directLighting = scalarDirectional ? selectedLighting.replace(scalarDirectional.original, scalarDirectional.replacement) : selectedLighting;
-          shader.fragmentShader = (textureState?.active?'uniform highp sampler2D homePointTexture;\n':'') + (textureState?.active?textureFragment:fragment) + shader.fragmentShader.replace('#include <lights_fragment_begin>', directLighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
+          const indirectLighting = textureState?.active && material.isMeshLambertMaterial && indirectBody || '#include <lights_fragment_end>';
+          shader.fragmentShader = (textureState?.active?'uniform highp sampler2D homePointTexture;\n':'') + (textureState?.active?textureFragment:fragment) + shader.fragmentShader.replace('#include <lights_fragment_begin>', directLighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n' + indirectLighting);
         };
         mesh.material.customProgramCacheKey = () => (enabled ? fragment+(textureState?.active?':point-texture-v2'+(runTexture?':run-texture-v1':'')+(geometryTexture?':geometry-texture-v1':'')+(geometryOptions.signalTexture?':signal-texture-v1':''):'') : 'home-editor') +
           (sharedWall ? ':wall-sheen-facing-v1' : wall ? ':wall-sheen-v2' : '') +
           (!sharedWall && staticGlassFacing.has(mesh.material) ? ':glass-facing-v1' : '') +
           (enabled && textureState?.active && literalRunLighting[decayState?.active?1:0] ? ':literal-lambert-point-body-v1' : '') +
           (enabled && textureState?.active && material.isMeshLambertMaterial && literalShadowPrefixes[decayState?.active?1:0] ? ':literal-lambert-shadow-point-v1' : '') +
+          (enabled && textureState?.active && material.isMeshLambertMaterial && indirectBody ? ':literal-lambert-indirect-v1' : '') +
           (scalarDirectional ? ':literal-lambert-directional-v1' : '') +
           (decayState?.active ? ':point-decay-two-v1' : '');
         if (decayState) {decayState.callback = material.onBeforeCompile; decayState.cacheKey = material.customProgramCacheKey;}

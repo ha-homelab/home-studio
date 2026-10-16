@@ -707,3 +707,14 @@ selection. It adds no resources, uniform slots or light-state changes. CPU
 source and binary32 trace proofs establish the intended transformation, not
 actual GLSL compilation, pixel parity or an Intel speedup. A compiler may
 already inline and scalarize the original struct calls, so benefit is unproven.
+
+The experimental `literalLambertIndirect` option removes one remaining Lambert
+indirect-light call boundary in the packed, active point-texture variant. It
+substitutes the pinned helper's single accumulation statement at the original
+call site, after the unchanged ambient, hemisphere and daylight accumulation.
+Exact helper, macro and call-site checks fail closed; PBR, editor, inactive
+texture and unknown-source variants retain the original call. The option is
+off by default and enabled by Home, with an independent cache tag and no new
+resources or uniforms. This may make aggregate state easier for a compiler to
+scalarize, but the driver may already inline it. CPU inverse and binary32
+proofs do not establish GLSL compilation, pixel parity or a performance gain.
