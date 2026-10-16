@@ -779,4 +779,34 @@ function assertRestoredViewerMode(beforeCount, value, mode, expectedLights) {
   assert.deepEqual(passes.sceneViewport, [0, 0, ...value.scene.drawingBuffer], 'Restored modes retain the full drawing buffer');
 }
 
-module.exports = {VIEWER_LOAD_BUDGET_MS, createViewerLoadDeadline, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction};
+function assertViewerScenarioComplete(record) {
+  assert(!record.timedOut, 'A timed-out viewer cannot receive completion credit');
+  const samples = record.samples;
+  assert.deepEqual(samples.map(sample => sample.cycle), [0, 1], 'Exactly two fresh viewer cycles must complete in order');
+  for (const sample of samples) {
+    assert.equal(sample.completed, true, 'Each viewer cycle must finish detachment and dashboard responsiveness checks');
+    assert.equal(sample.loadCompleted, true, 'Each viewer must complete cold readiness');
+    assert.equal(sample.loadBudgetMs, VIEWER_LOAD_BUDGET_MS, 'Cold readiness retains its fixed 60-second limit');
+    for (const [value, limit, label] of [[sample.loadMs, VIEWER_LOAD_BUDGET_MS, 'load'],
+      [sample.dragMs, 15000, 'Home drag'], [sample.editorDragMs, 15000, 'Editor drag'],
+      [sample.burst?.settled?.waitMs, 10000, 'Editor settling']]) {
+      assert(Number.isFinite(value) && value >= 0 && value < limit, `${label} must finish within its individual limit`);
+    }
+    assert(Number.isFinite(sample.detachMs) && sample.detachMs >= 0, 'Each viewer must retain its completed detachment receipt');
+  }
+  const recovery = samples[1].recovery;
+  assert(recovery && recovery.contextLosses === 1 && recovery.after > recovery.before, 'The second viewer must complete context recovery');
+  const modes = ['editor-cutaway', 'editor-full', 'home'];
+  const views = samples[1].postRestoreViews;
+  assert(Array.isArray(views), 'Restored viewer transitions must be recorded');
+  assert.deepEqual(views.map(view => view.mode), modes, 'All three restored viewer modes must complete in order');
+  for (const view of views) {
+    assert(view.completed === true && view.snapshot && Number.isFinite(view.durationMs) && view.durationMs >= 0,
+      'Each restored mode must finish its existing frame and graphics checks');
+  }
+  // This certifies the application sequence only. The shared runner still
+  // requires final browser identity, its absolute deadline and clean shutdown.
+  record.viewerCompletion = {version: 1, cycles: 2, postRestoreModes: modes};
+}
+
+module.exports = {VIEWER_LOAD_BUDGET_MS, createViewerLoadDeadline, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction};

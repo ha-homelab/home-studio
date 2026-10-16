@@ -14,7 +14,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
-const {changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
+const {changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
 const {createStartupDiagnostics} = require('./browser-startup-diagnostics.cjs');
 
 const root = path.resolve(process.env.HOME_STUDIO_SOURCE_ROOT || path.join(__dirname, '..'));
@@ -76,7 +76,7 @@ async function run(browserName, origin, project, sourceHash) {
   const profile = browserProfile(browserName, {viewport: {width: 1280, height: 800}});
   const inputDiagnostics = viewerInputOptions(browserName, profile);
   return diagnostics.run(browserName, {
-    reportOnly, deadlineMs: 120000, sourceHash, sourceFiles, sourceHashScope,
+    reportOnly, deadlineMs: 180000, sourceHash, sourceFiles, sourceHashScope,
     fixture: {floors: 1, rooms: project.floors[0].rooms.length, lights: project.floors[0].items.length},
     launch: browserLaunchOptions(browserName, process.env.BROWSER_STABILITY_HEADED !== '1'),
     context: profile.context, profile, inputDiagnostics,
@@ -110,7 +110,7 @@ async function run(browserName, origin, project, sourceHash) {
       console.log(`${browserName} ${browser.version()}: loading fictional dashboard, cycle ${cycle + 1}`);
       phases.start('viewer-load', {cycle});
       const started = Date.now();
-      const sample = {cycle}; samples.push(sample);
+      const sample = {cycle, completed:false}; samples.push(sample);
       const load = createViewerLoad(sample);
       let frame, child;
       try {
@@ -312,7 +312,7 @@ async function run(browserName, origin, project, sourceHash) {
         for (const mode of ['editor-cutaway', 'editor-full', 'home']) {
           phases.start('post-restore-' + mode, {cycle});
           const beforeCount = (await snapshot()).renderCount;
-          const transition = {mode, startedMs:Date.now()-started, durationMs:null};
+          const transition = {mode, startedMs:Date.now()-started, durationMs:null, completed:false};
           sample.postRestoreViews.push(transition);save();
           try {
             await child.evaluate(changeRestoredViewerMode, mode);
@@ -321,6 +321,7 @@ async function run(browserName, origin, project, sourceHash) {
             transition.snapshot = await child.evaluate(captureRestoredViewerMode);
             save();
             assertRestoredViewerMode(beforeCount, transition.snapshot, mode, lights);
+            transition.completed = true;
           } finally {
             transition.durationMs = Date.now()-started-transition.startedMs;save();
           }
@@ -357,11 +358,13 @@ async function run(browserName, origin, project, sourceHash) {
       phases.start('dashboard-after-detach', {cycle});
       assert.equal(page.frames().length,1,'Removing the floorplan releases its browsing context');
       assert.equal(await page.evaluate(() => 6*7),42,'The dashboard remains responsive after closing the floorplan');
+      sample.completed = true;save();
     }
     phases.start('final-checks');
     check(errors.length===0, `No uncaught exceptions: ${errors.join('; ')}`);
     check(crashes.length===0, 'No page crashes');
     check(consoleErrors.length===0, `No browser error logs: ${consoleErrors.join('; ')}`);
+    if (!reportOnly) assertViewerScenarioComplete(record);
     phases.complete();
     save();
   });

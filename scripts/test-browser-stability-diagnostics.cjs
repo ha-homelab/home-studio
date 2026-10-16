@@ -1433,10 +1433,14 @@ test('post-restoration cases keep deadlines and preserve pending transition rece
     assertRestoredViewerMode:()=>{}};
   await vm.runInNewContext('(async()=>{'+code+'})()',env);
   assert.deepEqual(Array.from(sample.postRestoreViews,row=>row.mode),['editor-cutaway','editor-full','home']);
-  assert(sample.postRestoreViews.every(row=>row.durationMs>=0&&row.snapshot));
+  assert(sample.postRestoreViews.every(row=>row.durationMs>=0&&row.snapshot&&row.completed===true));
   fail=true;await assert.rejects(vm.runInNewContext('(async()=>{'+code+'})()',env),/primary transition failure/);
   assert.equal(sample.postRestoreViews.length,1);assert(sample.postRestoreViews[0].durationMs>=0);
   assert.equal(sample.postRestoreViews[0].snapshot,undefined);
+  assert.equal(sample.postRestoreViews[0].completed,false);
+  fail=false;env.assertRestoredViewerMode=()=>{throw Error('restored graphics failure');};
+  await assert.rejects(vm.runInNewContext('(async()=>{'+code+'})()',env),/restored graphics failure/);
+  assert.equal(sample.postRestoreViews[0].completed,false,'A captured but rejected frame cannot receive completion credit');
 });
 
 
@@ -1481,20 +1485,20 @@ test('cold viewer timeout rearms an early timer and rejects a hanging operation'
   assert.equal(sample.loadCompleted,false);assert.equal(clock.pending().length,0);
 });
 
-test('cold stages and second cycle never renew the enclosing120s scenario', async () => {
+test('cold stages and second cycle never renew the enclosing180s scenario', async () => {
   const {diagnostics,clock}=clockedDiagnostics('viewer');const samples=[];
-  await assert.rejects(diagnostics.run('firefox',{...options,deadlineMs:120000},async({createViewerLoad,record})=>{
+  await assert.rejects(diagnostics.run('firefox',{...options,deadlineMs:180000},async({createViewerLoad,record})=>{
     for(let cycle=0;cycle<2;cycle++) {
       const sample={cycle};samples.push(sample);record.samples.push(sample);const load=createViewerLoad(sample);
       try {
         assert.equal(load.remainingMs(),cycle===0?60000:50000);
         await load.run(()=>clock.elapse(50000));load.complete();
       } finally {load.close();}
-      if(cycle===0)clock.elapse(20000);
+      if(cycle===0)clock.elapse(80000);
     }
-  }),/120-second browser deadline/);
+  }),/180-second browser deadline/);
   assert.equal(samples[0].loadCompleted,true);assert.equal(samples[1].loadCompleted,false);assert.equal(samples[1].loadTimedOut,true);
-  assert.equal(read(diagnostics).timeoutScope,'scenario');assert.equal(read(diagnostics).deadlineScope.scenarioMs,120000);
+  assert.equal(read(diagnostics).timeoutScope,'scenario');assert.equal(read(diagnostics).deadlineScope.scenarioMs,180000);
 });
 
 test('cold viewer uses remaining operation waits while all ordinary defaults stay30s', () => {
@@ -1503,8 +1507,106 @@ test('cold viewer uses remaining operation waits while all ordinary defaults sta
   assert(source.includes('load.run(() => page.evaluate('));
   assert(source.includes('load.run(() => page.locator('));
   assert(source.includes('loadMs<sample.loadBudgetMs && dragMs<15000 && editorDragMs<15000'));
-  assert(source.includes('reportOnly, deadlineMs: 120000'));
+  assert(source.includes('reportOnly, deadlineMs: 180000'));
   const shared=fs.readFileSync(path.join(__dirname,'browser-stability-diagnostics.cjs'),'utf8');
   assert(shared.includes('page.setDefaultTimeout(30000)'));
   assert(shared.includes('bootstrapMs = 30000'));
+});
+
+test('the actual viewer driver forwards180s uniformly for every engine, profile and fixture size', async () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  const start=source.indexOf('async function run(browserName,'),end=source.indexOf('\n(async () => {',start);
+  assert(start>0&&end>start);
+  const calls=[],env={browserProfile,viewerInputOptions,browserLaunchOptions,reportOnly:false,
+    sourceFiles:{},sourceHashScope:'instrumented-compiled-viewer',process,
+    diagnostics:{run:async(engine,options)=>{calls.push({engine,...options});}}};
+  vm.runInNewContext(source.slice(start,end)+'\nglobalThis.runViewer=run;',env);
+  const previous=process.env.HOME_STUDIO_BROWSER_PROFILE;
+  try {
+    for(const profile of ['desktop','phone','tablet']) {
+      process.env.HOME_STUDIO_BROWSER_PROFILE=profile;
+      for(const engine of ['chromium','firefox','webkit'])for(const rooms of [6,24]) {
+        await env.runViewer(engine,'http://127.0.0.1',
+          {floors:[{rooms:Array(rooms),items:Array(rooms*3)}]},'fixture-source');
+        const call=calls.at(-1);
+        assert.equal(call.deadlineMs,180000);assert.equal(call.profile.name,profile);
+        assert.equal(call.fixture.rooms,rooms);assert.equal(call.reportOnly,false);
+      }
+    }
+  } finally {
+    if(previous===undefined)delete process.env.HOME_STUDIO_BROWSER_PROFILE;
+    else process.env.HOME_STUDIO_BROWSER_PROFILE=previous;
+  }
+  assert.equal(calls.length,18);
+  assert.match(source,/if \(!reportOnly\) assertViewerScenarioComplete\(record\);/);
+  assert(source.indexOf('sample.completed = true;')>source.indexOf('The dashboard remains responsive after closing the floorplan'));
+});
+
+function completeViewerRecord() {
+  const samples=[0,1].map(cycle=>({cycle,completed:true,loadCompleted:true,loadBudgetMs:60000,
+    loadMs:59999,dragMs:14999,editorDragMs:14999,burst:{settled:{waitMs:9999}},detachMs:10}));
+  samples[1].recovery={contextLosses:1,before:20,after:21};
+  samples[1].postRestoreViews=['editor-cutaway','editor-full','home'].map(mode=>({mode,completed:true,snapshot:{},durationMs:1}));
+  return {samples};
+}
+
+test('viewer completion rejects incomplete cycles, recovery, individual limits and late progress', () => {
+  const {assertViewerScenarioComplete}=require('./browser-stability-diagnostics.cjs');
+  const record=completeViewerRecord();assertViewerScenarioComplete(record);
+  assert.deepEqual(record.viewerCompletion,{version:1,cycles:2,postRestoreModes:['editor-cutaway','editor-full','home']});
+  const mutations=[
+    r=>r.samples.pop(),r=>r.samples.push({...r.samples[1]}),r=>r.samples.reverse(),
+    r=>r.samples[1].cycle=0,r=>r.samples[0].completed=false,r=>delete r.samples[1].completed,
+    r=>r.samples[0].loadCompleted=false,r=>r.samples[0].loadBudgetMs=60001,
+    r=>r.samples[0].loadMs=60000,r=>r.samples[0].dragMs=15000,r=>r.samples[1].editorDragMs=15000,
+    r=>r.samples[1].burst.settled.waitMs=10000,r=>r.samples[0].dragMs=NaN,r=>r.samples[0].detachMs=-1,
+    r=>delete r.samples[1].recovery,r=>r.samples[1].recovery.after=20,r=>r.samples[1].recovery.contextLosses=2,
+    r=>delete r.samples[1].postRestoreViews,r=>r.samples[1].postRestoreViews.reverse(),
+    r=>r.samples[1].postRestoreViews.pop(),r=>r.samples[1].postRestoreViews[0].completed=false,
+    r=>delete r.samples[1].postRestoreViews[2].snapshot,r=>r.samples[1].postRestoreViews[1].durationMs=null,
+    r=>r.timedOut=true,
+  ];
+  for(const mutate of mutations) {
+    const invalid=completeViewerRecord();mutate(invalid);
+    assert.throws(()=>assertViewerScenarioComplete(invalid));
+    assert.equal(invalid.viewerCompletion,undefined,'Rejected progress cannot produce a completion marker');
+  }
+});
+
+test('the180s viewer admits only timely final identity and retains the245s hard envelope', async () => {
+  for(const elapsed of [179999,180000,180001])for(const finalIdentity of [false,true]) {
+    const {diagnostics,clock}=clockedDiagnostics(`viewer180-${elapsed}-${finalIdentity}`,({fake,clock,playwright})=>{
+      playwright.firefox.launch=async()=>{clock.elapse(29999);return fake.browser;};
+      const identity=fake.page.evaluate;let identities=0;
+      fake.page.evaluate=async()=>{if(++identities===2&&finalIdentity)clock.elapse(elapsed);return identity();};
+    });
+    const pending=diagnostics.run('firefox',{...options,deadlineMs:180000},async({record})=>{
+      Object.assign(record,completeViewerRecord());
+      require('./browser-stability-diagnostics.cjs').assertViewerScenarioComplete(record);
+      if(!finalIdentity)clock.elapse(elapsed);
+    });
+    if(elapsed<180000)await pending;
+    else await assert.rejects(pending,/180-second browser deadline/);
+    const record=read(diagnostics);
+    assert.equal(record.deadlineScope.bootstrapMs,30000);assert.equal(record.deadlineScope.scenarioMs,180000);
+    assert.equal(record.deadlineScope.hardProcessMs,245000);assert.equal(record.bootstrapDurationMs,29999);
+    assert.equal(record.status,elapsed<180000?'passed':'failed');
+    assert.equal(record.scenarioCompletedMs,elapsed<180000?29999+elapsed:null);
+    assert.equal(record.timeoutScope,elapsed<180000?undefined:'scenario');
+    assert.equal(clock.pending().length,0);
+  }
+});
+
+test('a stalled180s viewer still expires once and cannot gain time from phase progress', async () => {
+  const {diagnostics,clock}=clockedDiagnostics('viewer180-stalled');
+  let executions=0;
+  const pending=diagnostics.run('firefox',{...options,deadlineMs:180000},async({phases})=>{
+    executions++;phases.start('viewer-load',{cycle:0});await new Promise(()=>{});
+  }).catch(error=>error);
+  await clock.flush();await clock.advance(179999);
+  assert.equal(read(diagnostics).status,'running');
+  await clock.advance(1);assert.match((await pending).message,/180-second browser deadline/);
+  const record=read(diagnostics);
+  assert.equal(executions,1);assert.equal(record.status,'failed');assert.equal(record.scenarioCompletedMs,null);
+  assert.equal(record.timeoutPhase.activePhase.name,'viewer-load');assert.equal(clock.pending().length,0);
 });

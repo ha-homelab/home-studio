@@ -2,6 +2,15 @@
 
 ## [0.6.4] - Development line
 
+- Give the complete Playwright viewer scenario a uniform 180-second aggregate
+  budget, including both fresh loads and the three post-restoration modes.
+  Keep the 30-second bootstrap, 60-second cold loads, 15-second drags and
+  10-second Editor settling limits, with no retries. Require explicit completion
+  of both detached viewers and every restored view before final identity and
+  cleanup can pass; the total hard process envelope is 245 seconds. This is a
+  prospective change from 120 seconds, not a runtime improvement. R29 and all
+  earlier failures retain their original results.
+
 - Allow up to 60 seconds for Safari's initial WebDriver session request,
   within the existing 180-second browser watchdog. Record startup timing and
   reject late completion without retrying. Subsequent command timeouts and
@@ -34,7 +43,8 @@
 - Give each cold viewer creation one aggregate 60-second readiness budget,
   including fetch, frame selection and the first fully connected lit frame.
   Apply it uniformly across browsers and both creation cycles, bounded by the
-  existing 120-second Playwright or 180-second native scenario watchdog.
+  then-existing 120-second Playwright or 180-second native scenario watchdog
+  (the Playwright aggregate is subsequently aligned above).
   Record monotonic load timing and reject late completion. This prospective
   compatibility allowance can accept slower software-rendered startup; it is
   not a speed improvement. Planner, interaction and recovery limits are unchanged.
@@ -72,7 +82,7 @@
   cross-browser performance or pixel parity.
 
 - Separate Playwright browser bootstrap into one aggregate 30-second budget,
-  then start the existing 120-second viewer or 180-second planner scenario
+  then start the then-existing 120-second viewer or 180-second planner scenario
   budget immediately before application work. Keep all per-step checks, cleanup
   limits and assertions, including final identity, and reject late setup or
   callback completion. Record both scopes and their measured durations. This

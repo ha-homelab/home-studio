@@ -502,19 +502,35 @@ Playwright uses two consecutive budgets. One aggregate **30-second bootstrap**
 budget covers loading the automation module, launch, context creation, init
 scripts, page creation, initial browser identity, listeners and optional input
 tracing. It is not renewed as setup stages complete. Immediately before the
-scenario callback, the watchdog switches once to the existing **120-second
-viewer** or **180-second planner** budget. That scenario budget includes all
+scenario callback, the watchdog switches once to a **180-second viewer** or
+**180-second planner** budget. That scenario budget includes all
 scenario cycles, interactions and recovery, final browser identity and final checks;
 phase changes never renew it. Drag, step and cleanup limits, assertions, browser
 profiles and scene quality remain unchanged; the cold viewer load budget is
 specified separately below. No retry or
 platform-specific allowance is added.
 
-This is a prospective acceptance-contract change: the previous shared helper
-charged bootstrap against the scenario budget. Separating it adds at most
-**30 seconds** to the permitted wall time. It does not improve runtime performance
-or reclassify any historical failure. The hard process timer is **185 seconds
-for a viewer** or **245 seconds for a planner**, measured from the same case
+These are prospective acceptance-contract changes. The original shared helper
+charged bootstrap against the scenario budget; separating it added at most
+**30 seconds** to permitted wall time. The viewer scenario subsequently increased
+from **120 to 180 seconds**, uniformly across every Playwright engine, desktop,
+phone and tablet profile, and both fixture sizes. The earlier 120-second budget
+predated the three additional post-restoration mode checks and the 60-second
+cold-load allowance. The scenario includes two fresh viewer loads, four drags,
+two Editor settling checks, live-state transitions, forced context recovery and
+the restored Editor cutaway, full-height Editor and Home checks. The aggregate
+is a bounded completion guard for that full sequence; the individual 60-second
+loads, 15-second drags and 10-second settling checks remain responsiveness gates.
+The aggregate need not permit every individual operation to consume its maximum.
+
+R29's Intel Firefox 153 viewer-6 case exceeded the old aggregate while the
+completed individual loads, drags and settling checks stayed within their limits.
+Its retained timeout was in the restored Editor cutaway check; later progress
+during failure capture did not complete acceptance. That run remains failed.
+The new aggregate allows a slower combined scenario and is not a runtime speed
+improvement. Its numerical value matches the native viewer watchdog, but the
+scopes differ: native's 180 seconds also includes browser setup. The hard process
+timer is now **245 seconds for either Playwright suite**, measured from the same case
 start and including the existing 35-second failure/cleanup allowance. Requested
 input tracing retains its additional 11-second cleanup allowance. An unresolved
 launch or late resource cleanup leaves that hard timer armed. Late setup
@@ -539,6 +555,17 @@ sample fields or completed phase entries do not prove that work finished before
 the deadline; consult the retained timeout and status. Native Gecko and Safari
 acceptance timing is unchanged by this Playwright contract.
 
+Strict viewer receipts also require `completed: true` on exactly two ordered
+cycle samples, after each iframe detaches and the dashboard responds. Each of
+the three ordered `postRestoreViews` has its own completion marker, set only
+after the existing frame, mode, lighting and GL-error assertions pass. The final
+application check records `viewerCompletion: {version: 1, cycles: 2,
+postRestoreModes: ["editor-cutaway", "editor-full", "home"]}` only when those
+receipts and the individual timing limits are complete. This marker adds no
+browser work and does not replace `status: "passed"`, timely
+`scenarioCompletedMs`, final browser identity or successful cleanup. Report-only
+observations do not receive this strict completion marker.
+
 The cold viewer load has one aggregate **60-second** budget per cycle, uniformly
 across Playwright profiles and native Firefox, Waterfox and Safari. It starts
 before fixture fetch and iframe creation and covers frame selection through the
@@ -550,7 +577,7 @@ Planner loads retain 30 seconds. Interaction, settling, editor,
 recovery and teardown limits are unchanged.
 
 The cold budget cannot extend the existing outer deadline: Playwright retains
-its 30-second bootstrap and 120-second viewer scenario, and native viewers retain
+its 30-second bootstrap and 180-second viewer scenario, and native viewers retain
 their 180-second browser watchdog. Each of the two cycles gets a fresh cold
 budget limited by that same remaining outer clock. Native script and transport
 timeouts temporarily follow the remaining cold budget and return to their
