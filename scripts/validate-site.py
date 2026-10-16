@@ -12,6 +12,27 @@ LOCALE_CODES = (
     'en', 'ar', 'bn', 'cs', 'de', 'es', 'fa', 'fr', 'he', 'hi', 'id', 'it',
     'ja', 'ko', 'nl', 'pl', 'pt', 'ru', 'th', 'tr', 'uk', 'vi', 'zh-Hans', 'zh-Hant',
 )
+# These reviewed binary seeds encode only byte extrema, not arbitrary files.
+BINARY_REPLAY_SEEDS = {
+    'fuzz/corpus/wall-geometry/rectangle': bytes(range(14)),
+    'fuzz/corpus/wall-geometry/limits': bytes([255]) * 14,
+}
+FUZZ_REPLAY_FILES = (
+    'fuzz/project-validation.test.mjs', 'fuzz/wall-geometry.test.mjs',
+    'fuzz/project-validation.mjs', 'fuzz/wall-geometry.mjs', 'fuzz/bounds-oracle.mjs',
+    'fuzz/corpus/project-validation/empty.json',
+    'fuzz/corpus/project-validation/example-home.json',
+    'fuzz/corpus/project-validation/practice-home.json',
+    'fuzz/corpus/project-validation/invalid-title.json',
+    'fuzz/corpus/project-validation/prototype.json',
+    'fuzz/corpus/project-validation/furniture-valid.json',
+    'fuzz/corpus/project-validation/furniture-invalid-type.json',
+    'fuzz/corpus/project-validation/furniture-invalid-color.json',
+    'fuzz/corpus/project-validation/furniture-invalid-model.json',
+    'fuzz/corpus/project-validation/furniture-invalid-style.json',
+    'fuzz/corpus/project-validation/furniture-invalid-pattern.json',
+    *BINARY_REPLAY_SEEDS,
+)
 
 SITE_FILES = (
     'index.html', 'site.css', 'privacy.html', 'install.html', '404.html', '.nojekyll',
@@ -42,6 +63,8 @@ REPO_FILES = ('docs/i18n.md', 'docs/translations/README.md',
               'docs/architecture.md', 'docs/platform-acceptance.md',
               'scripts/build-planner-project.py', 'scripts/install-home-assistant.py',
               'scripts/package_release.py', 'scripts/test_package_release.py',
+              'scripts/test_source_replay.py', *FUZZ_REPLAY_FILES,
+              'scripts/test-light-state.cjs', 'scripts/test-tv-screen.cjs', 'scripts/test-media-preview.cjs',
               'scripts/test-install-home-assistant.py', 'scripts/test-public-package.py', 'scripts/test-wall-tops.cjs',
               'scripts/test-rounded-walls.cjs', 'scripts/test-wall-sheen.cjs', 'scripts/test-wall-motion.cjs', 'docs/rounded-walls.md',
               'scripts/test-browser-stability.cjs', 'scripts/browser-stability-diagnostics.cjs',
@@ -110,6 +133,10 @@ def validate(root):
     documents = {}
     for relative in (*SITE_FILES, *REPO_FILES):
         path = regular_file(root, relative)
+        if relative in BINARY_REPLAY_SEEDS:
+            if path.read_bytes() != BINARY_REPLAY_SEEDS[relative]:
+                raise ValueError(f'Unexpected binary replay seed: {relative}')
+            continue
         if path.suffix == '.jpg':
             continue
         text = path.read_text(encoding='utf-8')

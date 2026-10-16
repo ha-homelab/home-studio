@@ -25,6 +25,8 @@ jobs:
           node-version: '22'
       - name: Replay fuzz regression inputs without mutation campaigns
         run: node --test fuzz/*.test.mjs
+      - name: Run bundled CPU regressions from the extracted public source ZIP
+        run: python3 scripts/test_source_replay.py
       - name: Check generated catalog and furniture export parity
         run: |
           python3 scripts/generate-furniture-catalog.py --check

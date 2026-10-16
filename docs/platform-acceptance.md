@@ -92,6 +92,11 @@ fictional home, installs the generated archive into a temporary config
 folder, and checks its contents. Release tests check the public allowlist and
 repeatable ZIP bytes on each host. Same-host repeatability is not a claim of
 identical compressed bytes across different compression-library versions.
+The source ZIP also includes the CPU regression entry points used by its bundled
+package workflow and their fixed fictional fuzz corpus. A separate check runs
+those replay, light-state, TV and media tests from an extracted ZIP without a Git
+checkout or installed Node dependencies. These checks require Node.js 22; full
+release publication and mutation-campaign infrastructure remains in the repository.
 
 Every Playwright row exercises the generated **6-room/18-light** viewer, the
 larger **24-room/72-light** viewer, and the drawing tool with **2 floors,
