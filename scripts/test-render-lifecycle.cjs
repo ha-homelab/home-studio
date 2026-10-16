@@ -28,6 +28,7 @@ const context = vm.createContext({
     domElement: {addEventListener(type, fn) { listeners[type] = fn; }},
   },
 });
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../planner/render-capacity.js'), 'utf8').replace('export function ', 'function '), context);
 const prefixes = ['let renderRequest=', 'function cancelRender(', 'function requestRender(',
   'function selectRenderProfile(', 'function renderPixelRatio(', 'function drawScene(', 'function render(){',
   "renderer.domElement.addEventListener('webglcontextlost'", "renderer.domElement.addEventListener('webglcontextrestored'",

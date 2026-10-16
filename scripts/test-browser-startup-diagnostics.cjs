@@ -183,3 +183,19 @@ test('loopback receiver persists bounded whitelisted data, rejecting paths, priv
     fs.rmSync(directory,{recursive:true,force:true});
   }
 });
+
+
+test('raster capacity checkpoints accept only bounded measured evidence or unavailable status', () => {
+  const check = rasterProbe => validateCheckpoint({sequence:1,event:'profile',time:1,profile:{pixels:250000,rasterProbe}});
+  const measured = {status:'measured',samplesMs:[15,16,17],bestMs:15,totalMs:110};
+  check(measured); check({status:'unavailable'}); check({status:'unavailable',totalMs:8});
+  for (const rasterProbe of [null, [], {}, {status:'software'},
+    {...measured,identity:'Apple Software Renderer'}, {...measured,samplesMs:[15,16]},
+    {...measured,samplesMs:[15,16,17,18]}, {...measured,samplesMs:[15,-1,17]},
+    {...measured,samplesMs:[15,Infinity,17]}, {...measured,samplesMs:[15,NaN,17]},
+    {...measured,samplesMs:[15,'16',17]}, {...measured,samplesMs:[15,1e10,17]},
+    {...measured,bestMs:16}, {...measured,bestMs:NaN}, {...measured,totalMs:47},
+    {...measured,totalMs:Infinity}, {...measured,totalMs:-1}, {...measured,totalMs:undefined},
+    {status:'unavailable',samplesMs:[1,2,3]}, {status:'unavailable',bestMs:15},
+    {status:'unavailable',totalMs:NaN}, {status:'unavailable',totalMs:1e10}]) assert.throws(() => check(rasterProbe));
+});

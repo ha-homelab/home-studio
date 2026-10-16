@@ -147,7 +147,20 @@ function validateCheckpoint(value) {
     const keys = new Set(['pixels','pointShadows','pointShadowSize','sunShadowSize','shadowSize']);
     assert(value.profile && Object.keys(value.profile).length > 0);
     for (const [key,n] of Object.entries(value.profile)) {
-      if (key === 'instanceCatalog' || key === 'diffuseLighting') assert(typeof n === 'boolean');
+      if (key === 'rasterProbe') {
+        assert(n && typeof n === 'object' && !Array.isArray(n));
+        const measured = n.status === 'measured';
+        assert(measured || n.status === 'unavailable');
+        const fields = measured ? ['status','samplesMs','bestMs','totalMs'] : ['status','totalMs'];
+        assert(Object.keys(n).every(field => fields.includes(field)));
+        const duration = value => Number.isFinite(value) && value >= 0 && value <= 1e9;
+        if ('totalMs' in n) assert(duration(n.totalMs));
+        if (measured) {
+          assert(Array.isArray(n.samplesMs) && n.samplesMs.length === 3 && n.samplesMs.every(duration));
+          assert(n.bestMs === Math.min(...n.samplesMs));
+          assert(duration(n.totalMs) && n.totalMs + 1e-6 >= n.samplesMs.reduce((a,b) => a + b, 0));
+        }
+      } else if (key === 'instanceCatalog' || key === 'diffuseLighting') assert(typeof n === 'boolean');
       else assert(keys.has(key) && Number.isInteger(n) && n >= 0 && n <= 2000000);
     }
   }

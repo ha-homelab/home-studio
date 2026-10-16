@@ -1,6 +1,7 @@
 import * as THREE from 'data:text/javascript;base64,__THREE_B64__';
 __LIGHT_STATE_JS__
 __ROOM_LIGHTING_JS__
+__RENDER_CAPACITY_JS__
 __VIEWER_I18N_JS__
 const viewerI18n=createViewerI18n(__VIEWER_I18N_DATA__),vt=(key,params)=>viewerI18n.t(key,params);
 viewerI18n.init();
@@ -94,7 +95,7 @@ let renderProfile={pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSi
 // Diffuse materials keep room-constrained colored light, opacity and emissive
 // surfaces, with matte highlights and unfiltered shadows on that backend only.
 function createSceneMaterial(options){if(!renderProfile.diffuseLighting)return new THREE.MeshStandardMaterial(options);const {roughness,metalness,...shared}=options;return new THREE.MeshLambertMaterial(shared)}
-function selectRenderProfile(gl){try{const info=gl.getExtension('WEBGL_debug_renderer_info');const name=info&&gl.getParameter(info.UNMASKED_RENDERER_WEBGL);if(info&&/swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe|^Apple Software Renderer$/i.test(name))return {pixels:250000,pointShadows:2,pointShadowSize:128,sunShadowSize:512,diffuseLighting:/^Apple Software Renderer$/i.test(name)}}catch{}return {pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048,diffuseLighting:false}}
+function selectRenderProfile(gl){const capacity=getRenderCapacity(gl);const profile=capacity.reduced?{pixels:250000,pointShadows:2,pointShadowSize:128,sunShadowSize:512,diffuseLighting:capacity.diffuseLighting}:{pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048,diffuseLighting:false};if(capacity.rasterProbe)profile.rasterProbe=capacity.rasterProbe;return profile}
 let renderRequest=0,renderSuspended=false,renderLost=false;
 function cancelRender(){if(renderRequest)cancelAnimationFrame(renderRequest);renderRequest=0}
 function requestRender(){if(renderRequest||renderSuspended||renderLost||document.hidden)return;renderRequest=requestAnimationFrame(()=>{renderRequest=0;try{window.renderModel?.()}catch(error){report3DError(error)}})}

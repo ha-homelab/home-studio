@@ -94,6 +94,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     get: () => planBitmap[dimension],
     set(value) { planBitmap[dimension] = value; bitmapAreas.push(planBitmap.width * planBitmap.height); },
   });
+  vm.runInContext(fs.readFileSync(path.join(root, 'planner/render-capacity.js'), 'utf8').replace('export function ', 'function '), c);
   const clock = frames(c);
   vm.runInContext(scheduler + section('// On-demand 3D rendering.', '// Project actions and keyboard navigation.') + section('let firstResize =', 'window.planner ='), c);
   c.renderPreview(); assert.equal(constructions, 0, 'Plan-only use creates no WebGL context');

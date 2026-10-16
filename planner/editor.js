@@ -1,4 +1,5 @@
 import './language-links.js';
+import { getRenderCapacity } from './render-capacity.js';
 import { formatValidationError } from './validation.js';
 import { t, LOCALES, initI18n, setLocale, getLocale, onLocaleChange, translateStatic } from './i18n.js';
 
@@ -620,15 +621,12 @@ function createPreviewMaterial(options) {
   return new THREE.MeshLambertMaterial(shared);
 }
 function previewRenderProfile(gl) {
-  try {
-    const info = gl.getExtension('WEBGL_debug_renderer_info');
-    const name = info && gl.getParameter(info.UNMASKED_RENDERER_WEBGL);
-    if (/swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe|^Apple Software Renderer$/i.test(name)) {
-      const legacySoftware = /^Apple Software Renderer$/i.test(name);
-      return { pixels: 250000, shadowSize: 512, instanceCatalog: legacySoftware, diffuseLighting: legacySoftware };
-    }
-  } catch { /* A hidden renderer name keeps the normal rendering profile. */ }
-  return { pixels: 2000000, shadowSize: 2048, instanceCatalog: false, diffuseLighting: false };
+  const capacity = getRenderCapacity(gl);
+  const profile = capacity.reduced
+    ? { pixels: 250000, shadowSize: 512, instanceCatalog: capacity.diffuseLighting, diffuseLighting: capacity.diffuseLighting }
+    : { pixels: 2000000, shadowSize: 2048, instanceCatalog: false, diffuseLighting: false };
+  if (capacity.rasterProbe) profile.rasterProbe = capacity.rasterProbe;
+  return profile;
 }
 function initPreview() {
   if (renderer || previewUnavailable) return;

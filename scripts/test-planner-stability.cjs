@@ -161,7 +161,7 @@ const server=http.createServer((request,response)=>{
     content=startup.allowLoopback(content.toString(),origin).replace('<head>',`<head><script>${startup.scriptFor(origin)}(${instrument.toString()})();</script>`);
   }
   if(route==='/planner/editor.js')content+=`
-window.__plannerScene=()=>renderer?({layout:{...size},viewport:[innerWidth,innerHeight],memory:{...renderer.info.memory},programs:renderer.info.programs.length,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,buffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),shadowMap:[previewSun.shadow.mapSize.x,previewSun.shadow.mapSize.y],orbit:[orbit.yaw,orbit.pitch,orbit.radius]}):null;`;
+window.__plannerScene=()=>renderer?({rasterProbe:window.__plannerRasterProbe||null,layout:{...size},viewport:[innerWidth,innerHeight],memory:{...renderer.info.memory},programs:renderer.info.programs.length,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,buffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),shadowMap:[previewSun.shadow.mapSize.x,previewSun.shadow.mapSize.y],orbit:[orbit.yaw,orbit.pitch,orbit.radius]}):null;`;
   // Layout probes can settle the race under investigation. Never install them in primary acceptance.
   if(route==='/planner/editor.js' && traceRecovery)content+=`
 const __plannerOriginalInitPreview=initPreview;
@@ -403,6 +403,7 @@ async function run(engine,origin) {
   cycles=positiveInteger('PLANNER_STABILITY_CYCLES',3,10);
   catalog=JSON.parse(fs.readFileSync(path.join(root,'planner/catalog.json')));
   editor=fs.readFileSync(path.join(root,'planner/editor.js'),'utf8');
+  editor=editor.replace('const profile = previewRenderProfile(renderer.getContext());', '$& window.__plannerRasterProbe=profile.rasterProbe||null;');
   editor=startup.checkpointSource(editor,'const profile = previewRenderProfile(renderer.getContext());','profile');
   sourceHash=crypto.createHash('sha256').update(editor).digest('hex');
   project=fixture();

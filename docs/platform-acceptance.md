@@ -115,7 +115,8 @@ overlapping furniture and architecture retain their ordinary drawing order.
 Geometry, appearance, instance bounds, cleanup and dense-scene fallback have
 separate regression checks. Batching reduces draw calls but adds instanced shader
 variants; it does not guarantee faster first-use compilation. Other software
-renderers, native and hidden GPU identities keep the ordinary mesh path.
+renderers and native GPUs keep the ordinary mesh path unless the narrowly gated
+capacity probe below demonstrates slow raster work.
 
 The positively identified Apple Software Renderer uses Lambert materials and
 unfiltered shadows. Acceptance keeps the same scene, linked-light counts,
@@ -123,6 +124,26 @@ shadow-map limits, state changes and interaction deadlines in this mode. It is
 a deliberate matte rendering profile, not a claim of pixel identity with PBR.
 CPU tests cover the actual material factories and both shader families, including
 transparency, clipping, wall tint and room-light composition.
+
+Gecko can mask both hardware and software renderers as exactly `Apple M1, or similar`.
+Only that exact label with a Gecko user agent runs a capacity probe, once per
+new rendering context (including the planner's replacement context). It uses the
+existing WebGL2 context, a private 32 × 32 RGBA8 framebuffer, and a fixed
+512-iteration fragment shader: two warm draws and three timed draws, each with a
+one-pixel readback. A valid, nonblank readback and a **minimum of at least 15 ms**
+across all three measured draws selects the same reduced pixel/shadow budgets,
+Lambert lighting and planner batching. This measures raster capacity; it does
+not identify the underlying GPU as software. Other renderer labels are not probed.
+
+Calibration with that exact workload measured 24–26 ms per draw and roughly
+200 ms total on Apple Software Renderer, versus about 1 ms per draw and 48 ms
+total on a native Apple M5 GPU. These measurements are examples, not time limits
+or a guarantee on other hosts. The workload is fixed at five tiny draws with no
+animation loop; a synchronous driver call cannot have a JavaScript wall-clock
+timeout. Shader, framebuffer or readback failure keeps the normal rendering
+profile. The probe deletes every private resource, restores all GL state it
+changes, and leaves Three's state cache untouched. Diagnostics retain the
+bounded timing/status evidence separately from the reported GPU label.
 
 Phone and tablet profiles use **390 × 844** and **820 × 1180** CSS pixels,
 respectively, at device scale factor 2, with touch enabled. They retain the
