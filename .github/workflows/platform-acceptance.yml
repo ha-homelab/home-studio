@@ -150,7 +150,10 @@ jobs:
       - name: Compare recovery actions after Windows WebKit planner failure
         id: planner_recovery_diagnostics
         if: ${{ !cancelled() && steps.planner_acceptance.outcome == 'failure' && matrix.engine == 'webkit' && matrix.os == 'windows-2022' }}
+        env:
+          DEBUG: pw:browser
         run: |
+          set -o pipefail
           result=0
           for comparison in settled none edit resize; do
             actions="$comparison"
@@ -159,10 +162,12 @@ jobs:
               actions=all
               layout=settled
             fi
-            if ! HOME_STUDIO_DIAGNOSTICS_DIR="acceptance-artifacts/diagnostics/planner-$comparison" \
+            diagnostics_dir="acceptance-artifacts/diagnostics/planner-$comparison"
+            mkdir -p "$diagnostics_dir"
+            if ! HOME_STUDIO_DIAGNOSTICS_DIR="$diagnostics_dir" \
               PLANNER_STABILITY_RECOVERY_ACTIONS="$actions" \
               PLANNER_STABILITY_RESTORE_LAYOUT="$layout" \
-              node scripts/test-planner-stability.cjs; then
+              node scripts/test-planner-stability.cjs 2>&1 | tee "$diagnostics_dir/browser-process.log"; then
               result=1
             fi
           done

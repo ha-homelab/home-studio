@@ -108,6 +108,8 @@ class PlatformAcceptanceTests(unittest.TestCase):
         self.assertEqual(primary['if'], '${{ !cancelled() }}')
         self.assertNotIn('PLANNER_STABILITY_RESTORE_LAYOUT', primary['env'])
         self.assertNotIn('PLANNER_STABILITY_RECOVERY_ACTIONS', primary['env'])
+        self.assertNotIn('DEBUG', primary['env'])
+        self.assertEqual(diagnostic['env'], {'DEBUG': 'pw:browser'})
         self.assertIn('node scripts/test-planner-stability.cjs', primary['run'])
         self.assertEqual(diagnostic['if'], "${{ !cancelled() && steps.planner_acceptance.outcome == 'failure' && matrix.engine == 'webkit' && matrix.os == 'windows-2022' }}")
         self.assertLess(steps.index(primary), steps.index(diagnostic))
@@ -115,6 +117,8 @@ class PlatformAcceptanceTests(unittest.TestCase):
             self.assertNotIn('continue-on-error', step)
         fake_node = '''node() {
           printf '%s|%s|%s|%s\\n' "$1" "$PLANNER_STABILITY_RECOVERY_ACTIONS" "$PLANNER_STABILITY_RESTORE_LAYOUT" "$HOME_STUDIO_DIAGNOSTICS_DIR" >> "$CALL_LOG"
+          printf 'browser stdout\\n'
+          printf 'browser stderr\\n' >&2
           [ "$PLANNER_STABILITY_RECOVERY_ACTIONS" != "$FAILED_ACTION" ]
         }
         '''
@@ -128,9 +132,12 @@ class PlatformAcceptanceTests(unittest.TestCase):
                 log = Path(directory) / 'calls.txt'
                 result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', fake_node + diagnostic['run']],
                                         env={**os.environ, 'CALL_LOG': str(log), 'FAILED_ACTION': failed_action},
-                                        capture_output=True, text=True)
+                                        cwd=directory, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0 if failed_action == 'no-failure' else 1, result.stderr)
                 self.assertEqual(log.read_text().splitlines(), expected)
+                for comparison in ('settled', 'none', 'edit', 'resize'):
+                    process_log = Path(directory) / f'acceptance-artifacts/diagnostics/planner-{comparison}/browser-process.log'
+                    self.assertEqual(process_log.read_text(), 'browser stdout\nbrowser stderr\n')
 
     def test_native_browsers_use_exact_verified_downloads_and_versions(self):
         job = workflow('platform-acceptance.yml')['jobs']['native-browser']
