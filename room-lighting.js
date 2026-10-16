@@ -624,6 +624,43 @@ function pointDecayTwoChunk(THREE, chunk = THREE.ShaderChunk.lights_pars_begin) 
     .replace(call, 'homePointDistanceAttenuation( lightDistance, pointLight.distance )');
 }
 
+// Experimental texture-Lambert lowering. Keep the pinned operation sequence,
+// but do not pass aggregate light/material structs through the dynamic loop.
+function literalLambertPointBody(THREE, decayTwo) {
+  const compact = source => source?.replace(/\s+/g, '');
+  const point = THREE.ShaderChunk.lights_pars_begin.match(/void getPointLightInfo\([^]*?\n\t\}/)?.[0];
+  const direct = THREE.ShaderChunk.lights_lambert_pars_fragment.match(/void RE_Direct_Lambert\([^]*?\n\}/)?.[0];
+  if (compact(point) !== compact(`void getPointLightInfo( const in PointLight pointLight, const in vec3 geometryPosition, out IncidentLight light ) {
+    vec3 lVector = pointLight.position - geometryPosition;
+    light.direction = normalize( lVector );
+    float lightDistance = length( lVector );
+    light.color = pointLight.color;
+    light.color *= getDistanceAttenuation( lightDistance, pointLight.distance, pointLight.decay );
+    light.visible = ( light.color != vec3( 0.0 ) );
+  }`) || compact(direct) !== compact(`void RE_Direct_Lambert( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in LambertMaterial material, inout ReflectedLight reflectedLight ) {
+    float dotNL = saturate( dot( geometryNormal, directLight.direction ) );
+    vec3 irradiance = dotNL * directLight.color;
+    reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );
+  }`)) return null;
+  return `vec4 homePositionDistance=texelFetch(homePointTexture,ivec2(i*2,0),0);
+            vec4 homeColorDecay=texelFetch(homePointTexture,ivec2(i*2+1,0),0);
+            vec3 homeLightVector = homePositionDistance.xyz - geometryPosition;
+            vec3 homeLightDirection = normalize( homeLightVector );
+            float homeLightDistance = length( homeLightVector );
+            vec3 homeLightColor = homeColorDecay.xyz;
+            homeLightColor *= ${decayTwo ? 'homePointDistanceAttenuation( homeLightDistance, homePositionDistance.w )' : 'getDistanceAttenuation( homeLightDistance, homePositionDistance.w, homeColorDecay.w )'};
+            bool homeLightVisible = ( homeLightColor != vec3( 0.0 ) );
+            if (homeLightVisible) {
+              homeLightColor *= homeRunTransmission;
+              homeLightVisible = (homeLightColor != vec3(0.0));
+            }
+            if (homeLightVisible) {
+              float homeDotNL = saturate( dot( geometryNormal, homeLightDirection ) );
+              vec3 homeIrradiance = homeDotNL * homeLightColor;
+              reflectedLight.directDiffuse += homeIrradiance * BRDF_Lambert( material.diffuseColor );
+            }`;
+}
+
 // Softly confine each fixture's direct light to its room, retaining a short
 // doorway spill. Full-height shadow geometry still blocks opaque walls/doors.
 function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {}) {
@@ -858,6 +895,9 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
   const textureLighting=pointTexture ? lighting.replace(unshadowedBody,textureBody) : '';
   const runLighting=runTexture ? textureLighting.replace('homeLightRuns[homeRun]',
     'ivec4(texelFetch(homeRunTexture,ivec2(homeRun,homeRunBlock),0))') : textureLighting;
+  const literalPointBodies=geometryOptions.literalLambertPointBody && pointTexture
+    ? [false,true].map(decay => literalLambertPointBody(THREE,decay)) : [];
+  const literalRunLighting=literalPointBodies.map(body => body && runLighting.replace(textureBody,body));
   const runFragment=runTexture ? fragment.replace(`uniform ivec4 homeLightRuns[${capacity}];`,
     'uniform highp sampler2D homeRunTexture; uniform int homeRunBlock;') : fragment;
   const geometryFragment=geometryTexture ? geometryTexture.fragment(runFragment) : runFragment;
@@ -945,11 +985,12 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
               ? (decayState?.active ? textureDecayChunk : textureParameters) : decayChunk;
             shader.fragmentShader = shader.fragmentShader.replace('#include <lights_pars_begin>', () => parameters);
           }
-          shader.fragmentShader = (textureState?.active?'uniform highp sampler2D homePointTexture;\n':'') + (textureState?.active?textureFragment:fragment) + shader.fragmentShader.replace('#include <lights_fragment_begin>', textureState?.active?runLighting:lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
+          shader.fragmentShader = (textureState?.active?'uniform highp sampler2D homePointTexture;\n':'') + (textureState?.active?textureFragment:fragment) + shader.fragmentShader.replace('#include <lights_fragment_begin>', textureState?.active?(literalRunLighting[decayState?.active?1:0] || runLighting):lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
         };
         mesh.material.customProgramCacheKey = () => (enabled ? fragment+(textureState?.active?':point-texture-v2'+(runTexture?':run-texture-v1':'')+(geometryTexture?':geometry-texture-v1':'')+(geometryOptions.signalTexture?':signal-texture-v1':''):'') : 'home-editor') +
           (sharedWall ? ':wall-sheen-facing-v1' : wall ? ':wall-sheen-v2' : '') +
           (!sharedWall && staticGlassFacing.has(mesh.material) ? ':glass-facing-v1' : '') +
+          (enabled && textureState?.active && literalRunLighting[decayState?.active?1:0] ? ':literal-lambert-point-body-v1' : '') +
           (decayState?.active ? ':point-decay-two-v1' : '');
         if (decayState) {decayState.callback = material.onBeforeCompile; decayState.cacheKey = material.customProgramCacheKey;}
         if(textureState){textureState.callback=mesh.material.onBeforeCompile;textureState.cacheKey=mesh.material.customProgramCacheKey;}
