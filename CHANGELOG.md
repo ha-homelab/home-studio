@@ -2,6 +2,12 @@
 
 ## [0.6.4] - Development line
 
+- Keep the desktop viewer Editor stage within the available grid height.
+  Its minimum height no longer follows the drawing buffer's intrinsic aspect
+  ratio, preventing canvas size changes from expanding the page and feeding
+  extra resize work back into rendering. The mobile stage minimum, error
+  messages, drawing-buffer budgets and acceptance deadlines are unchanged.
+
 - Cap the Apple diffuse viewer at 125,000 drawing-buffer pixels
   instead of 250,000, including its measured masked-Apple selection. Home and
   Editor canvas detail becomes softer; HTML controls retain their resolution.

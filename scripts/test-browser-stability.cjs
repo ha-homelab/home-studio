@@ -222,10 +222,21 @@ async function run(browserName, origin, project, sourceHash) {
         for(let i=0;i<40;i++)canvas.dispatchEvent(new WheelEvent('wheel',{deltaY:1,cancelable:true,bubbles:true}));
         const synchronousDraws = window.floorplan.renderCount-before;
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        return {synchronousDraws,totalDraws:window.floorplan.renderCount-before,settled};
+        const bounds = selector => {
+          const rect = document.querySelector(selector).getBoundingClientRect();
+          return {top:rect.top,bottom:rect.bottom,height:rect.height};
+        };
+        const layout = {desktop:matchMedia('(min-width:851px)').matches,
+          main:bounds('main'),stage:bounds('main > .stage'),view:bounds('#view3d'),footer:bounds('.stage > .measure')};
+        return {synchronousDraws,totalDraws:window.floorplan.renderCount-before,settled,layout};
       });
       sample.burst = burst;
       check(burst.synchronousDraws<=1 && burst.totalDraws>0 && burst.totalDraws<=2, 'Wheel bursts coalesce into at most one scheduled scene draw');
+      if (burst.layout.desktop) {
+        const {main,stage,view,footer} = burst.layout;
+        check(stage.top>=main.top-1 && stage.bottom<=main.bottom+1 && view.bottom<=footer.top+1 && footer.bottom<=main.bottom+1,
+          'Desktop Editor stage and footer stay inside the available grid height');
+      }
       phases.start('editor-drag', {cycle});
       const beforeEditorDrag = await snapshot();
       const editorCameraBefore = beforeEditorDrag.scene.camera;
