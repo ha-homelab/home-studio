@@ -1,5 +1,5 @@
 name: Diagnostic Intel CGL bounded light bank
-run-name: Non-release Intel bounded light bank pairs · ${{ github.sha }}
+run-name: Non-release Intel bounded light bank pairs with common indexing state · ${{ github.sha }}
 
 on:
   push:
@@ -89,7 +89,7 @@ jobs:
         run: |
           python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-bank/install.log
           cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-bank/install.json
-      - name: Run both original native suites once, retaining any failure
+      - name: Normalize indexing once and run both original native suites
         env:
           INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-bank-browser
           PRODUCT: ${{ matrix.product }}

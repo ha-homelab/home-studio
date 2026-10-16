@@ -19,16 +19,24 @@ ARMS = (('baseline', comparison.BASELINE), ('candidate', comparison.CANDIDATES['
 class IntelComparisonTests(unittest.TestCase):
     def setUp(self):
         # Never include the caller's credentials in a failed mock-call diff.
-        environment = patch.dict(comparison.os.environ, {'PATH': '/usr/bin:/bin'}, clear=True)
+        environment = patch.dict(comparison.os.environ, {
+            'PATH': '/usr/bin:/bin', 'GITHUB_ACTIONS': 'true',
+            'RUNNER_ENVIRONMENT': 'github-hosted', 'RUNNER_OS': 'macOS'}, clear=True)
         environment.start()
         self.addCleanup(environment.stop)
         host = patch.object(comparison.platform, 'platform', return_value='Darwin-test-x86_64')
         host.start()
         self.addCleanup(host.stop)
+        system = patch.object(comparison.sys, 'platform', 'darwin')
+        system.start()
+        self.addCleanup(system.stop)
+        machine = patch.object(comparison.platform, 'machine', return_value='x86_64')
+        machine.start()
+        self.addCleanup(machine.stop)
 
     def run_fixture(self, exit_codes, mutate=False, mismatched_driver=False,
                     candidate='bounded-bank', product='firefox', mutate_install=False,
-                    cpu_error=False):
+                    cpu_error=False, indexing_codes=None, indexing_statuses=None):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
@@ -36,8 +44,21 @@ class IntelComparisonTests(unittest.TestCase):
         install.write_text('{"testFixture":true}')
         output = root / 'diagnostics'
         observed = []
+        self.indexing_calls, self.events = [], []
 
         def run(command, **kwargs):
+            if command[0] in ('/usr/bin/mdutil', '/usr/bin/sudo'):
+                self.indexing_calls.append(command)
+                self.events.append(('control', len(self.indexing_calls)))
+                index = len(self.indexing_calls) - 1
+                code = (indexing_codes or [0, 0, 0, 0, 0])[index]
+                if isinstance(code, Exception):
+                    raise code
+                stdout = ('/:\n\tIndexing enabled.\n/System/Volumes/Data:\n\tIndexing enabled.\n'
+                          if index == 0 else '/:\n\tIndexing disabled.\n/System/Volumes/Data:\n\tIndexing disabled.\n')
+                if index in (indexing_statuses or {}):
+                    stdout = indexing_statuses[index]
+                return subprocess.CompletedProcess(command, code, stdout=stdout, stderr='')
             arm = command[1].split('/')[-3]
             manifest = json.loads((output / 'comparison.json').read_text())
             self.assertEqual(next(value for value in manifest['arms'] if value['name'] == arm)['status'], 'running')
@@ -52,6 +73,7 @@ class IntelComparisonTests(unittest.TestCase):
             raw.mkdir()
             (raw / 'summary.json').write_bytes(b'{"originalFixtureReceipt":true}\n')
             observed.append((arm, command))
+            self.events.append(('suite', arm))
             if mutate_install:
                 install.write_text('{"changed":true}')
             result = exit_codes[len(observed) - 1]
@@ -118,6 +140,7 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertEqual(observed, [])
         self.assertEqual(manifest['status'], 'infrastructure-error')
         self.assertIn('original acceptance driver differs', manifest['error'])
+        self.assertEqual(self.indexing_calls, [])
 
     def test_exact_two_source_order(self):
         self.assertEqual(ARMS, (
@@ -247,6 +270,118 @@ class IntelComparisonTests(unittest.TestCase):
             if path.name != 'intel-cgl-bank.yml':
                 self.assertNotIn('diagnostic/intel-cgl-bank', path.read_text())
         self.assertFalse((HERE.parent / '.github/workflows/intel-cgl-boundaries.yml').exists())
+
+    def test_indexing_host_gate_rejects_every_missing_or_wrong_indicator_before_subprocess(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(comparison.subprocess, 'run') as run:
+            path = Path(directory) / 'status.json'
+            for key, values in {
+                    'GITHUB_ACTIONS': ['', 'false'],
+                    'RUNNER_ENVIRONMENT': ['', 'self-hosted'],
+                    'RUNNER_OS': ['', 'Linux', 'Windows']}.items():
+                for value in values:
+                    with self.subTest(key=key, value=value), patch.dict(comparison.os.environ, {key: value}):
+                        with self.assertRaises(ValueError):
+                            comparison.indexing_command(path, disable=True)
+            for attr, value in [('platform', 'linux'), ('platform', 'win32')]:
+                with patch.object(comparison.sys, attr, value), self.assertRaises(ValueError):
+                    comparison.indexing_command(path, disable=True)
+            with patch.object(comparison.platform, 'machine', return_value='arm64'), self.assertRaises(ValueError):
+                comparison.indexing_command(path, disable=True)
+            run.assert_not_called()
+            self.assertFalse(path.exists())
+
+    def test_one_normalization_precedes_both_sources_and_each_arm_rechecks_status(self):
+        result, manifest, observed, output = self.run_fixture([0, 0])
+        self.assertEqual(result, 0)
+        self.assertEqual(self.events, [('control', 1), ('control', 2), ('control', 3),
+            ('control', 4), ('suite', 'baseline'), ('control', 5), ('suite', 'candidate')])
+        status = ['/usr/bin/mdutil', '-a', '-s']
+        self.assertEqual(self.indexing_calls, [status,
+            ['/usr/bin/sudo', '-n', '/usr/bin/mdutil', '-a', '-i', 'off'], status, status, status])
+        self.assertEqual([arm['sourceRevision'] for arm in manifest['arms']], [revision for _, revision in ARMS])
+        self.assertEqual(manifest['indexingControl']['scope'], 'both-arms')
+        self.assertTrue(manifest['indexingControl']['verifiedDisabled'])
+        for name in ('before', 'disable', 'after'):
+            record = json.loads((output / ('indexing-' + name + '.json')).read_text())
+            self.assertEqual(record['exitCode'], 0)
+            self.assertEqual(record['timeoutSeconds'], 15)
+        for arm in manifest['arms']:
+            self.assertTrue(arm['indexingStatus']['verifiedDisabled'])
+            record = json.loads((output / arm['name'] / arm['indexingStatus']['file']).read_text())
+            self.assertEqual(record['command'], status)
+
+    def test_each_indexing_command_failure_stops_before_affected_suite_and_fails_job(self):
+        for index in range(5):
+            with self.subTest(index=index):
+                codes = [0] * 5
+                codes[index] = 3
+                result, manifest, observed, output = self.run_fixture([0, 0], indexing_codes=codes)
+                self.assertEqual(result, 1)
+                self.assertEqual(manifest['status'], 'infrastructure-error')
+                self.assertEqual(manifest['indexingControl']['verifiedDisabled'], index >= 3)
+                self.assertEqual([arm for arm, _ in observed], ['baseline'] if index == 4 else [])
+                names = ('indexing-before.json', 'indexing-disable.json', 'indexing-after.json',
+                         'baseline/indexing-before.json', 'candidate/indexing-before.json')
+                self.assertEqual(json.loads((output / names[index]).read_text())['exitCode'], 3)
+                if index >= 3:
+                    self.assertEqual(manifest['arms'][index - 3]['status'], 'infrastructure-error')
+                    self.assertFalse(manifest['arms'][index - 3]['indexingStatus']['verifiedDisabled'])
+                self.assertLessEqual(sum(command[0].endswith('sudo') for command in self.indexing_calls), 1)
+
+    def test_each_verification_rejects_enabled_unknown_partial_or_changed_volume_status(self):
+        for index in (2, 3, 4):
+            for text in ['', '/:\nIndexing enabled.\n', '/:\nunknown\n',
+                         '/:\nIndexing disabled.\n', '/:\nIndexing disabled.\n/another:\nIndexing disabled.\n',
+                         '/:\nIndexing disabled.\n/System/Volumes/Data:\nIndexing enabled.\n']:
+                with self.subTest(index=index, status=text):
+                    result, manifest, observed, _ = self.run_fixture([0, 0], indexing_statuses={index: text})
+                    self.assertEqual(result, 1)
+                    self.assertEqual([arm for arm, _ in observed], ['baseline'] if index == 4 else [])
+                    self.assertEqual(manifest['indexingControl']['verifiedDisabled'], index >= 3)
+                    self.assertEqual(manifest['status'], 'infrastructure-error')
+
+    def test_failed_baseline_is_preserved_when_candidate_indexing_has_drifted(self):
+        result, manifest, observed, _ = self.run_fixture([7], indexing_statuses={
+            4: '/:\nIndexing enabled.\n/System/Volumes/Data:\nIndexing disabled.\n'})
+        self.assertEqual(result, 1)
+        self.assertEqual([arm for arm, _ in observed], ['baseline'])
+        self.assertEqual(manifest['arms'][0]['status'], 'failed')
+        self.assertEqual(manifest['arms'][0]['exitCode'], 7)
+        self.assertEqual(manifest['arms'][1]['status'], 'infrastructure-error')
+        self.assertEqual(sum(command[0].endswith('sudo') for command in self.indexing_calls), 1)
+
+    def test_control_timeout_or_launch_error_never_starts_affected_suite(self):
+        for index in (1, 4):
+            for error in (OSError('private detail'), subprocess.TimeoutExpired('private command', 15)):
+                with self.subTest(index=index, error=type(error).__name__):
+                    codes = [0] * 5
+                    codes[index] = error
+                    result, manifest, observed, _ = self.run_fixture([0, 0], indexing_codes=codes)
+                    self.assertEqual(result, 1)
+                    self.assertEqual([arm for arm, _ in observed], ['baseline'] if index == 4 else [])
+                    self.assertNotIn('private', json.dumps(manifest))
+
+    def test_indexing_command_capture_is_capped_and_timeout_is_a_failure_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'status.json'
+            with patch.object(comparison.subprocess, 'run', return_value=
+                              subprocess.CompletedProcess([], 0, stdout='s' * 5000, stderr='e' * 5000)) as run:
+                record = comparison.indexing_command(path)
+            self.assertEqual(run.call_args.kwargs['timeout'], 15)
+            self.assertEqual(run.call_args.kwargs['env']['LC_ALL'], 'C')
+            self.assertEqual(len(record['stdout']), 4096)
+            self.assertEqual(len(record['stderr']), 4096)
+            self.assertTrue(record['stdoutTruncated'] and record['stderrTruncated'])
+            with self.assertRaises(ValueError):
+                comparison.indexing_volumes(record)
+            for error in (OSError('private exception'), subprocess.TimeoutExpired(
+                    'private command', 15, output=b'x' * 5000, stderr=b'e')):
+                with patch.object(comparison.subprocess, 'run', side_effect=error), self.assertRaises(RuntimeError):
+                    comparison.indexing_command(path, disable=True)
+                record = json.loads(path.read_text())
+                self.assertEqual(record['status'], 'failed')
+                self.assertEqual(record['error'], type(error).__name__)
+                self.assertNotIn('private', json.dumps(record))
 
     def test_cpu_capture_is_numeric_top_eight_and_basename_only(self):
         rows = [f'{index} 1 {index}.5 {index * 1024} /private/parent/App {index}'

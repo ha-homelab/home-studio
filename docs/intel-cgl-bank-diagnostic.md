@@ -1,7 +1,7 @@
 # Disposable Intel bounded-light-bank diagnostic
 
 Only a push to `diagnostic/intel-cgl-bank` starts this workflow. It has
-read-only permissions and pinned actions. It does not invoke the 77-lane
+read-only GitHub permissions and pinned actions. It does not invoke the 77-lane
 acceptance gate or publish a release. Its results are diagnostic evidence only.
 
 Two independent `macos-15-intel` jobs compare these exact sources in order:
@@ -14,6 +14,30 @@ parallelism is two. Each pair runs sequentially on one hosted VM and shares one
 official browser installation verified by the original installer, checksum
 catalog and signature checks. Python 3.13, Node 22 and both locked npm dependency
 installations are prepared before either suite starts.
+
+After both sources pass preflight, the runner records `mdutil -a -s`, invokes
+`sudo -n /usr/bin/mdutil -a -i off` exactly once, and records another status.
+Every volume from the initial inventory must report indexing disabled. Before
+each arm, a further read-only status must confirm the same disabled inventory.
+An enabled, missing, unknown, incomplete or truncated result stops the affected
+suite and fails the job. The runner never repeats the mutation between arms or
+repairs a changed setting mid-comparison. A prior browser failure remains in
+the manifest if the next arm's status check fails.
+
+Every Spotlight command requires `GITHUB_ACTIONS=true`,
+`RUNNER_ENVIRONMENT=github-hosted`, `RUNNER_OS=macOS`, Python's
+`sys.platform=darwin` and `machine=x86_64`. Local and self-hosted machines are
+rejected. Commands use `LC_ALL=C`, a 15-second timeout and JSON receipts capped
+at 4,096 characters each of stdout and stderr. Command errors fail the job.
+There is no settling sleep, index erasure, cache deletion, service stop or
+update/security configuration change. The setting changes only on the
+disposable hosted VM.
+
+This common normalization is not a proven cure for the Intel failures, and a
+disabled status does not prove that existing indexing workers are idle. The
+passive CPU records remain necessary context. Both sources receive the same
+normalization; the comparison varies the bank implementation, not Spotlight
+configuration. Fixed order and shared caches still limit causal conclusions.
 
 The unchanged candidate gives eligible immutable geometry a local PointLight
 bank of at most 32 records, while retaining the original shadow prefix. It
@@ -53,7 +77,9 @@ saved. Each capture has a two-second timeout; at most 240 records are attempted
 per arm, reserving the final record for the post-suite sample. The thread is
 stopped and joined before source verification or the next arm. Capture errors
 are retained as diagnostic records and never replace the original suite exit
-status. `suiteElapsedSeconds` excludes sampler startup and shutdown overhead.
+status. `suiteElapsedSeconds` excludes sampler startup/shutdown and Spotlight
+control overhead. Spotlight command and verification failures never become
+passing browser evidence.
 
 The CPU percentages are the operating system's `ps` estimates, not interval
 utilization measurements. These observations can associate active work with
@@ -62,11 +88,10 @@ throttling or hypervisor contention. The fixed baseline-first order and shared
 driver caches also limit interpretation; one pair is not a statistical speedup
 estimate.
 
-Publish the exact candidate commit before pushing this disposable branch. The
-wrapper never substitutes a moving ref or an unavailable source. Keep this
-workflow unpushed and unlaunched while the fallback-boundary comparison runs.
-It is a contingency only if that comparison fails to resolve Intel acceptance;
-its terminal evidence must be saved before any decision to run this experiment.
+The wrapper never substitutes a moving ref or an unavailable source. Keep this
+workflow unpushed until the preceding indexing comparison is terminal and its
+evidence has been saved. A push starts these two jobs; preparing this workflow
+authorizes no local setting change.
 
 Offline contract check, with no browser or network:
 
