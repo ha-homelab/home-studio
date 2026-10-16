@@ -1,0 +1,93 @@
+name: Diagnostic Intel PW153 pixels625 pair
+run-name: Non-release Intel PW153 pixels625 pair · ${{ github.sha }}
+on:
+  push:
+    branches: [diagnostic/intel-pw153-pixels625-pair]
+permissions:
+  contents: read
+concurrency:
+  group: diagnostic-intel-pw153-pixels625-pair
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  compare:
+    name: Diagnostic only · four original Intel PW153 viewer cases
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-pw153-pixels625-pair' }}
+    runs-on: macos-15-intel
+    timeout-minutes: 40
+    env:
+      PYTHONUTF8: '1'
+      BROWSER_STABILITY_ENGINES: firefox
+      BROWSER_STABILITY_HEADED: '1'
+      HOME_STUDIO_BROWSER_PROFILE: desktop
+      HOME_STUDIO_EXPECT_BROWSER_MAJOR: '153'
+      HOME_STUDIO_EXPECT_BROWSER_VERSION: '153.0'
+      FIREFOX_WEBGL_BACKEND: default
+      FIREFOX_COMPOSITOR_BACKEND: software
+      FIREFOX_GPU_PROCESS: disabled
+      PLAYWRIGHT_VERSION: '1.62.1'
+    steps:
+      - name: Check out the diagnostic harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: harness
+          persist-credentials: false
+      - name: Reject an unselected source before setup
+        run: |
+          mkdir -p harness/diagnostics
+          python3 harness/scripts/run-intel-pw153-pixels625-pair.py --validate-selection 2>&1 | tee harness/diagnostics/selection.log
+      - name: Check out the exact unchanged baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: 1d8c4dde1a6e02b2f992711fabbb370fd77488a7
+          path: baseline
+          persist-credentials: false
+      - name: Check out the exact selected candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: 7cc7031f860578d7e066fccd33543dce2bd43dbc
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+      - name: Verify both complete source trees and diagnostic contracts
+        run: |
+          python3 harness/scripts/test-intel-pw153-pixels625-pair.py
+          python3 harness/scripts/run-intel-pw153-pixels625-pair.py --validate-sources --source-root "$GITHUB_WORKSPACE" 2>&1 | tee harness/diagnostics/source-check.log
+          {
+            python3 --version
+            node --version
+            npm --version
+            uname -sm
+            sw_vers
+            /usr/sbin/sysctl machdep.cpu.brand_string hw.ncpu hw.memsize || true
+          } > harness/diagnostics/toolchain.log 2>&1
+      - name: Install one checksum-pinned Playwright toolchain and Firefox
+        timeout-minutes: 12
+        env:
+          TOOLCHAIN_DIR: ${{ runner.temp }}/home-studio-pw153-pair
+        run: |
+          python3 baseline/scripts/setup-browser-toolchain.py --version 1.62.1 --output "$TOOLCHAIN_DIR" --github-env "$GITHUB_ENV" 2>&1 | tee harness/diagnostics/toolchain-install.log
+          HOME_STUDIO_PLAYWRIGHT_MODULE="$TOOLCHAIN_DIR/node_modules/playwright" PLAYWRIGHT_BROWSERS_PATH="$TOOLCHAIN_DIR/browsers" python3 baseline/scripts/install-browser-with-retry.py --output harness/diagnostics/browser-install
+          cp "$TOOLCHAIN_DIR/toolchain.json" harness/diagnostics/toolchain.json
+      - name: Prepare the verified ephemeral Intel runner once
+        run: python3 baseline/scripts/prepare-intel-macos-ci.py --output harness/diagnostics/runner-environment
+      - name: Run baseline6 candidate6 candidate24 baseline24 without retries
+        env:
+          TOOLCHAIN_DIR: ${{ runner.temp }}/home-studio-pw153-pair
+        run: |
+          python3 harness/scripts/run-intel-pw153-pixels625-pair.py --source-root "$GITHUB_WORKSPACE" --toolchain "$TOOLCHAIN_DIR" --preparation harness/diagnostics/runner-environment --output harness/diagnostics/comparison 2>&1 | tee harness/diagnostics/pair.log
+      - name: Preserve all non-release evidence even when an original case fails
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostic-intel-pw153-pixels625-pair-${{ github.run_id }}-${{ github.run_attempt }}
+          path: harness/diagnostics/
+          if-no-files-found: error
+          retention-days: 14
