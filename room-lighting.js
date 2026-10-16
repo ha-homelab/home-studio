@@ -670,8 +670,36 @@ function literalLambertPointBody(THREE, decayTwo) {
             }`;
 }
 
-// Experimental direct-Lambert lowering. The directional path also executes
-// when every point light is off; retain its unconditional accumulation.
+// Keep the literal shadow prefix and its cached transmission, but lower only
+// its point-information and Lambert bodies to scalar/vector locals.
+function literalLambertShadowPoint(THREE, prefix, decayTwo) {
+  // Reuse the complete stock-span, macro and helper guards. No sampler or
+  // transmission expression changes; the existing cache block owns the locals.
+  if (!literalLambertPointBody(THREE, decayTwo)) return null;
+  const body = text => text.slice(text.indexOf('{') + 1, text.lastIndexOf('}'));
+  let point = body(THREE.ShaderChunk.lights_pars_begin.match(/void getPointLightInfo\([^]*?\n\t\}/)[0])
+    .replaceAll('pointLight.', 'pointLights[ i ].')
+    .replaceAll('lVector', 'homeShadowVector').replaceAll('lightDistance', 'homeShadowDistance')
+    .replace('light.direction =', 'vec3 homeShadowDirection =')
+    .replace('light.color =', 'vec3 homeShadowColor =').replaceAll('light.color', 'homeShadowColor')
+    .replace('light.visible =', 'bool homeShadowVisible =');
+  if (decayTwo) point = point.replace('getDistanceAttenuation( homeShadowDistance, pointLights[ i ].distance, pointLights[ i ].decay )',
+    'homePointDistanceAttenuation( homeShadowDistance, pointLights[ i ].distance )');
+  const direct = body(THREE.ShaderChunk.lights_lambert_pars_fragment.match(/void RE_Direct_Lambert\([^]*?\n\}/)[0])
+    .replaceAll('directLight.direction', 'homeShadowDirection').replaceAll('directLight.color', 'homeShadowColor')
+    .replaceAll('dotNL', 'homeShadowDot').replaceAll('irradiance', 'homeShadowIrradiance');
+  // The shared guard ignores whitespace, but these substitutions must create
+  // every local and consume every aggregate field. Otherwise retain the prefix.
+  if (/\b(?:pointLight|directLight|light)\s*\./.test(point + direct) ||
+      ['vec3 homeShadowDirection =', 'vec3 homeShadowColor =', 'bool homeShadowVisible =']
+        .some(declaration => point.split(declaration).length !== 2)) return null;
+  return prefix.replace('pointLight = pointLights[ i ];', point)
+    .replace('getPointLightInfo( pointLight, geometryPosition, directLight );', '')
+    .replace('RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );', '{' + direct + '}')
+    .replaceAll('directLight.color', 'homeShadowColor').replaceAll('directLight.visible', 'homeShadowVisible');
+}
+
+// The directional path also executes when every point is off.
 function literalLambertDirectional(THREE) {
   const compact = text => text?.replace(/\s+/g, '');
   const chunks = ['lights_pars_begin','lights_lambert_pars_fragment','lights_fragment_begin'].map(key => THREE.ShaderChunk[key]);
@@ -959,6 +987,9 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
   const literalPointBodies=geometryOptions.literalLambertPointBody && pointTexture
     ? [false,true].map(decay => literalLambertPointBody(THREE,decay)) : [];
   const literalRunLighting=literalPointBodies.map(body => body && runLighting.replace(textureBody,body));
+  const shadowPrefix=directPointLighting.slice(0,directPointLighting.indexOf('#pragma unroll_loop_end')+'#pragma unroll_loop_end'.length);
+  const literalShadowPrefixes=geometryOptions.literalLambertShadowPoint === true && packed && pointTexture
+    ? [false,true].map(decay => literalLambertShadowPoint(THREE,shadowPrefix,decay)) : [];
   const runFragment=runTexture ? fragment.replace(`uniform ivec4 homeLightRuns[${capacity}];`,
     'uniform highp sampler2D homeRunTexture; uniform int homeRunBlock;') : fragment;
   const directionalBody = packed && geometryOptions.literalLambertDirectional === true ? literalLambertDirectional(THREE) : null;
@@ -1048,7 +1079,10 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
               ? (decayState?.active ? textureDecayChunk : textureParameters) : decayChunk;
             shader.fragmentShader = shader.fragmentShader.replace('#include <lights_pars_begin>', () => parameters);
           }
-          const selectedLighting = textureState?.active ? (literalRunLighting[decayState?.active?1:0] || runLighting) : lighting;
+          let selectedLighting = textureState?.active ? (literalRunLighting[decayState?.active?1:0] || runLighting) : lighting;
+          if (textureState?.active && material.isMeshLambertMaterial && literalShadowPrefixes[decayState?.active?1:0]) {
+            selectedLighting = selectedLighting.replace(shadowPrefix,literalShadowPrefixes[decayState?.active?1:0]);
+          }
           const directLighting = scalarDirectional ? selectedLighting.replace(scalarDirectional.original, scalarDirectional.replacement) : selectedLighting;
           shader.fragmentShader = (textureState?.active?'uniform highp sampler2D homePointTexture;\n':'') + (textureState?.active?textureFragment:fragment) + shader.fragmentShader.replace('#include <lights_fragment_begin>', directLighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
         };
@@ -1056,6 +1090,7 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
           (sharedWall ? ':wall-sheen-facing-v1' : wall ? ':wall-sheen-v2' : '') +
           (!sharedWall && staticGlassFacing.has(mesh.material) ? ':glass-facing-v1' : '') +
           (enabled && textureState?.active && literalRunLighting[decayState?.active?1:0] ? ':literal-lambert-point-body-v1' : '') +
+          (enabled && textureState?.active && material.isMeshLambertMaterial && literalShadowPrefixes[decayState?.active?1:0] ? ':literal-lambert-shadow-point-v1' : '') +
           (scalarDirectional ? ':literal-lambert-directional-v1' : '') +
           (decayState?.active ? ':point-decay-two-v1' : '');
         if (decayState) {decayState.callback = material.onBeforeCompile; decayState.cacheKey = material.customProgramCacheKey;}

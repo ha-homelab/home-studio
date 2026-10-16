@@ -30,7 +30,7 @@ class SourceReplayTests(unittest.TestCase):
                         ['scripts/test-tv-screen.cjs'], ['scripts/test-media-preview.cjs'],
                         ['scripts/test-native-draw-diagnostic.cjs'], ['scripts/test-glass-wall-program.cjs'],
                         ['scripts/test-zero-point-block.cjs'], ['scripts/test-point-decay-two.cjs'], ['scripts/test-cached-shadow-transmission.cjs'], ['scripts/test-literal-lambert-directional.cjs'], ['scripts/test-fallback-shared-program.cjs'],
-                        ['scripts/test-point-texture-current.cjs'], ['scripts/test-point-run-texture.cjs'], ['scripts/test-static-geometry-atlas.cjs'], ['scripts/test-point-signal-texture.cjs'], ['scripts/test-signal-texture-decay-two.cjs'], ['scripts/test-literal-lambert-point-body.cjs']]
+                        ['scripts/test-point-texture-current.cjs'], ['scripts/test-point-run-texture.cjs'], ['scripts/test-static-geometry-atlas.cjs'], ['scripts/test-point-signal-texture.cjs'], ['scripts/test-signal-texture-decay-two.cjs'], ['scripts/test-literal-lambert-point-body.cjs'], ['scripts/test-scalar-shadow-point.cjs']]
             for paths in commands:
                 with self.subTest(command=['node', '--test', *paths]):
                     result = subprocess.run([node, '--test', *paths], cwd=source,

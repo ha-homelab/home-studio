@@ -695,3 +695,15 @@ is not proof of less interpreter work or faster compilation. CPU tests compare
 pinned expansions and binary32 operation traces; actual eight-view pixels,
 original deadlines and hosted performance still require measurement. No Intel
 performance claim or acceptance waiver is made.
+
+The experimental `literalLambertShadowPoint` option extends the scalar Lambert
+prototype only to the packed, active point-texture shadow prefix. It retains the
+existing per-light cached transmission, literal sampler indices, visibility
+gates, attenuation calls and exact accumulation order. The complete pinned
+point span, unique `RE_Direct` macro and helper checks must pass; unsupported
+source, PBR, inactive texture and editor variants keep their original bodies.
+The option defaults off and Home opts in within its existing owned texture
+selection. It adds no resources, uniform slots or light-state changes. CPU
+source and binary32 trace proofs establish the intended transformation, not
+actual GLSL compilation, pixel parity or an Intel speedup. A compiler may
+already inline and scalarize the original struct calls, so benefit is unproven.
