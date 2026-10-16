@@ -1,0 +1,107 @@
+name: Diagnostic Intel CGL fallback comparison
+run-name: Non-release Intel CGL fallback comparison · ${{ github.sha }}
+
+on:
+  push:
+    branches: [diagnostic/intel-cgl-fallback]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnostic-intel-cgl-fallback
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  compare:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-fallback' }}
+    runs-on: macos-15-intel
+    # Room for two original three-case suites and installation. Per-case
+    # deadlines remain inside the unchanged source drivers.
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      NATIVE_STARTUP_DIAGNOSTICS: '1'
+      FIREFOX_RENDERER_VISIBILITY: unmasked
+      FIREFOX_WEBGL_BACKEND: default
+      FIREFOX_COMPOSITOR_BACKEND: software
+      FIREFOX_GPU_PROCESS: disabled
+    steps:
+      - name: Check out the diagnostic harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: harness
+          persist-credentials: false
+      - name: Check out the exact packed-run baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: 9b8d52b164eb1364ce8504063096a506c63100eb
+          path: baseline
+          persist-credentials: false
+      - name: Check out the exact fallback shared-program candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: f4a9ebba66b8f7ddce017535092f1885fbbfa8c0
+          path: fallback-shared
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+      - name: Record tooling and prepare all fixtures before any source timing
+        run: |
+          mkdir -p harness/diagnostics/intel-cgl-fallback
+          {
+            python3 --version
+            node --version
+            npm --version
+            uname -sm
+            sw_vers
+          } > harness/diagnostics/intel-cgl-fallback/toolchain.log 2>&1
+          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-fallback/baseline-npm.log
+          npm --prefix fallback-shared ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-fallback/fallback-shared-npm.log
+          python3 harness/scripts/test-intel-cgl-fallback.py
+          HOME_STUDIO_REVIEW_SOURCE="$GITHUB_WORKSPACE/fallback-shared" python3 harness/diagnostics/restore/test_restore_adapter.py
+          node --test harness/diagnostics/restore/test-restore-trace.cjs
+      - name: Install one official checksum and signature verified ESR for all sources
+        env:
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-browser
+        run: |
+          python3 harness/scripts/setup-native-browser.py --product firefox --version 153.5.0esr --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-fallback/install.log
+          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-fallback/install.json
+      - name: Run all original native suites in order, retaining failures
+        id: compare
+        env:
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-browser
+        run: >-
+          python3 harness/scripts/run-intel-cgl-fallback.py
+          --source-root "$GITHUB_WORKSPACE"
+          --installation "$INSTALL_DIR/install.json"
+          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-fallback"
+      - name: Separate passive candidate restore diagnostic
+        if: ${{ failure() && steps.compare.outcome == 'failure' }}
+        run: |
+          primary="$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-fallback/fallback-shared/raw"
+          if test -f "$primary/viewer-24/report.json"; then
+            python3 "$GITHUB_WORKSPACE/harness/diagnostics/restore/diagnose-restore.py" \
+              --source "$GITHUB_WORKSPACE/fallback-shared" \
+              --primary-report "$primary/viewer-24/report.json" \
+              --primary-root "$primary" \
+              --installation "$RUNNER_TEMP/home-studio-intel-cgl-browser/install.json" \
+              --product firefox --expected-version 153.5.0esr \
+              --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-fallback/candidate-restore-replay" --run
+          fi
+      - name: Preserve non-release comparison evidence even when a source fails
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostic-intel-cgl-fallback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: harness/diagnostics/intel-cgl-fallback/
+          if-no-files-found: error
+          retention-days: 14
