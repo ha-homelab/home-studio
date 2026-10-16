@@ -102,6 +102,19 @@ class StrictTlsTests(unittest.TestCase):
         cls.strong = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         cls.weak = rsa.generate_private_key(public_exponent=65537, key_size=2047)
 
+    @unittest.skipUnless(sys.platform == "darwin", "requires native Security framework")
+    def test_native_security_framework_uses_exact_rsa_key_bits(self):
+        from _darwin_certificate import certificate_key_meets_minimum
+
+        for key, expected in ((self.weak, False), (self.strong, True)):
+            with self.subTest(bits=key.key_size):
+                der = certificate("native-test", key, None, None, ca=True).public_bytes(
+                    serialization.Encoding.DER
+                )
+                self.assertIs(certificate_key_meets_minimum(der), expected)
+        with self.assertRaises(ValueError):
+            certificate_key_meets_minimum(b"not a DER certificate")
+
     def contexts(self, directory, weak_part, version):
         keys = [
             self.weak if part == weak_part else self.strong

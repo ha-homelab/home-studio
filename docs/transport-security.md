@@ -15,13 +15,22 @@ verified chains fail closed. OpenSSL security level at least2 supplies the
 algorithm floor; the extra exact-key check rejects RSA2047 keys that OpenSSL
 can otherwise round into that level. Stronger host policy is preserved.
 
-For the strict profile, install `requirements-tls-test.txt` in an isolated
-environment. These requirements also support the synthetic tests. Intel macOS
-uses the native Security framework to inspect RSA/EC metadata instead of the
-cryptography package; it does not replace OpenSSL trust verification. Source
-and license attribution appear in [third-party notices](../THIRD_PARTY_NOTICES.md).
+For the strict runtime profile, install `requirements-strict-tls.txt` in an
+isolated environment. Its platform marker excludes the cryptography package on
+Intel macOS; that platform uses the native Security framework to inspect RSA/EC
+metadata without replacing OpenSSL trust verification. Linux and Apple silicon
+macOS use cryptography. Source and license attribution appear in
+[third-party notices](../THIRD_PARTY_NOTICES.md).
+
+The synthetic fixture suite separately requires `requirements-tls-test.txt` and
+is qualified on Linux and Apple silicon macOS. The native Security-framework
+RSA2047 rejection/RSA2048 acceptance is also exercised directly on Apple silicon.
+No Intel macOS execution is claimed by those results; Intel qualification remains
+pending. The runtime dependency marker avoids requiring an unavailable current
+Intel wheel.
 
 ```sh
+python3 -m pip install -r requirements-strict-tls.txt
 HOME_STUDIO_STRICT_TLS=1 python3 scripts/setup-chrome-for-testing.py \
   --version REVIEWED_VERSION --output /private/browser-test
 HOME_STUDIO_STRICT_TLS=1 python3 scripts/serve-ai-planner.py

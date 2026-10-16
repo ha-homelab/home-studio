@@ -53,7 +53,7 @@ SITE_FILES = (
     'planner/guide-assets/12-ai-review.jpg',
     'vendor/three.module.min.js', 'vendor/THREE-LICENSE.txt',
 )
-REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'THIRD_PARTY_NOTICES.md', 'scripts/download_tls.py', 'scripts/test-download-tls.py', 'requirements-tls-test.txt', 'docs/transport-security.md', 'docs/i18n.md', 'docs/translations/README.md',
+REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'THIRD_PARTY_NOTICES.md', 'scripts/download_tls.py', 'scripts/test-download-tls.py', 'requirements-tls-test.txt', 'requirements-strict-tls.txt', 'docs/transport-security.md', 'docs/i18n.md', 'docs/translations/README.md',
               *(f'docs/translations/README.{code}.md' for code in LOCALE_CODES if code != 'en'),
               'scripts/test-i18n.mjs', 'scripts/test-i18n-browser.cjs', 'scripts/test-validation-i18n.mjs',
               'scripts/test-help-i18n.cjs', 'scripts/test-panel-language.cjs', 'scripts/test-viewer-i18n.cjs', 'scripts/test-lock-control.cjs',
