@@ -1,5 +1,8 @@
 # Browser compatibility and rendering acceptance
 
+For a visual overview and dated results, start with the
+[illustrated quality and release guide](quality-and-release.md).
+
 Home Studio has two separate browser rendering paths. The hosted drawing tool
 at `/planner/` runs `planner/editor.js`, with a 2D canvas and its own 3D preview.
 The compiler creates a separate viewer from `viewer.js` and the Home view

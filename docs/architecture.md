@@ -4,6 +4,9 @@ Home studio has a public drawing and installation pipeline. A private household
 project can use the same code while keeping its measurements, photos, device
 bindings, deployment details, and specialized adapters outside the public repo.
 
+See the [illustrated quality and release guide](quality-and-release.md) for how
+we test both browser paths, recover graphics resources, and qualify a release.
+
 ## From drawing to installed panel
 
 1. **Browser editor:** `planner/index.html`, `editor.js`, and `model.js` edit a
