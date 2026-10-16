@@ -15,3 +15,17 @@
 .prose h1 { font-size: clamp(2.8rem, 6vw, 4rem); }
 .prose h2 { font-size: 1.5rem; margin-top: 2.5rem; }
 @media (max-width: 760px) { .preview-section, .start-cards, .closing-note, .site-footer, .prose { padding: 1.5rem; } .start-cards { grid-template-columns: 1fr; gap: 1.5rem; } .site-footer { flex-direction: column; } }
+
+.ai-feature { max-width: 1224px; margin: 0 auto 3rem; padding: 3rem; display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; background: #e5efe8; border: 1px solid #c7d8ce; border-radius: 18px; }
+.ai-feature h2 { font-size: clamp(2rem, 4vw, 3.3rem); line-height: 1.12; }
+.ai-steps ol { list-style: decimal-leading-zero; padding-left: 2rem; }
+.ai-steps li { padding: .8rem 0 .8rem .5rem; border-bottom: 1px solid #c7d8ce; }
+.ai-steps li::marker { color: #326b57; font-weight: 700; }
+.ai-steps strong, .ai-steps span { display: block; }
+.ai-steps span { font-size: .95rem; margin-top: .25rem; }
+.prose pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #e5efe8; padding: 1rem; border-radius: 8px; }
+@media (max-width: 760px) { .ai-feature { margin: 0 1.5rem 2rem; padding: 1.5rem; grid-template-columns: 1fr; gap: 1rem; } }
+
+.ai-guide-preview { margin: 2rem 0; }
+.ai-guide-preview img { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 10px; }
+.ai-guide-preview figcaption { color: #52614e; font-size: .85rem; margin-top: .5rem; }

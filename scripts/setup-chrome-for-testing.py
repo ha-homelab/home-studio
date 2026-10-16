@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
+from download_tls import open_download
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -58,7 +58,7 @@ def install(version, output):
         digest = hashlib.sha256()
         size = 0
         deadline = time.monotonic() + 240
-        with urllib.request.urlopen(entry['url'], timeout=60) as source, archive.open('wb') as target:
+        with open_download(entry['url'], timeout=60) as source, archive.open('wb') as target:
             while chunk := source.read(1024 * 1024):
                 if time.monotonic() > deadline:
                     raise TimeoutError('Chrome download exceeded four minutes')

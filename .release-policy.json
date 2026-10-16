@@ -5,7 +5,8 @@
   "visibility": "public",
   "version_file": "custom_components/home_floorplan/manifest.json",
   "validation_workflows": [
-    "package.yml"
+    "package.yml",
+    "codeql.yml"
   ],
   "artifact_pattern": "release-assets*",
   "local_checks": [

@@ -93,8 +93,8 @@ class BrowserMatrixTests(unittest.TestCase):
         for matrix_rows in self.rows.values():
             identities = {(row['os'], row['id']) for row in matrix_rows['include']}
             self.assertEqual(len(identities), len(matrix_rows['include']))
-        for os in ('ubuntu-24.04', 'windows-2022', 'macos-15'):
-            platform_rows = [row for row in rows if row['os'] == os]
+        for platform_os in ('ubuntu-24.04', 'windows-2022', 'macos-15'):
+            platform_rows = [row for row in rows if row['os'] == platform_os]
             self.assertEqual(len(platform_rows), 19)
             snapshots = {(row['playwright'], row['engine']) for row in platform_rows
                          if row['profile'] == 'desktop' and not row['channel'] and not row['cft']}
@@ -106,7 +106,7 @@ class BrowserMatrixTests(unittest.TestCase):
                              {('chromium', 'phone'), ('chromium', 'tablet'), ('webkit', 'phone'), ('webkit', 'tablet')})
             self.assertEqual({row['cft'] for row in platform_rows if row['cft']},
                              {'153.0.8010.52', '154.0.8037.92'})
-            native = {(row['product'], row['version']) for row in self.rows['native']['include'] if row['os'] == os}
+            native = {(row['product'], row['version']) for row in self.rows['native']['include'] if row['os'] == platform_os}
             self.assertEqual(native, {('firefox', '158.0'), ('firefox', '153.5.0esr'),
                                       ('waterfox', '6.7.5'), ('waterfox', '6.7.6')})
 
@@ -269,7 +269,7 @@ class BrowserMatrixTests(unittest.TestCase):
             manifest.write_text(json.dumps(contents))
             with mock.patch.object(chrome, 'MANIFEST', manifest), \
                     mock.patch.object(chrome, 'platform_key', return_value='linux64'), \
-                    mock.patch.object(chrome.urllib.request, 'urlopen', side_effect=lambda *a, **kw: io.BytesIO(payload)):
+                    mock.patch.object(chrome, 'open_download', side_effect=lambda *a, **kw: io.BytesIO(payload)):
                 with self.assertRaisesRegex(ValueError, 'SHA-256'):
                     chrome.install('123.0', root / 'rejected')
                 self.assertFalse((root / 'rejected/chrome-linux64').exists())

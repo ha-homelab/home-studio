@@ -22,7 +22,6 @@ from pathlib import Path
 import re
 import shutil
 import stat
-import sys
 import tarfile
 import tempfile
 import uuid

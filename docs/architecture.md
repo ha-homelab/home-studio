@@ -6,6 +6,12 @@ bindings, deployment details, and specialized adapters outside the public repo.
 
 ## From drawing to installed panel
 
+The [AI-assisted authoring workflow](ai-planning.md) adds an optional loopback
+companion for personal provider sessions, photo processing and validated drafts.
+Its modules are loaded only by the companion, not the hosted manual editor or
+installed viewer. See [AI architecture](ai-planner-architecture.md) for the implemented
+request, privacy, geometry and transactional preview boundaries.
+
 1. **Browser editor:** `planner/index.html`, `editor.js`, and `model.js` edit a
    versioned metric project. The draft stays in browser storage. Exporting JSON
    makes a portable source file; the browser does not contact Home Assistant.

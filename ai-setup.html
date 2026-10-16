@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Turn room photos, instructions and measured dimensions into an editable Home Studio draft using your own AI provider or local vision model.">
+  <title>Plan from photos · Home studio</title>
+  <link rel="stylesheet" href="./planner/guide.css"><link rel="stylesheet" href="./site.css">
+</head>
+<body>
+  <a class="skip-link" href="#setup">Skip to setup</a>
+  <header class="site-header"><a class="wordmark" href="./">Home<span>studio</span><small>ROOM TO IMAGINE</small></a><a class="button button-small" href="./planner/">Draw by hand →</a></header>
+  <main class="prose" id="setup">
+    <p class="eyebrow">YOUR PHOTOS · YOUR MODEL · YOUR EDITABLE PLAN</p>
+    <h1>Start with a room.<br>Let AI sketch.</h1>
+    <p class="lead">Give Home studio room photos, a few instructions and measurements. Your chosen AI model suggests furniture and openings. You review the draft in the editor before applying it.</p>
+    <p>This optional feature runs through a small companion on your computer. It needs Python 3.10 or newer and either your own provider API key or a running local vision model. The ordinary online drawing editor still works without either.</p>
+    <figure class="ai-guide-preview"><img src="./planner/guide-assets/12-ai-review.jpg" width="1500" height="1000" alt="Local Home Studio editor showing a detached room draft in 3D and the candidate review panel before Apply."><figcaption>A synthetic test example: the draft is visible in 3D while the saved plan stays unchanged. This verifies the editor workflow; it is not a demonstration of a live model's accuracy.</figcaption></figure>
+    <h2>1. Open your local studio</h2>
+    <p><a href="https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip">Download the complete toolkit</a> and extract it. Open a terminal in the extracted folder. On macOS or Linux, run:</p>
+    <pre><code>python3 scripts/serve-ai-planner.py</code></pre>
+    <p>On Windows, use <code>py -3 scripts/serve-ai-planner.py</code>. Open the local address printed by the command, then choose <strong>Plan from photos</strong> in the editor. Keep the terminal open while working. If the port is busy, add <code>--port 8100</code>.</p>
+    <p>If you already drew a plan on this website, first choose <strong>Export JSON</strong>, then open that file in the local editor. Website and local drafts have separate browser storage.</p>
+    <h2>2. Choose where your photos go</h2>
+    <p>Select a provider and enter an exact model ID that supports images, structured text and a context window of at least 32,768 tokens. Larger inputs may need more. Connect with your own API key, or choose a local runtime such as Ollama or LM Studio. The session remembers your key only in the companion's memory; it does not write it into your project or browser storage. Reconnect after closing the session or restarting the companion.</p>
+    <p><strong>Cloud mode:</strong> when you generate, the companion sends your instructions, prepared photos and the relevant room context to your selected provider. Your key is sent to that provider to authenticate. A gateway also receives the request and forwards it to its model host. Provider billing and retention rules apply. Home studio operates no AI relay.</p>
+    <p><strong>Local mode:</strong> use a vision-capable model on a loopback endpoint. Disable your runtime's cloud features if you want inference to stay on this machine. Model downloads may still need internet access.</p>
+    <p><a href="https://github.com/ha-homelab/home-studio/blob/main/docs/ai-provider-setup.md">Cloud provider setup →</a> · <a href="https://github.com/ha-homelab/home-studio/blob/main/docs/ai-local-models.md">Ollama, LM Studio and other local runtimes →</a></p>
+    <h2>3. Add evidence, not guesses</h2>
+    <p>Choose an existing room to furnish, or create a new rectangular room using its measured width, depth and height. Set the new room's position so it fits beside your other rooms. Add a few clear JPEG, PNG or WebP photos and explain what you want to keep or change.</p>
+    <p>For example: “The room is 4 m wide and 3 m deep. Keep the desk near the window. Put a two-seat sofa against the opposite wall. Leave the door clear.” Photos help identify objects; they do not establish accurate scale. Convert HEIC photos to JPEG first.</p>
+    <h2>4. Review, apply, adjust</h2>
+    <p>Generate a draft, check its assumptions and select the proposed items you want to keep. Preview it in 2D or 3D. Your saved project changes only when you choose <strong>Apply</strong>; the change can be undone. Unsupported objects, invalid dimensions and placements outside the room are rejected instead of silently imported.</p>
+    <p>Furnishing mode adds objects; it preserves existing furniture and walls. Move, resize or remove existing objects with the usual drawing tools. Repeat room by room. AI does not connect devices or run Home Assistant actions. When ready, <a href="./install.html">build and install your plan in Home Assistant</a> using the same project export as a hand-drawn plan.</p>
+    <h2>If something does not work</h2>
+    <ul>
+      <li><strong>No AI button?</strong> Use the address printed by the companion, not this hosted editor or a generic file server.</li>
+      <li><strong>Authentication or model error?</strong> Check the provider, exact model ID, API billing and image support. A chat subscription may not include API access.</li>
+      <li><strong>Local connection failed?</strong> Start the runtime, load a vision model, and use its loopback address. Do not expose the companion to your network.</li>
+      <li><strong>Draft rejected?</strong> Supply clearer measurements or simpler instructions and generate again. Existing work remains intact.</li>
+    </ul>
+    <p><a href="./privacy.html">Read the full privacy notice</a> · <a href="https://github.com/ha-homelab/home-studio/blob/main/docs/ai-planning.md">Detailed workflow and limits</a></p>
+  </main>
+</body>
+</html>
