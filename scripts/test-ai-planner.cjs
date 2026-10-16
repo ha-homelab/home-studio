@@ -8,6 +8,7 @@ const http = require('node:http');
 const zlib = require('node:zlib');
 const { spawnSync } = require('node:child_process');
 const playwright = require('playwright');
+const { browserLaunchOptions } = require('./browser-stability-diagnostics.cjs');
 const root = path.resolve(__dirname, '..');
 const catalog = JSON.parse(fs.readFileSync(path.join(root, 'planner/catalog.json')));
 const engines = (process.env.AI_PLANNER_ENGINES || 'chromium').split(',');
@@ -66,6 +67,20 @@ function python(args) {
   const result = spawnSync(process.env.PYTHON || 'python3', args, { cwd: root, encoding: 'utf8', timeout: 120000 });
   assert.equal(result.status, 0, result.error?.message || result.stderr || result.stdout);
 }
+async function waitPreview(page, expected) {
+  try {
+    await page.waitForFunction(expected => {
+      const metadata = window.planner.getPreviewMetadata();
+      if (metadata.error) throw new Error(`3D preview failed: ${metadata.error}`);
+      return Object.entries(expected).every(([key, value]) => metadata[key] === value);
+    }, expected);
+  } catch (error) {
+    const details = await page.evaluate(() => ({ metadata: window.planner.getPreviewMetadata(),
+      view: window.planner.getView(), rendererMessage: document.getElementById('preview-error').textContent,
+      visibility: document.visibilityState })).catch(() => ({ pageClosed: true }));
+    throw new Error(`3D preview did not reach ${JSON.stringify(expected)}: ${JSON.stringify(details)}`, { cause: error });
+  }
+}
 const waitStatus = (page, text) => page.waitForFunction(value => document.getElementById('ai-status').textContent.includes(value), text);
 async function waitHeld(which = 'generate') {
   const deadline = Date.now() + 5000;
@@ -84,7 +99,7 @@ async function connect(page, provider = 'openai') {
 async function generate(page) { await page.locator('#ai-generate').click(); await waitStatus(page, 'Draft ready'); }
 async function run(engine, origin) {
   assert(['chromium', 'firefox', 'webkit'].includes(engine), `Unknown AI_PLANNER_ENGINES engine: ${engine}`);
-  const browser = await playwright[engine].launch({ headless: true, ...(engine === 'chromium' ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined, args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } : {}) });
+  const browser = await playwright[engine].launch(browserLaunchOptions(engine, process.env.AI_PLANNER_HEADED !== '1'));
   const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'home-studio-ai-ui-')));
   try {
     const context = await browser.newContext({ viewport: { width: 1600, height: 1050 }, acceptDownloads: true });
@@ -113,7 +128,7 @@ async function run(engine, origin) {
     assert.deepEqual(JSON.parse(fs.readFileSync(beforeApplyPath, 'utf8')), initial, 'export during preview contains only the accepted plan');
     assert.equal(await page.locator('#ai-candidates img').count(), 0, 'candidate names are text, not HTML');
     await page.locator('#preview-tab').click();
-    await page.waitForFunction(() => window.planner.getPreviewMetadata().items === 2);
+    await waitPreview(page, { items: 2 });
     assert.equal((await page.evaluate(() => window.planner.getPreviewMetadata())).rooms, 1, '3D renders detached room');
     await page.locator('input[data-candidate-key="lamp"]').uncheck();
     assert((await page.locator('#ai-review-summary').textContent()).includes('1 item'), 'review counts follow candidate selection');
@@ -148,7 +163,7 @@ async function run(engine, origin) {
     await page.locator('#undo').click(); assert.deepEqual(await state(page), existing); await page.locator('[data-object-kind="rooms"]').first().click();
     responseMode = 'hold'; await page.locator('#ai-generate').click(); await page.waitForFunction(() => document.getElementById('ai-status').textContent.includes('Generating'));
     await waitHeld();
-    await page.locator('#preview-tab').click(); await page.waitForFunction(() => window.planner.getPreviewMetadata().rooms === 2);
+    await page.locator('#preview-tab').click(); await waitPreview(page, { rooms: 2 });
     await page.locator('#plan-tab').click();
     await page.locator('#project-title').fill('Edited while waiting'); await page.locator('#project-title').press('Tab');
     await waitStatus(page, 'plan or selection changed'); held(); held = null;

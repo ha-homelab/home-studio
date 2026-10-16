@@ -56,9 +56,10 @@ jobs:
       - name: Test AI preview, review, undo and real local companion
         env:
           AI_PLANNER_ENGINES: chromium,firefox
+          AI_PLANNER_HEADED: '1'
         run: |
-          node scripts/test-ai-planner.cjs
-          node scripts/test-ai-integration.cjs
+          LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-ai-planner.cjs
+          LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-ai-integration.cjs
       - name: Test language switching, right-to-left layout and project preservation
         run: node scripts/test-i18n-browser.cjs
       - name: Test localized help and offline installed viewer

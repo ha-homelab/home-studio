@@ -6,6 +6,7 @@ const http = require('node:http');
 const path = require('node:path');
 const fs = require('node:fs');
 const playwright = require('playwright');
+const { browserLaunchOptions } = require('./browser-stability-diagnostics.cjs');
 const root = path.resolve(__dirname, '..');
 const engines = (process.env.AI_PLANNER_ENGINES || 'chromium').split(',');
 let inferenceCount = 0;
@@ -65,7 +66,7 @@ function startCompanion() {
     companion = await startCompanion();
     for (const engine of engines) {
       assert(['chromium', 'firefox', 'webkit'].includes(engine));
-      const browser = await playwright[engine].launch({ headless: true, ...(engine === 'chromium' ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } : {}) });
+      const browser = await playwright[engine].launch(browserLaunchOptions(engine, process.env.AI_PLANNER_HEADED !== '1'));
       try {
         const page = await browser.newPage({ viewport: { width: 1500, height: 1000 } });
         const errors = [], external = [];
@@ -88,9 +89,14 @@ function startCompanion() {
         await page.locator('#ai-generate').click();
         await page.waitForFunction(() => document.getElementById('ai-status').textContent.includes('Draft ready'));
         assert.deepEqual(await page.evaluate(() => window.planner.getProject()), before);
+        await page.locator('#preview-tab').click();
+        await page.waitForFunction(() => {
+          const metadata = window.planner.getPreviewMetadata();
+          if (metadata.error) throw new Error(`3D preview failed: ${metadata.error}`);
+          return metadata.items === 1;
+        });
+        assert.equal((await page.evaluate(() => window.planner.getPreviewMetadata())).rooms, 1);
         if (process.env.AI_REVIEW_SCREENSHOT && engine === 'chromium') {
-          await page.locator('#preview-tab').click();
-          await page.waitForFunction(() => window.planner.getPreviewMetadata().items === 1);
           await page.locator('#ai-review-title').evaluate(node => node.scrollIntoView({ block: 'start' }));
           await page.screenshot({ path: process.env.AI_REVIEW_SCREENSHOT, type: 'jpeg', quality: 88 });
         }
