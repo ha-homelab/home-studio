@@ -94,10 +94,12 @@ async function run(browserName, origin, project, sourceHash) {
       throw Error('No exposed canvas pixel is available for a real drag');
     });
     const started = Date.now();
-    await input.drag({x: bounds.x+bounds.width*point.x, y: bounds.y+bounds.height*point.y},
+    const phases = await input.drag({x: bounds.x+bounds.width*point.x, y: bounds.y+bounds.height*point.y},
       {x: bounds.x+bounds.width*(point.x+.15), y: bounds.y+bounds.height*(point.y+.1)});
+    const framesStarted = Date.now();
     await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-    return Date.now()-started;
+    const completed = Date.now();
+    return {durationMs:completed-started,phases:{...phases,framesMs:completed-framesStarted}};
   };
     await page.goto(origin);
     const states = Object.fromEntries(project.floors[0].items.map(item => [item.entity_id,{state:'on',name:item.name,light:{brightness:180,color_mode:'color_temp',color_temp_kelvin:3000}}]));
@@ -149,7 +151,8 @@ async function run(browserName, origin, project, sourceHash) {
       check((await snapshot()).renderCount===idleBefore, 'An idle Home view does not continuously render');
       const canvas = frame.locator('#homeStage canvas');
       const homeCameraBefore = (await snapshot()).scene.camera;
-      const dragMs = await dragCanvas(canvas,child);
+      const homeDrag = await dragCanvas(canvas,child), dragMs = homeDrag.durationMs;
+      sample.homeDragPhases = homeDrag.phases;
       sample.dragMs = dragMs;
       sample.readyAfterDragMs = Date.now()-started;
       console.log(`${browserName}: Home drag and frame completion in ${dragMs} ms`);
@@ -212,7 +215,8 @@ async function run(browserName, origin, project, sourceHash) {
       check(burst.synchronousDraws<=1 && burst.totalDraws>0 && burst.totalDraws<=2, 'Wheel bursts coalesce into at most one scheduled scene draw');
       const beforeEditorDrag = await snapshot();
       const editorCameraBefore = beforeEditorDrag.scene.camera;
-      const editorDragMs = await dragCanvas(frame.locator('#view3d canvas'),child);
+      const editorDrag = await dragCanvas(frame.locator('#view3d canvas'),child), editorDragMs = editorDrag.durationMs;
+      sample.editorDragPhases = editorDrag.phases;
       sample.editorDragMs = editorDragMs;
       const afterEditorDrag = await snapshot();
       const editorCameraAfter = afterEditorDrag.scene.camera;

@@ -8,6 +8,27 @@ const vm = require('node:vm');
 const {test, after} = require('node:test');
 const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
 
+test('viewer drag receipts preserve native phases and the existing two-frame completion wait', async () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  const start=source.indexOf('const dragCanvas = async'),end=source.indexOf('    await page.goto(origin);',start);
+  assert(start>=0&&end>start);
+  let now=100,drags=0,frames=0,evaluations=0,fail=false;
+  const phases={hoverMs:2,pressMs:3,moveMs:20,releaseMs:4};
+  const env={Date:{now:()=>now},input:{drag:async()=>{drags++;if(fail)throw Error('native failure');now+=29;return phases;}},
+    requestAnimationFrame:callback=>{frames++;now+=7;callback();}};
+  vm.runInNewContext(source.slice(start,end).replace('const dragCanvas','globalThis.dragCanvas'),env);
+  const locator={scrollIntoViewIfNeeded:async()=>{},boundingBox:async()=>({x:10,y:20,width:100,height:100}),evaluate:async()=>({x:.25,y:.35})};
+  const child={evaluate:async callback=>{evaluations++;return callback();}};
+  const result=await env.dragCanvas(locator,child);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)),{durationMs:43,phases:{...phases,framesMs:14}});
+  assert.equal(drags,1);assert.equal(frames,2);assert.equal(evaluations,1);
+  assert.deepEqual(phases,{hoverMs:2,pressMs:3,moveMs:20,releaseMs:4},'Input phase data is not mutated');
+  fail=true;await assert.rejects(env.dragCanvas(locator,child),/native failure/);
+  assert.equal(drags,2);assert.equal(frames,2,'Failed native input cannot be replaced by another action');
+  assert.match(source,/sample\.homeDragPhases = homeDrag\.phases/);
+  assert.match(source,/sample\.editorDragPhases = editorDrag\.phases/);
+});
+
 test('Viewer frame receipts advance only after the real draw succeeds', () => {
   let active = 18, fail = false;
   const env = {renderer: {info:{render:{calls:1,triangles:1}},domElement:{width:632,height:394},getViewport(v){return v.copy({x:0,y:0,z:632,w:394});},getPixelRatio(){return 1;},render() {if (fail) throw Error('draw failed'); return 42;}},

@@ -167,6 +167,12 @@ per window. The guard budgets 836 of the Apple software renderer's reported
 1,024 vectors for the 24-room, 72-light fixture. Lower limits and larger plans fall back to
 the original literal geometry without reducing scene contents. CPU regression
 tests cover polygon boundaries, concave rooms, window ordering and this fallback.
+
+Viewer receipts retain the existing native drag phase timings for Home and the
+editor, followed by the existing two-animation-frame completion wait. These
+measurements add no input actions or rendered frames; the same total duration
+continues to determine whether the interaction passes.
+
 The packed daylight path omits loops for absent exterior rooms or windows and
 rejects rooms outside the existing conservative spatial bound before calculating
 polygon distance. The bound contains the full daylight and exterior transition;
