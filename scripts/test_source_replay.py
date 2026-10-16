@@ -26,7 +26,7 @@ class SourceReplayTests(unittest.TestCase):
             replay = sorted(path.relative_to(source).as_posix()
                             for path in (source / 'fuzz').glob('*.test.mjs'))
             self.assertEqual(replay, ['fuzz/project-validation.test.mjs', 'fuzz/wall-geometry.test.mjs'])
-            commands = [replay, ['scripts/test-browser-stability-diagnostics.cjs'], ['scripts/test-unlit-architectural-walls.cjs'], ['scripts/test-flat-editor-floors.cjs'], ['scripts/test-wall-outline-materials.cjs'], ['scripts/test-light-state.cjs'],
+            commands = [['scripts/test-ai-draft.mjs'], replay, ['scripts/test-browser-stability-diagnostics.cjs'], ['scripts/test-unlit-architectural-walls.cjs'], ['scripts/test-flat-editor-floors.cjs'], ['scripts/test-wall-outline-materials.cjs'], ['scripts/test-light-state.cjs'],
                         ['scripts/test-tv-screen.cjs'], ['scripts/test-media-preview.cjs'], ['scripts/test-render-lifecycle.cjs'],
                         ['scripts/test-viewer-geometry-context.cjs'], ['scripts/test-viewer-texture-context.cjs'], ['scripts/test-native-draw-diagnostic.cjs'], ['scripts/test-native-viewer-programs.cjs'], ['scripts/test-glass-wall-program.cjs'],
                         ['scripts/test-zero-point-block.cjs'], ['scripts/test-point-decay-two.cjs'], ['scripts/test-cached-shadow-transmission.cjs'], ['scripts/test-literal-lambert-directional.cjs'], ['scripts/test-fallback-shared-program.cjs'],
@@ -36,7 +36,7 @@ class SourceReplayTests(unittest.TestCase):
                     result = subprocess.run([node, '--test', *paths], cwd=source,
                                             capture_output=True, text=True, timeout=60)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            for script in ('scripts/test-native-draw-diagnostic.py', 'scripts/test-intel-macos-ci.py', 'scripts/test-waterfox-tooling.py'):
+            for script in ('scripts/test-ai-companion.py', 'scripts/test-native-draw-diagnostic.py', 'scripts/test-intel-macos-ci.py', 'scripts/test-waterfox-tooling.py'):
                 result = subprocess.run([sys.executable, script], cwd=source,
                                         capture_output=True, text=True, timeout=60)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
