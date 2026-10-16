@@ -81,6 +81,7 @@ jobs:
           node scripts/test-glass-wall-program.cjs
           node scripts/test-fallback-shared-program.cjs
           node scripts/test-point-texture-current.cjs
+          node scripts/test-point-run-texture.cjs
           node scripts/test-render-lifecycle.cjs
           node scripts/test-interaction-render.cjs
           node --test scripts/test-render-capacity.cjs

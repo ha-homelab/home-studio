@@ -380,10 +380,69 @@ function pointLightIsFiniteZero(light) {
     light.distance >= 0 && light.decay >= 0;
 }
 
+// Run records are exact nonnegative integers. RGBA32F preserves every value
+// admitted here; one texture row is a fixed block for one static material.
+function createLightRunTexture(THREE, capacity, roomCount, packed, options) {
+  if (!Number.isInteger(capacity) || capacity < 1 || capacity > 32768 ||
+      !Number.isInteger(roomCount) || roomCount < 0 || roomCount > 16777216 ||
+      !Number.isInteger(options.maxTextureSize) || capacity > options.maxTextureSize ||
+      !Number.isInteger(options.maxTextures) || options.maxTextures < 16 ||
+      packed.uniformVectors+3 > options.maxFragmentUniforms) return null;
+  const rows=new Map();
+  let texture=null, ready=false, disposed=false;
+  function valid(uniforms) {
+    const count=uniforms.homeLightRunCount.value, data=uniforms.homeLightRuns.value;
+    if(!Number.isInteger(count)||count<0||count>capacity||data.length!==capacity*4)return false;
+    for(let i=0;i<data.length;i+=4)if(
+      !Number.isInteger(data[i])||data[i]<0||data[i]>capacity||
+      !Number.isInteger(data[i+1])||data[i+1]<data[i]||data[i+1]>capacity||
+      !Number.isInteger(data[i+2])||data[i+2]<0||data[i+2]>roomCount||data[i+3]!==0)return false;
+    return true;
+  }
+  return {
+    get ready(){return ready;},
+    bind(material,shader){
+      // Getters also serve a cached texture program after a full/editor variant.
+      shader.uniforms.homeRunTexture={get value(){return texture;}};
+      shader.uniforms.homeRunBlock={get value(){return rows.get(material)||0;}};
+    },
+    update(global,materials){
+      ready=false;
+      if(disposed||!valid(global))return;
+      for(const state of materials.values())if(!valid(state.uniforms))return;
+      const added=[...materials.keys()].filter(material=>!rows.has(material));
+      const height=1+rows.size+added.length;
+      // Bound both GL dimensions and CPU allocation; unsupported scenes retain
+      // their original uniform program rather than dropping any run records.
+      if(height>options.maxTextureSize||capacity*height>1048576)return;
+      for(const material of added)rows.set(material,rows.size+1);
+      if(!texture||texture.image.height!==height){
+        texture?.dispose();
+        texture=new THREE.DataTexture(new Float32Array(capacity*height*4),capacity,height,THREE.RGBAFormat,THREE.FloatType);
+        texture.name='material-light-runs';texture.internalFormat='RGBA32F';
+        texture.minFilter=texture.magFilter=THREE.NearestFilter;texture.generateMipmaps=false;
+        texture.flipY=false;texture.colorSpace=THREE.NoColorSpace;texture.unpackAlignment=1;
+        texture.needsUpdate=true;
+      }
+      let changed=false;
+      const copy=(uniforms,row)=>{
+        const input=uniforms.homeLightRuns.value,offset=row*capacity*4,data=texture.image.data;
+        for(let i=0;i<input.length;i++)if(data[offset+i]!==input[i]){data[offset+i]=input[i];changed=true;}
+      };
+      copy(global,0);
+      for(const [material,state] of materials)copy(state.uniforms,rows.get(material));
+      if(changed)texture.needsUpdate=true;
+      ready=true;
+    },
+    releaseGPU(){if(!disposed&&texture){texture.dispose();texture.needsUpdate=true;}},
+    dispose(){if(disposed)return;disposed=true;ready=false;texture?.dispose();rows.clear();}
+  };
+}
+
 // Optional software-renderer transport. Selection happens before rendering;
 // the texture shader contains no dynamic fallback to the full PointLight array.
-function createPointLightTexture(THREE, capacity, packed, options, pointRooms) {
-  if (!Number.isInteger(capacity) || capacity < 1 || capacity > 32768 ||
+function createPointLightTexture(THREE, capacity, packed, options, pointRooms, runTexture) {
+  if ((options.runTexture && !runTexture) || !Number.isInteger(capacity) || capacity < 1 || capacity > 32768 ||
       !Number.isInteger(options.maxTextureSize) || capacity*2 > options.maxTextureSize ||
       !Number.isInteger(options.maxTextures) || options.maxTextures < 16 ||
       packed.uniformVectors+1 > options.maxFragmentUniforms) return null;
@@ -407,6 +466,7 @@ function createPointLightTexture(THREE, capacity, packed, options, pointRooms) {
       return state;
     },
     bind(state,shader) {
+      runTexture?.bind(state.material,shader);
       const source=shader.uniforms.pointLights;
       // Install in every variant: Three may reuse a cached texture program with
       // the most recently compiled full/editor variant's uniform map.
@@ -428,7 +488,7 @@ function createPointLightTexture(THREE, capacity, packed, options, pointRooms) {
       for(const shadowed of [true,false])for(const point of points)
         if(point.light?.visible&&Boolean(point.light.castShadow)===shadowed)ordered.push(point);
       count=ordered.length;
-      let ready=!disposed&&count<=capacity&&ordered.filter(p=>p.light.castShadow).length<=8&&
+      let ready=!disposed&&(!runTexture||runTexture.ready)&&count<=capacity&&ordered.filter(p=>p.light.castShadow).length<=8&&
         camera?.isCamera&&typeof camera.updateWorldMatrix==='function'&&camera.layers&&camera.matrixWorldInverse?.elements?.length===16;
       if(ready){
         camera.updateWorldMatrix(true,false);
@@ -487,7 +547,8 @@ function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {
     homeLightRunStarts:{value:new Int32Array(capacity)}, homePointLightingRequired:{value:true},
     homeLightRuns:{value:new Int32Array(capacity * 4)}
   });
-  const pointTexture=packed&&geometryOptions.pointTexture ? createPointLightTexture(THREE,capacity,packed,geometryOptions,uniforms.homePointRooms) : null;
+  const runTexture=packed&&geometryOptions.pointTexture&&geometryOptions.runTexture ? createLightRunTexture(THREE,capacity,rooms.length,packed,geometryOptions) : null;
+  const pointTexture=packed&&geometryOptions.pointTexture ? createPointLightTexture(THREE,capacity,packed,geometryOptions,uniforms.homePointRooms,runTexture) : null;
   const staticRuns = new Map(), dynamicMaterials = new WeakSet();
   const geometryDeclarations = packed ? `
     uniform bool homePointLightingRequired;
@@ -687,9 +748,13 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
             pointLight.position=homePositionDistance.xyz;pointLight.distance=homePositionDistance.w;
             pointLight.color=homeColorDecay.xyz;pointLight.decay=homeColorDecay.w;`);
   const textureLighting=pointTexture ? lighting.replace(unshadowedBody,textureBody) : '';
+  const runLighting=runTexture ? textureLighting.replace('homeLightRuns[homeRun]',
+    'ivec4(texelFetch(homeRunTexture,ivec2(homeRun,homeRunBlock),0))') : textureLighting;
+  const runFragment=runTexture ? fragment.replace(`uniform ivec4 homeLightRuns[${capacity}];`,
+    'uniform highp sampler2D homeRunTexture; uniform int homeRunBlock;') : fragment;
   return {
-    releaseGPU(){pointTexture?.releaseGPU();},
-    dispose(){pointTexture?.dispose();},
+    releaseGPU(){pointTexture?.releaseGPU();runTexture?.releaseGPU();},
+    dispose(){pointTexture?.dispose();runTexture?.dispose();},
     capacity, geometryMode: packed ? 'packed' : 'literal', geometryUniformVectors: packed?.uniformVectors ?? null,
     attach(group, enabled, {staticGeometry = false} = {}) {
       if (packed && staticGeometry) group?.updateWorldMatrix?.(true,true);
@@ -748,9 +813,9 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
             '#include <project_vertex>\nhomeWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;'
           );
           if(textureState?.active)shader.fragmentShader=shader.fragmentShader.replace('#include <lights_pars_begin>',textureParameters);
-          shader.fragmentShader = (textureState?.active?'uniform highp sampler2D homePointTexture;\n':'') + fragment + shader.fragmentShader.replace('#include <lights_fragment_begin>', textureState?.active?textureLighting:lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
+          shader.fragmentShader = (textureState?.active?'uniform highp sampler2D homePointTexture;\n':'') + (textureState?.active?runFragment:fragment) + shader.fragmentShader.replace('#include <lights_fragment_begin>', textureState?.active?runLighting:lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
         };
-        mesh.material.customProgramCacheKey = () => (enabled ? fragment+(textureState?.active?':point-texture-v2':'') : 'home-editor') +
+        mesh.material.customProgramCacheKey = () => (enabled ? fragment+(textureState?.active?':point-texture-v2'+(runTexture?':run-texture-v1':''):'') : 'home-editor') +
           (sharedWall ? ':wall-sheen-facing-v1' : wall ? ':wall-sheen-v2' : '') +
           (!sharedWall && staticGlassFacing.has(mesh.material) ? ':glass-facing-v1' : '');
         if(textureState){textureState.callback=mesh.material.onBeforeCompile;textureState.cacheKey=mesh.material.customProgramCacheKey;}
@@ -800,7 +865,6 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
       }
       uniforms.homeLightRunCount.value = runCount;
       if (packed) packLightRunRecords(uniforms.homeLightRunStarts.value, runs, pointRooms, runCount, uniforms.homeLightRuns.value);
-      pointTexture?.update(points,camera);
       if (packed) for (const state of staticRuns.values()) {
         state.uniforms.homeLightRunCount.value = filterRoomLightingRuns(state.unbounded ? null : state.bounds,
           packed.uniforms.homeRoomBounds.value,pointRooms,runs,runCount,
@@ -808,6 +872,8 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
         packLightRunRecords(state.uniforms.homeLightRunStarts.value, state.uniforms.homeLightRunEnds.value,
           pointRooms, state.uniforms.homeLightRunCount.value, state.uniforms.homeLightRuns.value);
       }
+      if(pointTexture)runTexture?.update(uniforms,staticRuns);
+      pointTexture?.update(points,camera);
     }
   };
 }

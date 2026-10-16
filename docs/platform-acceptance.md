@@ -327,6 +327,17 @@ release the texture. CPU tests check the pinned Three uploader/expanded shader,
 record order, state transitions and lifecycle. No performance improvement or
 pixel equivalence on a real driver is claimed by this experiment.
 
+A separate, unaccepted continuation moves only the packed run records from
+`homeLightRuns` into a second RGBA32F texture. Each static material keeps a
+fixed row; dynamic materials use the original global row. The scalar run
+count and ordered lighting loop are unchanged. The table is staged once after
+all static run filtering, with exact integer bounds, texture dimensions,
+sampler/uniform allowances and a 16 MiB allocation ceiling checked before
+selecting the program. Unsupported inputs retain the full uniform program.
+CPU comparisons cover shared/static/dynamic materials, stale unused tails,
+empty light lists, cached variants and disposal. No driver speedup or pixel
+equivalence is claimed for this continuation.
+
 Phone and tablet profiles use **390 × 844** and **820 × 1180** CSS pixels,
 respectively, at device scale factor 2, with touch enabled. They retain the
 actual desktop operating-system identity. Chromium exercises native touch
