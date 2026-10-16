@@ -348,6 +348,16 @@ The earlier standalone geometry texture was locally neutral or slower on
 translated x86-64/ARM; this cumulative experiment has no claimed driver benefit
 or pixel equivalence until independently measured.
 
+A final, unaccepted continuation appends lit-room flags and window transmission
+values to the existing point texture. It adds no sampler or per-frame texture/buffer allocation.
+Only the two dynamic signal-array reads change; the existing Float32 values,
+ordered math and shadow prefix remain. Nonfinite transmission updates deactivate
+the texture program before compilation, including environment-only updates.
+The original uniform program remains available for unsupported inputs. CPU
+proofs cover exact texels, emitted shader mappings, cached variants, update
+ordering, dimensions and disposal; real-driver pixels and performance still
+require the unchanged browser checks.
+
 Phone and tablet profiles use **390 × 844** and **820 × 1180** CSS pixels,
 respectively, at device scale factor 2, with touch enabled. They retain the
 actual desktop operating-system identity. Chromium exercises native touch

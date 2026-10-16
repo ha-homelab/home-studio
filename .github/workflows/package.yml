@@ -83,6 +83,7 @@ jobs:
           node scripts/test-point-texture-current.cjs
           node scripts/test-point-run-texture.cjs
           node scripts/test-static-geometry-atlas.cjs
+          node scripts/test-point-signal-texture.cjs
           node scripts/test-render-lifecycle.cjs
           node scripts/test-interaction-render.cjs
           node --test scripts/test-render-capacity.cjs

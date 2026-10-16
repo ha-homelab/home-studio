@@ -487,13 +487,20 @@ function createLightRunTexture(THREE, capacity, roomCount, packed, options) {
 
 // Optional software-renderer transport. Selection happens before rendering;
 // the texture shader contains no dynamic fallback to the full PointLight array.
-function createPointLightTexture(THREE, capacity, packed, options, pointRooms, runTexture, geometryTexture) {
+function createPointLightTexture(THREE, capacity, packed, options, pointRooms, runTexture, geometryTexture, signals) {
+  // Keep signal values in the same Float32 upload as the light records. Their
+  // literal offsets preserve both shader indexing and the existing sampler.
+  const signalNames=options.signalTexture ? ['homeLitRooms','homeWindowTransmission'] : [];
+  const signalCounts=signalNames.map(name=>signals?.[name]?.value?.length);
+  const signalOffsets=signalCounts.map((_,index)=>capacity*2+(index ? signalCounts[0] : 0));
+  const width=capacity*2+signalCounts.reduce((sum,count)=>sum+count,0);
   if ((options.runTexture && !runTexture) || (options.geometryTexture && !geometryTexture) || !Number.isInteger(capacity) || capacity < 1 || capacity > 32768 ||
-      !Number.isInteger(options.maxTextureSize) || capacity*2 > options.maxTextureSize ||
+      !signalCounts.every(count=>Number.isInteger(count)&&count>0) ||
+      !Number.isInteger(options.maxTextureSize) || width > options.maxTextureSize || width > 65536 ||
       !Number.isInteger(options.maxTextures) || options.maxTextures < 16 ||
       packed.uniformVectors+1 > options.maxFragmentUniforms) return null;
-  const data=new Float32Array(capacity*8), staging=new Float32Array(data.length), states=new Map();
-  const texture=new THREE.DataTexture(data,capacity*2,1,THREE.RGBAFormat,THREE.FloatType);
+  const data=new Float32Array(width*4), staging=new Float32Array(data.length), states=new Map();
+  const texture=new THREE.DataTexture(data,width,1,THREE.RGBAFormat,THREE.FloatType);
   texture.name='view-space-point-lights';texture.internalFormat='RGBA32F';
   texture.minFilter=texture.magFilter=THREE.NearestFilter;texture.generateMipmaps=false;
   texture.flipY=false;texture.colorSpace=THREE.NoColorSpace;texture.unpackAlignment=1;
@@ -503,7 +510,28 @@ function createPointLightTexture(THREE, capacity, packed, options, pointRooms, r
   function activate(state,active) {
     if(state.active!==active){state.active=active;state.material.needsUpdate=true;}
   }
+  function validSignals() {
+    return signalNames.every((name,field)=>{
+      const values=signals[name].value;
+      return values.length===signalCounts[field]&&values.every(value=>field===0 ? value===0||value===1 : finite(value));
+    });
+  }
   return {
+    fragment(source){
+      signalNames.forEach((name,field)=>{
+        source=source.replace(new RegExp('uniform (?:int|float) '+name+'\\[\\d+\\];'),'');
+        source=source.replace(new RegExp(name+'\\[([^\\]]+)\\]','g'),(_,index)=>{
+          const read=`texelFetch(homePointTexture,ivec2(${signalOffsets[field]}+(${index}),0),0).x`;
+          return field===0 ? `int(${read})` : read;
+        });
+      });
+      return source;
+    },
+    signalsChanged(){
+      // An environment-only update can precede a draw without update(). Never
+      // wait for the upload getter to reject a nonfinite signal after compile.
+      if(!validSignals())for(const state of states.values())activate(state,false);
+    },
     attach(mesh,group,enabled) {
       const material=mesh.material;
       let state=states.get(material);
@@ -526,6 +554,9 @@ function createPointLightTexture(THREE, capacity, packed, options, pointRooms, r
           staging[offset+3]=light.distance;staging[offset+4]=light.color.r;staging[offset+5]=light.color.g;
           staging[offset+6]=light.color.b;staging[offset+7]=light.decay;
         }
+        signalNames.forEach((name,field)=>signals[name].value.forEach((value,index)=>{
+          staging[(signalOffsets[field]+index)*4]=value;
+        }));
         if(staging.some((value,index)=>!Object.is(value,data[index]))){data.set(staging);texture.needsUpdate=true;}
         return texture;
       }};
@@ -535,7 +566,7 @@ function createPointLightTexture(THREE, capacity, packed, options, pointRooms, r
       for(const shadowed of [true,false])for(const point of points)
         if(point.light?.visible&&Boolean(point.light.castShadow)===shadowed)ordered.push(point);
       count=ordered.length;
-      let ready=!disposed&&(!runTexture||runTexture.ready)&&count<=capacity&&ordered.filter(p=>p.light.castShadow).length<=8&&
+      let ready=!disposed&&validSignals()&&(!runTexture||runTexture.ready)&&count<=capacity&&ordered.filter(p=>p.light.castShadow).length<=8&&
         camera?.isCamera&&typeof camera.updateWorldMatrix==='function'&&camera.layers&&camera.matrixWorldInverse?.elements?.length===16;
       if(ready){
         camera.updateWorldMatrix(true,false);
@@ -596,7 +627,7 @@ function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {
   });
   const geometryTexture=packed&&geometryOptions.pointTexture&&geometryOptions.geometryTexture ? createRoomGeometryTexture(THREE,packed,geometryOptions) : null;
   const runTexture=packed&&geometryOptions.pointTexture&&geometryOptions.runTexture ? createLightRunTexture(THREE,capacity,rooms.length,packed,geometryOptions) : null;
-  const pointTexture=packed&&geometryOptions.pointTexture ? createPointLightTexture(THREE,capacity,packed,geometryOptions,uniforms.homePointRooms,runTexture,geometryTexture) : null;
+  const pointTexture=packed&&geometryOptions.pointTexture ? createPointLightTexture(THREE,capacity,packed,geometryOptions,uniforms.homePointRooms,runTexture,geometryTexture,uniforms) : null;
   const staticRuns = new Map(), dynamicMaterials = new WeakSet();
   const geometryDeclarations = packed ? `
     uniform bool homePointLightingRequired;
@@ -800,7 +831,8 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
     'ivec4(texelFetch(homeRunTexture,ivec2(homeRun,homeRunBlock),0))') : textureLighting;
   const runFragment=runTexture ? fragment.replace(`uniform ivec4 homeLightRuns[${capacity}];`,
     'uniform highp sampler2D homeRunTexture; uniform int homeRunBlock;') : fragment;
-  const textureFragment=geometryTexture ? geometryTexture.fragment(runFragment) : runFragment;
+  const geometryFragment=geometryTexture ? geometryTexture.fragment(runFragment) : runFragment;
+  const textureFragment=pointTexture ? pointTexture.fragment(geometryFragment) : geometryFragment;
   return {
     releaseGPU(){pointTexture?.releaseGPU();runTexture?.releaseGPU();geometryTexture?.releaseGPU();},
     dispose(){pointTexture?.dispose();runTexture?.dispose();geometryTexture?.dispose();},
@@ -864,7 +896,7 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
           if(textureState?.active)shader.fragmentShader=shader.fragmentShader.replace('#include <lights_pars_begin>',textureParameters);
           shader.fragmentShader = (textureState?.active?'uniform highp sampler2D homePointTexture;\n':'') + (textureState?.active?textureFragment:fragment) + shader.fragmentShader.replace('#include <lights_fragment_begin>', textureState?.active?runLighting:lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
         };
-        mesh.material.customProgramCacheKey = () => (enabled ? fragment+(textureState?.active?':point-texture-v2'+(runTexture?':run-texture-v1':'')+(geometryTexture?':geometry-texture-v1':''):'') : 'home-editor') +
+        mesh.material.customProgramCacheKey = () => (enabled ? fragment+(textureState?.active?':point-texture-v2'+(runTexture?':run-texture-v1':'')+(geometryTexture?':geometry-texture-v1':'')+(geometryOptions.signalTexture?':signal-texture-v1':''):'') : 'home-editor') +
           (sharedWall ? ':wall-sheen-facing-v1' : wall ? ':wall-sheen-v2' : '') +
           (!sharedWall && staticGlassFacing.has(mesh.material) ? ':glass-facing-v1' : '');
         if(textureState){textureState.callback=mesh.material.onBeforeCompile;textureState.cacheKey=mesh.material.customProgramCacheKey;}
@@ -878,6 +910,7 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
         if (index >= 0) uniforms.homeWindowTransmission.value[index] = value;
       });
       else transmission.forEach((value,i)=>uniforms.homeWindowTransmission.value[i]=value);
+      pointTexture?.signalsChanged();
     },
     update(points, camera) {
       // Three.js stably sorts shadow casters before unshadowed point lights.

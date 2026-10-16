@@ -57,7 +57,9 @@ const root = path.resolve(__dirname, '..');
   assert.match(THREE.ShaderChunk.project_vertex, /mvPosition/);
   // Angle and palette work stays in vertices; fragments only blend the tint.
   assert.doesNotMatch(initial.fragmentShader, /sin\(|grazing|float tint/);
-  assert.doesNotMatch(source.slice(0, source.indexOf('function createRoomLighting')), /requestAnimationFrame|setInterval|setTimeout|Date|sampler/);
+  assert.doesNotMatch(source.slice(0, source.indexOf('function createRoomLighting')), /requestAnimationFrame|setInterval|setTimeout|Date/);
+  // Room-light transport may use textures; the sheen functions themselves may not.
+  assert.doesNotMatch([context.createWallSheenMotion,context.applyWallSheen,context.applySharedWallSheen].map(fn=>fn.toString()).join('\n'), /sampler/);
   // The packed path may share one program, but every material owns its switch.
   // Use real material defaults and geometry; no browser or fixture state is mocked.
   const rooms = [{id:'A',polygon:[[0,0],[4,0],[4,4],[0,4]]}];
