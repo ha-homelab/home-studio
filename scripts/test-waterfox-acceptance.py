@@ -454,6 +454,9 @@ def browser_preferences(port):
         # process in this temporary profile without changing the WebGL backend.
         # ESR153 defaults layers.gpu-process.force-enabled to false.
         prefs['layers.gpu-process.enabled'] = False
+        # Headed macOS/Windows otherwise disable WebGL before force-enabled
+        # is checked (gfxPlatform::InitWebGLConfig, FIREFOX_153_5_0esr_RELEASE).
+        prefs['webgl.allow-in-parent'] = True
     return prefs
 
 

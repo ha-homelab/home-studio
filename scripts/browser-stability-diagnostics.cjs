@@ -61,7 +61,11 @@ function browserLaunchOptions(engine, headless) {
     // Software WebRender does not disable the separate GPU process on macOS.
     // This opt-in isolates that process while retaining the WebGL backend.
     // ESR153 defaults layers.gpu-process.force-enabled to false.
-    ...(gpuProcess === 'disabled' ? {'layers.gpu-process.enabled': false} : {}),
+    // Headed macOS/Windows also require parent-process WebGL permission:
+    // gfxPlatform::InitWebGLConfig otherwise disables WebGL before force-enabled.
+    ...(gpuProcess === 'disabled' ? {
+      'layers.gpu-process.enabled': false, 'webgl.allow-in-parent': true,
+    } : {}),
   }};
 }
 

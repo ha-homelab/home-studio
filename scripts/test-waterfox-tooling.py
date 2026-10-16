@@ -128,20 +128,23 @@ class ToolingTests(unittest.TestCase):
         with patch.dict(acceptance.os.environ, {'FIREFOX_COMPOSITOR_BACKEND': 'typo'}), self.assertRaisesRegex(AssertionError, 'must be default or software'):
             acceptance.browser_preferences(2828)
 
-    def test_gpu_process_opt_in_preserves_compositor_and_webgl_preferences(self):
+    def test_gpu_process_opt_in_permits_parent_webgl_and_preserves_backend(self):
         with patch.dict(acceptance.os.environ, {'FIREFOX_WEBGL_BACKEND': 'angle', 'FIREFOX_COMPOSITOR_BACKEND': 'software'}):
             acceptance.os.environ.pop('FIREFOX_GPU_PROCESS', None)
             baseline = acceptance.browser_preferences(2828)
             self.assertNotIn('layers.gpu-process.enabled', baseline)
+            self.assertNotIn('webgl.allow-in-parent', baseline)
             acceptance.os.environ['FIREFOX_GPU_PROCESS'] = 'default'
             self.assertEqual(acceptance.browser_preferences(2828), baseline)
             acceptance.os.environ['FIREFOX_GPU_PROCESS'] = 'disabled'
             requested = acceptance.browser_preferences(2828)
-            self.assertEqual(requested, {**baseline, 'layers.gpu-process.enabled': False})
+            self.assertEqual(requested, {**baseline, 'layers.gpu-process.enabled': False, 'webgl.allow-in-parent': True})
             self.assertTrue(requested['gfx.webrender.software'])
             self.assertTrue(requested['webgl.force-enabled'])
             self.assertFalse(requested['webgl.forbid-software'])
             self.assertFalse(requested['webgl.disable-angle'])
+            acceptance.os.environ['FIREFOX_GPU_PROCESS'] = 'default'
+            self.assertEqual(acceptance.browser_preferences(2828), baseline)
             for invalid in ('', 'typo', 'false'):
                 with self.subTest(value=invalid), self.assertRaisesRegex(AssertionError, 'must be default or disabled'):
                     acceptance.os.environ['FIREFOX_GPU_PROCESS'] = invalid
