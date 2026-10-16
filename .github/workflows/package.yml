@@ -76,6 +76,7 @@ jobs:
           node scripts/test-home-render-budget.cjs
           node scripts/test-render-lifecycle.cjs
           node --test scripts/test-browser-stability-diagnostics.cjs
+          node --test scripts/test-browser-startup-diagnostics.cjs
       - name: Test planner drawing and preview resource budgets
         run: node scripts/test-planner-render-budget.cjs
       - name: Test deterministic public source release

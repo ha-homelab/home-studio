@@ -159,6 +159,14 @@ information, observations, and failures. Failed runs attempt screenshots;
 a crashed or unresponsive browser may not produce one. Job logs remain the
 evidence for dependency failures and runner-level timeouts.
 
+Legacy native Gecko rows on macOS enable `NATIVE_STARTUP_DIAGNOSTICS=1`.
+A separate loopback fixture process saves at most ten startup checkpoints,
+including the reported renderer, selected rendering profile and initial shader
+operations, even if the browser's main thread later stalls. Only these served
+diagnostic fixtures permit requests to their exact loopback origin; the shipped
+viewer and ordinary test fixtures retain their original connection policy.
+The mode is recorded in each receipt and defaults to off for local runs.
+
 If the primary planner check fails on Windows WebKit, the job runs four
 diagnostic comparisons: all recovery actions after layout settles, then no
 actions, editing only, and resizing only with immediate restoration. These
