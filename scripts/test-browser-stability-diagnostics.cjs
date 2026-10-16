@@ -431,13 +431,15 @@ test('planner recovery variants select real actions and retain restoration check
     const trace = [], record = {}, checks = [], stats = {contextLosses:0,shaderErrors:[]};
     const project = {floors:[{items:[{position_m:{x:2,z:1}}]}]};
     const memory = {geometries:2077,textures:1};
-    let lost=false, renderCount=1, viewport={width:1440,height:1000}, exported;
+    let lost=false, renderCount=1, viewport={width:1440,height:1000}, exported, resizedWhileLost=false;
+    const beforeImmediateRestore=[];
+    const recordRoundTrip=operation=>{if(resizedWhileLost&&layoutMode==='immediate')beforeImmediateRestore.push(operation);};
     const copy = value => JSON.parse(JSON.stringify(value));
     const current = () => copy({stats,preview:{renderCount,catalogItems:256,viewport},
       scene:{memory,pixelRatio:1,buffer:[viewport.width,viewport.height]}});
     const extension = {
       loseContext() {lost=true;stats.contextLosses++;trace.push('lose');},
-      restoreContext() {assert(lost);lost=false;if(secondLoss)stats.contextLosses++;trace.push('restore');},
+      restoreContext() {assert(lost);lost=false;resizedWhileLost=false;if(secondLoss)stats.contextLosses++;trace.push('restore');},
     };
     const window = {__plannerStats:stats,planner:{getPreviewMetadata:()=>current().preview},
       __plannerScene:()=>({layout:viewport})};
@@ -446,10 +448,10 @@ test('planner recovery variants select real actions and retain restoration check
       : {getContext:()=>({getExtension:()=>extension})}};
     const page = {
       locator: selector => selector,
-      evaluate: async (callback, argument) => callback(argument),
+      evaluate: async (callback, argument) => {recordRoundTrip('evaluate');return callback(argument);},
       waitForFunction: async (callback, argument) => assert(callback(argument)),
       waitForEvent: async event => {assert.equal(event,'download');return {path:async ()=>'fixture-export.json'};},
-      setViewportSize: async size => {assert(lost);trace.push('resize');viewport=copy(size);},
+      setViewportSize: async size => {assert(lost);trace.push('resize');viewport=copy(size);resizedWhileLost=true;},
     };
     const input = {tap:async selector => {
       if(selector==='#preview-tab'&&!lost)renderCount++;
@@ -459,7 +461,8 @@ test('planner recovery variants select real actions and retain restoration check
       deepEqual:(actual,expected,message)=>assert.deepEqual(copy(actual),copy(expected),message),
     });
     const context = {assert:crossRealmAssert,process:{env},record,reportOnly:false,page,input,window,document,
-      frames:async()=>{},save(){},getProject:async()=>copy(project),snapshot:async()=>current(),
+      frames:async()=>{recordRoundTrip('frames');},save(){},getProject:async()=>copy(project),
+      snapshot:async()=>{recordRoundTrip('snapshot');return current();},
       profile:{emulated:false},consoleErrors:[],samples:[{scene:{memory}}],
       fs:{readFileSync:()=>JSON.stringify(exported)},
       check:(condition,message)=>{checks.push(message);assert(condition,message);},
@@ -468,16 +471,22 @@ test('planner recovery variants select real actions and retain restoration check
     };
     Object.defineProperties(context, {innerWidth:{get:()=>viewport.width},innerHeight:{get:()=>viewport.height}});
     await vm.runInNewContext(settings + '\n(async()=>{\n' + recoveryBlock + '\n})()', context);
-    return {trace,record,checks,project,exported};
+    return {trace,record,checks,project,exported,beforeImmediateRestore};
   }
   for (const actions of [undefined,'all','none','edit','resize']) {
     for (const layout of ['immediate','settled']) {
-      const {trace,record,checks,project,exported}=await recover(actions,layout);
+      const {trace,record,checks,project,exported,beforeImmediateRestore}=await recover(actions,layout);
       const mode=actions??'all', edit=['all','edit'].includes(mode), resize=['all','resize'].includes(mode);
       assert.deepEqual(trace,['lose',...(edit?['edit']:[]),'export',...(resize?['resize']:[]),'restore']);
       assert.equal(record.recovery.actions,mode);
       assert.equal(record.recovery.layoutMode,layout);
       assert.equal(Boolean(record.recovery.settledLayout),layout==='settled');
+      if(resize&&layout==='immediate')assert.deepEqual(beforeImmediateRestore,['evaluate'],
+        'The very next browser evaluation after resizing must capture evidence and restore without an intervening round trip');
+      const restore=record.recovery.steps.find(step=>step.phase==='request-restore');
+      assert.equal(restore.snapshot.stats.contextLosses,1);
+      assert.equal(restore.snapshot.preview.renderCount,record.recovery.steps[0].snapshot.preview.renderCount,
+        'The checkpoint must precede the restored draw');
       assert.equal(project.floors[0].items[0].position_m.x,edit?1.5:2);
       assert.deepEqual(project,exported,'Each selected sequence preserves its own exported project');
       assert(checks.includes('Restoration must not lose the graphics context again'));

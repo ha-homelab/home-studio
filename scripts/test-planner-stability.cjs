@@ -260,8 +260,16 @@ async function run(engine,origin) {
         recovery.settledLayout=layout;save();
         check(['width','height'].every(key=>Math.abs(layout.actual[key]-layout.expected[key])<1),'Settled recovery uses the actual canvas layout');
       }
-      check((await snapshot()).preview.renderCount===before.preview.renderCount,'Recovery actions while the graphics context is lost must not draw');
-      await checkpoint('request-restore');await page.evaluate(()=>window.__restorePlanner());
+      // Capture the pre-restore evidence in the very next browser task. Extra
+      // round trips here would let the immediate variant's layout settle.
+      const restoreSnapshot=await page.evaluate(()=>{
+        window.__plannerRecoveryPhase='request-restore';
+        const value=JSON.parse(JSON.stringify({stats:window.__plannerStats,preview:window.planner.getPreviewMetadata(),scene:window.__plannerScene()}));
+        window.__restorePlanner();
+        return value;
+      });
+      recovery.steps.push({phase:'request-restore',snapshot:restoreSnapshot});save();
+      check(restoreSnapshot.preview.renderCount===before.preview.renderCount,'Recovery actions while the graphics context is lost must not draw');
       await input.tap(page.locator('#preview-tab'));await page.waitForFunction(count=>window.planner.getPreviewMetadata().renderCount>count,before.preview.renderCount);await frames();
       recovery.after=await snapshot();save();
       check(recovery.after.stats.contextLosses===1,'Restoration must not lose the graphics context again');
