@@ -97,6 +97,7 @@ jobs:
           node scripts/test-scalar-lambert-accumulators.cjs
           node scripts/test-render-lifecycle.cjs
           node scripts/test-interaction-render.cjs
+          node scripts/test-native-viewer-programs.cjs
           node --test scripts/test-render-capacity.cjs
           node --test scripts/test-browser-stability-diagnostics.cjs
           node --test scripts/test-browser-startup-diagnostics.cjs

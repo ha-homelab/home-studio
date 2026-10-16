@@ -27,6 +27,15 @@ from native_browser import PRODUCTS, validate_installation, validate_metadata
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Exact pinned RawShaderMaterial submission, independently expanded in the CPU
+# observer test. Unknown prefixes receive no first-motion exception.
+COPY_VERTEX = 'precision highp float;attribute vec3 position;void main(){gl_Position=vec4(position,1.0);}'
+COPY_FRAGMENT = 'precision highp float;uniform sampler2D source;uniform vec2 outputSize;void main(){vec2 sampleUV=(floor(gl_FragCoord.xy)+vec2(0.5))/outputSize;gl_FragColor=texture2D(source,sampleUV);}'
+COPY_PREFIX = '#define SHADER_TYPE RawShaderMaterial\n#define SHADER_NAME \n'
+COPY_SOURCES = {'vertex': COPY_PREFIX + COPY_VERTEX, 'fragment': COPY_PREFIX + COPY_FRAGMENT,
+                'rawVertex': COPY_VERTEX, 'rawFragment': COPY_FRAGMENT}
+NATIVE_VIEWER_PROGRAM_DIAGNOSTICS = ('(' + (ROOT / 'scripts/native-viewer-program-diagnostics.js').read_text(encoding='utf-8') + ')(' + json.dumps(COPY_SOURCES) + ');')
+
 
 # Installed before WebGL creation. Read the real GL error flag only at snapshots,
 # context loss and teardown; never issue synchronous GPU queries for each draw.
@@ -58,6 +67,7 @@ NATIVE_GL_DIAGNOSTICS = r"""
     seen.add(gl); evidence.contexts++; const read = gl.getError.bind(gl);
     const tracked = {id:evidence.contexts, canvas:this, gl, read};
     contexts.push(tracked);
+    window.__nativeTrackViewerContext?.(gl, this);
     gl.getError = () => { const code = read(); if (!gl.isContextLost()) remember(code, 'application-getError'); return code; };
     const getExtension = gl.getExtension.bind(gl);
     gl.getExtension = name => {
@@ -93,6 +103,7 @@ NATIVE_GL_DIAGNOSTICS = r"""
 
 NATIVE_VIEWER_FRAME_DIAGNOSTICS = r"""
 if (renderer) {
+  window.__nativeViewerPrograms.attachRenderer(renderer);
   const nativeRender = renderer.render.bind(renderer);
   renderer.render = (scene, camera) => {
     const result = nativeRender(scene, camera);
@@ -339,6 +350,51 @@ def assert_viewer_interaction(before, after):
         require(passes['copy'] == 0, 'Other graphics profiles must retain direct rendering')
 
 
+def viewer_program_links(stats):
+    ledger = stats.get('programLedger')
+    require(isinstance(ledger, dict) and ledger.get('errors') == [], 'Complete native program ledger required')
+    contexts = ledger.get('contexts')
+    require(isinstance(contexts, list) and len(contexts) == 1, 'Exactly one viewer program context required')
+    context = contexts[0]
+    require(context.get('id') == 1 and isinstance(context.get('epoch'), int), 'Viewer program context identity required')
+    links = context.get('links')
+    require(isinstance(links, list) and 0 < len(links) <= 128 and len(links) == stats['linkedPrograms'],
+            'Every native link call must remain in the bounded ledger')
+    require(all(link.get('ordinal') == index + 1 for index, link in enumerate(links)), 'Program link order must be complete')
+    return context, links
+
+
+def assert_first_motion_programs(before, after):
+    old_context, old = viewer_program_links(before)
+    new_context, new = viewer_program_links(after)
+    require(old_context['epoch'] == new_context['epoch'], 'First motion must remain in the same context epoch')
+    # Draw counters may advance; link identities and submitted source do not.
+    identity = lambda link: {key: value for key, value in link.items() if key not in ('copyDraws', 'outsideCopyDraw')}
+    require([identity(link) for link in new[:len(old)]] == [identity(link) for link in old], 'Prior program link identities must be retained')
+    added = new[len(old):]
+    require(len(new) >= len(old) and len(added) <= 1, 'First motion may initialize at most one exact copy program')
+    if not added:
+        return
+    copy = added[0]
+    passes_before, passes_after = before['scene']['renderPasses'], after['scene']['renderPasses']
+    renderer = after['gpu'].get('unmaskedRenderer') or after['gpu']['renderer']
+    probe = after['scene'].get('rasterProbe') or {}
+    diffuse = bool(re.fullmatch('Apple Software Renderer', renderer, re.I)) or (renderer == 'Apple M1, or similar' and probe.get('status') == 'measured' and probe.get('bestMs', 0) >= 15)
+    require(diffuse and passes_after['copy'] > passes_before['copy'] and not any(link.get('copyDraws', 0) > 0 for link in old if link.get('epoch') == new_context['epoch']), 'Only the first real diffuse copy gesture may initialize its program')
+    require(copy.get('epoch') == new_context['epoch'] and copy.get('program') not in {link['program'] for link in old}, 'Deferred copy must be one new current-context program, not a relink')
+    require(copy.get('exactCopy') is True and copy.get('sources') == COPY_SOURCES, 'Only the exact pinned copy shader pair may initialize during first motion')
+    require(copy.get('copyDraws', 0) > 0 and copy.get('outsideCopyDraw') is False, 'Deferred copy program must actually draw only in the copy pass')
+
+
+def assert_state_programs(before, after):
+    old_context, old = viewer_program_links(before)
+    new_context, new = viewer_program_links(after)
+    require(old_context['epoch'] == new_context['epoch'] and before['linkedPrograms'] == after['linkedPrograms'],
+            'Each light state change must not link or relink any shader program')
+    identity = lambda link: {key: value for key, value in link.items() if key not in ('copyDraws', 'outsideCopyDraw')}
+    require([identity(link) for link in old] == [identity(link) for link in new], 'State changes must retain every exact program link identity')
+
+
 def viewer(client, origin, project, record, save):
     client.call('WebDriver:Navigate', {'url': origin})
     client.execute('''window.addEventListener('message', event => {
@@ -358,13 +414,13 @@ def viewer(client, origin, project, record, save):
             iframe.onload=()=>{window.nativeViewer=iframe.contentWindow;const channel=new MessageChannel();window.viewerPort=channel.port1;
               channel.port1.onmessage=e=>{if(e.data.type==='model_config')channel.port1.postMessage({type:'states',connected:true,states});};
               iframe.contentWindow.postMessage({type:'home-floorplan:init',items,preferences:{}},'*',[channel.port2]);window.fixtureLoaded=true;};
-            iframe.srcdoc=html;document.body.append(iframe);}); return true;''', items, states, NATIVE_GL_DIAGNOSTICS, NATIVE_VIEWER_FRAME_DIAGNOSTICS)
+            iframe.srcdoc=html;document.body.append(iframe);}); return true;''', items, states, NATIVE_VIEWER_PROGRAM_DIAGNOSTICS + NATIVE_GL_DIAGNOSTICS, NATIVE_VIEWER_FRAME_DIAGNOSTICS)
         client.wait('window.fixtureLoaded')
         client.call('WebDriver:SwitchToFrame', {'id': 0})
         client.wait(f"window.floorplan?.renderCount>0 && document.querySelector('#homeConnection')?.dataset.connected==='true' && window.__nativeRenderedLights==={len(items)}")
         sample = {'cycle': cycle, 'loadMs': round((time.monotonic() - started) * 1000)}
         record['samples'].append(sample)
-        snapshot = lambda: client.execute('return {...window.__browserStability,nativeGraphics:window.__sampleNativeGraphics("viewer-snapshot"),renderedLights:window.__nativeRenderedLights,renderCount:window.floorplan.renderCount,scene:window.__browserScene()};')
+        snapshot = lambda: client.execute('return {...window.__browserStability,programLedger:window.__nativeViewerPrograms.snapshot(),nativeGraphics:window.__sampleNativeGraphics("viewer-snapshot"),renderedLights:window.__nativeRenderedLights,renderCount:window.floorplan.renderCount,scene:window.__browserScene()};')
         sample['initial'] = initial = snapshot()
         save()
         require(sample['loadMs'] < 30000, 'Viewer connected draw exceeded 30 seconds')
@@ -376,8 +432,10 @@ def viewer(client, origin, project, record, save):
         sample['afterDrag'] = after_drag = snapshot()
         require(after_drag['scene']['camera'] != initial['scene']['camera'], 'Real pointer drag changes the viewer camera')
         assert_viewer_interaction(initial, after_drag)
+        assert_first_motion_programs(initial, after_drag)
         # Send real bridge state updates, including all-off and partial illumination.
-        sample['states'] = [{'active': len(items), 'linkedPrograms': initial['linkedPrograms']}]
+        sample['states'] = [{'active': len(items), 'linkedPrograms': after_drag['linkedPrograms']}]
+        before_state = after_drag
         for active in (0, max(1, len(items) // 2), len(items)):
             next_states = json.loads(json.dumps(states))
             for index, item in enumerate(items):
@@ -385,8 +443,10 @@ def viewer(client, origin, project, record, save):
             update_viewer_state(client, next_states, active)
             value = snapshot()
             require(value['scene']['pointLights'] == len(items), 'State updates retain every light slot')
-            sample['states'].append({'active': active, 'linkedPrograms': value['linkedPrograms'], 'renderCount': value['renderCount'], 'renderedLights': value['renderedLights']})
+            sample['states'].append({'active': active, 'linkedPrograms': value['linkedPrograms'], 'renderCount': value['renderCount'], 'renderedLights': value['renderedLights'], 'programLedger': value['programLedger']})
             assert_graphics(value)
+            assert_state_programs(before_state, value)
+            before_state = value
         require(len({value['linkedPrograms'] for value in sample['states']}) == 1, 'State changes must not compile new shader variants')
         if cycle == 1:
             before = snapshot()['renderCount']
@@ -403,6 +463,7 @@ def viewer(client, origin, project, record, save):
             client.wait(f'window.floorplan.renderCount>{sample["recovery"]["renderCount"]}')
             sample['afterRecoveryDrag'] = after = snapshot()
             assert_viewer_interaction(sample['recovery'], after)
+            assert_first_motion_programs(sample['recovery'], after)
             assert_recovered_interaction(sample['recovery']['renderCount'], after['renderCount'], sample['recovery']['scene']['camera'], after['scene']['camera'], after)
         sample['final'] = snapshot()
         assert_graphics(sample['final'])
