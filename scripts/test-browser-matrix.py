@@ -45,6 +45,9 @@ class BrowserMatrixTests(unittest.TestCase):
         rows = self.rows['browser']['include']
         self.assertEqual(len(rows), 57)
         self.assertEqual(len(self.rows['native']['include']), 12)
+        for matrix_rows in self.rows.values():
+            identities = {(row['os'], row['id']) for row in matrix_rows['include']}
+            self.assertEqual(len(identities), len(matrix_rows['include']))
         for os in ('ubuntu-24.04', 'windows-2022', 'macos-15'):
             platform_rows = [row for row in rows if row['os'] == os]
             self.assertEqual(len(platform_rows), 19)
@@ -56,6 +59,8 @@ class BrowserMatrixTests(unittest.TestCase):
                              {'chrome', 'chrome-beta', 'msedge', 'msedge-beta'})
             self.assertEqual({(row['engine'], row['profile']) for row in platform_rows if row['profile'] != 'desktop'},
                              {('chromium', 'phone'), ('chromium', 'tablet'), ('webkit', 'phone'), ('webkit', 'tablet')})
+            self.assertEqual({row['cft'] for row in platform_rows if row['cft']},
+                             {'153.0.8010.52', '154.0.8037.92'})
             native = {(row['product'], row['version']) for row in self.rows['native']['include'] if row['os'] == os}
             self.assertEqual(native, {('firefox', '158.0'), ('firefox', '153.5.0esr'),
                                       ('waterfox', '6.7.5'), ('waterfox', '6.7.6')})
@@ -72,14 +77,30 @@ class BrowserMatrixTests(unittest.TestCase):
                 self.assertEqual(url.path, f'/chrome-for-testing-public/{version}/{platform}/chrome-{platform}.zip')
                 self.assertRegex(entry['sha256'], r'^[a-f0-9]{64}$')
 
-    def test_targets_visit_each_os_before_starting_the_next_browser(self):
+    def test_known_risks_run_first_without_changing_remaining_os_rotation(self):
         platforms = list(self.manifest['platforms'])
-        for matrix_rows in self.rows.values():
-            rows = matrix_rows['include']
-            for start in range(0, len(rows), len(platforms)):
-                batch = rows[start:start + len(platforms)]
-                self.assertEqual([row['os'] for row in batch], platforms)
-                self.assertEqual(len({row['id'] for row in batch}), 1)
+        priority = {
+            'browser': [('macos-15', 'firefox-153.0-pw1.62.1-desktop')]
+                + [('windows-2022', target) for target in (
+                    'webkit-27.2-pw1.64.0-desktop', 'webkit-26.6-pw1.63.0-desktop',
+                    'webkit-26.5-pw1.62.1-desktop', 'webkit-27.2-pw1.64.0-phone',
+                    'webkit-27.2-pw1.64.0-tablet')]
+                + [(os, f'chromium-156.0.8078.4-pw1.64.0-{profile}')
+                   for profile in ('phone', 'tablet') for os in platforms]
+                + [(os, f'webkit-27.2-pw1.64.0-{profile}')
+                   for profile in ('phone', 'tablet') for os in ('ubuntu-24.04', 'macos-15')],
+            'native': [('macos-15', target) for target in (
+                'firefox-153.5.0esr', 'waterfox-6.7.5', 'waterfox-6.7.6')],
+        }
+        for name, matrix_rows in self.rows.items():
+            identities = [(row['os'], row['id']) for row in matrix_rows['include']]
+            self.assertEqual(identities[:len(priority[name])], priority[name])
+            remaining = identities[len(priority[name]):]
+            targets = list(dict.fromkeys(target for _, target in remaining))
+            expected = [(os, target) for target in targets for os in platforms
+                        if (os, target) not in priority[name]]
+            self.assertEqual(remaining, expected)
+        self.assertEqual(self.rows, matrix.expand(self.manifest))
 
     def test_npm_locks_use_only_exact_integrity_pinned_dependencies(self):
         for version, toolchain in self.manifest['playwright'].items():

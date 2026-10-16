@@ -33,6 +33,20 @@ def load_manifest(path=MANIFEST):
 def expand(manifest):
     browser, native = [], []
     current = manifest['current_playwright']
+    oldest_firefox = min(int(toolchain['browsers']['firefox']['version'].split('.')[0])
+                         for toolchain in manifest['playwright'].values())
+
+    def priority(row):
+        if row['os'].startswith('macos-') and (
+                row.get('product') == 'waterfox' or row.get('version', '').endswith('esr') or
+                (row.get('engine') == 'firefox' and int(row['major']) == oldest_firefox)):
+            return 0
+        if row['os'].startswith('windows-') and row.get('engine') == 'webkit':
+            return 1
+        if row.get('profile', 'desktop') != 'desktop':
+            return 2
+        return 3
+
     for os in manifest['platforms']:
         for playwright, toolchain in manifest['playwright'].items():
             for engine, metadata in toolchain['browsers'].items():
@@ -68,6 +82,9 @@ def expand(manifest):
         for row in rows:
             targets.setdefault(row['id'], []).append(row)
         rows[:] = [row for target in targets.values() for row in target]
+        # Diagnose known legacy-Gecko, Windows WebKit, and touch risks early.
+        # Stable sorting preserves OS rotation within every priority group.
+        rows.sort(key=priority)
     return {'browser': {'include': browser}, 'native': {'include': native}}
 
 
