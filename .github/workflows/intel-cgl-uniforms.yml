@@ -1,0 +1,75 @@
+name: Diagnostic Intel CGL submitted uniforms
+run-name: Non-release Intel CGL uniforms · ${{ github.sha }}
+
+on:
+  push:
+    branches: [diagnostic/intel-cgl-uniforms]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnostic-intel-cgl-uniforms
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  diagnose:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-uniforms' }}
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+    steps:
+      - name: Check out the disposable harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: harness
+          persist-credentials: false
+      - name: Check out the exact source and draw diagnostic
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: d934c6a515131163c48c5bf84f7629ab4a2fdc40
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+      - name: Record tools and prepare the unchanged synthetic fixtures
+        run: |
+          mkdir -p harness/diagnostics/intel-cgl-uniforms
+          {
+            python3 --version
+            node --version
+            npm --version
+            uname -sm
+            sw_vers
+          } > harness/diagnostics/intel-cgl-uniforms/toolchain.log 2>&1
+          npm --prefix source ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-uniforms/npm.log
+          python3 harness/scripts/test-intel-cgl-uniforms.py
+      - name: Install the official checksum and signature verified ESR
+        env:
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-uniform-browser
+        run: |
+          python3 source/scripts/setup-native-browser.py --product firefox --version 153.5.0esr --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-uniforms/install.log
+          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-uniforms/install.json
+      - name: Run original acceptance and its failure-only draw diagnostic
+        env:
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-uniform-browser
+        run: >-
+          python3 harness/scripts/run-intel-cgl-uniforms.py
+          --source "$GITHUB_WORKSPACE/source"
+          --installation "$INSTALL_DIR/install.json"
+          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-uniforms"
+      - name: Preserve non-release evidence regardless of acceptance outcome
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostic-intel-cgl-uniforms-${{ github.run_id }}-${{ github.run_attempt }}
+          path: harness/diagnostics/intel-cgl-uniforms/
+          if-no-files-found: error
+          retention-days: 14
