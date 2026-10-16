@@ -1,15 +1,27 @@
-# AI provider setup for the proposed planner
+# AI provider setup
 
-**Status: design and provider preparation, not an available Home Studio feature.**
-Official documentation checked **2026-10-16**. No provider accounts, keys, paid requests,
-or live integration tests were used to prepare this guide. Console labels, model access,
-prices, and API capabilities can change.
+**Implemented adapters; live model compatibility requires a user smoke test.**
+Official documentation checked **2026-10-16**. Automated tests use synthetic payloads
+and mock servers, not provider accounts, private photos or paid requests. Console
+labels, model access, prices, and API capabilities can change.
 
-Start with the [planning overview](ai-planning.md). The
-[architecture proposal](ai-planner-architecture.md) describes the intended integration;
-[local models](ai-local-models.md) covers running inference on your own computer.
-OpenAI and Ollama are the proposed first adapters. The additional providers below are
-future adapter candidates, not a list of implemented integrations.
+Start the [local companion](ai-planning.md), choose a profile, enter your exact model
+ID and key, then connect. Select a vision model for photographs. Connect stores
+settings locally; Generate is the action that actually calls the model. The
+[architecture](ai-planner-architecture.md) describes the implemented boundaries;
+[local models](ai-local-models.md) covers same-computer inference.
+
+Implemented cloud profiles are OpenAI and xAI Responses; native Anthropic Messages;
+Google Gemini's OpenAI-compatible endpoint; Mistral, OpenRouter, Groq, Together,
+Fireworks Chat Completions; and DeepSeek text-only JSON mode. A listed provider is
+not a promise that every model on it supports this request. DeepSeek's profile
+rejects images. There is no automatic model selection or paid fallback.
+
+Typical requests need at least a **32,768-token context window** with room for an
+**8,192-token output allowance**. Catalog vocabulary, your instructions and image
+tokens also consume context; longer requests may need more. Choose a model that
+supports this output allowance. Requests are bounded but the UI does not estimate
+provider-specific token counts or cost. No request is retried automatically.
 
 ## Before creating a key
 
@@ -31,15 +43,15 @@ key with minimum required permissions, and a small usage budget. Keep the key ou
 project files, screenshots, prompts, issue reports, and browser storage. Store a backup
 in your own password manager if needed. Do not paste keys into this documentation.
 
-The proposed default transport is an optional local companion serving Home Studio and
-its API bridge from the same origin. The key would be held in session memory, cleared
+The default transport is an optional local companion serving Home Studio and
+its API bridge from the same origin. The key is held in session memory, cleared
 on disconnect or expiry, and sent over HTTPS to the selected provider for authentication.
-Selected photos, instructions, and required plan context would go to that provider.
+Selected photos, instructions, and required plan context go to that provider.
 With a gateway, that gateway receives the request and routes its content to an upstream
 provider. Memory-only handling does not mean nothing is transmitted or retained by
 the provider. Review the overview's privacy requirements before using room photos.
 
-Direct browser requests are an advanced, conditional option: the endpoint must support
+Direct browser requests are not implemented. A future direct mode would require a dedicated trusted origin: the endpoint must support
 the browser's CORS requests, and page scripts or extensions can access exposed secrets.
 The [OpenAI JavaScript SDK](https://developers.openai.com/api/reference/typescript)
 disables browser use by default and requires an explicit `dangerouslyAllowBrowser`
@@ -59,11 +71,11 @@ override. That override does not grant CORS permission or make a browser key pri
 4. Choose an accessible model from the [model catalog](https://developers.openai.com/api/docs/models).
    Confirm image input, structured outputs, context size, output limit, and current price.
 
-The proposed adapter targets `https://api.openai.com/v1/responses` with Bearer
+The adapter targets `https://api.openai.com/v1/responses` with Bearer
 authentication. Responses uses `input_image` content and `text.format` for schema
 output; Chat Completions uses different message and `response_format` fields. Do not
 mix their request shapes. Images can be supplied by URL, base64 data URL, or supported
-file reference. For private room photos, the design favors inline bytes over creating
+file reference. For private room photos, the adapter uses inline bytes over creating
 public URLs or persistent file uploads. See
 [vision](https://developers.openai.com/api/docs/guides/images-vision) and
 [structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
@@ -90,18 +102,20 @@ geometry and permissions before making changes.
 
 Claude's native endpoint is `https://api.anthropic.com/v1/messages`. Its API requires
 `anthropic-version` and authentication; the documented `x-api-key` form remains
-supported. A key spanning multiple workspaces also requires `anthropic-workspace-id`.
+supported. Use a workspace-scoped key. Keys requiring an additional `anthropic-workspace-id` header are not supported by this initial connection form.
 Use the native adapter rather than assuming OpenAI field names work.
 
 [Vision](https://platform.claude.com/docs/en/build-with-claude/vision) uses `image`
 content blocks with base64, URL, or supported file sources. Limits depend on image
 count, model, and hosting platform. Current
 [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
-use `output_config.format`; older beta examples may use deprecated fields. Check
+use `output_config.format`; older beta examples may use deprecated fields. The adapter removes bounds keywords unsupported by Claude from its grammar, keeps the complete schema in the prompt, and enforces all numeric, length and collection bounds in the local draft validator. Check
 schema restrictions and stop reasons, and do not combine incompatible features such
 as citations with a strict JSON response.
 
 ## Google Gemini Developer API
+
+The implemented profile uses `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`, Bearer authentication and OpenAI-compatible image/schema fields. The native Interactions API discussed below is background reference, not the active adapter. Choose a model supported on the compatibility endpoint.
 
 1. Open [Google AI Studio](https://aistudio.google.com/). New users may receive a
    default Cloud project and key; existing users can import a Cloud project through
@@ -243,7 +257,7 @@ These require separate future adapters and deployment-specific capability checks
 
 ## Verification and troubleshooting
 
-Before a future adapter is enabled, use a synthetic room image and a small schema to
+Before using a selected model with private photos, use a synthetic room image and a small schema to
 verify the complete path. A successful model-list request establishes neither vision
 nor schema compatibility. Check actual usage cost, cancellation, refusal handling,
 and session cleanup. Record provider, endpoint, model ID, adapter version, and date;
@@ -265,7 +279,7 @@ never record keys or raw private request bodies.
   apply action; do not execute returned code.
 - **429/5xx/timeout:** respect retry guidance and use bounded backoff. Repeated
   generations can cost money; an interrupted client does not prove billing stopped.
-- **Browser fetch/CORS failure:** use the proposed local companion once implemented.
+- **Browser fetch/CORS failure:** use the local companion; the hosted editor intentionally has no AI network access.
   Do not disable browser security or send a key through an untrusted public proxy.
 
 These are diagnostic categories, not a promise that every provider uses identical

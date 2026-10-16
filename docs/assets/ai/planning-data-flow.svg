@@ -1,19 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1120" height="650" viewBox="0 0 1120 650" role="img" aria-labelledby="title desc">
-  <title id="title">Proposed AI planning data flow</title>
-  <desc id="desc">The user selects photos and instructions in a browser. A local companion holds a temporary key and routes requests either to a local model or an explicitly selected cloud provider. Suggestions are validated and reviewed before they become editable plan objects. There is no Home Studio-operated relay. This is a proposal, not a released feature.</desc>
+  <title id="title">Optional AI planning data flow</title>
+  <desc id="desc">The user selects photos and instructions in a browser. A local companion holds a temporary key and routes requests either to a local model or an explicitly selected cloud provider. Suggestions are validated and reviewed before they become editable plan objects. There is no Home Studio-operated relay. The optional companion is separate from the installed Home Assistant viewer.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10Z" fill="#6ce1ed"/></marker>
   </defs>
   <rect width="1120" height="650" rx="20" fill="#0c1726"/>
   <g font-family="system-ui, sans-serif" fill="#eff7ff">
     <text x="32" y="46" font-size="25" font-weight="700">Room photos → reviewed, editable plan</text>
-    <text x="32" y="76" font-size="16" fill="#b6c9dd">Proposed design · no AI connection is shipped by this guide</text>
+    <text x="32" y="76" font-size="16" fill="#b6c9dd">Optional local companion · review each draft before applying</text>
     <rect x="26" y="103" width="712" height="493" rx="16" fill="#102a35" stroke="#397887" stroke-dasharray="7 6"/>
     <text x="46" y="134" font-size="17" fill="#8ae9df" font-weight="650">YOUR COMPUTER</text>
     <rect x="48" y="168" width="290" height="138" rx="13" fill="#193b4a" stroke="#4c8594"/>
     <text x="68" y="198" font-size="20" font-weight="650">Browser · personal session</text>
     <text x="68" y="230" font-size="16">Choose photos and measurements</text>
-    <text x="68" y="257" font-size="16">Crop, resize, remove metadata</text>
+    <text x="68" y="257" font-size="16">Resize and remove image metadata</text>
     <text x="68" y="284" font-size="16" fill="#b6d8e3">Review destination before sending</text>
     <path d="M338 234H405" fill="none" stroke="#6ce1ed" stroke-width="3" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
     <rect x="414" y="168" width="298" height="138" rx="13" fill="#193b4a" stroke="#4c8594"/>

@@ -1,216 +1,162 @@
-# AI-assisted planner architecture proposal
+# AI-assisted planner architecture
 
-Status: design only. No AI endpoint, photo upload, provider connection, or automatic
-room generation is implemented by this document. See the [overview](ai-planning.md),
-[provider setup](ai-provider-setup.md), and [local models](ai-local-models.md).
+The optional companion adds an inference boundary to the authoring tool. It does
+not add AI code to the installed Home Assistant viewer or weaken the hosted
+editor's `connect-src 'none'` policy. Both AI modes produce the existing project
+schema and use the existing compiler/installer.
 
-The intended result is an ordinary editable Home Studio project: room polygons,
-walls, openings, and catalog items that the user can move and resize. A generated
-render or mesh alone does not meet that requirement. Photos can suggest visible
-objects and relationships; they do not establish accurate room dimensions or reveal
-hidden walls. Ask for measured dimensions and identify assumptions before applying
-geometry.
+## Modules and ownership
 
-## Existing integration points
+- `scripts/serve-ai-planner.py`: stdlib-only Python 3.10+ launcher.
+- `ai_companion/server.py`: exact loopback Host/Origin checks, per-page sessions,
+  bounded HTTP concurrency, static allowlist, authenticated API and cleanup.
+- `ai_companion/providers.py`: fixed cloud profiles, local endpoint policy, native
+  Responses/Messages/Ollama and compatible Chat Completions serializers/parsers.
+- `ai_companion/transport.py`: bounded single HTTP request, verified HTTPS for
+  cloud endpoints, explicit DNS/socket handling, cancellation and redacted errors.
+- `ai_companion/protocol.py`: bounded JSON, duplicate/nonfinite rejection, sanitized
+  context envelope, image byte limits and header inspection without pixel decoding.
+- `ai_companion/assets.json`: exact reviewed static files served by the companion.
+  Python files, repository metadata, tests, keys and arbitrary paths are not served.
+- `ai/bootstrap.js`: injected only by the companion; loads the optional UI and CSS.
+- `ai/panel.js`: provider connection, request/review lifecycle and editor integration.
+- `ai/photo-worker.js`: bounded image inspection, decode, resize and re-encoding,
+  served with `connect-src 'none'`. It has no session credential or provider key.
+- `ai/draft.js` and `ai/json.js`: pure draft/context/schema/geometry validation.
+- `planner/editor.js`: a small exported bridge for accepted snapshot, revision,
+  selection, detached preview, explicit transactional apply and subscriptions.
 
-- [`planner/model.js`](../planner/model.js) defines schema version 1 and
-  `validateProject()`. Rooms contain metric `[x, z]` polygons. Walls are independent
-  segments; openings reference wall IDs. Items reference rooms and use
-  `position_m`, `dimensions_m`, and Y-axis `rotation_deg`. Item Y is its bottom
-  elevation relative to the floor, not its center.
-- [`planner/editor.js`](../planner/editor.js) owns selection, the active floor,
-  rendering, and the `home-studio.project.v1` browser draft. `transact()` clones the
-  project, validates and checks serialized size, then adds one undo snapshot and
-  saves. History retains up to 60 snapshots. JSON import uses `replaceProject()`
-  and replaces the entire project; it is not a room-merge API.
-- [`planner/catalog.json`](../planner/catalog.json) is the canonical catalog;
-  generated `catalog.js` and [`furniture.js`](../planner/furniture.js) supply browser
-  models and appearance validation. Existing IDs, dimensions, palettes, and
-  supported patterns provide the vocabulary for AI suggestions. Do not generate
-  executable recipes or download model-specified assets.
-- [`planner/project.py`](../planner/project.py) independently validates projects
-  before compilation. [`scripts/build-planner-project.py`](../scripts/build-planner-project.py)
-  produces viewers, model exports, and optionally an HA package, retaining the
-  editable `project.json` snapshot. The Python loader also rejects duplicate JSON
-  properties; browser `JSON.parse()` alone does not.
-- [`planner/index.html`](../planner/index.html) currently has `connect-src 'none'`.
-  Ordinary drawing works without AI or network access. The installed HA viewer and
-  authenticated host are separate systems, not AI connection points.
+The public website publishes the setup guide, not a key-entry form. The source
+release includes the companion and its tests. AI modules are outside `planner/`
+so the ordinary planner's static no-network check still applies to every editor
+module. The editor never imports the optional bootstrap on its own.
 
-## Proposed execution boundary
+## Request and credential lifecycle
 
-Prefer an optional local companion that serves an AI-enabled editor and its API
-from one loopback origin. Keep the existing static editor and its restrictive CSP.
-The companion entry point can use `connect-src 'self'`; its server makes the
-selected cloud or local inference request. A hosted HTTPS editor should not depend
-on a cross-origin request to a loopback service working in every browser.
+Loading `/planner/` from the companion injects a random page-session token and
+`/ai/bootstrap.js`. The token is separate from the provider credential. API requests
+include `X-Home-Studio-Session`. State-changing requests also require the exact
+Origin. Host must match the bound numeric loopback address and port. Cross-site
+Fetch Metadata, framing, unreviewed paths and unexpected body encodings are rejected.
 
-The user selects a provider, model, and connection profile before requesting a
-draft. The companion maps that profile to a configured adapter. Credentials stay
-in session memory and are separate from prompts, projects, exports, and logs.
-Local inference uses the same draft contract. Direct browser-to-provider access
-is an advanced alternative requiring provider CORS support, a deliberately scoped
-CSP, a dedicated trusted origin, and acceptance that page JavaScript can access
-the key. Repository paths on a shared GitHub Pages origin are not isolated from
-each other. Detailed setup and
-session security belong in the linked guides.
+`POST /api/ai/connect` validates a fixed provider or numeric loopback endpoint and
+keeps its model/key/endpoint together in memory. It makes no inference call. Editing
+connection settings invalidates the old connection in the UI. A connect replaces
+the previous server connection and invalidates any pending result.
 
-Neither the model nor a returned draft may choose a URL, model, adapter, tool,
-filesystem path, shell command, or HA service. The companion is not a general HTTP
-proxy. It must enforce loopback binding, Host/Origin validation, a session-bound
-request check, and fixed connection-profile destinations. No HA token or entity
-state is needed for photo planning.
-
-Bind the credential session to the adapter, normalized scheme/host/port, and
-allowed paths. A destination change requires a new credential session. Bypass
-inherited proxies in local mode and check connection-time addresses on every
-request/retry. Use only numeric loopback in the first local profile; LAN profiles
-require separate explicit policy. Disallow redirects, framing, and unsafe opener
-relationships; serve only reviewed assets from the companion origin.
-
-## User flow and scope
-
-1. Select an existing room, or explicitly start a new room draft. Collect the
-   user's objective, measured dimensions, and a small set of room photos. Show
-   which photos and room data will leave the device before the request.
-2. Establish coordinates: floor X/Z, floor-relative Y, a user-chosen reference
-   wall, and photo direction where known. Preserve measured geometry as a hard
-   constraint. Missing measurements remain questions or labelled estimates;
-   model confidence is not measurement accuracy.
-3. Generate a detached draft. Display proposed additions over the current plan,
-   list assumptions and measurements still needed, and allow normal numeric edits
-   and removal of individual suggestions before acceptance.
-4. Apply the reviewed selection in one transaction. Cancel discards the draft;
-   Undo restores the previous project. Export remains the existing editable JSON
-   workflow, followed by the existing compiler and installation process.
-
-The first increment only adds furniture to a selected room whose geometry already
-exists. It cannot resize walls, delete items, change another room, or assign entity
-bindings. Existing furniture is context for avoiding collisions, not permission to
-replace it. A later increment creates a measured room in a new project, including
-walls and openings. Changing architecture inside an existing multiroom floor comes
-later: walls have no room-owner field and may be shared, so such edits require an
-explicit dependency-aware review of every affected room and opening.
-
-## Draft contract
-
-Add a versioned schema at a proposed `planner/ai/draft.schema.json`, independent
-of project schema version 1. Reject unknown fields at every object level. Keep a
-trusted request envelope in application memory with `request_id`, monotonically
-increasing `base_revision`, target floor/room, permitted mode, measured constraints,
-catalog version/hash, and the allowed candidate vocabulary. A model response never
-grants itself scope by repeating or changing these values.
-
-For the first increment, require exactly this response shape:
+`GET /api/ai/providers` returns safe profile metadata. `GET /api/ai/status` returns
+connection metadata and expiry, never the key. `POST /api/ai/generate` accepts:
 
 ```json
 {
-  "draft_version": 1,
-  "request_id": "request_17",
-  "kind": "furnish_room",
-  "items": [
-    {
-      "candidate_key": "candidate_1",
-      "name": "Sofa",
-      "model_id": "sofa_3",
-      "style_id": "contemporary",
-      "position_m": { "x": 1.5, "y": 0, "z": 2.2 },
-      "dimensions_m": { "width": 2.35, "depth": 0.9, "height": 0.86 },
-      "rotation_deg": 90,
-      "evidence": "Visible sofa; dimensions use catalog defaults."
-    }
-  ],
-  "assumptions": [],
-  "needs_measurements": []
+  "request_id": "request_unique",
+  "mode": "furnish_room",
+  "context": {},
+  "instructions": "Keep the doorway clear.",
+  "images": [],
+  "schema": {"type": "object"}
 }
 ```
 
-All fields shown are required; an empty item list is valid. Candidate keys must be
-unique safe identifiers. Limit names to 100 characters, evidence to 300, and each
-of the two final arrays to 16 strings of at most 300 characters. The trusted adapter
-derives `type` from the catalog, assigns project IDs with `nextId()`, assigns the
-selected room, and sets new `entity_id` and `notes` to empty strings. It does not
-spread arbitrary model properties into a project object. Evidence and assumptions
-remain in draft state, outside the saved project schema.
+The abbreviated context/schema above illustrate the envelope only; use
+`createDraftContext` and `draftSchema` to produce the real contract. Room context
+excludes project notes, entity bindings, unrelated rooms, source URLs and credentials.
+It includes measured room geometry, relevant existing objects, openings and bounded
+catalog vocabulary. User instructions and visible text in photos remain untrusted.
 
-A subsequent `new_room` variant can add one room polygon/material, thickness per
-polygon edge, and openings expressed as edge index plus metric offset, width,
-sill, and head. The adapter creates wall IDs, resolves opening references, and
-builds a complete candidate project. Its origin and orientation come from the
-user-approved coordinate frame. Require explicit dimension review before applying
-estimated geometry; initial delivery should require measured dimensions. Do not
-silently present catalog sizes or perspective estimates as surveyed measurements.
+`POST /api/ai/cancel` aborts pending work and invalidates late results.
+`POST /api/ai/disconnect` also clears credentials. Sessions expire after at most
+30 minutes; the process periodically cleans abandoned sessions. There are at most
+8 page sessions, 12 concurrent HTTP handlers and one inference request. Requests
+have a 90-second total deadline. DNS resolution is independently bounded and does
+not carry keys or images. No retries, redirects or inherited HTTP proxy environment
+are used. Only reviewed remote HTTPS endpoints or numeric local HTTP endpoints
+are accepted. No arbitrary proxy, tool execution or server-side URL fetch exists.
 
-Use provider structured-output facilities where available, then validate locally
-regardless. Parse one complete JSON value with duplicate-property rejection; reject
-truncated output, prose wrappers, and unsupported schema versions. Provider output
-is data, never code or markup. Rendering explanations must use text nodes.
+The server suppresses request logs and raw upstream errors. Browser errors use safe
+messages, not reflected provider bodies. Keys remain in memory; Python/JavaScript do
+not guarantee physical erasure from RAM, swap or crash dumps. A process-local
+attacker or malicious same-origin script is outside the web-origin trust boundary.
 
-## Validation and bounded work
+## Draft contract and geometry
 
-The existing project limits remain authoritative: 2,000,000 serialized UTF-8 bytes;
-8 floors; per floor 64 rooms, 256 walls, 256 openings, and 256 items; 64 vertices
-per room; 2,048 vertices per floor; and 2,048 total entries across collections.
-X/Z coordinates and floor elevations range from −100 to 100 metres. Ceiling height
-is 0.5–20 metres; item dimensions are 0.001–100 metres and their tops cannot exceed
-the ceiling. Room polygons cannot self-intersect or overlap interiors. Wall and
-opening geometry has additional length, intersection, and overlap checks.
+`createDraftContext(project, options)` captures a frozen sanitized context and binds
+it through a private WeakMap to an accepted-project baseline. Passing a forged or
+serialized context back into `prepareDraft` is not an authorization shortcut.
 
-Proposed AI-specific limits are deliberately smaller: six input images, 10 MiB
-compressed and 24 megapixels decoded per image, 30 MiB compressed total, 64 item
-candidates, and 256 KiB response JSON. Apply the lowest provider-specific limit as
-well. Check decoded dimensions before allocating a full image; orient, resize,
-and re-encode accepted images to remove metadata. Bound concurrent requests to one,
-use cancellation and a finite timeout, and require an explicit retry after errors.
-Perform decoding in a separate worker/process with bounded memory/time, no
-provider credentials or inherited secrets, and denied network access. Do not
-decode untrusted photos in the credential-holding process.
+`draftSchema(mode)` gives the model a strict object schema. The response includes
+`draft_version`, matching `request_id`, `kind`, furniture `items`, `assumptions`, and
+`needs_measurements`. New-room responses also include `room_name` and `openings`.
+Candidate IDs are unique review keys, not project IDs. The application allocates its
+own IDs. Optional appearance values are explicit nullable fields in strict schemas.
 
-Existing validation does **not** establish that an item's footprint lies within
-its assigned room or that furniture is collision-free. Add AI draft checks for
-full rotated-footprint containment, including concave polygon edge crossings;
-ceiling clearance; and door/window obstruction. Report furniture overlap for review
-because legitimate arrangements include rugs under tables and lamps on desks.
-Normalize proposed rotations and show any adjustment; reject invalid geometry
-instead of silently clipping it. Run `validateProject()` and the byte check on the
-complete merged project before enabling Apply, and again inside `transact()`.
+Each furniture candidate identifies a catalog model/style and supplies metre-based
+`position_m`, `dimensions_m`, rotation and evidence. X/Z is the floor plane; Y is
+bottom elevation above the floor. New-room dimensions and origin come from the user,
+never the model. Openings use an edge index and measured offsets, sill/head and width.
 
-## Isolation, revisions, and implementation sequence
+`prepareDraft(project, context, response, options)` validates and builds a clone. It:
 
-Treat photo text, filenames, labels, existing notes, user descriptions, and model
-output as untrusted content. Send only the selected room's required geometry and
-sanitized item descriptors; omit entity IDs, unrelated floors, credentials, and
-private notes. Separate fixed instructions from supplied content. A photograph
-saying “ignore instructions” must have no authority: disabled tools, fixed
-destinations, strict schemas, and local validation enforce this boundary even if
-the model follows the photograph's text.
+1. Rejects unknown fields, duplicate JSON properties, unsafe keys, nonfinite numbers,
+   excessive depth/bytes/counts and request/mode mismatches.
+2. Resolves known catalog models/styles/patterns and validates appearance.
+3. Preserves existing geometry, objects and entity bindings. The model cannot edit
+   another room, delete an object, bind an entity or execute code.
+4. Checks rotated footprints against room boundaries, including edge crossings in
+   concave rooms, and validates floor/ceiling bounds.
+5. Creates a measured rectangle when requested. Exact shared walls are reused and
+   opening offsets are transformed for reversed wall direction. Partial overlaps
+   and inconsistent floor heights are rejected.
+6. Applies only selected candidates; reports assumptions, missing measurements and
+   collision/access warnings; validates the whole project and UTF-8 serialized size.
 
-Store pending drafts outside `project`. Increment the editor revision for edits,
-imports, Undo, and Redo. A late response cannot apply after a revision, target, or
-connection change; discard it or regenerate against current state. Applying a
-reviewed draft must also check that revision. No partial streaming response may
-mutate the project or autosave. Keep photos out of browser project storage and
-exports; release image buffers and object URLs when the draft closes.
+Source JSON is bounded to 256 KiB and 64 furniture candidates. The existing project
+limits remain authoritative: floors, rooms, wall/opening/item counts, vertices,
+coordinate bounds and the 2,000,000-byte project ceiling. The AI layer supplements,
+rather than replaces, the normal editor and Python compiler validators.
 
-Implement in reviewable increments:
+## Preview, apply and undo
 
-1. **Contract and fixtures:** proposed `planner/ai/draft.js` parses, validates, and
-   maps fake responses without network access. Add rejection fixtures for unknown
-   models, duplicate keys, nonfinite numbers, bounds, foreign scope, and hostile
-   text. Valid mapped projects must pass JavaScript and Python validators.
-2. **Review UI:** proposed `planner/ai/review.js` integrates overlays and an explicit
-   Apply button into the editor's transaction path. Browser tests prove Cancel is
-   inert, other rooms and entity bindings are unchanged, Apply adds one undo step,
-   stale responses fail, and export/import preserves accepted editable items.
-3. **Optional transport:** proposed `scripts/serve-ai-planner.py` and provider
-   adapters add the companion. Mocked tests cover destination restrictions,
-   session isolation, cancellation, timeouts, malformed replies, and redacted errors.
-   Ordinary planner tests must retain the offline CSP and zero AI requests.
-4. **Measured room creation:** add the second draft variant and dimension review.
-   Compile accepted fixtures with `build-planner-project.py`; inspect resulting
-   openings, 2D/3D geometry, and reopened project JSON. Test hidden/ambiguous features
-   as unresolved questions, not invented architectural facts.
+The bridge exposes an accepted-project snapshot/revision and a separate preview
+project used only for drawing. Preview is never autosaved, exported or compiled.
+2D additions have a separate highlight; the existing 3D renderer can inspect them.
+Main-plan edits, selection changes and connection changes invalidate pending drafts.
+Apply rechecks the accepted revision and invokes one normal history transaction.
+Undo restores the preceding accepted project. Cancellation and failure do not add
+history entries. Provider text is rendered with `textContent`, not interpreted HTML.
 
-Provider image support, structured-output compatibility, local model quality,
-latency, and browser connectivity need separate opt-in evaluation. None has been
-verified by a live inference request for this proposal.
+Image work is sequential and isolated in a disposable worker. The browser checks
+10 MiB per source, 30 MiB total, six images and 24 megapixels before decoding. It
+re-encodes a maximum 1600-pixel image and drops original metadata. The server checks
+prepared bytes/dimensions again but never invokes an image codec in its credential
+process. Unsupported HEIC/SVG input requires explicit user conversion.
+
+## Acceptance and limitations
+
+```sh
+node scripts/test-ai-draft.mjs
+python3 scripts/test-ai-companion.py
+AI_PLANNER_ENGINES=chromium,firefox,webkit node scripts/test-ai-planner.cjs
+AI_PLANNER_ENGINES=chromium,firefox,webkit node scripts/test-ai-integration.cjs
+python3 scripts/validate-site.py
+python3 scripts/test_source_replay.py
+```
+
+The environment-variable prefix in these examples uses a Unix shell; set it with
+PowerShell `$env:AI_PLANNER_ENGINES` on Windows. Browser checks need the development Playwright dependency and a supported installed
+browser. Unit/transport tests use no third-party Python dependencies or cloud keys.
+Fixtures cover rejected geometry and malicious fields, privacy/context boundaries,
+provider serialization/refusals, session isolation, redirects, cancellation/expiry,
+image bounds, detached preview, apply/undo and ordinary export. Accepted fixture
+projects are checked by the independent Python validator and compiler.
+
+These are synthetic integration checks, not a live provider certification matrix.
+The user must choose an available vision+structured-text model. Enterprise
+Azure/Bedrock/Vertex adapters, direct-browser provider access, LAN endpoints,
+WebGPU inference and photo reconstruction of arbitrary floor geometry are not
+implemented. The current AI UI is English; instructions may be multilingual.
+
+No continuous render loop is added for AI. Worker decoding happens only for selected
+photos; requests happen only on Generate. The installed viewer and its resource
+budget are unchanged. A very large catalog context can still cost provider tokens;
+one room per request bounds the private spatial context and makes review practical.

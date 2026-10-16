@@ -1,10 +1,24 @@
 # Local AI models for room-planning drafts
 
-**Status: setup guidance and proposed integration; official sources checked 2026-10-16.**
+**Implemented local profiles; runtime/model setup remains your choice.** Official
+sources checked 2026-10-16. Home Studio supports Ollama's native Chat API and the
+OpenAI-compatible Chat Completions APIs of LM Studio, llama.cpp, vLLM and LocalAI.
+The examples below prepare third-party runtimes; they were checked against their
+documentation, not executed as live model acceptance tests.
 
-Home Studio does not currently provide an AI adapter, companion installer, or AI planning screen. Its offline planner uses `connect-src 'none'`. Starting one of the servers below does not connect it to Home Studio. See the [planning proposal](ai-planning.md), [provider setup guide](ai-provider-setup.md), and [proposed architecture](ai-planner-architecture.md).
+Start a runtime with a vision-capable model, then start Home Studio using
+`python3 scripts/serve-ai-planner.py`. Open its printed address and choose **Plan
+from photos**. Select the runtime, paste its exact model ID and numeric loopback
+endpoint, and enter a local authentication token when configured. Plain `localhost`
+and LAN addresses are intentionally rejected; use `127.0.0.1` or `[::1]` with an
+explicit port. The profile supplies the inference path. See the [workflow](ai-planning.md),
+[cloud providers](ai-provider-setup.md), and [architecture](ai-planner-architecture.md).
 
-The proposed opt-in companion would serve its own UI and API from one local origin, send requests to a selected runtime, and produce a draft for review before import. The existing offline planner would remain separate. Vision output can suggest objects, room relationships, and questions to ask; it cannot establish reliable dimensions from an ordinary photograph. Supply measured dimensions and correct the resulting draft.
+A runtime does not connect to the ordinary hosted editor automatically. Its offline
+network policy remains unchanged. The companion serves UI and API on one local
+origin, avoiding browser-to-runtime CORS and mixed-content workarounds. Furnish a
+measured room or create a measured rectangle, then review before applying. Photos
+cannot establish reliable dimensions by themselves.
 
 ## Choose the model and hardware together
 
@@ -21,9 +35,21 @@ Size a trial as follows:
 
 Check each runtime's platform requirements before installing. LM Studio's requirements are a useful desktop reference, while vLLM has separate hardware installation paths. Neither a RAM figure nor GPU branding guarantees a particular model will fit or run quickly. [LM Studio requirements](https://lmstudio.ai/docs/app/system-requirements), [vLLM installation](https://docs.vllm.ai/en/latest/getting_started/installation/)
 
+## Planner context and memory budget
+
+The companion sends catalog vocabulary and the selected room in addition to your
+instructions and images. A typical text envelope is tens of kilobytes, before
+image tokens. Use a model and runtime context of at least **32,768 tokens**, with
+capacity for the **8,192-token output allowance**; more photos or longer input may
+need a larger window. The companion explicitly requests `num_ctx: 32768` from
+Ollama. Configure the corresponding model-load context in LM Studio and LocalAI.
+A tiny model test succeeding at an 8K context does not prove that a full planner
+request will fit. If your hardware cannot support the context, use a compatible
+smaller model or a cloud provider; do not silently truncate room evidence.
+
 ## Install and start a runtime
 
-These are **third-party commands**, not Home Studio commands. They were checked against documentation, not executed for this proposal. They support harmless capability tests; complete the acceptance checklist before sending personal data. Record the installed version, model revision, quantization, and context setting. Check `--help` against that version: current documentation can describe features absent from an older package. Downloading applications, weights, tokenizers, projectors, or kernels can require Internet access and model-license acceptance.
+These are **third-party commands**, not Home Studio commands. They were checked against documentation, not executed as live model acceptance tests. They support harmless capability tests; complete the acceptance checklist before sending personal data. Record the installed version, model revision, quantization, and context setting. Check `--help` against that version: current documentation can describe features absent from an older package. Downloading applications, weights, tokenizers, projectors, or kernels can require Internet access and model-license acceptance.
 
 Commands use a Unix shell. On Windows, use the runtime's documented installer and shell equivalents. For authenticated examples, set `HS_LOCAL_TOKEN` to a fresh random local-server token without placing its value in shell history; it is not a cloud provider key. Environment variables are convenient for a personal trial but remain accessible to sufficiently privileged local processes. Do not paste keys into screenshots or diagnostics.
 
@@ -77,11 +103,11 @@ Other supported package paths are listed in the [installation guide](https://git
 LLAMA_API_KEY="${HS_LOCAL_TOKEN:?Set a fresh local token first}" \
 llama-server -m /path/to/vision-model.gguf \
   --mmproj /path/to/matching-projector.gguf \
-  --host 127.0.0.1 --port 8081 --ctx-size 8192 \
+  --host 127.0.0.1 --port 8081 --ctx-size 32768 \
   --cors-origins http://127.0.0.1:8081 --no-webui
 ```
 
-The projector must match the model, not just its parameter count. The context value is a trial setting, not a universal requirement. The official multimodal guide lists compatible model/projector combinations. [Multimodal setup](https://github.com/ggml-org/llama.cpp/blob/master/docs/multimodal.md)
+The projector must match the model, not just its parameter count. This context value is a baseline for planner requests, not a guarantee that every image batch fits. The official multimodal guide lists compatible model/projector combinations. [Multimodal setup](https://github.com/ggml-org/llama.cpp/blob/master/docs/multimodal.md)
 
 Check `http://127.0.0.1:8081/health`, then authenticated `/v1/models` and `/v1/chat/completions`. Health is public and can return 503 during loading. Current server documentation describes permissive CORS defaults, so the command explicitly narrows the origin; it also fixes the port instead of relying on a changing default. Do not enable agent tools, MCP proxies, or local media-directory access. Grammar/JSON-schema support uses a supported subset and its request wrapper must match the installed build. [Server reference](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md)
 
@@ -104,7 +130,7 @@ With a compatible vision model already downloaded, including its tokenizer/confi
 VLLM_API_KEY="${HS_LOCAL_TOKEN:?Set a fresh local token first}" \
 VLLM_NO_USAGE_STATS=1 \
 vllm serve /path/to/local-vision-model --host 127.0.0.1 --port 8000 \
-  --max-model-len 8192 --limit-mm-per-prompt '{"image":1}'
+  --max-model-len 32768 --limit-mm-per-prompt '{"image":6}'
 ```
 
 The base is `http://127.0.0.1:8000/v1`. Verify `/models`, then `/chat/completions`. A compatible chat template is required. Image limits, preprocessing, and supported architectures vary; adjust the trial context to the model and memory budget. [Multimodal inputs](https://docs.vllm.ai/en/latest/features/multimodal_inputs/)
@@ -118,12 +144,12 @@ Download the matching native server release following the [Linux installation gu
 ```sh
 LOCALAI_API_KEY="${HS_LOCAL_TOKEN:?Set a fresh local token first}" \
 LOCALAI_ADDRESS=127.0.0.1:8080 \
-local-ai run moondream2-20250414
+local-ai run "${HS_LOCAL_MODEL:?Set a compatible local vision model name first}"
 ```
 
-This documented vision-model example downloads needed assets. Confirm launcher/service settings use loopback before starting them instead; the CLI's default `:8080` is broader. Environment configuration takes precedence over flags. Keep CORS disabled and CSRF protection enabled. [CLI configuration](https://localai.io/docs/reference/cli-reference/), [vision model setup](https://localai.io/docs/features/gpt-vision/)
+Choose a LocalAI catalog vision model with the context capacity described above, set its name in HS_LOCAL_MODEL, and configure that context in its model settings. The command downloads needed assets. Confirm launcher/service settings use loopback before starting them instead; the CLI's default `:8080` is broader. Environment configuration takes precedence over flags. Keep CORS disabled and CSRF protection enabled. [CLI configuration](https://localai.io/docs/reference/cli-reference/), [vision model setup](https://localai.io/docs/features/gpt-vision/)
 
-Use authenticated `http://127.0.0.1:8080/v1/models` and `/v1/chat/completions`. LocalAI's simple API keys confer administrative access, so the proposed companion must not expose the full runtime API. Confirm the selected backend actually runs local weights and has no cloud proxy or remote failover. [Quickstart and authentication](https://localai.io/docs/basics/getting_started/index.html), [cloud proxy](https://localai.io/docs/features/cloud-proxy/)
+Use authenticated `http://127.0.0.1:8080/v1/models` and `/v1/chat/completions`. LocalAI's simple API keys confer administrative access, so the companion does not expose the full runtime API. Confirm the selected backend actually runs local weights and has no cloud proxy or remote failover. [Quickstart and authentication](https://localai.io/docs/basics/getting_started/index.html), [cloud proxy](https://localai.io/docs/features/cloud-proxy/)
 
 Vision-plus-grammar support is backend-specific: the documented constrained-grammar path requires the llama.cpp backend. An OpenAI-compatible URL does not establish schema compatibility. [Constrained grammars](https://localai.io/docs/features/constrained_grammars/index.html)
 
@@ -161,11 +187,11 @@ If a request fails, distinguish connection refusal/wrong port, 401/403 authentic
 
 Local inference means execution on the selected machine only when the entire route is local. Downloads, update checks, telemetry, plugins, remote workers, and cloud fallback are separate network paths. Verify configuration and repeat a harmless request with outbound connectivity blocked after assets are installed. Success is useful evidence, not a blanket privacy guarantee: caches, swap, crash dumps, backups, browser extensions, and local administrators remain relevant.
 
-The proposed companion must satisfy these requirements before handling personal sessions:
+The companion implements these boundaries; keep them in place when modifying or deploying it:
 
 - Bind to numeric loopback; validate exact `Host` and browser `Origin` values, reject unexpected/null origins, require a fresh session credential, and protect state-changing requests against CSRF. Loopback binding and CORS alone do not prevent malicious websites or DNS rebinding.
 - Serve UI/API from one origin; allow only the selected loopback runtime and necessary routes, reject redirects and arbitrary upstream URLs, and keep provider credentials server-side in memory. Isolate image decoding, strip metadata, and enforce file, pixel, image-count, context, and timeout limits.
-- Never persist keys or photos in local/session storage, IndexedDB, service-worker caches, URLs, exports, or analytics. Disable payload/header logging and tracing throughout the companion/runtime path; check runtime disk caches separately. Cancellation clears request/image state; session end or expiry clears credentials and remaining session state. Document limits of memory erasure.
+- Never persist keys or photos in local/session storage, IndexedDB, service-worker caches, URLs, exports, or analytics. Disable payload/header logging and tracing throughout the companion/runtime path; check runtime disk caches separately. Cancellation stops and discards the pending request; selected photos remain available in browser memory for an explicit retry. Discard, Apply, panel close, or session end releases selected photos; session end or expiry clears credentials and remaining session state. Document limits of memory erasure.
 - Treat image text and model output as untrusted data. Disable tools, shell execution, and network fetching. Validate the draft independently, display uncertainties, and require explicit review/import.
 
 A public HTTPS page calling HTTP loopback may encounter CORS, mixed-content, or browser local/private-network restrictions. Behavior differs by browser/version; successful `curl` does not prove browser access. The separate same-origin companion avoids relying on that cross-origin route. Do not fix failures with wildcard CORS, public binds, or disabled browser protections. [Chrome's local-network security model](https://developer.chrome.com/blog/local-network-access/)
