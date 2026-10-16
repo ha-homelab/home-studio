@@ -211,18 +211,29 @@
 - Fix portable package metadata, Unicode paths and Windows installer path checks.
   Preserve backups, rollback and files belonging to other Home Assistant features.
 
-### Upgrade and coverage
+### Upgrade
 
 Export project JSON before changing planner origins and keep a Home Assistant
-configuration backup. Rebuild an existing generated viewer with this version to
-receive its rendering changes; publishing a release does not update a private
-home automatically. Project identifiers and entity bindings remain compatible.
+configuration backup. Rebuild and reinstall an existing generated viewer with
+this version to receive its rendering changes; publishing a release does not
+update a private home automatically. Project identifiers and entity bindings
+remain compatible.
+Follow the [installation and update guide](https://ha-homelab.github.io/home-studio/install.html),
+including the installer dry-run before replacing an installed component.
+
+### Coverage
 
 See [platform acceptance](docs/platform-acceptance.md) for the exact mandatory
 matrix and [browser compatibility](docs/browser-compatibility.md) for limits.
 Hosted graphics backends and emulated mobile viewports do not certify every GPU,
 extension, device, Safari version, Android WebView or physical mobile browser.
+
+### Security
+
 All automated fixtures use fictional homes and send no live device commands.
+Keep household plans, credentials and device bindings out of public bug reports
+and source archives. This release does not change Home Assistant's authentication
+boundary or claim to fix a security vulnerability.
 
 ## [0.6.3] - Development line
 
