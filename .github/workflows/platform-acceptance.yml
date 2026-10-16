@@ -76,6 +76,7 @@ jobs:
       HOME_STUDIO_EXPECT_BROWSER_VERSION: ${{ matrix.browser_version }}
       CFT_VERSION: ${{ matrix.cft }}
       PLAYWRIGHT_VERSION: ${{ matrix.playwright }}
+      DEBUG: ${{ matrix.engine == 'chromium' && 'pw:browser' || '' }}
       CHROMIUM_ANGLE_BACKEND: ${{ matrix.os == 'macos-15' && matrix.engine == 'chromium' && 'metal' || 'swiftshader' }}
       FIREFOX_WEBGL_BACKEND: ${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && (matrix.playwright == '1.63.0' || matrix.playwright == '1.64.0') && 'angle' || 'default' }}
       FIREFOX_COMPOSITOR_BACKEND: ${{ startsWith(matrix.os, 'macos-') && matrix.engine == 'firefox' && matrix.playwright == '1.62.1' && 'software' || 'default' }}
@@ -119,6 +120,7 @@ jobs:
           SELECTED_PYTHON: ${{ steps.python.outputs.python-path }}
         run: printf 'PYTHON=%s\n' "$SELECTED_PYTHON" >> "$GITHUB_ENV"
       - name: Test generated viewer with 6 rooms and 18 lights
+        id: viewer_6_acceptance
         env:
           HOME_STUDIO_DIAGNOSTICS_DIR: acceptance-artifacts/viewer-6
         run: |
@@ -128,6 +130,7 @@ jobs:
             node scripts/test-browser-stability.cjs
           fi
       - name: Test generated viewer with 24 rooms and 72 lights
+        id: viewer_24_acceptance
         if: ${{ !cancelled() }}
         env:
           HOME_STUDIO_DIAGNOSTICS_DIR: acceptance-artifacts/viewer-24
@@ -173,6 +176,34 @@ jobs:
               node scripts/test-planner-stability.cjs 2>&1 | tee "$diagnostics_dir/browser-process.log"; then
               result=1
             fi
+          done
+          exit "$result"
+      - name: Compare native tap transports after a Chromium touch viewer failure
+        id: viewer_touch_diagnostics
+        if: ${{ !cancelled() && matrix.engine == 'chromium' && matrix.profile != 'desktop' && (steps.viewer_6_acceptance.outcome == 'failure' || steps.viewer_24_acceptance.outcome == 'failure') }}
+        env:
+          VIEWER_6_OUTCOME: ${{ steps.viewer_6_acceptance.outcome }}
+          VIEWER_24_OUTCOME: ${{ steps.viewer_24_acceptance.outcome }}
+          BROWSER_STABILITY_TRACE_INPUT: '1'
+        run: |
+          set -o pipefail
+          result=0
+          for rooms in 6 24; do
+            outcome="$VIEWER_6_OUTCOME"
+            if [ "$rooms" = 24 ]; then outcome="$VIEWER_24_OUTCOME"; fi
+            if [ "$outcome" != failure ]; then continue; fi
+            for mode in sequential gesture50; do
+              diagnostics_dir="acceptance-artifacts/diagnostics/viewer-$rooms-touch-$mode"
+              mkdir -p "$diagnostics_dir"
+              export HOME_STUDIO_DIAGNOSTICS_DIR="$diagnostics_dir"
+              export BROWSER_STABILITY_ROOMS="$rooms"
+              export BROWSER_STABILITY_TOUCH_TAP="$mode"
+              if [ "$RUNNER_OS" = Linux ]; then
+                if ! LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-browser-stability.cjs 2>&1 | tee "$diagnostics_dir/browser-process.log"; then result=1; fi
+              else
+                if ! node scripts/test-browser-stability.cjs 2>&1 | tee "$diagnostics_dir/browser-process.log"; then result=1; fi
+              fi
+            done
           done
           exit "$result"
       - name: Preserve synthetic browser diagnostics and toolchain identity

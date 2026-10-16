@@ -5,8 +5,11 @@ import copy
 import hashlib
 import io
 import json
+import os
 import stat
+import subprocess
 import tempfile
+import textwrap
 import unittest
 import zipfile
 from pathlib import Path
@@ -32,6 +35,47 @@ class BrowserMatrixTests(unittest.TestCase):
     def setUp(self):
         self.manifest = matrix.load_manifest()
         self.rows = matrix.expand(self.manifest)
+
+    def test_touch_diagnostics_keep_primary_failures_and_select_only_failed_viewers(self):
+        workflow = (ROOT / '.github/workflows/platform-acceptance.yml').read_text()
+        section = workflow.split('      - name: Compare native tap transports after a Chromium touch viewer failure\n')[1].split('      - name: ')[0]
+        gate = "!cancelled() && matrix.engine == 'chromium' && matrix.profile != 'desktop' && (steps.viewer_6_acceptance.outcome == 'failure' || steps.viewer_24_acceptance.outcome == 'failure')"
+        self.assertIn('if: ${{ ' + gate + ' }}', section)
+        self.assertNotIn('continue-on-error', workflow)
+        self.assertIn("BROWSER_STABILITY_TRACE_INPUT: '1'", section)
+        self.assertIn("DEBUG: ${{ matrix.engine == 'chromium' && 'pw:browser' || '' }}", workflow)
+        for rooms in (6, 24):
+            primary = workflow.split(f'      - name: Test generated viewer with {rooms} rooms')[1].split('      - name: ')[0]
+            self.assertIn(f'id: viewer_{rooms}_acceptance', primary)
+            self.assertNotIn('BROWSER_STABILITY_TOUCH_TAP', primary)
+            self.assertNotIn('BROWSER_STABILITY_TRACE_INPUT', primary)
+        script = textwrap.dedent(section.split('        run: |\n')[1])
+        for runner_os in ('Linux', 'Windows'):
+            for failed in ((), (6,), (24,), (6, 24)):
+                with self.subTest(runner_os=runner_os, failed=failed), tempfile.TemporaryDirectory() as directory:
+                    folder = Path(directory)
+                    node = folder / 'node'
+                    node.write_text('#!/usr/bin/env python3\nimport json,os,sys\n'
+                        'with open(os.environ["CALLS"],"a") as out:\n'
+                        ' out.write(json.dumps({"rooms":int(os.environ["BROWSER_STABILITY_ROOMS"]),'
+                        '"mode":os.environ["BROWSER_STABILITY_TOUCH_TAP"],"args":sys.argv[1:],'
+                        '"trace":os.environ["BROWSER_STABILITY_TRACE_INPUT"]})+"\\n")\n'
+                        'sys.exit(1 if os.environ["BROWSER_STABILITY_TOUCH_TAP"]=="sequential" else 0)\n')
+                    node.chmod(0o755)
+                    xvfb = folder / 'xvfb-run'
+                    xvfb.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+                    xvfb.chmod(0o755)
+                    calls = folder / 'calls.jsonl'
+                    environment = {**os.environ, 'PATH':str(folder)+os.pathsep+os.environ['PATH'],
+                        'CALLS':str(calls), 'RUNNER_OS':runner_os, 'BROWSER_STABILITY_TRACE_INPUT':'1',
+                        'VIEWER_6_OUTCOME':'failure' if 6 in failed else 'success',
+                        'VIEWER_24_OUTCOME':'failure' if 24 in failed else 'success'}
+                    result = subprocess.run(['bash','-c',script],cwd=folder,env=environment,capture_output=True,text=True)
+                    self.assertEqual(result.returncode, 1 if failed else 0, result.stderr)
+                    actual = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
+                    expected = [{'rooms':rooms,'mode':mode,'args':['scripts/test-browser-stability.cjs'],'trace':'1'}
+                                for rooms in failed for mode in ('sequential','gesture50')]
+                    self.assertEqual(actual, expected)
 
     def test_current_toolchain_matches_repository_lock(self):
         version = self.manifest['current_playwright']

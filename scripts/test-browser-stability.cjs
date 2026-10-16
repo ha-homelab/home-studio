@@ -14,7 +14,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
-const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver} = require('./browser-stability-diagnostics.cjs');
+const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions} = require('./browser-stability-diagnostics.cjs');
 const {createStartupDiagnostics} = require('./browser-startup-diagnostics.cjs');
 
 const root = path.resolve(process.env.HOME_STUDIO_SOURCE_ROOT || path.join(__dirname, '..'));
@@ -72,14 +72,15 @@ function instrumentation() {
 
 async function run(browserName, origin, project, sourceHash) {
   const profile = browserProfile(browserName, {viewport: {width: 1280, height: 800}});
+  const inputDiagnostics = viewerInputOptions(browserName, profile);
   return diagnostics.run(browserName, {
     reportOnly, deadlineMs: 120000, sourceHash,
     fixture: {floors: 1, rooms: project.floors[0].rooms.length, lights: project.floors[0].items.length},
     launch: browserLaunchOptions(browserName, process.env.BROWSER_STABILITY_HEADED !== '1'),
-    context: profile.context, profile,
+    context: profile.context, profile, inputDiagnostics,
   }, async ({browser, page, record, check, save}) => {
   const {samples, errors, crashes, consoleErrors} = record;
-  const input = await createInputDriver(page, browserName, profile);
+  const input = await createInputDriver(page, browserName, profile, inputDiagnostics);
   const dragCanvas = async (locator, child) => {
     await locator.scrollIntoViewIfNeeded();
     const bounds = await locator.boundingBox();
@@ -261,6 +262,8 @@ async function run(browserName, origin, project, sourceHash) {
         recovery = {before:beforeLoss,after:(await snapshot()).renderCount,contextLosses:(await snapshot()).contextLosses,drawingBuffer:restored.actual};
       }
       sample.input = await child.evaluate(() => window.__acceptanceInput);
+      if (inputDiagnostics.tapMode !== 'playwright') check(sample.input.trustedTouchStarts===4 && sample.input.trustedTouchEnds===4,
+        'Diagnostic transport emits exactly two drag and two button touch sequences per cycle');
       if (profile.emulated) check(sample.input.trustedTouchStarts>0 && sample.input.trustedTouchEnds>0,
         'Touch profiles exercise trusted browser touch input');
       if (profile.input === 'native-touch') check(sample.input.trustedTouchMoves>0 && sample.input.trustedTouchPointerMoves>0,

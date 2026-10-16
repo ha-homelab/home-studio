@@ -6,7 +6,7 @@ const path = require('node:path');
 const {EventEmitter} = require('node:events');
 const vm = require('node:vm');
 const {test, after} = require('node:test');
-const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver} = require('./browser-stability-diagnostics.cjs');
+const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions} = require('./browser-stability-diagnostics.cjs');
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'home-studio-diagnostics-unit-'));
 const previousDirectory = process.env.STABILITY_UNIT_DIAGNOSTICS_DIR;
@@ -436,6 +436,92 @@ test('native touch drags use browser protocol and release a failed gesture', asy
   assert.equal(commands[12].payload.type, 'touchMove');
   assert.deepEqual(commands[12].payload.touchPoints, [{x:100,y:200,id:0}]);
   assert.deepEqual(commands[13].payload, {type:'touchEnd',touchPoints:[]});
+});
+
+test('viewer tap diagnostics validate modes and never change the default transport', async () => {
+  const touch = {input:'native-touch',emulated:true};
+  assert.deepEqual(viewerInputOptions('chromium', touch, {}), {tapMode:'playwright',traceInput:false});
+  for (const mode of ['', 'retry', 'gesture']) assert.throws(() =>
+    viewerInputOptions('chromium', touch, {BROWSER_STABILITY_TOUCH_TAP:mode}), /must be playwright/);
+  assert.throws(() => viewerInputOptions('webkit', touch, {BROWSER_STABILITY_TOUCH_TAP:'sequential'}), /Chromium touch/);
+  assert.throws(() => viewerInputOptions('chromium', {input:'mouse'}, {BROWSER_STABILITY_TOUCH_TAP:'gesture50'}), /Chromium touch/);
+  assert.throws(() => viewerInputOptions('chromium', touch, {BROWSER_STABILITY_TRACE_INPUT:'true'}), /must be 0 or 1/);
+  assert.throws(() => viewerInputOptions('firefox', touch, {BROWSER_STABILITY_TRACE_INPUT:'1'}), /requires Chromium/);
+  const commands = [];
+  const page = {context:()=>({newCDPSession:async()=>({send:async command=>commands.push(command)})})};
+  const driver = await createInputDriver(page, 'chromium', touch);
+  let taps = 0;
+  await driver.tap({tap:async(...args)=>{assert.equal(args.length,0);taps++;}});
+  assert.equal(taps,1); assert.deepEqual(commands,[]);
+});
+
+test('each alternative sends one native tap with no trial or retry input', async () => {
+  for (const tapMode of ['sequential','gesture50']) {
+    const commands = [];
+    let startAcknowledged = false;
+    const page = {context:()=>({newCDPSession:async()=>({send:async(method,payload)=>{
+      commands.push({method,payload});
+      if (payload.type === 'touchStart') {await Promise.resolve();startAcknowledged=true;}
+      if (payload.type === 'touchEnd') assert(startAcknowledged, 'Start must be acknowledged before end');
+    }})})};
+    let hit = true;
+    const locator = {tap:()=>assert.fail('No intercepted trial input'), click:()=>assert.fail('No fallback click'),
+      waitFor:async options=>assert.deepEqual(options,{state:'visible'}), scrollIntoViewIfNeeded:async()=>{},
+      isEnabled:async()=>true, evaluate:async()=>hit, boundingBox:async()=>({x:20,y:30,width:60,height:40})};
+    const driver = await createInputDriver(page,'chromium',{input:'native-touch',emulated:true},{tapMode});
+    await driver.tap(locator);
+    if (tapMode === 'sequential') assert.deepEqual(commands,[
+      {method:'Input.dispatchTouchEvent',payload:{type:'touchStart',touchPoints:[{x:50,y:50,id:0}]}},
+      {method:'Input.dispatchTouchEvent',payload:{type:'touchEnd',touchPoints:[]}},
+    ]);
+    else assert.deepEqual(commands,[{method:'Input.synthesizeTapGesture',
+      payload:{x:50,y:50,duration:50,tapCount:1,gestureSourceType:'touch'}}]);
+    commands.length=0; hit=false;
+    await assert.rejects(driver.tap(locator),/center must receive input/);
+    assert.deepEqual(commands,[],'Failed hit testing must not dispatch any touch');
+  }
+});
+
+function fakeInputTrace(fake, {lost=false, readFails=false} = {}) {
+  const commands = [];
+  const session = Object.assign(new EventEmitter(), {detach:async()=>commands.push('detach'),
+    send:async(method)=>{
+      commands.push(method);
+      if (method === 'Tracing.end') queueMicrotask(()=>session.emit('Tracing.tracingComplete',
+        {stream:'fictional-stream',dataLossOccurred:lost}));
+      if (method === 'IO.read') {
+        if (readFails) throw Error('synthetic trace stream failure');
+        return {data:Buffer.from('{"traceEvents":[]}').toString('base64'),base64Encoded:true,eof:true};
+      }
+      return {};
+    }});
+  fake.context.newCDPSession=async()=>session;
+  return commands;
+}
+
+test('requested input traces survive assertion failures and keep the original failure', async () => {
+  const fake=fakeBrowser(), commands=fakeInputTrace(fake);
+  const diagnostics=suite('input-trace-failure',{chromium:{launch:async()=>fake.browser}});
+  await assert.rejects(diagnostics.run('chromium', {...options,
+    inputDiagnostics:{tapMode:'gesture50',traceInput:true}}, async({check})=>check(false,'original missing click')), /original missing click/);
+  const record=read(diagnostics,'chromium.json');
+  assert.equal(record.status,'failed'); assert.equal(record.inputDiagnostics.tapMode,'gesture50');
+  assert.equal(record.inputTrace.status,'saved'); assert.equal(record.inputTrace.dataLoss,false);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(diagnostics.directory,record.inputTrace.file))),{traceEvents:[]});
+  assert.deepEqual(commands,['Tracing.start','Tracing.end','IO.read','IO.close','detach']);
+  assert(fake.context.closed && fake.browser.closed);
+});
+
+test('trace data loss or stream failure cannot create a green diagnostic', async () => {
+  for (const setup of [{lost:true},{readFails:true}]) {
+    const fake=fakeBrowser(); fakeInputTrace(fake,setup);
+    const diagnostics=suite(`input-trace-incomplete-${Object.keys(setup)[0]}`,{chromium:{launch:async()=>fake.browser}});
+    await assert.rejects(diagnostics.run('chromium', {...options,
+      inputDiagnostics:{tapMode:'sequential',traceInput:true}}, async()=>{}), /trace buffer|trace stream/);
+    const record=read(diagnostics,'chromium.json');
+    assert.equal(record.status,'failed'); assert.equal(record.inputTrace.status,'failed');
+    assert.equal(record.diagnosticsErrors.length,1); assert(fake.context.closed && fake.browser.closed);
+  }
 });
 
 test('input evidence retains event targets and viewport without changing native events', () => {

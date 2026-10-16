@@ -193,6 +193,32 @@ Every comparison runs, and any diagnostic failure also fails that step. The
 primary check still requires all actions with immediate restoration and its
 failure still fails the job even if every diagnostic passes.
 
+If a Chromium phone/tablet viewer check fails, the job repeats only that viewer
+size in two fixed diagnostic modes: sequential native touch start/end with no
+hold, then `Input.synthesizeTapGesture` with a 50 ms press. The ordinary
+Playwright tap remains the primary transport. Each diagnostic runs the original
+two full cycles, assertions, timing limits and recovery check; no failed tap is
+retried with another transport. Target checks use visibility, enabled state,
+stable scrolling and geometric hit testing. They do not use Playwright's
+`trial:true`, which emits intercepted native input and would contaminate the
+comparison. A local passing baseline did not reproduce the intermittent hosted
+missing click, so these comparisons gather evidence rather than establish a fix.
+
+These runs set `BROWSER_STABILITY_TOUCH_TAP=sequential|gesture50` and
+`BROWSER_STABILITY_TRACE_INPUT=1`. Their receipts, browser-process logs and
+Chromium input/latency/benchmark traces are under
+`diagnostics/viewer-{6,24}-touch-{sequential,gesture50}`. Trace capture is off in
+primary acceptance and may affect diagnostic timings. Missing or incomplete
+requested traces fail the diagnostic. The original failed viewer step still
+fails the job even if both comparisons pass; successful viewer sizes are not
+repeated. These comparisons add no optional row or release-gate waiver.
+
+All primary Chromium rows enable `DEBUG=pw:browser` in the CI job log to retain
+process launch, exit and shutdown evidence for intermittent cleanup failures.
+This does not enable primary input tracing or change the 15-second browser
+cleanup limit. Existing receipt identity and per-suite artifact paths remain
+unchanged.
+
 Check the first failed assertion and actual renderer before comparing timings.
 Chromium rows explicitly request `CHROMIUM_ANGLE_BACKEND=swiftshader` on
 Linux and Windows, and `CHROMIUM_ANGLE_BACKEND=metal` on macOS. The actual

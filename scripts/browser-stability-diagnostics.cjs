@@ -154,12 +154,47 @@ function inputInstrumentation() {
   }, true);
 }
 
-async function createInputDriver(page, engine, profile) {
+function viewerInputOptions(engine, profile, environment = process.env) {
+  const tapMode = environment.BROWSER_STABILITY_TOUCH_TAP ?? 'playwright';
+  assert(['playwright', 'sequential', 'gesture50'].includes(tapMode),
+    'BROWSER_STABILITY_TOUCH_TAP must be playwright, sequential or gesture50');
+  assert(tapMode === 'playwright' || (engine === 'chromium' && profile.input === 'native-touch'),
+    'Alternative tap diagnostics require a Chromium touch profile');
+  const trace = environment.BROWSER_STABILITY_TRACE_INPUT ?? '0';
+  assert(['0', '1'].includes(trace), 'BROWSER_STABILITY_TRACE_INPUT must be 0 or 1');
+  assert(trace === '0' || engine === 'chromium', 'Input tracing requires Chromium');
+  return {tapMode, traceInput:trace === '1'};
+}
+
+async function createInputDriver(page, engine, profile, {tapMode = 'playwright'} = {}) {
+  viewerInputOptions(engine, profile, {BROWSER_STABILITY_TOUCH_TAP:tapMode});
   const touch = profile.input === 'native-touch';
   assert(!touch || engine === 'chromium', 'Native touch drags require the Chromium CDP transport');
   const cdp = touch ? await page.context().newCDPSession(page) : null;
   return {
-    tap: locator => profile.emulated ? locator.tap() : locator.click(),
+    async tap(locator) {
+      if (tapMode === 'playwright') return profile.emulated ? locator.tap() : locator.click();
+      // trial:true still emits intercepted native input in Playwright. Check
+      // visibility, stability and the hit target without an extra touch sequence.
+      await locator.waitFor({state:'visible'});
+      await locator.scrollIntoViewIfNeeded();
+      assert(await locator.isEnabled(), 'The diagnostic tap target must be enabled');
+      const hit = await locator.evaluate(target => {
+        const bounds = target.getBoundingClientRect();
+        const element = document.elementFromPoint(bounds.x+bounds.width/2, bounds.y+bounds.height/2);
+        return element === target || target.contains(element);
+      });
+      assert(hit, 'The diagnostic tap target center must receive input');
+      const bounds = await locator.boundingBox();
+      assert(bounds && bounds.width > 0 && bounds.height > 0, 'The diagnostic tap target must have visible bounds');
+      const x = bounds.x+bounds.width/2, y = bounds.y+bounds.height/2;
+      if (tapMode === 'gesture50') {
+        await cdp.send('Input.synthesizeTapGesture', {x,y,duration:50,tapCount:1,gestureSourceType:'touch'});
+      } else {
+        await cdp.send('Input.dispatchTouchEvent', {type:'touchStart',touchPoints:[{x,y,id:0}]});
+        await cdp.send('Input.dispatchTouchEvent', {type:'touchEnd',touchPoints:[]});
+      }
+    },
     async drag(from, to, beforeRelease) {
       const marks = [Date.now()];
       if (touch) {
@@ -241,6 +276,7 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       browserContext: options.context, gpu: null, samples: [], errors: [], crashes: [], consoleErrors: [],
       consoleErrorDetails: [], httpErrors: [], requestFailures: [],
       failedAssertions: [], diagnosticsErrors: [], cleanupErrors: [], screenshot: null, snapshot: null, error: null,
+      inputDiagnostics: options.inputDiagnostics || null, inputTrace: null,
       cleanupTimeoutsMs: {context: 5000, browser: 15000}, cleanupDurationsMs: {},
     };
     const file = `${engine}.json`;
@@ -248,7 +284,7 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
     summary.browsers.push(reference);
     const save = () => { write(file, record); reference.status = record.status; saveSummary(); };
     save();
-    let browser, context, page, failure, expired = false, watchdog, launchPending = false;
+    let browser, context, page, failure, expired = false, watchdog, launchPending = false, traceSession;
     const hardDeadline = setTimeout(() => {
       const error = new Error(`${engine}: browser cleanup exceeded the hard process deadline`);
       record.status = 'failed';
@@ -259,7 +295,9 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       summary.error = errorDetails(error);
       summary.finishedAt = record.finishedAt;
       try { save(); } finally { process.exit(1); }
-    }, options.deadlineMs + 35000);
+    // Trace draining has its own bound; scene and browser-close limits are
+    // unchanged. Only requested diagnostic traces need this extra cleanup room.
+    }, options.deadlineMs + 35000 + (options.inputDiagnostics?.traceInput ? 11000 : 0));
     hardDeadline.unref();
     async function capture(screenshot) {
       if (!page || page.isClosed()) return;
@@ -351,6 +389,15 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
             resourceType: request.resourceType(), error: request.failure()?.errorText || null});
           save();
         });
+        if (options.inputDiagnostics?.traceInput) {
+          assert.equal(engine, 'chromium', 'Input tracing requires Chromium');
+          record.inputTrace = {file:`${engine}-input-trace.json`, status:'starting',
+            categories:'input,latencyInfo,benchmark,disabled-by-default-devtools.timeline.inputs'};
+          traceSession = await context.newCDPSession(page);
+          await traceSession.send('Tracing.start', {categories:record.inputTrace.categories,
+            options:'record-until-full', transferMode:'ReturnAsStream', streamFormat:'json'});
+          record.inputTrace.status = 'recording'; save();
+        }
         await execute({browser, context, page, record, check, save});
         // Chromium exposes UA client-hint brands only after a secure navigation.
         record.identity = await browserIdentity(page, engine, options.launch, record.browserVersion);
@@ -373,10 +420,42 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       failure = error;
       record.status = 'failed';
       record.error = errorDetails(error);
+      if (record.inputTrace?.status === 'starting') {
+        record.inputTrace.status = 'failed'; record.inputTrace.error = errorDetails(error);
+      }
       save();
       await capture(true);
     } finally {
       clearTimeout(watchdog);
+      if (traceSession && record.inputTrace.status === 'recording') {
+        try {
+          await bounded(async () => {
+            const completed = new Promise(resolve => traceSession.once('Tracing.tracingComplete', resolve));
+            await traceSession.send('Tracing.end');
+            const event = await completed;
+            record.inputTrace.dataLoss = Boolean(event.dataLossOccurred);
+            assert(event.stream, 'Input trace must return a stream');
+            const output = fs.openSync(path.join(directory, record.inputTrace.file), 'w');
+            try {
+              while (true) {
+                const chunk = await traceSession.send('IO.read', {handle:event.stream, size:1024*1024});
+                fs.writeSync(output, chunk.base64Encoded ? Buffer.from(chunk.data,'base64') : chunk.data);
+                if (chunk.eof) break;
+              }
+            } finally { fs.closeSync(output); }
+            await traceSession.send('IO.close', {handle:event.stream});
+            assert(!record.inputTrace.dataLoss, 'Input trace buffer must not lose events');
+          }, 10000, 'Input trace capture');
+          record.inputTrace.status = 'saved';
+        } catch (error) {
+          record.inputTrace.status = 'failed'; record.inputTrace.error = errorDetails(error);
+          record.diagnosticsErrors.push(errorDetails(error)); failure ||= error;
+        }
+      }
+      if (traceSession) {
+        try { await bounded(() => traceSession.detach(), 1000, 'Input trace session cleanup'); }
+        catch (error) { record.diagnosticsErrors.push(errorDetails(error)); failure ||= error; }
+      }
       // Write before teardown: evidence must survive a hung or failing browser close.
       record.finishedAt = new Date().toISOString();
       save();
@@ -427,4 +506,4 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
   };
 }
 
-module.exports = {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver};
+module.exports = {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions};
