@@ -188,6 +188,10 @@ for(const p of positions) {
     const loop=s=>s.slice(s.indexOf(start),s.indexOf(end)).replace(/\n}\n$/, '');
     const packedLoop=loop(packed.shader.fragmentShader);
     const cachedEquivalent=packedLoop
+      // Reverse only the scoped pure-call reuse; the complete literal-loop
+      // comparison below still covers admission, shadow and addition order.
+      .replace(/\{\nfloat homeShadowTransmission = (homePointTransmission\(homePointRooms\[ i \]\));\nif \(homeShadowTransmission != 0.0\) \{([\s\S]*?reflectedLight \);)\n\}\n\}/,
+        (_,call,body)=>`if (${call} != 0.0) {${body.replace('directLight.color *= homeShadowTransmission;', `directLight.color *= ${call};`)}\n}`)
       .replace('ivec4 homeRunData = homeLightRuns[homeRun];\n      ', '')
       .replaceAll('homeRunData.y','homeLightRunEnds[homeRun]')
       .replaceAll('homeRunData.x','homeRunStart')
