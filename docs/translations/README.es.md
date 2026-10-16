@@ -23,4 +23,10 @@ Tu plano y los identificadores de dispositivos pueden ser privados. Usa una casa
 
 Esta es una guía rápida traducida. La documentación completa y la guía ilustrada están actualmente en inglés. Se agradecen las correcciones de traducción.
 
+## Probar controles sin enviar órdenes
+
+En el plano instalado de Home Assistant, active Dry run para probar los botones sin enviar órdenes. Se bloquean los interruptores, la alimentación de televisores, las cortinas y los diálogos nativos con controles de cerraduras; los estados siguen siendo reales. Guarde la dirección del plano con ?dry_run=1 en los marcadores de este navegador. Los cambios de distribución aún se pueden guardar.
+
+[Dry run — English](../dry-run.md) · [Wiki — English](../wiki/Home.md)
+
 MIT · [LICENSE](../../LICENSE)

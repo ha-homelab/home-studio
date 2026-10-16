@@ -287,6 +287,26 @@ through a dedicated message channel. The host checks saved entity bindings and
 allowed actions before a user-initiated device command. The public static panel
 script does not need a floorplan, photos, or credentials embedded in it.
 
+### Dry run at the command boundary
+
+The host owns the per-browser Dry run preference. It filters device requests at
+the MessagePort boundary and checks the guard again immediately before service
+dispatch. Only explicitly non-device message families pass while it is active;
+new message types are not implicitly trusted. Native HA details dialogs are
+blocked too, because their lock and device controls live outside the iframe.
+
+A blocked request returns `command_result` with `dry_run: true` and `ok: false`.
+The viewer clears its pending interaction without synthesizing a state change.
+Real HA readings continue over the independent state path. Placement saves,
+exports, navigation, and language preferences are still allowed; this is not a
+read-only policy for saved layout data or other Home Assistant clients.
+
+![Separate trusted command and state paths](images/dry-run-command-flow.svg)
+
+See [the complete guard contract](dry-run.md) for URL pinning, storage failures,
+dispatch races, and differences from installer validation and the separate
+structurally read-only legacy tablet.
+
 ### Lock markers
 
 Linked `lock.*` entities show a padlock marker at the saved object's position.

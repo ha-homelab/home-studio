@@ -48,6 +48,26 @@ and device states into all 24 languages. It follows your Home Assistant language
 until you choose another language in the plan. The detailed reference, command-line
 diagnostics, and advanced device diagnostics remain in English.
 
+## Try device buttons without operating anything
+
+Enable **Dry run** in the installed plan's host header. It blocks switches,
+TV power, curtain operations, and native Home Assistant dialogs that can expose
+lock or other device controls. Readings remain real; there is no simulated
+success. Bookmark the plan with `?dry_run=1` to pin this browser's view in Dry run.
+Navigation and saved placement editing continue to work.
+
+Read [the Dry run guide](docs/dry-run.md) for the exact boundary, storage behavior,
+and verification. The installer's `--dry-run` is a separate archive-validation
+option. For operating notes and troubleshooting, start at the
+[repository documentation wiki](docs/wiki/Home.md).
+
+See the [illustrated process and results](docs/process-and-results.md) for the
+command boundary, browser persistence, translation coverage and evidence behind
+the change. Its workflow diagrams distinguish local verification from release
+acceptance.
+
+![From the Dry run command guard to tests, packaged documentation, signed review and release acceptance](docs/images/dry-run-delivery-process.svg)
+
 ## Furnish your rooms
 
 Open **Item library** to browse **195 designs in 22 categories**: furniture and

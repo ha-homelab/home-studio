@@ -23,4 +23,10 @@ Plan domu i identyfikatory urządzeń mogą być poufne. W publicznych przykład
 
 To przetłumaczona instrukcja szybkiego startu. Pełna dokumentacja i ilustrowany przewodnik są obecnie po angielsku. Poprawki tłumaczeń są mile widziane.
 
+## Sprawdzanie przycisków bez poleceń
+
+W zainstalowanym planie Home Assistant włącz Dry run, aby sprawdzać przyciski bez wysyłania poleceń. Przełączniki, zasilanie telewizorów, zasłony i okna systemowe z obsługą zamków są blokowane; stany pozostają rzeczywiste. Zapisz adres planu z ?dry_run=1 w zakładkach tej przeglądarki. Zmiany rozmieszczenia obiektów nadal można zapisywać.
+
+[Dry run — English](../dry-run.md) · [Wiki — English](../wiki/Home.md)
+
 MIT · [LICENSE](../../LICENSE)

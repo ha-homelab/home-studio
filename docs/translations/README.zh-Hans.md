@@ -23,4 +23,10 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 这是翻译版快速入门指南。完整参考文档和图文教程目前为英文。欢迎提出翻译修正。
 
+## 不发送命令地试用按钮
+
+在已安装的 Home Assistant 平面图中启用 Dry run，即可在不发送命令的情况下试用按钮。开关、电视电源、窗帘以及包含门锁控制的原生对话框会被阻止，状态仍显示真实数据。将平面图地址加上 ?dry_run=1 后保存为此浏览器的书签，可固定启用此模式。布局修改仍可保存。
+
+[Dry run — English](../dry-run.md) · [Wiki — English](../wiki/Home.md)
+
 MIT · [LICENSE](../../LICENSE)

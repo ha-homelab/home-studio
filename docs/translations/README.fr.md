@@ -23,4 +23,10 @@ Votre plan et les identifiants d’appareils peuvent être confidentiels. Utilis
 
 Ceci est un guide de démarrage traduit. La documentation complète et le guide illustré sont actuellement en anglais. Les corrections de traduction sont bienvenues.
 
+## Essayer les boutons sans commande
+
+Dans le plan Home Assistant installé, activez Dry run pour essayer les boutons sans envoyer de commandes. Les interrupteurs, l’alimentation des téléviseurs, les rideaux et les fenêtres natives de commande des serrures sont bloqués ; les états affichés restent réels. Enregistrez l’adresse du plan avec ?dry_run=1 dans les favoris de ce navigateur. Les modifications de disposition peuvent toujours être enregistrées.
+
+[Dry run — English](../dry-run.md) · [Wiki — English](../wiki/Home.md)
+
 MIT · [LICENSE](../../LICENSE)

@@ -23,4 +23,10 @@ Sua planta e os identificadores dos dispositivos podem ser privados. Use uma cas
 
 Este é um guia rápido traduzido. A documentação completa e o guia ilustrado estão atualmente em inglês. Correções de tradução são bem-vindas.
 
+## Testar botões sem comandos
+
+Na planta instalada do Home Assistant, ative Dry run para testar os botões sem enviar comandos. Interruptores, alimentação dos televisores, cortinas e janelas nativas com controles de fechaduras ficam bloqueados; os estados continuam reais. Guarde o endereço da planta com ?dry_run=1 nos favoritos deste navegador. As alterações de disposição ainda podem ser guardadas.
+
+[Dry run — English](../dry-run.md) · [Wiki — English](../wiki/Home.md)
+
 MIT · [LICENSE](../../LICENSE)
