@@ -88,6 +88,9 @@
   owned, eligible materials participate, and unsupported or externally changed
   materials retain their original path. This removes another cold shader family
   in both the Home view and editor without changing drawing resolution.
+- Reuse the pure room-transmission result within each packed shadowed light.
+  Preserve attenuation, shadow and light order, and all unshadowed calculations;
+  the change adds no texture, uniform or rendering pass.
 - Reuse planner outlines and selection controls, and avoid redrawing unchanged
   snapped positions. Preserve exact furniture overlap, appearance, undo and drag
   cancellation. Bound software-renderer resolution without reducing sharp HTML
