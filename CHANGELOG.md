@@ -10,10 +10,13 @@
   official browser binaries and supported browser automation protocols. Browser
   identity, source revision, rendering errors and cleanup remain release gates.
 - Fix WebKit preview recovery by releasing geometry and shadow resources while
-  the graphics context is lost, before rebuilding them. Preserve edits and JSON
-  export through context loss without stale GPU callbacks or missing furniture.
-  Refresh the actual canvas layout before allocating the first restored drawing
-  buffer, including when a resize notification is still pending.
+  the graphics context is lost, then retiring that context and rebuilding on a
+  fresh canvas. Preserve edits, camera orientation, zoom, keyboard focus and JSON
+  export without retaining old input handlers or GPU resources. Refresh the
+  actual canvas layout before allocating the replacement drawing buffer,
+  including when a resize notification is still pending.
+- Set direct touch manipulation on viewer controls while retaining page pinch
+  zoom. Keep native touch interaction checks separate from mouse acceptance.
 - Reduce room-lighting shader compilation and fragment work while preserving
   light order, every illuminated fixture and nonzero light through doorways.
 - Reuse planner outlines and selection controls, and avoid redrawing unchanged
