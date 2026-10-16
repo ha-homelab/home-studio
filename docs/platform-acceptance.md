@@ -678,43 +678,36 @@ inverse checks ready, unproved, invalid, restored, editor and independent
 fallback states. Neither standalone measurements nor a source expansion proves
 that this combination improves hosted Intel timing or compiles on every driver.
 
-### Experimental literal Lambert point body
+### Scoped scalar Lambert lighting
 
-The opt-in `literalLambertPointBody` experiment applies only to the existing
-owned, packed texture Lambert path. It reads the same two RGBA records and
-spells out pinned Three r169 point-light and Lambert operations with local
-vectors and scalars. Shadow prefixes, run scheduling, both visibility checks,
-addition order, dynamic or decay-two attenuation helpers, and all other shader
-paths remain unchanged. The editor, rejected inputs and unsupported materials
-retain the original shader. No resources or uniforms are added.
+The packed Home Lambert path expresses selected pinned Three r169 lighting
+operations with local vectors and scalars. `literalLambertPointBody` covers
+unshadowed point lights, `literalLambertShadowPoint` covers the literal point
+shadow prefix, and `literalLambertIndirect` substitutes the indirect helper's
+single accumulation at its original call site. These three options require
+active, eligible point-texture transport. `literalLambertDirectional` has an
+independent packed Lambert guard and does not require texture transport.
 
-This revisits the earlier `9590f994` Lambert-local experiment on the current
-texture transport; it is not a new lighting algorithm. The compiler may already
-eliminate aggregate struct traffic, so a reduction in source-level struct calls
-is not proof of less interpreter work or faster compilation. CPU tests compare
-pinned expansions and binary32 operation traces; actual eight-view pixels,
-original deadlines and hosted performance still require measurement. No Intel
-performance claim or acceptance waiver is made.
+Each option defaults off in `createRoomLighting`; Home enables the options for
+its existing rendering profile. Independent helper, macro and complete-block
+checks keep an unsupported rewrite on its prior path. PBR materials, the
+literal room shader and editor remain on their prior paths. A rejected texture
+proof disables the three texture-bound rewrites without disabling an otherwise
+valid directional rewrite. Each selected rewrite has its own cache-key suffix.
 
-The experimental `literalLambertShadowPoint` option extends the scalar Lambert
-prototype only to the packed, active point-texture shadow prefix. It retains the
-existing per-light cached transmission, literal sampler indices, visibility
-gates, attenuation calls and exact accumulation order. The complete pinned
-point span, unique `RE_Direct` macro and helper checks must pass; unsupported
-source, PBR, inactive texture and editor variants keep their original bodies.
-The option defaults off and Home opts in within its existing owned texture
-selection. It adds no resources, uniform slots or light-state changes. CPU
-source and binary32 trace proofs establish the intended transformation, not
-actual GLSL compilation, pixel parity or an Intel speedup. A compiler may
-already inline and scalarize the original struct calls, so benefit is unproven.
+The implementation preserves light and run order, cached room transmission,
+literal shadow sampler indices, visibility gates, attenuation, shadow
+multiplication and accumulation order. Ambient, hemisphere and daylight are
+accumulated before the unchanged indirect multiplication and addition. No
+lights, geometry, resources, uniform slots, resolution or acceptance limits
+are removed or added by these rewrites. The existing controller owns material
+callbacks, validates dynamic eligibility before drawing, and handles texture
+uploads, editor transitions and context recovery.
 
-The experimental `literalLambertIndirect` option removes one remaining Lambert
-indirect-light call boundary in the packed, active point-texture variant. It
-substitutes the pinned helper's single accumulation statement at the original
-call site, after the unchanged ambient, hemisphere and daylight accumulation.
-Exact helper, macro and call-site checks fail closed; PBR, editor, inactive
-texture and unknown-source variants retain the original call. The option is
-off by default and enabled by Home, with an independent cache tag and no new
-resources or uniforms. This may make aggregate state easier for a compiler to
-scalarize, but the driver may already inline it. CPU inverse and binary32
-proofs do not establish GLSL compilation, pixel parity or a performance gain.
+Pinned full-fragment inverses, binary32 traces and fallback/cache tests run in
+the package workflow and extracted-source replay. They establish the intended
+source transformation, not GPU floating-point equivalence or a general speedup.
+A driver may already inline these calls; exact rendered comparisons and the
+complete required browser matrix remain necessary. See the
+[Lambert implementation notes](literal-lambert-directional.md) for boundaries
+and the callback contract.

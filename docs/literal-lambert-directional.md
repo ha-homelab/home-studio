@@ -1,42 +1,72 @@
-# Experimental scalar directional Lambert body
+# Scoped scalar Lambert lighting
 
-The `literalLambertDirectional` option replaces only directional direct-light
-calls in the packed Home Lambert shader. Home opts in on this experimental
-branch. The default option, editor, literal room shader and PBR material paths
-retain their existing shader source.
+The packed Home renderer can express selected Three r169 lighting operations
+with local vectors and scalars instead of passing aggregate light/material
+structures through helper calls. This changes the shader representation, not
+the lighting model. The compiler may already perform the same lowering, so the
+implementation makes no general startup, interaction or Intel speed claim.
 
-The hypothesis is that removing directional `IncidentLight` argument copies
-and the direct Lambert `inout` call can reduce first-use lowering or interpreter
-cost on legacy Apple software OpenGL. The directional light executes even when
-all point lights are off. This is not a measured improvement or release claim.
+## Selection and preserved operations
 
-The replacement copies color, then direction, then sets visibility to true. It
-retains the original directional shadow expression, including multiplication by
-one when shadow reception is disabled. It always evaluates the original dot,
-saturation, irradiance, BRDF and addition in their original order. Zero color
-adds no new early-out. Direction is not renormalized. Each unrolled light has a
-separate local scope. Point, spot, indirect, daylight, material and vertex code
-are unchanged; indirect Lambert structs still exist.
+`literalLambertPointBody` replaces the unshadowed point-information and direct
+Lambert bodies only when the existing point-texture proof is active. It reads
+the same two RGBA records in the same order and retains normalization, length,
+attenuation, both visibility checks, room transmission, dot product, saturation,
+BRDF and accumulation order. The original run scheduler is unchanged.
 
-Exact pinned Three r169 helper, macro and directional-block guards fall back to
-the original shader when their source differs. Selection adds one stable cache
-key suffix and no uniforms, textures or GPU resources. On/off light state does
-not change selection. Home/editor reattachment and context restoration use the
-existing material and resource lifecycle.
+`literalLambertShadowPoint` uses the same eligible transport and keeps the
+literal point-shadow prefix. Each light retains its scoped cached transmission,
+admission and visibility checks, sampler index and shadow expression. The
+point-information and direct Lambert calculations use local values in that
+existing scope. There is no extra shadow pass or new early-out.
 
-`node scripts/test-literal-lambert-directional.cjs` checks real pinned program
-expansion, whole-shader inverse equality outside the directional block, changed
-source fallbacks and binary32 operation traces including zero, negative and
-nonfinite inputs. It is also included in package checks and extracted-source
-replay. These CPU checks do not establish real-driver floating-point pixel
-parity or performance; original browser acceptance limits remain unchanged.
+`literalLambertDirectional` applies independently to packed Lambert. It copies
+color and direction, sets visibility to true, and evaluates the original shadow
+expression, including multiplication by one when reception is disabled. It
+retains the dot product, saturation, BRDF and addition order. Direction is not
+renormalized, and a zero color does not introduce a shortcut.
 
-The combined prototype enables both this option and `literalLambertPointBody`.
-Point selection runs first, then directional replacement applies to the selected
-lighting block. Each independent source guard and cache suffix is retained.
-CPU tests cover both combinations; they do not establish combined GPU behavior.
+`literalLambertIndirect` requires eligible point-texture transport. After the
+unchanged ambient, hemisphere and daylight accumulation, it substitutes the
+pinned helper's single `indirectDiffuse` multiplication/addition at the original
+call site. It does not remove the surrounding material or reflected-light
+structures, rewrite indirect specular, or move any irradiance calculation.
 
-The point-body guard also requires the complete pinned source block and the
-unique Lambert direct-light macro. An upstream added operation, changed macro
-or ambiguous replacement falls back independently; directional selection still
-works when only the point block changes.
+All four options default off in `createRoomLighting`; Home opts in for its
+existing packed profile. Each rewrite checks its pinned helper, macro and
+complete replacement span and has an independent cache suffix. Unsupported
+source retains that rewrite's prior path. Texture-bound rewrites follow the
+existing finite-input, capacity, camera and material proof; directional
+selection remains independent. PBR, literal room-shader and editor variants
+retain their prior paths. The independent dynamic/constant-two point attenuation
+selection is described in [the attenuation notes](point-decay-two.md).
+
+## Callback and cache contract
+
+`createRoomLighting.attach` owns `onBeforeCompile` and `customProgramCacheKey`
+on the attached materials; it is not an arbitrary callback-composition API.
+The texture and decay selectors retain the final installed callback identities.
+Their existing update checks reject unsupported external callbacks or material
+changes, and a change of active selection sets `needsUpdate` before drawing.
+The same state predicates select emitted code and cache suffixes. Scene state
+updates alone do not create a new program when eligibility is unchanged.
+
+Callers supply the complete registered point collection and current camera to
+`update` before drawing. Home does this on full and signal-only draws. External
+changes between that update and rendering, or mutation of the pinned shader
+chunks after controller creation, are outside the owned viewer contract.
+Uniform bindings still precede the editor early return, so cached program reuse
+uses the existing latest uniform map. These rewrites add no uniforms, textures,
+getters, callbacks, render requests or disposal paths. Existing loss/rebuild
+handling remains responsible for the three data textures.
+
+## Validation scope
+
+The point, directional, shadow-point and indirect CPU tests independently
+reverse their full emitted fragments and compare pinned operation traces.
+They cover zero, signed zero and nonfinite arithmetic, source mutations,
+independent selection, editor/fallback transitions and cache identity. The
+proofs run unconditionally in package checks and extracted-source replay.
+They do not execute an actual shader compiler. Rendered pixel comparisons and
+the unchanged full browser qualification matrix are separate requirements;
+no CPU proof, local result or partial hosted result substitutes for them.

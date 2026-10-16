@@ -2,9 +2,11 @@
 
 ## [0.6.4] - Development line
 
-- Prototype composable scalar point and directional Lambert bodies for the
-  packed Home renderer. Retain lighting order and shadow operations; combined
-  driver performance and visual equivalence still require acceptance.
+- Express eligible packed Lambert lighting with local vectors and scalars,
+  preserving the pinned point, directional, shadow and indirect-light operation
+  order. Independent source and material guards retain the existing paths when
+  a rewrite is unsupported. These changes add no resources or quality reductions;
+  browser qualification still uses the original limits and complete matrix.
 
 - Require native Linux, Windows and macOS package/install acceptance and an
   expanded browser matrix for pull requests and releases. Keep browser families,
