@@ -1,13 +1,13 @@
-# Disposable Intel point-light-and-run-texture diagnostic
+# Disposable Intel cumulative-static-geometry-atlas diagnostic
 
-Only a push to `diagnostic/intel-cgl-run-texture` starts this workflow. It has
+Only a push to `diagnostic/intel-cgl-static-atlas` starts this workflow. It has
 read-only GitHub permissions and pinned actions. It does not invoke the 77-lane
 acceptance gate or publish a release. Its results are diagnostic evidence only.
 
 Two independent `macos-15-intel` jobs compare these exact sources in order:
 
 - Baseline: `13b8ed9e1f0baf68eac329764a05277377113419`.
-- PointLight and run texture: `0b45c8a9ecbb3f53a025a6e7ca210b8da4040ff4`.
+- Cumulative static geometry atlas: `939c9cb7b29c44e1c4d90be519351410422ff3ca`.
 
 One job uses Firefox `153.5.0esr`; the other uses Waterfox `6.7.6`. Maximum
 parallelism is two. Each pair runs sequentially on one hosted VM and shares one
@@ -36,7 +36,7 @@ disposable hosted VM.
 This common normalization is not a proven cure for the Intel failures, and a
 disabled status does not prove that existing indexing workers are idle. The
 passive CPU records remain necessary context. Both sources receive the same
-normalization; the comparison varies the point/run-record transport, not Spotlight
+normalization; the comparison varies point/run/static-geometry transport, not Spotlight
 configuration. Fixed order and shared caches still limit causal conclusions.
 
 The unchanged candidate gives eligible untextured Lambert materials an exact
@@ -46,8 +46,11 @@ PointLight declaration retains only the original shadow prefix. Unsupported or
 nonfinite inputs select the original full program before compilation. All scene
 lights remain. A second RGBA32F table replaces only the packed run array, with
 fixed static-material rows and a global dynamic row. Run counts, light order,
-room/window geometry and shadow semantics remain unchanged. No Intel improvement
-is established. This is a separate, explicitly triggered contingency experiment.
+room/window geometry and shadow semantics remain unchanged. A third immutable
+single-row RGBA32F atlas stores six packed static geometry arrays, including
+window-room indices; literal offsets replace only their record lookups. Original
+Float32 coordinates and exact signed integer indices are preserved. No Intel
+improvement is established. This is a separate contingency experiment.
 
 The wrapper invokes each source's original `test-native-browser-acceptance.py`
 once, with its standard product, expected-version, installation and output
@@ -94,23 +97,23 @@ estimate.
 
 The wrapper never substitutes a moving ref or an unavailable source. Keep this
 workflow unpushed unless the preceding point-texture comparison fails and its
-evidence has been saved. The run-texture candidate also needs independent and
+evidence has been saved. The static-atlas candidate also needs independent and
 pixel review before launch. A push starts these two jobs; preparing this workflow
 authorizes no local setting change.
 
 Offline contract check, with no browser or network:
 
 ```sh
-python3 scripts/test-intel-cgl-run-texture.py
+python3 scripts/test-intel-cgl-static-atlas.py
 ```
 
 The workflow supplies fixed choices. Its equivalent command on the Intel host
 is:
 
 ```sh
-python3 harness/scripts/run-intel-cgl-run-texture.py \
-  --source-root "$GITHUB_WORKSPACE" --candidate point-run-texture \
+python3 harness/scripts/run-intel-cgl-static-atlas.py \
+  --source-root "$GITHUB_WORKSPACE" --candidate static-atlas \
   --product firefox \
-  --installation "$RUNNER_TEMP/home-studio-intel-cgl-run-texture-browser/install.json" \
-  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-run-texture"
+  --installation "$RUNNER_TEMP/home-studio-intel-cgl-static-atlas-browser/install.json" \
+  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-static-atlas"
 ```
