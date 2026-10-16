@@ -2,6 +2,11 @@
 
 ## [0.6.4] - Development line
 
+- Retry a failed acceptance-artifact upload once with the same completed files.
+  The fallback replaces an ambiguous same-name upload, logs a warning and still
+  fails if transport fails again. Browser cases, outcomes and deadlines do not
+  change; earlier runs with missing artifacts remain unqualified.
+
 - Give the complete Playwright viewer scenario a uniform 180-second aggregate
   budget, including both fresh loads and the three post-restoration modes.
   Keep the 30-second bootstrap, 60-second cold loads, 15-second drags and

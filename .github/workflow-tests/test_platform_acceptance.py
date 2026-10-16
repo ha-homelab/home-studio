@@ -30,6 +30,101 @@ def inventory():
 
 
 class PlatformAcceptanceTests(unittest.TestCase):
+    def upload_action(self):
+        path = ROOT / '.github/actions/upload-acceptance-artifact/action.yml'
+        return yaml.load(path.read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
+
+    def assert_upload_transport(self, action):
+        self.assertEqual(action['runs']['using'], 'composite')
+        self.assertEqual(set(action['inputs']), {'name', 'path', 'if-no-files-found', 'retention-days'})
+        for name in ('name', 'path'):
+            self.assertEqual(action['inputs'][name]['required'], 'true')
+        self.assertEqual(action['inputs']['if-no-files-found']['default'], 'error')
+        self.assertEqual(action['inputs']['retention-days']['default'], '14')
+        steps = action['runs']['steps']
+        self.assertEqual(len(steps), 3)
+        primary, warning, fallback = steps
+        self.assertEqual(primary['id'], 'primary')
+        self.assertEqual(primary['if'], '${{ always() }}')
+        self.assertEqual(primary['continue-on-error'], 'true')
+        self.assertEqual(fallback['id'], 'fallback')
+        guard = "${{ !cancelled() && steps.primary.outcome == 'failure' }}"
+        self.assertEqual(warning['if'], guard)
+        self.assertEqual(fallback['if'], guard)
+        self.assertNotIn('continue-on-error', fallback)
+        self.assertNotIn('continue-on-error', warning)
+        self.assertEqual(warning['shell'], 'bash')
+        self.assertEqual(warning['run'], "echo '::warning::Acceptance artifact upload failed; retrying transport once with the same completed files. No browser or test is rerun. A same-name partial artifact may be replaced.'")
+        settings = {key: '${{ inputs.' + key + ' }}' for key in action['inputs']}
+        for step, overwrite in ((primary, 'false'), (fallback, 'true')):
+            self.assertEqual(step['uses'], 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9')
+            self.assertEqual(step['with'], {**settings, 'overwrite': overwrite})
+            self.assertNotIn('run', step)
+
+    def test_acceptance_upload_retries_only_failed_transport_once(self):
+        self.assert_upload_transport(self.upload_action())
+
+    def test_upload_transport_rejects_changed_inputs_guards_or_error_policy(self):
+        original = self.upload_action()
+        mutations = (
+            (0, 'continue-on-error', 'false'),
+            (0, 'if', '${{ success() }}'),
+            (1, 'if', "${{ steps.primary.conclusion == 'failure' }}"),
+            (1, 'run', 'node scripts/test-browser-stability.cjs'),
+            (2, 'if', '${{ always() }}'),
+            (2, 'if', "${{ steps.primary.outcome == 'success' }}"),
+            (2, 'continue-on-error', 'true'),
+            (2, 'uses', 'actions/upload-artifact@v7'),
+        )
+        for index, key, value in mutations:
+            with self.subTest(index=index, key=key, value=value):
+                action = copy.deepcopy(original)
+                action['runs']['steps'][index][key] = value
+                with self.assertRaises(AssertionError):
+                    self.assert_upload_transport(action)
+        for index, key, value in ((0, 'overwrite', 'true'), (2, 'overwrite', 'false'),
+                                  (2, 'path', 'other-files/'), (2, 'name', 'other-artifact'),
+                                  (2, 'retention-days', '1'), (2, 'if-no-files-found', 'ignore')):
+            with self.subTest(index=index, setting=key):
+                action = copy.deepcopy(original)
+                action['runs']['steps'][index]['with'][key] = value
+                with self.assertRaises(AssertionError):
+                    self.assert_upload_transport(action)
+        action = copy.deepcopy(original)
+        action['runs']['steps'].append(copy.deepcopy(action['runs']['steps'][-1]))
+        with self.assertRaises(AssertionError):
+            self.assert_upload_transport(action)
+
+    def test_upload_call_sites_are_unique_and_keep_original_failure_results(self):
+        jobs = workflow('platform-acceptance.yml')['jobs']
+        expected = {
+            'browser': ('acceptance-${{ matrix.os }}-${{ matrix.id }}', 'acceptance-artifacts/'),
+            'native-browser': ('acceptance-${{ matrix.os }}-${{ matrix.id }}', '${{ env.NATIVE_BROWSER_DIAGNOSTICS_DIR }}'),
+            'safari': ('acceptance-macos-15-safari', 'acceptance-artifacts/safari/'),
+        }
+        for name, job in jobs.items():
+            self.assertNotIn('continue-on-error', job)
+            uploads = [step for step in job['steps'] if step.get('uses') == './.github/actions/upload-acceptance-artifact']
+            self.assertEqual(len(uploads), int(name in expected))
+            self.assertFalse(any('actions/upload-artifact@' in step.get('uses', '') for step in job['steps']))
+            for step in job['steps']:
+                self.assertNotIn('continue-on-error', step)
+            if name in expected:
+                artifact, path = expected[name]
+                self.assertIs(uploads[0], job['steps'][-1])
+                self.assertEqual(uploads[0]['if'], '${{ always() }}')
+                self.assertEqual(uploads[0]['with'], {'name': artifact, 'path': path,
+                                                     'if-no-files-found': 'error', 'retention-days': '14'})
+        rows = inventory()
+        names = [f"acceptance-{row['os']}-{row['id']}" for group in rows.values() for row in group['include']]
+        names.append('acceptance-macos-15-safari')
+        self.assertEqual(len(names), 74)
+        self.assertEqual(len(set(names)), len(names))
+        spec = importlib.util.spec_from_file_location('upload_inventory', ROOT / 'scripts/validate-site.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertIn('.github/actions/upload-acceptance-artifact/action.yml', module.REPO_FILES)
+
     def assert_package_setup_budget(self, package):
         jobs = package['jobs']
         self.assertEqual(set(jobs), {'package', 'platforms'})
@@ -251,7 +346,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
             node_index = next(i for i, value in enumerate(steps) if 'actions/setup-node@' in value.get('uses', ''))
             self.assertLess(python_index, steps.index(step))
             self.assertLess(steps.index(step), node_index)
-            upload = next(value for value in steps if 'actions/upload-artifact@' in value.get('uses', ''))
+            upload = next(value for value in steps if value.get('uses') == './.github/actions/upload-acceptance-artifact')
             self.assertEqual(upload['if'], '${{ always() }}')
             self.assertEqual(upload['with']['if-no-files-found'], 'error')
         browser = {step.get('id'): step for step in jobs['browser']['steps']}
@@ -559,7 +654,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
         jobs = workflow('platform-acceptance.yml')['jobs']
         for name in ('browser', 'native-browser', 'safari'):
             with self.subTest(job=name):
-                upload = next(step for step in jobs[name]['steps'] if step.get('uses', '').startswith('actions/upload-artifact@'))
+                upload = next(step for step in jobs[name]['steps'] if step.get('uses') == './.github/actions/upload-acceptance-artifact')
                 self.assertEqual(upload['if'], '${{ always() }}')
                 self.assertEqual(upload['with']['if-no-files-found'], 'error')
                 self.assertEqual(upload['with']['retention-days'], '14')

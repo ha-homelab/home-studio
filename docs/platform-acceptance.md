@@ -611,6 +611,24 @@ Successful durations use the checked completion timestamp and must be strictly
 less than 60 seconds. These fields describe cold readiness, not gesture latency,
 and do not override the final case status or outer timeout evidence.
 
+The Playwright, native Gecko and Safari jobs preserve their completed evidence
+with a pinned upload action. If that transport attempt fails, one fallback
+uploads the same saved directory, artifact name and settings. A warning retains
+the first failure in the job log. The fallback uses `overwrite: true` because
+the first request may have created an artifact without returning its response.
+Its failure still fails the job; successful transport never changes an earlier
+browser or test failure. No test case, application interaction or browser
+session is retried; their deadlines are unchanged.
+The three package/install jobs currently publish no acceptance artifacts.
+
+Artifact names are unique across the 74 browser jobs. A replacement can change
+the artifact ID and ZIP digest, so collectors must bind the final completed
+job's current API artifact and digest rather than an early provisional upload.
+The upload backend does not preserve a replaced artifact from a historical
+attempt with the same name; independently retained ZIPs remain separate
+evidence. This bounded transport retry gives no retrospective acceptance
+credit to runs whose evidence is missing.
+
 Legacy native Gecko rows on macOS enable `NATIVE_STARTUP_DIAGNOSTICS=1`.
 A separate loopback fixture process saves at most 56 startup checkpoints,
 including the reported renderer, selected rendering profile, first two shader
