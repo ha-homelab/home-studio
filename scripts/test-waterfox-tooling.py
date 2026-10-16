@@ -27,6 +27,7 @@ acceptance = load('test-waterfox-acceptance')
 
 def replacement_stats():
     return {'contexts':2, 'contextLosses':2, 'retiredContextLosses':1,
+            'restoredBuffers':[{'contextId':1, 'lost':False, 'canvas':[0,0], 'drawingBuffer':[1,1]}],
             'gpu':{'version':'WebGL 2.0'}, 'linkedPrograms':4, 'shaderErrors':[], 'errors':[],
             'contextLossRequests':[
                 {'id':1, 'contextId':1, 'attached':True, 'retirement':False, 'matched':True},
@@ -451,6 +452,9 @@ for (const child of [false, true]) {
             acceptance.assert_recovered_graphics(replacement_stats())
         invalid = [
             (['contexts'], 3), (['contextLosses'], 3), (['retiredContextLosses'], 2),
+            (['restoredBuffers'], []), (['restoredBuffers', 0, 'contextId'], 2),
+            (['restoredBuffers', 0, 'lost'], True), (['restoredBuffers', 0, 'canvas'], [800,600]),
+            (['restoredBuffers', 0, 'drawingBuffer'], [800,600]),
             (['contextLossRequests', 1, 'matched'], False),
             (['contextLossRequests', 1, 'retirement'], False),
             (['contextLossRequests', 1, 'contextId'], 2),

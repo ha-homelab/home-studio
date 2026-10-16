@@ -78,7 +78,7 @@ NATIVE_GL_DIAGNOSTICS = r"""
     const stats = window.__plannerStats || window.__browserStability;
     value.application = stats ? {errors:stats.errors, shaderErrors:stats.shaderErrors, contexts:stats.contexts,
       contextLosses:stats.contextLosses, retiredContextLosses:stats.retiredContextLosses,
-      contextLossRequests:stats.contextLossRequests, contextEvents:stats.contextEvents,
+      contextLossRequests:stats.contextLossRequests, contextEvents:stats.contextEvents, restoredBuffers:stats.restoredBuffers,
       contextStates:window.__plannerContextStates?.()} : null;
     if (parent !== window) parent.postMessage({type:'native-gl-teardown', token:window.__nativeGraphicsToken, evidence:value}, '*');
     else sessionStorage.setItem('home-studio.native-gl-teardown', JSON.stringify(value));
@@ -254,6 +254,13 @@ class Marionette:
 def assert_replacement_lifecycle(stats, teardown=False):
     require(stats.get('contexts') == 2, 'Planner recovery must create exactly one replacement context')
     require(stats.get('retiredContextLosses') == 1, 'Planner recovery must retire exactly the original context')
+    restored = stats.get('restoredBuffers')
+    require(isinstance(restored, list) and len(restored) == 1, 'The original context must restore exactly once before retirement')
+    require(restored[0].get('contextId') == 1 and restored[0].get('lost') is False, 'The restored buffer must belong to the original live context')
+    require(restored[0].get('canvas') == [0, 0], 'The retired canvas must release its backing size before restoration')
+    buffer = restored[0].get('drawingBuffer')
+    require(isinstance(buffer, list) and len(buffer) == 2 and all(type(n) is int and 0 <= n <= 1 for n in buffer),
+            'The retired native drawing buffer must be at most one pixel per dimension')
     requests = stats.get('contextLossRequests')
     require(isinstance(requests, list) and len(requests) == (3 if teardown else 2), 'Planner recovery must retain every explicit context loss request')
     for index, request in enumerate(requests):
@@ -492,7 +499,11 @@ def run_case(installation, output, name, headless):
     server = browser = client = watchdog = None
     resources = contextlib.ExitStack()
     started = time.monotonic()
+    startup_file = output / 'startup.jsonl'
     try:
+        startup = os.environ.get('NATIVE_STARTUP_DIAGNOSTICS', '0')
+        require(startup in ('0', '1'), 'NATIVE_STARTUP_DIAGNOSTICS must be 0 or 1')
+        record['startupDiagnostics'] = startup == '1'
         directory = resources.enter_context(tempfile.TemporaryDirectory(prefix='home-studio-native-browser-'))
         browser_log = resources.enter_context((output / 'browser.log').open('w', encoding='utf-8'))
         fixture_log = resources.enter_context((output / 'fixture.log').open('w', encoding='utf-8'))
@@ -500,6 +511,10 @@ def run_case(installation, output, name, headless):
         profile = scratch / 'profile'
         profile.mkdir()
         env = {**os.environ, 'HOME_STUDIO_FIXTURE_ONLY': '1', 'PYTHON': sys.executable, 'PYTHONUTF8': '1', 'MOZ_CRASHREPORTER_DISABLE': '1', 'TMPDIR': str(scratch), 'TEMP': str(scratch), 'TMP': str(scratch)}
+        env.pop('HOME_STUDIO_STARTUP_DIAGNOSTICS_FILE', None)
+        if startup == '1':
+            startup_file.write_text('', encoding='utf-8')
+            env['HOME_STUDIO_STARTUP_DIAGNOSTICS_FILE'] = str(startup_file.resolve())
         script = 'test-planner-stability.cjs' if name == 'planner-256' else 'test-browser-stability.cjs'
         if name.startswith('viewer-'):
             env['BROWSER_STABILITY_ROOMS'] = name.split('-')[1]
@@ -601,6 +616,12 @@ def run_case(installation, output, name, headless):
         if record.get('deadlineExceeded'):
             record['status'] = 'failed'
             record.setdefault('error', 'The 180-second browser deadline expired')
+        if record.get('startupDiagnostics') and startup_file.exists():
+            try:
+                record['startupCheckpoints'] = [json.loads(line) for line in startup_file.read_text(encoding='utf-8').splitlines()]
+            except (OSError, ValueError) as error:
+                record['startupDiagnosticsError'] = str(error)
+                record['status'] = 'failed'
         record['durationMs'] = round((time.monotonic() - started) * 1000)
         save()
 

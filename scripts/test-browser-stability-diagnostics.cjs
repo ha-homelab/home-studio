@@ -330,6 +330,7 @@ test('the planner fixture serves the implicit favicon but still rejects missing 
   const end = source.indexOf('\nasync function run(', start);
   assert(start >= 0 && end > start, 'Exercise the actual planner fixture request handler');
   const handle = vm.runInNewContext(source.slice(start, end) + '\nserver', {
+    startup: require('./browser-startup-diagnostics.cjs').createStartupDiagnostics(), sourceHash: null,
     http: {createServer: callback => callback}, URL, fs, path, root: path.join(__dirname, '..'), editor: '',
   });
   for (const [url, expected] of [['/favicon.ico', 204], ['/planner/nonexistent.js', 404], ['/unserved.js', 404]]) {
@@ -834,6 +835,7 @@ test('planner operation tracing is opt-in and primary acceptance makes no layout
     const traceRecovery=vm.runInNewContext(settings+'\ntraceRecovery',{assert,process:{env}});
     assert.equal(traceRecovery,value==='1');
     const handle=vm.runInNewContext(source.slice(start,end)+'\nserver',{
+      startup:require('./browser-startup-diagnostics.cjs').createStartupDiagnostics(),sourceHash:null,
       http:{createServer:callback=>callback},URL,path,root:'/fixture',fixtureOnly:false,traceRecovery,
       fs:{existsSync:()=>true,statSync:()=>({isFile:()=>true})},
       editor:'function initPreview(){renderer={ready:true};return 42;}',

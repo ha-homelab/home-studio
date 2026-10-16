@@ -15,9 +15,11 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver} = require('./browser-stability-diagnostics.cjs');
+const {createStartupDiagnostics} = require('./browser-startup-diagnostics.cjs');
 
 const root = path.resolve(process.env.HOME_STUDIO_SOURCE_ROOT || path.join(__dirname, '..'));
 const fixtureOnly = process.env.HOME_STUDIO_FIXTURE_ONLY === '1';
+const startup = createStartupDiagnostics(fixtureOnly && process.env.HOME_STUDIO_STARTUP_DIAGNOSTICS_FILE);
 const diagnostics = fixtureOnly ? null : createDiagnostics('viewer', 'BROWSER_STABILITY', root);
 let temporary;
 const reportOnly = process.env.BROWSER_STABILITY_REPORT_ONLY === '1';
@@ -303,15 +305,22 @@ async function run(browserName, origin, project, sourceHash) {
   assert.equal(built.status,0,built.stderr || built.stdout || `Python builder exited with signal ${built.signal}`);
   let html = fs.readFileSync(path.join(output,'main/index.html'),'utf8');
   html = html.replace('<head>',`<head><script>window.__HOME_FLOORPLAN_EMBED__=true;(${instrumentation.toString()})();</script>`);
+  html = startup.checkpointSource(html, 'renderProfile=selectRenderProfile(renderer.getContext());', 'renderProfile');
   html = html.replace('</script></body>', `if(renderer){const captureRender=renderer.render.bind(renderer);renderer.render=(scene,camera)=>{const result=captureRender(scene,camera);window.__browserCamera={projection:camera.projectionMatrix.toArray(),world:camera.matrixWorld.toArray()};return result;};}window.__browserScene=()=>({camera:window.__browserCamera,drawingBuffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),programs:renderer.info.programs.length,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,triangles:renderer.info.render.triangles,drawCalls:renderer.info.render.calls,shadowMaps:(()=>{const sizes=[];scene.traverse(o=>{if(o.castShadow&&o.shadow)sizes.push([o.type,o.shadow.mapSize.x,o.shadow.mapSize.y])});return sizes})(),pointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible)n++});return n})(),activePointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible&&o.intensity>0)n++});return n})()});\n</script></body>`);
-  const sourceHash = crypto.createHash('sha256').update(html).digest('hex');
+  let sourceHash = crypto.createHash('sha256').update(html).digest('hex');
   const server = http.createServer((request,response) => {
+    if(startup.handle(request,response,sourceHash))return;
     if(request.url==='/fixture.json'){response.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify(project));return;}
     response.writeHead(200,{'Content-Type':'text/html','Cache-Control':'no-store'});
     response.end(request.url==='/viewer'?html:'<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fictional dashboard fixture</title><body style="margin:0"><p>Isolated dashboard fixture</p></body></html>');
   });
   try {
     await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const startupScript = startup.scriptFor(origin);
+    if(startupScript) html = html.replace('<head>',`<head><script>${startupScript}</script>`);
+    html = startup.allowLoopback(html, origin);
+    sourceHash = crypto.createHash('sha256').update(html).digest('hex');
     if(fixtureOnly) {
       console.log(JSON.stringify({fixtureServer:true,origin:`http://127.0.0.1:${server.address().port}`,sourceHash}));
       await new Promise(resolve=>{process.once('SIGTERM',resolve);process.once('SIGINT',resolve);});

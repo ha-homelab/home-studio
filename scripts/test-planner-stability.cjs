@@ -10,10 +10,12 @@ const http = require('node:http');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver} = require('./browser-stability-diagnostics.cjs');
+const {createStartupDiagnostics} = require('./browser-startup-diagnostics.cjs');
 
 const root = path.resolve(process.env.PLANNER_STABILITY_SOURCE_ROOT || path.join(__dirname, '..'));
 const reportOnly = process.env.PLANNER_STABILITY_REPORT_ONLY === '1';
 const fixtureOnly = process.env.HOME_STUDIO_FIXTURE_ONLY === '1';
+const startup = createStartupDiagnostics(fixtureOnly && process.env.HOME_STUDIO_STARTUP_DIAGNOSTICS_FILE);
 const restoreLayout = process.env.PLANNER_STABILITY_RESTORE_LAYOUT || 'immediate';
 assert(['immediate','settled'].includes(restoreLayout), 'PLANNER_STABILITY_RESTORE_LAYOUT must be immediate or settled');
 const recoveryActions = process.env.PLANNER_STABILITY_RECOVERY_ACTIONS ?? 'all';
@@ -144,6 +146,7 @@ function instrument() {
 }
 
 const server=http.createServer((request,response)=>{
+  if(startup.handle(request,response,sourceHash))return;
   let route=new URL(request.url,'http://localhost').pathname;
   // Headed Chromium requests this implicitly even without an icon link.
   if(route==='/favicon.ico'){response.writeHead(204,{'Cache-Control':'no-store'}).end();return;}
@@ -153,7 +156,10 @@ const server=http.createServer((request,response)=>{
   const file=path.join(root,route),extension=path.extname(file);
   if(!fs.existsSync(file) || !fs.statSync(file).isFile()){response.writeHead(404).end();return;}
   let content=route==='/planner/editor.js'?editor:fs.readFileSync(file);
-  if(fixtureOnly && route==='/planner/index.html')content=content.toString().replace('<head>',`<head><script>(${instrument.toString()})();</script>`);
+  if(fixtureOnly && route==='/planner/index.html') {
+    const origin=`http://127.0.0.1:${server.address().port}`;
+    content=startup.allowLoopback(content.toString(),origin).replace('<head>',`<head><script>${startup.scriptFor(origin)}(${instrument.toString()})();</script>`);
+  }
   if(route==='/planner/editor.js')content+=`
 window.__plannerScene=()=>renderer?({layout:{...size},viewport:[innerWidth,innerHeight],memory:{...renderer.info.memory},programs:renderer.info.programs.length,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,buffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),shadowMap:[previewSun.shadow.mapSize.x,previewSun.shadow.mapSize.y],orbit:[orbit.yaw,orbit.pitch,orbit.radius]}):null;`;
   // Layout probes can settle the race under investigation. Never install them in primary acceptance.
@@ -397,6 +403,7 @@ async function run(engine,origin) {
   cycles=positiveInteger('PLANNER_STABILITY_CYCLES',3,10);
   catalog=JSON.parse(fs.readFileSync(path.join(root,'planner/catalog.json')));
   editor=fs.readFileSync(path.join(root,'planner/editor.js'),'utf8');
+  editor=startup.checkpointSource(editor,'const profile = previewRenderProfile(renderer.getContext());','profile');
   sourceHash=crypto.createHash('sha256').update(editor).digest('hex');
   project=fixture();
   try {
