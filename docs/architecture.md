@@ -538,3 +538,15 @@ indicator. Switch-only lamps without brightness retain full on/off behavior.
 This is a UI intensity cue, not a claim about measured illuminance. It adds no
 polling, render loop or GPU effect. Run `node --test scripts/test-light-state.cjs`
 for brightness, color, missing-state and icon-contrast regressions.
+
+### Embedded first state (prepared experiment)
+
+An embedded viewer gives its host up to 100 ms to send the first valid state
+snapshot before the first complete frame. Inventory and view preferences are
+applied first; state messages are coalesced until that frame. A valid disconnected
+snapshot also releases the gate. An absent or unresponsive host still receives
+the complete offline preview, and standalone startup is unchanged. The gate
+cancels pending work while hidden or context-lost, resumes after restoration,
+and retires on permanent page removal. It adds no placeholder frame or reduced
+rendering quality. This is a current-source port of an earlier measured scheduling
+experiment; CPU tests do not establish current native startup performance.

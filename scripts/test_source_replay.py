@@ -26,7 +26,7 @@ class SourceReplayTests(unittest.TestCase):
             replay = sorted(path.relative_to(source).as_posix()
                             for path in (source / 'fuzz').glob('*.test.mjs'))
             self.assertEqual(replay, ['fuzz/project-validation.test.mjs', 'fuzz/wall-geometry.test.mjs'])
-            commands = [replay, ['scripts/test-light-state.cjs'],
+            commands = [replay, ['scripts/test-viewer-startup.cjs'], ['scripts/test-light-state.cjs'],
                         ['scripts/test-tv-screen.cjs'], ['scripts/test-media-preview.cjs'],
                         ['scripts/test-native-draw-diagnostic.cjs'], ['scripts/test-glass-wall-program.cjs'],
                         ['scripts/test-zero-point-block.cjs'], ['scripts/test-point-decay-two.cjs'], ['scripts/test-cached-shadow-transmission.cjs'], ['scripts/test-fallback-shared-program.cjs'],

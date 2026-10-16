@@ -4,17 +4,20 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const lines = fs.readFileSync(path.join(__dirname, '../viewer.js'), 'utf8').split('\n');
-const frames = new Map(), listeners = {}, events = {};
+const frames = new Map(), startupTimers = new Map(), listeners = {}, events = {};
 let serial = 0, draws = 0, invalidations = 0, disposals = 0, losses = 0, disconnects = 0;
 let box = {width:3840, height:2160};
 const buffers = [];
 const context = vm.createContext({
+  initialViewPending:false, initialViewTimer:0, initialViewFrame:0, initialViewRetired:false,
   initialViewReady: true, homeView: null, renderCount: 0, camera: {updateProjectionMatrix() {}}, scene: {},
   $() {return {getBoundingClientRect: () => box};},
   document: {hidden: false, addEventListener(type, fn) { events[type] = fn; }},
   window: {addEventListener(type, fn) { events[type] = fn; }},
   requestAnimationFrame(fn) { frames.set(++serial, fn); return serial; },
   cancelAnimationFrame(id) { frames.delete(id); },
+  setTimeout(fn) {startupTimers.set(++serial,fn);return serial;},
+  clearTimeout(id) {startupTimers.delete(id);},
   devicePixelRatio: 3,
   renderProfile: {pixels: 2000000},
   wallSheenMotion: {beforeRender() {}, afterRender() {}},
@@ -30,7 +33,7 @@ const context = vm.createContext({
   },
 });
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../planner/render-capacity.js'), 'utf8').replace('export function ', 'function '), context);
-const prefixes = ['let renderRequest=', 'let interactionRenderer=', 'function cancelRender(', 'function requestRender(',
+const prefixes = ['function finishInitialView(', 'function startInitialView(', 'function cancelInitialView(', 'let renderRequest=', 'let interactionRenderer=', 'function cancelRender(', 'function requestRender(',
   'function selectRenderProfile(', 'function renderPixelRatio(', 'function drawScene(', 'function render(){',
   "renderer.domElement.addEventListener('webglcontextlost'", "renderer.domElement.addEventListener('webglcontextrestored'",
   "document.addEventListener('visibilitychange'", "window.addEventListener('pagehide'", "window.addEventListener('pageshow'"];
@@ -180,7 +183,7 @@ box={width:480,height:320};context.window.resizeModel();assert.equal(draws,befor
 // paint a visible offline page. Neither order may lose the initial frame.
 context.renderCount=0;context.initialViewReady=false;vm.runInContext("viewSize=''",context);
 before=draws;events.pageshow({persisted:false});flush();assert.equal(draws,before);
-context.initialViewReady=true;context.window.resizeModel();assert.equal(draws,before+1);
+context.finishInitialView();flush();assert.equal(draws,before+1);
 events.pageshow({persisted:false});assert.equal(frames.size,0);
 context.renderCount=0;vm.runInContext("viewSize=''",context);
 before=draws;events.pageshow({persisted:false});assert.equal(draws,before+1);assert.equal(frames.size,0);
