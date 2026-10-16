@@ -234,7 +234,7 @@ homeView = (() => {
     }
     const lights=points.filter(point=>point.light).map(point=>point.light),lightCount=lights.length;
     configurePointShadows(lights, renderer?.capabilities, renderProfile);
-    if(!roomLighting || roomLighting.capacity<lightCount)roomLighting=createRoomLighting(THREE,model.rooms.map(room=>({...room,exterior:(model.exterior_rooms||[]).includes(room.id),polygon:room.polygon.map(([x,z])=>[xm(x),zm(z)])})),lightCount,daylightWindows,{packed:renderProfile.diffuseLighting===true,maxFragmentUniforms:renderer.capabilities.maxFragmentUniforms});
+    if(!roomLighting || roomLighting.capacity<lightCount){roomLighting?.dispose();roomLighting=createRoomLighting(THREE,model.rooms.map(room=>({...room,exterior:(model.exterior_rooms||[]).includes(room.id),polygon:room.polygon.map(([x,z])=>[xm(x),zm(z)])})),lightCount,daylightWindows,{packed:renderProfile.diffuseLighting===true,maxFragmentUniforms:renderer.capabilities.maxFragmentUniforms,pointDecayTwo:true,pointTexture:true,runTexture:true,geometryTexture:true,signalTexture:true,maxTextureSize:renderer.capabilities.maxTextureSize,maxTextures:renderer.capabilities.maxTextures});}
     roomLighting.attach(root,active,{staticGeometry:true});roomLighting.attach(objectGroup,active);
     updateFixtureShadows();
   }
@@ -491,7 +491,7 @@ homeView = (() => {
     refreshSignalStatus();
     if(redraw){
       // A state update can change lights before its scheduled full frame.
-      if(roomLighting?.geometryMode==='packed')roomLighting.update(points);
+      if(roomLighting?.geometryMode==='packed')roomLighting.update(points,camera);
       drawScene(camera);renderCount++;
     }
   }
@@ -521,7 +521,7 @@ homeView = (() => {
     if(lowerFloorContext)lowerFloorContext.visible=showLowerFloor&&!selected;
     $('homeFloorContext').disabled=!!selected;
     assumedZones?.render(selected,signalZone);refreshSignalStatus();
-    roomLighting?.update(points);
+    roomLighting?.update(points,camera);
     drawScene(camera);renderCount++;
     for(const label of labels) label.el.textContent=(rect.width<600 ? roomCode(label.room) : roomName(label.room))+(label.power?' · '+label.power:'');
     for(const point of [...labels,...points.map(p=>({el:p.marker,position:p.anchor||(!isCover(p.item)&&model.control_groups?.[p.item.id]?p.position.clone().setY(p.item.position_m.y+p.item.dimensions_m.height):p.position)}))]) {
@@ -670,6 +670,6 @@ homeView = (() => {
     $('homeToggleControls').textContent=vt(controlsCollapsed?'Show controls':'Hide controls');
     for(const label of labels)label.el.setAttribute('aria-label',vt('Focus room')+': '+roomName(label.room));
   }
-  return {get active(){return active},refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
+  return {get active(){return active},releaseGPU(){roomLighting?.releaseGPU();},dispose(){roomLighting?.dispose();},refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
     get illuminated(){return points.filter(p=>p.overlay?.visible && active).map(p=>p.item.id)}};
 })();

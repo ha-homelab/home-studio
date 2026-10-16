@@ -323,6 +323,40 @@ eight lighting/editor views. The 24-room connected loads changed from
 same-host measurements share OS/compiler caches and do not establish a general
 speedup or replace the required hosted Intel/browser matrix.
 
+The prepared software-renderer candidate uses three optional Float32 RGBA
+textures for point records, ordered run records and immutable room geometry.
+Integer texel fetches retain the original arithmetic and literal shadow prefix,
+with high precision, nearest filtering, no mipmaps and no color conversion.
+The active texture program declares only the shadow prefix of the stock
+PointLight array; unsupported inputs keep the full uniform program. Actual
+Three view-space point records populate the texture during uniform upload,
+including first render and signal-only redraws.
+
+Selection occurs before compiling a material. Only eligible Lambert materials
+with owned or ordinary callbacks and finite, known-room point lights on the
+current camera layers use this path. Capacity, dimensions, sampler and uniform
+limits, exact integer conversion and conservative Float32 overflow checks
+retain the original program when unsupported. The packed eligibility and
+existing quality budgets are not reduced. Context loss retains CPU data for
+reupload; teardown and controller replacement release all three textures.
+
+Each static material keeps a fixed run-table row; dynamic materials use the
+original global row. The scalar run count and ordered loop are unchanged.
+Runs are staged after static filtering, within a 16 MiB allocation ceiling.
+The immutable geometry atlas retains signed rectangle sentinels and window
+indices with fixed offsets. Lit-room flags and window transmission values
+append to the point texture, adding no fourth sampler or per-frame texture
+allocation. Nonfinite transmission deactivates texture selection immediately,
+including environment-only changes.
+
+The independent [decay-two specialization](point-decay-two.md) remains eligible
+only when every visible point has the exact validated decay value. Texture and
+decay selection form four separately keyed states, so losing either proof
+retains the other when valid. CPU tests cover exact records, original shader
+inverses, cached variants, update order, fallback transitions and disposal.
+Local image comparisons do not establish hosted Intel timing or qualify this
+prepared composition for release; all required browser checks still apply.
+
 Phone and tablet profiles use **390 × 844** and **820 × 1180** CSS pixels,
 respectively, at device scale factor 2, with touch enabled. They retain the
 actual desktop operating-system identity. Chromium exercises native touch
@@ -633,3 +667,13 @@ retained identical RGBA pixels across eight Home/editor views, and the original
 six-room and 24-room suites passed. A driver may already eliminate the duplicate
 computation, so this does not establish a speedup on other hosts. The complete
 required browser matrix remains the release gate.
+
+The prepared composition retains the existing point, run, geometry and signal
+texture transport and the independently selected decay-two helper. Caching
+changes only the packed shadow prefix: its transmission helper reads the same
+immutable per-draw uniforms or texels before and after point attenuation. It
+adds no texture, upload, cache-selection rule or resource lifecycle. The prior
+four-state texture/decay proof is unchanged; an additional whole-fragment
+inverse checks ready, unproved, invalid, restored, editor and independent
+fallback states. Neither standalone measurements nor a source expansion proves
+that this combination improves hosted Intel timing or compiles on every driver.
