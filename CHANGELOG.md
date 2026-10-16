@@ -2,6 +2,10 @@
 
 ## [0.6.4] - Development line
 
+- Prototype an opt-in scalar directional Lambert body for the packed Home
+  renderer. Retain the original lighting and shadow operations; performance
+  and real-GPU pixel equivalence remain unverified on this experimental branch.
+
 - Require native Linux, Windows and macOS package/install acceptance and an
   expanded browser matrix for pull requests and releases. Keep browser families,
   pinned historical builds, release channels and emulated touch profiles
