@@ -178,6 +178,8 @@ function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {
         all(lessThanEqual(p, ${glslVector([Math.max(...xs), Math.max(...zs)])} + vec2(0.56)));
     }`;
   }).join('\n');
+  // The shared 0.56 m bound also contains daylight's 0.015 m and exterior's
+  // 0.04 m reach. Absent static topologies need no packed room loop at all.
   const fragment = `
     varying vec3 homeWorldPosition;
     uniform int homePointRooms[${capacity}];
@@ -208,20 +210,20 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
     }
     vec3 homeDaylightIrradiance() {
       float exterior = homeExteriorSurface;
-      ${packed ? `for (int room = 0; room < ${rooms.length}; room++) {
-        if (homeRoomExterior[room] != 0) exterior = max(exterior, 1.0-smoothstep(0.0,0.04,homeRoomDistance(room)));
-      }` : rooms.filter(room=>room.exterior===true).map(room=>`exterior = max(exterior, 1.0-smoothstep(0.0,0.04,homeRoomDistance${roomIds.get(room.id)}()));`).join('\n')}
+      ${packed ? (rooms.some(room=>room.exterior===true) ? `for (int room = 0; room < ${rooms.length}; room++) {
+        if (homeRoomExterior[room] != 0 && homeRoomNearby(room)) exterior = max(exterior, 1.0-smoothstep(0.0,0.04,homeRoomDistance(room)));
+      }` : '') : rooms.filter(room=>room.exterior===true).map(room=>`exterior = max(exterior, 1.0-smoothstep(0.0,0.04,homeRoomDistance${roomIds.get(room.id)}()));`).join('\n')}
       float incoming = 0.0;
       if (homeDaylight > 0.0) {
-        ${packed ? `for (int room = 0; room < ${rooms.length}; room++) {
+        ${packed ? (packed.windowIndices.length ? `for (int room = 0; room < ${rooms.length}; room++) {
           ivec4 range = homeRoomRanges[room];
-          if (range.z < range.w && homeRoomDistance(room) <= 0.015) {
+          if (range.z < range.w && homeRoomNearby(room) && homeRoomDistance(room) <= 0.015) {
             for (int window = range.z; window < range.w; window++) {
               vec4 segment = homeWindowSegments[window];
               incoming += homeWindowTransmission[window] * homeWindowGlow(segment.xy, segment.zw);
             }
           }
-        }` : rooms.map(room=>{
+        }` : '') : rooms.map(room=>{
           const openings=windows.flatMap((window,i)=>window.room===room.id?[{...window,index:i}]:[]);
           return openings.length?`if (homeRoomDistance${roomIds.get(room.id)}() <= 0.015) {\n${openings.map(window=>`incoming += homeWindowTransmission[${window.index}] * homeWindowGlow(${glslVector(window.a)}, ${glslVector(window.b)});`).join('\n')}\n}`:'';
         }).join('\n')}

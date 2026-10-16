@@ -168,6 +168,75 @@ for(const p of positions) {
   assert.equal(evaluate(0,new Proxy([],{get:()=>{throw Error('Unexpected room read');}}),
     ()=>{throw Error('Unexpected bounds read');},()=>{throw Error('Unexpected geometry read');},transmission),1);
   console.log(JSON.stringify({checkedDirect,checkedRuns}));
+
+  // Execute the actual generated daylight control flow. The independent oracle
+  // visits original rooms/windows without the new bounds or topology shortcuts.
+  function daylightBody(fragment) {
+    const marker='vec3 homeDaylightIrradiance() {';
+    const begin=fragment.indexOf(marker)+marker.length;
+    assert(begin>=marker.length);
+    let depth=1,end=begin;
+    while(depth&&end<fragment.length) {if(fragment[end]==='{')depth++;if(fragment[end]==='}')depth--;end++;}
+    assert.equal(depth,0);return fragment.slice(begin,end-1);
+  }
+  function daylightEvaluator(body) {
+    const result=body.replace(/return 3\.14159265 \* vec3\(([^)]+)\) \*\s*([^;]+);/,
+      'return [$1].map(channel=>3.14159265*channel*($2));');
+    assert.notEqual(result,body,'Translate the unchanged vec3 irradiance expression');
+    return new Function('homeExteriorSurface','homeDaylight','homeRoomExterior','homeRoomRanges',
+      'homeWindowSegments','homeWindowTransmission','homeRoomNearby','homeRoomDistance','homeWindowGlow',
+      'max','min','smoothstep',result.replace(/\b(?:float|int|ivec4|vec4)\s+(\w+)/g,'let $1'));
+  }
+  const daylightPositions=[...positions];
+  for(const room of rooms)for(const vertex of room.polygon)
+    for(const edge of [.015,.04,.55,.56])for(const delta of [-1e-7,0,1e-7])
+      for(const axis of [0,1])for(const sign of [-1,1]) {
+        const point=[...vertex];point[axis]+=sign*(edge+delta);daylightPositions.push(point);
+      }
+  let checkedDaylight=0;
+  for(const [inputRooms,inputWindows] of [
+    [rooms,windows], [rooms.map(room=>({...room,exterior:false})),windows],
+    [rooms,[]], [rooms,[windows[2]]], [[],windows], [[],[]],
+  ]) {
+    const packedGeometry=context.packRoomLightingGeometry(inputRooms,inputWindows,9,1024);
+    const compiled=shaderFor(inputRooms,inputWindows,9,{packed:true,maxFragmentUniforms:1024});
+    const body=daylightBody(compiled.shader.fragmentShader),evaluateDaylight=daylightEvaluator(body);
+    const hasExterior=inputRooms.some(room=>room.exterior===true);
+    if(hasExterior)assert.match(body,/homeRoomExterior\[room\] != 0 && homeRoomNearby\(room\)/);
+    else assert.doesNotMatch(body,/homeRoomExterior\[/,'No exterior topology emits no exterior loop');
+    if(packedGeometry.windowIndices.length)assert.match(body,/range\.z < range\.w && homeRoomNearby\(room\) && homeRoomDistance\(room\) <= 0\.015/);
+    else assert.doesNotMatch(body,/homeRoomRanges\[/,'No mapped windows emit no window-room loop');
+    if(!hasExterior&&!packedGeometry.windowIndices.length)assert.doesNotMatch(body,/for \(/);
+    const bounds=packedGeometry.uniforms.homeRoomBounds.value;
+    const ranges=Array.from({length:inputRooms.length},(_,i)=>({
+      z:packedGeometry.uniforms.homeRoomRanges.value[i*4+2],w:packedGeometry.uniforms.homeRoomRanges.value[i*4+3]}));
+    const segments=packedGeometry.windowIndices.map((source,i)=>({source,
+      xy:Array.from(packedGeometry.uniforms.homeWindowSegments.value.slice(i*4,i*4+2)),
+      zw:Array.from(packedGeometry.uniforms.homeWindowSegments.value.slice(i*4+2,i*4+4))}));
+    const sourceForSegment=new Map(segments.map(segment=>[segment.xy,segment.source]));
+    for(const point of daylightPositions)for(const day of [0,.2,1])for(const materialExterior of [0,1]) {
+      const incomingByWindow=inputWindows.map((_,i)=>Math.fround([.08,.55,1,0][i%4]));
+      let incoming=0,exterior=materialExterior;const expectedOrder=[],actualOrder=[];
+      inputRooms.forEach(room=>{
+        const d=distance(point,edgesOf(room));
+        if(room.exterior===true)exterior=Math.max(exterior,1-smooth(0,.04,d));
+        if(day>0&&d<=.015)inputWindows.forEach((window,index)=>{
+          if(window.room!==room.id)return;
+          incoming+=incomingByWindow[index]*glow(point,[...window.a,...window.b].map(rounded));expectedOrder.push(index);
+        });
+      });
+      const expected=[.93,.97,1].map(channel=>3.14159265*channel*(day*Math.min(incoming,1.05)+exterior*(.16+1.1*day)));
+      const nearby=index=>point[0]>=bounds[index*4]-.56&&point[1]>=bounds[index*4+1]-.56&&
+        point[0]<=bounds[index*4+2]+.56&&point[1]<=bounds[index*4+3]+.56;
+      const actual=evaluateDaylight(materialExterior,day,packedGeometry.uniforms.homeRoomExterior.value,ranges,segments,
+        packedGeometry.windowIndices.map(index=>incomingByWindow[index]),nearby,
+        index=>{assert(nearby(index),'Distance is evaluated only after the conservative bounds guard');return distance(point,edgesOf(inputRooms[index]));},
+        (a,b)=>{actualOrder.push(sourceForSegment.get(a));return glow(point,[...a,...b]);},Math.max,Math.min,smooth);
+      assert.deepEqual(actual,expected,'Actual packed daylight equals original unguarded polygon/window accumulation');
+      assert.deepEqual(actualOrder,expectedOrder,'Mapped window contribution order is unchanged');checkedDaylight++;
+    }
+  }
+  console.log(JSON.stringify({checkedDaylight}));
   const full=Array.from({length:24},(_,i)=>{const x=i%6*4,z=Math.floor(i/6)*4;return{id:`room${i}`,polygon:[[x,z],[x+4,z],[x+4,z+4],[x,z+4]]};});
   const fullWindows=full.slice(0,6).map((r,i)=>({room:r.id,a:[i*4+1,0],b:[i*4+2.6,0]}));
   const literal=shaderFor(full,fullWindows,72),packed=shaderFor(full,fullWindows,72,{packed:true,maxFragmentUniforms:1024});
