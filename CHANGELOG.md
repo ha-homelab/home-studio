@@ -391,3 +391,7 @@ Offline RC fuzzing validates synthetic project inputs and geometry, with
 network isolation and bounded resource use. The source archive is built only
 from the reviewed public allowlist. Real household plans, private device
 bindings and credentials must stay outside the repository and public corpus.
+
+### Strict download transport
+
+- Add an opt-in verified TLS profile for owned browser downloads, including HTTPS-only redirects, synthetic chain regressions and documented vendor endpoint compatibility.

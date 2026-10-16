@@ -40,3 +40,5 @@ source only. Third-party JavaScript retains its bundled license.
 
 See [architecture](docs/architecture.md), [RC fuzzing](docs/fuzzing.md) and
 [release acceptance](RELEASING.md) for software-test and deployment boundaries.
+
+See [transport profiles](docs/transport-security.md) for the optional strict download policy, release-client qualification and current endpoint compatibility limits.

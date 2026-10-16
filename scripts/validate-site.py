@@ -52,7 +52,7 @@ SITE_FILES = (
     'planner/guide-assets/pattern-studio.json', 'planner/guide-assets/11-pattern-studio.jpg',
     'vendor/three.module.min.js', 'vendor/THREE-LICENSE.txt',
 )
-REPO_FILES = ('docs/i18n.md', 'docs/translations/README.md',
+REPO_FILES = ('scripts/download_tls.py', 'scripts/test-download-tls.py', 'requirements-tls-test.txt', 'docs/transport-security.md', 'docs/i18n.md', 'docs/translations/README.md',
               *(f'docs/translations/README.{code}.md' for code in LOCALE_CODES if code != 'en'),
               'scripts/test-i18n.mjs', 'scripts/test-i18n-browser.cjs', 'scripts/test-validation-i18n.mjs',
               'scripts/test-help-i18n.cjs', 'scripts/test-panel-language.cjs', 'scripts/test-viewer-i18n.cjs', 'scripts/test-lock-control.cjs',

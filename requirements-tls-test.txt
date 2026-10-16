@@ -1,0 +1,2 @@
+# Synthetic TLS certificate fixtures only; not an application dependency.
+cryptography==50.0.1

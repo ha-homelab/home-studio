@@ -39,3 +39,5 @@ review and release acceptance; automation is supporting evidence.
 [RELEASING.md](RELEASING.md) defines exact-candidate acceptance and promotion.
 A merge or successful software test does not authorize deployment, provide
 physical-device acceptance or demonstrate household safety.
+
+For transport changes, install `requirements-tls-test.txt` in an isolated development environment and run `python3 scripts/test-download-tls.py`. These tests use generated certificate chains without external network calls.
