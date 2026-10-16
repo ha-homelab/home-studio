@@ -746,3 +746,22 @@ PBR, editor, inactive transport and custom callbacks also retain their original
 paths. No resources, uniforms, budgets or browser requirements change. A
 compiler may already flatten these aggregates, so the CPU source and binary32
 proofs establish no GPU equivalence or performance gain.
+
+
+### Experimental initial scissor submission
+
+This isolated candidate tries one partial initialization draw only on the
+existing positively selected Apple diffuse path. The first initialized Home
+scene keeps its full viewport, camera, geometry, lights, shaders and default
+framebuffer, with a 2×2 physical-pixel center scissor. The canvas is concealed
+while a single 2,500 ms timer yields; only the subsequent ordinary full draw
+increments readiness. That draw uses current state, including intervening HA
+updates. Unsupported state or custom draw callbacks retain synchronous drawing.
+
+Hidden pages, context loss, pagehide and an editor switch cancel the pending
+wait. Owned visibility is restored without overwriting external style changes.
+Logical and physical scissor/viewport state is restored after the partial draw,
+including the pinned renderer's different round/floor paths. No shader, quality,
+case limit or acceptance assertion changes. The focused CPU proof checks these
+control and restoration contracts; it does not prove GPU equivalence or speed.
+This experiment has no performance or release-acceptance claim.

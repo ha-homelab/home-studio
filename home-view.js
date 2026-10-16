@@ -492,7 +492,7 @@ homeView = (() => {
     if(redraw){
       // A state update can change lights before its scheduled full frame.
       if(roomLighting?.geometryMode==='packed')roomLighting.update(points,camera);
-      drawScene(camera);renderCount++;
+      if(drawScene(camera)!==false)renderCount++;
     }
   }
   function render() {
@@ -522,7 +522,7 @@ homeView = (() => {
     $('homeFloorContext').disabled=!!selected;
     assumedZones?.render(selected,signalZone);refreshSignalStatus();
     roomLighting?.update(points,camera);
-    drawScene(camera);renderCount++;
+    if(drawScene(camera)!==false)renderCount++;
     for(const label of labels) label.el.textContent=(rect.width<600 ? roomCode(label.room) : roomName(label.room))+(label.power?' · '+label.power:'');
     for(const point of [...labels,...points.map(p=>({el:p.marker,position:p.anchor||(!isCover(p.item)&&model.control_groups?.[p.item.id]?p.position.clone().setY(p.item.position_m.y+p.item.dimensions_m.height):p.position)}))]) {
       const p=projectedPosition.copy(point.position).project(camera);

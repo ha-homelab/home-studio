@@ -104,14 +104,19 @@ const viewer = fs.readFileSync(path.join(root, 'viewer.js'), 'utf8');
 const home = fs.readFileSync(path.join(root, 'home-view.js'), 'utf8');
 const draw = viewer.split('\n').find(line => line.startsWith('function drawScene('));
 assert.ok(draw, 'The viewer defines one shared draw helper');
-assert.equal((viewer.match(/renderer\.render\(scene,camera\)/g) || []).length, 1);
+const primerStart=viewer.indexOf('function createInitialHomePrimer('),primerEnd=viewer.indexOf('\nconst wallSheenMotion=',primerStart);
+assert(primerStart>=0&&primerEnd>primerStart);
+const primer=viewer.slice(primerStart,primerEnd),ordinaryViewer=viewer.slice(0,primerStart)+viewer.slice(primerEnd);
+assert.equal((ordinaryViewer.match(/renderer\.render\(scene,camera\)/g) || []).length, 1);
+assert.equal((primer.match(/renderer\.render\(scene,camera\)/g) || []).length, 1);
+assert(!primer.includes('wallSheenMotion'), 'Partial initialization must not advance wall motion');
 assert.equal((home.match(/renderer\.render\(/g) || []).length, 0);
 assert.equal((home.match(/drawScene\(camera\)/g) || []).length, 2);
 const calls = [];
 const context = vm.createContext({
   scene: {},
   renderProfile: {diffuseLighting: false},
-  interactionRenderer: null, interactionPointer: {moved: true}, THREE: {},
+  initialHomePrimer: null, interactionRenderer: null, interactionPointer: {moved: true}, THREE: {},
   createInteractionRenderer: () => ({draw: () => {calls.push('copy draw'); throw Error('GPU copy unavailable');}}),
   renderSuspended: false, renderLost: false, document: {hidden: false},
   wallSheenMotion: {beforeRender: () => calls.push('before'), afterRender: () => calls.push('after')},

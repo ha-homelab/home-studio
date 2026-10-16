@@ -102,7 +102,7 @@ function createSceneMaterial(options){if(!renderProfile.diffuseLighting)return n
 function applyStaticMeshClipping(source,material){if(['walls','frames','doors','windows'].includes(source.kind)){material.clippingPlanes=[clipping];material.clipShadows=false;return}if(!renderProfile.diffuseLighting||source.kind!=='floors'||material.transparent||material.side!==THREE.DoubleSide||!source.vertices?.length)return;let extent=1;for(const vertex of source.vertices){if(!Array.isArray(vertex)||vertex.length!==3||!vertex.every(value=>Number.isFinite(value)&&Number.isFinite(Math.fround(value))))return;for(const value of vertex)extent=Math.max(extent,Math.abs(value))}const far=extent*4;if(!Number.isFinite(Math.fround(far)))return;material.clippingPlanes=[new THREE.Plane(new THREE.Vector3(0,-1,0),far)];material.clipShadows=false}
 function selectRenderProfile(gl){const capacity=getRenderCapacity(gl);const profile=capacity.reduced?{pixels:250000,pointShadows:2,pointShadowSize:128,sunShadowSize:512,diffuseLighting:capacity.diffuseLighting}:{pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048,diffuseLighting:false};if(capacity.rasterProbe)profile.rasterProbe=capacity.rasterProbe;return profile}
 let renderRequest=0,renderDelay=0,renderSuspended=false,renderLost=false;
-let interactionRenderer=null,interactionPointer=null,coalesceMotion=false;
+let interactionRenderer=null,interactionPointer=null,coalesceMotion=false,initialHomePrimer=null;
 function cancelRender(){if(renderRequest)cancelAnimationFrame(renderRequest);if(renderDelay)clearTimeout(renderDelay);renderRequest=renderDelay=0}
 // Paint the first moved-pointer frame immediately. Subsequent software frames
 // share a fixed deadline; further input never postpones it. Non-motion updates
@@ -297,13 +297,93 @@ function updateWallOutlines(){
   }
   root.add(wallOutlines);
 }
+// Only the initial, positively selected Apple diffuse path may submit a partial
+// frame. It never satisfies readiness; the ordinary current-state draw does.
+function createInitialHomePrimer(THREE, renderer, selected, requestFull, reportError, wallBefore, wallAfter) {
+  let state='fresh', timer=0, visibility=null;
+  const restoreVisibility=()=>{
+    if(!visibility)return;
+    const style=renderer.domElement.style, saved=visibility;visibility=null;
+    if(style.getPropertyValue('visibility')==='hidden'&&style.getPropertyPriority('visibility')===saved.priority){
+      if(saved.value)style.setProperty('visibility',saved.value,saved.priority);
+      else style.removeProperty('visibility');
+    }
+  };
+  const cancel=()=>{if(timer)clearTimeout(timer);timer=0;state='retired';restoreVisibility();};
+  const beforeDraw=(scene,camera,initialHome)=>{
+    if(state==='pending'){
+      if(initialHome)return false;
+      cancel();return true;
+    }
+    if(state!=='fresh')return true;
+    state='retired';
+    if(selected!==true||initialHome!==true)return true;
+    let ordinary=!scene.overrideMaterial;
+    scene.traverse(node=>{
+      const wall=typeof wallBefore==='function'&&typeof wallAfter==='function'&&node.onBeforeShadow===wallBefore&&node.onAfterShadow===wallAfter;
+      if(node.onBeforeRender!==THREE.Object3D.prototype.onBeforeRender||node.onAfterRender!==THREE.Object3D.prototype.onAfterRender||
+          (!wall&&(node.onBeforeShadow!==THREE.Object3D.prototype.onBeforeShadow||node.onAfterShadow!==THREE.Object3D.prototype.onAfterShadow))||
+          node.customDepthMaterial||node.customDistanceMaterial)ordinary=false;
+      for(const material of (Array.isArray(node.material)?node.material:[node.material]))
+        if(material&&material.onBeforeRender!==THREE.Material.prototype.onBeforeRender)ordinary=false;
+    });
+    if(!ordinary)return true;
+    const gl=renderer.getContext(), ratio=renderer.getPixelRatio();
+    if(renderer.getRenderTarget()!==null||renderer.getScissorTest()||!renderer.state?.scissor||
+        !Number.isFinite(ratio)||ratio<=0||gl.isContextLost())return true;
+    const viewport=renderer.getViewport(new THREE.Vector4()), current=renderer.getCurrentViewport(new THREE.Vector4());
+    const box=gl.getParameter(gl.SCISSOR_BOX), physicalViewport=gl.getParameter(gl.VIEWPORT);
+    if(box?.length!==4||physicalViewport?.length!==4)return true;
+    const scissor=renderer.getScissor(new THREE.Vector4()), physicalScissor=new THREE.Vector4().fromArray(box);
+    const width=gl.drawingBufferWidth, height=gl.drawingBufferHeight;
+    const values=[...viewport.toArray(),...current.toArray(),...scissor.toArray(),...physicalScissor.toArray()];
+    const rounded=viewport.clone().multiplyScalar(ratio).round(), floored=viewport.clone().multiplyScalar(ratio).floor();
+    if(!values.every(Number.isFinite)||width<2||height<2||viewport.x!==0||viewport.y!==0||
+        floored.z!==width||floored.w!==height||(!current.equals(rounded)&&!current.equals(floored))||
+        !current.toArray().every((value,index)=>value===physicalViewport[index]))return true;
+    const pixels=value=>(value+.25)/ratio, x=Math.max(0,Math.floor(width/2)-1), y=Math.max(0,Math.floor(height/2)-1);
+    const tiny=[pixels(x),pixels(y),pixels(2),pixels(2)];
+    // Both conversions used by Three must name the same physical rectangle.
+    if(!tiny.every((value,index)=>Math.floor(value*ratio)===[x,y,2,2][index]&&Math.round(value*ratio)===[x,y,2,2][index]))return true;
+    const style=renderer.domElement.style;
+    visibility={value:style.getPropertyValue('visibility'),priority:style.getPropertyPriority('visibility')};
+    style.setProperty('visibility','hidden',visibility.priority);
+    state='pending';let failure=null;
+    try{
+      renderer.setScissor(...tiny);renderer.setScissorTest(true);
+      renderer.render(scene,camera);
+    }catch(error){failure=error;}
+    finally{
+      // Attempt every restoration even if a lost context or callback fails.
+      for(const restore of [()=>renderer.setRenderTarget(null),()=>renderer.setViewport(viewport),
+        ()=>{if(!current.equals(rounded))renderer.setRenderTarget(null);},()=>renderer.setScissor(scissor),
+        // setScissor rounds while returning from a shadow target floors. Keep
+        // the saved logical box and the actual pre-primer box independently.
+        ()=>renderer.state.scissor(physicalScissor),()=>renderer.setScissorTest(false)]){
+        try{restore();}catch(error){failure??=error;}
+      }
+    }
+    if(failure){cancel();throw failure;}
+    if(state!=='pending'||gl.isContextLost()){cancel();return false;}
+    try{
+      gl.flush();
+      timer=setTimeout(()=>{
+        timer=0;if(state!=='pending')return;state='ready';
+        try{requestFull();}catch(error){cancel();reportError(error);}
+      },2500);
+    }catch(error){cancel();throw error;}
+    return false;
+  };
+  return {beforeDraw,cancel,completed(){state='complete';restoreVisibility();}};
+}
 const wallSheenMotion=createWallSheenMotion();
-function drawScene(camera){if(renderSuspended||renderLost||document.hidden)return;wallSheenMotion.beforeRender();try{const pointer=interactionPointer;if(renderProfile.diffuseLighting){interactionRenderer??=createInteractionRenderer(THREE,renderer);interactionRenderer.draw(scene,camera,pointer?.moved===true)}else renderer.render(scene,camera);if(pointer?.moved&&interactionPointer===pointer)pointer.painted=true}finally{wallSheenMotion.afterRender()}}
+function drawScene(camera){if(renderSuspended||renderLost||document.hidden)return false;if(initialHomePrimer&&!initialHomePrimer.beforeDraw(scene,camera,homeView?.active===true&&renderCount===0))return false;wallSheenMotion.beforeRender();try{const pointer=interactionPointer;if(renderProfile.diffuseLighting){interactionRenderer??=createInteractionRenderer(THREE,renderer);interactionRenderer.draw(scene,camera,pointer?.moved===true)}else renderer.render(scene,camera);if(pointer?.moved&&interactionPointer===pointer)pointer.painted=true;initialHomePrimer?.completed();return true}catch(error){initialHomePrimer?.cancel();throw error}finally{wallSheenMotion.afterRender()}}
 function report3DError(e){$('loadError').style.display='block';$('loadError').textContent='3D view could not start: '+e.message+'. Plan placement and JSON export are still available.';console.error(e)}
 try{
 scene=new THREE.Scene();scene.background=new THREE.Color('#e7e8df');camera=new THREE.PerspectiveCamera(42,1,.1,Math.max(150,planRadius*5));
 renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.localClippingEnabled=true;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.95;$('view3d').prepend(renderer.domElement);
 renderProfile=selectRenderProfile(renderer.getContext());if(renderProfile.diffuseLighting)renderer.shadowMap.type=THREE.BasicShadowMap;
+initialHomePrimer=createInitialHomePrimer(THREE,renderer,renderProfile.diffuseLighting,requestRender,report3DError,beginWallShadow,endWallShadow);
 // Capacity is cached for this context. Motion scheduling is independent of
 // material quality: software PBR still draws directly at its full resolution.
 coalesceMotion=getRenderCapacity(renderer.getContext()).reduced;
@@ -327,13 +407,13 @@ if(shape){
 }
 const glassPasses=createStaticGlassPasses(THREE,mesh,renderProfile.diffuseLighting);root.add(mesh);if(glassPasses)root.add(glassPasses.front)}
 ground=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(60,planRadius*2),Math.max(65,planRadius*2)),createSceneMaterial({color:'#dfe3d8',roughness:1}));ground.rotation.x=-Math.PI/2;ground.position.set(planCenter[0],-1.97,planCenter[1]);ground.receiveShadow=true;scene.add(ground);grid=new THREE.GridHelper(44,44,0xc0cabe,0xd0d7cb);grid.position.set(planCenter[0],-1.96,planCenter[1]);scene.add(grid);
-renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;cancelRender();interactionPointer=null;interactionRenderer?.dispose();interactionRenderer=null;releaseStaticGlassPasses();homeView?.releaseGPU?.();});
+renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;initialHomePrimer?.cancel();cancelRender();interactionPointer=null;interactionRenderer?.dispose();interactionRenderer=null;releaseStaticGlassPasses();homeView?.releaseGPU?.();});
 renderer.domElement.addEventListener('webglcontextrestored',()=>{renderLost=false;invalidateShadows();const before=renderCount;window.resizeModel?.();if(renderCount===before)requestRender()});
 function updateEditorCamera(){camera.position.set(target.x+radius*Math.sin(polar)*Math.sin(azimuth),target.y+radius*Math.cos(polar),target.z+radius*Math.sin(polar)*Math.cos(azimuth));camera.lookAt(target)}
-function render(){if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;const before=renderCount;updateWallOutlines();if(homeView?.active)homeView.render();else{updateEditorCamera();drawScene(camera);renderCount++}if(renderCount>before)cancelRender()}window.renderModel=render;window.requestModelRender=requestRender;
+function render(){if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;const before=renderCount;updateWallOutlines();if(homeView?.active)homeView.render();else{updateEditorCamera();if(drawScene(camera)!==false)renderCount++}if(renderCount>before)cancelRender()}window.renderModel=render;window.requestModelRender=requestRender;
 let viewSize='';const resize=()=>{if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;if(renderDelay)requestRender();const b=$(homeView?.active?'homeStage':'view3d').getBoundingClientRect(),ratio=renderPixelRatio(b.width,b.height),size=[homeView?.active,b.width,b.height,ratio].join();if(b.width&&b.height&&size!==viewSize){viewSize=size;renderer.setDrawingBufferSize(b.width,b.height,ratio);camera.aspect=b.width/b.height;camera.updateProjectionMatrix();render()}};window.resizeModel=resize;const observer=new ResizeObserver(resize);observer.observe($('view3d'));observer.observe($('homeStage'));
-document.addEventListener('visibilitychange',()=>{if(document.hidden){interactionPointer=null;cancelRender()}else{const before=renderCount;resize();if(renderCount===before)requestRender()}});
-window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();interactionPointer=null;if(!event.persisted){observer.disconnect();interactionRenderer?.dispose();interactionRenderer=null;homeView?.dispose?.();disposeStaticGlassPasses();renderer.dispose();renderer.forceContextLoss();}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){initialHomePrimer?.cancel();interactionPointer=null;cancelRender()}else{const before=renderCount;resize();if(renderCount===before)requestRender()}});
+window.addEventListener('pagehide',event=>{renderSuspended=true;initialHomePrimer?.cancel();cancelRender();interactionPointer=null;if(!event.persisted){observer.disconnect();interactionRenderer?.dispose();interactionRenderer=null;homeView?.dispose?.();disposeStaticGlassPasses();renderer.dispose();renderer.forceContextLoss();}});
 // A resize can already paint the resumed state. Initial pageshow also needs
 // no extra frame after boot painted; leave any pending live-state request intact.
 window.addEventListener('pageshow',event=>{const resumed=renderSuspended||event.persisted,before=renderCount;renderSuspended=false;resize();if(renderCount===before&&(resumed||renderCount===0))requestRender()});
