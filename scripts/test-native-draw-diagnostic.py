@@ -80,10 +80,15 @@ class DrawDiagnosticTests(unittest.TestCase):
         for original_line in [line for line in original.splitlines() if 'iframe.' in line or 'channel.port1.onmessage' in line]:
             self.assertIn(original_line, generated)
         self.assertIn("record.get('sourceFiles') == DIAGNOSTIC_PRIMARY_FILES", generated)
+        diagnostic_timeouts = "client.call('WebDriver:SetTimeouts', {'pageLoad': 180000, 'script': 180000})"
+        self.assertIn(diagnostic_timeouts, generated)
+        self.assertLess(generated.index(diagnostic_timeouts), generated.index("client.call('WebDriver:Navigate'"))
         self.assertIn("window.__nativeDrawDiagnostic?.done", generated)
         self.assertEqual(module.browser_preferences(456), {'marionette.port':456,'devtools.console.stdout.content':True})
         self.assertIn('attachNativeDrawDiagnostic(renderer', module.NATIVE_VIEWER_FRAME_DIAGNOSTICS)
         run_source = inspect.getsource(module.run_case)
+        self.assertIn("client.call('WebDriver:SetTimeouts', {'script': 30000, 'pageLoad': 30000, 'implicit': 0})", run_source)
+        self.assertNotIn("'pageLoad': 180000", run_source)
         self.assertIn('if not diagnostic_only:\n            assert_masked_capacity(record)', run_source)
         self.assertIn("'diagnostic-completed' if diagnostic_only else 'passed'", run_source)
         self.assertIn('diagnosticOnly=True, acceptanceStatus=\'not-run\'', run_source)

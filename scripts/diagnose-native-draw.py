@@ -93,7 +93,7 @@ def configure_worker(module, primary):
     source = source[:source.index(boundary)]
     source = source.replace('def viewer(', 'def diagnostic_viewer(', 1)
     source = source.replace('for cycle in range(2):', 'for cycle in range(1):', 1)
-    source = source.replace("    client.call('WebDriver:Navigate'", "    require(record.get('sourceFiles') == DIAGNOSTIC_PRIMARY_FILES, 'Diagnostic runtime source differs from primary')\n    client.connection.settimeout(185)\n    client.call('WebDriver:Navigate'", 1)
+    source = source.replace("    client.call('WebDriver:Navigate'", "    require(record.get('sourceFiles') == DIAGNOSTIC_PRIMARY_FILES, 'Diagnostic runtime source differs from primary')\n    client.connection.settimeout(185)\n    client.call('WebDriver:SetTimeouts', {'pageLoad': 180000, 'script': 180000})\n    client.call('WebDriver:Navigate'", 1)
     source += '''        client.wait('window.fixtureLoaded', timeout=180)
         client.call('WebDriver:SwitchToFrame', {'id': 0})
         client.wait('window.__nativeDrawDiagnostic?.done', timeout=180)
