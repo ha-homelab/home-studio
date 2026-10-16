@@ -10,22 +10,22 @@ from unittest.mock import patch
 
 
 HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location('intel_comparison', HERE / 'run-intel-cgl-direct-shadow-uniforms.py')
+spec = importlib.util.spec_from_file_location('intel_comparison', HERE / 'run-intel-cgl-lambert-accumulators.py')
 comparison = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(comparison)
-ARMS = (('candidate', comparison.CANDIDATES['direct-shadow-uniforms']), ('baseline', comparison.BASELINE))
+ARMS = (('candidate', comparison.CANDIDATES['lambert-accumulators']), ('baseline', comparison.BASELINE))
 
 
 class IntelComparisonTests(unittest.TestCase):
     def test_unselected_template_fails_before_any_source_or_host_action(self):
         with tempfile.TemporaryDirectory() as directory, \
-             patch.object(comparison, 'CANDIDATES', {'direct-shadow-uniforms': 'UNSELECTED'}), \
+             patch.object(comparison, 'CANDIDATES', {'lambert-accumulators': 'UNSELECTED'}), \
              patch.object(comparison, 'source_snapshot') as snapshot, \
              patch.object(comparison, 'indexing_command') as indexing, \
              patch.object(comparison.subprocess, 'run') as run:
             root = Path(directory)
             self.assertEqual(comparison.run_comparison(root, root / 'none', root / 'out',
-                'direct-shadow-uniforms', 'firefox'), 1)
+                'lambert-accumulators', 'firefox'), 1)
             manifest = json.loads((root / 'out/comparison.json').read_text())
             self.assertIn('Select one exact non-baseline candidate SHA', manifest['error'])
             self.assertEqual(manifest['arms'], [])
@@ -37,35 +37,35 @@ class IntelComparisonTests(unittest.TestCase):
 
     def test_selection_requires_exact_pin_proofs_and_matching_workflow(self):
         sha = 'a' * 40
-        proofs = ('scripts/test-selected-point.cjs', 'scripts/test-selected-directional.cjs', 'scripts/test-selected-shadow.cjs', 'scripts/test-selected-indirect.cjs', 'scripts/test-selected-direct-shadow.cjs')
+        proofs = ('scripts/test-selected-point.cjs', 'scripts/test-selected-directional.cjs', 'scripts/test-selected-shadow.cjs', 'scripts/test-selected-indirect.cjs', 'scripts/test-selected-direct-shadow.cjs', 'scripts/test-selected-accumulators.cjs')
         valid = f'revision: {sha}\nrevision: {sha}\n' + ''.join('node candidate/' + proof + '\n' for proof in proofs)
-        with patch.object(comparison, 'CANDIDATES', {'direct-shadow-uniforms': sha}), \
+        with patch.object(comparison, 'CANDIDATES', {'lambert-accumulators': sha}), \
              patch.object(comparison, 'CANDIDATE_CPU_CHECKS', proofs), \
              patch.object(Path, 'read_text', return_value=valid):
             comparison.validate_selection()
             for wrong in ['main', 'UNSELECTED', '0' * 40, comparison.BASELINE, 'A' * 40, 'g' * 40]:
                 with self.subTest(revision=wrong), \
-                     patch.object(comparison, 'CANDIDATES', {'direct-shadow-uniforms': wrong}), \
+                     patch.object(comparison, 'CANDIDATES', {'lambert-accumulators': wrong}), \
                      self.assertRaises(ValueError):
                     comparison.validate_selection()
-            for wrong in ['UNSELECTED', (), (proofs[0],), (proofs[0], proofs[1]), (proofs[0], proofs[1], proofs[2]), (proofs[0], proofs[1], proofs[2], proofs[0]), (proofs[0], proofs[1], proofs[2], '../test.cjs'), (proofs[0], proofs[1], proofs[2], 'scripts/test-foo.cjs;echo'), proofs[:4], (*proofs[:4], proofs[0]), (*proofs[:4], '../test.cjs'), (*proofs[:4], 'scripts/test-foo.cjs;echo')]:
+            for wrong in ['UNSELECTED', (), (proofs[0],), (proofs[0], proofs[1]), (proofs[0], proofs[1], proofs[2]), (proofs[0], proofs[1], proofs[2], proofs[0]), (proofs[0], proofs[1], proofs[2], '../test.cjs'), (proofs[0], proofs[1], proofs[2], 'scripts/test-foo.cjs;echo'), proofs[:4], (*proofs[:4], proofs[0]), (*proofs[:4], '../test.cjs'), (*proofs[:4], 'scripts/test-foo.cjs;echo'), proofs[:5], (*proofs[:5], proofs[0]), (*proofs[:5], '../test.cjs'), (*proofs[:5], 'scripts/test-foo.cjs;echo')]:
                 with self.subTest(proofs=wrong), patch.object(comparison, 'CANDIDATE_CPU_CHECKS', wrong), self.assertRaises(ValueError):
                     comparison.validate_selection()
-            for wrong in [valid.replace('revision:', 'wrong:', 1), valid.replace(proofs[0], 'wrong'), valid.replace(proofs[1], 'wrong'), valid.replace(proofs[2], 'wrong'), valid.replace(proofs[3], 'wrong'), valid.replace(proofs[4], 'wrong'), valid + f'revision: {sha}\n', valid + 'node candidate/' + proofs[1] + '\n']:
+            for wrong in [valid.replace('revision:', 'wrong:', 1), valid.replace(proofs[0], 'wrong'), valid.replace(proofs[1], 'wrong'), valid.replace(proofs[2], 'wrong'), valid.replace(proofs[3], 'wrong'), valid.replace(proofs[4], 'wrong'), valid.replace(proofs[5], 'wrong'), valid + f'revision: {sha}\n', valid + 'node candidate/' + proofs[1] + '\n']:
                 with patch.object(Path, 'read_text', return_value=wrong), self.assertRaises(ValueError):
                     comparison.validate_selection()
-            with patch.object(comparison, 'CANDIDATES', {'direct-shadow-uniforms': sha, 'extra': sha}), self.assertRaises(ValueError):
+            with patch.object(comparison, 'CANDIDATES', {'lambert-accumulators': sha, 'extra': sha}), self.assertRaises(ValueError):
                 comparison.validate_selection()
 
     def test_optional_toolchain_cpu_identity_precedes_browser_installation(self):
-        text = (HERE.parent / '.github/workflows/intel-cgl-direct-shadow-uniforms.yml').read_text()
+        text = (HERE.parent / '.github/workflows/intel-cgl-lambert-accumulators.yml').read_text()
         command = '/usr/sbin/sysctl machdep.cpu.brand_string hw.ncpu hw.memsize || true'
         self.assertEqual(text.count(command), 1)
         self.assertLess(text.index(command), text.index('name: Install one original checksum'))
 
     def test_selection_gate_precedes_all_checkouts_except_harness(self):
-        text = (HERE.parent / '.github/workflows/intel-cgl-direct-shadow-uniforms.yml').read_text()
-        gate = text.index('run: python3 harness/scripts/run-intel-cgl-direct-shadow-uniforms.py --validate-selection')
+        text = (HERE.parent / '.github/workflows/intel-cgl-lambert-accumulators.yml').read_text()
+        gate = text.index('run: python3 harness/scripts/run-intel-cgl-lambert-accumulators.py --validate-selection')
         self.assertLess(gate, text.index('name: Check out the exact common baseline'))
         self.assertLess(gate, text.index('name: Check out the exact independent candidate'))
         self.assertLess(gate, text.index('name: Install one original checksum'))
@@ -89,7 +89,7 @@ class IntelComparisonTests(unittest.TestCase):
         self.addCleanup(machine.stop)
 
     def run_fixture(self, exit_codes, mutate=False, mismatched_driver=False,
-                    candidate='direct-shadow-uniforms', product='firefox', mutate_install=False,
+                    candidate='lambert-accumulators', product='firefox', mutate_install=False,
                     cpu_error=False, indexing_codes=None, indexing_statuses=None):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -209,10 +209,10 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertEqual(self.indexing_calls, [])
 
     def test_exact_two_source_order(self):
-        self.assertEqual(comparison.CANDIDATE_CPU_CHECKS, ('scripts/test-literal-lambert-point-body.cjs', 'scripts/test-literal-lambert-directional.cjs', 'scripts/test-scalar-shadow-point.cjs', 'scripts/test-scalar-indirect-lambert.cjs', 'scripts/test-direct-shadow-uniforms.cjs'))
+        self.assertEqual(comparison.CANDIDATE_CPU_CHECKS, ('scripts/test-literal-lambert-point-body.cjs', 'scripts/test-literal-lambert-directional.cjs', 'scripts/test-scalar-shadow-point.cjs', 'scripts/test-scalar-indirect-lambert.cjs', 'scripts/test-direct-shadow-uniforms.cjs', 'scripts/test-scalar-lambert-accumulators.cjs'))
         self.assertEqual(ARMS, (
-            ('candidate', '227e2835d161b14b86446e20d35a0a5aa96df50e'),
-            ('baseline', 'f364c49422d8a549944695ad889867e98f366145'),
+            ('candidate', '7491f94943ba60cc663e411bc2361745c0cc9b87'),
+            ('baseline', '227e2835d161b14b86446e20d35a0a5aa96df50e'),
         ))
 
     def test_original_command_has_only_the_standard_installation_arguments(self):
@@ -241,13 +241,13 @@ class IntelComparisonTests(unittest.TestCase):
              patch.object(comparison.platform, 'machine', return_value='arm64'), \
              patch.object(comparison.subprocess, 'run') as run:
             root = Path(directory)
-            self.assertEqual(comparison.run_comparison(root, root / 'missing.json', root / 'output', 'direct-shadow-uniforms', 'firefox'), 1)
+            self.assertEqual(comparison.run_comparison(root, root / 'missing.json', root / 'output', 'lambert-accumulators', 'firefox'), 1)
             run.assert_not_called()
             self.assertEqual(json.loads((root / 'output/comparison.json').read_text())['status'], 'infrastructure-error')
 
     def test_both_product_pairs_keep_fixed_revisions_versions_and_host_records(self):
         self.assertEqual(comparison.CANDIDATES, {
-            'direct-shadow-uniforms': '227e2835d161b14b86446e20d35a0a5aa96df50e',
+            'lambert-accumulators': '7491f94943ba60cc663e411bc2361745c0cc9b87',
         })
         self.assertEqual(comparison.VERSIONS, {'firefox': '153.5.0esr', 'waterfox': '6.7.6'})
         for candidate, revision in comparison.CANDIDATES.items():
@@ -304,9 +304,9 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertEqual(data['uptimeError'], 'TimeoutExpired')
 
     def test_workflow_is_fixed_read_only_two_pair_diagnostic(self):
-        text = (HERE.parent / '.github/workflows/intel-cgl-direct-shadow-uniforms.yml').read_text()
-        self.assertIn('branches: [diagnostic/intel-cgl-direct-shadow-uniforms]', text)
-        self.assertIn("github.ref == 'refs/heads/diagnostic/intel-cgl-direct-shadow-uniforms'", text)
+        text = (HERE.parent / '.github/workflows/intel-cgl-lambert-accumulators.yml').read_text()
+        self.assertIn('branches: [diagnostic/intel-cgl-lambert-accumulators]', text)
+        self.assertIn("github.ref == 'refs/heads/diagnostic/intel-cgl-lambert-accumulators'", text)
         self.assertIn('runs-on: macos-15-intel', text)
         self.assertIn('timeout-minutes: 30', text)
         self.assertIn('max-parallel: 2', text)
@@ -322,7 +322,7 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertIn('python3 baseline/scripts/setup-native-browser.py', text)
         self.assertIn('permissions:\n  contents: read', text)
         self.assertIn('if: ${{ always() }}', text)
-        self.assertIn('name: diagnostic-intel-cgl-direct-shadow-uniforms-', text)
+        self.assertIn('name: diagnostic-intel-cgl-lambert-accumulators-', text)
         self.assertEqual(text.count('persist-credentials: false'), 3)
         self.assertNotRegex(text, r'workflow_dispatch|pull_request|secrets\.|continue-on-error|workflow_call|diagnose-restore|diagnose-native-draw')
         uses = re.findall(r'uses: ([^\s]+)', text)
@@ -333,14 +333,14 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertNotRegex(quality, re.compile(r'^  push:', re.MULTILINE))
         for name in ('release-pipeline.yml', 'pages.yml'):
             workflow = (HERE.parent / '.github/workflows' / name).read_text()
-            self.assertNotIn('diagnostic/intel-cgl-direct-shadow-uniforms', workflow)
+            self.assertNotIn('diagnostic/intel-cgl-lambert-accumulators', workflow)
         for path in (HERE.parent / '.github/workflows').glob('intel-cgl-*.yml'):
-            if path.name != 'intel-cgl-direct-shadow-uniforms.yml':
-                self.assertNotIn('diagnostic/intel-cgl-direct-shadow-uniforms', path.read_text())
+            if path.name != 'intel-cgl-lambert-accumulators.yml':
+                self.assertNotIn('diagnostic/intel-cgl-lambert-accumulators', path.read_text())
         self.assertFalse((HERE.parent / '.github/workflows/intel-cgl-boundaries.yml').exists())
 
     def test_candidate_cpu_contract_runs_before_browser_installation(self):
-        text = (HERE.parent / '.github/workflows/intel-cgl-direct-shadow-uniforms.yml').read_text()
+        text = (HERE.parent / '.github/workflows/intel-cgl-lambert-accumulators.yml').read_text()
         commands = ['node candidate/' + proof for proof in comparison.CANDIDATE_CPU_CHECKS]
         prepare = text.split('      - name: Record tooling and prepare both fixtures before timing\n', 1)[1].split('      - name:', 1)[0]
         self.assertEqual([line.strip() for line in prepare.splitlines() if line.strip().startswith('node candidate/')], commands)

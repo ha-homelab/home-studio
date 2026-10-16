@@ -1,15 +1,15 @@
-name: Diagnostic Intel CGL direct shadow uniform
-run-name: Non-release Intel direct shadow uniform pairs with common indexing state · ${{ github.sha }}
+name: Diagnostic Intel CGL Lambert accumulator
+run-name: Non-release Intel Lambert accumulator pairs with common indexing state · ${{ github.sha }}
 
 on:
   push:
-    branches: [diagnostic/intel-cgl-direct-shadow-uniforms]
+    branches: [diagnostic/intel-cgl-lambert-accumulators]
 
 permissions:
   contents: read
 
 concurrency:
-  group: diagnostic-intel-cgl-direct-shadow-uniforms
+  group: diagnostic-intel-cgl-lambert-accumulators
   cancel-in-progress: false
 
 defaults:
@@ -19,7 +19,7 @@ defaults:
 jobs:
   compare:
     name: ${{ matrix.product }} · ${{ matrix.candidate }}
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-direct-shadow-uniforms' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-lambert-accumulators' }}
     runs-on: macos-15-intel
     # Two sequential original three-case suites per VM; their own limits
     # are unchanged. Other pairs run on separate hosted VMs.
@@ -31,12 +31,12 @@ jobs:
         include:
           - product: firefox
             version: 153.5.0esr
-            candidate: direct-shadow-uniforms
-            revision: 227e2835d161b14b86446e20d35a0a5aa96df50e
+            candidate: lambert-accumulators
+            revision: 7491f94943ba60cc663e411bc2361745c0cc9b87
           - product: waterfox
             version: 6.7.6
-            candidate: direct-shadow-uniforms
-            revision: 227e2835d161b14b86446e20d35a0a5aa96df50e
+            candidate: lambert-accumulators
+            revision: 7491f94943ba60cc663e411bc2361745c0cc9b87
     env:
       PYTHONUTF8: '1'
       NATIVE_STARTUP_DIAGNOSTICS: '1'
@@ -51,11 +51,11 @@ jobs:
           path: harness
           persist-credentials: false
       - name: Reject an unselected or inconsistent candidate before setup
-        run: python3 harness/scripts/run-intel-cgl-direct-shadow-uniforms.py --validate-selection
+        run: python3 harness/scripts/run-intel-cgl-lambert-accumulators.py --validate-selection
       - name: Check out the exact common baseline
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: f364c49422d8a549944695ad889867e98f366145
+          ref: 227e2835d161b14b86446e20d35a0a5aa96df50e
           path: baseline
           persist-credentials: false
       - name: Check out the exact independent candidate
@@ -72,7 +72,7 @@ jobs:
           node-version: '22'
       - name: Record tooling and prepare both fixtures before timing
         run: |
-          mkdir -p harness/diagnostics/intel-cgl-direct-shadow-uniforms
+          mkdir -p harness/diagnostics/intel-cgl-lambert-accumulators
           {
             python3 --version
             node --version
@@ -80,39 +80,40 @@ jobs:
             uname -sm
             sw_vers
             /usr/sbin/sysctl machdep.cpu.brand_string hw.ncpu hw.memsize || true
-          } > harness/diagnostics/intel-cgl-direct-shadow-uniforms/toolchain.log 2>&1
-          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-direct-shadow-uniforms/baseline-npm.log
-          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-direct-shadow-uniforms/candidate-npm.log
-          python3 harness/scripts/test-intel-cgl-direct-shadow-uniforms.py
+          } > harness/diagnostics/intel-cgl-lambert-accumulators/toolchain.log 2>&1
+          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-lambert-accumulators/baseline-npm.log
+          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-lambert-accumulators/candidate-npm.log
+          python3 harness/scripts/test-intel-cgl-lambert-accumulators.py
           node candidate/scripts/test-literal-lambert-point-body.cjs
           node candidate/scripts/test-literal-lambert-directional.cjs
           node candidate/scripts/test-scalar-shadow-point.cjs
           node candidate/scripts/test-scalar-indirect-lambert.cjs
           node candidate/scripts/test-direct-shadow-uniforms.cjs
+          node candidate/scripts/test-scalar-lambert-accumulators.cjs
       - name: Install one original checksum and signature verified browser per pair
         env:
-          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-direct-shadow-uniforms-browser
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-lambert-accumulators-browser
           PRODUCT: ${{ matrix.product }}
           VERSION: ${{ matrix.version }}
         run: |
-          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-direct-shadow-uniforms/install.log
-          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-direct-shadow-uniforms/install.json
+          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-lambert-accumulators/install.log
+          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-lambert-accumulators/install.json
       - name: Normalize indexing once and run candidate before baseline
         env:
-          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-direct-shadow-uniforms-browser
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-lambert-accumulators-browser
           PRODUCT: ${{ matrix.product }}
           CANDIDATE: ${{ matrix.candidate }}
         run: >-
-          python3 harness/scripts/run-intel-cgl-direct-shadow-uniforms.py
+          python3 harness/scripts/run-intel-cgl-lambert-accumulators.py
           --source-root "$GITHUB_WORKSPACE"
           --candidate "$CANDIDATE" --product "$PRODUCT"
           --installation "$INSTALL_DIR/install.json"
-          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-direct-shadow-uniforms"
+          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-lambert-accumulators"
       - name: Preserve all non-release evidence even when a source fails
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: diagnostic-intel-cgl-direct-shadow-uniforms-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: harness/diagnostics/intel-cgl-direct-shadow-uniforms/
+          name: diagnostic-intel-cgl-lambert-accumulators-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: harness/diagnostics/intel-cgl-lambert-accumulators/
           if-no-files-found: error
           retention-days: 14
