@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
 const load = file => import(pathToFileURL(path.join(root, file)).href);
 const served = new Map([
   ['/home-studio/planner/', ['planner/index.html', 'text/html']],
-  ...['editor', 'model', 'catalog', 'furniture', 'i18n', 'validation', 'language-links'].map(name => [`/home-studio/planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
+  ...['editor', 'model', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity'].map(name => [`/home-studio/planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
   ...fs.readdirSync(path.join(root, 'planner/locales')).filter(name => name.endsWith('.js')).map(name => [`/home-studio/planner/locales/${name}`, [`planner/locales/${name}`, 'text/javascript']]),
   ['/home-studio/planner/editor.css', ['planner/editor.css', 'text/css']],
   ['/home-studio/vendor/three.module.min.js', ['vendor/three.module.min.js', 'text/javascript']],
