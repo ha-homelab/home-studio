@@ -1,15 +1,15 @@
-name: Diagnostic Intel CGL signal texture, decay-two and cached transmission
-run-name: Non-release Intel signal texture, decay-two and cached transmission pairs with common indexing state · ${{ github.sha }}
+name: Diagnostic Intel CGL shared opaque blend state
+run-name: Non-release Intel shared opaque blend state pairs with common indexing state · ${{ github.sha }}
 
 on:
   push:
-    branches: [diagnostic/intel-cgl-signal-decay-cached]
+    branches: [diagnostic/intel-cgl-opaque-blend]
 
 permissions:
   contents: read
 
 concurrency:
-  group: diagnostic-intel-cgl-signal-decay-cached
+  group: diagnostic-intel-cgl-opaque-blend
   cancel-in-progress: false
 
 defaults:
@@ -19,7 +19,7 @@ defaults:
 jobs:
   compare:
     name: ${{ matrix.product }} · ${{ matrix.candidate }}
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-signal-decay-cached' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-opaque-blend' }}
     runs-on: macos-15-intel
     # Two sequential original three-case suites per VM; their own limits
     # are unchanged. Other pairs run on separate hosted VMs.
@@ -31,12 +31,12 @@ jobs:
         include:
           - product: firefox
             version: 153.5.0esr
-            candidate: signal-decay-cached
-            revision: d94352dbf1d99ecffd65c5479ce31e76bbc8d3c4
+            candidate: opaque-blend
+            revision: 6549b9675f6131feb529b873e110eea01bc82d33
           - product: waterfox
             version: 6.7.6
-            candidate: signal-decay-cached
-            revision: d94352dbf1d99ecffd65c5479ce31e76bbc8d3c4
+            candidate: opaque-blend
+            revision: 6549b9675f6131feb529b873e110eea01bc82d33
     env:
       PYTHONUTF8: '1'
       NATIVE_STARTUP_DIAGNOSTICS: '1'
@@ -53,7 +53,7 @@ jobs:
       - name: Check out the exact common baseline
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: 13b8ed9e1f0baf68eac329764a05277377113419
+          ref: 7b7a896225aaf27fef26a135d654dfaddffe2c08
           path: baseline
           persist-credentials: false
       - name: Check out the exact independent candidate
@@ -70,43 +70,42 @@ jobs:
           node-version: '22'
       - name: Record tooling and prepare both fixtures before timing
         run: |
-          mkdir -p harness/diagnostics/intel-cgl-signal-decay-cached
+          mkdir -p harness/diagnostics/intel-cgl-opaque-blend
           {
             python3 --version
             node --version
             npm --version
             uname -sm
             sw_vers
-          } > harness/diagnostics/intel-cgl-signal-decay-cached/toolchain.log 2>&1
-          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-signal-decay-cached/baseline-npm.log
-          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-signal-decay-cached/candidate-npm.log
-          python3 harness/scripts/test-intel-cgl-signal-decay-cached.py
-          node candidate/scripts/test-signal-texture-decay-two.cjs
-          node candidate/scripts/test-cached-shadow-transmission.cjs
+          } > harness/diagnostics/intel-cgl-opaque-blend/toolchain.log 2>&1
+          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-opaque-blend/baseline-npm.log
+          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-opaque-blend/candidate-npm.log
+          python3 harness/scripts/test-intel-cgl-opaque-blend.py
+          node candidate/scripts/test-shared-opaque-blend.cjs
       - name: Install one original checksum and signature verified browser per pair
         env:
-          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-signal-decay-cached-browser
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-opaque-blend-browser
           PRODUCT: ${{ matrix.product }}
           VERSION: ${{ matrix.version }}
         run: |
-          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-signal-decay-cached/install.log
-          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-signal-decay-cached/install.json
+          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-opaque-blend/install.log
+          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-opaque-blend/install.json
       - name: Normalize indexing once and run both original native suites
         env:
-          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-signal-decay-cached-browser
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-opaque-blend-browser
           PRODUCT: ${{ matrix.product }}
           CANDIDATE: ${{ matrix.candidate }}
         run: >-
-          python3 harness/scripts/run-intel-cgl-signal-decay-cached.py
+          python3 harness/scripts/run-intel-cgl-opaque-blend.py
           --source-root "$GITHUB_WORKSPACE"
           --candidate "$CANDIDATE" --product "$PRODUCT"
           --installation "$INSTALL_DIR/install.json"
-          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-signal-decay-cached"
+          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-opaque-blend"
       - name: Preserve all non-release evidence even when a source fails
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: diagnostic-intel-cgl-signal-decay-cached-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: harness/diagnostics/intel-cgl-signal-decay-cached/
+          name: diagnostic-intel-cgl-opaque-blend-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: harness/diagnostics/intel-cgl-opaque-blend/
           if-no-files-found: error
           retention-days: 14

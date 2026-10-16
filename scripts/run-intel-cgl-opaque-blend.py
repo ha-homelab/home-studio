@@ -14,9 +14,9 @@ import threading
 import time
 
 
-BASELINE = '13b8ed9e1f0baf68eac329764a05277377113419'
+BASELINE = '7b7a896225aaf27fef26a135d654dfaddffe2c08'
 CANDIDATES = {
-    'signal-decay-cached': 'd94352dbf1d99ecffd65c5479ce31e76bbc8d3c4',
+    'opaque-blend': '6549b9675f6131feb529b873e110eea01bc82d33',
 }
 VERSIONS = {'firefox': '153.5.0esr', 'waterfox': '6.7.6'}
 DRIVER_FILES = (
@@ -270,7 +270,7 @@ def run_comparison(source_root, installation, output, candidate, product):
     output.mkdir(parents=True, exist_ok=True)
     manifest = {
         'schema': 1, 'diagnosticOnly': True, 'releaseEligible': False, 'acceptanceStatus': 'not-run',
-        'purpose': 'Same-host Intel Signal texture, decay-two and cached transmission comparison with common Spotlight normalization; never release qualification',
+        'purpose': 'Same-host Intel Shared opaque blend state comparison with common Spotlight normalization; never release qualification',
         'candidate': candidate, 'product': product, 'expectedVersion': VERSIONS[product],
         'startedAt': utc_now(), 'status': 'preparing', 'arms': [],
         'order': [name for name, _ in arms],

@@ -10,10 +10,10 @@ from unittest.mock import patch
 
 
 HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location('intel_comparison', HERE / 'run-intel-cgl-signal-decay-cached.py')
+spec = importlib.util.spec_from_file_location('intel_comparison', HERE / 'run-intel-cgl-opaque-blend.py')
 comparison = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(comparison)
-ARMS = (('baseline', comparison.BASELINE), ('candidate', comparison.CANDIDATES['signal-decay-cached']))
+ARMS = (('baseline', comparison.BASELINE), ('candidate', comparison.CANDIDATES['opaque-blend']))
 
 
 class IntelComparisonTests(unittest.TestCase):
@@ -35,7 +35,7 @@ class IntelComparisonTests(unittest.TestCase):
         self.addCleanup(machine.stop)
 
     def run_fixture(self, exit_codes, mutate=False, mismatched_driver=False,
-                    candidate='signal-decay-cached', product='firefox', mutate_install=False,
+                    candidate='opaque-blend', product='firefox', mutate_install=False,
                     cpu_error=False, indexing_codes=None, indexing_statuses=None):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -144,8 +144,8 @@ class IntelComparisonTests(unittest.TestCase):
 
     def test_exact_two_source_order(self):
         self.assertEqual(ARMS, (
-            ('baseline', '13b8ed9e1f0baf68eac329764a05277377113419'),
-            ('candidate', 'd94352dbf1d99ecffd65c5479ce31e76bbc8d3c4'),
+            ('baseline', '7b7a896225aaf27fef26a135d654dfaddffe2c08'),
+            ('candidate', '6549b9675f6131feb529b873e110eea01bc82d33'),
         ))
 
     def test_original_command_has_only_the_standard_installation_arguments(self):
@@ -173,13 +173,13 @@ class IntelComparisonTests(unittest.TestCase):
              patch.object(comparison.platform, 'machine', return_value='arm64'), \
              patch.object(comparison.subprocess, 'run') as run:
             root = Path(directory)
-            self.assertEqual(comparison.run_comparison(root, root / 'missing.json', root / 'output', 'signal-decay-cached', 'firefox'), 1)
+            self.assertEqual(comparison.run_comparison(root, root / 'missing.json', root / 'output', 'opaque-blend', 'firefox'), 1)
             run.assert_not_called()
             self.assertEqual(json.loads((root / 'output/comparison.json').read_text())['status'], 'infrastructure-error')
 
     def test_both_product_pairs_keep_fixed_revisions_versions_and_host_records(self):
         self.assertEqual(comparison.CANDIDATES, {
-            'signal-decay-cached': 'd94352dbf1d99ecffd65c5479ce31e76bbc8d3c4',
+            'opaque-blend': '6549b9675f6131feb529b873e110eea01bc82d33',
         })
         self.assertEqual(comparison.VERSIONS, {'firefox': '153.5.0esr', 'waterfox': '6.7.6'})
         for candidate, revision in comparison.CANDIDATES.items():
@@ -236,9 +236,9 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertEqual(data['uptimeError'], 'TimeoutExpired')
 
     def test_workflow_is_fixed_read_only_two_pair_diagnostic(self):
-        text = (HERE.parent / '.github/workflows/intel-cgl-signal-decay-cached.yml').read_text()
-        self.assertIn('branches: [diagnostic/intel-cgl-signal-decay-cached]', text)
-        self.assertIn("github.ref == 'refs/heads/diagnostic/intel-cgl-signal-decay-cached'", text)
+        text = (HERE.parent / '.github/workflows/intel-cgl-opaque-blend.yml').read_text()
+        self.assertIn('branches: [diagnostic/intel-cgl-opaque-blend]', text)
+        self.assertIn("github.ref == 'refs/heads/diagnostic/intel-cgl-opaque-blend'", text)
         self.assertIn('runs-on: macos-15-intel', text)
         self.assertIn('timeout-minutes: 30', text)
         self.assertIn('max-parallel: 2', text)
@@ -254,7 +254,7 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertIn('python3 baseline/scripts/setup-native-browser.py', text)
         self.assertIn('permissions:\n  contents: read', text)
         self.assertIn('if: ${{ always() }}', text)
-        self.assertIn('name: diagnostic-intel-cgl-signal-decay-cached-', text)
+        self.assertIn('name: diagnostic-intel-cgl-opaque-blend-', text)
         self.assertEqual(text.count('persist-credentials: false'), 3)
         self.assertNotRegex(text, r'workflow_dispatch|pull_request|secrets\.|continue-on-error|workflow_call|diagnose-restore|diagnose-native-draw')
         uses = re.findall(r'uses: ([^\s]+)', text)
@@ -265,16 +265,15 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertNotRegex(quality, re.compile(r'^  push:', re.MULTILINE))
         for name in ('release-pipeline.yml', 'pages.yml'):
             workflow = (HERE.parent / '.github/workflows' / name).read_text()
-            self.assertNotIn('diagnostic/intel-cgl-signal-decay-cached', workflow)
+            self.assertNotIn('diagnostic/intel-cgl-opaque-blend', workflow)
         for path in (HERE.parent / '.github/workflows').glob('intel-cgl-*.yml'):
-            if path.name != 'intel-cgl-signal-decay-cached.yml':
-                self.assertNotIn('diagnostic/intel-cgl-signal-decay-cached', path.read_text())
+            if path.name != 'intel-cgl-opaque-blend.yml':
+                self.assertNotIn('diagnostic/intel-cgl-opaque-blend', path.read_text())
         self.assertFalse((HERE.parent / '.github/workflows/intel-cgl-boundaries.yml').exists())
 
     def test_candidate_cpu_contract_runs_before_browser_installation(self):
-        text = (HERE.parent / '.github/workflows/intel-cgl-signal-decay-cached.yml').read_text()
-        commands = ['node candidate/scripts/test-signal-texture-decay-two.cjs',
-                    'node candidate/scripts/test-cached-shadow-transmission.cjs']
+        text = (HERE.parent / '.github/workflows/intel-cgl-opaque-blend.yml').read_text()
+        commands = ['node candidate/scripts/test-shared-opaque-blend.cjs']
         prepare = text.split('      - name: Record tooling and prepare both fixtures before timing\n', 1)[1].split('      - name:', 1)[0]
         self.assertEqual([line.strip() for line in prepare.splitlines() if line.strip().startswith('node candidate/')], commands)
         self.assertNotRegex(prepare, r'(?m)^ +if:|continue-on-error|\|\|')
