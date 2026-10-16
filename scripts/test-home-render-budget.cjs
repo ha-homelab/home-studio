@@ -8,6 +8,71 @@ const root = path.resolve(__dirname, '..');
 
 (async () => {
   const THREE = await import('data:text/javascript;base64,' + fs.readFileSync(path.join(root, 'vendor/three.module.min.js')).toString('base64'));
+  const materialContext = vm.createContext({THREE, renderProfile: {diffuseLighting: false}});
+  const materialFactory = fs.readFileSync(path.join(root, 'viewer.js'), 'utf8').split('\n').find(line=>line.startsWith('function createSceneMaterial('));
+  vm.runInContext(materialFactory, materialContext);
+  const appearance = {color: 0x2288bb, emissive: 0x123456, roughness: .8, metalness: .35,
+    transparent: true, opacity: .16, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true};
+  for (const diffuse of [false, true, false]) {
+    materialContext.renderProfile.diffuseLighting = diffuse;
+    const material = materialContext.createSceneMaterial(appearance);
+    assert.equal(Boolean(material.isMeshLambertMaterial), diffuse);
+    assert.equal(Boolean(material.isMeshStandardMaterial), !diffuse);
+    assert.equal(material.color.getHex(), appearance.color);
+    assert.equal(material.emissive.getHex(), appearance.emissive);
+    for (const field of ['transparent','opacity','depthWrite','side','forceSinglePass']) assert.equal(material[field], appearance[field]);
+    if (!diffuse) { assert.equal(material.roughness,.8); assert.equal(material.metalness,.35); }
+    material.dispose();
+  }
+  const clipSource=fs.readFileSync(path.join(root,'viewer.js'),'utf8').split('\n').find(line=>line.startsWith('function applyStaticMeshClipping('));
+  const cutaway=new THREE.Plane(new THREE.Vector3(0,-1,0),1.15);
+  const clipContext=vm.createContext({THREE,renderProfile:{diffuseLighting:true},clipping:cutaway});
+  vm.runInContext(clipSource,clipContext);
+  const floor={kind:'floors',vertices:[[-4,-2,6],[8,-2,-3],[8,-1,6]]};
+  const newFloorMaterial=()=>new THREE.MeshLambertMaterial({side:THREE.DoubleSide});
+  const clippedFloor=newFloorMaterial(),originalVertices=JSON.stringify(floor.vertices);
+  clipContext.applyStaticMeshClipping(floor,clippedFloor);
+  assert.equal(clippedFloor.clippingPlanes.length,1);
+  assert.notEqual(clippedFloor.clippingPlanes[0],cutaway);
+  assert.equal(clippedFloor.clipShadows,false);
+  assert.equal(JSON.stringify(floor.vertices),originalVertices,'Clipping setup cannot change static geometry');
+  for(const kind of ['walls','frames','doors','windows'])for(const diffuse of [false,true]){
+    clipContext.renderProfile.diffuseLighting=diffuse;
+    const material=newFloorMaterial();clipContext.applyStaticMeshClipping({kind,vertices:floor.vertices},material);
+    assert.equal(material.clippingPlanes[0],cutaway,'Existing cutaway semantics remain shared');
+    assert.equal(material.clipShadows,false);material.dispose();
+  }
+  for(const [diffuse,source,appearance]of [[false,floor,{}],[true,{...floor,kind:'stairs'},{}],
+    [true,floor,{transparent:true}],[true,floor,{side:THREE.FrontSide}],
+    [true,{...floor,vertices:[]},{}],[true,{...floor,vertices:[[0,NaN,0]]},{}],
+    [true,{...floor,vertices:[[0,Infinity,0]]},{}],[true,{...floor,vertices:[[0,1e39,0]]},{}]]){
+    clipContext.renderProfile.diffuseLighting=diffuse;
+    const material=new THREE.MeshLambertMaterial({side:THREE.DoubleSide,...appearance});
+    clipContext.applyStaticMeshClipping(source,material);assert.equal(material.clippingPlanes,null,'Unsupported or unchanged materials retain original clipping');material.dispose();
+  }
+  clipContext.renderProfile.diffuseLighting=true;
+  let clipChecks=0;
+  for(const scale of [.001,1,1000,1e8])for(const offset of [-20,0,35]){
+    const vertices=floor.vertices.map(v=>v.map(x=>(x+offset)*scale));
+    const material=newFloorMaterial();
+    clipContext.applyStaticMeshClipping({kind:'floors',vertices},material);
+    const plane=material.clippingPlanes[0];
+    for(const target of [new THREE.Vector3(),new THREE.Vector3(offset*scale,offset*scale,offset*scale)])for(let angle=0;angle<6;angle++){
+      const camera=new THREE.PerspectiveCamera();camera.position.set(Math.cos(angle)*100*scale,80*scale,Math.sin(angle)*100*scale).add(target);camera.lookAt(target);camera.updateMatrixWorld();
+      const viewPlane=plane.clone().applyMatrix4(camera.matrixWorldInverse);
+      const normal=viewPlane.normal.toArray().map(Math.fround),constant=Math.fround(viewPlane.constant);
+      for(let a=0;a<=5;a++)for(let b=0;b<=5-a;b++){
+        const point=new THREE.Vector3().fromArray(vertices[0]).multiplyScalar(a/5).addScaledVector(new THREE.Vector3().fromArray(vertices[1]),b/5).addScaledVector(new THREE.Vector3().fromArray(vertices[2]),1-(a+b)/5);
+        const view=point.applyMatrix4(camera.matrixWorldInverse).toArray().map(Math.fround);
+        const fragmentDot=Math.fround(normal.reduce((sum,n,i)=>Math.fround(sum+Math.fround(-view[i]*n)),0));
+        assert(fragmentDot<=constant,'Float32 clipping math must preserve every sampled floor fragment');clipChecks++;
+      }
+    }
+    assert.equal(material.side,THREE.DoubleSide);assert.equal(material.transparent,false);assert.equal(material.depthWrite,true);material.dispose();
+  }
+  assert.equal(clipChecks,3024);
+  const constant=clippedFloor.clippingPlanes[0].constant;cutaway.constant=20;
+  assert.equal(clippedFloor.clippingPlanes[0].constant,constant,'User cutaway changes cannot clip an originally unclipped floor');clippedFloor.dispose();
   const lighting = vm.createContext({});
   vm.runInContext(fs.readFileSync(path.join(root, 'room-lighting.js'), 'utf8'), lighting);
   for (const count of [0, 1, 4, 5, 16, 17, 64, 100, 1000]) {

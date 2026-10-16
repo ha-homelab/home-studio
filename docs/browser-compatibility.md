@@ -123,9 +123,11 @@ generated viewers and planner recovery; see [cross-platform acceptance](platform
 Passing a Playwright Firefox run is evidence for that bundled Firefox build,
 operating system, and graphics backend. It does not certify Waterfox. Likewise,
 Chromium with SwiftShader exercises software WebGL rather than physical GPU
-performance. Safari and mobile browsers still need their own target-browser
-acceptance runs. Read the native Waterfox job's own version, platform, graphics
-backend, and outcome when assessing the expanded coverage. Neither these
+performance. Native Safari has a separate macOS WebDriver job; Playwright WebKit
+is not a substitute for that job. Phone and tablet viewport profiles do not
+certify physical iPhones, iPads, or Android devices. Read each native browser
+job's own version, platform, graphics backend, and outcome when assessing the
+expanded coverage. Neither these
 earlier measurements nor a hosted CI result certifies every user's environment.
 
 No exact cause of a reported Waterfox browser crash has been established by the
@@ -158,7 +160,8 @@ oversized intermediate buffer. The separate 3D preview uses at most 2,000,000
 pixels and device pixel ratio 2, with a 2048 by 2048 sun shadow map. Positively
 identified software renderers use at most 250,000 drawing pixels and a 512 by
 512 sun shadow map. Native and unidentified renderers retain the normal
-profile. HTML controls retain their normal resolution.
+profile, except when the narrowly scoped masked-Apple capacity check described
+below selects the reduced profile. HTML controls retain their normal resolution.
 
 Orbiting reuses the existing drawing buffer and sun shadow map. Geometry
 changes and context restoration invalidate the shadow; they do not start a
@@ -167,7 +170,9 @@ does not use the generated viewer's room-light or point-shadow budget.
 
 Hidden pages suspend drawing. A lost WebGL context pauses the 3D preview while
 2D editing and JSON export remain available. When the browser restores the
-context, the preview redraws at the current viewport size. Discarding a page
+context, the planner retires it and builds a fresh canvas and renderer at the
+current viewport size, preserving the camera and edited project. Old canvas
+listeners are removed before the replacement receives input. Discarding a page
 disconnects the resize observer, disposes preview geometry, materials, shadows,
 and the renderer, and releases the context. A retained back/forward-cache page
 suspends and resumes instead of disposing its scene.
@@ -180,7 +185,8 @@ validation limits remain unchanged.
 ## Generated viewer rendering bounds
 
 Native and unidentified renderers allow at most eight point lights to cast
-occlusion shadows; positively identified software renderers allow at most two.
+occlusion shadows; positively identified software renderers and the measured
+slow masked-Apple path described below allow at most two.
 The renderer reserves four fragment texture units for the directional shadow
 and material maps, reducing the point-shadow count further when
 `maxTextures - 4` is below the selected limit. The first eligible fixtures in
@@ -199,13 +205,68 @@ The main canvas drawing buffer is capped at 2,000,000 pixels and device pixel
 ratio 2, scaling below the native display resolution when necessary. When the
 reported renderer positively identifies SwiftShader, llvmpipe, softpipe,
 Lavapipe, a software rasterizer, Microsoft Basic Render, or the exact
-`Apple Software Renderer` name, the cap is 250,000
-pixels, with the smaller point-shadow limits above and a 512 by 512 directional
+`Apple Software Renderer` name, the cap is 250,000 pixels, except that this
+revision caps the Apple diffuse viewer at 125,000 pixels. The same
+125,000-pixel cap applies when the masked-Apple capacity check selects diffuse
+lighting; other software renderers and the planner retain their existing caps.
+This reduces each canvas dimension by about 29% at the cap and can make edges
+and fine details softer. It is an explicit image-quality tradeoff, with no
+promised speedup on an unmeasured device. A small Editor canvas-aspect change
+can result from integer drawing-buffer rounding; Home layout and HTML controls
+retain their dimensions. All reduced
+profiles keep the smaller point-shadow limits above and a 512 by 512 directional
 shadow map. Native and unknown renderers retain the 2,000,000-pixel cap and
-2048 by 2048 directional shadow map. HTML labels and controls retain their normal
-resolution. Both profiles retain full physically based material lighting and
-room confinement for every light; the software profile reduces canvas detail
-and shadow coverage/resolution. Size and pixel ratio are applied in one renderer
+2048 by 2048 directional shadow map unless the masked-Apple capacity check below
+selects the reduced profile. HTML labels and controls retain their normal
+resolution. The Apple software rasterizer uses simpler diffuse materials and
+unfiltered shadows for lit surfaces, retaining room confinement, color and every
+linked light. Architectural wall fill is an exception in both Home and Editor:
+its constant-tint Basic material keeps geometry, opacity, cutaway clipping,
+outlines and shadow casting, but receives no lighting, daylight or shadows and
+has no animated or view-dependent sheen. In the Editor only, supported opaque
+static floors also use constant-tint materials without received lighting or
+shadows. The separate authoring backdrop is hidden, leaving the grid and real
+floors visible; geometry, clipping, floor shadow casting, furniture and outlines
+are retained. Other profiles retain their backdrop, and Home's existing hidden
+backdrop is unchanged. Returning to Home restores the original
+floor materials and their lighting. See the
+[profile and qualification notes](platform-acceptance.md). Packed room geometry
+for lit surfaces is enabled only within a conservative uniform budget; otherwise
+the original geometry shader is used. Other identified software renderers retain
+physically based materials.
+
+While dragging this diffuse viewer, the scene uses at most 62,500 pixels inside
+its unchanged drawing buffer. A cached texture copies those pixels to the full
+canvas; releasing or cancelling the pointer draws the original full-resolution
+scene. Lights, shadows, geometry and camera calculations are retained. This
+motion-only reduction does not affect HTML controls, resting frames, the planner,
+or other graphics profiles. The copy pass adds one real draw, included in the
+acceptance counters and interaction time. Its resources are disposed on context
+loss and final page teardown; page-cache suspension retains the bounded texture.
+
+On identified software paths, the first moved-pointer frame is scheduled normally.
+Later camera-motion events share one deadline: 64 ms on other software paths,
+and the last successful motion draw duration clamped to 64–250 ms on Apple
+diffuse rendering. Each event updates the camera without restarting the timer.
+The duration is local to the gesture and requires no GL query or synchronization.
+It measures synchronous submission and driver blocking, not asynchronous GPU
+completion. This coalesces intermediate positions and can add up to 250 ms
+between motion frames; it does not promise a particular frame rate.
+Pointer release, cancellation, resize and live-state updates bypass the delay. Hidden pages and
+lost contexts cancel it. Software paths using physically based materials still
+draw directly at their full resolution, with the same antialiasing, materials
+and shadows; only the diffuse path uses the motion copy described above.
+Hardware graphics retain their original frame scheduling.
+
+Gecko can report both hardware and software as `Apple M1, or similar`. For that
+exact label with a Gecko user agent, a one-time, fixed 32-by-32 raster check on
+the existing context measures capacity. Five valid pixel readbacks and a best
+measured draw of at least 15 ms select the same reduced diffuse profile. This
+measures a slow path, not GPU identity. Fast, failed, unsupported, and other
+unidentified paths keep normal rendering. See the [capacity workload and
+calibration](platform-acceptance.md) for its scope and limitations.
+
+Size and pixel ratio are applied in one renderer
 call, avoiding a separate ratio update against
 the old dimensions. These are pixel budgets, not a measurement of total GPU
 memory: color/depth storage, driver overhead, directional shadows, and geometry
@@ -216,10 +277,18 @@ change. Fixtures keep their shader slots when switched off, using zero intensity
 instead of changing the compiled light count. An initial host inventory identical
 to the viewer's current inventory does not rebuild the scene.
 
-The room-light shader evaluates room transmission at most once per lit room per
-fragment and skips unlit rooms. An exactly zero cached transmission skips that
+The normal room-light shader caches transmission once per lit room per fragment.
+The packed diffuse path calculates it on demand for the bounded shadow prefix
+and once per consecutive unshadowed room run, avoiding a dynamically indexed
+fragment-local array that is expensive in Apple's legacy software interpreter.
+Both paths skip unlit and distant rooms; exactly zero transmission skips the
 light's distance, attenuation, shadow, and direct surface-reflectance work.
-Nonzero contributions retain the same lighting calculation.
+Nonzero contributions retain the same lighting calculation and order.
+
+The packed path recognizes exact axis-aligned rectangles after coordinate
+quantization and uses their box distance directly. Other polygons retain the
+edge calculation, including in mixed plans. This changes neither room shapes
+nor the distance at which light fades through an opening.
 
 The 24-room, 72-light acceptance fixture exposed excessive software shader
 compilation from expanding a full lighting block for every fixture. Only the
@@ -227,17 +296,15 @@ bounded shadow-casting prefix is now expanded into literal shader indices, as
 required for its shadow samplers. Consecutive unshadowed lights from the same room share a runtime range. A
 fragment outside that room skips the whole range; otherwise one shared loop
 evaluates every light in its original order, with the same room confinement
-and material response. Range ends use one preallocated integer array, and state
-updates do not change the shader layout.
+and material response. Room-run data use preallocated integer storage, and
+state updates do not change the shader layout.
 No light is dropped or merged. Total light count and generated room/window shader
 size remain unbounded by the rendering profile, so larger projects still need
 testing against the target GPU's limits.
 
-Each room also has its own signed-distance function with its original polygon
-edges. Transmission, daylight, and exterior-light calls select that function
-directly. This prevents software shader compilers from expanding a full
-room-selection branch chain at every call, while preserving the same boundary,
-distance, and doorway-spill calculations.
+The literal fallback gives each room its own signed-distance function. The
+packed path uses shared runtime helpers and packed geometry. Both preserve the
+original boundary, distance, and doorway-spill calculations.
 For point-light transmission, an axis-aligned room bound expanded by 0.56 m
 rejects distant fragments before evaluating the polygon: the existing spill
 already reaches zero at 0.55 m. In-range and concave boundaries still use the
@@ -250,7 +317,12 @@ only advances during requested draws; it starts no animation loop. The existing
 reduced-motion, hidden-page, and limited-device guards keep that tint stationary.
 
 Rapid pointer and wheel input is combined into one pending animation-frame
-request. There is no idle rendering loop. Hidden pages and lost contexts pause
+request. Live state messages update controls and scene properties immediately,
+then share that same pending frame. A successful explicit draw satisfies the
+queued request; a hidden or zero-sized stage does not discard it. An unchanged
+initial host inventory does not redraw the already-presented disconnected state:
+the first state message supplies the live presentation. There is no idle
+rendering loop. Hidden pages and lost contexts pause
 draw submission and cancel pending draws. Restoration invalidates shadow maps,
 applies the current viewport size, and requests a fresh draw. On page discard,
 the viewer disconnects its resize observer, disposes the renderer, and releases
@@ -302,14 +374,16 @@ captures out of public reports.
 
 ## Candidate releases
 
-The stable `v0.6.2` base is already occupied. The next repair candidates use the
-reviewed `0.6.3` source base in
+The stable `v0.6.3` base is already occupied. The next repair candidates use the
+reviewed `0.6.4` source base in
 `custom_components/home_floorplan/manifest.json`; the release workflow allocates
-immutable `v0.6.3-beta.N` and `v0.6.3-rc.N` tags. A successful RC also requires the
+immutable `v0.6.4-beta.N` and `v0.6.4-rc.N` tags. A successful RC also requires the
 configured offline fuzz campaigns and source-bound release evidence.
 
-Candidates are prereleases. Publishing one does not establish Waterfox or
-physical-device acceptance and does not deploy a Home Assistant installation.
+Candidate publication requires passing the configured browser checks. That
+evidence applies only to the verified versions and environments; it does not
+certify other Waterfox configurations or physical devices, or deploy a Home
+Assistant installation.
 The hosted drawing tool follows a separate GitHub Pages workflow: a push to
 `main` stages the allowlisted website, including `planner/editor.js`, and
 deploys it. Publishing a beta or RC is not a gate on that website deployment.

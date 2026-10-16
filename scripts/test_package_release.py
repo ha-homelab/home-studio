@@ -4,6 +4,8 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -48,6 +50,21 @@ class PublicPackageTests(unittest.TestCase):
                 self.assertNotIn(b"\r", (first.parent / "home-studio.version.json").read_bytes())
                 with self.assertRaises(FileExistsError):
                     packaging.package(root, root / "one", "a" * 40)
+
+    def test_extracted_public_source_compiles_and_installs_without_checkout(self):
+        with tempfile.TemporaryDirectory(prefix="home-studio-source-") as temporary:
+            work = Path(temporary)
+            archive = packaging.package(packaging.ROOT, work / "dist", "a" * 40)
+            with zipfile.ZipFile(archive) as contents:
+                self.assertIn("home-studio/planner/interaction-render.js", contents.namelist())
+                action = ".github/actions/upload-acceptance-artifact/action.yml"
+                self.assertEqual(contents.read("home-studio/" + action),
+                                 (packaging.ROOT / action).read_bytes())
+                contents.extractall(work / "extracted")
+            source = work / "extracted/home-studio"
+            result = subprocess.run([sys.executable, "scripts/test-public-package.py"],
+                                    cwd=source, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_invalid_source_is_rejected_before_output(self):
         with tempfile.TemporaryDirectory() as temp:

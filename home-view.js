@@ -160,6 +160,11 @@ homeView = (() => {
     bridge?.postMessage({type:'view_preferences',sidebarCollapsed:controlsCollapsed});
   };
 
+  function attachRoomLighting() {
+    const attach=()=>{roomLighting?.attach(root,active,{staticGeometry:true});roomLighting?.attach(objectGroup,active)};
+    if(editorFloorMaterials)editorFloorMaterials.attachLighting(attach);else attach();
+  }
+
   function setActive(value) {
     active = value;previewTV(null);
     if(lowerFloorContext)lowerFloorContext.visible=value&&showLowerFloor&&!selected;
@@ -169,18 +174,22 @@ homeView = (() => {
       scene.background = new THREE.Color(value ? '#18242c' : '#e7e8df');
       // A dim base keeps unlit rooms readable while HA lights provide the contrast.
       hemisphere.intensity = value ? .16 : 1.8; sun.intensity = value ? .18 : 2.3;
-      ground.visible = grid.visible = !value;
+      // Keep the Editor grid and real floors; omit its backdrop on the diffuse profile.
+      ground.visible = !value && !renderProfile.diffuseLighting; grid.visible = !value;
       // Keep window heads visible.
       clipping.constant = value ? 2.1 : $('cutaway').checked ? 1.15 : 20;
       // Keep full-height shadow blockers when changing view modes.
-      roomLighting?.attach(root,value);roomLighting?.attach(objectGroup,value);
+      editorFloorMaterials?.setHomeActive(value);
+      attachRoomLighting();
       updateFixtureShadows();
       for (const mesh of root.children) if (['fixtures','stairs'].includes(mesh.userData.category)) mesh.visible = value || $(mesh.userData.category).checked;
     }
     if (overlayGroup) overlayGroup.visible = value;
     if(!value)for(const point of points)clearTrail(point);
     if (!value) showMode(false);
-    refreshControls(); requestAnimationFrame(() => window.resizeModel?.());
+    refreshControls();
+    const before=window.floorplan?.renderCount;
+    requestAnimationFrame(()=>{window.resizeModel?.();if(window.floorplan?.renderCount===before)window.requestModelRender?.()});
   }
 
   function rebuildControls() {
@@ -234,8 +243,8 @@ homeView = (() => {
     }
     const lights=points.filter(point=>point.light).map(point=>point.light),lightCount=lights.length;
     configurePointShadows(lights, renderer?.capabilities, renderProfile);
-    if(!roomLighting || roomLighting.capacity<lightCount)roomLighting=createRoomLighting(THREE,model.rooms.map(room=>({...room,exterior:(model.exterior_rooms||[]).includes(room.id),polygon:room.polygon.map(([x,z])=>[xm(x),zm(z)])})),lightCount,daylightWindows);
-    roomLighting.attach(root,active);roomLighting.attach(objectGroup,active);
+    if(!roomLighting || roomLighting.capacity<lightCount){roomLighting?.dispose();roomLighting=createRoomLighting(THREE,model.rooms.map(room=>({...room,exterior:(model.exterior_rooms||[]).includes(room.id),polygon:room.polygon.map(([x,z])=>[xm(x),zm(z)])})),lightCount,daylightWindows,{packed:renderProfile.diffuseLighting===true,maxFragmentUniforms:renderer.capabilities.maxFragmentUniforms,literalLambertDirectional:true,literalLambertPointBody:true,literalLambertShadowPoint:true,literalLambertIndirect:true,directShadowUniforms:true,scalarLambertAccumulators:true,pointDecayTwo:true,pointTexture:true,runTexture:true,geometryTexture:true,signalTexture:true,maxTextureSize:renderer.capabilities.maxTextureSize,maxTextures:renderer.capabilities.maxTextures});}
+    attachRoomLighting();
     updateFixtureShadows();
   }
 
@@ -489,7 +498,11 @@ homeView = (() => {
   function drawSignalFrame(redraw){
     if(!active||!camera||!renderer)return;
     refreshSignalStatus();
-    if(redraw){drawScene(camera);renderCount++;}
+    if(redraw){
+      // A state update can change lights before its scheduled full frame.
+      if(roomLighting?.geometryMode==='packed')roomLighting.update(points,camera);
+      drawScene(camera);renderCount++;
+    }
   }
   function render() {
     if(!active || !renderer)return;
@@ -514,10 +527,10 @@ homeView = (() => {
     const half=Math.max(cameraFit.height/2,cameraFit.width/aspect/2)*1.15/zoom;
     const cx=cameraFit.x+panX, cy=cameraFit.y+panY;
     camera.left=cx-half*aspect;camera.right=cx+half*aspect;camera.top=cy+half;camera.bottom=cy-half;camera.updateProjectionMatrix();
-    roomLighting?.update(points);
     if(lowerFloorContext)lowerFloorContext.visible=showLowerFloor&&!selected;
     $('homeFloorContext').disabled=!!selected;
     assumedZones?.render(selected,signalZone);refreshSignalStatus();
+    roomLighting?.update(points,camera);
     drawScene(camera);renderCount++;
     for(const label of labels) label.el.textContent=(rect.width<600 ? roomCode(label.room) : roomName(label.room))+(label.power?' · '+label.power:'');
     for(const point of [...labels,...points.map(p=>({el:p.marker,position:p.anchor||(!isCover(p.item)&&model.control_groups?.[p.item.id]?p.position.clone().setY(p.item.position_m.y+p.item.dimensions_m.height):p.position)}))]) {
@@ -587,7 +600,7 @@ homeView = (() => {
     renderer.domElement.addEventListener('pointerdown',e=>{if(active && e.button===0){start={x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY};renderer.domElement.setPointerCapture(e.pointerId);}});
     renderer.domElement.addEventListener('pointermove',e=>{if(!start || !active || !camera)return;
       if(Math.hypot(e.clientX-start.x,e.clientY-start.y)>6)start.moved=true;
-      if(start.moved){const rect=renderer.domElement.getBoundingClientRect();panX-=(e.clientX-start.lastX)*(camera.right-camera.left)/rect.width;panY+=(e.clientY-start.lastY)*(camera.top-camera.bottom)/rect.height;window.requestModelRender?.();}
+      if(start.moved){const rect=renderer.domElement.getBoundingClientRect();panX-=(e.clientX-start.lastX)*(camera.right-camera.left)/rect.width;panY+=(e.clientY-start.lastY)*(camera.top-camera.bottom)/rect.height;window.requestModelRender?.(true);}
       start.lastX=e.clientX;start.lastY=e.clientY;});
     renderer.domElement.addEventListener('pointercancel',()=>start=null);
     renderer.domElement.addEventListener('pointerup',e=>{
@@ -666,6 +679,6 @@ homeView = (() => {
     $('homeToggleControls').textContent=vt(controlsCollapsed?'Show controls':'Hide controls');
     for(const label of labels)label.el.setAttribute('aria-label',vt('Focus room')+': '+roomName(label.room));
   }
-  return {get active(){return active},refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
+  return {get active(){return active},releaseGPU(){roomLighting?.releaseGPU();},dispose(){roomLighting?.dispose();},refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
     get illuminated(){return points.filter(p=>p.overlay?.visible && active).map(p=>p.item.id)}};
 })();

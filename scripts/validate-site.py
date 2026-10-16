@@ -12,10 +12,31 @@ LOCALE_CODES = (
     'en', 'ar', 'bn', 'cs', 'de', 'es', 'fa', 'fr', 'he', 'hi', 'id', 'it',
     'ja', 'ko', 'nl', 'pl', 'pt', 'ru', 'th', 'tr', 'uk', 'vi', 'zh-Hans', 'zh-Hant',
 )
+# These reviewed binary seeds encode only byte extrema, not arbitrary files.
+BINARY_REPLAY_SEEDS = {
+    'fuzz/corpus/wall-geometry/rectangle': bytes(range(14)),
+    'fuzz/corpus/wall-geometry/limits': bytes([255]) * 14,
+}
+FUZZ_REPLAY_FILES = (
+    'fuzz/project-validation.test.mjs', 'fuzz/wall-geometry.test.mjs',
+    'fuzz/project-validation.mjs', 'fuzz/wall-geometry.mjs', 'fuzz/bounds-oracle.mjs',
+    'fuzz/corpus/project-validation/empty.json',
+    'fuzz/corpus/project-validation/example-home.json',
+    'fuzz/corpus/project-validation/practice-home.json',
+    'fuzz/corpus/project-validation/invalid-title.json',
+    'fuzz/corpus/project-validation/prototype.json',
+    'fuzz/corpus/project-validation/furniture-valid.json',
+    'fuzz/corpus/project-validation/furniture-invalid-type.json',
+    'fuzz/corpus/project-validation/furniture-invalid-color.json',
+    'fuzz/corpus/project-validation/furniture-invalid-model.json',
+    'fuzz/corpus/project-validation/furniture-invalid-style.json',
+    'fuzz/corpus/project-validation/furniture-invalid-pattern.json',
+    *BINARY_REPLAY_SEEDS,
+)
 
 SITE_FILES = (
     'index.html', 'site.css', 'privacy.html', 'install.html', '404.html', '.nojekyll',
-    'planner/index.html', 'planner/editor.css', 'planner/editor.js',
+    'planner/index.html', 'planner/editor.css', 'planner/editor.js', 'planner/render-capacity.js', 'planner/interaction-render.js',
     'planner/i18n.js', 'planner/validation.js', 'planner/locales/index.js',
     'planner/help.js', 'planner/help.css', 'planner/help-locales.js', 'planner/language-links.js',
     *(f'planner/locales/{code}.js' for code in LOCALE_CODES),
@@ -39,16 +60,32 @@ REPO_FILES = ('docs/i18n.md', 'docs/translations/README.md',
               *(f'viewer-locales/{code}.json' for code in LOCALE_CODES),
               'README.md', 'LICENSE', '.gitignore', '.gitattributes', 'scripts/validate-site.py', '.github/workflows/pages.yml',
               '.github/workflows/package.yml', '.github/workflows/platform-acceptance.yml',
+              '.github/actions/upload-acceptance-artifact/action.yml',
               'docs/architecture.md', 'docs/platform-acceptance.md',
               'scripts/build-planner-project.py', 'scripts/install-home-assistant.py',
               'scripts/package_release.py', 'scripts/test_package_release.py',
+              'scripts/test_source_replay.py', *FUZZ_REPLAY_FILES,
+              'scripts/test-light-state.cjs', 'scripts/test-tv-screen.cjs', 'scripts/test-media-preview.cjs',
               'scripts/test-install-home-assistant.py', 'scripts/test-public-package.py', 'scripts/test-wall-tops.cjs',
-              'scripts/test-rounded-walls.cjs', 'scripts/test-wall-sheen.cjs', 'scripts/test-wall-motion.cjs', 'docs/rounded-walls.md',
+              'scripts/test-rounded-walls.cjs', 'scripts/test-wall-sheen.cjs', 'scripts/test-wall-motion.cjs', 'scripts/test-wall-outline-materials.cjs', 'scripts/test-unlit-architectural-walls.cjs', 'scripts/test-flat-editor-floors.cjs', 'docs/rounded-walls.md',
               'scripts/test-browser-stability.cjs', 'scripts/browser-stability-diagnostics.cjs',
+              'scripts/browser-startup-diagnostics.cjs', 'scripts/test-browser-startup-diagnostics.cjs',
               'scripts/test-browser-stability-diagnostics.cjs', 'scripts/test-home-render-budget.cjs',
+              'scripts/test-packed-room-lighting.cjs', 'scripts/test-zero-point-block.cjs', 'scripts/test-point-decay-two.cjs', 'scripts/test-cached-shadow-transmission.cjs', 'scripts/test-literal-lambert-directional.cjs', 'docs/literal-lambert-directional.md', 'docs/point-decay-two.md', 'scripts/test-glass-wall-program.cjs', 'scripts/test-fallback-shared-program.cjs',
+              'scripts/test-point-texture-current.cjs', 'scripts/test-point-run-texture.cjs', 'scripts/test-static-geometry-atlas.cjs', 'scripts/test-point-signal-texture.cjs', 'scripts/test-signal-texture-decay-two.cjs', 'scripts/test-literal-lambert-point-body.cjs', 'scripts/test-scalar-shadow-point.cjs', 'scripts/test-scalar-indirect-lambert.cjs', 'scripts/test-direct-shadow-uniforms.cjs', 'scripts/test-scalar-lambert-accumulators.cjs',
               'scripts/waterfox-versions.json', 'scripts/setup-waterfox.py', 'scripts/test-waterfox-acceptance.py',
-              'scripts/test-waterfox-tooling.py',
-              'scripts/test-render-lifecycle.cjs', 'docs/browser-compatibility.md',
+              'scripts/test-waterfox-tooling.py', 'scripts/native-viewer-program-diagnostics.js', 'scripts/test-native-viewer-programs.cjs',
+              'scripts/prepare-intel-macos-ci.py', 'scripts/test-intel-macos-ci.py',
+              'scripts/firefox-versions.json', 'scripts/native_browser.py',
+              'scripts/setup-native-browser.py', 'scripts/test-native-browser-acceptance.py',
+              'scripts/diagnose-native-draw.py', 'scripts/native-draw-diagnostic.js',
+              'scripts/test-native-draw-diagnostic.py', 'scripts/test-native-draw-diagnostic.cjs',
+              'scripts/test-safari-acceptance.py', 'scripts/test-safari-tooling.py',
+              'scripts/browser-matrix.json', 'scripts/browser-matrix.py',
+              'scripts/setup-browser-toolchain.py', 'scripts/setup-chrome-for-testing.py',
+              'scripts/install-browser-with-retry.py', 'scripts/test-browser-install.py',
+              'scripts/test-browser-matrix.py',
+              'scripts/test-render-capacity.cjs', 'scripts/test-interaction-render.cjs', 'scripts/test-render-lifecycle.cjs', 'scripts/test-viewer-geometry-context.cjs', 'scripts/test-viewer-texture-context.cjs', 'docs/browser-compatibility.md',
               'scripts/test-planner-stability.cjs', 'scripts/test-planner-render-budget.cjs',
               'scripts/test-viewer-startup.cjs', 'scripts/test-module-expiry.cjs', 'scripts/test-floor-context.py', 'scripts/test-floor-context.cjs',
               'planner/project.py', 'planner/package.json', 'planner/catalog.json', 'planner/furniture.py',
@@ -101,6 +138,10 @@ def validate(root):
     documents = {}
     for relative in (*SITE_FILES, *REPO_FILES):
         path = regular_file(root, relative)
+        if relative in BINARY_REPLAY_SEEDS:
+            if path.read_bytes() != BINARY_REPLAY_SEEDS[relative]:
+                raise ValueError(f'Unexpected binary replay seed: {relative}')
+            continue
         if path.suffix == '.jpg':
             continue
         text = path.read_text(encoding='utf-8')

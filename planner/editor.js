@@ -1,4 +1,5 @@
 import './language-links.js';
+import { getRenderCapacity } from './render-capacity.js';
 import { formatValidationError } from './validation.js';
 import { t, LOCALES, initI18n, setLocale, getLocale, onLocaleChange, translateStatic } from './i18n.js';
 
@@ -612,28 +613,35 @@ planCanvas.addEventListener('wheel', e => { e.preventDefault(); zoomPlan(Math.ex
 
 // On-demand 3D rendering. Opening cuts and solid wall pieces use the same metric project.
 let renderer = null, scene = null, camera = null, worldGroup = null, previewSun = null, previewUnavailable = false, previewMetadata = {};
-let previewLost = false, previewSize = '', previewPixels = 2000000;
+let previewLost = false, previewSize = '', previewPixels = 2000000, previewInitialized = false, previewRendererDisposed = false, previewInstancing = false, previewDiffuseLighting = false;
 const orbit = { yaw: -Math.PI / 3, pitch: .8, radius: 17, baseRadius: 17, target: new THREE.Vector3(4, 0, 3), pointer: null };
+function createPreviewMaterial(options) {
+  if (!previewDiffuseLighting) return new THREE.MeshStandardMaterial(options);
+  const { roughness, metalness, ...shared } = options;
+  return new THREE.MeshLambertMaterial(shared);
+}
 function previewRenderProfile(gl) {
-  try {
-    const info = gl.getExtension('WEBGL_debug_renderer_info');
-    if (info && /swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe|^Apple Software Renderer$/i.test(gl.getParameter(info.UNMASKED_RENDERER_WEBGL))) return { pixels: 250000, shadowSize: 512 };
-  } catch { /* A hidden renderer name keeps the normal rendering profile. */ }
-  return { pixels: 2000000, shadowSize: 2048 };
+  const capacity = getRenderCapacity(gl);
+  const profile = capacity.reduced
+    ? { pixels: 250000, shadowSize: 512, instanceCatalog: capacity.diffuseLighting, diffuseLighting: capacity.diffuseLighting }
+    : { pixels: 2000000, shadowSize: 2048, instanceCatalog: false, diffuseLighting: false };
+  if (capacity.rasterProbe) profile.rasterProbe = capacity.rasterProbe;
+  return profile;
 }
 function initPreview() {
   if (renderer || previewUnavailable) return;
   try {
-    renderer = new THREE.WebGLRenderer({ canvas: $('preview-canvas'), antialias: true, alpha: false }); renderer.setClearColor(0xf2f4ed); renderer.outputColorSpace = THREE.SRGBColorSpace;
-    const profile = previewRenderProfile(renderer.getContext()); previewPixels = profile.pixels;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = .9; renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: true, alpha: false }); previewRendererDisposed = false; renderer.setClearColor(0xf2f4ed); renderer.outputColorSpace = THREE.SRGBColorSpace;
+    const profile = previewRenderProfile(renderer.getContext()); previewPixels = profile.pixels; previewInstancing = profile.instanceCatalog; previewDiffuseLighting = profile.diffuseLighting;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = .9; renderer.shadowMap.enabled = true; renderer.shadowMap.type = previewDiffuseLighting ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
     scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(40, 1, .02, 1500); scene.add(new THREE.HemisphereLight(0xffffff, 0xc7cfbc, 1.7));
     previewSun = new THREE.DirectionalLight(0xfff6e6, 2.5); previewSun.castShadow = true; previewSun.shadow.mapSize.set(profile.shadowSize, profile.shadowSize); previewSun.shadow.normalBias = .025; previewSun.shadow.bias = -.0002; scene.add(previewSun); scene.add(previewSun.target);
     // Orbiting moves only the camera. Reuse shadows until scene geometry changes.
     previewSun.shadow.autoUpdate = false; previewSun.shadow.needsUpdate = true;
     const fill = new THREE.DirectionalLight(0xdce9f2, .5); fill.position.set(12, 10, -10); scene.add(fill);
-    worldGroup = new THREE.Group(); scene.add(worldGroup); fitPreview();
-  } catch (error) { renderer?.dispose(); renderer?.forceContextLoss(); previewUnavailable = true; $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
+    worldGroup = new THREE.Group(); scene.add(worldGroup);
+    if (!previewInitialized) { fitPreview(); previewInitialized = true; }
+  } catch (error) { disposePreviewRenderer(); renderer?.forceContextLoss(); previewUnavailable = true; $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
 }
 function previewFloors() { return $('all-floors').checked ? project.floors : [floor()]; }
 function fitPreview() {
@@ -647,20 +655,75 @@ function fitPreview() {
 }
 function disposePreviewGeometry() {
   if (!worldGroup) return;
-  while (worldGroup.children.length) { const child = worldGroup.children[0]; worldGroup.remove(child); child.traverse(obj => { obj.geometry?.dispose(); if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose()); else obj.material?.dispose(); }); }
+  const geometries = new Set(), materials = new Set();
+  const dispose = (resource, seen) => { if (resource && !seen.has(resource)) { seen.add(resource); resource.dispose(); } };
+  while (worldGroup.children.length) {
+    const child = worldGroup.children[0]; worldGroup.remove(child);
+    child.traverse(obj => { if (obj.isInstancedMesh) obj.dispose(); dispose(obj.geometry, geometries); if (Array.isArray(obj.material)) obj.material.forEach(material => dispose(material, materials)); else dispose(obj.material, materials); });
+  }
+}
+function disposePreviewRenderer() {
+  if (!renderer || previewRendererDisposed) return;
+  disposePreviewGeometry();
+  if (previewSun) { previewSun.shadow.dispose(); previewSun.shadow.map = null; previewSun.shadow.mapPass = null; }
+  renderer.dispose(); previewRendererDisposed = true;
+}
+function instancePreviewCatalog(groups) {
+  // Only batch disjoint opaque furniture. Overlaps retain their original draw
+  // order, including coincident surfaces with different appearance variants.
+  worldGroup.updateMatrixWorld(true);
+  const catalog = new Set(groups), blocked = new Set();
+  const bounds = worldGroup.children.map(object => ({ object, box: new THREE.Box3().setFromObject(object) }))
+    .sort((a, b) => a.box.min.x - b.box.min.x);
+  let comparisons = 0;
+  for (let i = 0; i < bounds.length; i++) {
+    const a = bounds[i];
+    for (let j = i + 1; j < bounds.length && bounds[j].box.min.x < a.box.max.x; j++) {
+      // Dense imported projects must not turn a draw optimization into a stall.
+      if (++comparisons > 100000) return;
+      const b = bounds[j];
+      if (Math.min(a.box.max.x, b.box.max.x) - Math.max(a.box.min.x, b.box.min.x) > 1e-7 &&
+          Math.min(a.box.max.y, b.box.max.y) - Math.max(a.box.min.y, b.box.min.y) > 1e-7 &&
+          Math.min(a.box.max.z, b.box.max.z) - Math.max(a.box.min.z, b.box.min.z) > 1e-7) {
+        if (catalog.has(a.object)) blocked.add(a.object);
+        if (catalog.has(b.object)) blocked.add(b.object);
+      }
+    }
+  }
+  const batches = new Map();
+  for (const group of groups) if (!blocked.has(group)) {
+    for (const mesh of group.children) {
+      if (!batches.has(mesh.geometry)) batches.set(mesh.geometry, []);
+      batches.get(mesh.geometry).push(mesh);
+    }
+  }
+  for (const meshes of batches.values()) if (meshes.length > 1) {
+    const first = meshes[0], batch = new THREE.InstancedMesh(first.geometry, first.material, meshes.length);
+    batch.name = first.name; batch.castShadow = first.castShadow; batch.receiveShadow = first.receiveShadow;
+    meshes.forEach((mesh, index) => {
+      batch.setMatrixAt(index, mesh.matrixWorld); mesh.removeFromParent();
+      if (mesh !== first) mesh.material.dispose();
+    });
+    batch.instanceMatrix.needsUpdate = true; batch.computeBoundingBox(); batch.computeBoundingSphere();
+    worldGroup.add(batch);
+  }
+  for (const group of groups) if (!group.children.length) worldGroup.remove(group);
 }
 function rebuildPreview() {
   disposePreviewGeometry();
+  // Cached asset parts are immutable. Share their geometry only within this
+  // rebuild; every mesh keeps its own material, transform and rendering order.
+  const catalogGeometries = new Map(), catalogGroups = [];
   let wallMeshCount = 0, openingCount = 0, roomCount = 0, itemCount = 0, catalogItemCount = 0, itemMeshCount = 0;
   const box = (width, height, depth, position, color, rotation = 0, opacity = 1) => {
-    const geometry = new THREE.BoxGeometry(width, height, depth), material = new THREE.MeshStandardMaterial({ color, roughness: .78, transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
+    const geometry = new THREE.BoxGeometry(width, height, depth), material = createPreviewMaterial({ color, roughness: .78, transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
     const mesh = new THREE.Mesh(geometry, material); mesh.position.set(...position); mesh.rotation.y = rotation; mesh.castShadow = opacity >= 1; mesh.receiveShadow = true; worldGroup.add(mesh); return mesh;
   };
   for (const f of previewFloors()) {
     for (const r of f.rooms) {
       const shape = new THREE.Shape(); r.polygon.forEach((p, i) => { if (i) shape.lineTo(p[0], -p[1]); else shape.moveTo(p[0], -p[1]); }); shape.closePath();
       const geo = new THREE.ExtrudeGeometry(shape, { depth: .08, bevelEnabled: false }); geo.rotateX(-Math.PI / 2);
-      const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: COLORS[r.material], roughness: .9 })); mesh.position.y = f.elevation_m - .08; mesh.receiveShadow = true; mesh.castShadow = true; worldGroup.add(mesh); roomCount++;
+      const mesh = new THREE.Mesh(geo, createPreviewMaterial({ color: COLORS[r.material], roughness: .9 })); mesh.position.y = f.elevation_m - .08; mesh.receiveShadow = true; mesh.castShadow = true; worldGroup.add(mesh); roomCount++;
     }
     for (const wall of f.walls) {
       const len = distance(wall.start, wall.end), dx = (wall.end[0] - wall.start[0]) / len, dz = (wall.end[1] - wall.start[1]) / len, angle = -Math.atan2(dz, dx);
@@ -682,11 +745,15 @@ function rebuildPreview() {
       if (asset) {
         const group = new THREE.Group(); group.position.set(p.x, f.elevation_m + p.y, p.z); group.rotation.y = rotation; group.scale.set(d.width, d.height, d.depth);
         for (const part of asset.meshes) {
-          const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(part.vertices.flat(), 3)); geometry.setAttribute('normal', new THREE.Float32BufferAttribute(part.normals.flat(), 3)); geometry.setIndex(part.indices);
-          const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(...asset.materials[part.material].slice(0, 3)), roughness: .78 });
+          let geometry = catalogGeometries.get(part);
+          if (!geometry) {
+            geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(part.vertices.flat(), 3)); geometry.setAttribute('normal', new THREE.Float32BufferAttribute(part.normals.flat(), 3)); geometry.setIndex(part.indices);
+            catalogGeometries.set(part, geometry);
+          }
+          const material = createPreviewMaterial({ color: new THREE.Color(...asset.materials[part.material].slice(0, 3)), roughness: .78 });
           const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; mesh.castShadow = true; mesh.receiveShadow = true; group.add(mesh); itemMeshCount++;
         }
-        worldGroup.add(group); catalogItemCount++; continue;
+        worldGroup.add(group); catalogGroups.push(group); catalogItemCount++; continue;
       }
       box(d.width, d.height, d.depth, [p.x, f.elevation_m + p.y + d.height / 2, p.z], COLORS[item.type], rotation); itemMeshCount++;
       if (item.type === 'tv') {
@@ -701,6 +768,7 @@ function rebuildPreview() {
   previewSun.position.set(cx - span * .6, high + span * 1.3, cz + span * .5); previewSun.target.position.set(cx, low, cz);
   Object.assign(previewSun.shadow.camera, { left: -span, right: span, top: span, bottom: -span, near: .1, far: span * 5 + 100 }); previewSun.shadow.camera.updateProjectionMatrix();
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(span * 8, span * 8), new THREE.ShadowMaterial({ color: '#54654c', opacity: .14 })); ground.rotation.x = -Math.PI / 2; ground.position.set(cx, low - .081, cz); ground.receiveShadow = true; worldGroup.add(ground);
+  if (previewInstancing) instancePreviewCatalog(catalogGroups);
   let meshCount = 0; worldGroup.traverse(object => { if (object.isMesh) meshCount++; });
   previewMetadata = { floors: previewFloors().map(f => f.id), rooms: roomCount, wallSolidPieces: wallMeshCount, openings: openingCount, items: itemCount, catalogItems: catalogItemCount, itemMeshes: itemMeshCount, meshes: meshCount, renderCount: previewMetadata.renderCount || 0 };
   previewSun.shadow.needsUpdate = true;
@@ -723,18 +791,65 @@ function drawPreview() {
 }
 function renderPreview() { if (view !== 'preview' || canvasSuspended || document.hidden || previewLost) return; initPreview(); if (!renderer || previewUnavailable) return; if (previewDirty) rebuildPreview(); drawPreview(); }
 function zoomPreview(factor) { orbit.radius = Math.max(1, Math.min(600, orbit.radius / factor)); requestCanvasRender(); }
-const previewCanvas = $('preview-canvas');
-previewCanvas.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); previewCanvas.focus(); orbit.pointer = { x: e.clientX, y: e.clientY, yaw: orbit.yaw, pitch: orbit.pitch }; previewCanvas.setPointerCapture(e.pointerId); });
-previewCanvas.addEventListener('pointermove', e => { if (!orbit.pointer) return; orbit.yaw = orbit.pointer.yaw - (e.clientX - orbit.pointer.x) * .007; orbit.pitch = Math.max(.1, Math.min(1.5, orbit.pointer.pitch + (e.clientY - orbit.pointer.y) * .007)); requestCanvasRender(); });
-for (const event of ['pointerup', 'pointercancel']) previewCanvas.addEventListener(event, e => { orbit.pointer = null; if (previewCanvas.hasPointerCapture(e.pointerId)) previewCanvas.releasePointerCapture(e.pointerId); });
-previewCanvas.addEventListener('wheel', e => { e.preventDefault(); zoomPreview(Math.exp(-e.deltaY * .0015)); }, { passive: false });
-previewCanvas.addEventListener('keydown', e => {
-  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-'].includes(e.key)) return; e.preventDefault();
-  if (e.key === 'ArrowLeft') orbit.yaw -= .12; if (e.key === 'ArrowRight') orbit.yaw += .12; if (e.key === 'ArrowUp') orbit.pitch = Math.min(1.5, orbit.pitch + .1); if (e.key === 'ArrowDown') orbit.pitch = Math.max(.1, orbit.pitch - .1);
-  if (e.key === '+' || e.key === '=') zoomPreview(1.15); else if (e.key === '-') zoomPreview(1 / 1.15); else requestCanvasRender();
-});
-previewCanvas.addEventListener('webglcontextlost', e => { e.preventDefault(); previewLost = true; cancelCanvasRender(); $('preview-error').hidden = false; translatedText('preview-error', 'The graphics context was lost. Reload to restore 3D. Your local draft and JSON export remain available.'); });
-previewCanvas.addEventListener('webglcontextrestored', () => { previewLost = false; previewSize = ''; if (previewSun) previewSun.shadow.needsUpdate = true; $('preview-error').hidden = true; requestCanvasRender(); });
+let previewCanvas = $('preview-canvas'), previewEvents;
+function releasePreviewPointer(event) {
+  const pointer = orbit.pointer;
+  if (event && pointer && event.pointerId !== pointer.id) return;
+  orbit.pointer = null;
+  if (pointer && previewCanvas.hasPointerCapture(pointer.id)) previewCanvas.releasePointerCapture(pointer.id);
+}
+function bindPreviewCanvas() {
+  previewEvents = new AbortController();
+  const canvas = previewCanvas, options = { signal: previewEvents.signal };
+  canvas.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || orbit.pointer || previewLost || previewUnavailable) return;
+    e.preventDefault(); canvas.focus();
+    orbit.pointer = { id: e.pointerId, x: e.clientX, y: e.clientY, yaw: orbit.yaw, pitch: orbit.pitch };
+    canvas.setPointerCapture(e.pointerId);
+  }, options);
+  canvas.addEventListener('pointermove', e => {
+    if (!orbit.pointer || orbit.pointer.id !== e.pointerId) return;
+    orbit.yaw = orbit.pointer.yaw - (e.clientX - orbit.pointer.x) * .007;
+    orbit.pitch = Math.max(.1, Math.min(1.5, orbit.pointer.pitch + (e.clientY - orbit.pointer.y) * .007)); requestCanvasRender();
+  }, options);
+  for (const event of ['pointerup', 'pointercancel']) canvas.addEventListener(event, releasePreviewPointer, options);
+  canvas.addEventListener('wheel', e => { e.preventDefault(); zoomPreview(Math.exp(-e.deltaY * .0015)); }, { ...options, passive: false });
+  canvas.addEventListener('keydown', e => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-'].includes(e.key)) return; e.preventDefault();
+    if (e.key === 'ArrowLeft') orbit.yaw -= .12; if (e.key === 'ArrowRight') orbit.yaw += .12; if (e.key === 'ArrowUp') orbit.pitch = Math.min(1.5, orbit.pitch + .1); if (e.key === 'ArrowDown') orbit.pitch = Math.max(.1, orbit.pitch - .1);
+    if (e.key === '+' || e.key === '=') zoomPreview(1.15); else if (e.key === '-') zoomPreview(1 / 1.15); else requestCanvasRender();
+  }, options);
+  canvas.addEventListener('webglcontextlost', e => {
+    e.preventDefault(); previewLost = true; cancelCanvasRender(); releasePreviewPointer();
+    // Release old scene callbacks and Three's context listeners while GL is
+    // lost. Nothing from this renderer may run against a restored context.
+    disposePreviewRenderer(); previewDirty = true;
+    // This canvas will be retired after restoration. Keep its restored native
+    // drawing buffer minimal instead of allocating the full preview twice.
+    canvas.width = 0; canvas.height = 0;
+    $('preview-error').hidden = false; translatedText('preview-error', 'The graphics context was lost. Reload to restore 3D. Your local draft and JSON export remain available.');
+  }, options);
+  canvas.addEventListener('webglcontextrestored', () => {
+    if (!previewLost) return;
+    const retired = renderer, focused = document.activeElement === canvas;
+    previewEvents.abort();
+    // A new canvas guarantees a new native context, not just new Three caches.
+    // The old renderer has already been disposed while its context was lost.
+    const replacement = canvas.cloneNode(false);
+    replacement.width = 0; replacement.height = 0;
+    canvas.replaceWith(replacement); previewCanvas = replacement; bindPreviewCanvas();
+    renderer = scene = camera = worldGroup = previewSun = null;
+    previewLost = false; previewSize = ''; previewDirty = true;
+    // Retire the detached context before the next frame creates its replacement.
+    // Its loss is intentional cleanup; no app handlers remain on that canvas.
+    retired?.forceContextLoss();
+    $('preview-error').hidden = true;
+    resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect());
+    if (focused) previewCanvas.focus({ preventScroll: true });
+    requestCanvasRender();
+  }, options);
+}
+bindPreviewCanvas();
 
 // Project actions and keyboard navigation.
 function exportProject() {
@@ -833,7 +948,7 @@ canvasObserver.observe(document.querySelector('.canvas-shell'));
 document.addEventListener('visibilitychange', () => { if (document.hidden) cancelCanvasRender(); else { resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); } });
 window.addEventListener('pagehide', event => {
   canvasSuspended = true; cancelCanvasRender();
-  if (!event.persisted) { canvasObserver.disconnect(); disposePreviewGeometry(); previewSun?.shadow.dispose(); renderer?.dispose(); renderer?.forceContextLoss(); }
+  if (!event.persisted) { canvasObserver.disconnect(); previewEvents.abort(); releasePreviewPointer(); disposePreviewRenderer(); renderer?.forceContextLoss(); }
 });
 window.addEventListener('pageshow', () => { canvasSuspended = false; resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); });
 window.planner = Object.freeze({ getProject: () => clone(project), getPreviewMetadata: () => ({ ...previewMetadata }), getView: () => view, getSelection: () => selection && { ...selection }, worldToScreen: point => toScreen(point), validate: () => validateProject(clone(project), { complete: true }) });

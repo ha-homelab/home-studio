@@ -53,8 +53,10 @@ Run the cheap regression checks with `node --test fuzz/*.test.mjs`.
 It accepts ordinary `Error` and the production `ValidationError` exactly; unexpected
 subclasses, including `TypeError` and `RangeError`, remain findings.
 
-Use Node 24 in a source checkout; contributor infrastructure is not part of the
-end-user application ZIP.
+The deterministic replay tests and their fixed fictional corpus are included in
+versioned source ZIPs and need no dependency installation. Full mutation campaigns
+below require Node 24 in a source checkout; the Jazzer dependency manifests and
+release infrastructure are not part of the end-user application ZIP.
 
 ```sh
 npm ci --prefix fuzz --ignore-scripts --no-audit --no-fund
