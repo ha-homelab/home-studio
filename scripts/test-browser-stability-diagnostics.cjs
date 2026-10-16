@@ -477,6 +477,17 @@ function freshPreviewHarness(view = 'preview') {
     replaceWith(next) { assert.equal(activeCanvas,this);this.isConnected=false;next.isConnected=true;activeCanvas=next; }
     emit(type, values={}) { const event=new Event(type,{cancelable:true});Object.assign(event,values);this.dispatchEvent(event);return event; }
   }
+  for(const dimension of ['width','height']) Object.defineProperty(Canvas.prototype,dimension,{
+    get(){return this[`_${dimension}`];},
+    set(value){
+      const renderer=renderers.find(renderer=>renderer.domElement===this);
+      if(value===0&&renderer) {
+        assert(renderer.lost&&renderer.disposed,'Shrink only after disposing the lost renderer');
+        assert.equal(this.captured.size,0,'Release captured pointers before shrinking the lost canvas');
+      }
+      this[`_${dimension}`]=value;
+    },
+  });
   activeCanvas=new Canvas();
   const vector = () => ({x:0,y:0,z:0,set(x,y,z){Object.assign(this,{x,y,z});}});
   const resource = name => ({dispose(){traces.push(name);}});
@@ -493,7 +504,7 @@ function freshPreviewHarness(view = 'preview') {
     }
     setClearColor() {}
     getContext() {return {getExtension:()=>null};}
-    setDrawingBufferSize(...args) {allocations.push(args);}
+    setDrawingBufferSize(...args) {allocations.push(args);this.domElement.width=Math.floor(args[0]*args[2]);this.domElement.height=Math.floor(args[1]*args[2]);}
     render() {assert(!this.lost&&!this.disposed);traces.push(`render-${this.id}`);}
     dispose() { assert(this.lost || vm.runInContext('canvasSuspended',context));this.disposed=true;traces.push(`dispose-${this.id}`);this.domElement.removeEventListener('webglcontextrestored',this.restored); }
     forceContextLoss() {this.lost=true;traces.push(`retire-${this.id}`);this.domElement.emit('webglcontextlost');}
@@ -544,6 +555,7 @@ test('fresh preview retires old resources and handlers while preserving orbit, p
   assert(!original.hasPointerCapture(9));
   assert.equal(h.evaluate('orbit.pointer'),null);
   assert.deepEqual(h.traces,['cancel','geometry','material-a','material-b','shadow-map','shadow-pass','dispose-1']);
+  assert.deepEqual([original.width,original.height],[0,0],'A lost canvas must not restore its former full-size backing buffer');
   h.restore();
   assert.notEqual(h.canvas,original);
   assert.deepEqual(h.canvas.attributes,original.attributes);
@@ -557,6 +569,8 @@ test('fresh preview retires old resources and handlers while preserving orbit, p
   assert(h.evaluate('document.activeElement === previewCanvas'),'Canvas focus survives replacement');
   h.flush();
   assert.equal(h.renderers.length,2);
+  assert(h.canvas.width>1&&h.canvas.height>1,'The replacement resumes rendering at the full viewport budget');
+  assert.deepEqual([original.width,original.height],[0,0],'The detached canvas keeps minimal storage after its replacement renders');
   assert.equal(h.renderers.filter(renderer=>!renderer.lost).length,1);
   assert.equal(h.fitCalls,2,'Replacement initialization must not refit and reset the saved orbit');
   assert.equal(h.evaluate('JSON.stringify({...orbit,pointer:null})'),orbit);
@@ -686,7 +700,7 @@ test('planner recovery variants select real actions and retain restoration check
   async function recover(actions, layoutMode, secondLoss = false) {
     const env = {PLANNER_STABILITY_RESTORE_LAYOUT:layoutMode};
     if (actions !== undefined) env.PLANNER_STABILITY_RECOVERY_ACTIONS=actions;
-    const trace = [], record = {}, checks = [], stats = {contextLosses:0,retiredContextLosses:0,contexts:1,contextLossRequests:[],shaderErrors:[],errors:[]};
+    const trace = [], record = {}, checks = [], stats = {contextLosses:0,retiredContextLosses:0,contexts:1,contextLossRequests:[],restoredBuffers:[],shaderErrors:[],errors:[]};
     const project = {floors:[{items:[{position_m:{x:2,z:1}}]}]};
     const memory = {geometries:2077,textures:1}, orbit=[0,0,10];
     let lost=false, renderCount=1, viewport={width:1440,height:1000}, exported, resizedWhileLost=false;
@@ -697,7 +711,7 @@ test('planner recovery variants select real actions and retain restoration check
       scene:{memory,pixelRatio:1,buffer:[viewport.width,viewport.height],orbit}});
     const extension = {
       loseContext() {lost=true;stats.contextLosses++;stats.contextLossRequests.push({contextId:1,attached:true,retirement:false,matched:true});trace.push('lose');},
-      restoreContext() {assert(lost);lost=false;resizedWhileLost=false;stats.contextLosses++;stats.retiredContextLosses=1;stats.contexts=2;stats.contextLossRequests.push({contextId:1,attached:false,retirement:true,matched:true});if(secondLoss)stats.contextLosses++;trace.push('restore');},
+      restoreContext() {assert(lost);lost=false;resizedWhileLost=false;stats.contextLosses++;stats.retiredContextLosses=1;stats.contexts=2;stats.contextLossRequests.push({contextId:1,attached:false,retirement:true,matched:true});stats.restoredBuffers.push({contextId:1,canvas:[0,0],drawingBuffer:[1,1],lost:false});if(secondLoss)stats.contextLosses++;trace.push('restore');},
     };
     const window = {__plannerStats:stats,planner:{getPreviewMetadata:()=>current().preview},
       __plannerScene:()=>({layout:viewport}),

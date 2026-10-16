@@ -763,6 +763,9 @@ function bindPreviewCanvas() {
     // Release old scene callbacks and Three's context listeners while GL is
     // lost. Nothing from this renderer may run against a restored context.
     disposePreviewRenderer(); previewDirty = true;
+    // This canvas will be retired after restoration. Keep its restored native
+    // drawing buffer minimal instead of allocating the full preview twice.
+    canvas.width = 0; canvas.height = 0;
     $('preview-error').hidden = false; translatedText('preview-error', 'The graphics context was lost. Reload to restore 3D. Your local draft and JSON export remain available.');
   }, options);
   canvas.addEventListener('webglcontextrestored', () => {

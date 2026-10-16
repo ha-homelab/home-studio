@@ -52,7 +52,7 @@ function fixture() {
 }
 
 function instrument() {
-  const stats=window.__plannerStats={planDraws:0,canvasResizes:0,contexts:0,contextLosses:0,retiredContextLosses:0,linkedPrograms:0,shaderErrors:[],errors:[],contextEvents:[],contextLossRequests:[],linkFailures:[],recoveryOperations:[]};
+  const stats=window.__plannerStats={planDraws:0,canvasResizes:0,contexts:0,contextLosses:0,retiredContextLosses:0,linkedPrograms:0,shaderErrors:[],errors:[],contextEvents:[],contextLossRequests:[],restoredBuffers:[],linkFailures:[],recoveryOperations:[]};
   const contexts=[];
   window.__plannerContextStates=()=>contexts.map(({id,canvas,gl,restores})=>({id,attached:canvas.isConnected,lost:gl.isContextLost(),restores}));
   window.__plannerTraceRenderer=(renderer,readLayout)=>{
@@ -123,6 +123,12 @@ function instrument() {
           stats.linkFailures.push({log,lost:context.isContextLost(),program:stats.linkedPrograms,phase:window.__plannerRecoveryPhase||'edit-and-preview',time:performance.now()});
         }
       };
+      // Capture before the app retires this context in its restored listener.
+      // These GL dimensions do not read layout or settle ResizeObserver work.
+      this.addEventListener('webglcontextrestored',()=>{
+        stats.restoredBuffers.push({contextId:tracked.id,canvas:[this.width,this.height],
+          drawingBuffer:[context.drawingBufferWidth,context.drawingBufferHeight],lost:context.isContextLost()});
+      },{capture:true});
       for(const type of ['webglcontextlost','webglcontextrestored']) this.addEventListener(type,event=>{
         const request=type==='webglcontextlost'?tracked.pendingLosses.shift():null;
         if(request)request.matched=true;
@@ -339,6 +345,12 @@ async function run(engine,origin) {
         [{contextId:1,attached:true,retirement:false,matched:true},{contextId:1,attached:false,retirement:true,matched:true}],
         'Both deliberate losses must match actual loseContext requests on the original context');
       check(recovery.after.stats.contextLosses===2&&recovery.after.stats.retiredContextLosses===1,'Restoration must have only the deliberate loss and detached-context retirement');
+      const restoredBuffer=recovery.after.stats.restoredBuffers;
+      check(restoredBuffer.length===1&&restoredBuffer[0].contextId===1&&!restoredBuffer[0].lost,
+        'The original context restores once before retirement');
+      assert.deepEqual(restoredBuffer[0].canvas,[0,0],'The retired canvas must not request a full-size restored buffer');
+      check(restoredBuffer[0].drawingBuffer.every(size=>Number.isInteger(size)&&size>=0&&size<=1),
+        'The retired native drawing buffer is at most one pixel per dimension');
       assert.deepEqual(recovery.contexts,[{id:1,attached:false,lost:true,restores:1},{id:2,attached:true,lost:false,restores:0}],
         'The retired context is released and exactly one replacement context remains active');
       check(await page.locator('#preview-canvas').count()===1,'Recovery keeps exactly one preview canvas');
