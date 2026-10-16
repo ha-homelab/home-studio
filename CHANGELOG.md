@@ -2,6 +2,13 @@
 
 ## [0.6.4] - Development line
 
+- Prototype an unlit architectural wall fill in the existing Apple software
+  diffuse profile, including its measured masked-Apple selection. Walls retain
+  their teal tint, opacity, cutaway geometry, outlines and shadow casting, but
+  no longer receive lighting, shadows, daylight or animated sheen. This visual
+  tradeoff also applies in the Editor. Other surfaces, lights and rendering
+  profiles are unchanged. Performance and visual acceptance remain unverified.
+
 - Separate Playwright browser bootstrap into one aggregate 30-second budget,
   then start the existing 120-second viewer or 180-second planner scenario
   budget immediately before application work. Keep all per-step checks, cleanup

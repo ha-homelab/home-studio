@@ -95,7 +95,9 @@ let renderProfile={pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSi
 // Apple's legacy software rasterizer spends seconds interpreting PBR fragments.
 // Diffuse materials keep room-constrained colored light, opacity and emissive
 // surfaces, with matte highlights and unfiltered shadows on reduced diffuse paths.
-function createSceneMaterial(options){if(!renderProfile.diffuseLighting)return new THREE.MeshStandardMaterial(options);const {roughness,metalness,...shared}=options;return new THREE.MeshLambertMaterial(shared)}
+// On the existing Apple software profile, wall fill is an unlit diagram tint.
+// Geometry, transparency, cutaway and cast shadows remain unchanged.
+function createSceneMaterial(options,kind){if(!renderProfile.diffuseLighting)return new THREE.MeshStandardMaterial(options);const {roughness,metalness,...shared}=options;if(kind==='walls'){const {emissive,emissiveIntensity,...unlit}=shared;return new THREE.MeshBasicMaterial(unlit)}return new THREE.MeshLambertMaterial(shared)}
 // Static opaque floors can share the clipped frame shader without changing
 // their visible half-space. The far plane is outside every original vertex;
 // it is independent of the user cutaway and never clips shadow passes.
@@ -318,7 +320,7 @@ const candidate=wallPrism(m,wallAxes.get(m.wall_id));
 const shape=candidate&&(m.wall_id||candidate.length>=candidate.depth*1.25)?candidate:null;
 const geometry=shape?wallDisplayGeometry(m,shape,clipping.constant):new THREE.BufferGeometry();
 if(!shape){geometry.setAttribute('position',new THREE.Float32BufferAttribute(m.vertices.flat(),3));geometry.setAttribute('normal',new THREE.Float32BufferAttribute(m.normals.flat(),3));geometry.setIndex(m.indices)}
-const col=model.materials[m.material];const mat=createSceneMaterial({color:m.kind==='walls'?0xb2d8d2:m.kind==='frames'?0x9abfcb:new THREE.Color(...col.slice(0,3)),roughness:.8,emissive:m.kind==='walls'?0x315d59:m.kind==='frames'?0x18333d:m.kind==='vehicles'?0x10181b:0,metalness:m.material==='steel'||m.kind==='vehicles'?.35:0,transparent:m.kind==='walls'||col[3]<1,opacity:m.kind==='walls'?.16:col[3],depthWrite:m.kind!=='walls',forceSinglePass:m.kind==='walls',side:THREE.DoubleSide});if(m.kind==='walls')mat.onBeforeCompile=applyWallSheen;applyStaticMeshClipping(m,mat);const mesh=new THREE.Mesh(geometry,mat);mesh.name=m.name;mesh.userData.category=m.kind;mesh.castShadow=col[3]===1;mesh.receiveShadow=true;
+const col=model.materials[m.material];const mat=createSceneMaterial({color:m.kind==='walls'?0xb2d8d2:m.kind==='frames'?0x9abfcb:new THREE.Color(...col.slice(0,3)),roughness:.8,emissive:m.kind==='walls'?0x315d59:m.kind==='frames'?0x18333d:m.kind==='vehicles'?0x10181b:0,metalness:m.material==='steel'||m.kind==='vehicles'?.35:0,transparent:m.kind==='walls'||col[3]<1,opacity:m.kind==='walls'?.16:col[3],depthWrite:m.kind!=='walls',forceSinglePass:m.kind==='walls',side:THREE.DoubleSide},m.kind);if(m.kind==='walls'&&!mat.isMeshBasicMaterial)mat.onBeforeCompile=applyWallSheen;applyStaticMeshClipping(m,mat);const mesh=new THREE.Mesh(geometry,mat);mesh.name=m.name;mesh.userData.category=m.kind;mesh.castShadow=col[3]===1;mesh.receiveShadow=true;
 if(shape){
   // The same draw uses the exact original 12 triangles for all shadow passes.
   // Three reads drawRange after onBeforeShadow; no buffers or materials change.
