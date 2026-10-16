@@ -1,5 +1,7 @@
 # Home studio
 
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15584/badge)](https://www.bestpractices.dev/projects/15584)
+
 [![Fuzzing: RC only](https://img.shields.io/badge/Fuzzing-RC%20only-blue)](docs/fuzzing.md)
 
 **[Start drawing](https://ha-homelab.github.io/home-studio/planner/)** ·
