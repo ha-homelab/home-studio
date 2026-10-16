@@ -616,6 +616,7 @@ function freshPreviewHarness(view = 'preview') {
     testMesh:()=>({traverse(callback){callback({geometry:resource('geometry'),material:[resource('material-a'),resource('material-b')]});}}),
     planCanvas:{},ctx:{setTransform(){}},canvasObserver:{disconnect(){traces.push('disconnect');}},
   });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../planner/render-capacity.js'), 'utf8').replace('export function ', 'function '), context);
   vm.runInContext(`
     let previewDirty=true,canvasSuspended=false,size={width:934,height:824},view=${JSON.stringify(view)};
     let firstResize=false,planSize='old',map={x:0,y:0};
