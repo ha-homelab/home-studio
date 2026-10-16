@@ -9,12 +9,16 @@ from urllib.parse import unquote, urlsplit
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-GUIDES = ('README.md', 'docs/dry-run.md', 'docs/i18n.md', 'docs/architecture.md', 'docs/process-and-results.md',
-          'docs/translations/README.md')
+GUIDES = ('README.md', 'CHANGELOG.md', 'docs/dry-run.md', 'docs/i18n.md', 'docs/architecture.md',
+          'docs/process-and-results.md', 'docs/quality-and-release.md', 'docs/quality.md',
+          'docs/fuzzing.md', 'docs/browser-compatibility.md', 'docs/release-workflow.md',
+          'docs/VERSIONING.md', 'docs/translations/README.md')
 WIKI = ('Home', '_Sidebar', 'Getting-started', 'Dry-run', 'Troubleshooting',
         'Languages', 'Development')
 DIAGRAMS = ('docs/images/dry-run-command-flow.svg', 'docs/images/plan-state-lifecycle.svg',
-            'docs/images/dry-run-delivery-process.svg', 'docs/images/dry-run-validation.svg')
+            'docs/images/dry-run-delivery-process.svg', 'docs/images/dry-run-validation.svg',
+            'docs/assets/quality/browser-coverage.svg', 'docs/assets/quality/fuzz-results.svg',
+            'docs/assets/quality/release-pipeline.svg', 'docs/assets/quality/webgl-recovery.svg')
 LINK = re.compile(r'!?\[[^\]\n]*\]\(\s*(<[^>]+>|[^\s)]+)(?:\s+[\"\'][^\n)]*)?\s*\)')
 REFERENCE = re.compile(r'^\s*\[[^\]]+\]:\s*(<[^>]+>|\S+)', re.M)
 

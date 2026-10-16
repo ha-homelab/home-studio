@@ -1,5 +1,9 @@
 # CI and release operations — ha-homelab/home-studio
 
+The [illustrated quality guide](quality-and-release.md) shows the stages and
+links a dated release's results. This page describes the operational commands
+and gates behind that process.
+
 The source of truth is `.release-policy.json`. `quality-gate.yml` runs the callable
 validation workflows and produces the required **CI gate** status on every PR
 and merge-queue commit. Superseded PR runs are cancelled. Without an explicit

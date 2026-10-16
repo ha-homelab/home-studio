@@ -2,7 +2,9 @@
 
 See the [illustrated RC fuzzing process and verified rollout results](https://github.com/victron-venus/venus-os-ci-toolkit/blob/main/docs/rc-fuzzing-results.md)
 for the shared release flow, evidence requirements and a dated cross-project
-snapshot. The project-specific scope and reproduction guidance below still apply.
+snapshot. The [Home Studio v0.6.4 evidence snapshot](quality-and-release.md#recorded-results-including-failures)
+connects one release's fuzz results to its browser checks and stable promotion.
+The project-specific scope and reproduction guidance below still apply.
 
 > **Local packaging:** `python3 scripts/release.py package` is unsupported in this repository because no shell packaging adapter is installed. Use the [project commands below](#local-release-packaging); the generic example in `release-workflow.md` does not apply here.
 

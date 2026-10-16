@@ -1,8 +1,44 @@
 # Changelog
 
-## Unreleased
+## [0.7.0] - Development line
 
-- Document private security reporting, source contribution and maintainer responsibilities. Add first-party Python/JavaScript CodeQL analysis and include project policies in public source packages.
+- Add optional AI room drafting with 15 configured cloud and local provider
+  profiles, guided setup, and a private loopback companion. Review validated
+  proposals before applying them to the drawing; the manual planner remains
+  available without AI.
+- Add localized Dry run controls that block device commands and native details
+  dialogs while live state updates and navigation continue. Unreadable or corrupt
+  preferences fail closed; the host rechecks the guard immediately before dispatch.
+- Add illustrated browser, graphics-recovery and release guidance, including
+  historical v0.6.4 evidence and links to the shared RC fuzzing process. Include
+  the diagrams and linked versioning guide in public source ZIPs.
+- Document private security reporting, contribution and maintainer responsibilities;
+  add first-party Python/JavaScript CodeQL analysis, verified network transport
+  profiles, and public package policy documents.
+
+### Upgrade
+
+Export your project JSON and back up Home Assistant before updating. Rebuild and
+reinstall generated viewers to receive the viewer changes. AI drafting is
+optional and uses the separately started local companion; follow
+[provider setup](docs/ai-provider-setup.md). Existing manual drawing and JSON
+export do not require a provider account.
+
+### Coverage
+
+Provider adapters are tested with mocks; exact model behavior and image support
+still require explicit live testing. The [platform matrix](docs/platform-acceptance.md)
+describes representative browser and operating-system checks, not every physical
+device or browser configuration. The v0.6.4 results in the illustrated guide are
+historical and do not qualify this release candidate.
+
+### Security
+
+The local companion keeps provider credentials in temporary memory. Cloud
+requests send the selected planning data to the chosen provider; local provider
+profiles use loopback endpoints. Review the [AI privacy boundaries](docs/ai-planning.md)
+before submitting photos or plans. Dry run is a preview aid, not physical-device
+acceptance or authorization to install into a real home.
 
 ## [0.6.4] - Development line
 

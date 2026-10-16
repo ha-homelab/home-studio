@@ -4,6 +4,9 @@
 
 [![Fuzzing: RC only](https://img.shields.io/badge/Fuzzing-RC%20only-blue)](docs/fuzzing.md)
 
+**[How we test and release Home Studio](docs/quality-and-release.md)** — illustrated
+browser coverage, recovery checks, and verified release results.
+
 **[Start drawing](https://ha-homelab.github.io/home-studio/planner/)** ·
 **[Illustrated drawing guide](https://ha-homelab.github.io/home-studio/planner/guide.html)** ·
 **[Install in Home Assistant](https://ha-homelab.github.io/home-studio/install.html)** ·
@@ -269,6 +272,12 @@ These are development tools only;
 users do not need Node.js or Playwright to draw, compile, or install a plan.
 The browser test exports a real drawing and installs that exact file's package
 into a temporary config directory without contacting a live HA instance.
+
+![The release path: pull request checks, beta qualification, RC with fuzzing, and promotion of the same verified files to stable](docs/assets/quality/release-pipeline.svg)
+
+The [illustrated quality guide](docs/quality-and-release.md) explains what each
+stage proves, how to inspect its public evidence, and which environments still
+need testing on real hardware.
 
 The public repository contains the full package. GitHub Pages publishes only an
 explicit website allowlist, so the website stays a static editor and guide.

@@ -1,5 +1,9 @@
 # Quality evidence and limitations
 
+The [illustrated browser and release guide](quality-and-release.md) explains
+graphics recovery and browser acceptance, with a dated v0.6.4 evidence snapshot.
+Its recorded results do not qualify later source changes.
+
 The package workflow tests real archive parsing, installation, backup/rollback,
 public packaging, geometry and browser behavior. RC mutation campaigns target
 production project validation and geometry; ordinary CI replays synthetic
