@@ -1,6 +1,6 @@
-# Disposable Intel Lambert accumulator diagnostic
+# Disposable Intel cached Lambert diffuse diagnostic
 
-Only a push to `diagnostic/intel-cgl-lambert-accumulators` starts this workflow. It has
+Only a push to `diagnostic/intel-cgl-cached-lambert-diffuse` starts this workflow. It has
 read-only GitHub permissions and pinned actions. It does not invoke the 77-lane
 acceptance gate or publish a release. Its results are diagnostic evidence only.
 
@@ -11,20 +11,21 @@ preparation. Preparation does not authorize a push or launch.
 
 Two independent `macos-15-intel` jobs compare these sources in order:
 
-- Lambert accumulators candidate, first: `7491f94943ba60cc663e411bc2361745c0cc9b87`.
-- Baseline, second: `227e2835d161b14b86446e20d35a0a5aa96df50e`.
+- Cached Lambert diffuse candidate, first: `725ed7d23c57dc5aba65733ceb32b901d467bb6e`.
+- Baseline, second: `7491f94943ba60cc663e411bc2361745c0cc9b87`.
 - Candidate preflights: `node scripts/test-literal-lambert-point-body.cjs` and
   `node scripts/test-literal-lambert-directional.cjs`, plus
   `node scripts/test-scalar-shadow-point.cjs` and
   `node scripts/test-scalar-indirect-lambert.cjs`, and
   `node scripts/test-direct-shadow-uniforms.cjs`, and
-  `node scripts/test-scalar-lambert-accumulators.cjs`.
+  `node scripts/test-scalar-lambert-accumulators.cjs`, and
+  `node scripts/test-cached-lambert-diffuse.cjs`.
 
 One job uses Firefox `153.5.0esr`; the other uses Waterfox `6.7.6`. Maximum
 parallelism is two. Each pair runs sequentially on one hosted VM and shares one
 official browser installation verified by the original installer, checksum
 catalog and signature checks. Python 3.13, Node 22 and both locked npm dependency
-installations are prepared before either suite starts. All six selected candidate
+installations are prepared before either suite starts. All seven selected candidate
 CPU proofs run before the browser is installed; failure stops preparation.
 
 After both sources pass preflight, the runner records `mdutil -a -s`, invokes
@@ -50,12 +51,14 @@ disabled status does not prove that existing indexing workers are idle. The
 passive CPU records remain necessary context. Both sources receive the same
 normalization. Fixed order and shared caches still limit causal conclusions.
 
-The baseline already contains scalar unshadowed-point, directional, cached
-shadow-point and indirect Lambert bodies, plus direct shadow uniform reads.
-The candidate replaces main-scope Lambert material and reflected-light aggregate
-locals with scalar vector locals only when all guarded features permit it.
-Unsupported compiled features retain the original aggregates. All six CPU
-proofs run before browser installation.
+The baseline already contains scalar point, directional, indirect and main
+Lambert accumulators, plus direct shadow uniform reads. The candidate reuses
+one exact pure Lambert BRDF value only in the guarded scalar main branch.
+All contributions retain their multiplication and addition order; unsupported
+source, features or ownership retain the original per-use expression. All seven
+CPU proofs run before browser installation. The local strict case passed but
+showed no load improvement; this diagnostic tests the distinct hosted Intel
+path without predicting a gain.
 The candidate runs first to expose its initial use before the baseline has warmed
 this installation. It is not a guaranteed cold-driver run: setup, OS state and
 persistent machine-image caches are not controlled. The later baseline can benefit
@@ -117,16 +120,16 @@ local setting change.
 Offline contract check, with no browser or network:
 
 ```sh
-python3 scripts/test-intel-cgl-lambert-accumulators.py
+python3 scripts/test-intel-cgl-cached-lambert-diffuse.py
 ```
 
 The workflow supplies fixed choices. Its equivalent command on the Intel host
 is:
 
 ```sh
-python3 harness/scripts/run-intel-cgl-lambert-accumulators.py \
-  --source-root "$GITHUB_WORKSPACE" --candidate lambert-accumulators \
+python3 harness/scripts/run-intel-cgl-cached-lambert-diffuse.py \
+  --source-root "$GITHUB_WORKSPACE" --candidate cached-lambert-diffuse \
   --product firefox \
-  --installation "$RUNNER_TEMP/home-studio-intel-cgl-lambert-accumulators-browser/install.json" \
-  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-lambert-accumulators"
+  --installation "$RUNNER_TEMP/home-studio-intel-cgl-cached-lambert-diffuse-browser/install.json" \
+  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-cached-lambert-diffuse"
 ```
