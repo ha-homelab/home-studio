@@ -612,24 +612,30 @@ planCanvas.addEventListener('wheel', e => { e.preventDefault(); zoomPlan(Math.ex
 
 // On-demand 3D rendering. Opening cuts and solid wall pieces use the same metric project.
 let renderer = null, scene = null, camera = null, worldGroup = null, previewSun = null, previewUnavailable = false, previewMetadata = {};
-let previewLost = false, previewSize = '', previewPixels = 2000000, previewInitialized = false, previewRendererDisposed = false, previewInstancing = false;
+let previewLost = false, previewSize = '', previewPixels = 2000000, previewInitialized = false, previewRendererDisposed = false, previewInstancing = false, previewDiffuseLighting = false;
 const orbit = { yaw: -Math.PI / 3, pitch: .8, radius: 17, baseRadius: 17, target: new THREE.Vector3(4, 0, 3), pointer: null };
+function createPreviewMaterial(options) {
+  if (!previewDiffuseLighting) return new THREE.MeshStandardMaterial(options);
+  const { roughness, metalness, ...shared } = options;
+  return new THREE.MeshLambertMaterial(shared);
+}
 function previewRenderProfile(gl) {
   try {
     const info = gl.getExtension('WEBGL_debug_renderer_info');
     const name = info && gl.getParameter(info.UNMASKED_RENDERER_WEBGL);
     if (/swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe|^Apple Software Renderer$/i.test(name)) {
-      return { pixels: 250000, shadowSize: 512, instanceCatalog: /^Apple Software Renderer$/i.test(name) };
+      const legacySoftware = /^Apple Software Renderer$/i.test(name);
+      return { pixels: 250000, shadowSize: 512, instanceCatalog: legacySoftware, diffuseLighting: legacySoftware };
     }
   } catch { /* A hidden renderer name keeps the normal rendering profile. */ }
-  return { pixels: 2000000, shadowSize: 2048, instanceCatalog: false };
+  return { pixels: 2000000, shadowSize: 2048, instanceCatalog: false, diffuseLighting: false };
 }
 function initPreview() {
   if (renderer || previewUnavailable) return;
   try {
     renderer = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: true, alpha: false }); previewRendererDisposed = false; renderer.setClearColor(0xf2f4ed); renderer.outputColorSpace = THREE.SRGBColorSpace;
-    const profile = previewRenderProfile(renderer.getContext()); previewPixels = profile.pixels; previewInstancing = profile.instanceCatalog;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = .9; renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    const profile = previewRenderProfile(renderer.getContext()); previewPixels = profile.pixels; previewInstancing = profile.instanceCatalog; previewDiffuseLighting = profile.diffuseLighting;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = .9; renderer.shadowMap.enabled = true; renderer.shadowMap.type = previewDiffuseLighting ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
     scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(40, 1, .02, 1500); scene.add(new THREE.HemisphereLight(0xffffff, 0xc7cfbc, 1.7));
     previewSun = new THREE.DirectionalLight(0xfff6e6, 2.5); previewSun.castShadow = true; previewSun.shadow.mapSize.set(profile.shadowSize, profile.shadowSize); previewSun.shadow.normalBias = .025; previewSun.shadow.bias = -.0002; scene.add(previewSun); scene.add(previewSun.target);
     // Orbiting moves only the camera. Reuse shadows until scene geometry changes.
@@ -712,14 +718,14 @@ function rebuildPreview() {
   const catalogGeometries = new Map(), catalogGroups = [];
   let wallMeshCount = 0, openingCount = 0, roomCount = 0, itemCount = 0, catalogItemCount = 0, itemMeshCount = 0;
   const box = (width, height, depth, position, color, rotation = 0, opacity = 1) => {
-    const geometry = new THREE.BoxGeometry(width, height, depth), material = new THREE.MeshStandardMaterial({ color, roughness: .78, transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
+    const geometry = new THREE.BoxGeometry(width, height, depth), material = createPreviewMaterial({ color, roughness: .78, transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
     const mesh = new THREE.Mesh(geometry, material); mesh.position.set(...position); mesh.rotation.y = rotation; mesh.castShadow = opacity >= 1; mesh.receiveShadow = true; worldGroup.add(mesh); return mesh;
   };
   for (const f of previewFloors()) {
     for (const r of f.rooms) {
       const shape = new THREE.Shape(); r.polygon.forEach((p, i) => { if (i) shape.lineTo(p[0], -p[1]); else shape.moveTo(p[0], -p[1]); }); shape.closePath();
       const geo = new THREE.ExtrudeGeometry(shape, { depth: .08, bevelEnabled: false }); geo.rotateX(-Math.PI / 2);
-      const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: COLORS[r.material], roughness: .9 })); mesh.position.y = f.elevation_m - .08; mesh.receiveShadow = true; mesh.castShadow = true; worldGroup.add(mesh); roomCount++;
+      const mesh = new THREE.Mesh(geo, createPreviewMaterial({ color: COLORS[r.material], roughness: .9 })); mesh.position.y = f.elevation_m - .08; mesh.receiveShadow = true; mesh.castShadow = true; worldGroup.add(mesh); roomCount++;
     }
     for (const wall of f.walls) {
       const len = distance(wall.start, wall.end), dx = (wall.end[0] - wall.start[0]) / len, dz = (wall.end[1] - wall.start[1]) / len, angle = -Math.atan2(dz, dx);
@@ -746,7 +752,7 @@ function rebuildPreview() {
             geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(part.vertices.flat(), 3)); geometry.setAttribute('normal', new THREE.Float32BufferAttribute(part.normals.flat(), 3)); geometry.setIndex(part.indices);
             catalogGeometries.set(part, geometry);
           }
-          const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(...asset.materials[part.material].slice(0, 3)), roughness: .78 });
+          const material = createPreviewMaterial({ color: new THREE.Color(...asset.materials[part.material].slice(0, 3)), roughness: .78 });
           const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; mesh.castShadow = true; mesh.receiveShadow = true; group.add(mesh); itemMeshCount++;
         }
         worldGroup.add(group); catalogGroups.push(group); catalogItemCount++; continue;

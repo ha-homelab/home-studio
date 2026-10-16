@@ -117,6 +117,13 @@ separate regression checks. Batching reduces draw calls but adds instanced shade
 variants; it does not guarantee faster first-use compilation. Other software
 renderers, native and hidden GPU identities keep the ordinary mesh path.
 
+The positively identified Apple Software Renderer uses Lambert materials and
+unfiltered shadows. Acceptance keeps the same scene, linked-light counts,
+shadow-map limits, state changes and interaction deadlines in this mode. It is
+a deliberate matte rendering profile, not a claim of pixel identity with PBR.
+CPU tests cover the actual material factories and both shader families, including
+transparency, clipping, wall tint and room-light composition.
+
 Phone and tablet profiles use **390 × 844** and **820 × 1180** CSS pixels,
 respectively, at device scale factor 2, with touch enabled. They retain the
 actual desktop operating-system identity. Chromium exercises native touch

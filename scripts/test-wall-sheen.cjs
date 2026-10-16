@@ -9,15 +9,16 @@ const root = path.resolve(__dirname, '..');
   const context = vm.createContext({});
   const source = fs.readFileSync(path.join(root, 'room-lighting.js'), 'utf8');
   vm.runInContext(source, context);
-  const shader = () => ({uniforms: {}, vertexShader: THREE.ShaderLib.standard.vertexShader, fragmentShader: THREE.ShaderLib.standard.fragmentShader});
-  const mesh = category => ({material: new THREE.MeshStandardMaterial(), userData: {category}});
+  const shader = (library = THREE.ShaderLib.standard) => ({uniforms: {}, vertexShader: library.vertexShader, fragmentShader: library.fragmentShader});
+  for (const [Material, library] of [[THREE.MeshStandardMaterial, THREE.ShaderLib.standard], [THREE.MeshLambertMaterial, THREE.ShaderLib.lambert]]) {
+  const mesh = category => ({material: new Material(), userData: {category}});
   const walls = [mesh('walls'), mesh('walls')], floor = mesh('floors');
   const group = {traverse: visit => [...walls, floor].forEach(visit)};
   const lighting = context.createRoomLighting(THREE, [], 1, []);
   const keys = new Set();
   for (const enabled of [false, true, false]) {
     lighting.attach(group, enabled);
-    const wallShader = shader(), floorShader = shader();
+    const wallShader = shader(library), floorShader = shader(library);
     walls[0].material.onBeforeCompile(wallShader);
     floor.material.onBeforeCompile(floorShader);
     assert.match(wallShader.vertexShader, /wallSheen = mix/);
@@ -33,6 +34,7 @@ const root = path.resolve(__dirname, '..');
     keys.add(floor.material.customProgramCacheKey());
   }
   assert.equal(keys.size, 4, 'Only wall/non-wall and Home/editor variants');
+  }
   const initial = shader();
   context.applyWallSheen(initial);
   assert.equal(initial.uniforms.wallSheenPhase.value, 0);

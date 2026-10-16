@@ -62,10 +62,11 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   }, get = id => { if (!elements.has(id)) elements.set(id, makeSurface(id)); return elements.get(id); };
   const documentEvents = {}, windowEvents = {}, buffers = [];
   let constructions = 0, draws = 0, shadows = 0, disposals = 0, losses = 0, disconnects = 0, planDraws = 0;
+  let rendererName = 'ANGLE SwiftShader';
   let rect = {width: 3840, height: 2160};
   class Renderer {
     constructor() { constructions++; this.shadowMap = {}; }
-    getContext() { return {getExtension: () => ({UNMASKED_RENDERER_WEBGL: 1}), getParameter: () => 'ANGLE SwiftShader'}; }
+    getContext() { return {getExtension: () => ({UNMASKED_RENDERER_WEBGL: 1}), getParameter: () => rendererName}; }
     setClearColor() {}
     setSize() { throw Error('Drawing must not reset the canvas on every frame'); }
     setPixelRatio() { throw Error('Resize dimensions and pixel ratio atomically'); }
@@ -100,6 +101,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     const profile = c.previewRenderProfile({getExtension: () => ({UNMASKED_RENDERER_WEBGL: 1}), getParameter: () => label});
     assert.equal(profile.pixels, 250000);
     assert.equal(profile.instanceCatalog, label === 'Apple Software Renderer', 'Only positively identified Apple software rendering batches catalog parts');
+    assert.equal(profile.diffuseLighting, label === 'Apple Software Renderer');
   }
   for (const gl of [null, {getExtension: () => null}, {getExtension() { throw Error('blocked'); }},
     ...['Apple M1', 'Apple M1, or similar', 'Apple M2', 'Apple Software Renderer, or similar'].map(label =>
@@ -107,6 +109,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     assert.equal(c.previewRenderProfile(gl).pixels, 2000000);
     assert.equal(c.previewRenderProfile(gl).shadowSize, 2048);
     assert.equal(c.previewRenderProfile(gl).instanceCatalog, false);
+    assert.equal(c.previewRenderProfile(gl).diffuseLighting, false);
   }
   for (const [w, h] of [[800, 600], [3840, 2160], [7680, 4320]]) for (const budget of [250000, 2000000, 4000000]) {
     const r = c.canvasPixelRatio(w, h, budget); assert(w * h * r * r <= budget + .001); assert(r <= 2);
@@ -160,6 +163,26 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   windowEvents.pagehide({persisted: false}); assert.equal(disposals, 2); assert.equal(losses, 2); assert.equal(disconnects, 1);
   assert.equal(vm.runInContext('worldGroup.children.length', c), 0);
 
+  // The fallback is a distinct material/filter choice, not an instancing alias.
+  rendererName = 'Apple Software Renderer';
+  vm.runInContext('renderer=null', c);
+  c.initPreview();
+  assert.equal(vm.runInContext('renderer.shadowMap.type', c), THREE.BasicShadowMap);
+  assert.equal(vm.runInContext('previewDiffuseLighting', c), true);
+  const translucent = {color: 0x2277bb, emissive: 0x010203, opacity: .3, transparent: true,
+    depthWrite: false, side: THREE.DoubleSide, roughness: .8, metalness: .2};
+  for (const diffuse of [true, false, true]) {
+    vm.runInContext(`previewDiffuseLighting=${diffuse};previewInstancing=${!diffuse}`, c);
+    const material = c.createPreviewMaterial(translucent);
+    assert.equal(Boolean(material.isMeshLambertMaterial), diffuse);
+    assert.equal(Boolean(material.isMeshStandardMaterial), !diffuse);
+    assert.equal(material.color.getHex(), translucent.color);
+    assert.equal(material.emissive.getHex(), translucent.emissive);
+    for (const field of ['opacity','transparent','depthWrite','side']) assert.equal(material[field],translucent[field]);
+    material.dispose();
+  }
+  c.disposePreviewRenderer();
+
   // Repeated catalog furniture shares immutable vertex data, while appearance
   // variants, materials and per-item transforms keep their existing behavior.
   const furniture = await import('../planner/furniture.js');
@@ -174,12 +197,12 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   catalogFloor.items[1].dimensions_m.width *= 1.5;
   const sharedWorld = new THREE.Group();
   const shared = vm.createContext({THREE, worldGroup: sharedWorld, previewSun: new THREE.DirectionalLight(),
-    previewMetadata: {}, previewDirty: true, previewInstancing: false, previewFloors: () => catalogProject.floors,
+    previewMetadata: {}, previewDirty: true, previewInstancing: false, previewDiffuseLighting: false, previewFloors: () => catalogProject.floors,
     assetCache: new Map(), APPEARANCE_CACHE_LIMIT: 100, buildFurnitureAsset: furniture.buildFurnitureAsset,
     distance: model.distance, wallPieces: model.wallPieces, floorBounds: model.floorBounds,
     COLORS: {floor: '#eeeeee', furniture: '#aaaaaa'},
   });
-  vm.runInContext(section('function itemAsset(', 'function materialColor(') + section('function disposePreviewGeometry()', 'function drawPreview()'), shared);
+  vm.runInContext(section('function itemAsset(', 'function materialColor(') + section('function createPreviewMaterial(', 'function previewRenderProfile(') + section('function disposePreviewGeometry()', 'function drawPreview()'), shared);
   shared.rebuildPreview();
   const groups = sharedWorld.children.filter(object => object.isGroup);
   assert.equal(groups.length, catalogFloor.items.length);

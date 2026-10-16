@@ -188,6 +188,15 @@ reports actual draw meshes. Every rebuild
 explicitly disposes instance buffers and shared geometry; there is no persistent
 GPU cache or additional idle rendering.
 
+The legacy Apple software rasterizer also uses diffuse Lambert materials and
+unfiltered shadow maps. Its fragment interpreter spends substantial time in
+the PBR material shader even when no room light contributes. The simpler material
+keeps geometry, colors, opacity, emissive surfaces, clipping, room confinement,
+daylight and every linked light. Metallic/specular highlights and soft shadow
+filtering are intentionally omitted on this backend. Native and other software
+renderers retain the existing Standard materials. Material selection is separate
+from catalog instancing, and TV screens and unlit overlays keep their own materials.
+
 The compiler creates transformed meshes for GLB, OBJ/MTL, DAE, USDA and the
 downloadable plan SVG. Item namespaces include their ordinal to avoid collisions
 between a user identifier and a generated part suffix. Runtime model data retains

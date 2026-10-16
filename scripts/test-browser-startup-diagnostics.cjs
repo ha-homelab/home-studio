@@ -81,12 +81,14 @@ test('opaque-frame probe records eight distinct programs within forty safe check
   assert.equal(sent[2].value.gpu.renderer,'Apple Software Renderer');
 });
 
-test('startup profiles accept only the exact optional catalog-instancing boolean', () => {
+test('startup profiles accept only the exact optional rendering booleans', () => {
   const profile = {sequence:1,event:'profile',time:1,profile:{pixels:250000,shadowSize:512}};
+  for (const key of ['instanceCatalog','diffuseLighting']) {
   for (const value of [true,false]) assert.equal(validateCheckpoint({...profile,
-    profile:{...profile.profile,instanceCatalog:value}}).profile.instanceCatalog,value);
+    profile:{...profile.profile,[key]:value}}).profile[key],value);
   for (const value of [0,1,'true',null,{},[]]) assert.throws(()=>validateCheckpoint({...profile,
-    profile:{...profile.profile,instanceCatalog:value}}));
+    profile:{...profile.profile,[key]:value}}));
+  }
   assert.throws(()=>validateCheckpoint({...profile,profile:{pixels:true}}));
   assert.throws(()=>validateCheckpoint({...profile,profile:{privateFlag:true}}));
 });

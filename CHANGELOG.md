@@ -25,6 +25,9 @@
   and bound the overlap search. Other software renderers, native and unidentified
   GPU paths retain normal meshes; additional instanced shaders can add first-use
   compilation work.
+- Use simpler diffuse materials and unfiltered shadows on the legacy Apple
+  software rasterizer, retaining every linked light, room boundary, transparent
+  surface and control. Native GPU materials remain unchanged.
 - Set direct touch manipulation on viewer controls while retaining page pinch
   zoom. Keep native touch interaction checks separate from mouse acceptance.
 - Reduce room-lighting shader compilation and fragment work while preserving

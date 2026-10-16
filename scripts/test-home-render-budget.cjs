@@ -8,6 +8,22 @@ const root = path.resolve(__dirname, '..');
 
 (async () => {
   const THREE = await import('data:text/javascript;base64,' + fs.readFileSync(path.join(root, 'vendor/three.module.min.js')).toString('base64'));
+  const materialContext = vm.createContext({THREE, renderProfile: {diffuseLighting: false}});
+  const materialFactory = fs.readFileSync(path.join(root, 'viewer.js'), 'utf8').split('\n').find(line=>line.startsWith('function createSceneMaterial('));
+  vm.runInContext(materialFactory, materialContext);
+  const appearance = {color: 0x2288bb, emissive: 0x123456, roughness: .8, metalness: .35,
+    transparent: true, opacity: .16, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true};
+  for (const diffuse of [false, true, false]) {
+    materialContext.renderProfile.diffuseLighting = diffuse;
+    const material = materialContext.createSceneMaterial(appearance);
+    assert.equal(Boolean(material.isMeshLambertMaterial), diffuse);
+    assert.equal(Boolean(material.isMeshStandardMaterial), !diffuse);
+    assert.equal(material.color.getHex(), appearance.color);
+    assert.equal(material.emissive.getHex(), appearance.emissive);
+    for (const field of ['transparent','opacity','depthWrite','side','forceSinglePass']) assert.equal(material[field], appearance[field]);
+    if (!diffuse) { assert.equal(material.roughness,.8); assert.equal(material.metalness,.35); }
+    material.dispose();
+  }
   const lighting = vm.createContext({});
   vm.runInContext(fs.readFileSync(path.join(root, 'room-lighting.js'), 'utf8'), lighting);
   for (const count of [0, 1, 4, 5, 16, 17, 64, 100, 1000]) {

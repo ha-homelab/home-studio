@@ -147,7 +147,7 @@ function validateCheckpoint(value) {
     const keys = new Set(['pixels','pointShadows','pointShadowSize','sunShadowSize','shadowSize']);
     assert(value.profile && Object.keys(value.profile).length > 0);
     for (const [key,n] of Object.entries(value.profile)) {
-      if (key === 'instanceCatalog') assert(typeof n === 'boolean');
+      if (key === 'instanceCatalog' || key === 'diffuseLighting') assert(typeof n === 'boolean');
       else assert(keys.has(key) && Number.isInteger(n) && n >= 0 && n <= 2000000);
     }
   }

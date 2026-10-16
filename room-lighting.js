@@ -211,7 +211,7 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
     capacity,
     attach(group, enabled) {
       group?.traverse(mesh => {
-        if (!mesh.material?.isMeshStandardMaterial) return;
+        if (!mesh.material?.isMeshStandardMaterial && !mesh.material?.isMeshLambertMaterial) return;
         const wall = mesh.userData.category === 'walls';
         mesh.material.onBeforeCompile = shader => {
           if (wall) applyWallSheen(shader);
