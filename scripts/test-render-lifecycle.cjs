@@ -189,3 +189,111 @@ context.requestRender(); events.pagehide({persisted:false});
 assert.equal(frames.size,0); assert.equal(disposals,1); assert.equal(losses,1); assert.equal(disconnects,1);
 context.requestRender(); context.drawScene({}); assert.equal(draws,beforeTeardown);
 console.log('PASS: input coalescing, bounded buffers, idle/hidden/lost suspension, restoration and GPU teardown');
+
+// Run the production scheduler, pointer bookkeeping and lifecycle callbacks
+// against a clock whose timer and animation-frame queues are independent.
+function motionScheduler(diffuse = true) {
+  const raf = new Map(), timers = new Map(), handlers = {}, painted = [], errors = [];
+  let time = 0, id = 0, width = 800, rejectDraw = false;
+  const c = vm.createContext({
+    initialViewReady:true, renderCount:0, renderProfile:{diffuseLighting:diffuse,pixels:250000},
+    devicePixelRatio:1, THREE:{}, scene:{}, camera:{position:0,updateProjectionMatrix(){}},
+    document:{hidden:false,addEventListener:(type,fn)=>handlers[type]=fn},
+    window:{addEventListener:(type,fn)=>handlers[type]=fn},
+    requestAnimationFrame(fn){raf.set(++id,fn);return id;},
+    cancelAnimationFrame(key){raf.delete(key);},
+    setTimeout(fn,delay){timers.set(++id,{fn,due:time+delay});return id;},
+    clearTimeout(key){timers.delete(key);},
+    $(){return {getBoundingClientRect:()=>({width,height:600})};},
+    observer:{disconnect(){}},wallSheenMotion:{beforeRender(){},afterRender(){}},
+    updateWallOutlines(){},updateEditorCamera(){},invalidateShadows(){},
+    report3DError(error){errors.push(error.message);},
+    createInteractionRenderer(){return {draw(scene,camera,moving){
+      if(rejectDraw){rejectDraw=false;throw Error('injected draw failure');}
+      painted.push({time,position:camera.position,moving});
+    },dispose(){}};},
+    renderer:{domElement:{addEventListener:(type,fn)=>handlers[type]=fn},
+      render(scene,camera){painted.push({time,position:camera.position,moving:false});},
+      setDrawingBufferSize(){},dispose(){},forceContextLoss(){}},
+  });
+  for(const prefix of prefixes.filter(p=>p!=='function selectRenderProfile('))
+    vm.runInContext(lines.find(line=>line.startsWith(prefix)),c);
+  c.homeView={active:true,render(){if(width){c.drawScene(c.camera);c.renderCount++;}}};
+  vm.runInContext(resizeLine.split(';const observer=')[0]+';',c);
+  const input=source.slice(source.indexOf('if(renderProfile.diffuseLighting){\nrenderer.domElement.addEventListener'),source.indexOf('let drag=null;'));
+  vm.runInContext(input,c);
+  return {c,raf,timers,handlers,painted,errors,
+    read:expression=>vm.runInContext(expression,c),
+    start(){handlers.pointerdown?.({button:0,pointerId:1,clientX:0,clientY:0});},
+    move(position){c.camera.position=position;handlers.pointermove?.({pointerId:1,clientX:position,clientY:0});c.requestRender(true);},
+    flush(){const queue=[...raf.values()];raf.clear();queue.forEach(fn=>fn());},
+    advance(ms){const end=time+ms;while(true){const next=[...timers].filter(([,v])=>v.due<=end).sort((a,b)=>a[1].due-b[1].due)[0];if(!next)break;time=next[1].due;timers.delete(next[0]);next[1].fn();}time=end;},
+    hideStage(){width=0;},showStage(){width=800;},failNextDraw(){rejectDraw=true;},
+  };
+}
+const scheduled=motionScheduler();
+scheduled.start();scheduled.move(20);
+assert.equal(scheduled.raf.size,1,'The first moved-pointer frame retains ordinary RAF latency');
+assert.equal(scheduled.timers.size,0);
+scheduled.flush();assert.equal(scheduled.read('interactionPointer.painted'),true);
+assert.deepEqual(scheduled.painted,[{time:0,position:20,moving:true}]);
+scheduled.advance(10);scheduled.move(30);
+const [timer]=scheduled.timers.values();assert.equal(timer.due,74);
+scheduled.advance(20);scheduled.move(40);scheduled.move(50);
+assert.equal(scheduled.timers.size,1);assert.equal([...scheduled.timers.values()][0],timer,
+  'Later input shares the original deadline rather than debouncing it');
+scheduled.advance(43);assert.equal(scheduled.raf.size,0);
+scheduled.advance(1);assert.equal(scheduled.raf.size,1);scheduled.flush();
+assert.deepEqual(scheduled.painted.at(-1),{time:74,position:50,moving:true},
+  'A held drag paints the latest camera before pointerup');
+assert(scheduled.read('interactionPointer'),'The held-pointer frame does not end the gesture');
+assert.equal(scheduled.timers.size,0);assert.equal(scheduled.raf.size,0,'No self-sustaining motion loop');
+scheduled.move(60);assert.equal(scheduled.timers.size,1);
+scheduled.handlers.pointerup({pointerId:1});
+assert.equal(scheduled.timers.size,0);assert.equal(scheduled.raf.size,1);
+scheduled.flush();assert.deepEqual(scheduled.painted.at(-1),{time:74,position:60,moving:false},
+  'Release cancels the deadline and paints the latest camera at full quality');
+scheduled.advance(1000);assert.equal(scheduled.raf.size,0);assert.equal(scheduled.timers.size,0);
+
+for(const release of ['pointerup','pointercancel','lostpointercapture']) {
+  const q=motionScheduler();q.start();q.move(20);q.flush();q.move(30);
+  q.handlers[release]({pointerId:2});assert.equal(q.timers.size,1,'Unrelated pointers cannot cancel a pending frame');
+  q.handlers[release]({pointerId:1});assert.equal(q.timers.size,0);q.flush();
+  assert.equal(q.painted.at(-1).moving,false);q.advance(100);assert.equal(q.raf.size,0);
+}
+for(const change of ['live','explicit','resize']) {
+  const q=motionScheduler();q.start();q.move(20);q.flush();q.move(30);
+  if(change==='live')q.c.requestRender();
+  else if(change==='explicit')q.c.render();
+  else q.c.window.resizeModel();
+  assert.equal(q.timers.size,0,change+' does not wait for the motion deadline');q.flush();
+  assert.equal(q.painted.at(-1).position,30);q.advance(100);assert.equal(q.raf.size,0);
+}
+for(const transition of ['visibility','context','bfcache','dispose']) {
+  const q=motionScheduler();q.start();q.move(20);q.flush();q.move(30);
+  if(transition==='visibility'){q.c.document.hidden=true;q.handlers.visibilitychange();}
+  else if(transition==='context')q.handlers.webglcontextlost({preventDefault(){}});
+  else q.handlers.pagehide({persisted:transition==='bfcache'});
+  assert.equal(q.timers.size,0);assert.equal(q.raf.size,0);assert.equal(q.read('interactionPointer'),null);
+  q.advance(1000);q.flush();assert.equal(q.painted.length,1,'Suspension leaves no delayed GPU work');
+  if(transition==='visibility'){q.c.document.hidden=false;q.handlers.visibilitychange();}
+  else if(transition==='context')q.handlers.webglcontextrestored();
+  else if(transition==='bfcache')q.handlers.pageshow({persisted:true});
+  q.flush();if(transition!=='dispose')assert.equal(q.painted.at(-1).moving,false);
+}
+const failed=motionScheduler();failed.start();failed.failNextDraw();failed.move(20);failed.flush();
+assert.equal(failed.errors.length,1);assert.notEqual(failed.read('interactionPointer.painted'),true,
+  'An unsuccessful draw cannot mark the first motion frame complete');
+failed.move(30);assert.equal(failed.raf.size,1);assert.equal(failed.timers.size,0);failed.flush();
+assert.equal(failed.read('interactionPointer.painted'),true);
+const zero=motionScheduler();zero.start();zero.hideStage();zero.move(20);zero.flush();
+assert.equal(zero.painted.length,0);assert.notEqual(zero.read('interactionPointer.painted'),true);
+zero.showStage();zero.move(30);assert.equal(zero.timers.size,0);zero.flush();assert.equal(zero.painted.length,1);
+const normal=motionScheduler(false);normal.move(20);normal.flush();normal.move(30);
+assert.equal(normal.raf.size,1);assert.equal(normal.timers.size,0,'Normal rendering never receives the diffuse delay');
+normal.flush();assert.equal(normal.painted.length,2);
+assert(source.includes('drag.y=e.clientY;requestRender(true)'), 'Editor pointer movement opts into motion scheduling');
+const homeSource=fs.readFileSync(path.join(__dirname,'../home-view.js'),'utf8');
+assert(homeSource.includes('panY+=(e.clientY-start.lastY)*(camera.top-camera.bottom)/rect.height;window.requestModelRender?.(true)'),
+  'Home pointer movement opts into the same scheduler after updating the camera');
+console.log('PASS: first motion RAF, fixed held-drag deadlines, latest camera, full-quality release and lifecycle cancellation');

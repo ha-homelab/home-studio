@@ -12,7 +12,7 @@ function exercise(embedded, {hidden = false, initialRoom = null, failRender = fa
   const c = vm.createContext({
     embedded, window: {}, homeView: null, renderCount: 0, scene: {},
     document: {hidden: false}, renderSuspended: false, renderLost: false, devicePixelRatio: 1, renderProfile: {pixels: 2000000},
-    requestRender() {}, renderRequest: 0, cancelAnimationFrame() {},
+    requestRender() {}, renderRequest: 0, renderDelay: 0, cancelAnimationFrame() {}, clearTimeout() {},
     model: {initial_room: initialRoom}, camera: {updateProjectionMatrix() {}},
     console: {error(error) { errors.push(error.message); }},
     requestAnimationFrame(callback) { frames.push(callback); },

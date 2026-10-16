@@ -587,7 +587,7 @@ homeView = (() => {
     renderer.domElement.addEventListener('pointerdown',e=>{if(active && e.button===0){start={x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY};renderer.domElement.setPointerCapture(e.pointerId);}});
     renderer.domElement.addEventListener('pointermove',e=>{if(!start || !active || !camera)return;
       if(Math.hypot(e.clientX-start.x,e.clientY-start.y)>6)start.moved=true;
-      if(start.moved){const rect=renderer.domElement.getBoundingClientRect();panX-=(e.clientX-start.lastX)*(camera.right-camera.left)/rect.width;panY+=(e.clientY-start.lastY)*(camera.top-camera.bottom)/rect.height;window.requestModelRender?.();}
+      if(start.moved){const rect=renderer.domElement.getBoundingClientRect();panX-=(e.clientX-start.lastX)*(camera.right-camera.left)/rect.width;panY+=(e.clientY-start.lastY)*(camera.top-camera.bottom)/rect.height;window.requestModelRender?.(true);}
       start.lastX=e.clientX;start.lastY=e.clientY;});
     renderer.domElement.addEventListener('pointercancel',()=>start=null);
     renderer.domElement.addEventListener('pointerup',e=>{
