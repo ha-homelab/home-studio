@@ -819,3 +819,35 @@ lazy-copy failure. Existing failure evidence remains valid under its original co
 new source and browser evidence are required before adoption. Context restoration starts
 a new program epoch; the existing recovery gesture receives the same exact-copy check
 while all prior link history remains recorded. First-gesture initialization still falls inside the original 15-second budget, and no timing limit changes.
+
+### Viewer-owned resources across context recovery
+
+The viewer releases GPU associations for every scene geometry while the WebGL
+context is lost, including hidden objects, shared meshes and all cached rounded
+wall variants. Geometry objects, attributes, index arrays and draw ranges stay
+intact. The restored renderer uploads them when used. This removes the old
+Three r169 geometry manager's disposal listeners before a later Editor cutaway
+rebuild can dispose the same geometry through the restored manager. The private
+interaction-copy renderer keeps its existing separate loss-time cleanup.
+
+The CPU regression executes the pinned Three attributes, geometry and binding
+managers with generation-tagged GL handles. It reproduces stale buffer and
+vertex-array deletion without loss cleanup, then checks two loss/restore cycles,
+hidden and shared objects, dormant wall variants, and unchanged CPU data with
+the cleanup enabled.
+
+The same loss callback releases existing scene-light shadow targets and loaded
+TV screen maps, deduplicating shared references. It retains the render targets,
+textures and CPU images; normal shadow invalidation and TV texture update flags
+cause the restored renderer to upload them again. It does not recursively
+inspect arbitrary material textures; existing material cleanup remains
+unchanged. A separate pinned texture/properties-manager regression reproduces stale texture, framebuffer
+and renderbuffer deletion without cleanup and checks two clean restorations
+with it. These checks cover the viewer's named owners, not arbitrary resources
+in third-party scenes.
+
+Native and Playwright viewer cases now visit Editor cutaway, Editor full height
+and Home after the existing context-restoration check. These real UI transitions
+exercise outline disposal and rebuilding with the restored renderer, while
+retaining the original scenario deadlines, case count and error checks. The
+previous failure remains a failure; this regression adds coverage for its cause.

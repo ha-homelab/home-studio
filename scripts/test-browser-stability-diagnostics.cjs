@@ -1376,3 +1376,61 @@ test('bootstrap crossing its limit at the scenario handoff never starts execute'
   assert.equal(record.deadlineScope.hardProcessMs,77000);
   assert.equal(record.inputTrace.status,'saved');assert.deepEqual(record.diagnosticsErrors,[]);
 });
+
+test('post-restoration UI transitions use the existing handlers without synthetic frames or pointer credit', () => {
+  const {changeRestoredViewerMode} = require('./browser-stability-diagnostics.cjs');
+  const events=[], state={homeMode:true}, cutaway={checked:false,dispatchEvent(event){events.push(['cutaway',this.checked,event.type]);}};
+  const nodes={'#editLayout':{click(){events.push(['editor']);state.homeMode=false;}},
+    '#openHome':{click(){events.push(['home']);state.homeMode=true;}},'#cutaway':cutaway};
+  const env={window:{floorplan:state},document:{querySelector:key=>nodes[key]},Event:class{constructor(type){this.type=type;}}};
+  vm.runInNewContext('globalThis.change='+changeRestoredViewerMode.toString(),env);
+  for(const mode of ['editor-cutaway','editor-full','home'])env.change(mode);
+  assert.deepEqual(events,[['editor'],['cutaway',true,'change'],['cutaway',false,'change'],['home']]);
+  assert.throws(()=>env.change('unknown'),/Unknown restored/);
+});
+
+test('post-restoration snapshots retain GL errors and reject stale frames, wrong modes and lost lighting', () => {
+  const {captureRestoredViewerMode,assertRestoredViewerMode}=require('./browser-stability-diagnostics.cjs');
+  let errors=[1282,0], lost=false, reads=0;
+  const gl={NO_ERROR:0,isContextLost:()=>lost,getError:()=>{reads++;return errors.shift()??0;}};
+  const scene={pointLights:18,activePointLights:18,drawingBuffer:[632,394],renderPasses:{last:'scene',sceneViewport:[0,0,632,394]}};
+  const env={window:{__browserStability:{contexts:1,contextLosses:1,errors:[],shaderErrors:[]},floorplan:{homeMode:true,renderCount:4},__browserRenderedLights:18,__browserScene:()=>scene},
+    document:{querySelector:key=>key==='#cutaway'?{checked:false}:{getContext:()=>gl}}};
+  vm.runInNewContext('globalThis.capture='+captureRestoredViewerMode.toString(),env);
+  const captured=JSON.parse(JSON.stringify(env.capture()));
+  assert.deepEqual(captured.glErrors,[1282]);assert.equal(reads,2);
+  assert.throws(()=>assertRestoredViewerMode(3,captured,'home',18),/GL errors/);
+  errors=[0];const valid=JSON.parse(JSON.stringify(env.capture()));
+  assertRestoredViewerMode(3,valid,'home',18);
+  for(const patch of [{renderCount:3},{homeMode:false},{contexts:2},{contextLosses:2},{contextLost:true},{errors:['error']},{shaderErrors:['link']}])
+    assert.throws(()=>assertRestoredViewerMode(3,{...valid,...patch},'home',18));
+  for(const patch of [{pointLights:17},{activePointLights:17},{renderPasses:{last:'copy',sceneViewport:[0,0,632,394]}},{drawingBuffer:[631,394]}])
+    assert.throws(()=>assertRestoredViewerMode(3,{...valid,scene:{...valid.scene,...patch}},'home',18));
+  assert.throws(()=>assertRestoredViewerMode(3,{...valid,renderedLights:17},'home',18));
+  assertRestoredViewerMode(3,{...valid,homeMode:false,cutaway:true},'editor-cutaway',18);
+  assert.throws(()=>assertRestoredViewerMode(3,{...valid,homeMode:false,cutaway:false},'editor-cutaway',18));
+  assertRestoredViewerMode(3,{...valid,homeMode:false,cutaway:false},'editor-full',18);
+  lost=true;const prior=reads;assert.equal(env.capture().contextLost,true);assert.equal(reads,prior,'Lost context is never drained');
+  lost=false;errors=Array(32).fill(1282);assert.throws(()=>env.capture(),/queue did not drain/);
+});
+
+test('post-restoration cases keep deadlines and preserve pending transition receipts on failure', async () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  const start=source.indexOf('        sample.postRestoreViews = [];'),end=source.indexOf("\n      }\n      phases.start('input-receipt'",start);
+  assert(start>0&&end>start);
+  const code=source.slice(start,end);
+  assert(!/waitForTimeout|screenshot|timeout\s*:|renderModel|requestAnimationFrame/.test(code));
+  let fail=false,calls=[],count=3,now=100;
+  const sample={}, env={sample,cycle:1,started:50,lights:18,Date:{now:()=>++now},
+    phases:{start:name=>calls.push(name)},snapshot:async()=>({renderCount:count}),save:()=>{},
+    changeRestoredViewerMode:()=>{},captureRestoredViewerMode:()=>{},
+    child:{evaluate:async(fn,mode)=>{if(mode){count++;return;}return {renderCount:count};},
+      waitForFunction:async()=>{if(fail)throw Error('primary transition failure');}},
+    assertRestoredViewerMode:()=>{}};
+  await vm.runInNewContext('(async()=>{'+code+'})()',env);
+  assert.deepEqual(Array.from(sample.postRestoreViews,row=>row.mode),['editor-cutaway','editor-full','home']);
+  assert(sample.postRestoreViews.every(row=>row.durationMs>=0&&row.snapshot));
+  fail=true;await assert.rejects(vm.runInNewContext('(async()=>{'+code+'})()',env),/primary transition failure/);
+  assert.equal(sample.postRestoreViews.length,1);assert(sample.postRestoreViews[0].durationMs>=0);
+  assert.equal(sample.postRestoreViews[0].snapshot,undefined);
+});

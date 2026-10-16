@@ -46,6 +46,59 @@ def replacement_stats():
                 'lossRequests':[{'contextId':1, 'attached':True}, {'contextId':1, 'attached':False}]}}
 
 
+class RestoredViewerModeTests(unittest.TestCase):
+    def stats(self, mode='home', count=4):
+        return {'contexts':1, 'contextLosses':1, 'gpu':{'version':'WebGL 2.0'},
+                'linkedPrograms':8, 'errors':[], 'shaderErrors':[], 'renderCount':count,
+                'homeMode':mode == 'home', 'cutaway':mode == 'editor-cutaway', 'renderedLights':18,
+                'nativeGraphics':{'contexts':1,'errors':[], 'samples':[{'label':'recovery','states':[{'id':1,'attached':True,'lost':False}]}]},
+                'scene':{'pointLights':18,'activePointLights':18,'drawingBuffer':[632,394],
+                         'renderPasses':{'last':'scene','sceneViewport':[0,0,632,394]}}}
+
+    def test_clean_modes_and_negative_graphics_lighting_and_frame_checks(self):
+        for mode in ('editor-cutaway', 'editor-full', 'home'):
+            acceptance.assert_restored_viewer_mode(3, self.stats(mode), mode, 18)
+        mutations = [lambda s:s.update(renderCount=3), lambda s:s.update(homeMode=False),
+                     lambda s:s.update(contextLosses=2),lambda s:s.update(errors=['error']),
+                     lambda s:s.update(shaderErrors=['link']),lambda s:s.update(renderedLights=17),
+                     lambda s:s['scene'].update(pointLights=17), lambda s:s['scene'].update(activePointLights=17),
+                     lambda s:s['scene']['renderPasses'].update(last='copy'),
+                     lambda s:s['scene'].update(drawingBuffer=[631,394]),
+                     lambda s:s['nativeGraphics']['errors'].append({'code':1282,'label':'post-restore'}),
+                     lambda s:s['nativeGraphics']['samples'][-1]['states'][0].update(lost=True)]
+        for mutate in mutations:
+            value=self.stats();mutate(value)
+            with self.assertRaises(AssertionError):acceptance.assert_restored_viewer_mode(3,value,'home',18)
+        value=self.stats('editor-full')
+        with self.assertRaises(AssertionError):acceptance.assert_restored_viewer_mode(3,value,'editor-cutaway',18)
+
+    def test_sequence_and_failure_keep_pending_timing_without_extra_render_or_wait(self):
+        client=Mock();sample={};state={'mode':'home','count':3}
+        def execute(script,*args):
+            if args:state.update(mode=args[0],count=state['count']+1);return True
+            return {'homeMode':state['mode']=='home','cutaway':state['mode']=='editor-cutaway'}
+        client.execute.side_effect=execute
+        snapshot=lambda:self.stats(state['mode'],state['count'])
+        acceptance.post_restore_viewer_modes(client,sample,snapshot,lambda:None,18)
+        self.assertEqual([row['mode'] for row in sample['postRestoreViews']],['editor-cutaway','editor-full','home'])
+        self.assertTrue(all(row['durationMs']>=0 and 'snapshot' in row for row in sample['postRestoreViews']))
+        self.assertEqual(client.wait.call_count,3)
+        self.assertTrue(all(not call.kwargs for call in client.wait.call_args_list),'Existing wait limit is unchanged')
+        client.wait.side_effect=TimeoutError('original wait failure')
+        with self.assertRaisesRegex(TimeoutError,'original wait failure'):
+            acceptance.post_restore_viewer_modes(client,sample,snapshot,lambda:None,18)
+        self.assertEqual(len(sample['postRestoreViews']),1)
+        self.assertGreaterEqual(sample['postRestoreViews'][0]['durationMs'],0)
+        self.assertNotIn('snapshot',sample['postRestoreViews'][0])
+        source=inspect.getsource(acceptance.post_restore_viewer_modes)
+        for prohibited in ('renderModel','sleep(','screenshot','getProgramParameter'):
+            self.assertNotIn(prohibited,source)
+        viewer=inspect.getsource(acceptance.viewer)
+        self.assertEqual(viewer.count('post_restore_viewer_modes('),1)
+        self.assertLess(viewer.index('assert_recovered_interaction('),viewer.index('post_restore_viewer_modes('))
+        self.assertLess(viewer.index('post_restore_viewer_modes('),viewer.index("sample['final'] = snapshot()"))
+
+
 class Socket:
     def __init__(self, *messages):
         self.chunks = []

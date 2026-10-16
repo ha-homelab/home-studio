@@ -216,6 +216,11 @@ function wallDisplayGeometry(source,shape,limit){
   return geometry;
 }
 const roundedWalls=[];
+// Detach the old renderer's GPU disposal listeners before context restoration.
+// Hidden scene objects and inactive wall variants still retain CPU geometry.
+function releaseViewerGeometryGPU(){const geometries=new Set();scene?.traverse(object=>{if(object.geometry)geometries.add(object.geometry)});for(const wall of roundedWalls)for(const geometry of wall.cache.values())geometries.add(geometry);for(const geometry of geometries)geometry.dispose()}
+// Shadow targets and loaded TV maps have the same per-context disposal ownership.
+function releaseViewerTextureGPU(){const targets=new Set(),textures=new Set();scene?.traverse(object=>{for(const target of [object.shadow?.map,object.shadow?.mapPass])if(target)targets.add(target)});for(const target of targets)target.dispose();for(const id of Object.keys(tvEntities)){const map=objectsById.get(id)?.userData.screen?.material.map;if(map)textures.add(map)}for(const texture of textures){texture.dispose();texture.needsUpdate=true}}
 function updateRoundedWallGeometry(limit){
   for(const wall of roundedWalls){
     const key=Math.min(wall.shape.top,limit);
@@ -329,7 +334,7 @@ if(shape){
 }
 const glassPasses=createStaticGlassPasses(THREE,mesh,renderProfile.diffuseLighting);root.add(mesh);if(glassPasses)root.add(glassPasses.front)}
 ground=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(60,planRadius*2),Math.max(65,planRadius*2)),createSceneMaterial({color:'#dfe3d8',roughness:1}));ground.rotation.x=-Math.PI/2;ground.position.set(planCenter[0],-1.97,planCenter[1]);ground.receiveShadow=true;scene.add(ground);grid=new THREE.GridHelper(44,44,0xc0cabe,0xd0d7cb);grid.position.set(planCenter[0],-1.96,planCenter[1]);scene.add(grid);
-renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;cancelRender();interactionPointer=null;interactionRenderer?.dispose();interactionRenderer=null;releaseStaticGlassPasses();homeView?.releaseGPU?.();});
+renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;cancelRender();releaseViewerGeometryGPU();releaseViewerTextureGPU();interactionPointer=null;interactionRenderer?.dispose();interactionRenderer=null;releaseStaticGlassPasses();homeView?.releaseGPU?.();});
 renderer.domElement.addEventListener('webglcontextrestored',()=>{renderLost=false;invalidateShadows();const before=renderCount;window.resizeModel?.();if(renderCount===before)requestRender()});
 function updateEditorCamera(){camera.position.set(target.x+radius*Math.sin(polar)*Math.sin(azimuth),target.y+radius*Math.cos(polar),target.z+radius*Math.sin(polar)*Math.cos(azimuth));camera.lookAt(target)}
 function render(){if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;const before=renderCount;updateWallOutlines();if(homeView?.active)homeView.render();else{updateEditorCamera();drawScene(camera);renderCount++}if(renderCount>before)cancelRender()}window.renderModel=render;window.requestModelRender=requestRender;

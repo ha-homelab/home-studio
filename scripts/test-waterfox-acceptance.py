@@ -319,6 +319,48 @@ def assert_recovered_graphics(stats, replacement=False):
         require(stats.get('contextLosses') == 1, 'Recovery must have exactly the one deliberate context loss')
 
 
+def assert_restored_viewer_mode(before_count, value, mode, expected_lights):
+    require(mode in ('editor-cutaway', 'editor-full', 'home'), 'Known restored viewer mode required')
+    assert_recovered_graphics(value)
+    require(value['nativeGraphics']['samples'][-1].get('states') == [{'id':1, 'attached':True, 'lost':False}],
+            'Mode changes keep the original restored context attached and live')
+    require(value['renderCount'] > before_count, 'Every restored mode must complete a new frame')
+    require(value['homeMode'] is (mode == 'home'), 'The requested restored mode is active')
+    if mode != 'home':
+        require(value['cutaway'] is (mode == 'editor-cutaway'), 'The requested wall height is active')
+    require(value['scene']['pointLights'] == expected_lights, 'Restored modes retain every light slot')
+    if mode == 'home':
+        require(value['scene']['activePointLights'] == expected_lights, 'Restored Home retains every on-state light')
+        require(value['renderedLights'] == expected_lights, 'Restored Home draws the current light state')
+    assert_full_viewer_frame(value['scene'])
+
+
+def post_restore_viewer_modes(client, sample, snapshot, save, expected_lights):
+    sample['postRestoreViews'] = []
+    origin = time.monotonic()
+    for mode in ('editor-cutaway', 'editor-full', 'home'):
+        before = snapshot()['renderCount']
+        started = time.monotonic()
+        transition = {'mode': mode, 'startedMs': round((started-origin)*1000, 3), 'durationMs': None}
+        sample['postRestoreViews'].append(transition)
+        save()
+        try:
+            client.execute("""const mode=arguments[0];
+              if(mode==='home')document.querySelector('#openHome').click();
+              else{if(window.floorplan.homeMode)document.querySelector('#editLayout').click();
+                const cutaway=document.querySelector('#cutaway');cutaway.checked=mode==='editor-cutaway';
+                cutaway.dispatchEvent(new Event('change'));}return true;""", mode)
+            client.wait(f"window.floorplan.renderCount>{before} && window.floorplan.homeMode==={'true' if mode == 'home' else 'false'}")
+            value = snapshot()
+            value.update(client.execute("return {homeMode:window.floorplan.homeMode,cutaway:document.querySelector('#cutaway').checked};"))
+            transition['snapshot'] = value
+            save()
+            assert_restored_viewer_mode(before, value, mode, expected_lights)
+        finally:
+            transition['durationMs'] = round((time.monotonic()-started)*1000, 3)
+            save()
+
+
 def assert_recovered_interaction(before_count, after_count, before_camera, after_camera, stats, replacement=False):
     require(after_count > before_count, 'Recovered pointer input must produce a new frame')
     require(after_camera != before_camera, 'Recovered pointer input must change the camera')
@@ -465,6 +507,7 @@ def viewer(client, origin, project, record, save):
             assert_viewer_interaction(sample['recovery'], after)
             assert_first_motion_programs(sample['recovery'], after)
             assert_recovered_interaction(sample['recovery']['renderCount'], after['renderCount'], sample['recovery']['scene']['camera'], after['scene']['camera'], after)
+            post_restore_viewer_modes(client, sample, snapshot, save, len(items))
         sample['final'] = snapshot()
         assert_graphics(sample['final'])
         require(sample['final']['contextLosses'] == cycle, 'No unexpected WebGL context loss')

@@ -2,6 +2,15 @@
 
 ## [0.6.4] - Development line
 
+- Release viewer geometry GPU associations while a WebGL context is lost,
+  including hidden objects and inactive rounded-wall variants. Preserve CPU
+  geometry for upload after restoration. Release owned shadow targets and TV
+  texture associations at the same point, preserving their images and object
+  identities for reupload. This prevents later cutaway, shadow and TV updates
+  from invoking obsolete GPU disposal callbacks. Browser cases also check
+  Editor cutaway/full-height and Home transitions after context restoration,
+  within their unchanged scenario deadlines.
+
 - Prototype an unlit architectural wall fill in the existing Apple software
   diffuse profile, including its measured masked-Apple selection. Walls retain
   their teal tint, opacity, cutaway geometry, outlines and shadow casting, but

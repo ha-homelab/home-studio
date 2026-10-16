@@ -680,4 +680,54 @@ function assertViewerInteraction(before, after) {
   } else assert.equal(passes.copy, 0, 'Other graphics profiles must retain direct rendering');
 }
 
-module.exports = {createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction};
+// Exercise the existing UI handlers after a real context restoration. These
+// are lifecycle actions, not additional pointer gestures or rendering shortcuts.
+function changeRestoredViewerMode(mode) {
+  if (!['editor-cutaway', 'editor-full', 'home'].includes(mode)) throw Error('Unknown restored viewer mode');
+  if (mode === 'home') document.querySelector('#openHome').click();
+  else {
+    if (window.floorplan.homeMode) document.querySelector('#editLayout').click();
+    const cutaway = document.querySelector('#cutaway');
+    cutaway.checked = mode === 'editor-cutaway';
+    cutaway.dispatchEvent(new Event('change'));
+  }
+}
+
+function captureRestoredViewerMode() {
+  const canvas = document.querySelector('#homeStage canvas, #view3d canvas');
+  const gl = canvas.getContext('webgl2'), glErrors = [];
+  const contextLost = gl.isContextLost();
+  if (!contextLost) for (let n = 0; n < 32; n++) {
+    const code = gl.getError();
+    if (code === gl.NO_ERROR) break;
+    glErrors.push(code);
+    if (n === 31) throw Error('Restored viewer GL error queue did not drain');
+  }
+  return {...window.__browserStability, homeMode:window.floorplan.homeMode,
+    cutaway:document.querySelector('#cutaway').checked, contextLost, glErrors,
+    renderedLights:window.__browserRenderedLights, renderCount:window.floorplan.renderCount,
+    scene:window.__browserScene()};
+}
+
+function assertRestoredViewerMode(beforeCount, value, mode, expectedLights) {
+  assert(['editor-cutaway', 'editor-full', 'home'].includes(mode));
+  assert.equal(value.contexts, 1, 'Mode changes reuse the restored WebGL context');
+  assert.equal(value.contextLosses, 1, 'Mode changes cause no additional context loss');
+  assert.equal(value.contextLost, false, 'The restored context remains live');
+  assert.deepEqual(value.glErrors, [], 'Post-restoration mode changes must not produce GL errors');
+  assert.deepEqual(value.errors, [], 'Post-restoration mode changes must not produce browser errors');
+  assert.deepEqual(value.shaderErrors, [], 'Post-restoration mode programs must link');
+  assert(value.renderCount > beforeCount, 'Every restored mode must complete a new frame');
+  assert.equal(value.homeMode, mode === 'home', 'The requested restored mode is active');
+  if (mode !== 'home') assert.equal(value.cutaway, mode === 'editor-cutaway', 'The requested wall height is active');
+  assert.equal(value.scene.pointLights, expectedLights, 'Restored modes retain every light slot');
+  if (mode === 'home') {
+    assert.equal(value.scene.activePointLights, expectedLights, 'Restored Home retains every on-state light');
+    assert.equal(value.renderedLights, expectedLights, 'Restored Home draws the current light state');
+  }
+  const passes = value.scene.renderPasses;
+  assert.equal(passes.last, 'scene', 'Restored modes finish with a full scene draw');
+  assert.deepEqual(passes.sceneViewport, [0, 0, ...value.scene.drawingBuffer], 'Restored modes retain the full drawing buffer');
+}
+
+module.exports = {changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction};

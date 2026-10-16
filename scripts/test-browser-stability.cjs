@@ -14,7 +14,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
-const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
+const {changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
 const {createStartupDiagnostics} = require('./browser-startup-diagnostics.cjs');
 
 const root = path.resolve(process.env.HOME_STUDIO_SOURCE_ROOT || path.join(__dirname, '..'));
@@ -289,6 +289,26 @@ async function run(browserName, origin, project, sourceHash) {
         });
         assert.deepEqual(restored.actual,restored.expected, 'Context restoration applies viewport changes made while the context was lost');
         recovery = {before:beforeLoss,after:(await snapshot()).renderCount,contextLosses:(await snapshot()).contextLosses,drawingBuffer:restored.actual};
+        // Disposing outlines and revisiting cached wall geometry after restoration
+        // must not delete handles from the lost generation. Keep the same case
+        // deadline and existing per-operation limits; no screenshots or link queries.
+        sample.postRestoreViews = [];
+        for (const mode of ['editor-cutaway', 'editor-full', 'home']) {
+          phases.start('post-restore-' + mode, {cycle});
+          const beforeCount = (await snapshot()).renderCount;
+          const transition = {mode, startedMs:Date.now()-started, durationMs:null};
+          sample.postRestoreViews.push(transition);save();
+          try {
+            await child.evaluate(changeRestoredViewerMode, mode);
+            await child.waitForFunction(({beforeCount, home}) => window.floorplan.renderCount > beforeCount && window.floorplan.homeMode === home,
+              {beforeCount, home:mode === 'home'});
+            transition.snapshot = await child.evaluate(captureRestoredViewerMode);
+            save();
+            assertRestoredViewerMode(beforeCount, transition.snapshot, mode, lights);
+          } finally {
+            transition.durationMs = Date.now()-started-transition.startedMs;save();
+          }
+        }
       }
       phases.start('input-receipt', {cycle});
       sample.input = await child.evaluate(() => window.__acceptanceInput);
