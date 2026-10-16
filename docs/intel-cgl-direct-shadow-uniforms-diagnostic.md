@@ -1,6 +1,6 @@
-# Disposable Intel scalar indirect Lambert diagnostic
+# Disposable Intel direct shadow uniform diagnostic
 
-Only a push to `diagnostic/intel-cgl-scalar-indirect` starts this workflow. It has
+Only a push to `diagnostic/intel-cgl-direct-shadow-uniforms` starts this workflow. It has
 read-only GitHub permissions and pinned actions. It does not invoke the 77-lane
 acceptance gate or publish a release. Its results are diagnostic evidence only.
 
@@ -11,18 +11,19 @@ preparation. Preparation does not authorize a push or launch.
 
 Two independent `macos-15-intel` jobs compare these sources in order:
 
-- Baseline: `c6da122681807da85858a90a629de99997a72531`.
-- Scalar indirect Lambert: `f364c49422d8a549944695ad889867e98f366145`.
+- Direct shadow uniforms candidate, first: `227e2835d161b14b86446e20d35a0a5aa96df50e`.
+- Baseline, second: `f364c49422d8a549944695ad889867e98f366145`.
 - Candidate preflights: `node scripts/test-literal-lambert-point-body.cjs` and
   `node scripts/test-literal-lambert-directional.cjs`, plus
   `node scripts/test-scalar-shadow-point.cjs` and
-  `node scripts/test-scalar-indirect-lambert.cjs`.
+  `node scripts/test-scalar-indirect-lambert.cjs`, and
+  `node scripts/test-direct-shadow-uniforms.cjs`.
 
 One job uses Firefox `153.5.0esr`; the other uses Waterfox `6.7.6`. Maximum
 parallelism is two. Each pair runs sequentially on one hosted VM and shares one
 official browser installation verified by the original installer, checksum
 catalog and signature checks. Python 3.13, Node 22 and both locked npm dependency
-installations are prepared before either suite starts. All four selected candidate
+installations are prepared before either suite starts. All five selected candidate
 CPU proofs run before the browser is installed; failure stops preparation.
 
 After both sources pass preflight, the runner records `mdutil -a -s`, invokes
@@ -48,21 +49,23 @@ disabled status does not prove that existing indexing workers are idle. The
 passive CPU records remain necessary context. Both sources receive the same
 normalization. Fixed order and shared caches still limit causal conclusions.
 
-The baseline already contains the reviewed scalar unshadowed-point, directional
-and cached shadow-point Lambert bodies. The candidate additionally scalarizes the
-Lambert indirect-diffuse accumulation, preserving its arithmetic and order.
-All four CPU proofs run before browser installation. The source is pinned to the signed indirect-Lambert revision above;
-placeholders or inconsistent workflow pins still fail preflight before source
-checkouts, installation or any system command. No scalar-indirect Intel performance
-claim is made. Local image evidence and this harness require review before the
-workflow is pushed.
+The baseline already contains scalar unshadowed-point, directional, cached
+shadow-point and indirect Lambert bodies. The candidate replaces the readonly
+point and directional shadow struct copies with direct reads of the same uniform
+fields at the same indices. All five CPU proofs run before browser installation.
+The candidate runs first to expose its initial use before the baseline has warmed
+this installation. It is not a guaranteed cold-driver run: setup, OS state and
+persistent machine-image caches are not controlled. The later baseline can benefit
+from the candidate's work. This fixed order is an intentional contrast to earlier
+baseline-first pairs, not a randomized speed estimate. No performance claim is
+made by preparing this harness.
 
 The wrapper invokes each source's original `test-native-browser-acceptance.py`
 once, with its standard product, expected-version, installation and output
 arguments. Both original cycles of viewer 6/24 rooms, the original planner 256-item case,
 all semantic and graphics checks, 30-second load limits, 15-second viewer and 10-second planner
-interaction limits, and the original browser watchdog remain unchanged. A failed baseline does not prevent
-the candidate from running once, and any failed arm keeps the job red. The
+interaction limits, and the original browser watchdog remain unchanged. A failed candidate does not prevent
+the baseline from running once, and any failed arm keeps the job red. The
 30-minute job envelope includes setup and both suites; it does not extend an
 individual case deadline.
 
@@ -98,7 +101,7 @@ passing browser evidence.
 The CPU percentages are the operating system's `ps` estimates, not interval
 utilization measurements. These observations can associate active work with
 browser processes or other applications, but cannot establish thermal
-throttling or hypervisor contention. The fixed baseline-first order and shared
+throttling or hypervisor contention. The fixed candidate-first order and shared
 driver caches also limit interpretation; one pair is not a statistical speedup
 estimate.
 
@@ -111,16 +114,16 @@ local setting change.
 Offline contract check, with no browser or network:
 
 ```sh
-python3 scripts/test-intel-cgl-scalar-indirect.py
+python3 scripts/test-intel-cgl-direct-shadow-uniforms.py
 ```
 
 The workflow supplies fixed choices. Its equivalent command on the Intel host
 is:
 
 ```sh
-python3 harness/scripts/run-intel-cgl-scalar-indirect.py \
-  --source-root "$GITHUB_WORKSPACE" --candidate scalar-indirect \
+python3 harness/scripts/run-intel-cgl-direct-shadow-uniforms.py \
+  --source-root "$GITHUB_WORKSPACE" --candidate direct-shadow-uniforms \
   --product firefox \
-  --installation "$RUNNER_TEMP/home-studio-intel-cgl-scalar-indirect-browser/install.json" \
-  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-scalar-indirect"
+  --installation "$RUNNER_TEMP/home-studio-intel-cgl-direct-shadow-uniforms-browser/install.json" \
+  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-direct-shadow-uniforms"
 ```

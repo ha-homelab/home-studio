@@ -15,14 +15,15 @@ import threading
 import time
 
 
-BASELINE = 'c6da122681807da85858a90a629de99997a72531'
+BASELINE = 'f364c49422d8a549944695ad889867e98f366145'
 CANDIDATES = {
-    'scalar-indirect': 'f364c49422d8a549944695ad889867e98f366145',
+    'direct-shadow-uniforms': '227e2835d161b14b86446e20d35a0a5aa96df50e',
 }
 CANDIDATE_CPU_CHECKS = ('scripts/test-literal-lambert-point-body.cjs',
                         'scripts/test-literal-lambert-directional.cjs',
                         'scripts/test-scalar-shadow-point.cjs',
-                        'scripts/test-scalar-indirect-lambert.cjs')
+                        'scripts/test-scalar-indirect-lambert.cjs',
+                        'scripts/test-direct-shadow-uniforms.cjs')
 VERSIONS = {'firefox': '153.5.0esr', 'waterfox': '6.7.6'}
 DRIVER_FILES = (
     'scripts/test-native-browser-acceptance.py', 'scripts/test-waterfox-acceptance.py',
@@ -43,18 +44,18 @@ PROFILE = {
 
 def validate_selection():
     """The prepared template cannot run with an unset or moving source."""
-    if set(CANDIDATES) != {'scalar-indirect'}:
+    if set(CANDIDATES) != {'direct-shadow-uniforms'}:
         raise ValueError('Exactly one fixed candidate is required')
-    revision = CANDIDATES['scalar-indirect']
+    revision = CANDIDATES['direct-shadow-uniforms']
     if (not re.fullmatch(r'[0-9a-f]{40}', revision) or
             revision == BASELINE or revision == '0' * 40):
         raise ValueError('Select one exact non-baseline candidate SHA before running')
-    if (not isinstance(CANDIDATE_CPU_CHECKS, tuple) or len(CANDIDATE_CPU_CHECKS) != 4 or
-            len(set(CANDIDATE_CPU_CHECKS)) != 4 or
+    if (not isinstance(CANDIDATE_CPU_CHECKS, tuple) or len(CANDIDATE_CPU_CHECKS) != 5 or
+            len(set(CANDIDATE_CPU_CHECKS)) != 5 or
             any(not isinstance(proof, str) or not re.fullmatch(r'scripts/test-[a-z0-9-]+\.cjs', proof)
                 for proof in CANDIDATE_CPU_CHECKS)):
-        raise ValueError('Select four distinct candidate CPU proofs before running')
-    workflow = Path(__file__).resolve().parents[1] / '.github/workflows/intel-cgl-scalar-indirect.yml'
+        raise ValueError('Select five distinct candidate CPU proofs before running')
+    workflow = Path(__file__).resolve().parents[1] / '.github/workflows/intel-cgl-direct-shadow-uniforms.yml'
     text = workflow.read_text(encoding='utf-8')
     if (text.count('revision: ' + revision) != 2 or
             any(text.count('node candidate/' + proof) != 1 for proof in CANDIDATE_CPU_CHECKS)):
@@ -291,15 +292,15 @@ def command_for(source, installation, output, product):
 
 
 def run_comparison(source_root, installation, output, candidate, product):
-    arms = (('baseline', BASELINE), ('candidate', CANDIDATES[candidate]))
+    arms = (('candidate', CANDIDATES[candidate]), ('baseline', BASELINE))
     output.mkdir(parents=True, exist_ok=True)
     manifest = {
         'schema': 1, 'diagnosticOnly': True, 'releaseEligible': False, 'acceptanceStatus': 'not-run',
-        'purpose': 'Same-host Intel scalar indirect Lambert comparison with common Spotlight normalization; never release qualification',
+        'purpose': 'Candidate-first same-host Intel direct shadow uniform comparison with common Spotlight normalization; never release qualification',
         'candidate': candidate, 'product': product, 'expectedVersion': VERSIONS[product],
         'startedAt': utc_now(), 'status': 'preparing', 'arms': [],
         'order': [name for name, _ in arms],
-        'cacheLimitation': 'Fixed baseline-first order; shared host and OS/driver caches are not cleared. This is not a randomized performance estimate.',
+        'cacheLimitation': 'Fixed candidate-first order; shared host and OS/driver caches are not cleared. This is not a randomized performance estimate.',
         'host': {'system': platform.system(), 'machine': platform.machine(),
                  'platform': platform.platform(), 'python': sys.version},
         'profile': PROFILE, 'harnessRevision': os.environ.get('GITHUB_SHA'),

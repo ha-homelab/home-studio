@@ -10,22 +10,22 @@ from unittest.mock import patch
 
 
 HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location('intel_comparison', HERE / 'run-intel-cgl-scalar-indirect.py')
+spec = importlib.util.spec_from_file_location('intel_comparison', HERE / 'run-intel-cgl-direct-shadow-uniforms.py')
 comparison = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(comparison)
-ARMS = (('baseline', comparison.BASELINE), ('candidate', comparison.CANDIDATES['scalar-indirect']))
+ARMS = (('candidate', comparison.CANDIDATES['direct-shadow-uniforms']), ('baseline', comparison.BASELINE))
 
 
 class IntelComparisonTests(unittest.TestCase):
     def test_unselected_template_fails_before_any_source_or_host_action(self):
         with tempfile.TemporaryDirectory() as directory, \
-             patch.object(comparison, 'CANDIDATES', {'scalar-indirect': 'UNSELECTED'}), \
+             patch.object(comparison, 'CANDIDATES', {'direct-shadow-uniforms': 'UNSELECTED'}), \
              patch.object(comparison, 'source_snapshot') as snapshot, \
              patch.object(comparison, 'indexing_command') as indexing, \
              patch.object(comparison.subprocess, 'run') as run:
             root = Path(directory)
             self.assertEqual(comparison.run_comparison(root, root / 'none', root / 'out',
-                'scalar-indirect', 'firefox'), 1)
+                'direct-shadow-uniforms', 'firefox'), 1)
             manifest = json.loads((root / 'out/comparison.json').read_text())
             self.assertIn('Select one exact non-baseline candidate SHA', manifest['error'])
             self.assertEqual(manifest['arms'], [])
@@ -37,35 +37,35 @@ class IntelComparisonTests(unittest.TestCase):
 
     def test_selection_requires_exact_pin_proofs_and_matching_workflow(self):
         sha = 'a' * 40
-        proofs = ('scripts/test-selected-point.cjs', 'scripts/test-selected-directional.cjs', 'scripts/test-selected-shadow.cjs', 'scripts/test-selected-indirect.cjs')
+        proofs = ('scripts/test-selected-point.cjs', 'scripts/test-selected-directional.cjs', 'scripts/test-selected-shadow.cjs', 'scripts/test-selected-indirect.cjs', 'scripts/test-selected-direct-shadow.cjs')
         valid = f'revision: {sha}\nrevision: {sha}\n' + ''.join('node candidate/' + proof + '\n' for proof in proofs)
-        with patch.object(comparison, 'CANDIDATES', {'scalar-indirect': sha}), \
+        with patch.object(comparison, 'CANDIDATES', {'direct-shadow-uniforms': sha}), \
              patch.object(comparison, 'CANDIDATE_CPU_CHECKS', proofs), \
              patch.object(Path, 'read_text', return_value=valid):
             comparison.validate_selection()
             for wrong in ['main', 'UNSELECTED', '0' * 40, comparison.BASELINE, 'A' * 40, 'g' * 40]:
                 with self.subTest(revision=wrong), \
-                     patch.object(comparison, 'CANDIDATES', {'scalar-indirect': wrong}), \
+                     patch.object(comparison, 'CANDIDATES', {'direct-shadow-uniforms': wrong}), \
                      self.assertRaises(ValueError):
                     comparison.validate_selection()
-            for wrong in ['UNSELECTED', (), (proofs[0],), (proofs[0], proofs[1]), (proofs[0], proofs[1], proofs[2]), (proofs[0], proofs[1], proofs[2], proofs[0]), (proofs[0], proofs[1], proofs[2], '../test.cjs'), (proofs[0], proofs[1], proofs[2], 'scripts/test-foo.cjs;echo')]:
+            for wrong in ['UNSELECTED', (), (proofs[0],), (proofs[0], proofs[1]), (proofs[0], proofs[1], proofs[2]), (proofs[0], proofs[1], proofs[2], proofs[0]), (proofs[0], proofs[1], proofs[2], '../test.cjs'), (proofs[0], proofs[1], proofs[2], 'scripts/test-foo.cjs;echo'), proofs[:4], (*proofs[:4], proofs[0]), (*proofs[:4], '../test.cjs'), (*proofs[:4], 'scripts/test-foo.cjs;echo')]:
                 with self.subTest(proofs=wrong), patch.object(comparison, 'CANDIDATE_CPU_CHECKS', wrong), self.assertRaises(ValueError):
                     comparison.validate_selection()
-            for wrong in [valid.replace('revision:', 'wrong:', 1), valid.replace(proofs[0], 'wrong'), valid.replace(proofs[1], 'wrong'), valid.replace(proofs[2], 'wrong'), valid.replace(proofs[3], 'wrong'), valid + f'revision: {sha}\n', valid + 'node candidate/' + proofs[1] + '\n']:
+            for wrong in [valid.replace('revision:', 'wrong:', 1), valid.replace(proofs[0], 'wrong'), valid.replace(proofs[1], 'wrong'), valid.replace(proofs[2], 'wrong'), valid.replace(proofs[3], 'wrong'), valid.replace(proofs[4], 'wrong'), valid + f'revision: {sha}\n', valid + 'node candidate/' + proofs[1] + '\n']:
                 with patch.object(Path, 'read_text', return_value=wrong), self.assertRaises(ValueError):
                     comparison.validate_selection()
-            with patch.object(comparison, 'CANDIDATES', {'scalar-indirect': sha, 'extra': sha}), self.assertRaises(ValueError):
+            with patch.object(comparison, 'CANDIDATES', {'direct-shadow-uniforms': sha, 'extra': sha}), self.assertRaises(ValueError):
                 comparison.validate_selection()
 
     def test_optional_toolchain_cpu_identity_precedes_browser_installation(self):
-        text = (HERE.parent / '.github/workflows/intel-cgl-scalar-indirect.yml').read_text()
+        text = (HERE.parent / '.github/workflows/intel-cgl-direct-shadow-uniforms.yml').read_text()
         command = '/usr/sbin/sysctl machdep.cpu.brand_string hw.ncpu hw.memsize || true'
         self.assertEqual(text.count(command), 1)
         self.assertLess(text.index(command), text.index('name: Install one original checksum'))
 
     def test_selection_gate_precedes_all_checkouts_except_harness(self):
-        text = (HERE.parent / '.github/workflows/intel-cgl-scalar-indirect.yml').read_text()
-        gate = text.index('run: python3 harness/scripts/run-intel-cgl-scalar-indirect.py --validate-selection')
+        text = (HERE.parent / '.github/workflows/intel-cgl-direct-shadow-uniforms.yml').read_text()
+        gate = text.index('run: python3 harness/scripts/run-intel-cgl-direct-shadow-uniforms.py --validate-selection')
         self.assertLess(gate, text.index('name: Check out the exact common baseline'))
         self.assertLess(gate, text.index('name: Check out the exact independent candidate'))
         self.assertLess(gate, text.index('name: Install one original checksum'))
@@ -89,7 +89,7 @@ class IntelComparisonTests(unittest.TestCase):
         self.addCleanup(machine.stop)
 
     def run_fixture(self, exit_codes, mutate=False, mismatched_driver=False,
-                    candidate='scalar-indirect', product='firefox', mutate_install=False,
+                    candidate='direct-shadow-uniforms', product='firefox', mutate_install=False,
                     cpu_error=False, indexing_codes=None, indexing_statuses=None):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -159,7 +159,9 @@ class IntelComparisonTests(unittest.TestCase):
         exits = [1] + [0] * (len(ARMS) - 1)
         result, manifest, observed, output = self.run_fixture(exits)
         self.assertEqual(result, 1)
-        self.assertEqual([arm for arm, _ in observed], [name for name, _ in ARMS])
+        self.assertEqual([arm for arm, _ in observed], ['candidate', 'baseline'])
+        self.assertEqual(manifest['order'], ['candidate', 'baseline'])
+        self.assertIn('Fixed candidate-first order', manifest['cacheLimitation'])
         self.assertEqual([arm['exitCode'] for arm in manifest['arms']], exits)
         self.assertEqual([arm['status'] for arm in manifest['arms']], ['failed'] + ['passed'] * (len(exits) - 1))
         self.assertTrue(manifest['diagnosticOnly'])
@@ -183,6 +185,15 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertEqual(manifest['acceptanceStatus'], 'not-run')
         self.assertTrue(all(arm['sourceUnchanged'] for arm in manifest['arms']))
 
+    def test_failed_second_baseline_remains_red_after_candidate_pass(self):
+        result, manifest, observed, output = self.run_fixture([0, 9])
+        self.assertEqual(result, 1)
+        self.assertEqual([name for name, _ in observed], ['candidate', 'baseline'])
+        self.assertEqual(manifest['order'], ['candidate', 'baseline'])
+        self.assertEqual([(arm['name'], arm['status'], arm['exitCode']) for arm in manifest['arms']],
+                         [('candidate', 'passed', 0), ('baseline', 'failed', 9)])
+        self.assertEqual((output / 'baseline/raw/summary.json').read_bytes(), b'{"originalFixtureReceipt":true}\n')
+
     def test_source_change_fails_even_when_original_commands_exit_zero(self):
         result, manifest, observed, _ = self.run_fixture([0] * len(ARMS), mutate=True)
         self.assertEqual(result, 1)
@@ -198,10 +209,10 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertEqual(self.indexing_calls, [])
 
     def test_exact_two_source_order(self):
-        self.assertEqual(comparison.CANDIDATE_CPU_CHECKS, ('scripts/test-literal-lambert-point-body.cjs', 'scripts/test-literal-lambert-directional.cjs', 'scripts/test-scalar-shadow-point.cjs', 'scripts/test-scalar-indirect-lambert.cjs'))
+        self.assertEqual(comparison.CANDIDATE_CPU_CHECKS, ('scripts/test-literal-lambert-point-body.cjs', 'scripts/test-literal-lambert-directional.cjs', 'scripts/test-scalar-shadow-point.cjs', 'scripts/test-scalar-indirect-lambert.cjs', 'scripts/test-direct-shadow-uniforms.cjs'))
         self.assertEqual(ARMS, (
-            ('baseline', 'c6da122681807da85858a90a629de99997a72531'),
-            ('candidate', 'f364c49422d8a549944695ad889867e98f366145'),
+            ('candidate', '227e2835d161b14b86446e20d35a0a5aa96df50e'),
+            ('baseline', 'f364c49422d8a549944695ad889867e98f366145'),
         ))
 
     def test_original_command_has_only_the_standard_installation_arguments(self):
@@ -230,13 +241,13 @@ class IntelComparisonTests(unittest.TestCase):
              patch.object(comparison.platform, 'machine', return_value='arm64'), \
              patch.object(comparison.subprocess, 'run') as run:
             root = Path(directory)
-            self.assertEqual(comparison.run_comparison(root, root / 'missing.json', root / 'output', 'scalar-indirect', 'firefox'), 1)
+            self.assertEqual(comparison.run_comparison(root, root / 'missing.json', root / 'output', 'direct-shadow-uniforms', 'firefox'), 1)
             run.assert_not_called()
             self.assertEqual(json.loads((root / 'output/comparison.json').read_text())['status'], 'infrastructure-error')
 
     def test_both_product_pairs_keep_fixed_revisions_versions_and_host_records(self):
         self.assertEqual(comparison.CANDIDATES, {
-            'scalar-indirect': 'f364c49422d8a549944695ad889867e98f366145',
+            'direct-shadow-uniforms': '227e2835d161b14b86446e20d35a0a5aa96df50e',
         })
         self.assertEqual(comparison.VERSIONS, {'firefox': '153.5.0esr', 'waterfox': '6.7.6'})
         for candidate, revision in comparison.CANDIDATES.items():
@@ -244,7 +255,7 @@ class IntelComparisonTests(unittest.TestCase):
                 with self.subTest(candidate=candidate, product=product):
                     result, manifest, observed, output = self.run_fixture([0, 0], candidate=candidate, product=product)
                     self.assertEqual(result, 0)
-                    self.assertEqual([arm['sourceRevision'] for arm in manifest['arms']], [comparison.BASELINE, revision])
+                    self.assertEqual([arm['sourceRevision'] for arm in manifest['arms']], [revision, comparison.BASELINE])
                     self.assertEqual(manifest['product'], product)
                     for name, command in observed:
                         self.assertEqual(command[command.index('--product') + 1], product)
@@ -293,9 +304,9 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertEqual(data['uptimeError'], 'TimeoutExpired')
 
     def test_workflow_is_fixed_read_only_two_pair_diagnostic(self):
-        text = (HERE.parent / '.github/workflows/intel-cgl-scalar-indirect.yml').read_text()
-        self.assertIn('branches: [diagnostic/intel-cgl-scalar-indirect]', text)
-        self.assertIn("github.ref == 'refs/heads/diagnostic/intel-cgl-scalar-indirect'", text)
+        text = (HERE.parent / '.github/workflows/intel-cgl-direct-shadow-uniforms.yml').read_text()
+        self.assertIn('branches: [diagnostic/intel-cgl-direct-shadow-uniforms]', text)
+        self.assertIn("github.ref == 'refs/heads/diagnostic/intel-cgl-direct-shadow-uniforms'", text)
         self.assertIn('runs-on: macos-15-intel', text)
         self.assertIn('timeout-minutes: 30', text)
         self.assertIn('max-parallel: 2', text)
@@ -311,7 +322,7 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertIn('python3 baseline/scripts/setup-native-browser.py', text)
         self.assertIn('permissions:\n  contents: read', text)
         self.assertIn('if: ${{ always() }}', text)
-        self.assertIn('name: diagnostic-intel-cgl-scalar-indirect-', text)
+        self.assertIn('name: diagnostic-intel-cgl-direct-shadow-uniforms-', text)
         self.assertEqual(text.count('persist-credentials: false'), 3)
         self.assertNotRegex(text, r'workflow_dispatch|pull_request|secrets\.|continue-on-error|workflow_call|diagnose-restore|diagnose-native-draw')
         uses = re.findall(r'uses: ([^\s]+)', text)
@@ -322,14 +333,14 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertNotRegex(quality, re.compile(r'^  push:', re.MULTILINE))
         for name in ('release-pipeline.yml', 'pages.yml'):
             workflow = (HERE.parent / '.github/workflows' / name).read_text()
-            self.assertNotIn('diagnostic/intel-cgl-scalar-indirect', workflow)
+            self.assertNotIn('diagnostic/intel-cgl-direct-shadow-uniforms', workflow)
         for path in (HERE.parent / '.github/workflows').glob('intel-cgl-*.yml'):
-            if path.name != 'intel-cgl-scalar-indirect.yml':
-                self.assertNotIn('diagnostic/intel-cgl-scalar-indirect', path.read_text())
+            if path.name != 'intel-cgl-direct-shadow-uniforms.yml':
+                self.assertNotIn('diagnostic/intel-cgl-direct-shadow-uniforms', path.read_text())
         self.assertFalse((HERE.parent / '.github/workflows/intel-cgl-boundaries.yml').exists())
 
     def test_candidate_cpu_contract_runs_before_browser_installation(self):
-        text = (HERE.parent / '.github/workflows/intel-cgl-scalar-indirect.yml').read_text()
+        text = (HERE.parent / '.github/workflows/intel-cgl-direct-shadow-uniforms.yml').read_text()
         commands = ['node candidate/' + proof for proof in comparison.CANDIDATE_CPU_CHECKS]
         prepare = text.split('      - name: Record tooling and prepare both fixtures before timing\n', 1)[1].split('      - name:', 1)[0]
         self.assertEqual([line.strip() for line in prepare.splitlines() if line.strip().startswith('node candidate/')], commands)
@@ -363,7 +374,7 @@ class IntelComparisonTests(unittest.TestCase):
         result, manifest, observed, output = self.run_fixture([0, 0])
         self.assertEqual(result, 0)
         self.assertEqual(self.events, [('control', 1), ('control', 2), ('control', 3),
-            ('control', 4), ('suite', 'baseline'), ('control', 5), ('suite', 'candidate')])
+            ('control', 4), ('suite', 'candidate'), ('control', 5), ('suite', 'baseline')])
         status = ['/usr/bin/mdutil', '-a', '-s']
         self.assertEqual(self.indexing_calls, [status,
             ['/usr/bin/sudo', '-n', '/usr/bin/mdutil', '-a', '-i', 'off'], status, status, status])
@@ -388,9 +399,9 @@ class IntelComparisonTests(unittest.TestCase):
                 self.assertEqual(result, 1)
                 self.assertEqual(manifest['status'], 'infrastructure-error')
                 self.assertEqual(manifest['indexingControl']['verifiedDisabled'], index >= 3)
-                self.assertEqual([arm for arm, _ in observed], ['baseline'] if index == 4 else [])
+                self.assertEqual([arm for arm, _ in observed], ['candidate'] if index == 4 else [])
                 names = ('indexing-before.json', 'indexing-disable.json', 'indexing-after.json',
-                         'baseline/indexing-before.json', 'candidate/indexing-before.json')
+                         'candidate/indexing-before.json', 'baseline/indexing-before.json')
                 self.assertEqual(json.loads((output / names[index]).read_text())['exitCode'], 3)
                 if index >= 3:
                     self.assertEqual(manifest['arms'][index - 3]['status'], 'infrastructure-error')
@@ -405,15 +416,15 @@ class IntelComparisonTests(unittest.TestCase):
                 with self.subTest(index=index, status=text):
                     result, manifest, observed, _ = self.run_fixture([0, 0], indexing_statuses={index: text})
                     self.assertEqual(result, 1)
-                    self.assertEqual([arm for arm, _ in observed], ['baseline'] if index == 4 else [])
+                    self.assertEqual([arm for arm, _ in observed], ['candidate'] if index == 4 else [])
                     self.assertEqual(manifest['indexingControl']['verifiedDisabled'], index >= 3)
                     self.assertEqual(manifest['status'], 'infrastructure-error')
 
-    def test_failed_baseline_is_preserved_when_candidate_indexing_has_drifted(self):
+    def test_failed_candidate_is_preserved_when_baseline_indexing_has_drifted(self):
         result, manifest, observed, _ = self.run_fixture([7], indexing_statuses={
             4: '/:\nIndexing enabled.\n/System/Volumes/Data:\nIndexing disabled.\n'})
         self.assertEqual(result, 1)
-        self.assertEqual([arm for arm, _ in observed], ['baseline'])
+        self.assertEqual([arm for arm, _ in observed], ['candidate'])
         self.assertEqual(manifest['arms'][0]['status'], 'failed')
         self.assertEqual(manifest['arms'][0]['exitCode'], 7)
         self.assertEqual(manifest['arms'][1]['status'], 'infrastructure-error')
@@ -427,7 +438,7 @@ class IntelComparisonTests(unittest.TestCase):
                     codes[index] = error
                     result, manifest, observed, _ = self.run_fixture([0, 0], indexing_codes=codes)
                     self.assertEqual(result, 1)
-                    self.assertEqual([arm for arm, _ in observed], ['baseline'] if index == 4 else [])
+                    self.assertEqual([arm for arm, _ in observed], ['candidate'] if index == 4 else [])
                     self.assertNotIn('private', json.dumps(manifest))
 
     def test_indexing_command_capture_is_capped_and_timeout_is_a_failure_receipt(self):
@@ -485,7 +496,7 @@ class IntelComparisonTests(unittest.TestCase):
             self.assertNotIn('private capture detail', records)
             self.assertEqual([json.loads(line)['error'] for line in records.splitlines()], ['OSError'] * 2)
 
-    def test_suite_launch_exception_still_stops_sampler_and_runs_candidate(self):
+    def test_suite_launch_exception_still_stops_sampler_and_runs_baseline(self):
         result, manifest, observed, _ = self.run_fixture([OSError('cannot launch'), 0])
         self.assertEqual(result, 1)
         self.assertEqual(len(observed), 2)
