@@ -1146,6 +1146,10 @@ function clockedDiagnostics(label, configure = () => {}) {
       }
       now = Math.max(now, target); await this.flush();
     },
+    fireEarly(at) {
+      const timer = [...timers.values()].find(value => value.at === at);
+      assert(timer, 'Expected scheduled timer'); timers.delete(timer.id); timer.callback();
+    },
     pending: () => [...timers.values()].map(t => t.at), exits, calls,
   };
   const fake = fakeBrowser();
@@ -1163,7 +1167,7 @@ function clockedDiagnostics(label, configure = () => {}) {
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'browser-stability-diagnostics.cjs'),'utf8'),env,{filename:'actual-browser-stability-diagnostics.cjs'});
   const diagnostics=loaded.exports.createDiagnostics(label,'STABILITY_UNIT',path.join(__dirname,'..'));
-  return {diagnostics,fake,clock};
+  return {diagnostics,fake,clock,createViewerLoadDeadline:loaded.exports.createViewerLoadDeadline};
 }
 function deferred() { let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject}; }
 
@@ -1433,4 +1437,74 @@ test('post-restoration cases keep deadlines and preserve pending transition rece
   fail=true;await assert.rejects(vm.runInNewContext('(async()=>{'+code+'})()',env),/primary transition failure/);
   assert.equal(sample.postRestoreViews.length,1);assert(sample.postRestoreViews[0].durationMs>=0);
   assert.equal(sample.postRestoreViews[0].snapshot,undefined);
+});
+
+
+test('cold viewer load has one60s monotonic clock and immutable successful completion time', async () => {
+  const {diagnostics,clock}=clockedDiagnostics('viewer');
+  let sample;
+  const result=await diagnostics.run('firefox',{...options,deadlineMs:120000},async({createViewerLoad,record})=>{
+    sample={cycle:0};record.samples.push(sample);const load=createViewerLoad(sample);
+    try {
+      await load.run(()=>clock.elapse(20000));assert.equal(load.remainingMs(),40000);
+      await load.run(()=>clock.elapse(20000));assert.equal(load.remainingMs(),20000);
+      await load.run(()=>clock.elapse(19999));load.complete();
+      clock.elapse(1000);
+    } finally {load.close();}
+  });
+  assert.equal(result.status,'passed');assert.equal(result.loadBudgetMs,60000);
+  assert.equal(sample.loadBudgetMs,60000);assert.equal(sample.loadMs,59999);assert.equal(sample.loadCompleted,true);
+  assert.equal(result.deadlineScope.scenarioMs,120000);assert.equal(clock.pending().length,0);
+});
+
+test('cold viewer rejects exact boundary and late true before overdue timer delivery', async () => {
+  for (const elapsed of [60000,60001]) {
+    const {diagnostics,clock}=clockedDiagnostics('viewer');let sample,next=false;
+    await assert.rejects(diagnostics.run('firefox',{...options,deadlineMs:120000},async({createViewerLoad,record})=>{
+      sample={cycle:0};record.samples.push(sample);const load=createViewerLoad(sample);
+      try {await load.run(()=>{clock.elapse(elapsed);return true;});next=true;load.complete();}
+      finally {load.close();}
+    }),/cold load/);
+    assert.equal(next,false);assert.equal(sample.loadCompleted,false);assert.equal(sample.loadMs,elapsed);
+    assert.equal(read(diagnostics).status,'failed');assert.equal(clock.pending().length,0);
+  }
+});
+
+test('cold viewer timeout rearms an early timer and rejects a hanging operation', async () => {
+  const {clock,createViewerLoadDeadline}=clockedDiagnostics('cold-direct');
+  const sample={};const load=createViewerLoadDeadline(sample,120000,()=>{});
+  const pending=load.run(()=>new Promise(()=>{})).catch(error=>error);await clock.flush();
+  clock.elapse(59999.5);clock.fireEarly(60000);await clock.flush();
+  assert(clock.pending().some(time=>time>=60000));
+  await clock.advance(1);
+  assert.match((await pending).message,/cold load/);load.close();
+  assert.equal(sample.loadCompleted,false);assert.equal(clock.pending().length,0);
+});
+
+test('cold stages and second cycle never renew the enclosing120s scenario', async () => {
+  const {diagnostics,clock}=clockedDiagnostics('viewer');const samples=[];
+  await assert.rejects(diagnostics.run('firefox',{...options,deadlineMs:120000},async({createViewerLoad,record})=>{
+    for(let cycle=0;cycle<2;cycle++) {
+      const sample={cycle};samples.push(sample);record.samples.push(sample);const load=createViewerLoad(sample);
+      try {
+        assert.equal(load.remainingMs(),cycle===0?60000:50000);
+        await load.run(()=>clock.elapse(50000));load.complete();
+      } finally {load.close();}
+      if(cycle===0)clock.elapse(20000);
+    }
+  }),/120-second browser deadline/);
+  assert.equal(samples[0].loadCompleted,true);assert.equal(samples[1].loadCompleted,false);assert.equal(samples[1].loadTimedOut,true);
+  assert.equal(read(diagnostics).timeoutScope,'scenario');assert.equal(read(diagnostics).deadlineScope.scenarioMs,120000);
+});
+
+test('cold viewer uses remaining operation waits while all ordinary defaults stay30s', () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  assert.equal((source.match(/timeout: load.remainingMs\(\)/g)||[]).length,2);
+  assert(source.includes('load.run(() => page.evaluate('));
+  assert(source.includes('load.run(() => page.locator('));
+  assert(source.includes('loadMs<sample.loadBudgetMs && dragMs<15000 && editorDragMs<15000'));
+  assert(source.includes('reportOnly, deadlineMs: 120000'));
+  const shared=fs.readFileSync(path.join(__dirname,'browser-stability-diagnostics.cjs'),'utf8');
+  assert(shared.includes('page.setDefaultTimeout(30000)'));
+  assert(shared.includes('bootstrapMs = 30000'));
 });

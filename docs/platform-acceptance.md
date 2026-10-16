@@ -463,8 +463,9 @@ tracing. It is not renewed as setup stages complete. Immediately before the
 scenario callback, the watchdog switches once to the existing **120-second
 viewer** or **180-second planner** budget. That scenario budget includes all
 scenario cycles, interactions and recovery, final browser identity and final checks;
-phase changes never renew it. Existing load, drag, step and cleanup limits,
-assertions, browser profiles and scene quality remain unchanged. No retry or
+phase changes never renew it. Drag, step and cleanup limits, assertions, browser
+profiles and scene quality remain unchanged; the cold viewer load budget is
+specified separately below. No retry or
 platform-specific allowance is added.
 
 This is a prospective acceptance-contract change: the previous shared helper
@@ -495,6 +496,33 @@ callback can still finish work while failure evidence is captured, so later
 sample fields or completed phase entries do not prove that work finished before
 the deadline; consult the retained timeout and status. Native Gecko and Safari
 acceptance timing is unchanged by this Playwright contract.
+
+The cold viewer load has one aggregate **60-second** budget per cycle, uniformly
+across Playwright profiles and native Firefox, Waterfox and Safari. It starts
+before fixture fetch and iframe creation and covers frame selection through the
+first fully connected frame with every expected light rendered. Each wait uses
+the remaining budget; completing a blocked call at or after the deadline still
+fails. This is a prospective change from 30 seconds for cold viewer loads only,
+not a runtime speed improvement or a reclassification of previous failed runs,
+including R24. Planner loads retain 30 seconds. Interaction, settling, editor,
+recovery and teardown limits are unchanged.
+
+The cold budget cannot extend the existing outer deadline: Playwright retains
+its 30-second bootstrap and 120-second viewer scenario, and native viewers retain
+their 180-second browser watchdog. Each of the two cycles gets a fresh cold
+budget limited by that same remaining outer clock. Native script and transport
+timeouts temporarily follow the remaining cold budget and return to their
+ordinary 30-second setting afterward. Native timeout setup is included in the
+cold measurement; its reset and the diagnostic snapshot after readiness are not.
+The separate fenced first-frame diagnostic retains its own 180-second limit and
+cannot award acceptance credit.
+
+Every viewer report and cycle sample records `loadBudgetMs: 60000`. Samples also
+record monotonic `loadMs` and `loadCompleted`; a pending or failed cold load is
+saved with `loadCompleted: false`, and detected expiry sets `loadTimedOut: true`.
+Successful durations use the checked completion timestamp and must be strictly
+less than 60 seconds. These fields describe cold readiness, not gesture latency,
+and do not override the final case status or outer timeout evidence.
 
 Legacy native Gecko rows on macOS enable `NATIVE_STARTUP_DIAGNOSTICS=1`.
 A separate loopback fixture process saves at most 56 startup checkpoints,

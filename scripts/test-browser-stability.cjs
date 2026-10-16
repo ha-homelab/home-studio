@@ -80,7 +80,7 @@ async function run(browserName, origin, project, sourceHash) {
     fixture: {floors: 1, rooms: project.floors[0].rooms.length, lights: project.floors[0].items.length},
     launch: browserLaunchOptions(browserName, process.env.BROWSER_STABILITY_HEADED !== '1'),
     context: profile.context, profile, inputDiagnostics,
-  }, async ({browser, page, record, check, save, phases}) => {
+  }, async ({browser, page, record, check, save, phases, createViewerLoad}) => {
   const {samples, errors, crashes, consoleErrors} = record;
   phases.start('input-setup');
   const input = await createInputDriver(page, browserName, profile, inputDiagnostics);
@@ -110,27 +110,32 @@ async function run(browserName, origin, project, sourceHash) {
       console.log(`${browserName} ${browser.version()}: loading fictional dashboard, cycle ${cycle + 1}`);
       phases.start('viewer-load', {cycle});
       const started = Date.now();
-      await page.evaluate(async ({items,states,height}) => {
-        const html = await (await fetch('/viewer')).text();
-        const iframe = document.createElement('iframe');
-        iframe.id = 'viewer';iframe.sandbox = 'allow-scripts allow-downloads allow-forms';
-        iframe.style.cssText = `width:100%;height:${height}px;border:0`;
-        iframe.onload = () => {
-          const channel = new MessageChannel();window.viewerPort = channel.port1;
-          channel.port1.onmessage = event => { if(event.data.type==='model_config') channel.port1.postMessage({type:'states',connected:true,states}); };
-          iframe.contentWindow.postMessage({type:'home-floorplan:init',items,preferences:{}},'*',[channel.port2]);
-        };
-        iframe.srcdoc = html;document.body.append(iframe);
-      }, {items:project.floors[0].items,states,height:profile.emulated?profile.context.viewport.height-60:740});
-      await page.waitForFunction(() => document.querySelector('#viewer'));
-      const frame = await page.locator('#viewer').contentFrame();
-      // FrameLocator supports locators, but evaluate uses the actual child Frame.
-      const child = page.frames().find(value => value !== page.mainFrame());
-      await child.waitForFunction(expected => window.floorplan?.renderCount > 0 && document.querySelector('#homeConnection')?.dataset.connected === 'true' && window.__browserRenderedLights === expected, project.floors[0].items.length);
-      const loadMs = Date.now()-started;
+      const sample = {cycle}; samples.push(sample);
+      const load = createViewerLoad(sample);
+      let frame, child;
+      try {
+        await load.run(() => page.evaluate(async ({items,states,height}) => {
+          const html = await (await fetch('/viewer')).text();
+          const iframe = document.createElement('iframe');
+          iframe.id = 'viewer';iframe.sandbox = 'allow-scripts allow-downloads allow-forms';
+          iframe.style.cssText = `width:100%;height:${height}px;border:0`;
+          iframe.onload = () => {
+            const channel = new MessageChannel();window.viewerPort = channel.port1;
+            channel.port1.onmessage = event => { if(event.data.type==='model_config') channel.port1.postMessage({type:'states',connected:true,states}); };
+            iframe.contentWindow.postMessage({type:'home-floorplan:init',items,preferences:{}},'*',[channel.port2]);
+          };
+          iframe.srcdoc = html;document.body.append(iframe);
+        }, {items:project.floors[0].items,states,height:profile.emulated?profile.context.viewport.height-60:740}));
+        await load.run(() => page.waitForFunction(() => document.querySelector('#viewer'), null, {timeout: load.remainingMs()}));
+        frame = await load.run(() => page.locator('#viewer').contentFrame());
+        // FrameLocator supports locators, but evaluate uses the actual child Frame.
+        child = page.frames().find(value => value !== page.mainFrame());
+        await load.run(() => child.waitForFunction(expected => window.floorplan?.renderCount > 0 && document.querySelector('#homeConnection')?.dataset.connected === 'true' && window.__browserRenderedLights === expected, project.floors[0].items.length, {timeout: load.remainingMs()}));
+        load.complete();
+      } finally { load.close(); save(); }
+      const loadMs = sample.loadMs;
       phases.start('initial-checks', {cycle});
-      const sample = {cycle,loadMs};samples.push(sample);save();
-      console.log(`${browserName}: first connected draw in ${loadMs} ms`);
+      console.log(`${browserName}: first connected draw in ${sample.loadMs} ms`);
       const snapshot = () => child.evaluate(() => ({...window.__browserStability,renderedLights:window.__browserRenderedLights,renderCount:window.floorplan.renderCount,homeMode:window.floorplan.homeMode,scene:window.__browserScene?.()}));
       let initial = await snapshot();
       record.gpu = initial.gpu;
@@ -260,7 +265,7 @@ async function run(browserName, origin, project, sourceHash) {
       initial = await snapshot();
       check(initial.shaderErrors.length===0, 'Light changes and editor/Home transitions keep every shader linked');
       check(initial.contextLosses===0, 'No unexpected WebGL context loss');
-      check(loadMs<30000 && dragMs<15000 && editorDragMs<15000, `Load and drag remain responsive (load ${loadMs} ms, Home drag ${dragMs} ms, editor drag ${editorDragMs} ms)`);
+      check(loadMs<sample.loadBudgetMs && dragMs<15000 && editorDragMs<15000, `Load and drag remain responsive (load ${loadMs} ms, Home drag ${dragMs} ms, editor drag ${editorDragMs} ms)`);
       let recovery = null;
       if(cycle===1 && !reportOnly) {
         phases.start('context-loss', {cycle});

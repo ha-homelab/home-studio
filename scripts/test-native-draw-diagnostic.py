@@ -1,4 +1,5 @@
 """Offline contracts for the failure-only native draw profiler."""
+import ast
 import importlib.util
 import inspect
 import io
@@ -86,8 +87,17 @@ class DrawDiagnosticTests(unittest.TestCase):
         self.assertNotIn('canvas_drag', generated)
         self.assertNotIn('renderModel', generated)
         self.assertNotIn('requestAnimationFrame', generated)
-        for original_line in [line for line in original.splitlines() if 'iframe.' in line or 'channel.port1.onmessage' in line]:
-            self.assertIn(original_line, generated)
+        def bootstrap_call(source):
+            calls = [node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.Call)
+                     and isinstance(node.func, ast.Attribute) and node.func.attr == 'execute'
+                     and node.args and isinstance(node.args[0], ast.Constant)
+                     and isinstance(node.args[0].value, str)
+                     and node.args[0].value.startswith('const [items,states,diagnostics,frameDiagnostics]')]
+            self.assertEqual(len(calls), 1)
+            return ast.dump(calls[0], include_attributes=False)
+        self.assertEqual(bootstrap_call(original), bootstrap_call(generated))
+        for acceptance_scope in ('viewer_load_scope', 'load.run', 'loadBudgetMs'):
+            self.assertNotIn(acceptance_scope, generated)
         self.assertIn("record.get('sourceFiles') == DIAGNOSTIC_PRIMARY_FILES", generated)
         diagnostic_timeouts = "client.call('WebDriver:SetTimeouts', {'pageLoad': 180000, 'script': 180000})"
         self.assertIn(diagnostic_timeouts, generated)

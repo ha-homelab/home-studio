@@ -41,11 +41,30 @@ class SafariWebDriver(native.Marionette):
         request = urllib.request.Request(self.origin + route, data=body, method=method,
                                          headers={'Content-Type': 'application/json; charset=utf-8'})
         try:
-            response = urllib.request.urlopen(request, timeout=30)
+            response = urllib.request.urlopen(request, timeout=self.command_timeout())
         except urllib.error.HTTPError as error:
             response = error
         with response:
-            result = json.loads(response.read(64 * 1024 * 1024 + 1))
+            if self.__dict__.get('_cold_load_deadline') is None:
+                raw = response.read(64 * 1024 * 1024 + 1)
+            else:
+                # HTTP headers and body share the same cold-load clock. Update
+                # each bounded read's socket timeout, rather than renewing 60s.
+                body_response = response.fp if isinstance(response, urllib.error.HTTPError) else response
+                chunks, size = [], 0
+                while size <= 64 * 1024 * 1024:
+                    remaining = self.command_timeout()
+                    if body_response.isclosed():
+                        break
+                    transport = getattr(getattr(body_response.fp, 'raw', None), '_sock', None)
+                    native.require(transport is not None, 'Cold Safari response requires a bounded socket')
+                    transport.settimeout(remaining)
+                    chunk = body_response.read1(min(65536, 64 * 1024 * 1024 + 1 - size))
+                    if not chunk:
+                        break
+                    chunks.append(chunk); size += len(chunk)
+                raw = b''.join(chunks)
+            result = json.loads(raw)
             value = result.get('value')
             if response.status >= 400 or isinstance(value, dict) and value.get('error'):
                 raise RuntimeError(f'WebDriver {method} {route}: {value}')
@@ -124,6 +143,8 @@ def run_case(output, name, driver_path):
               'sourceRevision': os.environ.get('GITHUB_SHA'), 'samples': [],
               'os': {'platform': sys.platform, 'release': platform.release(), 'machine': platform.machine()},
               'headless': False, 'emulatedMobile': False, 'cleanupErrors': []}
+    if name.startswith('viewer-'):
+        record['loadBudgetMs'] = native.VIEWER_LOAD_BUDGET_MS
     def save():
         (output / 'report.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
     save()
@@ -154,6 +175,7 @@ def run_case(output, name, driver_path):
             def expired():
                 record['deadlineExceeded'] = True
                 native.stop(driver)
+            client._browser_deadline = time.monotonic() + 180
             watchdog = threading.Timer(180, expired)
             watchdog.daemon = True
             watchdog.start()

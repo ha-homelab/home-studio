@@ -46,6 +46,106 @@ def replacement_stats():
                 'lossRequests':[{'contextId':1, 'attached':True}, {'contextId':1, 'attached':False}]}}
 
 
+class ViewerColdLoadTests(unittest.TestCase):
+    def test_boundary_and_late_calls_preserve_failure_receipts_and_reset(self):
+        for elapsed, passed in [(59.999, True), (60, False), (61, False)]:
+            now = [0.0]; client = Mock(); sample = {}
+            with patch.object(acceptance.time, 'monotonic', side_effect=lambda: now[0]):
+                def operation(): now[0] = elapsed; return True
+                try:
+                    with acceptance.viewer_load_scope(client, sample) as load:
+                        load.run(operation); load.complete()
+                        now[0] += 10  # Later cleanup cannot change successful load timing.
+                except TimeoutError:
+                    self.assertFalse(passed)
+                else:
+                    self.assertTrue(passed)
+            self.assertEqual(sample['loadBudgetMs'], 60000)
+            self.assertEqual(sample['loadCompleted'], passed)
+            self.assertAlmostEqual(sample['loadMs'], elapsed * 1000, places=2)
+            self.assertIsNone(client._cold_load_deadline)
+            self.assertEqual(client.call.call_args.args, ('WebDriver:SetTimeouts', {'script': 30000}))
+
+    def test_transport_expiry_still_marks_the_failed_sample(self):
+        now = [0.0]; client = Mock(); sample = {}
+        with patch.object(acceptance.time, 'monotonic', side_effect=lambda:now[0]):
+            with self.assertRaisesRegex(TimeoutError, 'transport expired'):
+                with acceptance.viewer_load_scope(client, sample) as load:
+                    def failed_transport():
+                        now[0] = 60
+                        raise TimeoutError('transport expired')
+                    load.run(failed_transport)
+        self.assertFalse(sample['loadCompleted'])
+        self.assertTrue(sample['loadTimedOut'])
+        self.assertEqual(sample['loadMs'], 60000)
+
+    def test_earlier_stages_consume_one_budget_and_outer_limit_is_never_renewed(self):
+        for outer in (None, 45):
+            now = [0.0]; sample = {}; client = Mock()
+            if outer is not None: client._browser_deadline = outer
+            def advance(_expression, timeout):
+                expected = (60 if outer is None else 45) - now[0]
+                self.assertAlmostEqual(timeout, expected)
+                now[0] += 20
+            client.wait.side_effect = advance
+            with patch.object(acceptance.time, 'monotonic', side_effect=lambda: now[0]):
+                with self.assertRaises(TimeoutError):
+                    with acceptance.viewer_load_scope(client, sample) as load:
+                        load.wait('fetch'); load.wait('iframe'); load.wait('connected')
+            self.assertFalse(sample['loadCompleted'])
+            if outer is not None: self.assertEqual(client._browser_deadline, outer)
+
+    def test_each_cycle_is_fresh_but_browser_deadline_and_default_wait_stay_fixed(self):
+        now = [0.0]; client = Mock(); client._browser_deadline = 180
+        with patch.object(acceptance.time, 'monotonic', side_effect=lambda: now[0]):
+            for cycle in range(2):
+                sample = {'cycle': cycle}
+                with acceptance.viewer_load_scope(client, sample) as load:
+                    self.assertEqual(load.remaining(), 60)
+                    now[0] += 40; load.complete()
+                self.assertEqual(sample['loadMs'], 40000)
+        self.assertEqual(client._browser_deadline, 180)
+        self.assertEqual(inspect.signature(acceptance.Marionette.wait).parameters['timeout'].default, 30)
+        self.assertIn('threading.Timer(180, deadline_exceeded)', inspect.getsource(acceptance.run_case))
+        self.assertIn("sample['loadMs'] < 30000", inspect.getsource(acceptance.planner))
+
+    def test_scoped_socket_timeout_is_remaining_and_restored_even_on_failure(self):
+        class Connection:
+            def __init__(self): self.timeout = 30; self.values = []
+            def gettimeout(self): return self.timeout
+            def settimeout(self, value): self.timeout = value; self.values.append(value)
+            def sendall(self, _body): pass
+            def recv(self, _length): raise OSError('original transport failure')
+        client = acceptance.Marionette.__new__(acceptance.Marionette)
+        client.connection = Connection(); client.sequence = 0; client.buffer = b''
+        client._cold_load_deadline = 60
+        with patch.object(acceptance.time, 'monotonic', side_effect=[20, 35]):
+            with self.assertRaisesRegex(OSError, 'original transport'):
+                client.call('WebDriver:ExecuteScript')
+        self.assertEqual(client.connection.values, [40, 25, 30])
+        self.assertEqual(client.connection.timeout, 30)
+
+    def test_actual_viewer_saves_cold_failure_before_any_drag(self):
+        now = [0.0]; client = Mock(); record = {'samples': []}; saved = []
+        def late(_expression, timeout): now[0] += 61
+        client.wait.side_effect = late
+        with patch.object(acceptance.time, 'monotonic', side_effect=lambda: now[0]):
+            with self.assertRaises(TimeoutError):
+                acceptance.viewer(client, 'http://fixture', {'floors':[{'items':[]}]}, record,
+                                  lambda: saved.append(copy.deepcopy(record)))
+        self.assertEqual(record['loadBudgetMs'], 60000)
+        self.assertEqual(saved[-1]['samples'][0]['loadMs'], 61000)
+        self.assertFalse(saved[-1]['samples'][0]['loadCompleted'])
+        client.canvas_drag.assert_not_called()
+
+    def test_original_failure_survives_timeout_reset_failure(self):
+        client = Mock(); sample = {}; client.call.side_effect = [None, RuntimeError('reset failure')]
+        with self.assertRaisesRegex(ValueError, 'original failure'):
+            with acceptance.viewer_load_scope(client, sample): raise ValueError('original failure')
+        self.assertFalse(sample['loadCompleted'])
+        self.assertIsNone(client._cold_load_deadline)
+
+
 class RestoredViewerModeTests(unittest.TestCase):
     def stats(self, mode='home', count=4):
         return {'contexts':1, 'contextLosses':1, 'gpu':{'version':'WebGL 2.0'},

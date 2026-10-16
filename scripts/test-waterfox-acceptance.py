@@ -189,6 +189,65 @@ def shutdown_browser(client, process, record):
         record['shutdownMs'] = round((time.monotonic() - started) * 1000)
 
 
+VIEWER_LOAD_BUDGET_MS = 60000
+
+
+class ViewerLoadDeadline:
+    """One monotonic deadline for creation through the first connected lit frame."""
+    def __init__(self, client, sample):
+        self.client, self.sample = client, sample
+        self.completed_at = None
+        self.started = time.monotonic()
+        self.deadline = self.started + VIEWER_LOAD_BUDGET_MS / 1000
+        outer = client.__dict__.get('_browser_deadline')
+        if outer is not None:
+            self.deadline = min(self.deadline, outer)
+        sample.update(loadBudgetMs=VIEWER_LOAD_BUDGET_MS, loadMs=None, loadCompleted=False)
+
+    def remaining(self):
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            self.sample['loadTimedOut'] = True
+            raise TimeoutError('Viewer cold load exceeded its 60-second or remaining browser deadline')
+        return remaining
+
+    def run(self, operation):
+        self.remaining()
+        result = operation()
+        self.remaining()  # A blocked call returning true after expiry is still late.
+        return result
+
+    def wait(self, expression):
+        return self.run(lambda: self.client.wait(expression, timeout=self.remaining()))
+
+    def complete(self):
+        completed = time.monotonic()
+        self.remaining()
+        self.completed_at = completed
+        self.sample['loadCompleted'] = True
+
+
+@contextlib.contextmanager
+def viewer_load_scope(client, sample):
+    load = ViewerLoadDeadline(client, sample)
+    previous = client.__dict__.get('_cold_load_deadline')
+    client._cold_load_deadline = load.deadline
+    try:
+        load.run(lambda: client.call('WebDriver:SetTimeouts', {'script': max(1, math.floor(load.remaining() * 1000))}))
+        yield load
+    finally:
+        if load.completed_at is None and time.monotonic() >= load.deadline:
+            sample['loadTimedOut'] = True
+        sample['loadMs'] = math.floor(((load.completed_at if load.completed_at is not None else time.monotonic()) - load.started) * 1000000) / 1000
+        client._cold_load_deadline = previous
+        failed = sys.exc_info()[0] is not None
+        try:
+            client.call('WebDriver:SetTimeouts', {'script': 30000})
+        except Exception:
+            if not failed:
+                raise  # Restore errors cannot hide the original cold-load failure.
+
+
 class Marionette:
     """The version-3 length-prefixed transport used by stock Gecko browsers."""
     def __init__(self, connection):
@@ -211,7 +270,18 @@ class Marionette:
         body, self.buffer = self.buffer[:length], self.buffer[length:]
         return json.loads(body)
 
+    def command_timeout(self):
+        deadline = self.__dict__.get('_cold_load_deadline')
+        if deadline is None:
+            return 30
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('Viewer cold load exhausted its remaining deadline')
+        return remaining
+
     def read(self):
+        if self.__dict__.get('_cold_load_deadline') is not None:
+            self.connection.settimeout(self.command_timeout())
         chunk = self.connection.recv(65536)
         if not chunk:
             raise ConnectionError('Browser closed the Marionette connection')
@@ -220,8 +290,16 @@ class Marionette:
     def call(self, name, data=None):
         self.sequence += 1
         body = json.dumps([0, self.sequence, name, data or {}]).encode('utf-8')
-        self.connection.sendall(str(len(body)).encode() + b':' + body)
-        response = self.receive()
+        scoped = self.__dict__.get('_cold_load_deadline') is not None
+        previous = self.connection.gettimeout() if scoped else None
+        try:
+            if scoped:
+                self.connection.settimeout(self.command_timeout())
+            self.connection.sendall(str(len(body)).encode() + b':' + body)
+            response = self.receive()
+        finally:
+            if scoped:
+                self.connection.settimeout(previous)
         require(response[:2] == [1, self.sequence], 'Unexpected Marionette response ID')
         if response[2]:
             raise RuntimeError(json.dumps(response[2]))
@@ -438,6 +516,7 @@ def assert_state_programs(before, after):
 
 
 def viewer(client, origin, project, record, save):
+    record['loadBudgetMs'] = VIEWER_LOAD_BUDGET_MS
     client.call('WebDriver:Navigate', {'url': origin})
     client.execute('''window.addEventListener('message', event => {
       if (event.data?.type === 'native-gl-teardown' && event.data.token === window.nativeGraphicsToken) window.nativeTeardown = event.data.evidence;
@@ -446,8 +525,11 @@ def viewer(client, origin, project, record, save):
     states = {item['entity_id']: {'state': 'on', 'name': item['name'], 'light': {'brightness': 180, 'color_mode': 'color_temp', 'color_temp_kelvin': 3000}} for item in items}
     states['sun.sun'] = {'state': 'above_horizon', 'elevation': 30}
     for cycle in range(2):
-        started = time.monotonic()
-        client.execute('''const [items,states,diagnostics,frameDiagnostics]=arguments; window.fixtureLoaded=false;window.nativeTeardown=null;window.nativeGraphicsToken=crypto.randomUUID();
+        sample = {'cycle': cycle, 'loadBudgetMs': VIEWER_LOAD_BUDGET_MS}
+        record['samples'].append(sample)
+        try:
+            with viewer_load_scope(client, sample) as load:
+                load.run(lambda: client.execute('''const [items,states,diagnostics,frameDiagnostics]=arguments; window.fixtureLoaded=false;window.nativeTeardown=null;window.nativeGraphicsToken=crypto.randomUUID();
           fetch('/viewer').then(r=>r.text()).then(html=>{html=html.replace('<head>',()=>'<head><script>window.__nativeGraphicsToken='+JSON.stringify(window.nativeGraphicsToken)+';'+diagnostics+'</script>');
             html=html.replace('</script></body>', ()=>frameDiagnostics+'</script></body>');
             const iframe=document.createElement('iframe');
@@ -456,16 +538,16 @@ def viewer(client, origin, project, record, save):
             iframe.onload=()=>{window.nativeViewer=iframe.contentWindow;const channel=new MessageChannel();window.viewerPort=channel.port1;
               channel.port1.onmessage=e=>{if(e.data.type==='model_config')channel.port1.postMessage({type:'states',connected:true,states});};
               iframe.contentWindow.postMessage({type:'home-floorplan:init',items,preferences:{}},'*',[channel.port2]);window.fixtureLoaded=true;};
-            iframe.srcdoc=html;document.body.append(iframe);}); return true;''', items, states, NATIVE_VIEWER_PROGRAM_DIAGNOSTICS + NATIVE_GL_DIAGNOSTICS, NATIVE_VIEWER_FRAME_DIAGNOSTICS)
-        client.wait('window.fixtureLoaded')
-        client.call('WebDriver:SwitchToFrame', {'id': 0})
-        client.wait(f"window.floorplan?.renderCount>0 && document.querySelector('#homeConnection')?.dataset.connected==='true' && window.__nativeRenderedLights==={len(items)}")
-        sample = {'cycle': cycle, 'loadMs': round((time.monotonic() - started) * 1000)}
-        record['samples'].append(sample)
+            iframe.srcdoc=html;document.body.append(iframe);}); return true;''', items, states, NATIVE_VIEWER_PROGRAM_DIAGNOSTICS + NATIVE_GL_DIAGNOSTICS, NATIVE_VIEWER_FRAME_DIAGNOSTICS))
+                load.wait('window.fixtureLoaded')
+                load.run(lambda: client.call('WebDriver:SwitchToFrame', {'id': 0}))
+                load.wait(f"window.floorplan?.renderCount>0 && document.querySelector('#homeConnection')?.dataset.connected==='true' && window.__nativeRenderedLights==={len(items)}")
+                load.complete()
+        finally:
+            save()
         snapshot = lambda: client.execute('return {...window.__browserStability,programLedger:window.__nativeViewerPrograms.snapshot(),nativeGraphics:window.__sampleNativeGraphics("viewer-snapshot"),renderedLights:window.__nativeRenderedLights,renderCount:window.floorplan.renderCount,scene:window.__browserScene()};')
         sample['initial'] = initial = snapshot()
         save()
-        require(sample['loadMs'] < 30000, 'Viewer connected draw exceeded 30 seconds')
         assert_graphics(initial)
         require(initial['scene']['pointLights'] == len(items), 'Every fixture light retains a shader slot')
         require(initial['scene']['activePointLights'] == len(items), 'Every on-state fixture light contributes illumination')
@@ -696,6 +778,8 @@ def run_case(installation, output, name, headless, *, diagnostic_only=False):
               'os': {'platform': sys.platform, 'release': platform.release(), 'machine': platform.machine()},
               'pythonVersion': platform.python_version(), 'headless': headless,
               'output': str(output), 'samples': []}
+    if name.startswith('viewer-'):
+        record['loadBudgetMs'] = VIEWER_LOAD_BUDGET_MS
     if diagnostic_only:
         record.update(diagnosticOnly=True, acceptanceStatus='not-run')
     def save():
@@ -766,6 +850,7 @@ def run_case(installation, output, name, headless, *, diagnostic_only=False):
         def deadline_exceeded():
             record['deadlineExceeded'] = True
             stop(browser)
+        browser_deadline = time.monotonic() + 180
         watchdog = threading.Timer(180, deadline_exceeded)
         watchdog.daemon = True
         watchdog.start()
@@ -780,6 +865,7 @@ def run_case(installation, output, name, headless, *, diagnostic_only=False):
                 time.sleep(.1)
         require(connection is not None, 'Browser Marionette startup timed out')
         client = Marionette(connection)
+        client._browser_deadline = browser_deadline
         record['protocol'] = client.hello
         record['session'] = session = client.call('WebDriver:NewSession', {'capabilities': {}})
         capabilities = session.get('capabilities', session)

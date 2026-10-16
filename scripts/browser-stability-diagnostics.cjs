@@ -277,6 +277,49 @@ function createPhaseTimings(record, now = () => performance.now(), origin = now(
   };
 }
 
+// This local allowance never renews or extends the enclosing scenario clock.
+const VIEWER_LOAD_BUDGET_MS = 60000;
+function createViewerLoadDeadline(sample, outerDeadlineAt, checkOuter) {
+  const started = performance.now(), deadlineAt = Math.min(started + VIEWER_LOAD_BUDGET_MS, outerDeadlineAt);
+  Object.assign(sample, {loadBudgetMs: VIEWER_LOAD_BUDGET_MS, loadMs: null, loadCompleted: false});
+  let timer, closed = false, failed, completedAt;
+  const check = () => {
+    checkOuter();
+    if (failed) throw failed;
+    if (performance.now() >= deadlineAt) {
+      sample.loadTimedOut = true;
+      throw (failed = new Error('Viewer cold load exceeded its 60-second deadline'));
+    }
+  };
+  const timeout = new Promise((_, reject) => {
+    const expire = () => {
+      try {
+        check();
+        timer = setTimeout(expire, Math.max(1, Math.ceil(deadlineAt - performance.now())));
+      } catch (error) { failed = error; reject(error); }
+    };
+    timer = setTimeout(expire, Math.max(1, Math.ceil(deadlineAt - performance.now())));
+  });
+  // The timer may expire between operations; retain its rejection for run().
+  timeout.catch(() => {});
+  return {
+    remainingMs() { check(); return Math.max(1, Math.floor(deadlineAt - performance.now())); },
+    async run(operation) {
+      check();
+      const value = await Promise.race([timeout, Promise.resolve().then(() => { check(); return operation(); })]);
+      check();
+      return value;
+    },
+    complete() { const now = performance.now(); check(); completedAt = now; sample.loadCompleted = true; },
+    close() {
+      if (closed) return;
+      closed = true; clearTimeout(timer);
+      if (completedAt === undefined && performance.now() >= deadlineAt) sample.loadTimedOut = true;
+      sample.loadMs = Math.floor(((completedAt ?? performance.now()) - started) * 1000) / 1000;
+    },
+  };
+}
+
 function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
   const base = path.resolve(process.env[`${prefix}_DIAGNOSTICS_DIR`] ||
     process.env.HOME_STUDIO_DIAGNOSTICS_DIR || path.join(__dirname, '..', 'acceptance-artifacts'));
@@ -326,6 +369,7 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
     record.deadlineScope = {version: 2, bootstrapMs, scenarioMs: options.deadlineMs,
       scenario: 'execute-through-final-identity-and-checks',
       hardProcessMs: bootstrapMs + options.deadlineMs + 35000 + (options.inputDiagnostics?.traceInput ? 11000 : 0)};
+    if (name === 'viewer') record.loadBudgetMs = VIEWER_LOAD_BUDGET_MS;
     record.bootstrapDurationMs = null;
     record.scenarioStartedMs = null;
     record.scenarioDurationMs = null;
@@ -515,7 +559,12 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
         armWatchdog();
         phases.start('test');
         checkDeadline();
-        await execute({browser, context, page, record, check, save, phases});
+        await execute({browser, context, page, record, check, save, phases,
+          createViewerLoad(sample) {
+            assert.equal(name, 'viewer', 'Only viewer creation has a cold-load allowance');
+            checkDeadline();
+            return createViewerLoadDeadline(sample, deadlineAt, checkDeadline);
+          }});
         checkDeadline();
         // Chromium exposes UA client-hint brands only after a secure navigation.
         phases.start('browser-final-identity');
@@ -730,4 +779,4 @@ function assertRestoredViewerMode(beforeCount, value, mode, expectedLights) {
   assert.deepEqual(passes.sceneViewport, [0, 0, ...value.scene.drawingBuffer], 'Restored modes retain the full drawing buffer');
 }
 
-module.exports = {changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction};
+module.exports = {VIEWER_LOAD_BUDGET_MS, createViewerLoadDeadline, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction};

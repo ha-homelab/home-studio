@@ -87,10 +87,19 @@ def configure_worker(module, primary):
     prefs = primary['preferences']
     module.browser_preferences = lambda port: {**prefs, 'marionette.port': port, 'devtools.console.stdout.content': True}
     source = inspect.getsource(module.viewer)
-    boundary = "        client.wait('window.fixtureLoaded')"
-    if source.count(boundary) != 1 or source.count('for cycle in range(2):') != 1:
+    # Extract only the unchanged bootstrap call, not the acceptance-only 60s
+    # scope. This fenced observer retains its explicit 180s diagnostic limit.
+    begin = "                load.run(lambda: client.execute("
+    boundary = "                load.wait('window.fixtureLoaded')"
+    if source.count(begin) != 1 or source.count(boundary) != 1 or source.count('for cycle in range(2):') != 1:
         raise RuntimeError('Native viewer bootstrap changed; review the diagnostic adapter')
-    source = source[:source.index(boundary)]
+    bootstrap = source[source.index(begin):source.index(boundary)].rstrip()
+    if not bootstrap.endswith('))'):
+        raise RuntimeError('Native viewer bootstrap wrapper changed')
+    bootstrap = bootstrap.replace('load.run(lambda: ', '', 1)[:-1]
+    bootstrap = bootstrap[8:] + '\n'
+    source = source[:source.index('    for cycle in range(2):')] + '    for cycle in range(2):\n' + bootstrap
+    source = source.replace("    record['loadBudgetMs'] = VIEWER_LOAD_BUDGET_MS\n", '', 1)
     source = source.replace('def viewer(', 'def diagnostic_viewer(', 1)
     source = source.replace('for cycle in range(2):', 'for cycle in range(1):', 1)
     source = source.replace("    client.call('WebDriver:Navigate'", "    require(record.get('sourceFiles') == DIAGNOSTIC_PRIMARY_FILES, 'Diagnostic runtime source differs from primary')\n    client.connection.settimeout(185)\n    client.call('WebDriver:SetTimeouts', {'pageLoad': 180000, 'script': 180000})\n    client.call('WebDriver:Navigate'", 1)
