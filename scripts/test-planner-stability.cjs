@@ -26,7 +26,7 @@ const traceRecoveryValue = process.env.PLANNER_STABILITY_TRACE_RECOVERY ?? '0';
 assert(['0','1'].includes(traceRecoveryValue), 'PLANNER_STABILITY_TRACE_RECOVERY must be 0 or 1');
 const traceRecovery = traceRecoveryValue === '1';
 const diagnostics = fixtureOnly ? null : createDiagnostics('planner', 'PLANNER_STABILITY', root);
-let cycles, catalog, editor, sourceHash, project;
+let cycles, catalog, editor, sourceHash, sourceFiles, project;
 
 function fixture() {
   const project = {schema_version:1,id:'planner_stress',title:'Fictional planner stress fixture',floors:[]};
@@ -161,7 +161,7 @@ const server=http.createServer((request,response)=>{
     content=startup.allowLoopback(content.toString(),origin).replace('<head>',`<head><script>${startup.scriptFor(origin)}(${instrument.toString()})();</script>`);
   }
   if(route==='/planner/editor.js')content+=`
-window.__plannerScene=()=>renderer?({rasterProbe:window.__plannerRasterProbe||null,layout:{...size},viewport:[innerWidth,innerHeight],memory:{...renderer.info.memory},programs:renderer.info.programs.length,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,buffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),shadowMap:[previewSun.shadow.mapSize.x,previewSun.shadow.mapSize.y],orbit:[orbit.yaw,orbit.pitch,orbit.radius]}):null;`;
+window.__plannerScene=()=>renderer?({rasterProbe:window.__plannerRasterProbe||null,shadowType:renderer.shadowMap.type,materialTypes:(()=>{const types=new Set();scene.traverse(o=>{for(const m of (Array.isArray(o.material)?o.material:[o.material]))if(m)types.add(m.type)});return [...types].sort()})(),layout:{...size},viewport:[innerWidth,innerHeight],memory:{...renderer.info.memory},programs:renderer.info.programs.length,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,buffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),shadowMap:[previewSun.shadow.mapSize.x,previewSun.shadow.mapSize.y],orbit:[orbit.yaw,orbit.pitch,orbit.radius]}):null;`;
   // Layout probes can settle the race under investigation. Never install them in primary acceptance.
   if(route==='/planner/editor.js' && traceRecovery)content+=`
 const __plannerOriginalInitPreview=initPreview;
@@ -179,7 +179,7 @@ initPreview=function(...args){
 async function run(engine,origin) {
   const profile = browserProfile(engine, {viewport: {width: 1440, height: 1000}, deviceScaleFactor: 2});
   return diagnostics.run(engine, {
-    reportOnly, deadlineMs: 180000, sourceHash,
+    reportOnly, deadlineMs: 180000, sourceHash, sourceHashScope: 'instrumented-planner-editor', sourceFiles,
     fixture: {floors: 2, rooms: 16, catalogItems: 256},
     launch: browserLaunchOptions(engine, process.env.PLANNER_STABILITY_HEADED !== '1'),
     context: profile.context, profile,
@@ -402,6 +402,7 @@ async function run(engine,origin) {
   diagnostics?.configure(engines,reportOnly);
   cycles=positiveInteger('PLANNER_STABILITY_CYCLES',3,10);
   catalog=JSON.parse(fs.readFileSync(path.join(root,'planner/catalog.json')));
+  sourceFiles=Object.fromEntries(['planner/editor.js','planner/render-capacity.js'].filter(name=>fs.existsSync(path.join(root,name))).map(name=>[name,crypto.createHash('sha256').update(fs.readFileSync(path.join(root,name))).digest('hex')]));
   editor=fs.readFileSync(path.join(root,'planner/editor.js'),'utf8');
   editor=editor.replace('const profile = previewRenderProfile(renderer.getContext());', '$& window.__plannerRasterProbe=profile.rasterProbe||null;');
   editor=startup.checkpointSource(editor,'const profile = previewRenderProfile(renderer.getContext());','profile');
@@ -410,7 +411,7 @@ async function run(engine,origin) {
   try {
     await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
     if(fixtureOnly) {
-      console.log(JSON.stringify({fixtureServer:true,origin:`http://127.0.0.1:${server.address().port}`,sourceHash}));
+      console.log(JSON.stringify({fixtureServer:true,origin:`http://127.0.0.1:${server.address().port}`,sourceHash,sourceHashScope:'instrumented-planner-editor',sourceFiles}));
       await new Promise(resolve=>{process.once('SIGTERM',resolve);process.once('SIGINT',resolve);});
     } else {
       await diagnostics.runAll(engines,engine=>run(engine,`http://127.0.0.1:${server.address().port}`));

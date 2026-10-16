@@ -16,7 +16,7 @@ missing WebGL, browser crash, timeout, or failed assertion fails the gate.
 `fail-fast: false` lets the remaining rows finish and preserve their evidence.
 
 The reviewed inventory is `scripts/browser-matrix.json`, checked on
-2026-10-15. Its expansion produces **76 acceptance executions**, plus one
+2026-10-15. Its expansion produces **77 acceptance executions**, plus one
 inventory-validation job:
 
 - **3 package/install rows:** Ubuntu 24.04 x64, Windows Server 2022 x64, and
@@ -42,6 +42,15 @@ inventory-validation job:
   ESR **153.5.0esr**, and native Waterfox **6.7.6** on `macos-15-intel`. These add
   x64 evidence alongside the same required ARM64 targets; all original 73
   executions remain required.
+
+- **1 masked-renderer row:** native Firefox ESR **153.5.0esr** on macOS 15 with
+  Gecko's normal renderer sanitization enabled. It repeats all three required
+  suites and retains the original 76 executions. This verifies measured-capacity
+  selection behind the opaque renderer label, not merely the unmasked test path.
+  The lane derives expected budgets from the raw label and independently checked
+  timing/readback evidence, then checks actual drawing-buffer dimensions,
+  material types, shadow filtering, shadow counts and map sizes. Selected profile
+  flags alone cannot satisfy these checks.
 
 The Intel rows reuse the exact browser pins, fixtures, graphics preferences,
 and assertions of their ARM64 counterparts. They compare older Gecko's CGL
@@ -143,7 +152,11 @@ animation loop; a synchronous driver call cannot have a JavaScript wall-clock
 timeout. Shader, framebuffer or readback failure keeps the normal rendering
 profile. The probe deletes every private resource, restores all GL state it
 changes, and leaves Three's state cache untouched. Diagnostics retain the
-bounded timing/status evidence separately from the reported GPU label.
+bounded timing/status and five RGBA readbacks separately from the reported GPU label.
+The planner receipt retains its existing `sourceHash` with explicit
+`instrumented-planner-editor` scope, plus `sourceFiles` SHA-256 hashes for the
+original editor and shared capacity helper. These name the critical source
+inputs; the recorded Git revision identifies the full checkout.
 
 Phone and tablet profiles use **390 × 844** and **820 × 1180** CSS pixels,
 respectively, at device scale factor 2, with touch enabled. They retain the

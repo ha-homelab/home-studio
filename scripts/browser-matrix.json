@@ -176,5 +176,12 @@
         }
       }
     }
-  }
+  },
+  "native_variants": [
+    {
+      "os": "macos-15",
+      "source_id": "firefox-153.5.0esr",
+      "renderer_visibility": "masked"
+    }
+  ]
 }

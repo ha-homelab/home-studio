@@ -228,6 +228,7 @@ jobs:
       PYTHONUTF8: '1'
       NATIVE_BROWSER_PRODUCT: ${{ matrix.product }}
       NATIVE_BROWSER_VERSION: ${{ matrix.version }}
+      FIREFOX_RENDERER_VISIBILITY: ${{ matrix.renderer_visibility || 'unmasked' }}
       NATIVE_BROWSER_DIAGNOSTICS_DIR: acceptance-artifacts/${{ matrix.id }}
       NATIVE_STARTUP_DIAGNOSTICS: ${{ startsWith(matrix.os, 'macos-') && (matrix.product == 'waterfox' || (matrix.product == 'firefox' && matrix.version == '153.5.0esr')) && '1' || '0' }}
       FIREFOX_WEBGL_BACKEND: ${{ matrix.os == 'macos-15' && matrix.product == 'firefox' && matrix.version == '158.0' && 'angle' || 'default' }}

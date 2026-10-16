@@ -89,7 +89,7 @@ class BrowserMatrixTests(unittest.TestCase):
     def test_full_desktop_and_touch_coverage_is_required(self):
         rows = self.rows['browser']['include']
         self.assertEqual(len(rows), 58)
-        self.assertEqual(len(self.rows['native']['include']), 14)
+        self.assertEqual(len(self.rows['native']['include']), 15)
         for matrix_rows in self.rows.values():
             identities = {(row['os'], row['id']) for row in matrix_rows['include']}
             self.assertEqual(len(identities), len(matrix_rows['include']))
@@ -135,7 +135,7 @@ class BrowserMatrixTests(unittest.TestCase):
                 + [(os, f'webkit-27.2-pw1.64.0-{profile}')
                    for profile in ('phone', 'tablet') for os in ('ubuntu-24.04', 'macos-15')],
             'native': [('macos-15', target) for target in (
-                'firefox-153.5.0esr', 'waterfox-6.7.5', 'waterfox-6.7.6')],
+                'firefox-153.5.0esr', 'waterfox-6.7.5', 'waterfox-6.7.6', 'firefox-153.5.0esr-masked-renderer')],
         }
         for name, matrix_rows in self.rows.items():
             identities = [(row['os'], row['id']) for row in matrix_rows['include']
@@ -163,7 +163,29 @@ class BrowserMatrixTests(unittest.TestCase):
             for row in additional:
                 self.assertIn({**row, 'os': 'macos-15'}, baseline[name]['include'])
             self.assertTrue(all(row['os'].startswith('macos-') for row in rows[:2]))
-        self.assertEqual(sum(len(rows['include']) for rows in self.rows.values()) + 4, 76)
+        self.assertEqual(sum(len(rows['include']) for rows in self.rows.values()) + 4, 77)
+
+    def test_masked_variant_adds_exactly_one_mandatory_row_without_changing_originals(self):
+        original = copy.deepcopy(self.manifest)
+        original.pop('native_variants')
+        baseline = matrix.expand(original)
+        self.assertEqual(self.rows['browser'], baseline['browser'])
+        variants = [row for row in self.rows['native']['include'] if 'renderer_visibility' in row]
+        self.assertEqual(len(variants), 1)
+        variant = variants[0]
+        self.assertEqual(variant, {'os':'macos-15', 'product':'firefox', 'version':'153.5.0esr',
+                                  'id':'firefox-153.5.0esr-masked-renderer', 'renderer_visibility':'masked'})
+        self.assertEqual([row for row in self.rows['native']['include'] if 'renderer_visibility' not in row],
+                         baseline['native']['include'])
+        for change in ({'os':'unknown'}, {'source_id':'unknown'}, {'renderer_visibility':'unmasked'}, {'extra':True}):
+            manifest = copy.deepcopy(self.manifest)
+            manifest['native_variants'][0].update(change)
+            with self.assertRaises(ValueError):
+                matrix.expand(manifest)
+        duplicate = copy.deepcopy(self.manifest)
+        duplicate['native_variants'] *= 2
+        with self.assertRaisesRegex(ValueError, 'unique rows'):
+            matrix.expand(duplicate)
 
     def test_additional_targets_reject_unknown_sources_targets_and_duplicates(self):
         changes = [

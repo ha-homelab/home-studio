@@ -551,5 +551,68 @@ assert.deepEqual(JSON.parse(JSON.stringify(value.samples.at(-1).states)),[{id:1,
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+class MaskedCapacityTests(unittest.TestCase):
+    def record(self, reduced=True, planner=False):
+        times = [16, 17, 18] if reduced else [1, 2, 3]
+        size = 512 if reduced else 2048
+        scene = {'rasterProbe':{'status':'measured','samplesMs':times,'bestMs':min(times),'totalMs':100,
+                               'pixels':[[88+i,88+i,88+i,255] for i in range(5)]},
+                 'drawingBuffer':[500,500] if reduced else [1400,1000],
+                 'materialTypes':['MeshLambertMaterial' if reduced else 'MeshStandardMaterial','MeshBasicMaterial'],
+                 'shadowType':0 if reduced else 2, 'pointLights':18,
+                 'shadowMaps':[['DirectionalLight',size,size]] + [['PointLight',128 if reduced else 512,128 if reduced else 512]] * (2 if reduced else 8),
+                 'shadowMap':[size,size]}
+        gpu = {'unmaskedRenderer':'Apple M1, or similar','textureUnits':16}
+        snapshot = {'scene':scene, **({'stats':{'gpu':gpu}} if planner else {'gpu':gpu})}
+        return {'preferences':{'webgl.sanitize-unmasked-renderer':True}, 'userAgent':'Mozilla/5.0 Gecko/20100101 Firefox/153.0',
+                'suite':'planner-256' if planner else 'viewer-6', 'samples':[{'initial':snapshot}]}
+
+    def test_measured_fast_and_slow_capacity_require_real_scene_properties(self):
+        for reduced in (False, True):
+            for planner in (False, True):
+                record = self.record(reduced, planner)
+                acceptance.assert_masked_capacity(record)
+                scene = record['samples'][0]['initial']['scene']
+                scene['materialTypes'] = ['MeshStandardMaterial' if reduced else 'MeshLambertMaterial']
+                with self.assertRaisesRegex(AssertionError, 'Actual materials'):
+                    acceptance.assert_masked_capacity(record)
+
+    def test_masked_evidence_rejects_missing_blank_constant_and_inconsistent_measurements(self):
+        mutations = [
+            lambda p: p.update(status='unavailable'), lambda p: p.update(bestMs=1),
+            lambda p: p.update(samplesMs=[16,17]), lambda p: p.update(samplesMs=[16,float('nan'),18]),
+            lambda p: p.update(totalMs=1), lambda p: p.update(totalMs=float('inf')),
+            lambda p: p.update(pixels=[[0,0,0,255]] * 5), lambda p: p.update(pixels=[[255,255,255,255]] * 5),
+            lambda p: p.update(pixels=[[88,88,88,255]] * 5), lambda p: p.update(pixels=[[88,88,88,0]] * 5),
+            lambda p: p.update(identity='software'), lambda p: p.pop('pixels'),
+        ]
+        for mutate in mutations:
+            record = self.record()
+            mutate(record['samples'][0]['initial']['scene']['rasterProbe'])
+            with self.assertRaises(AssertionError):
+                acceptance.assert_masked_capacity(record)
+
+    def test_capacity_cannot_be_faked_with_profile_flags_or_wrong_raw_identity(self):
+        for field, value in [('drawingBuffer',[1000,1000]), ('shadowType',2),
+                             ('shadowMaps',[['DirectionalLight',2048,2048]]), ('rasterProbe',None)]:
+            record = self.record()
+            scene = record['samples'][0]['initial']['scene']
+            scene.update(reduced=True, diffuseLighting=True)
+            scene[field] = value
+            with self.assertRaises(AssertionError):
+                acceptance.assert_masked_capacity(record)
+        record = self.record()
+        record['samples'][0]['initial']['gpu']['unmaskedRenderer'] = 'Apple Software Renderer'
+        with self.assertRaisesRegex(AssertionError, 'opaque Apple'):
+            acceptance.assert_masked_capacity(record)
+        record = self.record()
+        record['userAgent'] = 'AppleWebKit/537.36 like Gecko'
+        with self.assertRaisesRegex(AssertionError, 'actual Gecko'):
+            acceptance.assert_masked_capacity(record)
+
+    def test_unmasked_rows_keep_their_existing_acceptance_path(self):
+        acceptance.assert_masked_capacity({'preferences':{'webgl.sanitize-unmasked-renderer':False}})
+
+
 if __name__ == '__main__':
     unittest.main()

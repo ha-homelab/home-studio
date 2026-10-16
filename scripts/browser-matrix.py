@@ -89,6 +89,15 @@ def expand(manifest):
                 if len(matches) != 1:
                     raise ValueError(f'Unknown or ambiguous additional {name} target: {target}')
                 rows.append({**matches[0], 'os': os})
+    for variant in manifest.get('native_variants', []):
+        if (set(variant) != {'os', 'source_id', 'renderer_visibility'} or
+                variant['renderer_visibility'] != 'masked'):
+            raise ValueError('Native variants require explicit masked renderer visibility')
+        matches = [row for row in native if row['os'] == variant['os'] and row['id'] == variant['source_id']]
+        if len(matches) != 1 or 'renderer_visibility' in matches[0]:
+            raise ValueError('Native variant requires one original source row')
+        native.append({**matches[0], 'id': variant['source_id'] + '-masked-renderer',
+                       'renderer_visibility': variant['renderer_visibility']})
     for rows in matrices.values():
         identities = {(row['os'], row['id']) for row in rows}
         if len(identities) != len(rows) or not 1 <= len(rows) <= 256:

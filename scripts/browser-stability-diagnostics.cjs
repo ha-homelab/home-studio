@@ -269,6 +269,7 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       schemaVersion: 1, suite: name, engine, status: 'running', startedAt: new Date().toISOString(),
       os: summary.os, nodeVersion: process.version, browserVersion: null, playwrightVersion: null,
       reportOnly: options.reportOnly, fixture: options.fixture, sourceRevision, sourceHash: options.sourceHash || null,
+      ...(options.sourceFiles ? {sourceFiles:options.sourceFiles, sourceHashScope:options.sourceHashScope} : {}),
       profile: options.profile || {name: 'desktop', emulated: false, realMobileOS: false}, identity: null,
       launch: {headless: options.launch.headless, channel: options.launch.channel || null,
         executablePath: options.launch.executablePath || null, args: options.launch.args || [],

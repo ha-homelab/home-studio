@@ -8,6 +8,8 @@ import argparse
 import base64
 import contextlib
 import json
+import math
+import re
 import os
 import platform
 import queue
@@ -470,6 +472,56 @@ def browser_preferences(port):
     return prefs
 
 
+def assert_masked_capacity(record):
+    """Derive expectations from raw identity and probe evidence, never selected profile flags."""
+    if record['preferences'].get('webgl.sanitize-unmasked-renderer') is not True:
+        return
+    require(re.search(r'\bGecko/\d', record['userAgent']), 'Masked capacity acceptance requires actual Gecko')
+    duration = lambda value: type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1e9
+    require(record['samples'], 'Masked acceptance requires completed scene samples')
+    for sample in record['samples']:
+        require('initial' in sample, 'Masked acceptance requires the initial scene')
+        for key in ('initial', 'recovery', 'afterRecoveryOrbit', 'afterRecoveryDrag', 'final'):
+            if key not in sample:
+                continue
+            snapshot = sample[key]
+            gpu = snapshot.get('stats', snapshot)['gpu']
+            require(gpu.get('unmaskedRenderer') == 'Apple M1, or similar', 'The masked lane must exercise the exact opaque Apple label')
+            scene = snapshot['scene']
+            probe = scene.get('rasterProbe')
+            require(isinstance(probe, dict) and set(probe) == {'status','samplesMs','pixels','bestMs','totalMs'}, 'Masked acceptance requires complete independent raster evidence')
+            require(probe['status'] == 'measured', 'The masked capacity probe must complete')
+            times, pixels = probe['samplesMs'], probe['pixels']
+            require(isinstance(times, list) and len(times) == 3 and all(duration(n) for n in times), 'Three finite raster durations are required')
+            require(duration(probe['totalMs']) and probe['totalMs'] + 1e-6 >= sum(times), 'Total probe time must include every measured draw')
+            require(duration(probe['bestMs']) and probe['bestMs'] == min(times), 'Probe minimum must match the measured durations')
+            require(isinstance(pixels, list) and len(pixels) == 5, 'Every warm and measured draw must have readback evidence')
+            require(all(isinstance(pixel, list) and len(pixel) == 4 and pixel[3] == 255 and
+                        all(type(value) is int and 0 < value < 255 for value in pixel[:3]) for pixel in pixels), 'Probe readbacks must be nonzero, nonsaturated RGB')
+            require(any(pixel != pixels[0] for pixel in pixels[1:]), 'Seeded probe draws must change the readback')
+            reduced = min(times) >= 15
+            buffer = scene.get('buffer', scene.get('drawingBuffer'))
+            require(isinstance(buffer, list) and len(buffer) == 2 and all(type(n) is int and n > 0 for n in buffer), 'Actual drawing buffer dimensions are required')
+            require(math.prod(buffer) <= (250000 if reduced else 2000000), 'Actual drawing buffer must obey the measured capacity budget')
+            materials = scene.get('materialTypes')
+            require(isinstance(materials, list) and all(isinstance(name, str) for name in materials), 'Actual scene material types are required')
+            required, forbidden = ('MeshLambertMaterial', 'MeshStandardMaterial') if reduced else ('MeshStandardMaterial', 'MeshLambertMaterial')
+            require(required in materials and forbidden not in materials and 'MeshPhysicalMaterial' not in materials, 'Actual materials must match measured capacity')
+            require(scene.get('shadowType') == (0 if reduced else 2), 'Actual shadow filtering must match measured capacity')
+            shadow_size = 512 if reduced else 2048
+            if record['suite'] == 'planner-256':
+                require(scene.get('shadowMap') == [shadow_size, shadow_size], 'Actual planner shadow must match measured capacity')
+            else:
+                maps = scene['shadowMaps']
+                sun = [entry for entry in maps if entry[0] == 'DirectionalLight']
+                points = [entry for entry in maps if entry[0] == 'PointLight']
+                require(sun and all(entry[1:] == [shadow_size, shadow_size] for entry in sun), 'Actual sun shadows must match measured capacity')
+                count = max(0, min(scene['pointLights'], 2 if reduced else 8, gpu['textureUnits'] - 4))
+                require(len(points) == count, 'Actual point shadow count must match measured capacity and samplers')
+                face = 128 if reduced else 512
+                require(all(entry[1:] == [face, face] for entry in points), 'Actual point shadows must match measured capacity')
+
+
 def assert_requested_backend(record):
     if record['os']['platform'] == 'darwin' and record['preferences'].get('webgl.disable-angle') is False:
         for sample in record['samples']:
@@ -545,6 +597,9 @@ def run_case(installation, output, name, headless):
                 pass
         require(info is not None, 'Fixture server startup timed out')
         record['sourceHash'] = info['sourceHash']
+        if 'sourceFiles' in info:
+            record['sourceFiles'] = info['sourceFiles']
+            record['sourceHashScope'] = info['sourceHashScope']
         with urllib.request.urlopen(info['origin'] + '/fixture.json', timeout=10) as response:
             project = json.load(response)
         with socket.socket() as probe:
@@ -584,6 +639,7 @@ def run_case(installation, output, name, headless):
         record['userAgent'] = client.execute('return navigator.userAgent;')
         save()
         (planner if name == 'planner-256' else viewer)(client, info['origin'], project, record, save)
+        assert_masked_capacity(record)
         assert_requested_backend(record)
         shutdown_browser(client, browser, record)
         client = None

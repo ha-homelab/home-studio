@@ -208,6 +208,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
         jobs = workflow('platform-acceptance.yml')['jobs']
         browser = jobs['browser']['env']
         native = jobs['native-browser']['env']
+        self.assertEqual(native['FIREFOX_RENDERER_VISIBILITY'], "${{ matrix.renderer_visibility || 'unmasked' }}")
         self.assertEqual(browser['FIREFOX_WEBGL_BACKEND'],
                          "${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && (matrix.playwright == '1.63.0' || matrix.playwright == '1.64.0') && 'angle' || 'default' }}")
         self.assertEqual(browser['FIREFOX_COMPOSITOR_BACKEND'],
