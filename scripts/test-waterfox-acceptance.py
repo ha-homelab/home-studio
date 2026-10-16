@@ -447,7 +447,10 @@ def browser_preferences(port):
     require(compositor in ('default', 'software'), 'FIREFOX_COMPOSITOR_BACKEND must be default or software')
     gpu_process = os.environ.get('FIREFOX_GPU_PROCESS', 'default')
     require(gpu_process in ('default', 'disabled'), 'FIREFOX_GPU_PROCESS must be default or disabled')
+    visibility = os.environ.get('FIREFOX_RENDERER_VISIBILITY', 'unmasked')
+    require(visibility in ('unmasked', 'masked'), 'FIREFOX_RENDERER_VISIBILITY must be unmasked or masked')
     prefs = {'marionette.port': port, 'browser.shell.checkDefaultBrowser': False, 'browser.aboutwelcome.enabled': False, 'browser.startup.homepage': 'about:blank', 'browser.startup.homepage_override.mstone': 'ignore', 'browser.startup.firstrunSkipsHomepage': True, 'browser.migrate.automigrate.enabled': False, 'app.update.auto': False, 'app.update.enabled': False, 'webgl.force-enabled': True, 'webgl.forbid-software': False, 'webgl.sanitize-unmasked-renderer': False}
+    prefs['webgl.sanitize-unmasked-renderer'] = visibility == 'masked'
     if backend == 'angle':
         prefs['webgl.disable-angle'] = False
     if compositor == 'software':
@@ -549,6 +552,7 @@ def run_case(installation, output, name, headless):
             port = probe.getsockname()[1]
         prefs = browser_preferences(port)
         record['preferences'] = prefs
+        record['rendererVisibility'] = 'masked' if prefs['webgl.sanitize-unmasked-renderer'] else 'unmasked'
         (profile / 'user.js').write_text('\n'.join(f'user_pref({json.dumps(key)},{json.dumps(value)});' for key, value in prefs.items()), encoding='utf-8')
         command = [installation['binary'], '--no-remote', '--profile', str(profile), '--marionette', 'about:blank']
         if headless:

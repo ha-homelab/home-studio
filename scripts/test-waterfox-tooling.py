@@ -151,6 +151,26 @@ class ToolingTests(unittest.TestCase):
                     acceptance.os.environ['FIREFOX_GPU_PROCESS'] = invalid
                     acceptance.browser_preferences(2828)
 
+    def test_renderer_visibility_preserves_backend_and_context_preferences(self):
+        for backend in ('default', 'angle'):
+            with self.subTest(backend=backend), patch.dict(acceptance.os.environ, {
+                'FIREFOX_WEBGL_BACKEND': backend,
+                'FIREFOX_COMPOSITOR_BACKEND': 'software',
+                'FIREFOX_GPU_PROCESS': 'disabled',
+            }, clear=True):
+                baseline = acceptance.browser_preferences(2828)
+                self.assertFalse(baseline['webgl.sanitize-unmasked-renderer'])
+                acceptance.os.environ['FIREFOX_RENDERER_VISIBILITY'] = 'unmasked'
+                self.assertEqual(acceptance.browser_preferences(2828), baseline)
+                acceptance.os.environ['FIREFOX_RENDERER_VISIBILITY'] = 'masked'
+                self.assertEqual(acceptance.browser_preferences(2828), {
+                    **baseline, 'webgl.sanitize-unmasked-renderer': True,
+                })
+                for invalid in ('', 'default', 'true', 'typo'):
+                    acceptance.os.environ['FIREFOX_RENDERER_VISIBILITY'] = invalid
+                    with self.subTest(visibility=invalid), self.assertRaisesRegex(AssertionError, 'must be unmasked or masked'):
+                        acceptance.browser_preferences(2828)
+
     def test_requested_macos_backend_requires_real_metal_renderer(self):
         with patch.dict(acceptance.os.environ, {'FIREFOX_WEBGL_BACKEND': 'angle'}):
             prefs = acceptance.browser_preferences(2828)
