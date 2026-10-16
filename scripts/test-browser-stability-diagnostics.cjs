@@ -389,7 +389,8 @@ test('planner disposes geometry and shadow callbacks before restoring the GL con
   const error = {hidden:true};
   const context = vm.createContext({worldGroup:group,previewSun:{shadow},
     previewCanvas:{addEventListener: (name, callback) => { handlers[name] = callback; }},
-    cancelCanvasRender: () => cancelled++,requestCanvasRender: () => scheduled++,$: () => error,translatedText() {}});
+    cancelCanvasRender: () => cancelled++,requestCanvasRender: () => scheduled++,$: () => error,translatedText() {},
+    resizeCanvases() {},document:{querySelector:()=>({getBoundingClientRect:()=>({width:640,height:480})})}});
   vm.runInContext("let previewLost = false, previewDirty = false, previewSize = 'before';\n" +
     section('function disposePreviewGeometry()', 'function rebuildPreview()') +
     section("previewCanvas.addEventListener('webglcontextlost'", '// Project actions and keyboard navigation.'), context);
@@ -602,5 +603,45 @@ test('planner operation tracing is opt-in and primary acceptance makes no layout
       assert.equal(attached[0].renderer.ready,true);
       assert.deepEqual(JSON.parse(JSON.stringify(attached[0].layout)),{layout:{width:800,height:600},shell:{width:700,height:500},viewport:[1280,900],view:'preview'});
     }
+  }
+});
+
+test('the first restored drawing buffer uses actual layout before ResizeObserver delivery', () => {
+  const source=fs.readFileSync(path.join(__dirname,'../planner/editor.js'),'utf8');
+  const section=(start,end)=>source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start)));
+  for(const view of ['plan','preview']) {
+    const handlers={},allocations=[],scheduled=[],rect={width:774,height:724};
+    let layoutReads=0;
+    const context=vm.createContext({
+      previewCanvas:{addEventListener:(name,callback)=>{handlers[name]=callback;}},
+      previewSun:{shadow:{needsUpdate:false}},
+      document:{hidden:false,querySelector:()=>({getBoundingClientRect:()=>{layoutReads++;return rect;}})},
+      planCanvas:{},ctx:{setTransform(){}},devicePixelRatio:2,
+      renderer:{setDrawingBufferSize:(...args)=>allocations.push(args),render(){}},
+      camera:{position:{set(){}},lookAt(){},updateProjectionMatrix(){}},scene:{},
+      previewFloors:()=>[],fitPreview(){},fitPlan(){},updateZoom(){},
+      cancelCanvasRender(){},$:()=>({hidden:false}),translatedText(){},
+      onSchedule:layout=>scheduled.push(JSON.parse(JSON.stringify(layout))),
+    });
+    vm.runInContext(`
+      let previewLost=true,previewSize='old',previewPixels=2000000,previewUnavailable=false;
+      let size={width:934,height:824},canvasSuspended=false,firstResize=false,planSize='old';
+      let map={x:0,y:0},view=${JSON.stringify(view)},previewMetadata={};
+      const orbit={yaw:0,pitch:1,radius:100,baseRadius:100,target:{x:0,y:0,z:0}};
+      function requestCanvasRender(){onSchedule(size);}
+      ${section('function canvasPixelRatio(', 'let startupMessage')}
+      ${section('function resizeCanvases(', 'const canvasObserver')}
+      ${section('function drawPreview()', 'function renderPreview()')}
+      ${section("previewCanvas.addEventListener('webglcontextlost'", '// Project actions and keyboard navigation.')}
+    `,context);
+    handlers.webglcontextrestored();
+    assert.equal(layoutReads,1,'Restoration reads the current shell before any observer callback');
+    assert.equal(allocations.length,0,'Restoration schedules drawing instead of drawing during the context event');
+    assert(scheduled.length>0);
+    assert(scheduled.every(layout=>layout.width===774&&layout.height===724),'All restored frame requests see refreshed layout');
+    vm.runInContext("view='preview';drawPreview();",context);
+    assert.equal(allocations.length,1);
+    assert.deepEqual(allocations[0],[774,724,Math.sqrt(2000000/(774*724))]);
+    assert.equal(context.previewSun.shadow.needsUpdate,true);
   }
 });

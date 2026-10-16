@@ -741,7 +741,15 @@ previewCanvas.addEventListener('webglcontextlost', e => {
   if (previewSun) { previewSun.shadow.dispose(); previewSun.shadow.map = null; previewSun.shadow.mapPass = null; }
   $('preview-error').hidden = false; translatedText('preview-error', 'The graphics context was lost. Reload to restore 3D. Your local draft and JSON export remain available.');
 });
-previewCanvas.addEventListener('webglcontextrestored', () => { previewLost = false; previewSize = ''; if (previewSun) previewSun.shadow.needsUpdate = true; $('preview-error').hidden = true; requestCanvasRender(); });
+previewCanvas.addEventListener('webglcontextrestored', () => {
+  previewLost = false; previewSize = '';
+  if (previewSun) previewSun.shadow.needsUpdate = true;
+  $('preview-error').hidden = true;
+  // A viewport change can precede its ResizeObserver callback. Refresh the
+  // layout before the first restored frame allocates its drawing buffer.
+  resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect());
+  requestCanvasRender();
+});
 
 // Project actions and keyboard navigation.
 function exportProject() {
