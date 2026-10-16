@@ -338,6 +338,16 @@ CPU comparisons cover shared/static/dynamic materials, stale unused tails,
 empty light lists, cached variants and disposal. No driver speedup or pixel
 equivalence is claimed for this continuation.
 
+A cumulative static-atlas continuation stores the six immutable packed geometry
+arrays in one RGBA32F row, including window-room indices and signed rectangle
+sentinels. Literal offsets replace only record lookups; ordered geometry and
+lighting arithmetic remain unchanged. Texture storage is allocated once per
+controller and reuploaded after context loss. Nonfinite data, inexact integer
+indices and unsupported texture/uniform/sampler limits retain the full shader.
+The earlier standalone geometry texture was locally neutral or slower on
+translated x86-64/ARM; this cumulative experiment has no claimed driver benefit
+or pixel equivalence until independently measured.
+
 Phone and tablet profiles use **390 × 844** and **820 × 1180** CSS pixels,
 respectively, at device scale factor 2, with touch enabled. They retain the
 actual desktop operating-system identity. Chromium exercises native touch

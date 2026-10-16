@@ -380,6 +380,52 @@ function pointLightIsFiniteZero(light) {
     light.distance >= 0 && light.decay >= 0;
 }
 
+// Immutable geometry keeps its existing Float32 values and exact signed
+// integer indices. A single row needs no runtime division or component lookup.
+function createRoomGeometryTexture(THREE, packed, options) {
+  if(!Number.isInteger(options.maxTextureSize)||options.maxTextureSize<1||
+    !Number.isInteger(options.maxTextures)||options.maxTextures<16||
+    packed.uniformVectors+4>options.maxFragmentUniforms)return null;
+  const fields=[['homeRoomEdges',4,false],['homeRoomRanges',4,true],
+    ['homeRoomBounds',4,false],['homeRoomExterior',1,true],
+    ['homeWindowSegments',4,false],['homeWindowRooms',1,true]];
+  const offsets={};let count=0;
+  for(const [name,components,integer] of fields){
+    const values=packed.uniforms[name].value;
+    if(!values.length||values.length%components||!values.every(value=>Number.isFinite(value)&&
+      Number.isFinite(Math.fround(value))&&(!integer||Number.isInteger(value)&&Math.abs(value)<=16777216)))return null;
+    offsets[name]=count;count+=values.length/components;
+  }
+  if(count>options.maxTextureSize||count>65536)return null;
+  const data=new Float32Array(count*4);
+  for(const [name,components] of fields){
+    const values=packed.uniforms[name].value,offset=offsets[name]*4;
+    if(components===4)data.set(values,offset);
+    else values.forEach((value,index)=>{data[offset+index*4]=value;});
+  }
+  const texture=new THREE.DataTexture(data,count,1,THREE.RGBAFormat,THREE.FloatType);
+  texture.name='immutable-room-geometry';texture.internalFormat='RGBA32F';
+  texture.minFilter=texture.magFilter=THREE.NearestFilter;texture.generateMipmaps=false;
+  texture.flipY=false;texture.colorSpace=THREE.NoColorSpace;texture.unpackAlignment=1;
+  texture.needsUpdate=true;
+  let disposed=false;
+  return {
+    texture,offsets,
+    fragment(source){
+      for(const [name,components,integer] of fields){
+        source=source.replace(new RegExp('uniform (?:vec4|ivec4|int) '+name+'\\[\\d+\\];'),'');
+        source=source.replace(new RegExp(name+'\\[([^\\]]+)\\]','g'),(_,index)=>{
+          const read=`texelFetch(homeGeometryTexture,ivec2(${offsets[name]}+(${index}),0),0)`;
+          return integer ? components===1 ? `int(${read}.x)` : `ivec4(${read})` : read;
+        });
+      }
+      return 'uniform highp sampler2D homeGeometryTexture;\n'+source;
+    },
+    releaseGPU(){if(!disposed){texture.dispose();texture.needsUpdate=true;}},
+    dispose(){if(!disposed){disposed=true;texture.dispose();}}
+  };
+}
+
 // Run records are exact nonnegative integers. RGBA32F preserves every value
 // admitted here; one texture row is a fixed block for one static material.
 function createLightRunTexture(THREE, capacity, roomCount, packed, options) {
@@ -441,8 +487,8 @@ function createLightRunTexture(THREE, capacity, roomCount, packed, options) {
 
 // Optional software-renderer transport. Selection happens before rendering;
 // the texture shader contains no dynamic fallback to the full PointLight array.
-function createPointLightTexture(THREE, capacity, packed, options, pointRooms, runTexture) {
-  if ((options.runTexture && !runTexture) || !Number.isInteger(capacity) || capacity < 1 || capacity > 32768 ||
+function createPointLightTexture(THREE, capacity, packed, options, pointRooms, runTexture, geometryTexture) {
+  if ((options.runTexture && !runTexture) || (options.geometryTexture && !geometryTexture) || !Number.isInteger(capacity) || capacity < 1 || capacity > 32768 ||
       !Number.isInteger(options.maxTextureSize) || capacity*2 > options.maxTextureSize ||
       !Number.isInteger(options.maxTextures) || options.maxTextures < 16 ||
       packed.uniformVectors+1 > options.maxFragmentUniforms) return null;
@@ -467,6 +513,7 @@ function createPointLightTexture(THREE, capacity, packed, options, pointRooms, r
     },
     bind(state,shader) {
       runTexture?.bind(state.material,shader);
+      if(geometryTexture)shader.uniforms.homeGeometryTexture={value:geometryTexture.texture};
       const source=shader.uniforms.pointLights;
       // Install in every variant: Three may reuse a cached texture program with
       // the most recently compiled full/editor variant's uniform map.
@@ -547,8 +594,9 @@ function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {
     homeLightRunStarts:{value:new Int32Array(capacity)}, homePointLightingRequired:{value:true},
     homeLightRuns:{value:new Int32Array(capacity * 4)}
   });
+  const geometryTexture=packed&&geometryOptions.pointTexture&&geometryOptions.geometryTexture ? createRoomGeometryTexture(THREE,packed,geometryOptions) : null;
   const runTexture=packed&&geometryOptions.pointTexture&&geometryOptions.runTexture ? createLightRunTexture(THREE,capacity,rooms.length,packed,geometryOptions) : null;
-  const pointTexture=packed&&geometryOptions.pointTexture ? createPointLightTexture(THREE,capacity,packed,geometryOptions,uniforms.homePointRooms,runTexture) : null;
+  const pointTexture=packed&&geometryOptions.pointTexture ? createPointLightTexture(THREE,capacity,packed,geometryOptions,uniforms.homePointRooms,runTexture,geometryTexture) : null;
   const staticRuns = new Map(), dynamicMaterials = new WeakSet();
   const geometryDeclarations = packed ? `
     uniform bool homePointLightingRequired;
@@ -752,9 +800,10 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
     'ivec4(texelFetch(homeRunTexture,ivec2(homeRun,homeRunBlock),0))') : textureLighting;
   const runFragment=runTexture ? fragment.replace(`uniform ivec4 homeLightRuns[${capacity}];`,
     'uniform highp sampler2D homeRunTexture; uniform int homeRunBlock;') : fragment;
+  const textureFragment=geometryTexture ? geometryTexture.fragment(runFragment) : runFragment;
   return {
-    releaseGPU(){pointTexture?.releaseGPU();runTexture?.releaseGPU();},
-    dispose(){pointTexture?.dispose();runTexture?.dispose();},
+    releaseGPU(){pointTexture?.releaseGPU();runTexture?.releaseGPU();geometryTexture?.releaseGPU();},
+    dispose(){pointTexture?.dispose();runTexture?.dispose();geometryTexture?.dispose();},
     capacity, geometryMode: packed ? 'packed' : 'literal', geometryUniformVectors: packed?.uniformVectors ?? null,
     attach(group, enabled, {staticGeometry = false} = {}) {
       if (packed && staticGeometry) group?.updateWorldMatrix?.(true,true);
@@ -813,9 +862,9 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
             '#include <project_vertex>\nhomeWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;'
           );
           if(textureState?.active)shader.fragmentShader=shader.fragmentShader.replace('#include <lights_pars_begin>',textureParameters);
-          shader.fragmentShader = (textureState?.active?'uniform highp sampler2D homePointTexture;\n':'') + (textureState?.active?runFragment:fragment) + shader.fragmentShader.replace('#include <lights_fragment_begin>', textureState?.active?runLighting:lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
+          shader.fragmentShader = (textureState?.active?'uniform highp sampler2D homePointTexture;\n':'') + (textureState?.active?textureFragment:fragment) + shader.fragmentShader.replace('#include <lights_fragment_begin>', textureState?.active?runLighting:lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
         };
-        mesh.material.customProgramCacheKey = () => (enabled ? fragment+(textureState?.active?':point-texture-v2'+(runTexture?':run-texture-v1':''):'') : 'home-editor') +
+        mesh.material.customProgramCacheKey = () => (enabled ? fragment+(textureState?.active?':point-texture-v2'+(runTexture?':run-texture-v1':'')+(geometryTexture?':geometry-texture-v1':''):'') : 'home-editor') +
           (sharedWall ? ':wall-sheen-facing-v1' : wall ? ':wall-sheen-v2' : '') +
           (!sharedWall && staticGlassFacing.has(mesh.material) ? ':glass-facing-v1' : '');
         if(textureState){textureState.callback=mesh.material.onBeforeCompile;textureState.cacheKey=mesh.material.customProgramCacheKey;}
