@@ -162,7 +162,7 @@ const viewer=fs.readFileSync(path.join(root,'viewer.js'),'utf8');
   // lost; CPU material/geometry identities remain valid for restored uploads.
   const eventSource=(start,end)=>viewer.slice(viewer.indexOf(start)+start.length,viewer.indexOf(end,viewer.indexOf(start)));
   const loss=eventSource("renderer.domElement.addEventListener('webglcontextlost',",");\nrenderer.domElement.addEventListener('webglcontextrestored'");
-  Object.assign(context,{homeView:null,releaseViewerGeometryGPU(){},releaseViewerTextureGPU(){},cancelRender(){},interactionPointer:{},interactionRenderer:null,renderLost:false});
+  Object.assign(context,{editorFloorMaterials:null,homeView:null,releaseViewerGeometryGPU(){},releaseViewerTextureGPU(){},cancelRender(){},interactionPointer:{},interactionRenderer:null,renderLost:false});
   vm.runInContext('this.loss='+loss,context);
   let generation=0,lost=false,stale=0,disposals=0;
   function register(){for(const material of [back.material,front.material]){
@@ -185,7 +185,7 @@ const viewer=fs.readFileSync(path.join(root,'viewer.js'),'utf8');
   for(const change of rejected){const object=mesh();change(object);const material=object.material;assert.equal(context.createStaticGlassPasses(THREE,object,true),null);assert.equal(object.material,material);}
   assert.equal(context.createStaticGlassPasses(THREE,mesh(),false),null,'non-diffuse path unchanged');
   assert(viewer.includes('createStaticGlassPasses(THREE,mesh,renderProfile.diffuseLighting);root.add(mesh);if(glassPasses)root.add(glassPasses.front)'));
-  assert(viewer.includes('disposeStaticGlassPasses();renderer.dispose()'));
+  assert(viewer.includes('disposeStaticGlassPasses();editorFloorMaterials?.dispose();renderer.dispose()'));
   context.disposeStaticGlassPasses();
   console.log(JSON.stringify({checkedNormalAndBiasCases:checked,compiledPrefixCases:compiledCases,rejectionCases:rejected.length,sharedRoles:5,restorationGenerations:2}));
 })().catch(error=>{console.error(error);process.exitCode=1;});

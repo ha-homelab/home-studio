@@ -43,12 +43,20 @@
   Editor cutaway/full-height and Home transitions after context restoration,
   within their unchanged scenario deadlines.
 
+- Use constant-tint floors and authoring background in the existing Apple
+  diffuse Editor profile. Supported opaque floors keep geometry, clipping and
+  shadow casting, but receive no Editor lighting or shadows. Home restores the
+  exact original lit material objects; furniture, outlines, other profiles and
+  acceptance limits are unchanged. Retain one lazy Basic material per eligible
+  mesh and release both active and dormant GPU associations on context loss.
+  This is a visual tradeoff requiring evaluation, not a pixel-parity claim.
+
 - Use an unlit architectural wall fill in the existing Apple software
   diffuse fallback, including its measured masked-Apple selection. Walls retain
   their teal tint, opacity, cutaway geometry, outlines and shadow casting, but
   no longer receive lighting, shadows, daylight or animated/view sheen. This
-  deliberate visual tradeoff also applies in the Editor. Other surfaces,
-  lights and rendering profiles are unchanged. Qualify each revision with the
+  deliberate visual tradeoff also applies in the Editor. Lights and other
+  rendering profiles are unchanged. Qualify each revision with the
   complete required hosted matrix; local comparisons do not establish
   cross-browser performance or pixel parity.
 

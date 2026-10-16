@@ -159,14 +159,26 @@ The unlit wall fill keeps the original teal tint (`0xb2d8d2`), opacity
 (`0.16`), transparent draw order, double-sided geometry, depth behavior,
 cutaway clipping, outlines and full-height shadow casting. Walls no longer
 receive point or directional lighting, daylight, shadows or animated/view
-sheen; the constant-tint appearance also persists in the Editor. Floors,
-frames, furniture and other surfaces retain their existing materials, and all
-scene lights and shadow maps remain present. Hardware and other software
+sheen; the constant-tint appearance also persists in the Editor. Home floors,
+frames and furniture retain their existing materials, and all scene lights and
+shadow maps remain present. Hardware and other software
 profiles are unchanged. This is an intentional visual tradeoff, not a claim of
 pixel parity. Qualify each revision with the complete required hosted matrix;
 local comparisons do not establish cross-browser performance. Original browser
 scenarios, assertions and deadlines remain required before any acceptance
 decision.
+
+The same diffuse profile uses constant-tint Basic materials for supported opaque
+static floors and the authoring background in the Editor only. These surfaces
+keep their geometry, colors, clipping, depth behavior and shadow casting, but do
+not receive lighting or shadows in the Editor. Furniture and outlines keep their
+existing materials. Returning to Home restores the exact original floor material
+objects, including their lighting callbacks and uniforms. Unsupported materials
+(textures, transparency or custom callbacks) keep their original path. One lazy
+Basic material per eligible mesh is retained across mode switches; context loss
+releases GPU associations for active and dormant materials, and final page cleanup
+releases both. This is an explicit Editor quality tradeoff requiring visual and
+performance evaluation; it does not change resolution, lights or acceptance limits.
 
 Gecko can mask both hardware and software renderers as exactly `Apple M1, or similar`.
 Only that exact label with a Gecko user agent runs a capacity probe, once per

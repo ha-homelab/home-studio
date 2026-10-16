@@ -66,6 +66,7 @@ jobs:
           node scripts/test-wall-sheen.cjs
           node scripts/test-wall-motion.cjs
           node scripts/test-unlit-architectural-walls.cjs
+          node scripts/test-flat-editor-floors.cjs
       - name: Test dimmed light indicators and color interpretation
         run: node --test scripts/test-light-state.cjs
       - name: Test TV frame retention and disposal

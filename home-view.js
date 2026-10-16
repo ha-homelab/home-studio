@@ -160,6 +160,11 @@ homeView = (() => {
     bridge?.postMessage({type:'view_preferences',sidebarCollapsed:controlsCollapsed});
   };
 
+  function attachRoomLighting() {
+    const attach=()=>{roomLighting?.attach(root,active,{staticGeometry:true});roomLighting?.attach(objectGroup,active)};
+    if(editorFloorMaterials)editorFloorMaterials.attachLighting(attach);else attach();
+  }
+
   function setActive(value) {
     active = value;previewTV(null);
     if(lowerFloorContext)lowerFloorContext.visible=value&&showLowerFloor&&!selected;
@@ -173,7 +178,8 @@ homeView = (() => {
       // Keep window heads visible.
       clipping.constant = value ? 2.1 : $('cutaway').checked ? 1.15 : 20;
       // Keep full-height shadow blockers when changing view modes.
-      roomLighting?.attach(root,value,{staticGeometry:true});roomLighting?.attach(objectGroup,value);
+      editorFloorMaterials?.setHomeActive(value);
+      attachRoomLighting();
       updateFixtureShadows();
       for (const mesh of root.children) if (['fixtures','stairs'].includes(mesh.userData.category)) mesh.visible = value || $(mesh.userData.category).checked;
     }
@@ -237,7 +243,7 @@ homeView = (() => {
     const lights=points.filter(point=>point.light).map(point=>point.light),lightCount=lights.length;
     configurePointShadows(lights, renderer?.capabilities, renderProfile);
     if(!roomLighting || roomLighting.capacity<lightCount){roomLighting?.dispose();roomLighting=createRoomLighting(THREE,model.rooms.map(room=>({...room,exterior:(model.exterior_rooms||[]).includes(room.id),polygon:room.polygon.map(([x,z])=>[xm(x),zm(z)])})),lightCount,daylightWindows,{packed:renderProfile.diffuseLighting===true,maxFragmentUniforms:renderer.capabilities.maxFragmentUniforms,literalLambertDirectional:true,literalLambertPointBody:true,literalLambertShadowPoint:true,literalLambertIndirect:true,directShadowUniforms:true,scalarLambertAccumulators:true,pointDecayTwo:true,pointTexture:true,runTexture:true,geometryTexture:true,signalTexture:true,maxTextureSize:renderer.capabilities.maxTextureSize,maxTextures:renderer.capabilities.maxTextures});}
-    roomLighting.attach(root,active,{staticGeometry:true});roomLighting.attach(objectGroup,active);
+    attachRoomLighting();
     updateFixtureShadows();
   }
 

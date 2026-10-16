@@ -98,6 +98,75 @@ let renderProfile={pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSi
 // On the existing Apple software profile, wall fill is an unlit diagram tint.
 // Geometry, transparency, cutaway and cast shadows remain unchanged.
 function createSceneMaterial(options,kind){if(!renderProfile.diffuseLighting)return new THREE.MeshStandardMaterial(options);const {roughness,metalness,...shared}=options;if(kind==='walls'){const {emissive,emissiveIntensity,...unlit}=shared;return new THREE.MeshBasicMaterial(unlit)}return new THREE.MeshLambertMaterial(shared)}
+// The software Editor is a layout diagram. Keep the original Home materials
+// and lazily retain one unlit mate for each supported static floor/background.
+function createEditorFloorMaterials(THREE, group, ground, profile) {
+  const entries = [], meshes = new Set();
+  let homeActive = null, disposed = false;
+  function supported(material, initial = false) {
+    if (!material?.isMeshLambertMaterial || material.transparent || material.opacity !== 1 ||
+        material.vertexColors || material.wireframe || material.alphaTest || material.alphaHash ||
+        ![THREE.NormalBlending,THREE.NoBlending].includes(material.blending) || !material.depthWrite || !material.depthTest ||
+        !material.color || ![material.color.r,material.color.g,material.color.b].every(Number.isFinite) ||
+        material.emissive && (material.emissive.r || material.emissive.g || material.emissive.b) ||
+        Object.values(material).some(value => value?.isTexture) || Object.keys(material.userData || {}).length) return false;
+    for (const key in material.defines || {}) return false;
+    return !initial || (material.onBeforeCompile === THREE.Material.prototype.onBeforeCompile &&
+      material.customProgramCacheKey === THREE.Material.prototype.customProgramCacheKey &&
+      material.onBeforeRender === THREE.Material.prototype.onBeforeRender);
+  }
+  function meshCallbacksSupported(mesh) {
+    return mesh.onBeforeRender === THREE.Object3D.prototype.onBeforeRender &&
+      mesh.onAfterRender === THREE.Object3D.prototype.onAfterRender &&
+      mesh.onBeforeShadow === THREE.Object3D.prototype.onBeforeShadow &&
+      mesh.onAfterShadow === THREE.Object3D.prototype.onAfterShadow;
+  }
+  function callbacks(material) {return [material.onBeforeCompile,material.customProgramCacheKey,material.onBeforeRender]}
+  function stillOwned(entry) {
+    entry.owned &&= meshCallbacksSupported(entry.mesh) && callbacks(entry.home).every((value,index) => value === entry.callbacks[index]);
+    return entry.owned;
+  }
+  function register(mesh) {
+    if (!profile.diffuseLighting || !mesh?.isMesh || mesh.isSkinnedMesh || mesh.isInstancedMesh || mesh.isBatchedMesh ||
+        meshes.has(mesh) || !meshCallbacksSupported(mesh) || !supported(mesh.material, true)) return;
+    meshes.add(mesh); entries.push({mesh,home:mesh.material,flat:null,owned:true,callbacks:callbacks(mesh.material)});
+  }
+  group?.traverse(mesh => {if (mesh.userData.category === 'floors') register(mesh)});
+  register(ground);
+  function releaseGPU() {
+    const materials = new Set();
+    for (const entry of entries) {materials.add(entry.home); if (entry.flat) materials.add(entry.flat)}
+    for (const material of materials) material.dispose();
+  }
+  return {
+    setHomeActive(value) {
+      if (disposed || homeActive === value) return;
+      homeActive = value;
+      for (const entry of entries) {
+        const {mesh,home} = entry;
+        if (mesh.material !== home && (!entry.flat || mesh.material !== entry.flat)) continue;
+        if (value || !stillOwned(entry) || !supported(home)) {mesh.material = home; continue}
+        entry.flat ??= new THREE.MeshBasicMaterial();
+        THREE.Material.prototype.copy.call(entry.flat,home);
+        entry.flat.color.copy(home.color);entry.flat.fog=home.fog;
+        // Preserve the actual clipping plane identities used by the viewer.
+        entry.flat.clippingPlanes=home.clippingPlanes;
+        entry.flat.needsUpdate=true;mesh.material=entry.flat;
+      }
+    },
+    attachLighting(attach) {
+      for (const entry of entries) stillOwned(entry);
+      attach();
+      for (const entry of entries) if (entry.owned && entry.mesh.material === entry.home) entry.callbacks=callbacks(entry.home);
+    },
+    releaseGPU,
+    dispose() {
+      if (disposed) return;
+      for (const entry of entries) if (entry.flat && entry.mesh.material === entry.flat) entry.mesh.material=entry.home;
+      releaseGPU();entries.length=0;meshes.clear();disposed=true;
+    }
+  };
+}
 // Static opaque floors can share the clipped frame shader without changing
 // their visible half-space. The far plane is outside every original vertex;
 // it is independent of the user cutaway and never clips shadow passes.
@@ -105,6 +174,7 @@ function applyStaticMeshClipping(source,material){if(['walls','frames','doors','
 function selectRenderProfile(gl){const capacity=getRenderCapacity(gl);const profile=capacity.reduced?{pixels:capacity.diffuseLighting?125000:250000,pointShadows:2,pointShadowSize:128,sunShadowSize:512,diffuseLighting:capacity.diffuseLighting}:{pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048,diffuseLighting:false};if(capacity.rasterProbe)profile.rasterProbe=capacity.rasterProbe;return profile}
 let renderRequest=0,renderDelay=0,renderSuspended=false,renderLost=false;
 let interactionRenderer=null,interactionPointer=null,coalesceMotion=false;
+let editorFloorMaterials=null;
 function cancelRender(){if(renderRequest)cancelAnimationFrame(renderRequest);if(renderDelay)clearTimeout(renderDelay);renderRequest=renderDelay=0}
 // Paint the first moved-pointer frame immediately. Subsequent software frames
 // share a fixed deadline; further input never postpones it. Apple diffuse
@@ -336,13 +406,14 @@ if(shape){
 }
 const glassPasses=createStaticGlassPasses(THREE,mesh,renderProfile.diffuseLighting);root.add(mesh);if(glassPasses)root.add(glassPasses.front)}
 ground=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(60,planRadius*2),Math.max(65,planRadius*2)),createSceneMaterial({color:'#dfe3d8',roughness:1}));ground.rotation.x=-Math.PI/2;ground.position.set(planCenter[0],-1.97,planCenter[1]);ground.receiveShadow=true;scene.add(ground);grid=new THREE.GridHelper(44,44,0xc0cabe,0xd0d7cb);grid.position.set(planCenter[0],-1.96,planCenter[1]);scene.add(grid);
-renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;cancelRender();releaseViewerGeometryGPU();releaseViewerTextureGPU();interactionPointer=null;interactionRenderer?.dispose();interactionRenderer=null;releaseStaticGlassPasses();homeView?.releaseGPU?.();});
+editorFloorMaterials=createEditorFloorMaterials(THREE,root,ground,renderProfile);editorFloorMaterials.setHomeActive(embedded);
+renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;cancelRender();releaseViewerGeometryGPU();releaseViewerTextureGPU();editorFloorMaterials?.releaseGPU();interactionPointer=null;interactionRenderer?.dispose();interactionRenderer=null;releaseStaticGlassPasses();homeView?.releaseGPU?.();});
 renderer.domElement.addEventListener('webglcontextrestored',()=>{renderLost=false;invalidateShadows();const before=renderCount;window.resizeModel?.();if(renderCount===before)requestRender()});
 function updateEditorCamera(){camera.position.set(target.x+radius*Math.sin(polar)*Math.sin(azimuth),target.y+radius*Math.cos(polar),target.z+radius*Math.sin(polar)*Math.cos(azimuth));camera.lookAt(target)}
 function render(){if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;const before=renderCount;updateWallOutlines();if(homeView?.active)homeView.render();else{updateEditorCamera();drawScene(camera);renderCount++}if(renderCount>before)cancelRender()}window.renderModel=render;window.requestModelRender=requestRender;
 let viewSize='';const resize=()=>{if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;if(renderDelay)requestRender();const b=$(homeView?.active?'homeStage':'view3d').getBoundingClientRect(),ratio=renderPixelRatio(b.width,b.height),size=[homeView?.active,b.width,b.height,ratio].join();if(b.width&&b.height&&size!==viewSize){viewSize=size;renderer.setDrawingBufferSize(b.width,b.height,ratio);camera.aspect=b.width/b.height;camera.updateProjectionMatrix();render()}};window.resizeModel=resize;const observer=new ResizeObserver(resize);observer.observe($('view3d'));observer.observe($('homeStage'));
 document.addEventListener('visibilitychange',()=>{if(document.hidden){interactionPointer=null;cancelRender()}else{const before=renderCount;resize();if(renderCount===before)requestRender()}});
-window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();interactionPointer=null;if(!event.persisted){observer.disconnect();interactionRenderer?.dispose();interactionRenderer=null;homeView?.dispose?.();disposeStaticGlassPasses();renderer.dispose();renderer.forceContextLoss();}});
+window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();interactionPointer=null;if(!event.persisted){observer.disconnect();interactionRenderer?.dispose();interactionRenderer=null;homeView?.dispose?.();disposeStaticGlassPasses();editorFloorMaterials?.dispose();renderer.dispose();renderer.forceContextLoss();}});
 // A resize can already paint the resumed state. Initial pageshow also needs
 // no extra frame after boot painted; leave any pending live-state request intact.
 window.addEventListener('pageshow',event=>{const resumed=renderSuspended||event.persisted,before=renderCount;renderSuspended=false;resize();if(renderCount===before&&(resumed||renderCount===0))requestRender()});
