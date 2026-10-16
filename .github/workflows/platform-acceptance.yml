@@ -152,6 +152,7 @@ jobs:
         if: ${{ !cancelled() && steps.planner_acceptance.outcome == 'failure' && matrix.engine == 'webkit' && matrix.os == 'windows-2022' }}
         env:
           DEBUG: pw:browser
+          PLANNER_STABILITY_TRACE_RECOVERY: '1'
         run: |
           set -o pipefail
           result=0

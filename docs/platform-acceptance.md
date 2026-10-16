@@ -135,8 +135,10 @@ actions, editing only, and resizing only with immediate restoration. These
 use `PLANNER_STABILITY_RECOVERY_ACTIONS` and `PLANNER_STABILITY_RESTORE_LAYOUT`
 to isolate the extra context loss observed on this port. Evidence is saved
 under `diagnostics/planner-{settled,none,edit,resize}` in the same artifact.
-Each comparison enables `DEBUG=pw:browser` and retains combined browser-process
-output in `browser-process.log`, with pipeline failures preserved.
+Each comparison enables `PLANNER_STABILITY_TRACE_RECOVERY=1` for detailed
+renderer/layout tracing and `DEBUG=pw:browser` for browser-process output,
+retained in `browser-process.log` with pipeline failures preserved. The primary
+acceptance check uses the default without detailed recovery tracing.
 Every comparison runs, and any diagnostic failure also fails that step. The
 primary check still requires all actions with immediate restoration and its
 failure still fails the job even if every diagnostic passes.
