@@ -10,25 +10,33 @@ from unittest.mock import patch
 
 
 HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location('intel_comparison', HERE / 'run-intel-cgl-boundaries.py')
+spec = importlib.util.spec_from_file_location('intel_comparison', HERE / 'run-intel-cgl-indexing.py')
 comparison = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(comparison)
-ARMS = (('baseline', comparison.BASELINE), ('candidate', comparison.CANDIDATES['fallback-boundaries']))
+ARMS = (('baseline', comparison.BASELINE), ('candidate', comparison.CANDIDATES['indexing-disabled']))
 
 
 class IntelComparisonTests(unittest.TestCase):
     def setUp(self):
         # Never include the caller's credentials in a failed mock-call diff.
-        environment = patch.dict(comparison.os.environ, {'PATH': '/usr/bin:/bin'}, clear=True)
+        environment = patch.dict(comparison.os.environ, {
+            'PATH': '/usr/bin:/bin', 'GITHUB_ACTIONS': 'true',
+            'RUNNER_ENVIRONMENT': 'github-hosted', 'RUNNER_OS': 'macOS'}, clear=True)
         environment.start()
         self.addCleanup(environment.stop)
         host = patch.object(comparison.platform, 'platform', return_value='Darwin-test-x86_64')
         host.start()
         self.addCleanup(host.stop)
+        system = patch.object(comparison.sys, 'platform', 'darwin')
+        system.start()
+        self.addCleanup(system.stop)
+        machine = patch.object(comparison.platform, 'machine', return_value='x86_64')
+        machine.start()
+        self.addCleanup(machine.stop)
 
     def run_fixture(self, exit_codes, mutate=False, mismatched_driver=False,
-                    candidate='fallback-boundaries', product='firefox', mutate_install=False,
-                    cpu_error=False):
+                    candidate='indexing-disabled', product='firefox', mutate_install=False,
+                    cpu_error=False, indexing_codes=None, indexing_after=None):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
@@ -36,8 +44,21 @@ class IntelComparisonTests(unittest.TestCase):
         install.write_text('{"testFixture":true}')
         output = root / 'diagnostics'
         observed = []
+        self.indexing_calls, self.events = [], []
 
         def run(command, **kwargs):
+            if command[0] in ('/usr/bin/mdutil', '/usr/bin/sudo'):
+                self.indexing_calls.append(command)
+                self.events.append(('control', len(self.indexing_calls)))
+                index = len(self.indexing_calls) - 1
+                code = (indexing_codes or [0, 0, 0])[index]
+                if isinstance(code, Exception):
+                    raise code
+                stdout = ('/:\n\tIndexing enabled.\n/System/Volumes/Data:\n\tIndexing enabled.\n'
+                          if index == 0 else '/:\n\tIndexing disabled.\n/System/Volumes/Data:\n\tIndexing disabled.\n')
+                if index == 2 and indexing_after is not None:
+                    stdout = indexing_after
+                return subprocess.CompletedProcess(command, code, stdout=stdout, stderr='')
             arm = command[1].split('/')[-3]
             manifest = json.loads((output / 'comparison.json').read_text())
             self.assertEqual(next(value for value in manifest['arms'] if value['name'] == arm)['status'], 'running')
@@ -52,6 +73,7 @@ class IntelComparisonTests(unittest.TestCase):
             raw.mkdir()
             (raw / 'summary.json').write_bytes(b'{"originalFixtureReceipt":true}\n')
             observed.append((arm, command))
+            self.events.append(('suite', arm))
             if mutate_install:
                 install.write_text('{"changed":true}')
             result = exit_codes[len(observed) - 1]
@@ -122,7 +144,7 @@ class IntelComparisonTests(unittest.TestCase):
     def test_exact_two_source_order(self):
         self.assertEqual(ARMS, (
             ('baseline', '13b8ed9e1f0baf68eac329764a05277377113419'),
-            ('candidate', '800acbda7b8692b8c18d73e4be7b00211c552ff3'),
+            ('candidate', '13b8ed9e1f0baf68eac329764a05277377113419'),
         ))
 
     def test_original_command_has_only_the_standard_installation_arguments(self):
@@ -150,13 +172,13 @@ class IntelComparisonTests(unittest.TestCase):
              patch.object(comparison.platform, 'machine', return_value='arm64'), \
              patch.object(comparison.subprocess, 'run') as run:
             root = Path(directory)
-            self.assertEqual(comparison.run_comparison(root, root / 'missing.json', root / 'output', 'fallback-boundaries', 'firefox'), 1)
+            self.assertEqual(comparison.run_comparison(root, root / 'missing.json', root / 'output', 'indexing-disabled', 'firefox'), 1)
             run.assert_not_called()
             self.assertEqual(json.loads((root / 'output/comparison.json').read_text())['status'], 'infrastructure-error')
 
     def test_both_product_pairs_keep_fixed_revisions_versions_and_host_records(self):
         self.assertEqual(comparison.CANDIDATES, {
-            'fallback-boundaries': '800acbda7b8692b8c18d73e4be7b00211c552ff3',
+            'indexing-disabled': '13b8ed9e1f0baf68eac329764a05277377113419',
         })
         self.assertEqual(comparison.VERSIONS, {'firefox': '153.5.0esr', 'waterfox': '6.7.6'})
         for candidate, revision in comparison.CANDIDATES.items():
@@ -213,9 +235,9 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertEqual(data['uptimeError'], 'TimeoutExpired')
 
     def test_workflow_is_fixed_read_only_two_pair_diagnostic(self):
-        text = (HERE.parent / '.github/workflows/intel-cgl-boundaries.yml').read_text()
-        self.assertIn('branches: [diagnostic/intel-cgl-boundaries]', text)
-        self.assertIn("github.ref == 'refs/heads/diagnostic/intel-cgl-boundaries'", text)
+        text = (HERE.parent / '.github/workflows/intel-cgl-indexing.yml').read_text()
+        self.assertIn('branches: [diagnostic/intel-cgl-indexing]', text)
+        self.assertIn("github.ref == 'refs/heads/diagnostic/intel-cgl-indexing'", text)
         self.assertIn('runs-on: macos-15-intel', text)
         self.assertIn('timeout-minutes: 30', text)
         self.assertIn('max-parallel: 2', text)
@@ -231,7 +253,7 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertIn('python3 baseline/scripts/setup-native-browser.py', text)
         self.assertIn('permissions:\n  contents: read', text)
         self.assertIn('if: ${{ always() }}', text)
-        self.assertIn('name: diagnostic-intel-cgl-boundaries-', text)
+        self.assertIn('name: diagnostic-intel-cgl-indexing-', text)
         self.assertEqual(text.count('persist-credentials: false'), 3)
         self.assertNotRegex(text, r'workflow_dispatch|pull_request|secrets\.|continue-on-error|workflow_call|diagnose-restore|diagnose-native-draw')
         uses = re.findall(r'uses: ([^\s]+)', text)
@@ -242,7 +264,91 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertNotRegex(quality, re.compile(r'^  push:', re.MULTILINE))
         for name in ('release-pipeline.yml', 'pages.yml'):
             workflow = (HERE.parent / '.github/workflows' / name).read_text()
-            self.assertNotIn('diagnostic/intel-cgl-boundaries', workflow)
+            self.assertNotIn('diagnostic/intel-cgl-indexing', workflow)
+        for path in (HERE.parent / '.github/workflows').glob('intel-cgl-*.yml'):
+            if path.name != 'intel-cgl-indexing.yml':
+                self.assertNotIn('diagnostic/intel-cgl-indexing', path.read_text())
+        self.assertFalse((HERE.parent / '.github/workflows/intel-cgl-boundaries.yml').exists())
+
+    def test_indexing_host_gate_rejects_every_missing_or_wrong_indicator_before_subprocess(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(comparison.subprocess, 'run') as run:
+            path = Path(directory) / 'status.json'
+            for key, values in {
+                    'GITHUB_ACTIONS': ['', 'false'],
+                    'RUNNER_ENVIRONMENT': ['', 'self-hosted'],
+                    'RUNNER_OS': ['', 'Linux', 'Windows']}.items():
+                for value in values:
+                    with self.subTest(key=key, value=value), patch.dict(comparison.os.environ, {key: value}):
+                        with self.assertRaises(ValueError):
+                            comparison.indexing_command(path, disable=True)
+            for attr, value in [('platform', 'linux'), ('platform', 'win32')]:
+                with patch.object(comparison.sys, attr, value), self.assertRaises(ValueError):
+                    comparison.indexing_command(path, disable=True)
+            with patch.object(comparison.platform, 'machine', return_value='arm64'), self.assertRaises(ValueError):
+                comparison.indexing_command(path, disable=True)
+            run.assert_not_called()
+            self.assertFalse(path.exists())
+
+    def test_only_one_mutation_between_identical_source_suites_and_verified_status(self):
+        result, manifest, observed, output = self.run_fixture([0, 0])
+        self.assertEqual(result, 0)
+        self.assertEqual(self.events, [('control', 1), ('suite', 'baseline'),
+            ('control', 2), ('control', 3), ('suite', 'candidate')])
+        self.assertEqual(self.indexing_calls, [
+            ['/usr/bin/mdutil', '-a', '-s'],
+            ['/usr/bin/sudo', '-n', '/usr/bin/mdutil', '-a', '-i', 'off'],
+            ['/usr/bin/mdutil', '-a', '-s']])
+        self.assertEqual([arm['sourceRevision'] for arm in manifest['arms']], [comparison.BASELINE] * 2)
+        self.assertTrue(manifest['indexingControl']['verifiedDisabled'])
+        for name in ('before', 'disable', 'after'):
+            record = json.loads((output / ('indexing-' + name + '.json')).read_text())
+            self.assertEqual(record['exitCode'], 0)
+            self.assertEqual(record['timeoutSeconds'], 15)
+
+    def test_each_indexing_command_failure_stops_before_candidate_and_fails_job(self):
+        for index in range(3):
+            with self.subTest(index=index):
+                codes = [0, 0, 0]
+                codes[index] = 3
+                result, manifest, observed, output = self.run_fixture([0, 0], indexing_codes=codes)
+                self.assertEqual(result, 1)
+                self.assertEqual(manifest['status'], 'infrastructure-error')
+                self.assertFalse(manifest['indexingControl']['verifiedDisabled'])
+                self.assertEqual([arm for arm, _ in observed], [] if index == 0 else ['baseline'])
+                name = ('before', 'disable', 'after')[index]
+                self.assertEqual(json.loads((output / ('indexing-' + name + '.json')).read_text())['exitCode'], 3)
+
+    def test_indexing_verification_rejects_enabled_unknown_partial_or_changed_volume_status(self):
+        for text in ['', '/:\nIndexing enabled.\n', '/:\nunknown\n',
+                     '/:\nIndexing disabled.\n', '/:\nIndexing disabled.\n/another:\nIndexing disabled.\n',
+                     '/:\nIndexing disabled.\n/System/Volumes/Data:\nIndexing enabled.\n']:
+            with self.subTest(status=text):
+                result, manifest, observed, _ = self.run_fixture([0, 0], indexing_after=text)
+                self.assertEqual(result, 1)
+                self.assertEqual([arm for arm, _ in observed], ['baseline'])
+                self.assertFalse(manifest['indexingControl']['verifiedDisabled'])
+
+    def test_indexing_command_capture_is_capped_and_timeout_is_a_failure_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'status.json'
+            with patch.object(comparison.subprocess, 'run', return_value=
+                              subprocess.CompletedProcess([], 0, stdout='s' * 5000, stderr='e' * 5000)) as run:
+                record = comparison.indexing_command(path)
+            self.assertEqual(run.call_args.kwargs['timeout'], 15)
+            self.assertEqual(run.call_args.kwargs['env']['LC_ALL'], 'C')
+            self.assertEqual(len(record['stdout']), 4096)
+            self.assertEqual(len(record['stderr']), 4096)
+            self.assertTrue(record['stdoutTruncated'] and record['stderrTruncated'])
+            with self.assertRaises(ValueError):
+                comparison.indexing_volumes(record)
+            for error in (OSError('private exception'), subprocess.TimeoutExpired(
+                    'private command', 15, output=b'x' * 5000, stderr=b'e')):
+                with patch.object(comparison.subprocess, 'run', side_effect=error), self.assertRaises(RuntimeError):
+                    comparison.indexing_command(path, disable=True)
+                record = json.loads(path.read_text())
+                self.assertEqual(record['status'], 'failed')
+                self.assertEqual(record['error'], type(error).__name__)
+                self.assertNotIn('private', json.dumps(record))
 
     def test_cpu_capture_is_numeric_top_eight_and_basename_only(self):
         rows = [f'{index} 1 {index}.5 {index * 1024} /private/parent/App {index}'

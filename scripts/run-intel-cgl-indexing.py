@@ -16,7 +16,7 @@ import time
 
 BASELINE = '13b8ed9e1f0baf68eac329764a05277377113419'
 CANDIDATES = {
-    'fallback-boundaries': '800acbda7b8692b8c18d73e4be7b00211c552ff3',
+    'indexing-disabled': '13b8ed9e1f0baf68eac329764a05277377113419',
 }
 VERSIONS = {'firefox': '153.5.0esr', 'waterfox': '6.7.6'}
 DRIVER_FILES = (
@@ -87,6 +87,72 @@ def host_resources():
         except (OSError, subprocess.TimeoutExpired) as error:
             record[name + 'Error'] = type(error).__name__
     return record
+
+
+def require_indexing_host():
+    """Never change a local, self-hosted, non-macOS or non-Intel machine."""
+    if not (os.environ.get('GITHUB_ACTIONS') == 'true' and
+            os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted' and
+            os.environ.get('RUNNER_OS') == 'macOS' and
+            sys.platform == 'darwin' and platform.machine() == 'x86_64'):
+        raise ValueError('Spotlight control requires a GitHub-hosted Intel macOS Actions runner')
+
+
+def indexing_command(path, disable=False):
+    """Run only the fixed status or indexing-off command and retain bounded evidence."""
+    require_indexing_host()
+    command = (['/usr/bin/sudo', '-n', '/usr/bin/mdutil', '-a', '-i', 'off']
+               if disable else ['/usr/bin/mdutil', '-a', '-s'])
+    record = {'diagnosticOnly': True, 'command': command, 'startedAt': utc_now(),
+              'timeoutSeconds': 15, 'outputLimitCharacters': 4096}
+    started = time.monotonic()
+    def capture(value):
+        if isinstance(value, bytes):
+            value = value.decode('utf-8', errors='replace')
+        value = value or ''
+        return value[:4096], len(value) > 4096
+    try:
+        environment = os.environ.copy()
+        environment['LC_ALL'] = 'C'
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, check=False, timeout=15, env=environment)
+        record.update(exitCode=result.returncode,
+                      status='completed' if result.returncode == 0 else 'failed')
+        stdout, stderr = result.stdout, result.stderr
+    except (OSError, subprocess.TimeoutExpired) as error:
+        record.update(exitCode=None, status='failed', error=type(error).__name__)
+        stdout, stderr = getattr(error, 'stdout', None), getattr(error, 'stderr', None)
+    record['stdout'], record['stdoutTruncated'] = capture(stdout)
+    record['stderr'], record['stderrTruncated'] = capture(stderr)
+    record['elapsedSeconds'] = time.monotonic() - started
+    write_json(path, record)
+    if record['status'] != 'completed':
+        raise RuntimeError('Spotlight command failed; see ' + path.name)
+    return record
+
+
+def indexing_volumes(record):
+    """Interpret complete mdutil status, rejecting unknown or partial evidence."""
+    if record['stdoutTruncated'] or record['stderrTruncated']:
+        raise ValueError('Spotlight status output is truncated')
+    volumes, current = {}, None
+    for raw in record['stdout'].splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith('/') and line.endswith(':'):
+            if current is not None or line[:-1] in volumes:
+                raise ValueError('Spotlight status contains an incomplete or duplicate volume')
+            current = line[:-1]
+        elif current is not None and line in (
+                'Indexing enabled.', 'Indexing disabled.', 'Indexing and searching disabled.'):
+            volumes[current] = line
+            current = None
+        else:
+            raise ValueError('Spotlight status contains an unrecognized result')
+    if current is not None or not volumes:
+        raise ValueError('Spotlight status has no complete volume inventory')
+    return volumes
 
 
 def cpu_processes():
@@ -197,7 +263,7 @@ def run_comparison(source_root, installation, output, candidate, product):
     output.mkdir(parents=True, exist_ok=True)
     manifest = {
         'schema': 1, 'diagnosticOnly': True, 'releaseEligible': False, 'acceptanceStatus': 'not-run',
-        'purpose': 'Same-host Intel native fallback program boundary comparison; never release qualification',
+        'purpose': 'Same-source Intel native Spotlight indexing comparison; never release qualification',
         'candidate': candidate, 'product': product, 'expectedVersion': VERSIONS[product],
         'startedAt': utc_now(), 'status': 'preparing', 'arms': [],
         'order': [name for name, _ in arms],
@@ -210,6 +276,7 @@ def run_comparison(source_root, installation, output, candidate, product):
     manifest_path = output / 'comparison.json'
     write_json(manifest_path, manifest)
     try:
+        require_indexing_host()
         if platform.system() != 'Darwin' or platform.machine() != 'x86_64':
             raise ValueError('This diagnostic requires the native macos-15-intel runner')
         overrides = sorted(key for key in os.environ if key.startswith(
@@ -233,10 +300,26 @@ def run_comparison(source_root, installation, output, candidate, product):
             elif driver_hashes != manifest['driverSha256']:
                 raise ValueError(f'{name}: original acceptance driver differs between source arms')
         manifest['status'] = 'running'
+        manifest['indexingControl'] = {'before': 'indexing-before.json',
+                                       'disable': 'indexing-disable.json',
+                                       'after': 'indexing-after.json', 'verifiedDisabled': False}
         write_json(manifest_path, manifest)
+        before_indexing = indexing_volumes(indexing_command(output / 'indexing-before.json'))
         for arm in manifest['arms']:
             name, revision = arm['name'], arm['sourceRevision']
             source, arm_output = source_root / name, output / name
+            if name == 'candidate':
+                try:
+                    indexing_command(output / 'indexing-disable.json', disable=True)
+                    after_indexing = indexing_volumes(indexing_command(output / 'indexing-after.json'))
+                    if set(after_indexing) != set(before_indexing) or any(
+                            value == 'Indexing enabled.' for value in after_indexing.values()):
+                        raise ValueError('Spotlight indexing-off state was not verified for every baseline volume')
+                    manifest['indexingControl']['verifiedDisabled'] = True
+                    write_json(manifest_path, manifest)
+                except Exception as error:
+                    arm.update(status='infrastructure-error', error=f'{type(error).__name__}: {error}')
+                    raise
             command = command_for(source, installation, arm_output, product)
             arm['hostResourcesBefore'] = host_resources()
             write_json(arm_output / 'host-before.json', arm['hostResourcesBefore'])
