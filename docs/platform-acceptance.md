@@ -384,10 +384,13 @@ failure evidence is captured, so later sample fields or completed phase entries
 do not prove that work finished before the deadline; consult `timeoutPhase`.
 
 Legacy native Gecko rows on macOS enable `NATIVE_STARTUP_DIAGNOSTICS=1`.
-A separate loopback fixture process saves at most forty startup checkpoints,
+A separate loopback fixture process saves at most 56 startup checkpoints,
 including the reported renderer, selected rendering profile, first two shader
 compilations and first eight program links/status queries, even if the browser's
-main thread later stalls. Program indices distinguish an initial shadow shader
+main thread later stalls. Bounded before/after records also capture the first
+draw submitted with each of those eight programs. Submission duration can
+include deferred driver compilation and does not measure GPU execution time.
+Program indices distinguish an initial shadow shader
 from later lighting programs. Shader metadata includes type, source length and
 a nonsecurity FNV-1a fingerprint of at most the first 65,536 UTF-16 code units;
 the hashed length is explicit, and shader source text is never retained or sent. Only these served
@@ -461,7 +464,9 @@ Linux and Windows, and `CHROMIUM_ANGLE_BACKEND=metal` on macOS. The actual
 renderer must confirm the requested backend. Hosted macOS Metal exercises the
 runner's virtual graphics device; it does not certify a physical Mac GPU.
 Linux runs headed browsers under Xvfb with software GL. Firefox profiles force WebGL enablement
-and disclose the actual renderer rather than a sanitized GPU name. Playwright
+and normally disclose the actual renderer rather than a sanitized GPU name.
+The explicit masked-ESR row retains Gecko's normal renderer sanitization and
+validates the measured-capacity decision instead. Playwright
 Firefox 155/157 and native Firefox 158 rows on macOS select
 `FIREFOX_WEBGL_BACKEND=angle` and require the reported renderer to confirm Metal
 ANGLE. Playwright Firefox 153, native ESR 153, and Waterfox retain their default

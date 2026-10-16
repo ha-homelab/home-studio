@@ -160,7 +160,8 @@ oversized intermediate buffer. The separate 3D preview uses at most 2,000,000
 pixels and device pixel ratio 2, with a 2048 by 2048 sun shadow map. Positively
 identified software renderers use at most 250,000 drawing pixels and a 512 by
 512 sun shadow map. Native and unidentified renderers retain the normal
-profile. HTML controls retain their normal resolution.
+profile, except when the narrowly scoped masked-Apple capacity check described
+below selects the reduced profile. HTML controls retain their normal resolution.
 
 Orbiting reuses the existing drawing buffer and sun shadow map. Geometry
 changes and context restoration invalidate the shadow; they do not start a
@@ -184,7 +185,8 @@ validation limits remain unchanged.
 ## Generated viewer rendering bounds
 
 Native and unidentified renderers allow at most eight point lights to cast
-occlusion shadows; positively identified software renderers allow at most two.
+occlusion shadows; positively identified software renderers and the measured
+slow masked-Apple path described below allow at most two.
 The renderer reserves four fragment texture units for the directional shadow
 and material maps, reducing the point-shadow count further when
 `maxTextures - 4` is below the selected limit. The first eligible fixtures in
@@ -206,7 +208,8 @@ Lavapipe, a software rasterizer, Microsoft Basic Render, or the exact
 `Apple Software Renderer` name, the cap is 250,000
 pixels, with the smaller point-shadow limits above and a 512 by 512 directional
 shadow map. Native and unknown renderers retain the 2,000,000-pixel cap and
-2048 by 2048 directional shadow map. HTML labels and controls retain their normal
+2048 by 2048 directional shadow map unless the masked-Apple capacity check below
+selects the reduced profile. HTML labels and controls retain their normal
 resolution. The Apple software rasterizer uses simpler diffuse materials and
 unfiltered shadows while retaining room confinement, color and every linked
 light. Its packed room geometry is enabled only within a conservative uniform
