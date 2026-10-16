@@ -746,3 +746,17 @@ PBR, editor, inactive transport and custom callbacks also retain their original
 paths. No resources, uniforms, budgets or browser requirements change. A
 compiler may already flatten these aggregates, so the CPU source and binary32
 proofs establish no GPU equivalence or performance gain.
+
+The optional `cachedLambertDiffuse` experiment reuses the exact
+`BRDF_Lambert(homeDiffuseColor)` value after diffuse initialization, only in the
+guarded scalar-accumulator branch. The four authored accumulation statements
+keep their multiplication operands and addition order. The compiled feature
+fallback retains the original expression at every use. Exact helper, constant,
+source-dependency, reserved-name and material-define checks reject unsafe
+rewrites; external callback and texture eligibility follow the existing
+controller. The option defaults off and Home opts in for this isolated
+experiment. No uniforms, textures, frames, quality settings or limits change.
+The first all-off fixture frame would save only one vector multiplication;
+drivers may already reuse it, and a longer-lived value may increase register
+pressure. CPU inverse and binary32 proofs do not predict a speedup or guarantee
+GPU pixel identity.
