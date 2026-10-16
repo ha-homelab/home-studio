@@ -24,7 +24,7 @@ void main(){
 }`;
 
 function measureAppleRaster(gl) {
-  const started = performance.now(), shaders = [], samplesMs = [];
+  const started = performance.now(), shaders = [], samplesMs = [], pixels = [];
   let saved, program, texture, framebuffer, vertexArray;
   let result = { status: 'unavailable' };
   try {
@@ -39,6 +39,7 @@ function measureAppleRaster(gl) {
       program: gl.getParameter(gl.CURRENT_PROGRAM),
       draw: gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING), read: gl.getParameter(gl.READ_FRAMEBUFFER_BINDING),
       viewport: gl.getParameter(gl.VIEWPORT), mask: gl.getParameter(gl.COLOR_WRITEMASK),
+      // ACTIVE_TEXTURE is never changed; only its current binding is touched.
       texture: gl.getParameter(gl.TEXTURE_BINDING_2D), vertexArray: gl.getParameter(gl.VERTEX_ARRAY_BINDING),
       packBuffer: gl.getParameter(gl.PIXEL_PACK_BUFFER_BINDING),
       flags: flags.map(name => [gl[name], gl.isEnabled(gl[name])]),
@@ -79,10 +80,12 @@ function measureAppleRaster(gl) {
       gl.readPixels(16, 16, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
       const elapsed = performance.now() - before;
       if (!Number.isFinite(elapsed) || elapsed < 0 || gl.isContextLost() ||
-          pixel[3] !== 255 || !(pixel[0] || pixel[1] || pixel[2])) throw Error('Invalid probe readback');
+          pixel[3] !== 255 || !pixel.slice(0, 3).every(value => value > 0 && value < 255)) throw Error('Invalid probe readback');
+      pixels.push(Array.from(pixel));
       if (draw >= 2) samplesMs.push(elapsed);
     }
-    result = { status: 'measured', samplesMs, bestMs: Math.min(...samplesMs) };
+    if (!pixels.some(pixel => pixel.some((value, index) => value !== pixels[0][index]))) throw Error('Unchanging probe readback');
+    result = { status: 'measured', samplesMs, pixels, bestMs: Math.min(...samplesMs) };
   } catch { /* Unsupported or failed probes keep the normal rendering profile. */ }
   finally {
     // Keep cleaning up if a host GL wrapper throws during a restoration call.

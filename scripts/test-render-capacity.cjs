@@ -13,12 +13,16 @@ function fixture({name = 'Apple M1, or similar', times = [30, 30, 16, 17, 18], f
   const created = new Set(), deleted = new Set(), flags = new Map(), state = new Map();
   const gl = {};
   for (const key of ['CURRENT_PROGRAM','DRAW_FRAMEBUFFER_BINDING','READ_FRAMEBUFFER_BINDING','VIEWPORT','COLOR_WRITEMASK',
-    'TEXTURE_BINDING_2D','VERTEX_ARRAY_BINDING','PIXEL_PACK_BUFFER_BINDING','DEPTH_TEST','STENCIL_TEST','BLEND','SCISSOR_TEST',
+    'TEXTURE_BINDING_2D','ACTIVE_TEXTURE','VERTEX_ARRAY_BINDING','PIXEL_PACK_BUFFER_BINDING','DEPTH_TEST','STENCIL_TEST','BLEND','SCISSOR_TEST',
     'CULL_FACE','RASTERIZER_DISCARD','DITHER','POLYGON_OFFSET_FILL','SAMPLE_ALPHA_TO_COVERAGE','SAMPLE_COVERAGE',
     'PACK_ALIGNMENT','PACK_ROW_LENGTH','PACK_SKIP_PIXELS','PACK_SKIP_ROWS','VERTEX_SHADER','FRAGMENT_SHADER','COMPILE_STATUS',
     'LINK_STATUS','TEXTURE_2D','RGBA8','FRAMEBUFFER','DRAW_FRAMEBUFFER','READ_FRAMEBUFFER','COLOR_ATTACHMENT0',
     'FRAMEBUFFER_COMPLETE','PIXEL_PACK_BUFFER','TRIANGLES','RGBA','UNSIGNED_BYTE']) gl[key] = key;
   for (const key of Object.keys(gl)) {state.set(key, {old: key}); flags.set(key, true);}
+  // Start on unit7 with a separate, live unit0 texture; the probe must preserve both.
+  state.set(gl.ACTIVE_TEXTURE, 7);
+  const textures = new Map([[0, {old:'unit0'}], [7, state.get(gl.TEXTURE_BINDING_2D)]]), initialTextures = new Map(textures);
+  gl.activeTexture = unit => state.set(gl.ACTIVE_TEXTURE, unit);
   state.set(gl.VIEWPORT, [9, 8, 700, 500]); state.set(gl.COLOR_WRITEMASK, [false, true, false, true]);
   for (const key of ['PACK_ALIGNMENT','PACK_ROW_LENGTH','PACK_SKIP_PIXELS','PACK_SKIP_ROWS']) state.set(key, 8);
   const initialState = new Map(state), initialFlags = new Map(flags);
@@ -33,7 +37,7 @@ function fixture({name = 'Apple M1, or similar', times = [30, 30, 16, 17, 18], f
   }
   gl.shaderSource = () => {}; gl.compileShader = () => {}; gl.attachShader = () => {}; gl.linkProgram = () => {};
   gl.getShaderParameter = () => failure !== 'compile'; gl.getProgramParameter = () => failure !== 'link';
-  gl.bindTexture = (_, value) => state.set(gl.TEXTURE_BINDING_2D, value);
+  gl.bindTexture = (_, value) => { textures.set(state.get(gl.ACTIVE_TEXTURE), value); state.set(gl.TEXTURE_BINDING_2D, value); };
   gl.bindVertexArray = value => state.set(gl.VERTEX_ARRAY_BINDING, value);
   gl.bindBuffer = (_, value) => state.set(gl.PIXEL_PACK_BUFFER_BINDING, value);
   gl.bindFramebuffer = (target, value) => {
@@ -59,12 +63,13 @@ function fixture({name = 'Apple M1, or similar', times = [30, 30, 16, 17, 18], f
   gl.readPixels = (x, y, width, height, format, type, pixel) => {
     assert.deepEqual([x,y,width,height,format,type], [16,16,1,1,gl.RGBA,gl.UNSIGNED_BYTE]);
     now += times[draws - 1];
-    pixel.set(failure === 'blank' ? [0,0,0,255] : failure === 'transparent' ? [48,40,33,0] : [48,40,33,255]);
+    pixel.set(failure === 'blank' ? [0,0,0,255] : failure === 'transparent' ? [48,40,33,0] :
+      failure === 'white' ? [255,255,255,255] : failure === 'constant' ? [88,88,88,255] : [88+draws,88+draws,88+draws,255]);
   };
   const context = vm.createContext({performance: {now: () => now}});
   vm.runInContext(source.replace('export function ', 'function '), context);
   return {gl, context, get: (ua = gecko) => context.getRenderCapacity(gl, ua), created, deleted,
-    draws: () => draws, clean: () => { assert.deepEqual(state, initialState); assert.deepEqual(flags, initialFlags); assert.deepEqual(deleted, created); }};
+    draws: () => draws, clean: () => { assert.deepEqual(state, initialState); assert.deepEqual(flags, initialFlags); assert.deepEqual(deleted, created); assert.deepEqual(textures, initialTextures); }};
 }
 
 test('only exact masked Apple renderer on Gecko runs a probe', () => {
@@ -92,7 +97,7 @@ test('two warm draws and all three measured draws must be slow; result cached pe
 });
 test('all partial allocation, compile, link, framebuffer, draw and readback failures clean up and retain normal profile', () => {
   for (const failure of ['createProgram','createShader','createTexture','createFramebuffer','createVertexArray',
-    'compile','link','framebuffer','uniform','draw','blank','transparent','lost']) {
+    'compile','link','framebuffer','uniform','draw','blank','transparent','white','constant','lost']) {
     const f = fixture({failure}), result = f.get(); assert.equal(result.reduced, false, failure); assert.equal(result.diffuseLighting, false);
     assert.equal(result.rasterProbe.status, 'unavailable'); assert.equal(f.get(), result, 'Failed probe is not repeatedly retried'); f.clean();
   }

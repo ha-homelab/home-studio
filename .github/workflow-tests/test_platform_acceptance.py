@@ -81,7 +81,12 @@ class PlatformAcceptanceTests(unittest.TestCase):
         for script in ('test-install-home-assistant.py', 'test-public-package.py', 'test_package_release.py'):
             self.assertIn(script, install)
         steps = jobs['browser']['steps']
-        viewer = [step for step in steps if 'node scripts/test-browser-stability.cjs' in step.get('run', '')]
+        viewer_commands = [step for step in steps if 'node scripts/test-browser-stability.cjs' in step.get('run', '')]
+        self.assertEqual([step.get('id') for step in viewer_commands],
+                         ['viewer_6_acceptance', 'viewer_24_acceptance', 'viewer_touch_diagnostics'])
+        viewer = [step for step in viewer_commands if step['id'] in {'viewer_6_acceptance', 'viewer_24_acceptance'}]
+        self.assertNotIn('if', viewer[0])
+        self.assertEqual(viewer[1]['if'], '${{ !cancelled() }}')
         planner = [step for step in steps if step.get('id') == 'planner_acceptance']
         self.assertEqual(len(viewer), 2)
         self.assertEqual(len(planner), 1)
@@ -98,6 +103,37 @@ class PlatformAcceptanceTests(unittest.TestCase):
         self.assertIn('scripts/setup-browser-toolchain.py', runs)
         self.assertIn('scripts/setup-chrome-for-testing.py', runs)
         self.assertIn('"$HOME_STUDIO_PLAYWRIGHT_MODULE/cli.js"', runs)
+
+    def test_touch_comparisons_only_rerun_failed_sizes_and_never_hide_a_failure(self):
+        steps = workflow('platform-acceptance.yml')['jobs']['browser']['steps']
+        diagnostic = next(step for step in steps if step.get('id') == 'viewer_touch_diagnostics')
+        self.assertEqual(diagnostic['if'], "${{ !cancelled() && matrix.engine == 'chromium' && matrix.profile != 'desktop' && (steps.viewer_6_acceptance.outcome == 'failure' || steps.viewer_24_acceptance.outcome == 'failure') }}")
+        self.assertEqual(diagnostic['env'], {
+            'VIEWER_6_OUTCOME': '${{ steps.viewer_6_acceptance.outcome }}',
+            'VIEWER_24_OUTCOME': '${{ steps.viewer_24_acceptance.outcome }}',
+            'BROWSER_STABILITY_TRACE_INPUT': '1',
+        })
+        self.assertNotIn('continue-on-error', diagnostic)
+        fake_node = '''node() {
+          printf '%s|%s|%s\\n' "$1" "$BROWSER_STABILITY_ROOMS" "$BROWSER_STABILITY_TOUCH_TAP" >> "$CALL_LOG"
+          [ "$BROWSER_STABILITY_TOUCH_TAP" != "$FAILED_MODE" ]
+        }
+        xvfb-run() { shift; "$@"; }
+        '''
+        for runner in ('Linux', 'Windows'):
+            for failed_sizes in ([], [6], [24], [6, 24]):
+                for failed_mode in ('none', 'sequential'):
+                    with self.subTest(runner=runner, sizes=failed_sizes, failed_mode=failed_mode), tempfile.TemporaryDirectory() as directory:
+                        log = Path(directory) / 'calls.txt'
+                        result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', fake_node + diagnostic['run']],
+                            env={**os.environ, 'CALL_LOG':str(log), 'RUNNER_OS':runner, 'FAILED_MODE':failed_mode,
+                                 'VIEWER_6_OUTCOME':'failure' if 6 in failed_sizes else 'success',
+                                 'VIEWER_24_OUTCOME':'failure' if 24 in failed_sizes else 'success'},
+                            cwd=directory, capture_output=True, text=True)
+                        expected = [f'scripts/test-browser-stability.cjs|{size}|{mode}'
+                                    for size in failed_sizes for mode in ('sequential', 'gesture50')]
+                        self.assertEqual(log.read_text().splitlines() if log.exists() else [], expected)
+                        self.assertEqual(result.returncode, 1 if failed_sizes and failed_mode != 'none' else 0, result.stderr)
 
     def test_windows_webkit_recovery_comparisons_are_failure_only_diagnostics(self):
         steps = workflow('platform-acceptance.yml')['jobs']['browser']['steps']

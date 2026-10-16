@@ -151,12 +151,16 @@ function validateCheckpoint(value) {
         assert(n && typeof n === 'object' && !Array.isArray(n));
         const measured = n.status === 'measured';
         assert(measured || n.status === 'unavailable');
-        const fields = measured ? ['status','samplesMs','bestMs','totalMs'] : ['status','totalMs'];
+        const fields = measured ? ['status','samplesMs','pixels','bestMs','totalMs'] : ['status','totalMs'];
         assert(Object.keys(n).every(field => fields.includes(field)));
         const duration = value => Number.isFinite(value) && value >= 0 && value <= 1e9;
         if ('totalMs' in n) assert(duration(n.totalMs));
         if (measured) {
           assert(Array.isArray(n.samplesMs) && n.samplesMs.length === 3 && n.samplesMs.every(duration));
+          assert(Array.isArray(n.pixels) && n.pixels.length === 5);
+          assert(n.pixels.every(pixel => Array.isArray(pixel) && pixel.length === 4 && pixel[3] === 255 &&
+            pixel.slice(0,3).every(value => Number.isInteger(value) && value > 0 && value < 255)));
+          assert(n.pixels.some(pixel => pixel.some((value,index) => value !== n.pixels[0][index])));
           assert(n.bestMs === Math.min(...n.samplesMs));
           assert(duration(n.totalMs) && n.totalMs + 1e-6 >= n.samplesMs.reduce((a,b) => a + b, 0));
         }

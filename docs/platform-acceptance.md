@@ -130,7 +130,7 @@ Only that exact label with a Gecko user agent runs a capacity probe, once per
 new rendering context (including the planner's replacement context). It uses the
 existing WebGL2 context, a private 32 × 32 RGBA8 framebuffer, and a fixed
 512-iteration fragment shader: two warm draws and three timed draws, each with a
-one-pixel readback. A valid, nonblank readback and a **minimum of at least 15 ms**
+one-pixel readback. Valid, nonzero and nonsaturated RGB readbacks that vary across the seeds, and a **minimum of at least 15 ms**
 across all three measured draws selects the same reduced pixel/shadow budgets,
 Lambert lighting and planner batching. This measures raster capacity; it does
 not identify the underlying GPU as software. Other renderer labels are not probed.
