@@ -1,15 +1,15 @@
-name: Diagnostic Intel CGL cumulative static geometry atlas
-run-name: Non-release Intel cumulative static geometry atlas pairs with common indexing state · ${{ github.sha }}
+name: Diagnostic Intel CGL flat point state machine
+run-name: Non-release Intel flat point state machine pairs with common indexing state · ${{ github.sha }}
 
 on:
   push:
-    branches: [diagnostic/intel-cgl-static-atlas]
+    branches: [diagnostic/intel-cgl-flat-state-machine]
 
 permissions:
   contents: read
 
 concurrency:
-  group: diagnostic-intel-cgl-static-atlas
+  group: diagnostic-intel-cgl-flat-state-machine
   cancel-in-progress: false
 
 defaults:
@@ -19,7 +19,7 @@ defaults:
 jobs:
   compare:
     name: ${{ matrix.product }} · ${{ matrix.candidate }}
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-static-atlas' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-flat-state-machine' }}
     runs-on: macos-15-intel
     # Two sequential original three-case suites per VM; their own limits
     # are unchanged. Other pairs run on separate hosted VMs.
@@ -31,12 +31,12 @@ jobs:
         include:
           - product: firefox
             version: 153.5.0esr
-            candidate: static-atlas
-            revision: 939c9cb7b29c44e1c4d90be519351410422ff3ca
+            candidate: flat-state-machine
+            revision: e22a61fd3d358bf69fe29114cc8aedd44d12ea12
           - product: waterfox
             version: 6.7.6
-            candidate: static-atlas
-            revision: 939c9cb7b29c44e1c4d90be519351410422ff3ca
+            candidate: flat-state-machine
+            revision: e22a61fd3d358bf69fe29114cc8aedd44d12ea12
     env:
       PYTHONUTF8: '1'
       NATIVE_STARTUP_DIAGNOSTICS: '1'
@@ -70,41 +70,41 @@ jobs:
           node-version: '22'
       - name: Record tooling and prepare both fixtures before timing
         run: |
-          mkdir -p harness/diagnostics/intel-cgl-static-atlas
+          mkdir -p harness/diagnostics/intel-cgl-flat-state-machine
           {
             python3 --version
             node --version
             npm --version
             uname -sm
             sw_vers
-          } > harness/diagnostics/intel-cgl-static-atlas/toolchain.log 2>&1
-          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-static-atlas/baseline-npm.log
-          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-static-atlas/candidate-npm.log
-          python3 harness/scripts/test-intel-cgl-static-atlas.py
+          } > harness/diagnostics/intel-cgl-flat-state-machine/toolchain.log 2>&1
+          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-flat-state-machine/baseline-npm.log
+          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-flat-state-machine/candidate-npm.log
+          python3 harness/scripts/test-intel-cgl-flat-state-machine.py
       - name: Install one original checksum and signature verified browser per pair
         env:
-          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-static-atlas-browser
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-flat-state-machine-browser
           PRODUCT: ${{ matrix.product }}
           VERSION: ${{ matrix.version }}
         run: |
-          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-static-atlas/install.log
-          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-static-atlas/install.json
+          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-flat-state-machine/install.log
+          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-flat-state-machine/install.json
       - name: Normalize indexing once and run both original native suites
         env:
-          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-static-atlas-browser
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-flat-state-machine-browser
           PRODUCT: ${{ matrix.product }}
           CANDIDATE: ${{ matrix.candidate }}
         run: >-
-          python3 harness/scripts/run-intel-cgl-static-atlas.py
+          python3 harness/scripts/run-intel-cgl-flat-state-machine.py
           --source-root "$GITHUB_WORKSPACE"
           --candidate "$CANDIDATE" --product "$PRODUCT"
           --installation "$INSTALL_DIR/install.json"
-          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-static-atlas"
+          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-flat-state-machine"
       - name: Preserve all non-release evidence even when a source fails
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: diagnostic-intel-cgl-static-atlas-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: harness/diagnostics/intel-cgl-static-atlas/
+          name: diagnostic-intel-cgl-flat-state-machine-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: harness/diagnostics/intel-cgl-flat-state-machine/
           if-no-files-found: error
           retention-days: 14

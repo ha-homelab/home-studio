@@ -1,13 +1,13 @@
-# Disposable Intel cumulative-static-geometry-atlas diagnostic
+# Disposable Intel flat-point-state-machine diagnostic
 
-Only a push to `diagnostic/intel-cgl-static-atlas` starts this workflow. It has
+Only a push to `diagnostic/intel-cgl-flat-state-machine` starts this workflow. It has
 read-only GitHub permissions and pinned actions. It does not invoke the 77-lane
 acceptance gate or publish a release. Its results are diagnostic evidence only.
 
 Two independent `macos-15-intel` jobs compare these exact sources in order:
 
 - Baseline: `13b8ed9e1f0baf68eac329764a05277377113419`.
-- Cumulative static geometry atlas: `939c9cb7b29c44e1c4d90be519351410422ff3ca`.
+- Flat point state machine: `e22a61fd3d358bf69fe29114cc8aedd44d12ea12`.
 
 One job uses Firefox `153.5.0esr`; the other uses Waterfox `6.7.6`. Maximum
 parallelism is two. Each pair runs sequentially on one hosted VM and shares one
@@ -36,21 +36,17 @@ disposable hosted VM.
 This common normalization is not a proven cure for the Intel failures, and a
 disabled status does not prove that existing indexing workers are idle. The
 passive CPU records remain necessary context. Both sources receive the same
-normalization; the comparison varies point/run/static-geometry transport, not Spotlight
-configuration. Fixed order and shared caches still limit causal conclusions.
+normalization; the comparison varies only packed point-light run traversal, not
+Spotlight configuration. Fixed order and shared caches still limit causal conclusions.
 
-The unchanged candidate gives eligible untextured Lambert materials an exact
-Float32 texture of the original Three view-space PointLight records. Integer
-texel fetches preserve the ordered unshadowed lighting arithmetic, and the stock
-PointLight declaration retains only the original shadow prefix. Unsupported or
-nonfinite inputs select the original full program before compilation. All scene
-lights remain. A second RGBA32F table replaces only the packed run array, with
-fixed static-material rows and a global dynamic row. Run counts, light order,
-room/window geometry and shadow semantics remain unchanged. A third immutable
-single-row RGBA32F atlas stores six packed static geometry arrays, including
-window-room indices; literal offsets replace only their record lookups. Original
-Float32 coordinates and exact signed integer indices are preserved. No Intel
-improvement is established. This is a separate contingency experiment.
+The unchanged candidate flattens the packed shader's nested run/light traversal
+into one state-machine loop. It retains one transmission call per nonempty
+clipped run, whole-run zero culling, the original ordered per-light body and the
+literal shadow prefix. Point lights, room/window records, geometry, rendering
+resolution and all acceptance limits remain unchanged. Literal fallback and
+editor shaders are unchanged. CPU call-sequence proofs and pinned Three shader
+expansion do not establish driver compilation, pixel equivalence or an Intel
+performance gain. This is a separate contingency experiment.
 
 The wrapper invokes each source's original `test-native-browser-acceptance.py`
 once, with its standard product, expected-version, installation and output
@@ -96,24 +92,24 @@ driver caches also limit interpretation; one pair is not a statistical speedup
 estimate.
 
 The wrapper never substitutes a moving ref or an unavailable source. Keep this
-workflow unpushed unless the preceding point-texture comparison fails and its
-evidence has been saved. The static-atlas candidate also needs independent and
-pixel review before launch. A push starts these two jobs; preparing this workflow
-authorizes no local setting change.
+workflow unpushed until the coordinator has reviewed the preceding diagnostic
+and the flat-state-machine candidate's independent source and pixel evidence.
+A push starts these two jobs; preparing this workflow authorizes no local
+setting change.
 
 Offline contract check, with no browser or network:
 
 ```sh
-python3 scripts/test-intel-cgl-static-atlas.py
+python3 scripts/test-intel-cgl-flat-state-machine.py
 ```
 
 The workflow supplies fixed choices. Its equivalent command on the Intel host
 is:
 
 ```sh
-python3 harness/scripts/run-intel-cgl-static-atlas.py \
-  --source-root "$GITHUB_WORKSPACE" --candidate static-atlas \
+python3 harness/scripts/run-intel-cgl-flat-state-machine.py \
+  --source-root "$GITHUB_WORKSPACE" --candidate flat-state-machine \
   --product firefox \
-  --installation "$RUNNER_TEMP/home-studio-intel-cgl-static-atlas-browser/install.json" \
-  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-static-atlas"
+  --installation "$RUNNER_TEMP/home-studio-intel-cgl-flat-state-machine-browser/install.json" \
+  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-flat-state-machine"
 ```
