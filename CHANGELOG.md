@@ -2,6 +2,12 @@
 
 ## [0.6.4] - Development line
 
+- Bound browser-tool installation to 12 minutes inside a 30-minute package
+  validation job, allowing slow operating-system package mirrors while retaining
+  required dependencies and every check. Browser bootstrap, scenario, load,
+  interaction and recovery deadlines remain unchanged; previously cancelled
+  package runs receive no pass credit.
+
 - Pace expensive Apple software motion draws using a bounded 64–250 ms
   per-gesture delay. Input continues to update the camera, and pointer release
   requests the ordinary full-quality frame. Other graphics profiles and all

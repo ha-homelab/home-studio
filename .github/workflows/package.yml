@@ -9,7 +9,7 @@ jobs:
     uses: ./.github/workflows/platform-acceptance.yml
   package:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -43,6 +43,7 @@ jobs:
           node scripts/test-validation-i18n.mjs
           node --test scripts/test-panel-language.cjs
       - name: Install browser test tools
+        timeout-minutes: 12
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           npx playwright install --with-deps chromium firefox

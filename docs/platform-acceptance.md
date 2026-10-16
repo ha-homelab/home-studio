@@ -15,6 +15,15 @@ extended tier, report-only browser, or allowed failure. A download failure,
 missing WebGL, browser crash, timeout, or failed assertion fails the gate.
 `fail-fast: false` lets the remaining rows finish and preserve their evidence.
 
+The separate package-validation job has a 30-minute overall envelope. Its
+browser-tool installation step has a 12-minute limit covering `npm ci` and
+Playwright's browser and operating-system dependencies (`--with-deps`). This
+allows for slow operating-system package mirrors without consuming the entire
+job before application checks finish. All later checks remain mandatory. The
+browser matrix, per-case bootstrap and scenario watchdogs, and load, interaction
+and recovery limits are unchanged. This prospective setup allowance does not
+reclassify the earlier package job cancelled at its 15-minute limit as passed.
+
 The reviewed inventory is `scripts/browser-matrix.json`, checked on
 2026-10-15. Its expansion produces **77 acceptance executions**, plus one
 inventory-validation job:

@@ -1,5 +1,6 @@
 """Keep complete native browser coverage mandatory in PR and release validation."""
 
+import copy
 import importlib.util
 import json
 import os
@@ -29,6 +30,61 @@ def inventory():
 
 
 class PlatformAcceptanceTests(unittest.TestCase):
+    def assert_package_setup_budget(self, package):
+        jobs = package['jobs']
+        self.assertEqual(set(jobs), {'package', 'platforms'})
+        self.assertEqual(jobs['platforms'], {'uses': './.github/workflows/platform-acceptance.yml'})
+        job = jobs['package']
+        self.assertEqual(job['timeout-minutes'], '30')
+        self.assertNotIn('if', job)
+        self.assertNotIn('continue-on-error', job)
+        steps = job['steps']
+        installs = [step for step in steps if step.get('name') == 'Install browser test tools']
+        self.assertEqual(len(installs), 1)
+        install = installs[0]
+        self.assertEqual(install['timeout-minutes'], '12')
+        self.assertNotIn('if', install)
+        self.assertNotIn('continue-on-error', install)
+        self.assertEqual(install['run'].splitlines(), [
+            'npm ci --ignore-scripts --no-audit --no-fund',
+            'npx playwright install --with-deps chromium firefox',
+        ])
+        for command in ('npm run test:planner', 'node scripts/test-i18n-browser.cjs',
+                        'node scripts/test-help-i18n.cjs', 'node scripts/test-viewer-i18n.cjs',
+                        'node scripts/test-lock-control.cjs'):
+            matches = [step for step in steps if command in step.get('run', '').splitlines()]
+            self.assertEqual(len(matches), 1, command)
+            self.assertGreater(steps.index(matches[0]), steps.index(install))
+            self.assertNotIn('if', matches[0])
+            self.assertNotIn('continue-on-error', matches[0])
+
+    def test_package_browser_setup_has_separate_bounded_envelope(self):
+        self.assert_package_setup_budget(workflow('package.yml'))
+
+    def test_package_setup_contract_rejects_unbounded_or_optional_work(self):
+        original = workflow('package.yml')
+        mutations = (
+            ('package', 'timeout-minutes', '15'),
+            ('package', 'continue-on-error', 'true'),
+            ('platforms', 'if', 'false'),
+            ('install', 'timeout-minutes', '30'),
+            ('install', 'continue-on-error', 'true'),
+            ('install', 'if', 'false'),
+            ('install', 'run', 'npx playwright install chromium firefox'),
+            ('browser', 'continue-on-error', 'true'),
+        )
+        for target, key, value in mutations:
+            with self.subTest(target=target, key=key, value=value):
+                changed = copy.deepcopy(original)
+                steps = changed['jobs']['package']['steps']
+                selected = (next(step for step in steps if step.get('name') == 'Install browser test tools')
+                            if target == 'install' else
+                            next(step for step in steps if step.get('run') == 'npm run test:planner')
+                            if target == 'browser' else changed['jobs'][target])
+                selected[key] = value
+                with self.assertRaises(AssertionError):
+                    self.assert_package_setup_budget(changed)
+
     def test_native_program_isolation_proof_is_unconditional_and_packaged(self):
         steps = workflow('package.yml')['jobs']['package']['steps']
         command = 'node scripts/test-native-viewer-programs.cjs'
