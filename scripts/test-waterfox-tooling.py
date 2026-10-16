@@ -343,6 +343,20 @@ class ToolingTests(unittest.TestCase):
             self.assertEqual(saved['error'], 'fixture launch failed')
             self.assertIn('cleanup failed', saved['cleanupErrors'])
 
+    def test_initial_viewer_wait_requires_rendered_connected_lights(self):
+        class WaitCaptured(Exception):
+            pass
+        client = Mock()
+        client.wait.side_effect = [None, WaitCaptured()]
+        items = [{'entity_id': 'light.fixture_a', 'name': 'A'},
+                 {'entity_id': 'light.fixture_b', 'name': 'B'}]
+        with self.assertRaises(WaitCaptured):
+            acceptance.viewer(client, 'http://127.0.0.1', {'floors': [{'items': items}]}, {'samples': []}, Mock())
+        condition = client.wait.call_args_list[1].args[0]
+        self.assertIn("dataset.connected==='true'", condition)
+        self.assertIn('window.floorplan?.renderCount>0', condition)
+        self.assertIn('window.__nativeRenderedLights===2', condition)
+
     def test_viewer_state_waits_for_the_new_frame(self):
         client = Mock()
         client.execute.return_value = 41

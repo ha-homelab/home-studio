@@ -42,6 +42,38 @@ const flush = () => { const pending = [...frames.values()]; frames.clear(); pend
 for(let i=0;i<200;i++) context.requestRender();
 assert.equal(draws,0); assert.equal(frames.size,1); flush(); assert.equal(draws,1);
 assert.equal(frames.size,0,'The scheduler must not create an idle animation loop');
+// Host state bursts update controls immediately and draw only the latest state
+// on the next frame. The explicit render API remains available to callers.
+const source = lines.join('\n');
+const refreshStart = source.indexOf('function refreshEntityPresentation(){');
+const refreshEnd = source.indexOf('\nfunction updateHeightCaption()',refreshStart);
+assert(refreshStart>=0 && refreshEnd>refreshStart);
+let controlUpdates=0;
+context.tvEntities={}; context.embedded=false;
+context.homeView={refreshControls(){controlUpdates++;}};
+vm.runInContext(source.slice(refreshStart,refreshEnd),context);
+for(let i=0;i<200;i++)context.refreshEntityPresentation();
+assert.equal(controlUpdates,200,'Live controls reflect every received state immediately');
+assert.equal(draws,1,'Receiving states does not synchronously redraw the entire scene');
+assert.equal(frames.size,1,'State bursts share the existing bounded render scheduler');
+flush(); assert.equal(draws,2);
+assert.equal(frames.size,0,'A state update does not start an idle render loop');
+context.homeView=null;
+context.requestRender();
+context.window.renderModel();
+assert.equal(draws,3,'An explicit draw reflects the current state immediately');
+assert.equal(frames.size,0,'An explicit draw satisfies the previously queued frame');
+flush();assert.equal(draws,3,'The queued state is not drawn a second time');
+let homeVisible=false;
+context.homeView={active:true,render(){if(homeVisible){draws++;context.renderCount++;}}};
+context.requestRender();context.window.renderModel();
+assert.equal(draws,3,'A zero-sized Home stage cannot draw');
+assert.equal(frames.size,1,'A no-op explicit draw preserves the pending state frame');
+homeVisible=true;flush();assert.equal(draws,4,'The restored Home stage draws the queued state');
+context.requestRender();context.window.renderModel();
+assert.equal(draws,5);assert.equal(frames.size,0,'A successful explicit Home draw satisfies its pending frame');
+context.homeView=null;
+draws=1;
 for (const renderer of ['ANGLE (Google, SwiftShader Device)', 'llvmpipe (LLVM 19)', 'softpipe', 'Microsoft Basic Render Driver', 'lavapipe', 'Apple Software Renderer']) {
   const profile=context.selectRenderProfile({getExtension:()=>({UNMASKED_RENDERER_WEBGL:1}),getParameter:()=>renderer});
   assert.equal(profile.pixels,250000);

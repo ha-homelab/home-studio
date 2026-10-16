@@ -12,7 +12,7 @@ function exercise(embedded, {hidden = false, initialRoom = null, failRender = fa
   const c = vm.createContext({
     embedded, window: {}, homeView: null, renderCount: 0, scene: {},
     document: {hidden: false}, renderSuspended: false, renderLost: false, devicePixelRatio: 1, renderProfile: {pixels: 2000000},
-    requestRender() {},
+    requestRender() {}, renderRequest: 0, cancelAnimationFrame() {},
     model: {initial_room: initialRoom}, camera: {updateProjectionMatrix() {}},
     console: {error(error) { errors.push(error.message); }},
     requestAnimationFrame(callback) { frames.push(callback); },
@@ -29,11 +29,12 @@ function exercise(embedded, {hidden = false, initialRoom = null, failRender = fa
   const lines = source.split('\n');
   const declaration = lines.find(line => line.startsWith('let initialViewReady='));
   const render = lines.find(line => line.startsWith('function render(){'));
+  const cancelRender = lines.find(line => line.startsWith('function cancelRender('));
   const drawScene = lines.find(line => line.startsWith('function drawScene('));
   const pixelRatio = lines.find(line => line.startsWith('function renderPixelRatio('));
   const resize = lines.find(line => line.startsWith("let viewSize='';")).split(';const observer=')[0] + ';';
   const report = lines.find(line => line.startsWith('function report3DError('));
-  vm.runInContext([declaration, report, drawScene, pixelRatio, render, resize].join('\n'), c);
+  vm.runInContext([declaration, report, drawScene, pixelRatio, cancelRender, render, resize].join('\n'), c);
   c.window.resizeModel(); // The existing resize before Home is initialized.
   c.homeView = {
     active: false,
@@ -143,14 +144,14 @@ function exerciseHostInventory(transform = value => value) {
 const sameInventory = exerciseHostInventory();
 assert.equal(sameInventory.calls.builds, 0, 'Identical validated inventory reuses boot geometry and shadow maps');
 assert.equal(sameInventory.c.items, sameInventory.bootItems, 'Identical data preserves the assigned array');
-assert.equal(sameInventory.calls.refreshes, 1, 'The host handshake still refreshes state presentation');
+assert.equal(sameInventory.calls.refreshes, 0, 'An unchanged handshake does not redraw the already-presented disconnected state');
 assert.equal(sameInventory.aside.inert, false);
 assert.equal(sameInventory.c.bridge, sameInventory.port);
 assert.equal(sameInventory.calls.preferences[0].sidebarCollapsed, true);
 assert.equal(sameInventory.calls.sent[0].type, 'model_config');
 assert.equal(sameInventory.calls.removed, 1);
 sameInventory.port.onmessage({data: {type: 'states', connected: true, states: {}}});
-assert.equal(sameInventory.calls.refreshes, 2, 'Live host messages remain connected after skipping a rebuild');
+assert.equal(sameInventory.calls.refreshes, 1, 'The first live host message refreshes presentation after skipping the unchanged handshake');
 assert.equal(sameInventory.c.haConnected, true);
 const reorderedInventory = exerciseHostInventory(items => items.map(item => Object.fromEntries(Object.entries(item).reverse().map(([key,value])=>[key,value&&typeof value==='object'?Object.fromEntries(Object.entries(value).reverse()):value]))));
 assert.equal(reorderedInventory.calls.builds, 0, 'JSON property order does not discard matching boot resources');

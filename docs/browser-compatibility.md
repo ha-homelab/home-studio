@@ -269,7 +269,12 @@ only advances during requested draws; it starts no animation loop. The existing
 reduced-motion, hidden-page, and limited-device guards keep that tint stationary.
 
 Rapid pointer and wheel input is combined into one pending animation-frame
-request. There is no idle rendering loop. Hidden pages and lost contexts pause
+request. Live state messages update controls and scene properties immediately,
+then share that same pending frame. A successful explicit draw satisfies the
+queued request; a hidden or zero-sized stage does not discard it. An unchanged
+initial host inventory does not redraw the already-presented disconnected state:
+the first state message supplies the live presentation. There is no idle
+rendering loop. Hidden pages and lost contexts pause
 draw submission and cancel pending draws. Restoration invalidates shadow maps,
 applies the current viewport size, and requests a fresh draw. On page discard,
 the viewer disconnects its resize observer, disposes the renderer, and releases

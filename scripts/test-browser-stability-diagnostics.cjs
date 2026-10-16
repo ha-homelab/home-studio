@@ -6,7 +6,24 @@ const path = require('node:path');
 const {EventEmitter} = require('node:events');
 const vm = require('node:vm');
 const {test, after} = require('node:test');
-const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions} = require('./browser-stability-diagnostics.cjs');
+const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames} = require('./browser-stability-diagnostics.cjs');
+
+test('Viewer frame receipts advance only after the real draw succeeds', () => {
+  let active = 18, fail = false;
+  const env = {renderer: {render() {if (fail) throw Error('draw failed'); return 42;}},
+    __browserScene: () => ({activePointLights: active})};
+  env.window = env;
+  vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer)`, env);
+  const camera = {projectionMatrix: {toArray: () => [1]}, matrixWorld: {toArray: () => [2]}};
+  assert.equal(env.renderer.render({}, camera), 42);
+  active = 0;
+  assert.equal(env.__browserRenderedLights, 18, 'CPU state is not a completed frame');
+  env.renderer.render({}, camera);
+  assert.equal(env.__browserRenderedLights, 0);
+  active = 9; fail = true;
+  assert.throws(() => env.renderer.render({}, camera), /draw failed/);
+  assert.equal(env.__browserRenderedLights, 0, 'A failed draw cannot certify new state');
+});
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'home-studio-diagnostics-unit-'));
 const previousDirectory = process.env.STABILITY_UNIT_DIAGNOSTICS_DIR;

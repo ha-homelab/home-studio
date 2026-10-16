@@ -336,7 +336,7 @@ def viewer(client, origin, project, record, save):
             iframe.srcdoc=html;document.body.append(iframe);}); return true;''', items, states, NATIVE_GL_DIAGNOSTICS, NATIVE_VIEWER_FRAME_DIAGNOSTICS)
         client.wait('window.fixtureLoaded')
         client.call('WebDriver:SwitchToFrame', {'id': 0})
-        client.wait("window.floorplan?.renderCount>0 && document.querySelector('#homeConnection')?.dataset.connected==='true'")
+        client.wait(f"window.floorplan?.renderCount>0 && document.querySelector('#homeConnection')?.dataset.connected==='true' && window.__nativeRenderedLights==={len(items)}")
         sample = {'cycle': cycle, 'loadMs': round((time.monotonic() - started) * 1000)}
         record['samples'].append(sample)
         snapshot = lambda: client.execute('return {...window.__browserStability,nativeGraphics:window.__sampleNativeGraphics("viewer-snapshot"),renderedLights:window.__nativeRenderedLights,renderCount:window.floorplan.renderCount,scene:window.__browserScene()};')

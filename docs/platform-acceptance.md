@@ -186,6 +186,11 @@ and check draft preservation. They use the actual installed browser protocol
 and record the browser's reported identity. These suites are separate evidence
 from Playwright's patched browser builds and do not claim assertion-for-assertion
 identity with the Playwright runner.
+Initial viewer readiness requires both a connected bridge and a successful
+renderer call containing every expected active fixture. A connection label or
+updated CPU-side light state alone cannot finish the startup measurement.
+Failed renderer calls do not advance the recorded frame state.
+
 Both drivers include two animation frames after pointer release in their drag
 timings. A fast input acknowledgement alone is not rendering responsiveness;
 the native 15-second viewer and 10-second planner limits include this draw wait.

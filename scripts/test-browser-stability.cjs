@@ -14,7 +14,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
-const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions} = require('./browser-stability-diagnostics.cjs');
+const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames} = require('./browser-stability-diagnostics.cjs');
 const {createStartupDiagnostics} = require('./browser-startup-diagnostics.cjs');
 
 const root = path.resolve(process.env.HOME_STUDIO_SOURCE_ROOT || path.join(__dirname, '..'));
@@ -119,11 +119,11 @@ async function run(browserName, origin, project, sourceHash) {
       const frame = await page.locator('#viewer').contentFrame();
       // FrameLocator supports locators, but evaluate uses the actual child Frame.
       const child = page.frames().find(value => value !== page.mainFrame());
-      await child.waitForFunction(() => window.floorplan?.renderCount > 0 && document.querySelector('#homeConnection')?.dataset.connected === 'true');
+      await child.waitForFunction(expected => window.floorplan?.renderCount > 0 && document.querySelector('#homeConnection')?.dataset.connected === 'true' && window.__browserRenderedLights === expected, project.floors[0].items.length);
       const loadMs = Date.now()-started;
       const sample = {cycle,loadMs};samples.push(sample);save();
       console.log(`${browserName}: first connected draw in ${loadMs} ms`);
-      const snapshot = () => child.evaluate(() => ({...window.__browserStability,renderCount:window.floorplan.renderCount,homeMode:window.floorplan.homeMode,scene:window.__browserScene?.()}));
+      const snapshot = () => child.evaluate(() => ({...window.__browserStability,renderedLights:window.__browserRenderedLights,renderCount:window.floorplan.renderCount,homeMode:window.floorplan.homeMode,scene:window.__browserScene?.()}));
       let initial = await snapshot();
       record.gpu = initial.gpu;
       Object.assign(sample, initial);
@@ -230,6 +230,7 @@ async function run(browserName, origin, project, sourceHash) {
         sample.statePrograms.push(value.linkedPrograms);
         check(value.scene.pointLights===lights, 'Light state changes retain stable shader slots');
         check(value.scene.activePointLights===onCount, 'Only lights whose live state is on contribute intensity');
+        check(value.renderedLights===onCount, 'The queued frame has rendered the new light state');
       }
       check(new Set(sample.statePrograms).size===1, 'All-off, partially lit and all-on states do not compile new programs');
       initial = await snapshot();
@@ -309,7 +310,7 @@ async function run(browserName, origin, project, sourceHash) {
   let html = fs.readFileSync(path.join(output,'main/index.html'),'utf8');
   html = html.replace('<head>',`<head><script>window.__HOME_FLOORPLAN_EMBED__=true;(${instrumentation.toString()})();</script>`);
   html = startup.checkpointSource(html, 'renderProfile=selectRenderProfile(renderer.getContext());', 'renderProfile');
-  html = html.replace('</script></body>', `if(renderer){const captureRender=renderer.render.bind(renderer);renderer.render=(scene,camera)=>{const result=captureRender(scene,camera);window.__browserCamera={projection:camera.projectionMatrix.toArray(),world:camera.matrixWorld.toArray()};return result;};}window.__browserScene=()=>({rasterProbe:renderProfile.rasterProbe||null,shadowType:renderer.shadowMap.type,materialTypes:(()=>{const types=new Set();scene.traverse(o=>{for(const m of (Array.isArray(o.material)?o.material:[o.material]))if(m)types.add(m.type)});return [...types].sort()})(),camera:window.__browserCamera,drawingBuffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),programs:renderer.info.programs.length,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,triangles:renderer.info.render.triangles,drawCalls:renderer.info.render.calls,shadowMaps:(()=>{const sizes=[];scene.traverse(o=>{if(o.castShadow&&o.shadow)sizes.push([o.type,o.shadow.mapSize.x,o.shadow.mapSize.y])});return sizes})(),pointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible)n++});return n})(),activePointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible&&o.intensity>0)n++});return n})()});\n</script></body>`);
+  html = html.replace('</script></body>', `if(renderer)(${captureViewerFrames.toString()})(renderer);window.__browserScene=()=>({rasterProbe:renderProfile.rasterProbe||null,shadowType:renderer.shadowMap.type,materialTypes:(()=>{const types=new Set();scene.traverse(o=>{for(const m of (Array.isArray(o.material)?o.material:[o.material]))if(m)types.add(m.type)});return [...types].sort()})(),camera:window.__browserCamera,drawingBuffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),programs:renderer.info.programs.length,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,triangles:renderer.info.render.triangles,drawCalls:renderer.info.render.calls,shadowMaps:(()=>{const sizes=[];scene.traverse(o=>{if(o.castShadow&&o.shadow)sizes.push([o.type,o.shadow.mapSize.x,o.shadow.mapSize.y])});return sizes})(),pointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible)n++});return n})(),activePointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible&&o.intensity>0)n++});return n})()});\n</script></body>`);
   let sourceHash = crypto.createHash('sha256').update(html).digest('hex');
   const server = http.createServer((request,response) => {
     if(startup.handle(request,response,sourceHash))return;

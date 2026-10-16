@@ -318,7 +318,7 @@ ground=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(60,planRadius*2),Math.max
 renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;cancelRender();});
 renderer.domElement.addEventListener('webglcontextrestored',()=>{renderLost=false;invalidateShadows();window.resizeModel?.();requestRender()});
 function updateEditorCamera(){camera.position.set(target.x+radius*Math.sin(polar)*Math.sin(azimuth),target.y+radius*Math.cos(polar),target.z+radius*Math.sin(polar)*Math.cos(azimuth));camera.lookAt(target)}
-function render(){if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;updateWallOutlines();if(homeView?.active){homeView.render();return}updateEditorCamera();drawScene(camera);renderCount++}window.renderModel=render;window.requestModelRender=requestRender;
+function render(){if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;const before=renderCount;updateWallOutlines();if(homeView?.active)homeView.render();else{updateEditorCamera();drawScene(camera);renderCount++}if(renderCount>before)cancelRender()}window.renderModel=render;window.requestModelRender=requestRender;
 let viewSize='';const resize=()=>{if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;const b=$(homeView?.active?'homeStage':'view3d').getBoundingClientRect(),ratio=renderPixelRatio(b.width,b.height),size=[homeView?.active,b.width,b.height,ratio].join();if(b.width&&b.height&&size!==viewSize){viewSize=size;renderer.setDrawingBufferSize(b.width,b.height,ratio);camera.aspect=b.width/b.height;camera.updateProjectionMatrix();render()}};window.resizeModel=resize;const observer=new ResizeObserver(resize);observer.observe($('view3d'));observer.observe($('homeStage'));
 document.addEventListener('visibilitychange',()=>{if(document.hidden)cancelRender();else{resize();requestRender()}});
 window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();if(!event.persisted){observer.disconnect();renderer.dispose();renderer.forceContextLoss();}});
@@ -362,7 +362,7 @@ const toggle=nodes?.toggle;if(toggle)toggle.disabled=!available||!['on','off'].i
 const appearance=resolveLightAppearance(state),isLight=['chandelier','lamp'].includes(it.type)||it.entity_id.startsWith('light.');
 const object=objectsById.get(it.id);if(object)object.traverse(child=>{if(child.material?.emissive){if(isLight){child.material.emissive.setRGB(...appearance.rgb.map(c=>c/255),THREE.SRGBColorSpace);child.material.emissiveIntensity=available?.3*appearance.brightness:0}else{child.material.emissive.setHex(color);child.material.emissiveIntensity=available&&entityOn?.3:.08}}});
 nodes?.pin.querySelector('circle')?.setAttribute('fill','#'+color.toString(16).padStart(6,'0'));
-}homeView?.refreshControls();window.renderModel?.();
+}homeView?.refreshControls();window.requestModelRender?.();
 }
 function updateHeightCaption(){
   $('heightCaption').textContent=$('cutaway').checked?vt('Walls and windows cut at 1.15 m · exports keep full height.'):vt('Full-height walls and windows · ceiling {height} m.',{height:model.ceiling_height_m.toFixed(2)});
@@ -390,7 +390,7 @@ window.addEventListener('message',function init(event){if(event.source!==parent|
 let inventoryChanged=false;try{const incoming=reconcileStoredAppearance(validateInventoryItems(event.data.items));inventoryChanged=inventorySnapshot(incoming)!==inventorySnapshot(items);if(inventoryChanged)items=incoming}catch(error){setEditorStatus('Cannot load saved inventory: '+error.message);return}
 bridge=event.ports[0];homeView?.applyViewPreferences(event.data.preferences||{});bridge.onmessage=event=>{if(event.data?.type==='view_preferences'){homeView?.applyViewPreferences(event.data);return}if(event.data?.type==='camera_frames'){applyCameraFrames(event.data.frames);return}if(event.data?.type==='tv_frame'){applyTVFrame(event.data.image,true,event.data.item_id);return}if(event.data?.type==='command_result'){homeView.handleCommandResult(event.data);return}if(event.data?.type!=='states')return;haStates=event.data.states;haConnected=event.data.connected;if(!haConnected)applyCameraFrames();const options=Object.entries(haStates).map(([id,state])=>[id,state.name]);const key=JSON.stringify(options);if(key!==entityOptions){entityOptions=key;$('haEntities').replaceChildren(...options.map(([id,name])=>{const option=document.createElement('option');option.value=id;option.label=name;return option}))}refreshEntityPresentation()};
 bridge.postMessage({type:'model_config',...Object.fromEntries(['tv_entities','camera_entities','room_activity','receiver_activity','assumed_activity'].map(key=>[key,model[key]]))});
-document.querySelector('aside').inert=false;if(inventoryChanged)rebuildInventoryView();else refreshEntityPresentation();setEditorStatus(appearanceRefreshNotice || 'Connected. Select an entity from the list to bind an object.');window.removeEventListener('message',init);
+document.querySelector('aside').inert=false;if(inventoryChanged)rebuildInventoryView();setEditorStatus(appearanceRefreshNotice || 'Connected. Select an entity from the list to bind an object.');window.removeEventListener('message',init);
 });
 }
 refreshViewerLanguage(false);

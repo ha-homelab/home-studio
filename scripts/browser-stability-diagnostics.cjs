@@ -518,4 +518,16 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
   };
 }
 
-module.exports = {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions};
+// Injected into the fictional viewer after its renderer exists. CPU state can
+// change before a queued frame; only a successful draw advances this receipt.
+function captureViewerFrames(renderer) {
+  const draw = renderer.render.bind(renderer);
+  renderer.render = (scene, camera) => {
+    const result = draw(scene, camera);
+    window.__browserCamera = {projection: camera.projectionMatrix.toArray(), world: camera.matrixWorld.toArray()};
+    window.__browserRenderedLights = window.__browserScene().activePointLights;
+    return result;
+  };
+}
+
+module.exports = {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames};
