@@ -612,7 +612,7 @@ planCanvas.addEventListener('wheel', e => { e.preventDefault(); zoomPlan(Math.ex
 
 // On-demand 3D rendering. Opening cuts and solid wall pieces use the same metric project.
 let renderer = null, scene = null, camera = null, worldGroup = null, previewSun = null, previewUnavailable = false, previewMetadata = {};
-let previewLost = false, previewSize = '', previewPixels = 2000000, previewInitialized = false, previewRendererDisposed = false;
+let previewLost = false, previewSize = '', previewPixels = 2000000, previewInitialized = false, previewRendererDisposed = false, previewInstancing = false;
 const orbit = { yaw: -Math.PI / 3, pitch: .8, radius: 17, baseRadius: 17, target: new THREE.Vector3(4, 0, 3), pointer: null };
 function previewRenderProfile(gl) {
   try {
@@ -625,7 +625,7 @@ function initPreview() {
   if (renderer || previewUnavailable) return;
   try {
     renderer = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: true, alpha: false }); previewRendererDisposed = false; renderer.setClearColor(0xf2f4ed); renderer.outputColorSpace = THREE.SRGBColorSpace;
-    const profile = previewRenderProfile(renderer.getContext()); previewPixels = profile.pixels;
+    const profile = previewRenderProfile(renderer.getContext()); previewPixels = profile.pixels; previewInstancing = profile.pixels === 250000;
     renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = .9; renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(40, 1, .02, 1500); scene.add(new THREE.HemisphereLight(0xffffff, 0xc7cfbc, 1.7));
     previewSun = new THREE.DirectionalLight(0xfff6e6, 2.5); previewSun.castShadow = true; previewSun.shadow.mapSize.set(profile.shadowSize, profile.shadowSize); previewSun.shadow.normalBias = .025; previewSun.shadow.bias = -.0002; scene.add(previewSun); scene.add(previewSun.target);
@@ -652,7 +652,7 @@ function disposePreviewGeometry() {
   const dispose = (resource, seen) => { if (resource && !seen.has(resource)) { seen.add(resource); resource.dispose(); } };
   while (worldGroup.children.length) {
     const child = worldGroup.children[0]; worldGroup.remove(child);
-    child.traverse(obj => { dispose(obj.geometry, geometries); if (Array.isArray(obj.material)) obj.material.forEach(material => dispose(material, materials)); else dispose(obj.material, materials); });
+    child.traverse(obj => { if (obj.isInstancedMesh) obj.dispose(); dispose(obj.geometry, geometries); if (Array.isArray(obj.material)) obj.material.forEach(material => dispose(material, materials)); else dispose(obj.material, materials); });
   }
 }
 function disposePreviewRenderer() {
@@ -661,11 +661,52 @@ function disposePreviewRenderer() {
   if (previewSun) { previewSun.shadow.dispose(); previewSun.shadow.map = null; previewSun.shadow.mapPass = null; }
   renderer.dispose(); previewRendererDisposed = true;
 }
+function instancePreviewCatalog(groups) {
+  // Only batch disjoint opaque furniture. Overlaps retain their original draw
+  // order, including coincident surfaces with different appearance variants.
+  worldGroup.updateMatrixWorld(true);
+  const catalog = new Set(groups), blocked = new Set();
+  const bounds = worldGroup.children.map(object => ({ object, box: new THREE.Box3().setFromObject(object) }))
+    .sort((a, b) => a.box.min.x - b.box.min.x);
+  let comparisons = 0;
+  for (let i = 0; i < bounds.length; i++) {
+    const a = bounds[i];
+    for (let j = i + 1; j < bounds.length && bounds[j].box.min.x < a.box.max.x; j++) {
+      // Dense imported projects must not turn a draw optimization into a stall.
+      if (++comparisons > 100000) return;
+      const b = bounds[j];
+      if (Math.min(a.box.max.x, b.box.max.x) - Math.max(a.box.min.x, b.box.min.x) > 1e-7 &&
+          Math.min(a.box.max.y, b.box.max.y) - Math.max(a.box.min.y, b.box.min.y) > 1e-7 &&
+          Math.min(a.box.max.z, b.box.max.z) - Math.max(a.box.min.z, b.box.min.z) > 1e-7) {
+        if (catalog.has(a.object)) blocked.add(a.object);
+        if (catalog.has(b.object)) blocked.add(b.object);
+      }
+    }
+  }
+  const batches = new Map();
+  for (const group of groups) if (!blocked.has(group)) {
+    for (const mesh of group.children) {
+      if (!batches.has(mesh.geometry)) batches.set(mesh.geometry, []);
+      batches.get(mesh.geometry).push(mesh);
+    }
+  }
+  for (const meshes of batches.values()) if (meshes.length > 1) {
+    const first = meshes[0], batch = new THREE.InstancedMesh(first.geometry, first.material, meshes.length);
+    batch.name = first.name; batch.castShadow = first.castShadow; batch.receiveShadow = first.receiveShadow;
+    meshes.forEach((mesh, index) => {
+      batch.setMatrixAt(index, mesh.matrixWorld); mesh.removeFromParent();
+      if (mesh !== first) mesh.material.dispose();
+    });
+    batch.instanceMatrix.needsUpdate = true; batch.computeBoundingBox(); batch.computeBoundingSphere();
+    worldGroup.add(batch);
+  }
+  for (const group of groups) if (!group.children.length) worldGroup.remove(group);
+}
 function rebuildPreview() {
   disposePreviewGeometry();
   // Cached asset parts are immutable. Share their geometry only within this
   // rebuild; every mesh keeps its own material, transform and rendering order.
-  const catalogGeometries = new Map();
+  const catalogGeometries = new Map(), catalogGroups = [];
   let wallMeshCount = 0, openingCount = 0, roomCount = 0, itemCount = 0, catalogItemCount = 0, itemMeshCount = 0;
   const box = (width, height, depth, position, color, rotation = 0, opacity = 1) => {
     const geometry = new THREE.BoxGeometry(width, height, depth), material = new THREE.MeshStandardMaterial({ color, roughness: .78, transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
@@ -705,7 +746,7 @@ function rebuildPreview() {
           const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(...asset.materials[part.material].slice(0, 3)), roughness: .78 });
           const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; mesh.castShadow = true; mesh.receiveShadow = true; group.add(mesh); itemMeshCount++;
         }
-        worldGroup.add(group); catalogItemCount++; continue;
+        worldGroup.add(group); catalogGroups.push(group); catalogItemCount++; continue;
       }
       box(d.width, d.height, d.depth, [p.x, f.elevation_m + p.y + d.height / 2, p.z], COLORS[item.type], rotation); itemMeshCount++;
       if (item.type === 'tv') {
@@ -720,6 +761,7 @@ function rebuildPreview() {
   previewSun.position.set(cx - span * .6, high + span * 1.3, cz + span * .5); previewSun.target.position.set(cx, low, cz);
   Object.assign(previewSun.shadow.camera, { left: -span, right: span, top: span, bottom: -span, near: .1, far: span * 5 + 100 }); previewSun.shadow.camera.updateProjectionMatrix();
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(span * 8, span * 8), new THREE.ShadowMaterial({ color: '#54654c', opacity: .14 })); ground.rotation.x = -Math.PI / 2; ground.position.set(cx, low - .081, cz); ground.receiveShadow = true; worldGroup.add(ground);
+  if (previewInstancing) instancePreviewCatalog(catalogGroups);
   let meshCount = 0; worldGroup.traverse(object => { if (object.isMesh) meshCount++; });
   previewMetadata = { floors: previewFloors().map(f => f.id), rooms: roomCount, wallSolidPieces: wallMeshCount, openings: openingCount, items: itemCount, catalogItems: catalogItemCount, itemMeshes: itemMeshCount, meshes: meshCount, renderCount: previewMetadata.renderCount || 0 };
   previewSun.shadow.needsUpdate = true;

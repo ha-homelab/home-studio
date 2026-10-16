@@ -110,6 +110,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   }
   c.view = 'preview'; c.renderPreview();
   assert.equal(constructions, 1); assert.equal(draws, 1); assert.equal(shadows, 1);
+  assert.equal(vm.runInContext('previewInstancing', c), true, 'The detected software profile enables catalog batching');
   assert.equal(vm.runInContext('previewSun.shadow.mapSize.x', c), 512);
   assert.equal(vm.runInContext('previewSun.shadow.autoUpdate', c), false);
   const canvas = get('preview-canvas');
@@ -170,7 +171,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   catalogFloor.items[1].dimensions_m.width *= 1.5;
   const sharedWorld = new THREE.Group();
   const shared = vm.createContext({THREE, worldGroup: sharedWorld, previewSun: new THREE.DirectionalLight(),
-    previewMetadata: {}, previewDirty: true, previewFloors: () => catalogProject.floors,
+    previewMetadata: {}, previewDirty: true, previewInstancing: false, previewFloors: () => catalogProject.floors,
     assetCache: new Map(), APPEARANCE_CACHE_LIMIT: 100, buildFurnitureAsset: furniture.buildFurnitureAsset,
     distance: model.distance, wallPieces: model.wallPieces, floorBounds: model.floorBounds,
     COLORS: {floor: '#eeeeee', furniture: '#aaaaaa'},
@@ -207,6 +208,93 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   assert([...oldMaterials.values()].every(count => count === 1), 'Every material is disposed exactly once');
   sharedWorld.traverse(object => { if (object.geometry) assert(!oldGeometry.has(object.geometry), 'A rebuild never reuses a disposed GPU resource'); });
   shared.disposePreviewGeometry(); assert.equal(sharedWorld.children.length, 0);
+
+  // Software batching retains expanded geometry, colors and world transforms.
+  // Intersecting items and transparent architecture keep their original order.
+  const expandMeshes = world => {
+    world.updateMatrixWorld(true); const records = [];
+    world.traverse(mesh => {
+      if (!mesh.isMesh) return;
+      const shape = JSON.stringify([Array.from(mesh.geometry.attributes.position.array),
+        Array.from(mesh.geometry.attributes.normal?.array || []), Array.from(mesh.geometry.index?.array || []),
+        mesh.material.color.toArray(), mesh.material.roughness, mesh.material.transparent,
+        mesh.material.opacity, mesh.castShadow, mesh.receiveShadow]);
+      const count = mesh.isInstancedMesh ? mesh.count : 1;
+      for (let i = 0; i < count; i++) {
+        const matrix = new THREE.Matrix4();
+        if (mesh.isInstancedMesh) { mesh.getMatrixAt(i, matrix); matrix.premultiply(mesh.matrixWorld); }
+        else matrix.copy(mesh.matrixWorld);
+        records.push({shape, matrix: matrix.toArray()});
+      }
+    });
+    return records.sort((a, b) => (a.shape + JSON.stringify(a.matrix.map(x => Math.round(x * 1e4))))
+      .localeCompare(b.shape + JSON.stringify(b.matrix.map(x => Math.round(x * 1e4)))));
+  };
+  catalogFloor.elevation_m = 3;
+  catalogFloor.items.forEach((item, i) => { item.position_m.x = i * 5 + 2; item.position_m.z = 4; });
+  shared.rebuildPreview(); const ordinaryRecords = expandMeshes(sharedWorld), ordinaryCount = shared.previewMetadata.meshes;
+  shared.previewInstancing = true; shared.rebuildPreview();
+  const instanceRecords = expandMeshes(sharedWorld), instanceMeshes = sharedWorld.children.filter(mesh => mesh.isInstancedMesh);
+  assert(instanceMeshes.length > 0); assert(shared.previewMetadata.meshes < ordinaryCount);
+  assert.equal(instanceRecords.length, ordinaryRecords.length, 'Batching retains every logical surface');
+  assert.equal(shared.previewMetadata.itemMeshes, catalogFloor.items.reduce((n, item) => n + shared.itemAsset(item).meshes.length, 0));
+  for (let i = 0; i < ordinaryRecords.length; i++) {
+    assert.equal(instanceRecords[i].shape, ordinaryRecords[i].shape);
+    instanceRecords[i].matrix.forEach((value, axis) => assert(Math.abs(value - ordinaryRecords[i].matrix[axis]) < 1e-6));
+  }
+  const disposedInstances = new Map();
+  for (const mesh of instanceMeshes) {
+    disposedInstances.set(mesh, 0); mesh.addEventListener('dispose', () => disposedInstances.set(mesh, disposedInstances.get(mesh) + 1));
+    assert(mesh.boundingBox && mesh.boundingSphere, 'Bounds exist before the first render');
+    for (let i = 0; i < mesh.count; i++) {
+      const matrix = new THREE.Matrix4(); mesh.getMatrixAt(i, matrix);
+      for (let j = 0; j < mesh.geometry.attributes.position.count; j++) {
+        const point = new THREE.Vector3().fromBufferAttribute(mesh.geometry.attributes.position, j).applyMatrix4(matrix);
+        assert(mesh.boundingBox.clone().expandByScalar(1e-6).containsPoint(point));
+        assert(point.distanceTo(mesh.boundingSphere.center) <= mesh.boundingSphere.radius + 1e-6);
+      }
+    }
+  }
+  shared.rebuildPreview();
+  assert([...disposedInstances.values()].every(count => count === 1), 'Every instance buffer receives its disposal event during rebuild');
+  const newInstances = sharedWorld.children.filter(mesh => mesh.isInstancedMesh);
+  assert(newInstances.every(mesh => !disposedInstances.has(mesh)), 'Instance objects never persist across rebuilds');
+  shared.disposePreviewGeometry();
+
+  // Coincident red/blue/red furniture must not change its visible winner.
+  catalogFloor.items = [0, 1, 2, 3, 4].map((index) => ({...model.clone(catalogFloor.items[0]),
+    id: `overlap_${index}`, color: index === 1 ? '#2266cc' : '#c45328',
+    position_m: {x: index < 3 ? 2 : index * 5, y: 0, z: 4}}));
+  shared.previewInstancing = false; shared.rebuildPreview();
+  const orderedGroups = sharedWorld.children.filter(object => object.isGroup), overlapBefore = orderedGroups.slice(0, 3);
+  const originalMaterials = overlapBefore.map(group => group.children.map(mesh => mesh.material));
+  shared.instancePreviewCatalog(orderedGroups);
+  assert(overlapBefore.every(group => group.parent === sharedWorld));
+  overlapBefore.forEach((group, index) => assert.deepEqual(group.children.map(mesh => mesh.material), originalMaterials[index]));
+  assert.deepEqual(sharedWorld.children.filter(object => overlapBefore.includes(object)), overlapBefore, 'Coincident appearances keep their exact draw order and materials');
+  assert(sharedWorld.children.some(mesh => mesh.isInstancedMesh), 'Unrelated disjoint items still batch');
+  shared.disposePreviewGeometry();
+
+  shared.rebuildPreview();
+  const architectureGroups = sharedWorld.children.filter(object => object.isGroup);
+  const glass = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3), new THREE.MeshStandardMaterial({transparent: true, opacity: .22}));
+  glass.position.set(15, 3.5, 4); sharedWorld.add(glass);
+  shared.instancePreviewCatalog(architectureGroups);
+  assert.equal(glass.parent, sharedWorld); assert.equal(glass.material.opacity, .22);
+  assert.equal(architectureGroups[3].parent, sharedWorld, 'Furniture intersecting a window keeps its ordinary rendering path');
+  shared.disposePreviewGeometry();
+
+  // A dense imported scene falls back before mutating even disjoint candidates.
+  const denseGroups = [], denseGeometry = new THREE.BoxGeometry(), denseMaterial = new THREE.MeshStandardMaterial();
+  for (let i = 0; i < 502; i++) {
+    const group = new THREE.Group(); group.add(new THREE.Mesh(denseGeometry, denseMaterial));
+    if (i < 2) group.position.x = 1000 + i * 3;
+    denseGroups.push(group); sharedWorld.add(group);
+  }
+  shared.instancePreviewCatalog(denseGroups);
+  assert.deepEqual(sharedWorld.children, denseGroups, 'The comparison budget falls back without partial batching');
+  assert(denseGroups.every(group => group.children.length === 1));
+  shared.disposePreviewGeometry();
 
   // Real pointer handlers: exact endpoint math, one clone per gesture, and undo/cancel.
   for (const kind of ['rooms', 'walls', 'items', 'openings']) {
