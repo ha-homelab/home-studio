@@ -538,14 +538,23 @@ The primary failure remains required and unchanged; this is not an acceptance
 retry and does not add or replace any of the 77 required lanes.
 
 The separate `diagnostics/first-frame/` directory contains `diagnostic.json`,
-`draws.jsonl`, and the browser's durable log and report. The diagnostic fences
-each draw with `gl.finish`, retaining program/shader fingerprints, material and
+`draws.jsonl`, and the browser's durable log and report. The diagnostic uses
+`gl.finish` immediately before and after each draw, retaining program/shader fingerprints, material and
 mesh category, framebuffer/viewport, shadow-light attribution and the original
 point-shadow atlas face index. Shader fingerprints include `hashedLength` and
 cover at most 65,536 code units; a matching truncated fingerprint does not prove
-full-source equality. Fencing
-changes scheduling: compare submission and completion times as diagnostic
-evidence, not ordinary acceptance performance or pure shader compilation time.
+full-source equality. `preDrawDrainMs` measures commands queued since the
+preceding fence, such as state changes or uploads; submission and completion
+are recorded separately. Completion can still include driver specialization
+triggered by the draw. The `pre-draw-drain-and-post-draw-fence-v1` timing mode
+changes scheduling and is not directly comparable to older post-draw-only
+traces, ordinary acceptance performance or pure shader compilation time.
+Each draw also records the last observed scalar uploads for the point-light
+guard, daylight, exterior surface, wall switches and face mode. This observes
+existing `getUniformLocation`, `uniform1i` and `uniform1f` calls without adding
+GL queries or uploads. `null` means unknown, never an inferred zero or false;
+these are submitted values, not GPU readbacks. Relinking/deleting a program
+invalidates its cached values, and capture completion removes owned observers.
 Only the first naturally requested frame is fenced; no warm-up frame or input
 sequence is added. At most 600 draws and 2,000 event records are captured, with
 a 180-second overall worker deadline including setup and launch. A bounded

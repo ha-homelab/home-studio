@@ -5,7 +5,46 @@ function attachNativeDrawDiagnostic(renderer, stateFor) {
   let nextId = 1, sequence = 0, active = false, started = false;
   let program = null, framebuffer = null, viewport = null, mesh = null, material = null, camera = null;
   let phase = 'main', shadowCameras = new Map();
-  const result = window.__nativeDrawDiagnostic = {diagnosticOnly:true, done:false, truncated:false, draws:0};
+  const result = window.__nativeDrawDiagnostic = {diagnosticOnly:true, timingMode:'pre-draw-drain-and-post-draw-fence-v1', done:false, truncated:false, draws:0};
+  // Observe calls already made by Three. These are submitted values, not GL
+  // readbacks; absent, stale or unsupported uploads must remain unknown.
+  const uniformNames = ['homePointLightingRequired','homeDaylight','homeExteriorSurface',
+    'homeWallSurface','homeWallSheenEnabled','homeFaceMode'];
+  const uniformLocations = new WeakMap(), uniformValues = new WeakMap(), uniformWrappers = [];
+  let observeUniforms = true;
+  const observe = (name, handler) => {
+    const original = gl[name];
+    const wrapped = function(...args) { return handler(original, args); };
+    gl[name] = wrapped; uniformWrappers.push({name,original,wrapped});
+  };
+  observe('getUniformLocation', (original, args) => {
+    const location = original.apply(gl,args), [target,name] = args;
+    if (observeUniforms && location && uniformNames.includes(name)) {
+      let values = uniformValues.get(target);
+      if (!values) { values = new Map(); uniformValues.set(target,values); }
+      uniformLocations.set(location,{target,name,values});
+    }
+    return location;
+  });
+  for (const method of ['uniform1i','uniform1f']) observe(method, (original, args) => {
+    const returned = original.apply(gl,args), entry = uniformLocations.get(args[0]);
+    if (observeUniforms && entry && entry.target === program && uniformValues.get(program) === entry.values) {
+      const value = args[1];
+      entry.values.set(entry.name, typeof value === 'boolean' || typeof value === 'number' && Number.isFinite(value) ? value : null);
+    }
+    return returned;
+  });
+  observe('deleteProgram', (original, args) => {
+    const returned = original.apply(gl,args);
+    if (observeUniforms) uniformValues.delete(args[0]);
+    return returned;
+  });
+  const submittedUniforms = target => Object.fromEntries(uniformNames.map(name =>
+    [name,uniformValues.get(target)?.get(name) ?? null]));
+  const stopUniformObservation = () => {
+    observeUniforms = false;
+    for (const {name,original,wrapped} of uniformWrappers) if (gl[name] === wrapped) gl[name] = original;
+  };
   const id = value => { if (!value) return null; if (!ids.has(value)) ids.set(value, nextId++); return ids.get(value); };
   const emit = value => {
     if (sequence >= 1999) {
@@ -50,6 +89,7 @@ function attachNativeDrawDiagnostic(renderer, stateFor) {
   for (const name of ['linkProgram','getProgramParameter']) {
     const original = gl[name].bind(gl);
     gl[name] = (...args) => {
+      if (name === 'linkProgram' && observeUniforms) uniformValues.delete(args[0]);
       const measured = active && (name === 'linkProgram' || args[1] === gl.LINK_STATUS);
       if (!measured) return original(...args);
       const began=now(); emit({event:'query-before',method:name,...describeProgram(args[0])});
@@ -67,6 +107,7 @@ function attachNativeDrawDiagnostic(renderer, stateFor) {
         return original(...args);
       }
       const draw=++result.draws, owner={draw,method:name,phase,...describeProgram(program),
+        submittedUniforms:submittedUniforms(program),
         category:mesh?.userData?.category||null, mesh:(mesh?.name||'').slice(0,128),
         material:material?.type||null, originalMaterial:mesh?.material?.type||null,
         side:material?.side??null, transparent:material?.transparent??null,
@@ -74,13 +115,15 @@ function attachNativeDrawDiagnostic(renderer, stateFor) {
         count:Number(name.includes('Elements')?args[1]:args[2])||0,
         instances:name.endsWith('Instanced')?Number(args.at(-1)):1};
       emit({event:'draw-before',...owner});
-      const began=now(); let submitted;
+      const began=now(); let preDrawDrainMs, drawStarted, submitted;
       try {
-        const value=original(...args); submitted=now(); finish();
-        emit({event:'draw-after',...owner,submissionMs:submitted-began,completionMs:now()-submitted});
+        finish(); preDrawDrainMs=now()-began;
+        drawStarted=now(); const value=original(...args); submitted=now(); finish();
+        emit({event:'draw-after',...owner,preDrawDrainMs,submissionMs:submitted-drawStarted,completionMs:now()-submitted});
         return value;
       } catch (error) {
-        emit({event:'draw-error',...owner,error:String(error),submitted:submitted!==undefined}); throw error;
+        emit({event:'draw-error',...owner,error:String(error),preDrawDrainMs,submitted:submitted!==undefined,
+          stage:submitted!==undefined?'completion':drawStarted!==undefined?'draw':'pre-draw-drain'}); throw error;
       }
     };
   }
@@ -118,18 +161,21 @@ function attachNativeDrawDiagnostic(renderer, stateFor) {
     // Never add GPU fences to a hardware or ordinary software profile.
     if (!state.profile?.diffuseLighting) {
       result.done=true; result.error='Expected the measured legacy diffuse profile';
-      emit({event:'profile-rejected',state}); return render.call(this,scene,camera);
+      emit({event:'profile-rejected',state}); stopUniformObservation(); return render.call(this,scene,camera);
     }
     framebuffer=gl.getParameter(gl.FRAMEBUFFER_BINDING); viewport=Array.from(gl.getParameter(gl.VIEWPORT));
     emit({event:'frame-before',state,buffer:[gl.drawingBufferWidth,gl.drawingBufferHeight],viewport,
       stack:String(new Error().stack).split('\n').slice(1,10)});
-    const drain=now(); finish(); emit({event:'pre-frame-drain',durationMs:now()-drain});
+    const drain=now();
+    try { finish(); } catch(error) { stopUniformObservation(); throw error; }
+    emit({event:'pre-frame-drain',durationMs:now()-drain});
     const began=now(); active=true;
     try { return render.call(this,scene,camera); }
     catch(error) { result.error=String(error); throw error; }
     finally {
       active=false; result.done=true; result.frameMs=now()-began;
       emit({event:'frame-after',...result,renderInfo:{...renderer.info.render}});
+      stopUniformObservation();
     }
   };
 }
