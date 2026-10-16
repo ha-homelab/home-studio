@@ -285,3 +285,7 @@ never record keys or raw private request bodies.
 These are diagnostic categories, not a promise that every provider uses identical
 HTTP status codes. Preserve a redacted request ID and consult that provider's error
 documentation when reporting a failure.
+
+## Strict transport profile
+
+The optional [strict TLS profile](transport-security.md) applies to all cloud connections made by the AI companion. Launch it with `HOME_STUDIO_STRICT_TLS=1` after installing the documented metadata dependency. This verifies exact key sizes throughout the certificate chain before sending the session's provider key or project data. Local models remain numeric-loopback only.

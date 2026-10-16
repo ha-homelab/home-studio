@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Document private security reporting, source contribution and maintainer responsibilities. Add first-party Python/JavaScript CodeQL analysis and include project policies in public source packages.
+
 ## [0.6.4] - Development line
 
 - Bound the existing Apple diffuse viewer to 62,500 resting and 31,250 motion
@@ -387,3 +391,7 @@ Offline RC fuzzing validates synthetic project inputs and geometry, with
 network isolation and bounded resource use. The source archive is built only
 from the reviewed public allowlist. Real household plans, private device
 bindings and credentials must stay outside the repository and public corpus.
+
+### Strict download transport
+
+- Add an opt-in verified TLS profile for owned browser downloads, including HTTPS-only redirects, synthetic chain regressions and documented vendor endpoint compatibility.

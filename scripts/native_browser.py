@@ -14,6 +14,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+from download_tls import open_download
 from pathlib import Path
 
 PRODUCTS = {'waterfox': 'Waterfox', 'firefox': 'Firefox'}
@@ -36,7 +37,7 @@ def platform_key():
 def download(entry, destination):
     digest = hashlib.sha512()
     deadline = time.monotonic() + 240
-    with urllib.request.urlopen(entry['url'], timeout=60) as source, destination.open('wb') as target:
+    with open_download(entry['url'], timeout=60) as source, destination.open('wb') as target:
         total = 0
         while chunk := source.read(1024 * 1024):
             if time.monotonic() > deadline:

@@ -1,5 +1,7 @@
 # Home studio
 
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15584/badge)](https://www.bestpractices.dev/projects/15584)
+
 [![Fuzzing: RC only](https://img.shields.io/badge/Fuzzing-RC%20only-blue)](docs/fuzzing.md)
 
 **[Start drawing](https://ha-homelab.github.io/home-studio/planner/)** ·
@@ -284,3 +286,8 @@ validation and geometry. See the [fuzzing guide](docs/fuzzing.md) for targets,
 budgets, synthetic data rules and reproduction, and [release instructions](RELEASING.md)
 for versioned source ZIPs. Beta builds and ordinary pull requests do not run
 mutation campaigns.
+
+
+## Contributing and security
+
+See [contribution and test requirements](CONTRIBUTING.md), [private security reporting](SECURITY.md), [governance](GOVERNANCE.md) and the [roadmap](ROADMAP.md).
