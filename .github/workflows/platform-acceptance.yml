@@ -22,7 +22,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Test version pins, coverage expansion and isolated setup
-        run: python3 scripts/test-browser-matrix.py
+        run: |
+          python3 scripts/test-browser-matrix.py
+          python3 scripts/test-browser-install.py
       - name: Expand all required targets
         id: matrix
         run: python3 scripts/browser-matrix.py --github-output "$GITHUB_OUTPUT"
@@ -100,14 +102,7 @@ jobs:
           mkdir -p acceptance-artifacts
           cp "$TOOLCHAIN_DIR/toolchain.json" acceptance-artifacts/toolchain.json
       - name: Install the selected browser and native system dependencies
-        run: |
-          if [ -n "$HOME_STUDIO_BROWSER_CHANNEL" ]; then
-            node "$HOME_STUDIO_PLAYWRIGHT_MODULE/cli.js" install --with-deps --force "$HOME_STUDIO_BROWSER_CHANNEL"
-          elif [ -n "$CFT_VERSION" ]; then
-            node "$HOME_STUDIO_PLAYWRIGHT_MODULE/cli.js" install-deps chromium
-          else
-            node "$HOME_STUDIO_PLAYWRIGHT_MODULE/cli.js" install --with-deps "$BROWSER_STABILITY_ENGINES"
-          fi
+        run: python3 scripts/install-browser-with-retry.py
       - name: Extract checksum-pinned historical Chrome for Testing
         if: ${{ matrix.cft != '' }}
         env:

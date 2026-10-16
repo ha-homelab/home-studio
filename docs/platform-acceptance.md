@@ -215,6 +215,14 @@ Each Playwright snapshot installs in a separate temporary directory using an
 exact generated npm lock, SHA-512 package integrity, disabled install scripts,
 and no optional packages. Setup verifies the installed package versions and
 `browsers.json` revisions against the inventory before installing browsers.
+
+Browser installation retries only recognized transient transport failures,
+such as an interrupted HTTP/2 download, at most three times. It retains every
+attempt's output and exit code under `browser-install/` in the job artifact.
+Certificate, checksum, signature and package errors remain fatal, as does an
+exhausted download retry. The selected channel and pinned toolchain never change
+between attempts. Browser acceptance itself is not retried by this helper;
+a previously installed runner browser cannot turn a failed installation green.
 The source checkout's lockfile is not rewritten. Pinned browser rows also
 check the actual browser version and major at launch.
 
