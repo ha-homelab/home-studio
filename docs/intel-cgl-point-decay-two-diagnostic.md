@@ -1,19 +1,21 @@
-# Disposable Intel cumulative-signal-texture diagnostic
+# Disposable Intel constant-point-decay diagnostic
 
-Only a push to `diagnostic/intel-cgl-signal-texture` starts this workflow. It has
+Only a push to `diagnostic/intel-cgl-point-decay-two` starts this workflow. It has
 read-only GitHub permissions and pinned actions. It does not invoke the 77-lane
 acceptance gate or publish a release. Its results are diagnostic evidence only.
 
 Two independent `macos-15-intel` jobs compare these exact sources in order:
 
 - Baseline: `13b8ed9e1f0baf68eac329764a05277377113419`.
-- Cumulative signal texture: `c2577a50ed9bba02b6f53fec55580f1dc4fda9c3`.
+- Constant point decay: `cbcfca552850a8fec51769dddbcefde7393e7fa8`.
 
 One job uses Firefox `153.5.0esr`; the other uses Waterfox `6.7.6`. Maximum
 parallelism is two. Each pair runs sequentially on one hosted VM and shares one
 official browser installation verified by the original installer, checksum
 catalog and signature checks. Python 3.13, Node 22 and both locked npm dependency
-installations are prepared before either suite starts.
+installations are prepared before either suite starts. The candidate's
+`test-point-decay-two.cjs` CPU/shader contract also runs before the browser is
+installed; failure stops preparation.
 
 After both sources pass preflight, the runner records `mdutil -a -s`, invokes
 `sudo -n /usr/bin/mdutil -a -i off` exactly once, and records another status.
@@ -36,24 +38,20 @@ disposable hosted VM.
 This common normalization is not a proven cure for the Intel failures, and a
 disabled status does not prove that existing indexing workers are idle. The
 passive CPU records remain necessary context. Both sources receive the same
-normalization; the comparison varies point/run/static-geometry/signal transport, not
-Spotlight configuration. Fixed order and shared caches still limit causal conclusions.
+normalization; the comparison varies only the point attenuation specialization,
+not Spotlight configuration. Fixed order and shared caches still limit causal conclusions.
 
-The unchanged candidate gives eligible untextured Lambert materials an exact
-Float32 texture of the original Three view-space PointLight records. Integer
-texel fetches preserve the ordered unshadowed lighting arithmetic, and the stock
-PointLight declaration retains only the original shadow prefix. Unsupported or
-nonfinite inputs select the original full program before compilation. All scene
-lights remain. A second RGBA32F table replaces only the packed run array, with
-fixed static-material rows and a global dynamic row. Run counts, light order,
-room/window geometry and shadow semantics remain unchanged. A third immutable
-single-row RGBA32F atlas stores six packed static geometry arrays, including
-window-room indices; literal offsets replace only their record lookups. Original
-Float32 coordinates and exact signed integer indices are preserved. Finally,
-room-lit flags and window-transmission scalars are appended to the existing
-point texture with fixed offsets. This adds no fourth sampler and preserves
-Float32 values, update ordering and invalid-input fallback. No Intel improvement
-is established. This is a separate cumulative contingency experiment.
+The unchanged candidate specializes only the packed Lambert point attenuation
+helper after every visible registered point has exact decay 2, including
+zero-intensity and shadowed lights. It preserves `pow(lightDistance, 2.0)`, the
+cutoff operations, all light slots, the shadow prefix and lighting order. The
+original generic attenuation and spot helper remain unchanged. Unproved inputs,
+external callbacks and unsupported materials retain the original shader; the
+editor and literal path are unchanged. This source has no texture-transport
+changes. Its complete-point-set and owned-callback contract is documented in
+the candidate's `docs/point-decay-two.md`. Constant and dynamic `pow` may be
+lowered or rounded differently by a driver. Local strict acceptance is not
+proof of pixel equivalence or an Intel speedup; those require separate evidence.
 
 The wrapper invokes each source's original `test-native-browser-acceptance.py`
 once, with its standard product, expected-version, installation and output
@@ -107,16 +105,16 @@ local setting change.
 Offline contract check, with no browser or network:
 
 ```sh
-python3 scripts/test-intel-cgl-signal-texture.py
+python3 scripts/test-intel-cgl-point-decay-two.py
 ```
 
 The workflow supplies fixed choices. Its equivalent command on the Intel host
 is:
 
 ```sh
-python3 harness/scripts/run-intel-cgl-signal-texture.py \
-  --source-root "$GITHUB_WORKSPACE" --candidate signal-texture \
+python3 harness/scripts/run-intel-cgl-point-decay-two.py \
+  --source-root "$GITHUB_WORKSPACE" --candidate point-decay-two \
   --product firefox \
-  --installation "$RUNNER_TEMP/home-studio-intel-cgl-signal-texture-browser/install.json" \
-  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-signal-texture"
+  --installation "$RUNNER_TEMP/home-studio-intel-cgl-point-decay-two-browser/install.json" \
+  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-point-decay-two"
 ```
