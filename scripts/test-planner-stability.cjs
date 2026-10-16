@@ -20,6 +20,9 @@ const recoveryActions = process.env.PLANNER_STABILITY_RECOVERY_ACTIONS ?? 'all';
 assert(['all','none','edit','resize'].includes(recoveryActions), 'PLANNER_STABILITY_RECOVERY_ACTIONS must be all, none, edit, or resize');
 const recoveryEdit = recoveryActions === 'all' || recoveryActions === 'edit';
 const recoveryResize = recoveryActions === 'all' || recoveryActions === 'resize';
+const traceRecoveryValue = process.env.PLANNER_STABILITY_TRACE_RECOVERY ?? '0';
+assert(['0','1'].includes(traceRecoveryValue), 'PLANNER_STABILITY_TRACE_RECOVERY must be 0 or 1');
+const traceRecovery = traceRecoveryValue === '1';
 const diagnostics = fixtureOnly ? null : createDiagnostics('planner', 'PLANNER_STABILITY', root);
 let cycles, catalog, editor, sourceHash, project;
 
@@ -125,7 +128,9 @@ const server=http.createServer((request,response)=>{
   let content=route==='/planner/editor.js'?editor:fs.readFileSync(file);
   if(fixtureOnly && route==='/planner/index.html')content=content.toString().replace('<head>',`<head><script>(${instrument.toString()})();</script>`);
   if(route==='/planner/editor.js')content+=`
-window.__plannerScene=()=>renderer?({layout:{...size},viewport:[innerWidth,innerHeight],memory:{...renderer.info.memory},programs:renderer.info.programs.length,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,buffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),shadowMap:[previewSun.shadow.mapSize.x,previewSun.shadow.mapSize.y],orbit:[orbit.yaw,orbit.pitch,orbit.radius]}):null;
+window.__plannerScene=()=>renderer?({layout:{...size},viewport:[innerWidth,innerHeight],memory:{...renderer.info.memory},programs:renderer.info.programs.length,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,buffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),shadowMap:[previewSun.shadow.mapSize.x,previewSun.shadow.mapSize.y],orbit:[orbit.yaw,orbit.pitch,orbit.radius]}):null;`;
+  // Layout probes can settle the race under investigation. Never install them in primary acceptance.
+  if(route==='/planner/editor.js' && traceRecovery)content+=`
 const __plannerOriginalInitPreview=initPreview;
 initPreview=function(...args){
   const result=__plannerOriginalInitPreview.apply(this,args);
@@ -263,7 +268,7 @@ async function run(engine,origin) {
     if(!reportOnly) {
       await input.tap(page.locator('#preview-tab'));await frames();
       const saved=await getProject(),before=await snapshot();
-      recovery=record.recovery={savedItems:saved.floors.flatMap(f=>f.items).length,layoutMode:restoreLayout,actions:recoveryActions,steps:[]};
+      recovery=record.recovery={savedItems:saved.floors.flatMap(f=>f.items).length,layoutMode:restoreLayout,actions:recoveryActions,traceEnabled:traceRecovery,steps:[]};
       const checkpoint=async phase=>{
         await page.evaluate(value=>{window.__plannerRecoveryPhase=value;},phase);
         recovery.steps.push({phase,snapshot:await snapshot()});save();

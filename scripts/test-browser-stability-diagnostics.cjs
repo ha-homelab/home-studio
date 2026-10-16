@@ -504,6 +504,7 @@ test('planner recovery variants select real actions and retain restoration check
       assert.deepEqual(trace,['lose',...(edit?['edit']:[]),'export',...(resize?['resize']:[]),'restore']);
       assert.equal(record.recovery.actions,mode);
       assert.equal(record.recovery.layoutMode,layout);
+      assert.equal(record.recovery.traceEnabled,false);
       assert.equal(Boolean(record.recovery.settledLayout),layout==='settled');
       if(resize&&layout==='immediate')assert.deepEqual(beforeImmediateRestore,['evaluate'],
         'The very next browser evaluation after resizing must capture evidence and restore without an intervening round trip');
@@ -572,22 +573,34 @@ test('planner recovery traces loss across resize and render without sampling nor
   assert.equal(reads,cappedReads,'The bounded trace stops GL sampling after 30 recovery operations');
 });
 
-test('the served planner attaches recovery tracing after lazy renderer initialization', () => {
+test('planner operation tracing is opt-in and primary acceptance makes no layout probes', () => {
   const source=fs.readFileSync(path.join(__dirname,'test-planner-stability.cjs'),'utf8');
+  const settings=source.slice(source.indexOf('const restoreLayout ='),source.indexOf('const diagnostics ='));
   const start=source.indexOf('const server=http.createServer('),end=source.indexOf('\nasync function run(',start);
-  const handle=vm.runInNewContext(source.slice(start,end)+'\nserver',{
-    http:{createServer:callback=>callback},URL,path,root:'/fixture',fixtureOnly:false,
-    fs:{existsSync:()=>true,statSync:()=>({isFile:()=>true})},
-    editor:'function initPreview(){renderer={ready:true};return 42;}',
-  });
-  let served;
-  handle({url:'/planner/editor.js'},{writeHead(){return this;},end(content){served=content;}});
-  const attached=[],context={renderer:null,size:{width:800,height:600},view:'preview',innerWidth:1280,innerHeight:900,
-    document:{querySelector:()=>({getBoundingClientRect:()=>({width:700,height:500})})},
-    window:{__plannerTraceRenderer:(renderer,readLayout)=>attached.push({renderer,layout:readLayout()})},
-  };
-  assert.equal(vm.runInNewContext(served+'\ninitPreview();',context),42);
-  assert.equal(attached.length,1);
-  assert.equal(attached[0].renderer.ready,true);
-  assert.deepEqual(JSON.parse(JSON.stringify(attached[0].layout)),{layout:{width:800,height:600},shell:{width:700,height:500},viewport:[1280,900],view:'preview'});
+  for(const value of ['', 'true', 'typo']) {
+    assert.throws(()=>vm.runInNewContext(settings,{assert,process:{env:{PLANNER_STABILITY_TRACE_RECOVERY:value}}}),/TRACE_RECOVERY must be/);
+  }
+  for(const value of [undefined,'0','1']) {
+    const env=value===undefined?{}:{PLANNER_STABILITY_TRACE_RECOVERY:value};
+    const traceRecovery=vm.runInNewContext(settings+'\ntraceRecovery',{assert,process:{env}});
+    assert.equal(traceRecovery,value==='1');
+    const handle=vm.runInNewContext(source.slice(start,end)+'\nserver',{
+      http:{createServer:callback=>callback},URL,path,root:'/fixture',fixtureOnly:false,traceRecovery,
+      fs:{existsSync:()=>true,statSync:()=>({isFile:()=>true})},
+      editor:'function initPreview(){renderer={ready:true};return 42;}',
+    });
+    let served,layoutReads=0;
+    handle({url:'/planner/editor.js'},{writeHead(){return this;},end(content){served=content;}});
+    const attached=[],context={renderer:null,size:{width:800,height:600},view:'preview',innerWidth:1280,innerHeight:900,
+      document:{querySelector:()=>({getBoundingClientRect:()=>{layoutReads++;return {width:700,height:500};}})},
+      window:{__plannerRecoveryPhase:'request-restore',__plannerTraceRenderer:(renderer,readLayout)=>attached.push({renderer,layout:readLayout()})},
+    };
+    assert.equal(vm.runInNewContext(served+'\ninitPreview();',context),42);
+    assert.equal(attached.length,traceRecovery?1:0,'Primary acceptance installs no renderer operation wrappers');
+    assert.equal(layoutReads,traceRecovery?1:0,'Primary acceptance performs no operation-trace layout reads');
+    if(traceRecovery) {
+      assert.equal(attached[0].renderer.ready,true);
+      assert.deepEqual(JSON.parse(JSON.stringify(attached[0].layout)),{layout:{width:800,height:600},shell:{width:700,height:500},viewport:[1280,900],view:'preview'});
+    }
+  }
 });
