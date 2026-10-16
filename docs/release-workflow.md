@@ -21,7 +21,8 @@ change the configured nightly policy.
 
 ## Local checks
 
-Use Python 3.11+ for the CLI and the project toolchains documented in `scripts/ci.sh`.
+Use Python 3.11+ for the CLI and Node.js 22 for the JavaScript checks listed in
+[`package.yml`](../.github/workflows/package.yml).
 The scripts fail on missing dependencies and do not publish anything during checks.
 
 ```bash

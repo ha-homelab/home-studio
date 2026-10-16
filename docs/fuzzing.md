@@ -1,5 +1,9 @@
 # Release-candidate fuzzing
 
+See the [illustrated RC fuzzing process and verified rollout results](https://github.com/victron-venus/venus-os-ci-toolkit/blob/main/docs/rc-fuzzing-results.md)
+for the shared release flow, evidence requirements and a dated cross-project
+snapshot. The project-specific scope and reproduction guidance below still apply.
+
 > **Local packaging:** `python3 scripts/release.py package` is unsupported in this repository because no shell packaging adapter is installed. Use the [project commands below](#local-release-packaging); the generic example in `release-workflow.md` does not apply here.
 
 The public repository runs [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js)
@@ -53,8 +57,10 @@ Run the cheap regression checks with `node --test fuzz/*.test.mjs`.
 It accepts ordinary `Error` and the production `ValidationError` exactly; unexpected
 subclasses, including `TypeError` and `RangeError`, remain findings.
 
-Use Node 24 in a source checkout; contributor infrastructure is not part of the
-end-user application ZIP.
+The deterministic replay tests and their fixed fictional corpus are included in
+versioned source ZIPs and need no dependency installation. Full mutation campaigns
+below require Node 24 in a source checkout; the Jazzer dependency manifests and
+release infrastructure are not part of the end-user application ZIP.
 
 ```sh
 npm ci --prefix fuzz --ignore-scripts --no-audit --no-fund

@@ -1,6 +1,8 @@
 import * as THREE from 'data:text/javascript;base64,__THREE_B64__';
 __LIGHT_STATE_JS__
 __ROOM_LIGHTING_JS__
+__RENDER_CAPACITY_JS__
+__INTERACTION_RENDER_JS__
 __VIEWER_I18N_JS__
 const viewerI18n=createViewerI18n(__VIEWER_I18N_DATA__),vt=(key,params)=>viewerI18n.t(key,params);
 viewerI18n.init();
@@ -89,11 +91,97 @@ let renderer,scene,camera,objectGroup,root,hemisphere,sun,ground,grid,homeView=n
 let initialViewReady=!embedded;
 // Software WebGL runs fragment shaders on the CPU. Bound its canvas and shadows;
 // controls remain sharp HTML and every fixture keeps its lighting and interaction.
-let renderProfile={pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048};
-function selectRenderProfile(gl){try{const info=gl.getExtension('WEBGL_debug_renderer_info');if(info&&/swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe|^Apple Software Renderer$/i.test(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)))return {pixels:250000,pointShadows:2,pointShadowSize:128,sunShadowSize:512}}catch{}return {pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048}}
-let renderRequest=0,renderSuspended=false,renderLost=false;
-function cancelRender(){if(renderRequest)cancelAnimationFrame(renderRequest);renderRequest=0}
-function requestRender(){if(renderRequest||renderSuspended||renderLost||document.hidden)return;renderRequest=requestAnimationFrame(()=>{renderRequest=0;try{window.renderModel?.()}catch(error){report3DError(error)}})}
+let renderProfile={pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048,diffuseLighting:false};
+// Apple's legacy software rasterizer spends seconds interpreting PBR fragments.
+// Diffuse materials keep room-constrained colored light, opacity and emissive
+// surfaces, with matte highlights and unfiltered shadows on reduced diffuse paths.
+// On the existing Apple software profile, wall fill is an unlit diagram tint.
+// Geometry, transparency, cutaway and cast shadows remain unchanged.
+function createSceneMaterial(options,kind){if(!renderProfile.diffuseLighting)return new THREE.MeshStandardMaterial(options);const {roughness,metalness,...shared}=options;if(kind==='walls'){const {emissive,emissiveIntensity,...unlit}=shared;return new THREE.MeshBasicMaterial(unlit)}return new THREE.MeshLambertMaterial(shared)}
+// The software Editor is a layout diagram. Keep the original Home materials
+// and lazily retain one unlit mate for each supported static floor/background.
+function createEditorFloorMaterials(THREE, group, ground, profile) {
+  const entries = [], meshes = new Set();
+  let homeActive = null, disposed = false;
+  function supported(material, initial = false) {
+    if (!material?.isMeshLambertMaterial || material.transparent || material.opacity !== 1 ||
+        material.vertexColors || material.wireframe || material.alphaTest || material.alphaHash ||
+        ![THREE.NormalBlending,THREE.NoBlending].includes(material.blending) || !material.depthWrite || !material.depthTest ||
+        !material.color || ![material.color.r,material.color.g,material.color.b].every(Number.isFinite) ||
+        material.emissive && (material.emissive.r || material.emissive.g || material.emissive.b) ||
+        Object.values(material).some(value => value?.isTexture) || Object.keys(material.userData || {}).length) return false;
+    for (const key in material.defines || {}) return false;
+    return !initial || (material.onBeforeCompile === THREE.Material.prototype.onBeforeCompile &&
+      material.customProgramCacheKey === THREE.Material.prototype.customProgramCacheKey &&
+      material.onBeforeRender === THREE.Material.prototype.onBeforeRender);
+  }
+  function meshCallbacksSupported(mesh) {
+    return mesh.onBeforeRender === THREE.Object3D.prototype.onBeforeRender &&
+      mesh.onAfterRender === THREE.Object3D.prototype.onAfterRender &&
+      mesh.onBeforeShadow === THREE.Object3D.prototype.onBeforeShadow &&
+      mesh.onAfterShadow === THREE.Object3D.prototype.onAfterShadow;
+  }
+  function callbacks(material) {return [material.onBeforeCompile,material.customProgramCacheKey,material.onBeforeRender]}
+  function stillOwned(entry) {
+    entry.owned &&= meshCallbacksSupported(entry.mesh) && callbacks(entry.home).every((value,index) => value === entry.callbacks[index]);
+    return entry.owned;
+  }
+  function register(mesh) {
+    if (!profile.diffuseLighting || !mesh?.isMesh || mesh.isSkinnedMesh || mesh.isInstancedMesh || mesh.isBatchedMesh ||
+        meshes.has(mesh) || !meshCallbacksSupported(mesh) || !supported(mesh.material, true)) return;
+    meshes.add(mesh); entries.push({mesh,home:mesh.material,flat:null,owned:true,callbacks:callbacks(mesh.material)});
+  }
+  group?.traverse(mesh => {if (mesh.userData.category === 'floors') register(mesh)});
+  register(ground);
+  function releaseGPU() {
+    const materials = new Set();
+    for (const entry of entries) {materials.add(entry.home); if (entry.flat) materials.add(entry.flat)}
+    for (const material of materials) material.dispose();
+  }
+  return {
+    setHomeActive(value) {
+      if (disposed || homeActive === value) return;
+      homeActive = value;
+      for (const entry of entries) {
+        const {mesh,home} = entry;
+        if (mesh.material !== home && (!entry.flat || mesh.material !== entry.flat)) continue;
+        if (value || !stillOwned(entry) || !supported(home)) {mesh.material = home; continue}
+        entry.flat ??= new THREE.MeshBasicMaterial();
+        THREE.Material.prototype.copy.call(entry.flat,home);
+        entry.flat.color.copy(home.color);entry.flat.fog=home.fog;
+        // Preserve the actual clipping plane identities used by the viewer.
+        entry.flat.clippingPlanes=home.clippingPlanes;
+        entry.flat.needsUpdate=true;mesh.material=entry.flat;
+      }
+    },
+    attachLighting(attach) {
+      for (const entry of entries) stillOwned(entry);
+      attach();
+      for (const entry of entries) if (entry.owned && entry.mesh.material === entry.home) entry.callbacks=callbacks(entry.home);
+    },
+    releaseGPU,
+    dispose() {
+      if (disposed) return;
+      for (const entry of entries) if (entry.flat && entry.mesh.material === entry.flat) entry.mesh.material=entry.home;
+      releaseGPU();entries.length=0;meshes.clear();disposed=true;
+    }
+  };
+}
+// Static opaque floors can share the clipped frame shader without changing
+// their visible half-space. The far plane is outside every original vertex;
+// it is independent of the user cutaway and never clips shadow passes.
+function applyStaticMeshClipping(source,material){if(['walls','frames','doors','windows'].includes(source.kind)){material.clippingPlanes=[clipping];material.clipShadows=false;return}if(!renderProfile.diffuseLighting||source.kind!=='floors'||material.transparent||material.side!==THREE.DoubleSide||!source.vertices?.length)return;let extent=1;for(const vertex of source.vertices){if(!Array.isArray(vertex)||vertex.length!==3||!vertex.every(value=>Number.isFinite(value)&&Number.isFinite(Math.fround(value))))return;for(const value of vertex)extent=Math.max(extent,Math.abs(value))}const far=extent*4;if(!Number.isFinite(Math.fround(far)))return;material.clippingPlanes=[new THREE.Plane(new THREE.Vector3(0,-1,0),far)];material.clipShadows=false}
+function selectRenderProfile(gl){const capacity=getRenderCapacity(gl);const profile=capacity.reduced?{pixels:capacity.diffuseLighting?62500:250000,pointShadows:2,pointShadowSize:128,sunShadowSize:512,diffuseLighting:capacity.diffuseLighting}:{pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048,diffuseLighting:false};if(capacity.rasterProbe)profile.rasterProbe=capacity.rasterProbe;return profile}
+let renderRequest=0,renderDelay=0,renderSuspended=false,renderLost=false;
+let interactionRenderer=null,interactionPointer=null,coalesceMotion=false;
+let editorFloorMaterials=null;
+function cancelRender(){if(renderRequest)cancelAnimationFrame(renderRequest);if(renderDelay)clearTimeout(renderDelay);renderRequest=renderDelay=0}
+// Paint the first moved-pointer frame immediately. Subsequent software frames
+// share a fixed deadline; further input never postpones it. Apple diffuse
+// motion uses its last successful draw time, bounded to 64–250 ms, per gesture.
+// Other software keeps 64 ms. Non-motion updates
+// and pointer release bypass this delay and still use the ordinary next frame.
+function requestRender(motion=false){if(renderSuspended||renderLost||document.hidden)return;if(!motion&&renderDelay){clearTimeout(renderDelay);renderDelay=0}if(renderRequest||renderDelay)return;if(motion&&coalesceMotion&&interactionPointer?.moved&&interactionPointer.painted){renderDelay=setTimeout(()=>{renderDelay=0;requestRender()},renderProfile.diffuseLighting?interactionPointer.frameDelay??64:64);return}renderRequest=requestAnimationFrame(()=>{renderRequest=0;try{window.renderModel?.()}catch(error){report3DError(error)}})}
 function renderPixelRatio(width,height){return Math.min(Number.isFinite(devicePixelRatio)&&devicePixelRatio>0?devicePixelRatio:1,2,Math.sqrt(renderProfile.pixels/Math.max(1,width*height)))}
 function invalidateShadows(){scene?.traverse(o=>{if(o.shadow){o.shadow.autoUpdate=false;o.shadow.needsUpdate=true}})}
 // Accept only complete rectangular prisms, including the compiler's rotated walls.
@@ -200,6 +288,11 @@ function wallDisplayGeometry(source,shape,limit){
   return geometry;
 }
 const roundedWalls=[];
+// Detach the old renderer's GPU disposal listeners before context restoration.
+// Hidden scene objects and inactive wall variants still retain CPU geometry.
+function releaseViewerGeometryGPU(){const geometries=new Set();scene?.traverse(object=>{if(object.geometry)geometries.add(object.geometry)});for(const wall of roundedWalls)for(const geometry of wall.cache.values())geometries.add(geometry);for(const geometry of geometries)geometry.dispose()}
+// Shadow targets and loaded TV maps have the same per-context disposal ownership.
+function releaseViewerTextureGPU(){const targets=new Set(),textures=new Set();scene?.traverse(object=>{for(const target of [object.shadow?.map,object.shadow?.mapPass])if(target)targets.add(target)});for(const target of targets)target.dispose();for(const id of Object.keys(tvEntities)){const map=objectsById.get(id)?.userData.screen?.material.map;if(map)textures.add(map)}for(const texture of textures){texture.dispose();texture.needsUpdate=true}}
 function updateRoundedWallGeometry(limit){
   for(const wall of roundedWalls){
     const key=Math.min(wall.shape.top,limit);
@@ -247,6 +340,10 @@ function wallBoundarySegments(meshes,limit,atBase=false){
   return [...segments.values()];
 }
 let wallOutlines,wallOutlineHeight;
+// The four contour materials have fixed roles. Keep their programs when only
+// cutaway geometry changes; fresh objects retain the original transparent order.
+const wallOutlineMaterials=[];
+function releaseWallOutlineMaterials(dispose=false){for(const material of wallOutlineMaterials)material?.dispose();if(dispose)wallOutlineMaterials.length=0}
 let lowerFloorContext;
 function buildLowerFloorContext(){
   const data=model.lower_floor_context;
@@ -262,13 +359,13 @@ function updateWallOutlines(){
   if(!root||wallOutlineHeight===clipping.constant)return;
   wallOutlineHeight=clipping.constant;
   updateRoundedWallGeometry(wallOutlineHeight);
-  if(wallOutlines){wallOutlines.traverse(o=>{o.geometry?.dispose();o.material?.dispose()});root.remove(wallOutlines);}
+  if(wallOutlines){wallOutlines.traverse(o=>{o.geometry?.dispose()});root.remove(wallOutlines);}
   wallOutlines=new THREE.Group();wallOutlines.name='Visible wall boundaries';
   // Draw after the translucent wall fill, while opaque furniture still occludes.
   wallOutlines.renderOrder=1;
   const geometry=positions=>new THREE.BufferGeometry().setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
   for(const [atBase,color,glow] of [[true,0x387bff,.22],[false,0x81fff0,.42]]){
-    const edges=[],halo=[];
+    const slot=atBase?0:2,edges=[],halo=[];
     for(const [a,b] of wallBoundarySegments(model.meshes,wallOutlineHeight,atBase)){
       const dx=b[0]-a[0],dz=b[2]-a[2],length=Math.hypot(dx,dz);
       if(length<1e-6)continue;
@@ -277,19 +374,22 @@ function updateWallOutlines(){
       const p=[a[0]+nx,y,a[2]+nz],q=[b[0]+nx,y,b[2]+nz],r=[b[0]-nx,y,b[2]-nz],s=[a[0]-nx,y,a[2]-nz];
       halo.push(...p,...q,...r,...p,...r,...s);
     }
-    wallOutlines.add(new THREE.Mesh(geometry(halo),new THREE.MeshBasicMaterial({color,transparent:true,opacity:glow,depthWrite:false,toneMapped:false,side:THREE.DoubleSide,forceSinglePass:true})));
-    const line=new THREE.LineSegments(geometry(edges),new THREE.LineBasicMaterial({color,transparent:true,opacity:1,depthWrite:false,toneMapped:false}));
+    wallOutlines.add(new THREE.Mesh(geometry(halo),wallOutlineMaterials[slot]??=new THREE.MeshBasicMaterial({color,transparent:true,opacity:glow,depthWrite:false,toneMapped:false,side:THREE.DoubleSide,forceSinglePass:true})));
+    const line=new THREE.LineSegments(geometry(edges),wallOutlineMaterials[slot+1]??=new THREE.LineBasicMaterial({color,transparent:true,opacity:1,depthWrite:false,toneMapped:false}));
     line.renderOrder=1;wallOutlines.add(line);
   }
   root.add(wallOutlines);
 }
 const wallSheenMotion=createWallSheenMotion();
-function drawScene(camera){if(renderSuspended||renderLost||document.hidden)return;wallSheenMotion.beforeRender();try{renderer.render(scene,camera)}finally{wallSheenMotion.afterRender()}}
+function drawScene(camera){if(renderSuspended||renderLost||document.hidden)return;wallSheenMotion.beforeRender();try{const pointer=interactionPointer,started=renderProfile.diffuseLighting&&pointer?.moved?performance.now():null;if(renderProfile.diffuseLighting){interactionRenderer??=createInteractionRenderer(THREE,renderer,31250);interactionRenderer.draw(scene,camera,pointer?.moved===true)}else renderer.render(scene,camera);if(pointer?.moved&&interactionPointer===pointer){pointer.painted=true;if(started!==null){const elapsed=performance.now()-started;pointer.frameDelay=Number.isFinite(elapsed)?Math.min(250,Math.max(64,elapsed)):64}}}finally{wallSheenMotion.afterRender()}}
 function report3DError(e){$('loadError').style.display='block';$('loadError').textContent='3D view could not start: '+e.message+'. Plan placement and JSON export are still available.';console.error(e)}
 try{
 scene=new THREE.Scene();scene.background=new THREE.Color('#e7e8df');camera=new THREE.PerspectiveCamera(42,1,.1,Math.max(150,planRadius*5));
 renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.localClippingEnabled=true;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.95;$('view3d').prepend(renderer.domElement);
-renderProfile=selectRenderProfile(renderer.getContext());
+renderProfile=selectRenderProfile(renderer.getContext());if(renderProfile.diffuseLighting)renderer.shadowMap.type=THREE.BasicShadowMap;
+// Capacity is cached for this context. Motion scheduling is independent of
+// material quality: software PBR still draws directly at its full resolution.
+coalesceMotion=getRenderCapacity(renderer.getContext()).reduced;
 hemisphere=new THREE.HemisphereLight(0xffffff,0xa6aaa1,1.8);scene.add(hemisphere);sun=new THREE.DirectionalLight(0xfff9ee,2.3);sun.position.set(-7,22,12);sun.castShadow=true;sun.shadow.mapSize.set(renderProfile.sunShadowSize,renderProfile.sunShadowSize);Object.assign(sun.shadow.camera,{left:-16,right:16,top:22,bottom:-22,near:1,far:65});sun.shadow.normalBias=.035;sun.target.position.set(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]);scene.add(sun,sun.target);
 if(planBounds){const scale=Math.max(1,planRadius/32);sun.position.copy(sun.target.position).add(new THREE.Vector3(-7,22,12).multiplyScalar(scale));Object.assign(sun.shadow.camera,{left:-planRadius,right:planRadius,top:planRadius,bottom:-planRadius,far:Math.max(65,planRadius*4)});sun.shadow.camera.updateProjectionMatrix();}
 root=new THREE.Group();objectGroup=new THREE.Group();scene.add(root,objectGroup);buildLowerFloorContext();
@@ -301,24 +401,33 @@ const candidate=wallPrism(m,wallAxes.get(m.wall_id));
 const shape=candidate&&(m.wall_id||candidate.length>=candidate.depth*1.25)?candidate:null;
 const geometry=shape?wallDisplayGeometry(m,shape,clipping.constant):new THREE.BufferGeometry();
 if(!shape){geometry.setAttribute('position',new THREE.Float32BufferAttribute(m.vertices.flat(),3));geometry.setAttribute('normal',new THREE.Float32BufferAttribute(m.normals.flat(),3));geometry.setIndex(m.indices)}
-const col=model.materials[m.material];const mat=new THREE.MeshStandardMaterial({color:m.kind==='walls'?0xb2d8d2:m.kind==='frames'?0x9abfcb:new THREE.Color(...col.slice(0,3)),roughness:.8,emissive:m.kind==='walls'?0x315d59:m.kind==='frames'?0x18333d:m.kind==='vehicles'?0x10181b:0,metalness:m.material==='steel'||m.kind==='vehicles'?.35:0,transparent:m.kind==='walls'||col[3]<1,opacity:m.kind==='walls'?.16:col[3],depthWrite:m.kind!=='walls',forceSinglePass:m.kind==='walls',side:THREE.DoubleSide});if(m.kind==='walls')mat.onBeforeCompile=applyWallSheen;if(['walls','frames','doors','windows'].includes(m.kind)){mat.clippingPlanes=[clipping];mat.clipShadows=false}const mesh=new THREE.Mesh(geometry,mat);mesh.name=m.name;mesh.userData.category=m.kind;mesh.castShadow=col[3]===1;mesh.receiveShadow=true;
+const col=model.materials[m.material];const mat=createSceneMaterial({color:m.kind==='walls'?0xb2d8d2:m.kind==='frames'?0x9abfcb:new THREE.Color(...col.slice(0,3)),roughness:.8,emissive:m.kind==='walls'?0x315d59:m.kind==='frames'?0x18333d:m.kind==='vehicles'?0x10181b:0,metalness:m.material==='steel'||m.kind==='vehicles'?.35:0,transparent:m.kind==='walls'||col[3]<1,opacity:m.kind==='walls'?.16:col[3],depthWrite:m.kind!=='walls',forceSinglePass:m.kind==='walls',side:THREE.DoubleSide},m.kind);if(m.kind==='walls'&&!mat.isMeshBasicMaterial)mat.onBeforeCompile=applyWallSheen;applyStaticMeshClipping(m,mat);const mesh=new THREE.Mesh(geometry,mat);mesh.name=m.name;mesh.userData.category=m.kind;mesh.castShadow=col[3]===1;mesh.receiveShadow=true;
 if(shape){
   // The same draw uses the exact original 12 triangles for all shadow passes.
   // Three reads drawRange after onBeforeShadow; no buffers or materials change.
   mesh.onBeforeShadow=beginWallShadow;mesh.onAfterShadow=endWallShadow;
   roundedWalls.push({mesh,source:m,shape,cache:new Map([[Math.min(shape.top,clipping.constant),geometry]])});
 }
-root.add(mesh)}
-ground=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(60,planRadius*2),Math.max(65,planRadius*2)),new THREE.MeshStandardMaterial({color:'#dfe3d8',roughness:1}));ground.rotation.x=-Math.PI/2;ground.position.set(planCenter[0],-1.97,planCenter[1]);ground.receiveShadow=true;scene.add(ground);grid=new THREE.GridHelper(44,44,0xc0cabe,0xd0d7cb);grid.position.set(planCenter[0],-1.96,planCenter[1]);scene.add(grid);
-renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;cancelRender();});
-renderer.domElement.addEventListener('webglcontextrestored',()=>{renderLost=false;invalidateShadows();window.resizeModel?.();requestRender()});
+const glassPasses=createStaticGlassPasses(THREE,mesh,renderProfile.diffuseLighting);root.add(mesh);if(glassPasses)root.add(glassPasses.front)}
+// Apply the same backdrop policy before a standalone Editor's first render.
+ground=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(60,planRadius*2),Math.max(65,planRadius*2)),createSceneMaterial({color:'#dfe3d8',roughness:1}));ground.rotation.x=-Math.PI/2;ground.position.set(planCenter[0],-1.97,planCenter[1]);ground.receiveShadow=true;ground.visible=!renderProfile.diffuseLighting;scene.add(ground);grid=new THREE.GridHelper(44,44,0xc0cabe,0xd0d7cb);grid.position.set(planCenter[0],-1.96,planCenter[1]);scene.add(grid);
+editorFloorMaterials=createEditorFloorMaterials(THREE,root,ground,renderProfile);editorFloorMaterials.setHomeActive(embedded);
+renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;cancelRender();releaseViewerGeometryGPU();releaseViewerTextureGPU();releaseWallOutlineMaterials();editorFloorMaterials?.releaseGPU();interactionPointer=null;interactionRenderer?.dispose();interactionRenderer=null;releaseStaticGlassPasses();homeView?.releaseGPU?.();});
+renderer.domElement.addEventListener('webglcontextrestored',()=>{renderLost=false;invalidateShadows();const before=renderCount;window.resizeModel?.();if(renderCount===before)requestRender()});
 function updateEditorCamera(){camera.position.set(target.x+radius*Math.sin(polar)*Math.sin(azimuth),target.y+radius*Math.cos(polar),target.z+radius*Math.sin(polar)*Math.cos(azimuth));camera.lookAt(target)}
-function render(){if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;updateWallOutlines();if(homeView?.active){homeView.render();return}updateEditorCamera();drawScene(camera);renderCount++}window.renderModel=render;window.requestModelRender=requestRender;
-let viewSize='';const resize=()=>{if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;const b=$(homeView?.active?'homeStage':'view3d').getBoundingClientRect(),ratio=renderPixelRatio(b.width,b.height),size=[homeView?.active,b.width,b.height,ratio].join();if(b.width&&b.height&&size!==viewSize){viewSize=size;renderer.setDrawingBufferSize(b.width,b.height,ratio);camera.aspect=b.width/b.height;camera.updateProjectionMatrix();render()}};window.resizeModel=resize;const observer=new ResizeObserver(resize);observer.observe($('view3d'));observer.observe($('homeStage'));
-document.addEventListener('visibilitychange',()=>{if(document.hidden)cancelRender();else{resize();requestRender()}});
-window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();if(!event.persisted){observer.disconnect();renderer.dispose();renderer.forceContextLoss();}});
-window.addEventListener('pageshow',()=>{renderSuspended=false;resize();requestRender()});
-let drag=null;renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());renderer.domElement.addEventListener('pointerdown',e=>{if(homeView?.active)return;drag={x:e.clientX,y:e.clientY,button:e.button};renderer.domElement.setPointerCapture(e.pointerId)});renderer.domElement.addEventListener('pointermove',e=>{if(homeView?.active||!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(drag.button===2||e.shiftKey){const scale=radius*.0018;target.x-=dx*scale*Math.cos(azimuth);target.z+=dx*scale*Math.sin(azimuth);target.x-=dy*scale*Math.sin(azimuth);target.z-=dy*scale*Math.cos(azimuth)}else{azimuth-=dx*.006;polar=Math.max(.02,Math.min(1.46,polar+dy*.006))}drag.x=e.clientX;drag.y=e.clientY;requestRender()});renderer.domElement.addEventListener('pointerup',()=>drag=null);renderer.domElement.addEventListener('pointercancel',()=>drag=null);renderer.domElement.addEventListener('wheel',e=>{if(homeView?.active)return;e.preventDefault();radius=Math.max(3,Math.min(Math.max(65,planRadius*2),radius*Math.exp(e.deltaY*.001)));requestRender()},{passive:false});
+function render(){if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;const before=renderCount;updateWallOutlines();if(homeView?.active)homeView.render();else{updateEditorCamera();drawScene(camera);renderCount++}if(renderCount>before)cancelRender()}window.renderModel=render;window.requestModelRender=requestRender;
+let viewSize='';const resize=()=>{if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;if(renderDelay)requestRender();const b=$(homeView?.active?'homeStage':'view3d').getBoundingClientRect(),ratio=renderPixelRatio(b.width,b.height),size=[homeView?.active,b.width,b.height,ratio].join();if(b.width&&b.height&&size!==viewSize){viewSize=size;renderer.setDrawingBufferSize(b.width,b.height,ratio);camera.aspect=b.width/b.height;camera.updateProjectionMatrix();render()}};window.resizeModel=resize;const observer=new ResizeObserver(resize);observer.observe($('view3d'));observer.observe($('homeStage'));
+document.addEventListener('visibilitychange',()=>{if(document.hidden){interactionPointer=null;cancelRender()}else{const before=renderCount;resize();if(renderCount===before)requestRender()}});
+window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();interactionPointer=null;if(!event.persisted){observer.disconnect();interactionRenderer?.dispose();interactionRenderer=null;homeView?.dispose?.();disposeStaticGlassPasses();releaseWallOutlineMaterials(true);editorFloorMaterials?.dispose();renderer.dispose();renderer.forceContextLoss();}});
+// A resize can already paint the resumed state. Initial pageshow also needs
+// no extra frame after boot painted; leave any pending live-state request intact.
+window.addEventListener('pageshow',event=>{const resumed=renderSuspended||event.persisted,before=renderCount;renderSuspended=false;resize();if(renderCount===before&&(resumed||renderCount===0))requestRender()});
+if(coalesceMotion){
+renderer.domElement.addEventListener('pointerdown',event=>{if(!renderLost&&!renderSuspended&&event.button===0&&!interactionPointer)interactionPointer={id:event.pointerId,x:event.clientX,y:event.clientY,moved:false}});
+renderer.domElement.addEventListener('pointermove',event=>{if(interactionPointer?.id===event.pointerId&&Math.hypot(event.clientX-interactionPointer.x,event.clientY-interactionPointer.y)>6)interactionPointer.moved=true});
+for(const type of ['pointerup','pointercancel','lostpointercapture'])renderer.domElement.addEventListener(type,event=>{if(interactionPointer?.id!==event.pointerId)return;const redraw=interactionPointer.moved;interactionPointer=null;if(redraw)requestRender()});
+}
+let drag=null;renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());renderer.domElement.addEventListener('pointerdown',e=>{if(homeView?.active)return;drag={x:e.clientX,y:e.clientY,button:e.button};renderer.domElement.setPointerCapture(e.pointerId)});renderer.domElement.addEventListener('pointermove',e=>{if(homeView?.active||!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(drag.button===2||e.shiftKey){const scale=radius*.0018;target.x-=dx*scale*Math.cos(azimuth);target.z+=dx*scale*Math.sin(azimuth);target.x-=dy*scale*Math.sin(azimuth);target.z-=dy*scale*Math.cos(azimuth)}else{azimuth-=dx*.006;polar=Math.max(.02,Math.min(1.46,polar+dy*.006))}drag.x=e.clientX;drag.y=e.clientY;requestRender(true)});renderer.domElement.addEventListener('pointerup',()=>drag=null);renderer.domElement.addEventListener('pointercancel',()=>drag=null);renderer.domElement.addEventListener('wheel',e=>{if(homeView?.active)return;e.preventDefault();radius=Math.max(3,Math.min(Math.max(65,planRadius*2),radius*Math.exp(e.deltaY*.001)));requestRender()},{passive:false});
 $('resetView').onclick=()=>{$('focusRoom').value='';target.set(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]);radius=planRadius;azimuth=.57;polar=.48;render()};$('topView').onclick=()=>{if($('focusRoom').value)focusRoom($('focusRoom').value);else{target.set(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]);radius=planRadius*.91}polar=.001;azimuth=0;render()};$('zoomIn').onclick=()=>{radius=Math.max(3,radius/1.15);render()};$('zoomOut').onclick=()=>{radius=Math.min(Math.max(65,planRadius*2),radius*1.15);render()};
 $('cutaway').onchange=()=>{const cutaway=$('cutaway').checked;clipping.constant=cutaway?1.15:20;updateHeightCaption();render()};for(const k of ['fixtures','stairs'])$(k).onchange=()=>{root.children.filter(m=>m.userData.category===k).forEach(m=>m.visible=$(k).checked);invalidateShadows();render()};resize();
 }catch(e){report3DError(e)}
@@ -337,10 +446,10 @@ const size=it.dimensions_m,candidate=model.object_assets?.[it.id],asset=candidat
 if(asset){
 o=new THREE.Group();const batches={};
 for(const part of asset.meshes){const batch=batches[part.material]??={vertices:[],normals:[],indices:[]};const offset=batch.vertices.length/3;batch.vertices.push(...part.vertices.flat());batch.normals.push(...part.normals.flat());batch.indices.push(...part.indices.map(i=>i+offset))}
-for(const [material,batch] of Object.entries(batches)){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(batch.vertices,3));geo.setAttribute('normal',new THREE.Float32BufferAttribute(batch.normals,3));geo.setIndex(batch.indices);const col=model.materials[material];const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(...col.slice(0,3)),roughness:.8,transparent:col[3]<1,opacity:col[3],depthWrite:col[3]===1,side:THREE.DoubleSide});const child=new THREE.Mesh(geo,mat);child.castShadow=col[3]===1;child.receiveShadow=true;child.userData.curtainFabric=!!model.cover_windows?.[it.id] && /curtain|safety_mesh/.test(material);o.add(child)}
+for(const [material,batch] of Object.entries(batches)){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(batch.vertices,3));geo.setAttribute('normal',new THREE.Float32BufferAttribute(batch.normals,3));geo.setIndex(batch.indices);const col=model.materials[material];const mat=createSceneMaterial({color:new THREE.Color(...col.slice(0,3)),roughness:.8,transparent:col[3]<1,opacity:col[3],depthWrite:col[3]===1,side:THREE.DoubleSide});const child=new THREE.Mesh(geo,mat);child.castShadow=col[3]===1;child.receiveShadow=true;child.userData.curtainFabric=!!model.cover_windows?.[it.id] && /curtain|safety_mesh/.test(material);o.add(child)}
 if(tvEntities[it.id]&&it.entity_id===tvEntities[it.id]){const screen=new THREE.Mesh(new THREE.PlaneGeometry(.968,.948),new THREE.MeshBasicMaterial({toneMapped:false}));screen.position.set(0,.515,.393);screen.visible=false;o.userData.screen=screen;o.add(screen)}
 o.scale.set(size.width,size.height,size.depth);o.position.set(it.position_m.x,it.position_m.y,it.position_m.z);
-}else{const geo=new THREE.BoxGeometry(size.width,size.height,size.depth);const mat=new THREE.MeshStandardMaterial({color:it.type==='tv'?0x273239:0xb87637,roughness:.7});o=new THREE.Mesh(geo,mat);o.position.set(it.position_m.x,it.position_m.y+size.height/2,it.position_m.z);o.castShadow=true;o.receiveShadow=true}
+}else{const geo=new THREE.BoxGeometry(size.width,size.height,size.depth);const mat=createSceneMaterial({color:it.type==='tv'?0x273239:0xb87637,roughness:.7});o=new THREE.Mesh(geo,mat);o.position.set(it.position_m.x,it.position_m.y+size.height/2,it.position_m.z);o.castShadow=true;o.receiveShadow=true;registerFallbackBoxProgram(THREE,o,renderProfile.diffuseLighting)}
 o.rotation.y=it.rotation_deg*Math.PI/180;o.userData.id=it.id;objectGroup.add(o);objectsById.set(it.id,o)}
 }homeView?.rebuildControls();refreshEntityPresentation();}
 function persistInventory(){if(embedded){if(bridge)bridge.postMessage({type:'save',items});else setEditorStatus('Not connected. Export JSON to keep your edits.');return}try{localStorage.setItem(KEY,JSON.stringify(items))}catch(e){setEditorStatus('Browser storage unavailable. Export JSON to keep your work.')}}
@@ -357,7 +466,7 @@ const toggle=nodes?.toggle;if(toggle)toggle.disabled=!available||!['on','off'].i
 const appearance=resolveLightAppearance(state),isLight=['chandelier','lamp'].includes(it.type)||it.entity_id.startsWith('light.');
 const object=objectsById.get(it.id);if(object)object.traverse(child=>{if(child.material?.emissive){if(isLight){child.material.emissive.setRGB(...appearance.rgb.map(c=>c/255),THREE.SRGBColorSpace);child.material.emissiveIntensity=available?.3*appearance.brightness:0}else{child.material.emissive.setHex(color);child.material.emissiveIntensity=available&&entityOn?.3:.08}}});
 nodes?.pin.querySelector('circle')?.setAttribute('fill','#'+color.toString(16).padStart(6,'0'));
-}homeView?.refreshControls();window.renderModel?.();
+}homeView?.refreshControls();window.requestModelRender?.();
 }
 function updateHeightCaption(){
   $('heightCaption').textContent=$('cutaway').checked?vt('Walls and windows cut at 1.15 m · exports keep full height.'):vt('Full-height walls and windows · ceiling {height} m.',{height:model.ceiling_height_m.toFixed(2)});
@@ -385,7 +494,7 @@ window.addEventListener('message',function init(event){if(event.source!==parent|
 let inventoryChanged=false;try{const incoming=reconcileStoredAppearance(validateInventoryItems(event.data.items));inventoryChanged=inventorySnapshot(incoming)!==inventorySnapshot(items);if(inventoryChanged)items=incoming}catch(error){setEditorStatus('Cannot load saved inventory: '+error.message);return}
 bridge=event.ports[0];homeView?.applyViewPreferences(event.data.preferences||{});bridge.onmessage=event=>{if(event.data?.type==='view_preferences'){homeView?.applyViewPreferences(event.data);return}if(event.data?.type==='camera_frames'){applyCameraFrames(event.data.frames);return}if(event.data?.type==='tv_frame'){applyTVFrame(event.data.image,true,event.data.item_id);return}if(event.data?.type==='command_result'){homeView.handleCommandResult(event.data);return}if(event.data?.type!=='states')return;haStates=event.data.states;haConnected=event.data.connected;if(!haConnected)applyCameraFrames();const options=Object.entries(haStates).map(([id,state])=>[id,state.name]);const key=JSON.stringify(options);if(key!==entityOptions){entityOptions=key;$('haEntities').replaceChildren(...options.map(([id,name])=>{const option=document.createElement('option');option.value=id;option.label=name;return option}))}refreshEntityPresentation()};
 bridge.postMessage({type:'model_config',...Object.fromEntries(['tv_entities','camera_entities','room_activity','receiver_activity','assumed_activity'].map(key=>[key,model[key]]))});
-document.querySelector('aside').inert=false;if(inventoryChanged)rebuildInventoryView();else refreshEntityPresentation();setEditorStatus(appearanceRefreshNotice || 'Connected. Select an entity from the list to bind an object.');window.removeEventListener('message',init);
+document.querySelector('aside').inert=false;if(inventoryChanged)rebuildInventoryView();setEditorStatus(appearanceRefreshNotice || 'Connected. Select an entity from the list to bind an object.');window.removeEventListener('message',init);
 });
 }
 refreshViewerLanguage(false);

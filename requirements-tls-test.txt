@@ -1,0 +1,3 @@
+# Synthetic certificate fixtures: qualified on Linux and Apple silicon macOS.
+# Runtime-only users should install requirements-strict-tls.txt instead.
+cryptography==50.0.1

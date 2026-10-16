@@ -1,4 +1,5 @@
 import './language-links.js';
+import { getRenderCapacity } from './render-capacity.js';
 import { formatValidationError } from './validation.js';
 import { t, LOCALES, initI18n, setLocale, getLocale, onLocaleChange, translateStatic } from './i18n.js';
 
@@ -18,6 +19,16 @@ const planCanvas = $('plan-canvas'), ctx = planCanvas.getContext('2d', { alpha: 
 let project = blankProject(), activeFloorId, selection = null, tool = 'select', view = 'plan', history = [], future = [], drag = null;
 let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, spaceHeld = false, saveFailed = false, previewDirty = true;
 let canvasFrame = 0, canvasSuspended = false;
+// Optional integrations render a detached candidate; project/history/storage always
+// retain the accepted document. The ordinary editor imports no AI code.
+let candidatePreview = null, editorRevision = 0;
+const editorListeners = new Set();
+function editorChanged() {
+  candidatePreview = null; editorRevision++; previewDirty = true;
+  for (const listener of editorListeners) listener(editorRevision);
+}
+const displayedProject = () => candidatePreview || project;
+const displayedFloor = () => displayedProject().floors.find(f => f.id === activeFloorId) || displayedProject().floors[0];
 function cancelCanvasRender() { if (canvasFrame) cancelAnimationFrame(canvasFrame); canvasFrame = 0; }
 function requestCanvasRender() {
   if (canvasFrame || canvasSuspended || document.hidden) return;
@@ -207,25 +218,25 @@ function transact(change, message = () => t('Project updated.'), { fit = false }
     historyPush(project); project = draft; previewDirty = true;
     if (!project.floors.some(f => f.id === activeFloorId)) activeFloorId = project.floors[0].id;
     if (!selected()) selection = null;
-    renderUI(); if (fit) { fitPlan(); fitPreview(); } renderPlan(); status(message); save();
+    editorChanged(); renderUI(); if (fit) { fitPlan(); fitPreview(); } renderPlan(); status(message); save();
     return true;
   } catch (error) { selection = priorSelection; $('project-title').value = project.title; status(() => t('Change not applied: {error}', { error: formatValidationError(error, t) }), true); renderInspector(); return false; }
 }
 function replaceProject(next, message) {
   validateProject(next); serializeProject(next); historyPush(project); project = clone(next); activeFloorId = project.floors[0].id; selection = null; drag = null; previewDirty = true;
-  setView('plan'); setTool('select'); renderUI(); fitPlan(); fitPreview(); renderPlan(); status(message); save();
+  editorChanged(); setView('plan'); setTool('select'); renderUI(); fitPlan(); fitPreview(); renderPlan(); status(message); save();
 }
 function undo(redo = false) {
   const source = redo ? future : history, destination = redo ? history : future; if (!source.length) return;
   destination.push(project); project = source.pop(); if (!project.floors.some(f => f.id === activeFloorId)) activeFloorId = project.floors[0].id;
-  selection = null; drag = null; previewDirty = true; renderUI(); renderPlan(); status(() => redo ? t('Change restored.') : t('Change undone.')); save();
+  selection = null; drag = null; previewDirty = true; editorChanged(); renderUI(); renderPlan(); status(() => redo ? t('Change restored.') : t('Change undone.')); save();
 }
 function renderUI() {
   $('project-title').value = project.title; $('floor-caption').textContent = floor().name;
   $('undo').disabled = history.length === 0; $('redo').disabled = future.length === 0;
   $('floor-list').replaceChildren();
   project.floors.forEach(f => {
-    const b = button('', () => { activeFloorId = f.id; selection = null; previewDirty = true; renderUI(); fitPlan(); fitPreview(); renderPlan(); }, 'floor-button');
+    const b = button('', () => { activeFloorId = f.id; selection = null; previewDirty = true; editorChanged(); renderUI(); fitPlan(); fitPreview(); renderPlan(); }, 'floor-button');
     b.setAttribute('aria-current', String(f.id === activeFloorId)); b.append(node('span', '', f.name), node('small', '', `${round(f.elevation_m)} m`)); $('floor-list').append(b);
   });
   $('object-list').replaceChildren();
@@ -245,7 +256,7 @@ function renderUI() {
 }
 function setSelection(next) {
   if (selection?.kind === next?.kind && selection?.id === next?.id) return;
-  selection = next;
+  selection = next; editorChanged();
   // Selection changes do not alter floor names, object labels, or their order.
   for (const b of $('object-list').children) if (b.dataset.objectId) {
     b.setAttribute('aria-pressed', String(b.dataset.objectKind === selection?.kind && b.dataset.objectId === selection?.id));
@@ -328,7 +339,7 @@ function renderInspector() {
     field(parent, t('Offset from wall start (m)'), object.offset_m, v => editObject(o => { o.offset_m = v; }), { type: 'number', min: 0, help: t('Wall starts at x {x}, z {z}. Offset locates the first edge of this opening.', { x: wall.start[0], z: wall.start[1] }) });
     const r = row(parent); field(r, t('Sill height (m)'), object.sill_m, v => editObject(o => { o.sill_m = v; }), { type: 'number', min: 0, max: f.height_m }); field(r, t('Head height (m)'), object.head_m, v => editObject(o => { o.head_m = v; }), { type: 'number', min: .05, max: f.height_m });
     parent.append(node('p', 'callout', t('These dimensions remove wall geometry in both the preview and the exported build. The window tint is only a preview aid.')));
-    parent.append(button(t('Select parent wall'), () => { selection = { kind: 'walls', id: wall.id }; renderUI(); renderPlan(); }));
+    parent.append(button(t('Select parent wall'), () => { setSelection({ kind: 'walls', id: wall.id }); renderUI(); renderPlan(); }));
   } else if (kind === 'items') {
     field(parent, t('Item name'), object.name, v => editObject(o => { o.name = v; }));
     const model = object.model_id ? getCatalogModel(object.model_id) : null;
@@ -400,7 +411,7 @@ function setTool(next) {
   if (view === 'plan') $('tool-hint').textContent = toolHint();
   planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
   if (tool !== 'select' && view !== 'plan') setView('plan');
-  $('empty-state').hidden = floor().rooms.length + floor().walls.length + floor().items.length > 0 || tool !== 'select' || view !== 'plan';
+  $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || view !== 'plan';
 }
 function setView(next) {
   view = next;
@@ -408,7 +419,7 @@ function setView(next) {
   $('plan-tab').tabIndex = next === 'plan' ? 0 : -1; $('preview-tab').tabIndex = next === 'preview' ? 0 : -1;
   $('plan-view').hidden = next !== 'plan'; $('preview-view').hidden = next !== 'preview'; $('snap-label').hidden = next !== 'plan';
   $('tool-hint').textContent = next === 'preview' ? t('Drag to orbit · scroll to zoom · arrow keys to rotate') : toolHint();
-  $('empty-state').hidden = floor().rooms.length + floor().walls.length + floor().items.length > 0 || tool !== 'select' || next !== 'plan';
+  $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || next !== 'plan';
   if (next === 'preview') renderPreview(); else renderPlan(); updateZoom();
 }
 function addOpening(wall, offset, type) {
@@ -437,7 +448,7 @@ const toScreen = p => [map.x + p[0] * map.scale, map.y + p[1] * map.scale];
 const toWorld = p => [(p[0] - map.x) / map.scale, (p[1] - map.y) / map.scale];
 function localPoint(event, canvas = planCanvas) { const r = canvas.getBoundingClientRect(); return [event.clientX - r.left, event.clientY - r.top]; }
 function fitPlan() {
-  const b = floorBounds(floor()), pad = 90;
+  const b = floorBounds(displayedFloor()), pad = 90;
   map.scale = Math.max(8, Math.min(95, (size.width - pad * 2) / Math.max(2, b.maxX - b.minX), (size.height - pad * 2) / Math.max(2, b.maxZ - b.minZ)));
   map.x = (size.width - (b.minX + b.maxX) * map.scale) / 2; map.y = (size.height - (b.minZ + b.maxZ) * map.scale) / 2; updateZoom();
 }
@@ -467,7 +478,7 @@ function renderPlan() {
   for (let x = Math.floor(top[0] / gridStep) * gridStep; x <= bottom[0]; x += gridStep) { const px = Math.round(toScreen([x, 0])[0]) + .5; ctx.strokeStyle = x === 0 ? '#c5d0bd' : '#e2e7dc'; ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, size.height); ctx.stroke(); }
   for (let z = Math.floor(top[1] / gridStep) * gridStep; z <= bottom[1]; z += gridStep) { const py = Math.round(toScreen([0, z])[1]) + .5; ctx.strokeStyle = z === 0 ? '#c5d0bd' : '#e2e7dc'; ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(size.width, py); ctx.stroke(); }
   if (map.scale >= 44) { ctx.fillStyle = '#dde4d6'; for (let x = Math.floor(top[0]); x <= bottom[0]; x += .25) for (let z = Math.floor(top[1]); z <= bottom[1]; z += .25) { const [px, py] = toScreen([x, z]); ctx.fillRect(px, py, 1, 1); } }
-  const f = floor();
+  const f = displayedFloor();
   for (const r of f.rooms) {
     const active = selection?.kind === 'rooms' && selection.id === r.id;
     path(r.polygon, true); ctx.fillStyle = COLORS[r.material]; ctx.globalAlpha = active ? .85 : .65; ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = active ? '#4a8073' : '#b4bba3'; ctx.lineWidth = active ? 2 : 1; ctx.setLineDash(active ? [5, 3] : []); ctx.stroke(); ctx.setLineDash([]);
@@ -527,6 +538,17 @@ function renderPlan() {
     else { path([a, b]); ctx.stroke(); } ctx.setLineDash([]);
     const p = toScreen(b); ctx.fillStyle = '#2c7663'; ctx.textAlign = 'left'; ctx.font = '11px sans-serif'; ctx.fillText(tool === 'room' ? `${Math.abs(b[0] - a[0]).toFixed(2)} × ${Math.abs(b[1] - a[1]).toFixed(2)} m` : `${distance(a, b).toFixed(2)} m`, p[0] + 12, p[1] - 12);
   }
+  if (candidatePreview) {
+    const accepted = floor();
+    ctx.save(); ctx.strokeStyle = '#8051ad'; ctx.lineWidth = 3; ctx.setLineDash([5, 4]);
+    for (const room of f.rooms) if (!accepted.rooms.some(r => r.id === room.id)) { path(room.polygon, true); ctx.stroke(); }
+    for (const item of f.items) if (!accepted.items.some(i => i.id === item.id)) {
+      const [x, y] = toScreen([item.position_m.x, item.position_m.z]);
+      ctx.save(); ctx.translate(x, y); ctx.rotate(-item.rotation_deg * Math.PI / 180);
+      ctx.strokeRect(-item.dimensions_m.width * map.scale / 2, -item.dimensions_m.depth * map.scale / 2, item.dimensions_m.width * map.scale, item.dimensions_m.depth * map.scale); ctx.restore();
+    }
+    ctx.restore();
+  }
   // A fixed metric scale makes the current zoom unambiguous.
   const scaleMeters = map.scale < 20 ? 5 : map.scale > 150 ? .5 : 1, sx = 20, sy = size.height - 76;
   ctx.strokeStyle = '#9bab8f'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sx, sy - 3); ctx.lineTo(sx, sy + 3); ctx.moveTo(sx, sy); ctx.lineTo(sx + scaleMeters * map.scale, sy); ctx.moveTo(sx + scaleMeters * map.scale, sy - 3); ctx.lineTo(sx + scaleMeters * map.scale, sy + 3); ctx.stroke(); ctx.fillStyle = '#8a9b7e'; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(t('{scale} m · grid {grid} m', { scale: scaleMeters, grid: gridStep }), sx, sy - 9);
@@ -569,6 +591,7 @@ planCanvas.addEventListener('pointermove', event => {
     // every catalog surface until the object's visible position actually changes.
     if (dx === drag.offset[0] && dz === drag.offset[1]) return;
     drag.offset = [dx, dz];
+    if (!drag.moved && (dx || dz)) editorChanged();
     if (dx || dz) drag.moved = true; const object = selected();
     const original = drag.original.floors.find(f => f.id === activeFloorId)[selection.kind].find(o => o.id === selection.id);
     if (selection.kind === 'rooms') object.polygon = original.polygon.map(p => [round(p[0] + dx), round(p[1] + dz)]);
@@ -612,30 +635,37 @@ planCanvas.addEventListener('wheel', e => { e.preventDefault(); zoomPlan(Math.ex
 
 // On-demand 3D rendering. Opening cuts and solid wall pieces use the same metric project.
 let renderer = null, scene = null, camera = null, worldGroup = null, previewSun = null, previewUnavailable = false, previewMetadata = {};
-let previewLost = false, previewSize = '', previewPixels = 2000000;
+let previewLost = false, previewSize = '', previewPixels = 2000000, previewInitialized = false, previewRendererDisposed = false, previewInstancing = false, previewDiffuseLighting = false;
 const orbit = { yaw: -Math.PI / 3, pitch: .8, radius: 17, baseRadius: 17, target: new THREE.Vector3(4, 0, 3), pointer: null };
+function createPreviewMaterial(options) {
+  if (!previewDiffuseLighting) return new THREE.MeshStandardMaterial(options);
+  const { roughness, metalness, ...shared } = options;
+  return new THREE.MeshLambertMaterial(shared);
+}
 function previewRenderProfile(gl) {
-  try {
-    const info = gl.getExtension('WEBGL_debug_renderer_info');
-    if (info && /swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe|^Apple Software Renderer$/i.test(gl.getParameter(info.UNMASKED_RENDERER_WEBGL))) return { pixels: 250000, shadowSize: 512 };
-  } catch { /* A hidden renderer name keeps the normal rendering profile. */ }
-  return { pixels: 2000000, shadowSize: 2048 };
+  const capacity = getRenderCapacity(gl);
+  const profile = capacity.reduced
+    ? { pixels: 250000, shadowSize: 512, instanceCatalog: capacity.diffuseLighting, diffuseLighting: capacity.diffuseLighting }
+    : { pixels: 2000000, shadowSize: 2048, instanceCatalog: false, diffuseLighting: false };
+  if (capacity.rasterProbe) profile.rasterProbe = capacity.rasterProbe;
+  return profile;
 }
 function initPreview() {
   if (renderer || previewUnavailable) return;
   try {
-    renderer = new THREE.WebGLRenderer({ canvas: $('preview-canvas'), antialias: true, alpha: false }); renderer.setClearColor(0xf2f4ed); renderer.outputColorSpace = THREE.SRGBColorSpace;
-    const profile = previewRenderProfile(renderer.getContext()); previewPixels = profile.pixels;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = .9; renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: true, alpha: false }); previewRendererDisposed = false; renderer.setClearColor(0xf2f4ed); renderer.outputColorSpace = THREE.SRGBColorSpace;
+    const profile = previewRenderProfile(renderer.getContext()); previewPixels = profile.pixels; previewInstancing = profile.instanceCatalog; previewDiffuseLighting = profile.diffuseLighting;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = .9; renderer.shadowMap.enabled = true; renderer.shadowMap.type = previewDiffuseLighting ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
     scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(40, 1, .02, 1500); scene.add(new THREE.HemisphereLight(0xffffff, 0xc7cfbc, 1.7));
     previewSun = new THREE.DirectionalLight(0xfff6e6, 2.5); previewSun.castShadow = true; previewSun.shadow.mapSize.set(profile.shadowSize, profile.shadowSize); previewSun.shadow.normalBias = .025; previewSun.shadow.bias = -.0002; scene.add(previewSun); scene.add(previewSun.target);
     // Orbiting moves only the camera. Reuse shadows until scene geometry changes.
     previewSun.shadow.autoUpdate = false; previewSun.shadow.needsUpdate = true;
     const fill = new THREE.DirectionalLight(0xdce9f2, .5); fill.position.set(12, 10, -10); scene.add(fill);
-    worldGroup = new THREE.Group(); scene.add(worldGroup); fitPreview();
-  } catch (error) { renderer?.dispose(); renderer?.forceContextLoss(); previewUnavailable = true; $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
+    worldGroup = new THREE.Group(); scene.add(worldGroup);
+    if (!previewInitialized) { fitPreview(); previewInitialized = true; }
+  } catch (error) { disposePreviewRenderer(); renderer?.forceContextLoss(); previewUnavailable = true; $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
 }
-function previewFloors() { return $('all-floors').checked ? project.floors : [floor()]; }
+function previewFloors() { return $('all-floors').checked ? displayedProject().floors : [displayedFloor()]; }
 function fitPreview() {
   const floors = previewFloors(), bounds = floors.map(floorBounds), minX = Math.min(...bounds.map(b => b.minX)), maxX = Math.max(...bounds.map(b => b.maxX)), minZ = Math.min(...bounds.map(b => b.minZ)), maxZ = Math.max(...bounds.map(b => b.maxZ));
   const low = Math.min(...floors.map(f => f.elevation_m)), high = Math.max(...floors.map(f => f.elevation_m + f.height_m));
@@ -647,20 +677,75 @@ function fitPreview() {
 }
 function disposePreviewGeometry() {
   if (!worldGroup) return;
-  while (worldGroup.children.length) { const child = worldGroup.children[0]; worldGroup.remove(child); child.traverse(obj => { obj.geometry?.dispose(); if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose()); else obj.material?.dispose(); }); }
+  const geometries = new Set(), materials = new Set();
+  const dispose = (resource, seen) => { if (resource && !seen.has(resource)) { seen.add(resource); resource.dispose(); } };
+  while (worldGroup.children.length) {
+    const child = worldGroup.children[0]; worldGroup.remove(child);
+    child.traverse(obj => { if (obj.isInstancedMesh) obj.dispose(); dispose(obj.geometry, geometries); if (Array.isArray(obj.material)) obj.material.forEach(material => dispose(material, materials)); else dispose(obj.material, materials); });
+  }
+}
+function disposePreviewRenderer() {
+  if (!renderer || previewRendererDisposed) return;
+  disposePreviewGeometry();
+  if (previewSun) { previewSun.shadow.dispose(); previewSun.shadow.map = null; previewSun.shadow.mapPass = null; }
+  renderer.dispose(); previewRendererDisposed = true;
+}
+function instancePreviewCatalog(groups) {
+  // Only batch disjoint opaque furniture. Overlaps retain their original draw
+  // order, including coincident surfaces with different appearance variants.
+  worldGroup.updateMatrixWorld(true);
+  const catalog = new Set(groups), blocked = new Set();
+  const bounds = worldGroup.children.map(object => ({ object, box: new THREE.Box3().setFromObject(object) }))
+    .sort((a, b) => a.box.min.x - b.box.min.x);
+  let comparisons = 0;
+  for (let i = 0; i < bounds.length; i++) {
+    const a = bounds[i];
+    for (let j = i + 1; j < bounds.length && bounds[j].box.min.x < a.box.max.x; j++) {
+      // Dense imported projects must not turn a draw optimization into a stall.
+      if (++comparisons > 100000) return;
+      const b = bounds[j];
+      if (Math.min(a.box.max.x, b.box.max.x) - Math.max(a.box.min.x, b.box.min.x) > 1e-7 &&
+          Math.min(a.box.max.y, b.box.max.y) - Math.max(a.box.min.y, b.box.min.y) > 1e-7 &&
+          Math.min(a.box.max.z, b.box.max.z) - Math.max(a.box.min.z, b.box.min.z) > 1e-7) {
+        if (catalog.has(a.object)) blocked.add(a.object);
+        if (catalog.has(b.object)) blocked.add(b.object);
+      }
+    }
+  }
+  const batches = new Map();
+  for (const group of groups) if (!blocked.has(group)) {
+    for (const mesh of group.children) {
+      if (!batches.has(mesh.geometry)) batches.set(mesh.geometry, []);
+      batches.get(mesh.geometry).push(mesh);
+    }
+  }
+  for (const meshes of batches.values()) if (meshes.length > 1) {
+    const first = meshes[0], batch = new THREE.InstancedMesh(first.geometry, first.material, meshes.length);
+    batch.name = first.name; batch.castShadow = first.castShadow; batch.receiveShadow = first.receiveShadow;
+    meshes.forEach((mesh, index) => {
+      batch.setMatrixAt(index, mesh.matrixWorld); mesh.removeFromParent();
+      if (mesh !== first) mesh.material.dispose();
+    });
+    batch.instanceMatrix.needsUpdate = true; batch.computeBoundingBox(); batch.computeBoundingSphere();
+    worldGroup.add(batch);
+  }
+  for (const group of groups) if (!group.children.length) worldGroup.remove(group);
 }
 function rebuildPreview() {
   disposePreviewGeometry();
+  // Cached asset parts are immutable. Share their geometry only within this
+  // rebuild; every mesh keeps its own material, transform and rendering order.
+  const catalogGeometries = new Map(), catalogGroups = [];
   let wallMeshCount = 0, openingCount = 0, roomCount = 0, itemCount = 0, catalogItemCount = 0, itemMeshCount = 0;
   const box = (width, height, depth, position, color, rotation = 0, opacity = 1) => {
-    const geometry = new THREE.BoxGeometry(width, height, depth), material = new THREE.MeshStandardMaterial({ color, roughness: .78, transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
+    const geometry = new THREE.BoxGeometry(width, height, depth), material = createPreviewMaterial({ color, roughness: .78, transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
     const mesh = new THREE.Mesh(geometry, material); mesh.position.set(...position); mesh.rotation.y = rotation; mesh.castShadow = opacity >= 1; mesh.receiveShadow = true; worldGroup.add(mesh); return mesh;
   };
   for (const f of previewFloors()) {
     for (const r of f.rooms) {
       const shape = new THREE.Shape(); r.polygon.forEach((p, i) => { if (i) shape.lineTo(p[0], -p[1]); else shape.moveTo(p[0], -p[1]); }); shape.closePath();
       const geo = new THREE.ExtrudeGeometry(shape, { depth: .08, bevelEnabled: false }); geo.rotateX(-Math.PI / 2);
-      const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: COLORS[r.material], roughness: .9 })); mesh.position.y = f.elevation_m - .08; mesh.receiveShadow = true; mesh.castShadow = true; worldGroup.add(mesh); roomCount++;
+      const mesh = new THREE.Mesh(geo, createPreviewMaterial({ color: COLORS[r.material], roughness: .9 })); mesh.position.y = f.elevation_m - .08; mesh.receiveShadow = true; mesh.castShadow = true; worldGroup.add(mesh); roomCount++;
     }
     for (const wall of f.walls) {
       const len = distance(wall.start, wall.end), dx = (wall.end[0] - wall.start[0]) / len, dz = (wall.end[1] - wall.start[1]) / len, angle = -Math.atan2(dz, dx);
@@ -682,11 +767,15 @@ function rebuildPreview() {
       if (asset) {
         const group = new THREE.Group(); group.position.set(p.x, f.elevation_m + p.y, p.z); group.rotation.y = rotation; group.scale.set(d.width, d.height, d.depth);
         for (const part of asset.meshes) {
-          const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(part.vertices.flat(), 3)); geometry.setAttribute('normal', new THREE.Float32BufferAttribute(part.normals.flat(), 3)); geometry.setIndex(part.indices);
-          const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(...asset.materials[part.material].slice(0, 3)), roughness: .78 });
+          let geometry = catalogGeometries.get(part);
+          if (!geometry) {
+            geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(part.vertices.flat(), 3)); geometry.setAttribute('normal', new THREE.Float32BufferAttribute(part.normals.flat(), 3)); geometry.setIndex(part.indices);
+            catalogGeometries.set(part, geometry);
+          }
+          const material = createPreviewMaterial({ color: new THREE.Color(...asset.materials[part.material].slice(0, 3)), roughness: .78 });
           const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; mesh.castShadow = true; mesh.receiveShadow = true; group.add(mesh); itemMeshCount++;
         }
-        worldGroup.add(group); catalogItemCount++; continue;
+        worldGroup.add(group); catalogGroups.push(group); catalogItemCount++; continue;
       }
       box(d.width, d.height, d.depth, [p.x, f.elevation_m + p.y + d.height / 2, p.z], COLORS[item.type], rotation); itemMeshCount++;
       if (item.type === 'tv') {
@@ -701,6 +790,7 @@ function rebuildPreview() {
   previewSun.position.set(cx - span * .6, high + span * 1.3, cz + span * .5); previewSun.target.position.set(cx, low, cz);
   Object.assign(previewSun.shadow.camera, { left: -span, right: span, top: span, bottom: -span, near: .1, far: span * 5 + 100 }); previewSun.shadow.camera.updateProjectionMatrix();
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(span * 8, span * 8), new THREE.ShadowMaterial({ color: '#54654c', opacity: .14 })); ground.rotation.x = -Math.PI / 2; ground.position.set(cx, low - .081, cz); ground.receiveShadow = true; worldGroup.add(ground);
+  if (previewInstancing) instancePreviewCatalog(catalogGroups);
   let meshCount = 0; worldGroup.traverse(object => { if (object.isMesh) meshCount++; });
   previewMetadata = { floors: previewFloors().map(f => f.id), rooms: roomCount, wallSolidPieces: wallMeshCount, openings: openingCount, items: itemCount, catalogItems: catalogItemCount, itemMeshes: itemMeshCount, meshes: meshCount, renderCount: previewMetadata.renderCount || 0 };
   previewSun.shadow.needsUpdate = true;
@@ -723,18 +813,65 @@ function drawPreview() {
 }
 function renderPreview() { if (view !== 'preview' || canvasSuspended || document.hidden || previewLost) return; initPreview(); if (!renderer || previewUnavailable) return; if (previewDirty) rebuildPreview(); drawPreview(); }
 function zoomPreview(factor) { orbit.radius = Math.max(1, Math.min(600, orbit.radius / factor)); requestCanvasRender(); }
-const previewCanvas = $('preview-canvas');
-previewCanvas.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); previewCanvas.focus(); orbit.pointer = { x: e.clientX, y: e.clientY, yaw: orbit.yaw, pitch: orbit.pitch }; previewCanvas.setPointerCapture(e.pointerId); });
-previewCanvas.addEventListener('pointermove', e => { if (!orbit.pointer) return; orbit.yaw = orbit.pointer.yaw - (e.clientX - orbit.pointer.x) * .007; orbit.pitch = Math.max(.1, Math.min(1.5, orbit.pointer.pitch + (e.clientY - orbit.pointer.y) * .007)); requestCanvasRender(); });
-for (const event of ['pointerup', 'pointercancel']) previewCanvas.addEventListener(event, e => { orbit.pointer = null; if (previewCanvas.hasPointerCapture(e.pointerId)) previewCanvas.releasePointerCapture(e.pointerId); });
-previewCanvas.addEventListener('wheel', e => { e.preventDefault(); zoomPreview(Math.exp(-e.deltaY * .0015)); }, { passive: false });
-previewCanvas.addEventListener('keydown', e => {
-  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-'].includes(e.key)) return; e.preventDefault();
-  if (e.key === 'ArrowLeft') orbit.yaw -= .12; if (e.key === 'ArrowRight') orbit.yaw += .12; if (e.key === 'ArrowUp') orbit.pitch = Math.min(1.5, orbit.pitch + .1); if (e.key === 'ArrowDown') orbit.pitch = Math.max(.1, orbit.pitch - .1);
-  if (e.key === '+' || e.key === '=') zoomPreview(1.15); else if (e.key === '-') zoomPreview(1 / 1.15); else requestCanvasRender();
-});
-previewCanvas.addEventListener('webglcontextlost', e => { e.preventDefault(); previewLost = true; cancelCanvasRender(); $('preview-error').hidden = false; translatedText('preview-error', 'The graphics context was lost. Reload to restore 3D. Your local draft and JSON export remain available.'); });
-previewCanvas.addEventListener('webglcontextrestored', () => { previewLost = false; previewSize = ''; if (previewSun) previewSun.shadow.needsUpdate = true; $('preview-error').hidden = true; requestCanvasRender(); });
+let previewCanvas = $('preview-canvas'), previewEvents;
+function releasePreviewPointer(event) {
+  const pointer = orbit.pointer;
+  if (event && pointer && event.pointerId !== pointer.id) return;
+  orbit.pointer = null;
+  if (pointer && previewCanvas.hasPointerCapture(pointer.id)) previewCanvas.releasePointerCapture(pointer.id);
+}
+function bindPreviewCanvas() {
+  previewEvents = new AbortController();
+  const canvas = previewCanvas, options = { signal: previewEvents.signal };
+  canvas.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || orbit.pointer || previewLost || previewUnavailable) return;
+    e.preventDefault(); canvas.focus();
+    orbit.pointer = { id: e.pointerId, x: e.clientX, y: e.clientY, yaw: orbit.yaw, pitch: orbit.pitch };
+    canvas.setPointerCapture(e.pointerId);
+  }, options);
+  canvas.addEventListener('pointermove', e => {
+    if (!orbit.pointer || orbit.pointer.id !== e.pointerId) return;
+    orbit.yaw = orbit.pointer.yaw - (e.clientX - orbit.pointer.x) * .007;
+    orbit.pitch = Math.max(.1, Math.min(1.5, orbit.pointer.pitch + (e.clientY - orbit.pointer.y) * .007)); requestCanvasRender();
+  }, options);
+  for (const event of ['pointerup', 'pointercancel']) canvas.addEventListener(event, releasePreviewPointer, options);
+  canvas.addEventListener('wheel', e => { e.preventDefault(); zoomPreview(Math.exp(-e.deltaY * .0015)); }, { ...options, passive: false });
+  canvas.addEventListener('keydown', e => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-'].includes(e.key)) return; e.preventDefault();
+    if (e.key === 'ArrowLeft') orbit.yaw -= .12; if (e.key === 'ArrowRight') orbit.yaw += .12; if (e.key === 'ArrowUp') orbit.pitch = Math.min(1.5, orbit.pitch + .1); if (e.key === 'ArrowDown') orbit.pitch = Math.max(.1, orbit.pitch - .1);
+    if (e.key === '+' || e.key === '=') zoomPreview(1.15); else if (e.key === '-') zoomPreview(1 / 1.15); else requestCanvasRender();
+  }, options);
+  canvas.addEventListener('webglcontextlost', e => {
+    e.preventDefault(); previewLost = true; cancelCanvasRender(); releasePreviewPointer();
+    // Release old scene callbacks and Three's context listeners while GL is
+    // lost. Nothing from this renderer may run against a restored context.
+    disposePreviewRenderer(); previewDirty = true;
+    // This canvas will be retired after restoration. Keep its restored native
+    // drawing buffer minimal instead of allocating the full preview twice.
+    canvas.width = 0; canvas.height = 0;
+    $('preview-error').hidden = false; translatedText('preview-error', 'The graphics context was lost. Reload to restore 3D. Your local draft and JSON export remain available.');
+  }, options);
+  canvas.addEventListener('webglcontextrestored', () => {
+    if (!previewLost) return;
+    const retired = renderer, focused = document.activeElement === canvas;
+    previewEvents.abort();
+    // A new canvas guarantees a new native context, not just new Three caches.
+    // The old renderer has already been disposed while its context was lost.
+    const replacement = canvas.cloneNode(false);
+    replacement.width = 0; replacement.height = 0;
+    canvas.replaceWith(replacement); previewCanvas = replacement; bindPreviewCanvas();
+    renderer = scene = camera = worldGroup = previewSun = null;
+    previewLost = false; previewSize = ''; previewDirty = true;
+    // Retire the detached context before the next frame creates its replacement.
+    // Its loss is intentional cleanup; no app handlers remain on that canvas.
+    retired?.forceContextLoss();
+    $('preview-error').hidden = true;
+    resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect());
+    if (focused) previewCanvas.focus({ preventScroll: true });
+    requestCanvasRender();
+  }, options);
+}
+bindPreviewCanvas();
 
 // Project actions and keyboard navigation.
 function exportProject() {
@@ -761,7 +898,7 @@ $('add-floor').addEventListener('click', () => {
   let index = 2; while (project.floors.some(f => f.id === `floor_${index}`)) index++;
   const previousId = activeFloorId, id = `floor_${index}`, next = newFloor(id, `Floor ${index}`, round(floor().elevation_m + floor().height_m + .25));
   const ok = transact(p => { p.floors.push(next); }, () => t('New floor added. Set its name and elevation in the inspector.'));
-  if (ok) { activeFloorId = id; selection = null; previewDirty = true; renderUI(); fitPlan(); fitPreview(); renderPlan(); } else activeFloorId = previousId;
+  if (ok) { activeFloorId = id; selection = null; previewDirty = true; editorChanged(); renderUI(); fitPlan(); fitPreview(); renderPlan(); } else activeFloorId = previousId;
 });
 $('start-room').addEventListener('click', () => { setTool('room'); planCanvas.focus(); });
 document.querySelectorAll('[data-tool]').forEach(b => { const label = b.querySelector('span:nth-child(2)').textContent; b.setAttribute('aria-label', label); b.title = label; b.addEventListener('click', () => { setTool(b.dataset.tool); }); });
@@ -796,7 +933,7 @@ $('build-project').addEventListener('click', () => {
 $('copy-command').addEventListener('click', async () => { try { await navigator.clipboard.writeText(BUILD_COMMAND); translatedText('copy-command', 'Copied'); } catch { translatedText('copy-command', 'Select and copy the command above'); } });
 window.addEventListener('keydown', e => {
   if (e.target.closest('input, textarea, select') || document.querySelector('dialog[open]')) return;
-  if (e.key === 'Escape') { finishPointer(null, true); selection = null; setTool('select'); renderUI(); renderPlan(); return; }
+  if (e.key === 'Escape') { finishPointer(null, true); setSelection(null); setTool('select'); renderUI(); renderPlan(); return; }
   if (e.code === 'Space' && (e.target === planCanvas || e.target === previewCanvas || e.target === document.body)) { e.preventDefault(); spaceHeld = true; if (view === 'plan') planCanvas.style.cursor = 'grab'; }
   if (e.ctrlKey || e.metaKey) {
     if (e.key.toLowerCase() === 'z') { e.preventDefault(); undo(e.shiftKey); }
@@ -833,7 +970,7 @@ canvasObserver.observe(document.querySelector('.canvas-shell'));
 document.addEventListener('visibilitychange', () => { if (document.hidden) cancelCanvasRender(); else { resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); } });
 window.addEventListener('pagehide', event => {
   canvasSuspended = true; cancelCanvasRender();
-  if (!event.persisted) { canvasObserver.disconnect(); disposePreviewGeometry(); previewSun?.shadow.dispose(); renderer?.dispose(); renderer?.forceContextLoss(); }
+  if (!event.persisted) { canvasObserver.disconnect(); previewEvents.abort(); releasePreviewPointer(); disposePreviewRenderer(); renderer?.forceContextLoss(); }
 });
 window.addEventListener('pageshow', () => { canvasSuspended = false; resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); });
 window.planner = Object.freeze({ getProject: () => clone(project), getPreviewMetadata: () => ({ ...previewMetadata }), getView: () => view, getSelection: () => selection && { ...selection }, worldToScreen: point => toScreen(point), validate: () => validateProject(clone(project), { complete: true }) });
@@ -879,3 +1016,29 @@ $('language-select').addEventListener('change', async event => {
 });
 renderLocale();
 if (!initialLocale.loaded) status(() => t('Language could not be loaded. English is shown instead.'), true);
+
+
+// A narrow, opt-in bridge. Snapshots are copies; preview never replaces accepted
+// state. The revision includes selection and in-progress moves, preventing late
+// results from changing a different room or overwriting an intervening edit.
+export const editorBridge = Object.freeze({
+  snapshot: () => clone(project),
+  revision: () => editorRevision,
+  selectionContext: () => ({ floorId: activeFloorId, roomId: selection?.kind === 'rooms' ? selection.id : selection?.kind === 'items' ? selected()?.room : null }),
+  subscribe(listener) { editorListeners.add(listener); return () => editorListeners.delete(listener); },
+  previewProject(candidate) {
+    validateProject(candidate); serializeProject(candidate); candidatePreview = clone(candidate); previewDirty = true;
+    $('empty-state').hidden = true; fitPlan(); fitPreview(); requestCanvasRender();
+  },
+  cancelPreview() {
+    if (!candidatePreview) return;
+    candidatePreview = null; previewDirty = true; setView(view); requestCanvasRender();
+  },
+  applyProject(candidate, baseRevision) {
+    if (baseRevision !== editorRevision || drag) throw new Error('The plan or selection changed. Generate a fresh draft.');
+    validateProject(candidate); serializeProject(candidate);
+    candidatePreview = null;
+    const next = clone(candidate);
+    return transact(draft => { for (const key of Object.keys(draft)) delete draft[key]; Object.assign(draft, next); }, 'AI draft applied. Undo restores your previous plan.', { fit: true });
+  },
+});

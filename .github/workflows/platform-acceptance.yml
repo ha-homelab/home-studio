@@ -10,6 +10,25 @@ defaults:
     shell: bash
 
 jobs:
+  matrix:
+    name: Validate the required browser inventory
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      browser: ${{ steps.matrix.outputs.browser }}
+      native: ${{ steps.matrix.outputs.native }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Test version pins, coverage expansion and isolated setup
+        run: |
+          python3 scripts/test-browser-matrix.py
+          python3 scripts/test-browser-install.py
+      - name: Expand all required targets
+        id: matrix
+        run: python3 scripts/browser-matrix.py --github-output "$GITHUB_OUTPUT"
+
   install:
     name: Package and install (${{ matrix.os }})
     strategy:
@@ -33,28 +52,39 @@ jobs:
         run: python3 scripts/validate-site.py
       - name: Test archive validation, installation, backup and rollback
         run: python3 scripts/test-install-home-assistant.py
+      - name: Test loopback companion security and provider adapters
+        run: python3 scripts/test-ai-companion.py
       - name: Build and install a fictional home
         run: python3 scripts/test-public-package.py
       - name: Verify reproducible source archives
         run: python3 scripts/test_package_release.py
 
   browser:
-    name: Browser (${{ matrix.os }}, ${{ matrix.engine }})
+    name: Browser (${{ matrix.os }}, ${{ matrix.id }})
+    needs: matrix
     strategy:
       fail-fast: false
-      max-parallel: 3
-      matrix:
-        os: [ubuntu-24.04, windows-2022, macos-15]
-        engine: [chromium, firefox]
+      max-parallel: 10
+      matrix: ${{ fromJSON(needs.matrix.outputs.browser) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       PYTHONUTF8: '1'
       BROWSER_STABILITY_ENGINES: ${{ matrix.engine }}
       PLANNER_STABILITY_ENGINES: ${{ matrix.engine }}
       BROWSER_STABILITY_HEADED: '1'
       PLANNER_STABILITY_HEADED: '1'
-      FIREFOX_WEBGL_BACKEND: ${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && 'angle' || 'default' }}
+      HOME_STUDIO_BROWSER_CHANNEL: ${{ matrix.channel }}
+      HOME_STUDIO_BROWSER_PROFILE: ${{ matrix.profile }}
+      HOME_STUDIO_EXPECT_BROWSER_MAJOR: ${{ matrix.major }}
+      HOME_STUDIO_EXPECT_BROWSER_VERSION: ${{ matrix.browser_version }}
+      CFT_VERSION: ${{ matrix.cft }}
+      PLAYWRIGHT_VERSION: ${{ matrix.playwright }}
+      DEBUG: ${{ matrix.engine == 'chromium' && 'pw:browser' || '' }}
+      CHROMIUM_ANGLE_BACKEND: ${{ matrix.os == 'macos-15' && matrix.engine == 'chromium' && 'metal' || 'swiftshader' }}
+      FIREFOX_WEBGL_BACKEND: ${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && (matrix.playwright == '1.63.0' || matrix.playwright == '1.64.0') && 'angle' || 'default' }}
+      FIREFOX_COMPOSITOR_BACKEND: ${{ startsWith(matrix.os, 'macos-') && matrix.engine == 'firefox' && matrix.playwright == '1.62.1' && 'software' || 'default' }}
+      FIREFOX_GPU_PROCESS: ${{ startsWith(matrix.os, 'macos-') && matrix.engine == 'firefox' && matrix.playwright == '1.62.1' && 'disabled' || 'default' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -63,18 +93,35 @@ jobs:
         id: python
         with:
           python-version: '3.13'
+      - name: Prepare the ephemeral Intel macOS runner
+        id: prepare_intel
+        if: ${{ matrix.os == 'macos-15-intel' }}
+        run: python3 scripts/prepare-intel-macos-ci.py --output acceptance-artifacts/runner-environment
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '22'
-      - name: Install pinned browser test tools
+      - name: Install and verify the isolated pinned browser toolchain
+        env:
+          TOOLCHAIN_DIR: ${{ runner.temp }}/home-studio-playwright
         run: |
-          npm ci --ignore-scripts --no-audit --no-fund
-          npx playwright install --with-deps "${BROWSER_STABILITY_ENGINES}"
+          python3 scripts/setup-browser-toolchain.py --version "$PLAYWRIGHT_VERSION" --output "$TOOLCHAIN_DIR" --github-env "$GITHUB_ENV"
+          mkdir -p acceptance-artifacts
+          cp "$TOOLCHAIN_DIR/toolchain.json" acceptance-artifacts/toolchain.json
+      - name: Install the selected browser and native system dependencies
+        run: python3 scripts/install-browser-with-retry.py
+      - name: Extract checksum-pinned historical Chrome for Testing
+        if: ${{ matrix.cft != '' }}
+        env:
+          CFT_INSTALL_DIR: ${{ runner.temp }}/home-studio-chrome-for-testing
+        run: |
+          python3 scripts/setup-chrome-for-testing.py --version "$CFT_VERSION" --output "$CFT_INSTALL_DIR" --github-env "$GITHUB_ENV"
+          cp "$CFT_INSTALL_DIR/install.json" acceptance-artifacts/chrome-for-testing.json
       - name: Select the compiler interpreter
         env:
           SELECTED_PYTHON: ${{ steps.python.outputs.python-path }}
         run: printf 'PYTHON=%s\n' "$SELECTED_PYTHON" >> "$GITHUB_ENV"
       - name: Test generated viewer with 6 rooms and 18 lights
+        id: viewer_6_acceptance
         env:
           HOME_STUDIO_DIAGNOSTICS_DIR: acceptance-artifacts/viewer-6
         run: |
@@ -84,7 +131,8 @@ jobs:
             node scripts/test-browser-stability.cjs
           fi
       - name: Test generated viewer with 24 rooms and 72 lights
-        if: ${{ !cancelled() }}
+        id: viewer_24_acceptance
+        if: ${{ !cancelled() && (matrix.os != 'macos-15-intel' || steps.prepare_intel.outcome == 'success') }}
         env:
           HOME_STUDIO_DIAGNOSTICS_DIR: acceptance-artifacts/viewer-24
           BROWSER_STABILITY_ROOMS: '24'
@@ -95,7 +143,8 @@ jobs:
             node scripts/test-browser-stability.cjs
           fi
       - name: Test drawing and 3D preview with 2 floors and 256 items
-        if: ${{ !cancelled() }}
+        id: planner_acceptance
+        if: ${{ !cancelled() && (matrix.os != 'macos-15-intel' || steps.prepare_intel.outcome == 'success') }}
         env:
           HOME_STUDIO_DIAGNOSTICS_DIR: acceptance-artifacts/planner
         run: |
@@ -104,28 +153,150 @@ jobs:
           else
             node scripts/test-planner-stability.cjs
           fi
-      - name: Preserve synthetic browser diagnostics
+      - name: Compare recovery actions after Windows WebKit planner failure
+        id: planner_recovery_diagnostics
+        if: ${{ !cancelled() && steps.planner_acceptance.outcome == 'failure' && matrix.engine == 'webkit' && matrix.os == 'windows-2022' }}
+        env:
+          DEBUG: pw:browser
+          PLANNER_STABILITY_TRACE_RECOVERY: '1'
+        run: |
+          set -o pipefail
+          result=0
+          for comparison in settled none edit resize; do
+            actions="$comparison"
+            layout=immediate
+            if [ "$comparison" = settled ]; then
+              actions=all
+              layout=settled
+            fi
+            diagnostics_dir="acceptance-artifacts/diagnostics/planner-$comparison"
+            mkdir -p "$diagnostics_dir"
+            if ! HOME_STUDIO_DIAGNOSTICS_DIR="$diagnostics_dir" \
+              PLANNER_STABILITY_RECOVERY_ACTIONS="$actions" \
+              PLANNER_STABILITY_RESTORE_LAYOUT="$layout" \
+              node scripts/test-planner-stability.cjs 2>&1 | tee "$diagnostics_dir/browser-process.log"; then
+              result=1
+            fi
+          done
+          exit "$result"
+      - name: Compare native tap transports after a Chromium touch viewer failure
+        id: viewer_touch_diagnostics
+        if: ${{ !cancelled() && matrix.engine == 'chromium' && matrix.profile != 'desktop' && (steps.viewer_6_acceptance.outcome == 'failure' || steps.viewer_24_acceptance.outcome == 'failure') }}
+        env:
+          VIEWER_6_OUTCOME: ${{ steps.viewer_6_acceptance.outcome }}
+          VIEWER_24_OUTCOME: ${{ steps.viewer_24_acceptance.outcome }}
+          BROWSER_STABILITY_TRACE_INPUT: '1'
+        run: |
+          set -o pipefail
+          result=0
+          for rooms in 6 24; do
+            outcome="$VIEWER_6_OUTCOME"
+            if [ "$rooms" = 24 ]; then outcome="$VIEWER_24_OUTCOME"; fi
+            if [ "$outcome" != failure ]; then continue; fi
+            for mode in playwright gesture50; do
+              diagnostics_dir="acceptance-artifacts/diagnostics/viewer-$rooms-touch-$mode"
+              mkdir -p "$diagnostics_dir"
+              export HOME_STUDIO_DIAGNOSTICS_DIR="$diagnostics_dir"
+              export BROWSER_STABILITY_ROOMS="$rooms"
+              export BROWSER_STABILITY_TOUCH_TAP="$mode"
+              if [ "$RUNNER_OS" = Linux ]; then
+                if ! LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-browser-stability.cjs 2>&1 | tee "$diagnostics_dir/browser-process.log"; then result=1; fi
+              else
+                if ! node scripts/test-browser-stability.cjs 2>&1 | tee "$diagnostics_dir/browser-process.log"; then result=1; fi
+              fi
+            done
+          done
+          exit "$result"
+      - name: Preserve synthetic browser diagnostics and toolchain identity
         if: ${{ always() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: ./.github/actions/upload-acceptance-artifact
         with:
-          name: acceptance-${{ matrix.os }}-${{ matrix.engine }}
+          name: acceptance-${{ matrix.os }}-${{ matrix.id }}
           path: acceptance-artifacts/
           if-no-files-found: error
           retention-days: 14
 
-  waterfox:
-    name: Waterfox ${{ matrix.version }} (windows-2022)
+  native-browser:
+    name: Native browser (${{ matrix.os }}, ${{ matrix.id }})
+    needs: matrix
     strategy:
       fail-fast: false
-      max-parallel: 2
-      matrix:
-        version: ['6.7.5', '6.7.6']
-    runs-on: windows-2022
-    timeout-minutes: 20
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.matrix.outputs.native) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     env:
       PYTHONUTF8: '1'
-      WATERFOX_VERSION: ${{ matrix.version }}
-      WATERFOX_DIAGNOSTICS_DIR: acceptance-artifacts/waterfox-${{ matrix.version }}
+      NATIVE_BROWSER_PRODUCT: ${{ matrix.product }}
+      NATIVE_BROWSER_VERSION: ${{ matrix.version }}
+      FIREFOX_RENDERER_VISIBILITY: ${{ matrix.renderer_visibility || 'unmasked' }}
+      NATIVE_BROWSER_DIAGNOSTICS_DIR: acceptance-artifacts/${{ matrix.id }}
+      NATIVE_STARTUP_DIAGNOSTICS: ${{ startsWith(matrix.os, 'macos-') && (matrix.product == 'waterfox' || (matrix.product == 'firefox' && matrix.version == '153.5.0esr')) && '1' || '0' }}
+      FIREFOX_WEBGL_BACKEND: ${{ matrix.os == 'macos-15' && matrix.product == 'firefox' && matrix.version == '158.0' && 'angle' || 'default' }}
+      FIREFOX_COMPOSITOR_BACKEND: ${{ startsWith(matrix.os, 'macos-') && (matrix.product == 'waterfox' || (matrix.product == 'firefox' && matrix.version == '153.5.0esr')) && 'software' || 'default' }}
+      FIREFOX_GPU_PROCESS: ${{ startsWith(matrix.os, 'macos-') && (matrix.product == 'waterfox' || (matrix.product == 'firefox' && matrix.version == '153.5.0esr')) && 'disabled' || 'default' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Prepare the ephemeral Intel macOS runner
+        id: prepare_intel
+        if: ${{ matrix.os == 'macos-15-intel' }}
+        run: python3 scripts/prepare-intel-macos-ci.py --output "$NATIVE_BROWSER_DIAGNOSTICS_DIR/runner-environment"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+      - name: Install fixture tooling and Linux graphics dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          if [ "$RUNNER_OS" = Linux ]; then
+            npx playwright install-deps firefox
+          fi
+      - name: Check pinned downloads and native browser protocol tooling
+        run: python3 scripts/test-waterfox-tooling.py
+      - name: Extract the verified browser into an isolated directory
+        env:
+          NATIVE_BROWSER_INSTALL_DIR: ${{ runner.temp }}/home-studio-native-browser
+        run: python3 scripts/setup-native-browser.py --product "$NATIVE_BROWSER_PRODUCT" --version "$NATIVE_BROWSER_VERSION" --output "$NATIVE_BROWSER_INSTALL_DIR"
+      - name: Test both synthetic viewers and the 256-item planner
+        id: native_acceptance
+        env:
+          NATIVE_BROWSER_INSTALL_DIR: ${{ runner.temp }}/home-studio-native-browser
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a python3 scripts/test-native-browser-acceptance.py --product "$NATIVE_BROWSER_PRODUCT" --expected-version "$NATIVE_BROWSER_VERSION" --installation "$NATIVE_BROWSER_INSTALL_DIR/install.json" --output "$NATIVE_BROWSER_DIAGNOSTICS_DIR"
+          else
+            python3 scripts/test-native-browser-acceptance.py --product "$NATIVE_BROWSER_PRODUCT" --expected-version "$NATIVE_BROWSER_VERSION" --installation "$NATIVE_BROWSER_INSTALL_DIR/install.json" --output "$NATIVE_BROWSER_DIAGNOSTICS_DIR"
+          fi
+      - name: Diagnose one original frame after a legacy native viewer failure
+        id: native_draw_diagnostic
+        if: ${{ !cancelled() && steps.native_acceptance.outcome == 'failure' && startsWith(matrix.os, 'macos-') && (matrix.product == 'waterfox' || (matrix.product == 'firefox' && matrix.version == '153.5.0esr')) }}
+        env:
+          NATIVE_BROWSER_INSTALL_DIR: ${{ runner.temp }}/home-studio-native-browser
+        run: >-
+          python3 scripts/diagnose-native-draw.py --product "$NATIVE_BROWSER_PRODUCT"
+          --expected-version "$NATIVE_BROWSER_VERSION"
+          --installation "$NATIVE_BROWSER_INSTALL_DIR/install.json"
+          --primary-output "$NATIVE_BROWSER_DIAGNOSTICS_DIR"
+          --output "$NATIVE_BROWSER_DIAGNOSTICS_DIR/diagnostics/first-frame"
+      - name: Preserve native browser identity and diagnostics
+        if: ${{ always() }}
+        uses: ./.github/actions/upload-acceptance-artifact
+        with:
+          name: acceptance-${{ matrix.os }}-${{ matrix.id }}
+          path: ${{ env.NATIVE_BROWSER_DIAGNOSTICS_DIR }}
+          if-no-files-found: error
+          retention-days: 14
+
+  safari:
+    name: Safari (macos-15, installed stable)
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -136,21 +307,19 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '22'
-      - name: Check pinned downloads and browser protocol tooling
-        run: python3 scripts/test-waterfox-tooling.py
-      - name: Extract the verified Waterfox version into an isolated directory
-        env:
-          WATERFOX_INSTALL_DIR: ${{ runner.temp }}/waterfox-${{ matrix.version }}
-        run: python3 scripts/setup-waterfox.py --version "$WATERFOX_VERSION" --output "$WATERFOX_INSTALL_DIR"
-      - name: Test this Waterfox version with synthetic viewer and planner fixtures
-        env:
-          WATERFOX_INSTALL_DIR: ${{ runner.temp }}/waterfox-${{ matrix.version }}
-        run: python3 scripts/test-waterfox-acceptance.py --installation "$WATERFOX_INSTALL_DIR/install.json" --output "$WATERFOX_DIAGNOSTICS_DIR"
-      - name: Preserve version-specific Waterfox diagnostics
+      - name: Install fixture tooling and check Safari protocol support
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          python3 scripts/test-safari-tooling.py
+      - name: Enable WebDriver on this disposable hosted runner
+        run: sudo /usr/bin/safaridriver --enable
+      - name: Test installed Safari with both viewers and the 256-item planner
+        run: python3 scripts/test-safari-acceptance.py --output acceptance-artifacts/safari
+      - name: Preserve actual Safari identity and diagnostics
         if: ${{ always() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: ./.github/actions/upload-acceptance-artifact
         with:
-          name: acceptance-windows-2022-waterfox-${{ matrix.version }}
-          path: ${{ env.WATERFOX_DIAGNOSTICS_DIR }}
+          name: acceptance-macos-15-safari
+          path: acceptance-artifacts/safari/
           if-no-files-found: error
           retention-days: 14

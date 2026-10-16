@@ -9,15 +9,25 @@ jobs:
     uses: ./.github/workflows/platform-acceptance.yml
   package:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: Check Python common errors
+        run: |
+          python3 -m pip install ruff==0.14.0
+          python3 -m ruff check --select F --ignore-noqa scripts ai_companion
+      - name: Test strict download transport with synthetic certificate chains
+        run: |
+          python3 -m pip install -r requirements-tls-test.txt
+          python3 scripts/test-download-tls.py
       - name: Check published sources and website
         run: python3 scripts/validate-site.py
       - name: Test archive validation, installation, backup and rollback
         run: python3 scripts/test-install-home-assistant.py
+      - name: Test ephemeral Intel runner preparation without system commands
+        run: python3 scripts/test-intel-macos-ci.py
       - name: Build and install a fictional home in an isolated directory
         run: python3 scripts/test-public-package.py
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
@@ -25,6 +35,8 @@ jobs:
           node-version: '22'
       - name: Replay fuzz regression inputs without mutation campaigns
         run: node --test fuzz/*.test.mjs
+      - name: Run bundled CPU regressions from the extracted public source ZIP
+        run: python3 scripts/test_source_replay.py
       - name: Check generated catalog and furniture export parity
         run: |
           python3 scripts/generate-furniture-catalog.py --check
@@ -43,12 +55,24 @@ jobs:
           node scripts/test-i18n.mjs
           node scripts/test-validation-i18n.mjs
           node --test scripts/test-panel-language.cjs
+      - name: Test AI draft validation and companion security without provider calls
+        run: |
+          node scripts/test-ai-draft.mjs
+          python3 scripts/test-ai-companion.py
       - name: Install browser test tools
+        timeout-minutes: 12
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           npx playwright install --with-deps chromium firefox
       - name: Test drawing, furnishing, export and installation through the editor
         run: npm run test:planner
+      - name: Test AI preview, review, undo and real local companion
+        env:
+          AI_PLANNER_ENGINES: chromium,firefox
+          AI_PLANNER_HEADED: '1'
+        run: |
+          LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-ai-planner.cjs
+          LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-ai-integration.cjs
       - name: Test language switching, right-to-left layout and project preservation
         run: node scripts/test-i18n-browser.cjs
       - name: Test localized help and offline installed viewer
@@ -70,6 +94,9 @@ jobs:
           node scripts/test-rounded-walls.cjs
           node scripts/test-wall-sheen.cjs
           node scripts/test-wall-motion.cjs
+          node scripts/test-wall-outline-materials.cjs
+          node scripts/test-unlit-architectural-walls.cjs
+          node scripts/test-flat-editor-floors.cjs
       - name: Test dimmed light indicators and color interpretation
         run: node --test scripts/test-light-state.cjs
       - name: Test TV frame retention and disposal
@@ -83,9 +110,36 @@ jobs:
       - name: Test render budgets and page lifecycle
         run: |
           node scripts/test-home-render-budget.cjs
+          node scripts/test-packed-room-lighting.cjs
+          node scripts/test-zero-point-block.cjs
+          node scripts/test-point-decay-two.cjs
+          node scripts/test-cached-shadow-transmission.cjs
+          node scripts/test-literal-lambert-directional.cjs
+          node scripts/test-glass-wall-program.cjs
+          node scripts/test-fallback-shared-program.cjs
+          node scripts/test-point-texture-current.cjs
+          node scripts/test-point-run-texture.cjs
+          node scripts/test-static-geometry-atlas.cjs
+          node scripts/test-point-signal-texture.cjs
+          node scripts/test-signal-texture-decay-two.cjs
+          node scripts/test-literal-lambert-point-body.cjs
+          node scripts/test-scalar-shadow-point.cjs
+          node scripts/test-scalar-indirect-lambert.cjs
+          node scripts/test-direct-shadow-uniforms.cjs
+          node scripts/test-scalar-lambert-accumulators.cjs
           node scripts/test-render-lifecycle.cjs
+          node scripts/test-viewer-geometry-context.cjs
+          node scripts/test-viewer-texture-context.cjs
+          node scripts/test-interaction-render.cjs
+          node scripts/test-native-viewer-programs.cjs
+          node --test scripts/test-render-capacity.cjs
           node --test scripts/test-browser-stability-diagnostics.cjs
+          node --test scripts/test-browser-startup-diagnostics.cjs
       - name: Test planner drawing and preview resource budgets
         run: node scripts/test-planner-render-budget.cjs
+      - name: Test bounded native draw diagnostics without a browser
+        run: |
+          python3 scripts/test-native-draw-diagnostic.py
+          node --test scripts/test-native-draw-diagnostic.cjs
       - name: Test deterministic public source release
         run: python3 scripts/test_package_release.py

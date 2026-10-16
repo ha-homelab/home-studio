@@ -1,5 +1,7 @@
 # Home studio
 
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15584/badge)](https://www.bestpractices.dev/projects/15584)
+
 [![Fuzzing: RC only](https://img.shields.io/badge/Fuzzing-RC%20only-blue)](docs/fuzzing.md)
 
 **[Start drawing](https://ha-homelab.github.io/home-studio/planner/)** ·
@@ -197,6 +199,30 @@ The generic package uses HA's own authentication. It does not install HACS,
 configure SSO, trace photos, or activate household-specific TV, camera, or RF
 sensing adapters.
 
+## Draft from room photos with your own AI
+
+Run the optional local companion with Python 3.10+:
+
+```sh
+python3 scripts/serve-ai-planner.py
+```
+
+On Windows: `py -3 scripts/serve-ai-planner.py`. Choose **Plan from photos** in the
+local editor, connect your provider or local vision model, and add photos,
+instructions and measured dimensions. Furnish an existing room or create a measured
+rectangular room, preview the suggestions, then apply one undoable edit. The normal
+editor, JSON export and Home Assistant installation workflow remain the same.
+
+Credentials stay in temporary companion memory and out of project/browser storage.
+Cloud generation sends the chosen data and authentication key to your provider;
+local generation requires a loopback model runtime. There is no Home Studio AI relay.
+The hosted website does not collect keys, and the installed HA viewer has no AI dependency.
+Adapters are mock-tested; exact live model compatibility still needs a user smoke test.
+
+[Quick start](https://ha-homelab.github.io/home-studio/ai-setup.html) ·
+[Workflow and privacy](docs/ai-planning.md) · [Provider setup](docs/ai-provider-setup.md) ·
+[Local models](docs/ai-local-models.md) · [Architecture](docs/ai-planner-architecture.md)
+
 ## Shared code, private homes
 
 The public compiler, viewer, integration core, and installer can also be used by
@@ -234,8 +260,11 @@ for two-floor drawing, furniture dragging, preview orbit, and graphics recovery
 in the browser editor. See [browser compatibility](docs/browser-compatibility.md)
 for rendering budgets, measured coverage, and a safe bug-report checklist.
 The public CI gate also requires [cross-platform acceptance](docs/platform-acceptance.md):
-package installation on Linux, Windows, and macOS, plus Chromium and Firefox
-checks of both the drawing tool and generated viewer on each OS.
+package installation on Linux, Windows, and macOS; pinned Chromium, Firefox,
+and WebKit generations; Chrome and Edge channels; native Firefox and Waterfox;
+and native Safari on macOS. Phone and tablet viewport checks supplement desktop
+coverage. The linked matrix distinguishes emulation from physical-device testing
+and records the exact versions actually launched.
 These are development tools only;
 users do not need Node.js or Playwright to draw, compile, or install a plan.
 The browser test exports a real drawing and installs that exact file's package
@@ -277,3 +306,8 @@ validation and geometry. See the [fuzzing guide](docs/fuzzing.md) for targets,
 budgets, synthetic data rules and reproduction, and [release instructions](RELEASING.md)
 for versioned source ZIPs. Beta builds and ordinary pull requests do not run
 mutation campaigns.
+
+
+## Contributing and security
+
+See [contribution and test requirements](CONTRIBUTING.md), [private security reporting](SECURITY.md), [governance](GOVERNANCE.md) and the [roadmap](ROADMAP.md).

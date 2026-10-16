@@ -12,10 +12,31 @@ LOCALE_CODES = (
     'en', 'ar', 'bn', 'cs', 'de', 'es', 'fa', 'fr', 'he', 'hi', 'id', 'it',
     'ja', 'ko', 'nl', 'pl', 'pt', 'ru', 'th', 'tr', 'uk', 'vi', 'zh-Hans', 'zh-Hant',
 )
+# These reviewed binary seeds encode only byte extrema, not arbitrary files.
+BINARY_REPLAY_SEEDS = {
+    'fuzz/corpus/wall-geometry/rectangle': bytes(range(14)),
+    'fuzz/corpus/wall-geometry/limits': bytes([255]) * 14,
+}
+FUZZ_REPLAY_FILES = (
+    'fuzz/project-validation.test.mjs', 'fuzz/wall-geometry.test.mjs',
+    'fuzz/project-validation.mjs', 'fuzz/wall-geometry.mjs', 'fuzz/bounds-oracle.mjs',
+    'fuzz/corpus/project-validation/empty.json',
+    'fuzz/corpus/project-validation/example-home.json',
+    'fuzz/corpus/project-validation/practice-home.json',
+    'fuzz/corpus/project-validation/invalid-title.json',
+    'fuzz/corpus/project-validation/prototype.json',
+    'fuzz/corpus/project-validation/furniture-valid.json',
+    'fuzz/corpus/project-validation/furniture-invalid-type.json',
+    'fuzz/corpus/project-validation/furniture-invalid-color.json',
+    'fuzz/corpus/project-validation/furniture-invalid-model.json',
+    'fuzz/corpus/project-validation/furniture-invalid-style.json',
+    'fuzz/corpus/project-validation/furniture-invalid-pattern.json',
+    *BINARY_REPLAY_SEEDS,
+)
 
 SITE_FILES = (
-    'index.html', 'site.css', 'privacy.html', 'install.html', '404.html', '.nojekyll',
-    'planner/index.html', 'planner/editor.css', 'planner/editor.js',
+    'index.html', 'site.css', 'privacy.html', 'install.html', 'ai-setup.html', '404.html', '.nojekyll',
+    'planner/index.html', 'planner/editor.css', 'planner/editor.js', 'planner/render-capacity.js', 'planner/interaction-render.js',
     'planner/i18n.js', 'planner/validation.js', 'planner/locales/index.js',
     'planner/help.js', 'planner/help.css', 'planner/help-locales.js', 'planner/language-links.js',
     *(f'planner/locales/{code}.js' for code in LOCALE_CODES),
@@ -29,10 +50,14 @@ SITE_FILES = (
     'planner/guide-assets/garage-and-studio.json',
     'planner/guide-assets/decor-studio.json', 'planner/guide-assets/10-decor-studio.jpg',
     'planner/guide-assets/pattern-studio.json', 'planner/guide-assets/11-pattern-studio.jpg',
+    'planner/guide-assets/12-ai-review.jpg',
     'vendor/three.module.min.js', 'vendor/THREE-LICENSE.txt',
 )
-REPO_FILES = ('docs/i18n.md', 'docs/translations/README.md',
-              'docs/dry-run.md', 'docs/fuzzing.md', 'RELEASING.md', 'scripts/test-dry-run.cjs',
+REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'THIRD_PARTY_NOTICES.md',
+              'scripts/download_tls.py', 'scripts/test-download-tls.py', 'requirements-tls-test.txt',
+              'requirements-strict-tls.txt', 'docs/transport-security.md',
+              'docs/i18n.md', 'docs/translations/README.md',
+              'docs/dry-run.md', 'scripts/test-dry-run.cjs',
               'scripts/build-panel-locales.py', 'scripts/test-dry-run-browser.cjs',
               'scripts/validate-docs.py', 'scripts/test-docs.py',
               *(f'docs/wiki/{name}.md' for name in ('Home', '_Sidebar', 'Getting-started', 'Dry-run', 'Troubleshooting', 'Languages', 'Development')),
@@ -45,18 +70,48 @@ REPO_FILES = ('docs/i18n.md', 'docs/translations/README.md',
               'scripts/test-help-i18n.cjs', 'scripts/test-panel-language.cjs', 'scripts/test-viewer-i18n.cjs', 'scripts/test-lock-control.cjs',
               'viewer-i18n.js', 'viewer-locales/index.json',
               *(f'viewer-locales/{code}.json' for code in LOCALE_CODES),
-              'README.md', 'LICENSE', '.gitignore', '.gitattributes', 'scripts/validate-site.py', '.github/workflows/pages.yml',
+              'README.md', 'LICENSE', 'CONTRIBUTING.md', 'SECURITY.md',
+              'GOVERNANCE.md', 'CODE_OF_CONDUCT.md', 'ROADMAP.md', 'docs/quality.md',
+              'RELEASING.md', 'CHANGELOG.md', 'docs/fuzzing.md',
+              'docs/rc-fuzzing.md', 'docs/release-workflow.md', '.gitignore', '.gitattributes', 'scripts/validate-site.py', '.github/workflows/pages.yml',
               '.github/workflows/package.yml', '.github/workflows/platform-acceptance.yml',
+              '.github/actions/upload-acceptance-artifact/action.yml',
               'docs/architecture.md', 'docs/platform-acceptance.md',
+              'docs/ai-planning.md', 'docs/ai-planner-architecture.md',
+              'docs/ai-provider-setup.md', 'docs/ai-local-models.md',
+              'docs/assets/ai/planning-data-flow.svg',
+              'ai/package.json', 'ai/bootstrap.js', 'ai/panel.js', 'ai/panel.css',
+              'ai/photo-worker.js', 'ai/draft.js', 'ai/json.js',
+              'ai_companion/__init__.py', 'ai_companion/assets.json',
+              'ai_companion/server.py', 'ai_companion/protocol.py',
+              'ai_companion/providers.py', 'ai_companion/transport.py',
+              'scripts/serve-ai-planner.py', 'scripts/test-ai-companion.py',
+              'scripts/test-ai-draft.mjs', 'scripts/test-ai-planner.cjs',
+              'scripts/test-ai-integration.cjs',
               'scripts/build-planner-project.py', 'scripts/install-home-assistant.py',
               'scripts/package_release.py', 'scripts/test_package_release.py',
+              'scripts/test_source_replay.py', *FUZZ_REPLAY_FILES,
+              'scripts/test-light-state.cjs', 'scripts/test-tv-screen.cjs', 'scripts/test-media-preview.cjs',
               'scripts/test-install-home-assistant.py', 'scripts/test-public-package.py', 'scripts/test-wall-tops.cjs',
-              'scripts/test-rounded-walls.cjs', 'scripts/test-wall-sheen.cjs', 'scripts/test-wall-motion.cjs', 'docs/rounded-walls.md',
+              'scripts/test-rounded-walls.cjs', 'scripts/test-wall-sheen.cjs', 'scripts/test-wall-motion.cjs', 'scripts/test-wall-outline-materials.cjs', 'scripts/test-unlit-architectural-walls.cjs', 'scripts/test-flat-editor-floors.cjs', 'docs/rounded-walls.md',
               'scripts/test-browser-stability.cjs', 'scripts/browser-stability-diagnostics.cjs',
+              'scripts/browser-startup-diagnostics.cjs', 'scripts/test-browser-startup-diagnostics.cjs',
               'scripts/test-browser-stability-diagnostics.cjs', 'scripts/test-home-render-budget.cjs',
+              'scripts/test-packed-room-lighting.cjs', 'scripts/test-zero-point-block.cjs', 'scripts/test-point-decay-two.cjs', 'scripts/test-cached-shadow-transmission.cjs', 'scripts/test-literal-lambert-directional.cjs', 'docs/literal-lambert-directional.md', 'docs/point-decay-two.md', 'scripts/test-glass-wall-program.cjs', 'scripts/test-fallback-shared-program.cjs',
+              'scripts/test-point-texture-current.cjs', 'scripts/test-point-run-texture.cjs', 'scripts/test-static-geometry-atlas.cjs', 'scripts/test-point-signal-texture.cjs', 'scripts/test-signal-texture-decay-two.cjs', 'scripts/test-literal-lambert-point-body.cjs', 'scripts/test-scalar-shadow-point.cjs', 'scripts/test-scalar-indirect-lambert.cjs', 'scripts/test-direct-shadow-uniforms.cjs', 'scripts/test-scalar-lambert-accumulators.cjs',
               'scripts/waterfox-versions.json', 'scripts/setup-waterfox.py', 'scripts/test-waterfox-acceptance.py',
-              'scripts/test-waterfox-tooling.py',
-              'scripts/test-render-lifecycle.cjs', 'docs/browser-compatibility.md',
+              'scripts/test-waterfox-tooling.py', 'scripts/native-viewer-program-diagnostics.js', 'scripts/test-native-viewer-programs.cjs',
+              'scripts/prepare-intel-macos-ci.py', 'scripts/test-intel-macos-ci.py',
+              'scripts/firefox-versions.json', 'scripts/native_browser.py',
+              'scripts/setup-native-browser.py', 'scripts/test-native-browser-acceptance.py',
+              'scripts/diagnose-native-draw.py', 'scripts/native-draw-diagnostic.js',
+              'scripts/test-native-draw-diagnostic.py', 'scripts/test-native-draw-diagnostic.cjs',
+              'scripts/test-safari-acceptance.py', 'scripts/test-safari-tooling.py',
+              'scripts/browser-matrix.json', 'scripts/browser-matrix.py',
+              'scripts/setup-browser-toolchain.py', 'scripts/setup-chrome-for-testing.py',
+              'scripts/install-browser-with-retry.py', 'scripts/test-browser-install.py',
+              'scripts/test-browser-matrix.py',
+              'scripts/test-render-capacity.cjs', 'scripts/test-interaction-render.cjs', 'scripts/test-render-lifecycle.cjs', 'scripts/test-viewer-geometry-context.cjs', 'scripts/test-viewer-texture-context.cjs', 'docs/browser-compatibility.md',
               'scripts/test-planner-stability.cjs', 'scripts/test-planner-render-budget.cjs',
               'scripts/test-viewer-startup.cjs', 'scripts/test-module-expiry.cjs', 'scripts/test-floor-context.py', 'scripts/test-floor-context.cjs',
               'planner/project.py', 'planner/package.json', 'planner/catalog.json', 'planner/furniture.py',
@@ -109,6 +164,10 @@ def validate(root):
     documents = {}
     for relative in (*SITE_FILES, *REPO_FILES):
         path = regular_file(root, relative)
+        if relative in BINARY_REPLAY_SEEDS:
+            if path.read_bytes() != BINARY_REPLAY_SEEDS[relative]:
+                raise ValueError(f'Unexpected binary replay seed: {relative}')
+            continue
         if path.suffix == '.jpg':
             continue
         text = path.read_text(encoding='utf-8')
@@ -119,6 +178,16 @@ def validate(root):
             parser = Links()
             parser.feed(text)
             documents[relative] = parser
+    # The companion may serve only reviewed UI files, never its Python source or
+    # arbitrary repository content. Network-capable AI modules stay off Pages.
+    ai_assets = {'ai/bootstrap.js', 'ai/panel.js', 'ai/panel.css',
+                 'ai/photo-worker.js', 'ai/draft.js', 'ai/json.js'}
+    allowed = json.loads(regular_file(root, 'ai_companion/assets.json').read_text())
+    if (not isinstance(allowed, list) or not all(isinstance(name, str) for name in allowed)
+            or len(allowed) != len(set(allowed)) or set(allowed) != set(SITE_FILES) | ai_assets):
+        raise ValueError('Companion asset allowlist must exactly match reviewed UI assets')
+    if ai_assets & set(SITE_FILES):
+        raise ValueError('AI network modules must not be published on the shared Pages origin')
     for relative, parser in documents.items():
         for tag, key, link in parser.links:
             parsed = urlsplit(link)
