@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Test reviewed coverage and reject toolchain drift or unsafe browser archives."""
 import importlib.util
+import copy
 import hashlib
 import io
 import json
@@ -43,8 +44,8 @@ class BrowserMatrixTests(unittest.TestCase):
 
     def test_full_desktop_and_touch_coverage_is_required(self):
         rows = self.rows['browser']['include']
-        self.assertEqual(len(rows), 57)
-        self.assertEqual(len(self.rows['native']['include']), 12)
+        self.assertEqual(len(rows), 58)
+        self.assertEqual(len(self.rows['native']['include']), 14)
         for matrix_rows in self.rows.values():
             identities = {(row['os'], row['id']) for row in matrix_rows['include']}
             self.assertEqual(len(identities), len(matrix_rows['include']))
@@ -93,7 +94,8 @@ class BrowserMatrixTests(unittest.TestCase):
                 'firefox-153.5.0esr', 'waterfox-6.7.5', 'waterfox-6.7.6')],
         }
         for name, matrix_rows in self.rows.items():
-            identities = [(row['os'], row['id']) for row in matrix_rows['include']]
+            identities = [(row['os'], row['id']) for row in matrix_rows['include']
+                          if row['os'] in platforms]
             self.assertEqual(identities[:len(priority[name])], priority[name])
             remaining = identities[len(priority[name]):]
             targets = list(dict.fromkeys(target for _, target in remaining))
@@ -101,6 +103,43 @@ class BrowserMatrixTests(unittest.TestCase):
                         if (os, target) not in priority[name]]
             self.assertEqual(remaining, expected)
         self.assertEqual(self.rows, matrix.expand(self.manifest))
+
+    def test_intel_comparisons_add_only_three_exact_clones(self):
+        original = copy.deepcopy(self.manifest)
+        original.pop('additional_targets')
+        baseline = matrix.expand(original)
+        expected = {'browser': {'firefox-153.0-pw1.62.1-desktop'},
+                    'native': {'firefox-153.5.0esr', 'waterfox-6.7.6'}}
+        for name, matrix_rows in self.rows.items():
+            rows = matrix_rows['include']
+            additional = [row for row in rows if row['os'] == 'macos-15-intel']
+            self.assertEqual({row['id'] for row in additional}, expected[name])
+            self.assertEqual([row for row in rows if row['os'] != 'macos-15-intel'],
+                             baseline[name]['include'])
+            for row in additional:
+                self.assertIn({**row, 'os': 'macos-15'}, baseline[name]['include'])
+            self.assertTrue(all(row['os'].startswith('macos-') for row in rows[:2]))
+        self.assertEqual(sum(len(rows['include']) for rows in self.rows.values()) + 4, 76)
+
+    def test_additional_targets_reject_unknown_sources_targets_and_duplicates(self):
+        changes = [
+            ('source_platform', 'unknown', 'known source'),
+            ('browser', ['firefox-999-desktop'], 'Unknown or ambiguous'),
+            ('native', ['waterfox-0.0'], 'Unknown or ambiguous'),
+            ('browser', ['firefox-153.0-pw1.62.1-desktop'] * 2, 'unique rows'),
+            ('native', ['waterfox-6.7.6'] * 2, 'unique rows'),
+            ('architecture', 'unknown', 'metadata is invalid'),
+        ]
+        for key, value, error in changes:
+            with self.subTest(key=key, value=value):
+                manifest = copy.deepcopy(self.manifest)
+                manifest['additional_targets']['macos-15-intel'][key] = value
+                with self.assertRaisesRegex(ValueError, error):
+                    matrix.expand(manifest)
+        manifest = copy.deepcopy(self.manifest)
+        manifest['additional_targets']['macos-15'] = manifest['additional_targets'].pop('macos-15-intel')
+        with self.assertRaisesRegex(ValueError, 'distinct platform'):
+            matrix.expand(manifest)
 
     def test_npm_locks_use_only_exact_integrity_pinned_dependencies(self):
         for version, toolchain in self.manifest['playwright'].items():

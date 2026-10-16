@@ -73,7 +73,23 @@ def expand(manifest):
             for version in versions:
                 native.append(dict(os=os, product=product, version=version,
                                    id=f'{product}-{version}'))
-    for rows in (browser, native):
+    matrices = {'browser': browser, 'native': native}
+    for os, targets in manifest.get('additional_targets', {}).items():
+        source = targets['source_platform']
+        if source not in manifest['platforms'] or os in manifest['platforms']:
+            raise ValueError('Additional targets require a known source and a distinct platform')
+        if (targets['system'] != manifest['platforms'][source]['system'] or
+                targets['architecture'] not in ('x64', 'arm64')):
+            raise ValueError('Additional target platform metadata is invalid')
+        if not targets.get('browser') and not targets.get('native'):
+            raise ValueError('Additional platforms must name explicit targets')
+        for name, rows in matrices.items():
+            for target in targets.get(name, []):
+                matches = [row for row in rows if row['os'] == source and row['id'] == target]
+                if len(matches) != 1:
+                    raise ValueError(f'Unknown or ambiguous additional {name} target: {target}')
+                rows.append({**matches[0], 'os': os})
+    for rows in matrices.values():
         identities = {(row['os'], row['id']) for row in rows}
         if len(identities) != len(rows) or not 1 <= len(rows) <= 256:
             raise ValueError('Matrix must have unique rows within the GitHub job limit')

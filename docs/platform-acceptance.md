@@ -16,7 +16,7 @@ missing WebGL, browser crash, timeout, or failed assertion fails the gate.
 `fail-fast: false` lets the remaining rows finish and preserve their evidence.
 
 The reviewed inventory is `scripts/browser-matrix.json`, checked on
-2026-10-15. Its expansion produces **73 acceptance executions**, plus one
+2026-10-15. Its expansion produces **76 acceptance executions**, plus one
 inventory-validation job:
 
 - **3 package/install rows:** Ubuntu 24.04 x64, Windows Server 2022 x64, and
@@ -38,6 +38,18 @@ inventory-validation job:
 - **1 native Safari row:** the Safari installed on the macOS 15 runner, driven
   through Apple's `safaridriver`. Its runtime version is recorded separately
   from the WebKit engine rows.
+- **3 Intel Mac comparison rows:** Playwright Firefox **153.0**, native Firefox
+  ESR **153.5.0esr**, and native Waterfox **6.7.6** on `macos-15-intel`. These add
+  x64 evidence alongside the same required ARM64 targets; all original 73
+  executions remain required.
+
+The Intel rows reuse the exact browser pins, fixtures, graphics preferences,
+and assertions of their ARM64 counterparts. They compare older Gecko's CGL
+behavior across hosted architectures; they are not an assumed fix or a claim
+about physical Intel GPUs. GitHub documents `macos-15-intel` as a standard
+[Intel runner](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+The manifest lists these three targets explicitly rather than expanding every
+browser onto another platform.
 
 Playwright **1.64.0** pins Chromium **156.0.8078.4**, Firefox **157.0**, and
 WebKit **27.2**. Playwright **1.63.0** pins Chromium **153.0.8010.12**, Firefox
@@ -50,6 +62,8 @@ not Linux containers with a different user agent. The existing focused Linux
 package suite continues to run localization, model, render-budget, component,
 and fuzz-regression checks. The ten-row browser limit shortens the full gate
 while keeping each row's fixture and timing limits unchanged.
+Older macOS Gecko, Windows WebKit, and touch rows run first so known risks
+produce evidence early; scheduling priority does not change required coverage.
 
 The Playwright versions above are three snapshots, **not three consecutive
 browser majors**. Their versions and revisions come from each release's
@@ -246,7 +260,7 @@ bundles unmodified so their signatures remain valid.
 
 A successful matrix covers the inventory above, not every past browser or
 hardware combination. Windows Server 2022 is not the reporter's Windows 11
-machine. ARM64 macOS coverage does not establish Intel Mac behavior. Hosted
+machine. Intel Mac coverage is limited to the three explicit comparison rows. Hosted
 VM renderers do not reproduce all GPUs, drivers, extensions, browser policies,
 or hardware-acceleration settings.
 

@@ -19,6 +19,15 @@
       "cft": "mac-arm64"
     }
   },
+  "additional_targets": {
+    "macos-15-intel": {
+      "system": "macos",
+      "architecture": "x64",
+      "source_platform": "macos-15",
+      "browser": ["firefox-153.0-pw1.62.1-desktop"],
+      "native": ["firefox-153.5.0esr", "waterfox-6.7.6"]
+    }
+  },
   "playwright": {
     "1.64.0": {
       "metadata_source": "https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/browsers.json",

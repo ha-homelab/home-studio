@@ -68,7 +68,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
             self.assertEqual(jobs[job]['needs'], 'matrix')
             self.assertEqual(jobs[job]['strategy']['matrix'], '${{ fromJSON(needs.matrix.outputs.' + output + ') }}')
             self.assertEqual(jobs[job]['runs-on'], '${{ matrix.os }}')
-            self.assertEqual({row['os'] for row in inventory()[output]['include']}, PLATFORMS)
+            self.assertEqual({row['os'] for row in inventory()[output]['include']}, PLATFORMS | {'macos-15-intel'})
         source = (WORKFLOWS / 'platform-acceptance.yml').read_text(encoding='utf-8')
         self.assertNotIn('REPORT_ONLY', source)
         self.assertNotIn('|| true', source)
@@ -151,7 +151,8 @@ class PlatformAcceptanceTests(unittest.TestCase):
         self.assertNotIn('--headless', runs)
         for row in inventory()['native']['include']:
             manifest = json.loads((ROOT / f'scripts/{row["product"]}-versions.json').read_text())
-            key = {'ubuntu-24.04': 'linux-x64', 'windows-2022': 'windows-x64', 'macos-15': 'macos'}[row['os']]
+            key = {'ubuntu-24.04': 'linux-x64', 'windows-2022': 'windows-x64',
+                   'macos-15': 'macos', 'macos-15-intel': 'macos'}[row['os']]
             download = manifest['versions'][row['version']][key]
             url = urlsplit(download['url'])
             self.assertEqual(url.scheme, 'https')
@@ -174,15 +175,15 @@ class PlatformAcceptanceTests(unittest.TestCase):
         self.assertEqual(browser['FIREFOX_WEBGL_BACKEND'],
                          "${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && (matrix.playwright == '1.63.0' || matrix.playwright == '1.64.0') && 'angle' || 'default' }}")
         self.assertEqual(browser['FIREFOX_COMPOSITOR_BACKEND'],
-                         "${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && matrix.playwright == '1.62.1' && 'software' || 'default' }}")
+                         "${{ startsWith(matrix.os, 'macos-') && matrix.engine == 'firefox' && matrix.playwright == '1.62.1' && 'software' || 'default' }}")
         self.assertEqual(browser['FIREFOX_GPU_PROCESS'],
-                         "${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && matrix.playwright == '1.62.1' && 'disabled' || 'default' }}")
+                         "${{ startsWith(matrix.os, 'macos-') && matrix.engine == 'firefox' && matrix.playwright == '1.62.1' && 'disabled' || 'default' }}")
         self.assertEqual(native['FIREFOX_WEBGL_BACKEND'],
                          "${{ matrix.os == 'macos-15' && matrix.product == 'firefox' && matrix.version == '158.0' && 'angle' || 'default' }}")
         self.assertEqual(native['FIREFOX_COMPOSITOR_BACKEND'],
-                         "${{ matrix.os == 'macos-15' && (matrix.product == 'waterfox' || (matrix.product == 'firefox' && matrix.version == '153.5.0esr')) && 'software' || 'default' }}")
+                         "${{ startsWith(matrix.os, 'macos-') && (matrix.product == 'waterfox' || (matrix.product == 'firefox' && matrix.version == '153.5.0esr')) && 'software' || 'default' }}")
         self.assertEqual(native['FIREFOX_GPU_PROCESS'],
-                         "${{ matrix.os == 'macos-15' && (matrix.product == 'waterfox' || (matrix.product == 'firefox' && matrix.version == '153.5.0esr')) && 'disabled' || 'default' }}")
+                         "${{ startsWith(matrix.os, 'macos-') && (matrix.product == 'waterfox' || (matrix.product == 'firefox' && matrix.version == '153.5.0esr')) && 'disabled' || 'default' }}")
 
     def test_chromium_backend_uses_hosted_metal_only_on_macos(self):
         browser = workflow('platform-acceptance.yml')['jobs']['browser']['env']
