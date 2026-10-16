@@ -2,6 +2,13 @@
 
 ## [0.6.4] - Development line
 
+- Experimentally cap the Apple diffuse viewer at 125,000 drawing-buffer pixels
+  instead of 250,000, including its measured masked-Apple selection. Home and
+  Editor canvas detail becomes softer; HTML controls retain their resolution.
+  Geometry, lights, shadows, the 62,500-pixel motion target, other renderers,
+  planner and acceptance deadlines are unchanged. This isolated experiment
+  requires visual and performance evaluation and is not release qualification.
+
 - Give each cold viewer creation one aggregate 60-second readiness budget,
   including fetch, frame selection and the first fully connected lit frame.
   Apply it uniformly across browsers and both creation cycles, bounded by the
