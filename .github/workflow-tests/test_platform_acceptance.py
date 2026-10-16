@@ -106,6 +106,24 @@ class PlatformAcceptanceTests(unittest.TestCase):
         inventory_checks = '\n'.join(step.get('run', '') for step in jobs['matrix']['steps'])
         self.assertIn('python3 scripts/test-browser-install.py', inventory_checks)
 
+    def test_native_draw_diagnostic_is_separate_and_only_follows_a_legacy_failure(self):
+        steps = workflow('platform-acceptance.yml')['jobs']['native-browser']['steps']
+        primary = next(step for step in steps if step.get('id') == 'native_acceptance')
+        diagnostic = next(step for step in steps if step.get('id') == 'native_draw_diagnostic')
+        self.assertNotIn('if', primary)
+        self.assertEqual(diagnostic['if'], "${{ !cancelled() && steps.native_acceptance.outcome == 'failure' && startsWith(matrix.os, 'macos-') && (matrix.product == 'waterfox' || (matrix.product == 'firefox' && matrix.version == '153.5.0esr')) }}")
+        self.assertLess(steps.index(primary), steps.index(diagnostic))
+        self.assertEqual(diagnostic['env']['NATIVE_BROWSER_INSTALL_DIR'], primary['env']['NATIVE_BROWSER_INSTALL_DIR'])
+        self.assertIn('scripts/diagnose-native-draw.py', diagnostic['run'])
+        self.assertNotIn('test-native-browser-acceptance.py', diagnostic['run'])
+        self.assertIn('--primary-output "$NATIVE_BROWSER_DIAGNOSTICS_DIR"', diagnostic['run'])
+        self.assertIn('--output "$NATIVE_BROWSER_DIAGNOSTICS_DIR/diagnostics/first-frame"', diagnostic['run'])
+        self.assertNotIn('continue-on-error', primary)
+        self.assertNotIn('continue-on-error', diagnostic)
+        package = '\n'.join(step.get('run','') for step in workflow('package.yml')['jobs']['package']['steps'])
+        self.assertIn('python3 scripts/test-native-draw-diagnostic.py', package)
+        self.assertIn('node --test scripts/test-native-draw-diagnostic.cjs', package)
+
     def test_touch_comparisons_only_rerun_failed_sizes_and_never_hide_a_failure(self):
         steps = workflow('platform-acceptance.yml')['jobs']['browser']['steps']
         diagnostic = next(step for step in steps if step.get('id') == 'viewer_touch_diagnostics')

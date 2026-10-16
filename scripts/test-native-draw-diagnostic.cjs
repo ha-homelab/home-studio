@@ -1,0 +1,89 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const test = require('node:test');
+const source = fs.readFileSync(path.join(__dirname,'native-draw-diagnostic.js'),'utf8');
+
+function fixture({draws=1, diffuse=true, failFinish=0}={}) {
+  const events=[], calls={render:0,draw:0,finish:0,queries:0};
+  let clock=0;
+  const gl={FRAMEBUFFER:1,DRAW_FRAMEBUFFER:2,FRAMEBUFFER_BINDING:3,VIEWPORT:4,
+    LINK_STATUS:5,VERTEX_SHADER:6,FRAGMENT_SHADER:7,drawingBufferWidth:100,drawingBufferHeight:80,
+    createShader:()=>({}), shaderSource(){},attachShader(){},useProgram(){},
+    bindFramebuffer(){},viewport(){},linkProgram(){},getProgramParameter(){return true;},
+    getParameter(p){calls.queries++;return p===3?null:[0,0,100,80];},
+    drawElements(){calls.draw++;},finish(){calls.finish++;clock+=3;if(calls.finish===failFinish)throw Error('GPU failed');}};
+  const camera={}, light={type:'PointLight',name:'synthetic lamp',shadow:{camera,isPointLightShadow:true,updateMatrices(){},mapSize:{toArray:()=>[128,128]}}};
+  const program={}, framebuffer={}, material={type:'MeshLambertMaterial',side:2,transparent:false};
+  const mesh={name:'fictional floor',userData:{category:'floors'},material};
+  const renderer={getContext:()=>gl,info:{render:{calls:draws}},
+    renderBufferDirect(camera,fog,geometry,material,mesh){
+      gl.useProgram(program);gl.drawElements(4,36,5123,0);
+    },
+    shadowMap:{render(){light.shadow.updateMatrices(light,3);renderer.renderBufferDirect(camera,null,null,{type:'MeshDistanceMaterial',side:0,transparent:false},mesh);}},
+    render(scene){
+      calls.render++;
+      const vertex=gl.createShader(gl.VERTEX_SHADER),fragment=gl.createShader(gl.FRAGMENT_SHADER);
+      gl.shaderSource(vertex,'vertex');gl.shaderSource(fragment,'fragment');
+      gl.attachShader(program,vertex);gl.attachShader(program,fragment);
+      gl.linkProgram(program);gl.getProgramParameter(program,gl.LINK_STATUS);
+      if(scene.shadow){gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);gl.viewport(0,0,256,128);renderer.shadowMap.render([light]);}
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,null);gl.viewport(0,0,100,80);
+      for(let i=0;i<draws;i++)renderer.renderBufferDirect({},null,null,material,mesh);
+    }};
+  const context={window:{},console:{info(line){events.push(JSON.parse(line.slice('HOME_NATIVE_DRAW '.length)));}},
+    performance:{now:()=>++clock}};
+  vm.runInNewContext(source+'\nthis.attach=attachNativeDrawDiagnostic;',context);
+  context.attach(renderer,()=>({connected:false,renderCount:0,profile:{diffuseLighting:diffuse}}));
+  return {renderer,gl,calls,events,result:context.window.__nativeDrawDiagnostic};
+}
+
+test('only one naturally requested scene frame is fenced; queries and later frames are untouched',()=>{
+  const f=fixture();assert.deepEqual(f.calls,{render:0,draw:0,finish:0,queries:0});
+  f.renderer.render({shadow:true});
+  assert.deepEqual(f.calls,{render:1,draw:2,finish:3,queries:2});
+  assert.equal(f.result.done,true);assert.equal(f.result.draws,2);
+  const before=f.events.filter(e=>e.event==='draw-before');
+  assert.equal(before[0].phase,'shadow');assert.equal(before[0].shadow.type,'PointLight');
+  assert.equal(before[0].shadow.faceIndex,3);
+  assert.equal(before[0].material,'MeshDistanceMaterial');assert.equal(before[0].originalMaterial,'MeshLambertMaterial');
+  assert.ok(before[0].framebuffer);assert.deepEqual(before[0].viewport,[0,0,256,128]);
+  assert.equal(before[1].phase,'main');assert.equal(before[1].framebuffer,null);
+  assert.equal(before[1].category,'floors');assert.deepEqual(before[1].shaders.map(s=>s.type),['vertex','fragment']);
+  assert.ok(before[1].shaders.every(s=>/^fnv1a32:[a-f0-9]{8}$/.test(s.fingerprint)));
+  assert.equal(f.events.filter(e=>e.event==='query-before').length,2);
+  assert.ok(f.events.some(e=>e.event==='draw-after'&&e.completionMs>e.submissionMs));
+  f.renderer.render({});assert.equal(f.calls.finish,3);assert.equal(f.calls.render,2);
+  assert.equal(f.events.filter(e=>e.event==='frame-before').length,1);
+});
+
+test('draw cap stops fencing rather than dropping scene draw calls',()=>{
+  const f=fixture({draws:605});f.renderer.render({});
+  assert.equal(f.calls.draw,605);assert.equal(f.calls.finish,601);
+  assert.equal(f.result.draws,600);assert.equal(f.result.truncated,true);assert.equal(f.result.done,true);
+  assert.equal(f.events.filter(e=>e.event==='draw-limit').length,1);
+});
+
+test('before-draw evidence survives completion failure, and the error is preserved',()=>{
+  const f=fixture({failFinish:2});assert.throws(()=>f.renderer.render({}),/GPU failed/);
+  assert.equal(f.result.done,true);assert.match(f.result.error,/GPU failed/);
+  assert.equal(f.events.filter(e=>e.event==='draw-before').length,1);
+  assert.equal(f.events.filter(e=>e.event==='draw-after').length,0);
+  assert.equal(f.events.find(e=>e.event==='draw-error').submitted,true);
+});
+
+test('ordinary profiles are never fenced and copy passes cannot consume the scene capture',()=>{
+  const ordinary=fixture({diffuse:false});ordinary.renderer.render({});
+  assert.equal(ordinary.calls.finish,0);assert.match(ordinary.result.error,/legacy diffuse/);
+  const f=fixture();f.renderer.render({name:'interaction-copy'});
+  assert.equal(f.calls.finish,0);assert.equal(f.result.done,false);
+  f.renderer.render({});assert.equal(f.calls.finish,2);assert.equal(f.result.done,true);
+});
+
+test('event persistence is capped even when a driver performs repeated link-status queries',()=>{
+  const f=fixture();const direct=f.renderer.renderBufferDirect;
+  f.renderer.renderBufferDirect=function(...args){for(let i=0;i<1200;i++)f.gl.getProgramParameter({},f.gl.LINK_STATUS);return direct.apply(this,args);};
+  f.renderer.render({});assert.equal(f.events.length,2000);assert.equal(f.result.truncated,true);
+  assert.equal(f.events.at(-1).event,'event-limit');assert.equal(f.calls.draw,1);
+});

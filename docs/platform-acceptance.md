@@ -469,6 +469,30 @@ and Waterfox rows use `FIREFOX_COMPOSITOR_BACKEND=software` and
 apply only to disposable test profiles. Keep application
 bundles unmodified so their signatures remain valid.
 
+After a macOS legacy native viewer fails, CI may capture one original startup
+frame with `scripts/diagnose-native-draw.py`. It selects the failed six-room
+case first, otherwise the failed 24-room case, only when the primary receipt
+records Apple Software Renderer or a masked renderer with a measured slow
+raster probe. It uses the same verified installation, source and preferences.
+The primary failure remains required and unchanged; this is not an acceptance
+retry and does not add or replace any of the 77 required lanes.
+
+The separate `diagnostics/first-frame/` directory contains `diagnostic.json`,
+`draws.jsonl`, and the browser's durable log and report. The diagnostic fences
+each draw with `gl.finish`, retaining program/shader fingerprints, material and
+mesh category, framebuffer/viewport, shadow-light attribution and the original
+point-shadow atlas face index. Shader fingerprints include `hashedLength` and
+cover at most 65,536 code units; a matching truncated fingerprint does not prove
+full-source equality. Fencing
+changes scheduling: compare submission and completion times as diagnostic
+evidence, not ordinary acceptance performance or pure shader compilation time.
+Only the first naturally requested frame is fenced; no warm-up frame or input
+sequence is added. At most 600 draws and 2,000 event records are captured, with
+a 180-second overall worker deadline including setup and launch. A bounded
+five-second termination grace precedes forced process-group cleanup. Partial
+logs remain available when startup, a draw or teardown fails. Neither successful
+capture nor incomplete capture changes the failed primary receipt.
+
 ## Boundaries of a green result
 
 A successful matrix covers the inventory above, not every past browser or

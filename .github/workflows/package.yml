@@ -84,5 +84,9 @@ jobs:
           node --test scripts/test-browser-startup-diagnostics.cjs
       - name: Test planner drawing and preview resource budgets
         run: node scripts/test-planner-render-budget.cjs
+      - name: Test bounded native draw diagnostics without a browser
+        run: |
+          python3 scripts/test-native-draw-diagnostic.py
+          node --test scripts/test-native-draw-diagnostic.cjs
       - name: Test deterministic public source release
         run: python3 scripts/test_package_release.py

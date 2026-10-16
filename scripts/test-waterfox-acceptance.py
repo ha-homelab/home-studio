@@ -585,13 +585,15 @@ def assert_browser_identity(installation, capabilities):
     require(capabilities['moz:buildID'] == app['BuildID'], 'Loaded browser build must match the verified package')
 
 
-def run_case(installation, output, name, headless):
+def run_case(installation, output, name, headless, *, diagnostic_only=False):
     output.mkdir(parents=True, exist_ok=True)
     record = {'schema': 1, 'suite': name, 'status': 'running', 'installation': installation,
               'sourceRevision': os.environ.get('GITHUB_SHA'),
               'os': {'platform': sys.platform, 'release': platform.release(), 'machine': platform.machine()},
               'pythonVersion': platform.python_version(), 'headless': headless,
               'output': str(output), 'samples': []}
+    if diagnostic_only:
+        record.update(diagnosticOnly=True, acceptanceStatus='not-run')
     def save():
         (output / 'report.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
     save()
@@ -683,11 +685,12 @@ def run_case(installation, output, name, headless):
         record['userAgent'] = client.execute('return navigator.userAgent;')
         save()
         (planner if name == 'planner-256' else viewer)(client, info['origin'], project, record, save)
-        assert_masked_capacity(record)
-        assert_requested_backend(record)
+        if not diagnostic_only:
+            assert_masked_capacity(record)
+            assert_requested_backend(record)
         shutdown_browser(client, browser, record)
         client = None
-        record['status'] = 'passed'
+        record['status'] = 'diagnostic-completed' if diagnostic_only else 'passed'
         stop(server)
     except Exception as error:
         record['status'] = 'failed'
