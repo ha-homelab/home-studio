@@ -308,6 +308,25 @@ eight lighting/editor views. The 24-room connected loads changed from
 same-host measurements share OS/compiler caches and do not establish a general
 speedup or replace the required hosted Intel/browser matrix.
 
+An isolated, unaccepted point-texture experiment retains the packed room/run
+shader and moves only unshadowed PointLight records into one full Float32
+RGBA texture. Integer texel fetches use high precision, nearest filtering,
+no mipmaps and no color conversion. The original ordered lighting arithmetic
+and literal shadow prefix remain; the texture program physically declares
+only that prefix of the stock PointLight array, with no full-array fallback
+branch. Actual Three view-space records populate the texture during uniform
+upload, including the first render and signal-only redraws.
+
+Selection occurs before compiling a material. Only untextured Lambert
+materials with ordinary render callbacks and finite, known-room point lights
+on the current camera layers are eligible. Capacity, texture size, sampler,
+uniform and conservative Float32 overflow checks retain the original program
+when unsupported. The existing packed eligibility is not reduced. Context
+loss preserves CPU data for reupload; final teardown and controller replacement
+release the texture. CPU tests check the pinned Three uploader/expanded shader,
+record order, state transitions and lifecycle. No performance improvement or
+pixel equivalence on a real driver is claimed by this experiment.
+
 Phone and tablet profiles use **390 × 844** and **820 × 1180** CSS pixels,
 respectively, at device scale factor 2, with touch enabled. They retain the
 actual desktop operating-system identity. Chromium exercises native touch

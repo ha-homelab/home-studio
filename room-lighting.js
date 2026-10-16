@@ -380,6 +380,95 @@ function pointLightIsFiniteZero(light) {
     light.distance >= 0 && light.decay >= 0;
 }
 
+// Optional software-renderer transport. Selection happens before rendering;
+// the texture shader contains no dynamic fallback to the full PointLight array.
+function createPointLightTexture(THREE, capacity, packed, options, pointRooms) {
+  if (!Number.isInteger(capacity) || capacity < 1 || capacity > 32768 ||
+      !Number.isInteger(options.maxTextureSize) || capacity*2 > options.maxTextureSize ||
+      !Number.isInteger(options.maxTextures) || options.maxTextures < 16 ||
+      packed.uniformVectors+1 > options.maxFragmentUniforms) return null;
+  const data=new Float32Array(capacity*8), staging=new Float32Array(data.length), states=new Map();
+  const texture=new THREE.DataTexture(data,capacity*2,1,THREE.RGBAFormat,THREE.FloatType);
+  texture.name='view-space-point-lights';texture.internalFormat='RGBA32F';
+  texture.minFilter=texture.magFilter=THREE.NearestFilter;texture.generateMipmaps=false;
+  texture.flipY=false;texture.colorSpace=THREE.NoColorSpace;texture.unpackAlignment=1;
+  texture.needsUpdate=true;
+  let disposed=false, count=0;
+  const finite=value=>Number.isFinite(value)&&Number.isFinite(Math.fround(value));
+  function activate(state,active) {
+    if(state.active!==active){state.active=active;state.material.needsUpdate=true;}
+  }
+  return {
+    attach(mesh,group,enabled) {
+      const material=mesh.material;
+      let state=states.get(material);
+      if(!state){state={material,active:false,meshes:new Map()};states.set(material,state);}
+      state.meshes.set(mesh,group);state.enabled=enabled;
+      return state;
+    },
+    bind(state,shader) {
+      const source=shader.uniforms.pointLights;
+      // Install in every variant: Three may reuse a cached texture program with
+      // the most recently compiled full/editor variant's uniform map.
+      shader.uniforms.homePointTexture={get value(){
+        staging.fill(0);
+        for(let i=0;i<count;i++){
+          const light=source.value[i],offset=i*8;
+          if(!light)throw new Error('Missing Three point-light record for texture');
+          staging[offset]=light.position.x;staging[offset+1]=light.position.y;staging[offset+2]=light.position.z;
+          staging[offset+3]=light.distance;staging[offset+4]=light.color.r;staging[offset+5]=light.color.g;
+          staging[offset+6]=light.color.b;staging[offset+7]=light.decay;
+        }
+        if(staging.some((value,index)=>!Object.is(value,data[index]))){data.set(staging);texture.needsUpdate=true;}
+        return texture;
+      }};
+    },
+    update(points,camera) {
+      const ordered=[];
+      for(const shadowed of [true,false])for(const point of points)
+        if(point.light?.visible&&Boolean(point.light.castShadow)===shadowed)ordered.push(point);
+      count=ordered.length;
+      let ready=!disposed&&count<=capacity&&ordered.filter(p=>p.light.castShadow).length<=8&&
+        camera?.isCamera&&typeof camera.updateWorldMatrix==='function'&&camera.layers&&camera.matrixWorldInverse?.elements?.length===16;
+      if(ready){
+        camera.updateWorldMatrix(true,false);
+        const view=camera.matrixWorldInverse.elements,magnitude=Math.max(...view.map(Math.abs));
+        if(!view.every(finite)||view[3]!==0||view[7]!==0||view[11]!==0||!view[15])ready=false;
+        for(let i=0;i<count;i++){
+          const light=ordered[i].light;
+          if(!light.isPointLight||!pointRooms.value[i]||light.map||typeof light.layers?.test!=='function'||!light.layers.test(camera.layers)||
+              typeof light.updateWorldMatrix!=='function'||light.matrixWorld?.elements?.length!==16||
+              ![light.intensity,light.color?.r,light.color?.g,light.color?.b,light.distance,light.decay,
+                light.position?.x,light.position?.y,light.position?.z].every(finite)){ready=false;break;}
+          for(let parent=light;parent;parent=parent.parent)if(!parent.visible)ready=false;
+          light.updateWorldMatrix(true,false);
+          const world=light.matrixWorld.elements,position=Math.max(1,Math.abs(world[12]),Math.abs(world[13]),Math.abs(world[14]));
+          if(!world.every(finite)||!finite(position*magnitude*4/Math.abs(view[15]))||
+              ![light.color.r*light.intensity,light.color.g*light.intensity,light.color.b*light.intensity].every(finite))ready=false;
+        }
+      }
+      for(const state of states.values()){
+        const {material,meshes}=state;
+        for(const [mesh,group] of meshes){
+          let attached=false;
+          for(let node=mesh;node;node=node.parent)if(node===group)attached=true;
+          if(!attached||mesh.material!==material)meshes.delete(mesh);
+        }
+        if(!meshes.size){activate(state,false);states.delete(material);continue;}
+        // Untextured Lambert materials leave ample sampler space for the
+        // original shadow prefix. External callbacks retain the full program.
+        activate(state,Boolean(ready&&state.enabled&&material.isMeshLambertMaterial&&
+          !Object.values(material).some(value=>value?.isTexture)&&
+          material.onBeforeCompile===state.callback&&material.customProgramCacheKey===state.cacheKey&&
+          [...meshes.keys()].every(mesh=>mesh.onBeforeRender===THREE.Object3D.prototype.onBeforeRender)&&
+          material.onBeforeRender===THREE.Material.prototype.onBeforeRender));
+      }
+    },
+    releaseGPU(){if(!disposed){texture.dispose();texture.needsUpdate=true;}},
+    dispose(){if(disposed)return;disposed=true;for(const state of states.values())activate(state,false);states.clear();texture.dispose();}
+  };
+}
+
 // Softly confine each fixture's direct light to its room, retaining a short
 // doorway spill. Full-height shadow geometry still blocks opaque walls/doors.
 function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {}) {
@@ -398,6 +487,7 @@ function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {
     homeLightRunStarts:{value:new Int32Array(capacity)}, homePointLightingRequired:{value:true},
     homeLightRuns:{value:new Int32Array(capacity * 4)}
   });
+  const pointTexture=packed&&geometryOptions.pointTexture ? createPointLightTexture(THREE,capacity,packed,geometryOptions,uniforms.homePointRooms) : null;
   const staticRuns = new Map(), dynamicMaterials = new WeakSet();
   const geometryDeclarations = packed ? `
     uniform bool homePointLightingRequired;
@@ -589,7 +679,17 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
   // family when every point is off. Never infer zero from a brightness epsilon.
   const guardedPointLighting = packed ? 'if (homePointLightingRequired) {\n' + directPointLighting + '\n}\n' : directPointLighting;
   const lighting = (packed ? '' : transmissionCache) + lightChunk.slice(0, pointStart) + guardedPointLighting + lightChunk.slice(pointEnd);
+  const textureParameters=pointTexture ? THREE.ShaderChunk.lights_pars_begin.replace('uniform PointLight pointLights[ NUM_POINT_LIGHTS ];',
+    '#if NUM_POINT_LIGHT_SHADOWS > 0\n\tuniform PointLight pointLights[ NUM_POINT_LIGHT_SHADOWS ];\n\t#endif') : '';
+  const textureBody=unshadowedBody.replace('pointLight = pointLights[ i ];',`
+            vec4 homePositionDistance=texelFetch(homePointTexture,ivec2(i*2,0),0);
+            vec4 homeColorDecay=texelFetch(homePointTexture,ivec2(i*2+1,0),0);
+            pointLight.position=homePositionDistance.xyz;pointLight.distance=homePositionDistance.w;
+            pointLight.color=homeColorDecay.xyz;pointLight.decay=homeColorDecay.w;`);
+  const textureLighting=pointTexture ? lighting.replace(unshadowedBody,textureBody) : '';
   return {
+    releaseGPU(){pointTexture?.releaseGPU();},
+    dispose(){pointTexture?.dispose();},
     capacity, geometryMode: packed ? 'packed' : 'literal', geometryUniformVectors: packed?.uniformVectors ?? null,
     attach(group, enabled, {staticGeometry = false} = {}) {
       if (packed && staticGeometry) group?.updateWorldMatrix?.(true,true);
@@ -632,6 +732,7 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
         const wallEnabled = prepareSharedWallProgram(THREE, mesh,
           fallbackFacing ? 'opaque' : !dynamicMaterials.has(mesh.material) && sharedWallRoles.get(mesh.material));
         const sharedWall = Boolean(wallEnabled);
+        const textureState=pointTexture?.attach(mesh,group,enabled);
         mesh.material.onBeforeCompile = shader => {
           if (sharedWall) applySharedWallSheen(shader, wallEnabled);
           else if (wall) applyWallSheen(shader);
@@ -639,17 +740,20 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
           if (sharedWall || facing) applyStaticFacing(THREE, shader, facing || bothFaces);
           // Keep uniform definitions identical in both material variants.
           Object.assign(shader.uniforms, uniforms, staticRuns.get(mesh.material)?.uniforms, {homeExteriorSurface:{value:mesh.userData.category==='stairs'?1:0}});
+          if(textureState)pointTexture.bind(textureState,shader);
           // The editor needs no room/window shader, especially on software WebGL.
           if (!enabled) return;
           shader.vertexShader = 'varying vec3 homeWorldPosition;\n' + shader.vertexShader.replace(
             '#include <project_vertex>',
             '#include <project_vertex>\nhomeWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;'
           );
-          shader.fragmentShader = fragment + shader.fragmentShader.replace('#include <lights_fragment_begin>', lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
+          if(textureState?.active)shader.fragmentShader=shader.fragmentShader.replace('#include <lights_pars_begin>',textureParameters);
+          shader.fragmentShader = (textureState?.active?'uniform highp sampler2D homePointTexture;\n':'') + fragment + shader.fragmentShader.replace('#include <lights_fragment_begin>', textureState?.active?textureLighting:lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
         };
-        mesh.material.customProgramCacheKey = () => (enabled ? fragment : 'home-editor') +
+        mesh.material.customProgramCacheKey = () => (enabled ? fragment+(textureState?.active?':point-texture-v2':'') : 'home-editor') +
           (sharedWall ? ':wall-sheen-facing-v1' : wall ? ':wall-sheen-v2' : '') +
           (!sharedWall && staticGlassFacing.has(mesh.material) ? ':glass-facing-v1' : '');
+        if(textureState){textureState.callback=mesh.material.onBeforeCompile;textureState.cacheKey=mesh.material.customProgramCacheKey;}
         mesh.material.needsUpdate = true;
       });
     },
@@ -661,7 +765,7 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
       });
       else transmission.forEach((value,i)=>uniforms.homeWindowTransmission.value[i]=value);
     },
-    update(points) {
+    update(points, camera) {
       // Three.js stably sorts shadow casters before unshadowed point lights.
       // These lights have no projection maps, so traversal order breaks ties.
       // Zero-intensity fixtures retain their slots across on/off state changes.
@@ -696,6 +800,7 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
       }
       uniforms.homeLightRunCount.value = runCount;
       if (packed) packLightRunRecords(uniforms.homeLightRunStarts.value, runs, pointRooms, runCount, uniforms.homeLightRuns.value);
+      pointTexture?.update(points,camera);
       if (packed) for (const state of staticRuns.values()) {
         state.uniforms.homeLightRunCount.value = filterRoomLightingRuns(state.unbounded ? null : state.bounds,
           packed.uniforms.homeRoomBounds.value,pointRooms,runs,runCount,
