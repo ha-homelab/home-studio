@@ -1,0 +1,23 @@
+{
+  "title": "Dry run: recorded Node test entries",
+  "subtitle": "The scoped run passed all 31 entries. This is an inventory of checks, not a measure of code coverage.",
+  "observed_date": "2026-10-15",
+  "description": "The recorded run contains 11 Dry-run guard entries, 5 host-language entries, 14 media and state entries, and one aggregate diagnostic-suite entry. All passed. These counts are not assertion counts, code-coverage percentages, browser benchmarks or evidence of a release.",
+  "note": "Source: docs/data/dry-run-validation.json (four Node test files). The diagnostic entry wraps a suite. Browser, package and device checks are separate evidence.",
+  "sources": [
+    "scripts/test-dry-run.cjs",
+    "scripts/test-panel-language.cjs",
+    "scripts/test-media-preview.cjs",
+    "scripts/test-module-expiry.cjs"
+  ],
+  "panels": [{
+    "title": "Entries by test group",
+    "unit": "Recorded test entries (count)",
+    "series": [
+      {"label": "Dry-run guard", "value": 11, "color": "#008b83"},
+      {"label": "Host language", "value": 5, "color": "#7858c9"},
+      {"label": "Media and state", "value": 14, "color": "#297ac6"},
+      {"label": "Diagnostic suite entry", "value": 1, "color": "#cb790c"}
+    ]
+  }]
+}

@@ -13,6 +13,8 @@ claim that a separate GitHub Wiki has been published.
   report a translation issue.
 - [Development and validation](Development.md): source map, review boundaries,
   and regression commands.
+- [Illustrated process and results](../process-and-results.md): delivery steps,
+  behavior changes, recorded evidence and its limits.
 
 The [main README](../../README.md) is the product overview. Detailed references
 cover [architecture](../architecture.md), [Dry run](../dry-run.md),

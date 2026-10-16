@@ -9,11 +9,12 @@ from urllib.parse import unquote, urlsplit
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-GUIDES = ('README.md', 'docs/dry-run.md', 'docs/i18n.md', 'docs/architecture.md',
+GUIDES = ('README.md', 'docs/dry-run.md', 'docs/i18n.md', 'docs/architecture.md', 'docs/process-and-results.md',
           'docs/translations/README.md')
 WIKI = ('Home', '_Sidebar', 'Getting-started', 'Dry-run', 'Troubleshooting',
         'Languages', 'Development')
-DIAGRAMS = ('docs/images/dry-run-command-flow.svg', 'docs/images/plan-state-lifecycle.svg')
+DIAGRAMS = ('docs/images/dry-run-command-flow.svg', 'docs/images/plan-state-lifecycle.svg',
+            'docs/images/dry-run-delivery-process.svg', 'docs/images/dry-run-validation.svg')
 LINK = re.compile(r'!?\[[^\]\n]*\]\(\s*(<[^>]+>|[^\s)]+)(?:\s+[\"\'][^\n)]*)?\s*\)')
 REFERENCE = re.compile(r'^\s*\[[^\]]+\]:\s*(<[^>]+>|\S+)', re.M)
 

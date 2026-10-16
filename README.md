@@ -56,6 +56,13 @@ and verification. The installer's `--dry-run` is a separate archive-validation
 option. For operating notes and troubleshooting, start at the
 [repository documentation wiki](docs/wiki/Home.md).
 
+See the [illustrated process and results](docs/process-and-results.md) for the
+command boundary, browser persistence, translation coverage and evidence behind
+the change. Its workflow diagrams distinguish local verification from release
+acceptance.
+
+![From the Dry run command guard to tests, packaged documentation, signed review and release acceptance](docs/images/dry-run-delivery-process.svg)
+
 ## Furnish your rooms
 
 Open **Item library** to browse **195 designs in 22 categories**: furniture and
