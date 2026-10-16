@@ -167,12 +167,29 @@ uniform arrays, replacing repeated literal GLSL helpers with shared loops. Room
 order, doorway spill, daylight and window transmission retain the same math;
 other renderer profiles retain their original shader source. Packing is enabled
 only when the reported fragment-uniform limit covers a conservative allowance:
-130 vectors (including the private wall-sheen and glass-facing switches) plus seven per light
+131 vectors (including the private wall-sheen, glass-facing and zero-point switches) plus seven per light
 slot, four per room, one per polygon edge, two per window, and one per room with
-windows (at least one reserved slot). The guard budgets 844 of the Apple software renderer's reported
+windows (at least one reserved slot). The guard budgets 845 of the Apple software renderer's reported
 1,024 vectors for the 24-room, 72-light fixture. Lower limits and larger plans fall back to
 the original literal geometry without reducing scene contents. CPU regression
 tests cover polygon boundaries, concave rooms, window ordering and this fallback.
+
+When every visible point light belongs to a known room and has exactly zero
+intensity with valid finite inputs, the packed shader skips its point-light
+block through one shared runtime uniform. Empty visible-light sets also skip
+that block. Unknown rooms, nonzero or malformed inputs retain the original
+calculation. Lights, their ordering, shadows and program families remain intact;
+ambient, sun and daylight calculations remain outside the guard. Both full
+Home frames and signal-only frames refresh the uniform immediately before
+drawing, including after a live update or controller replacement.
+
+One local native ARM64 Apple Software Renderer pair reduced the 24-room
+two-cycle case from 56.37 to 49.84 seconds and improved both initial loads.
+The six-room total was unchanged, and some drag measurements regressed.
+Probe timings varied and some work shifted into the connected frame; these
+ordered pairs do not establish a general speedup or resolve hosted Intel
+acceptance. Separate off/on, daylight, shaded-window and cutaway comparisons
+retained identical canvas pixels. All existing acceptance limits still apply.
 
 Packed daylight traversal visits only rooms that own windows, in the original
 room order. Window order, transmission and distance calculations remain the

@@ -73,6 +73,11 @@
   rendering profiles and unsupported glass retain their original path. Local
   startup improved, but interaction results varied; full browser acceptance
   remains required.
+- Skip the packed point-light calculation when all visible, known-room lights
+  have exactly zero intensity and valid finite inputs. Keep every light,
+  shadow and shader family, and refresh the shared guard at each Home draw
+  boundary. Ambient, sun and daylight remain unchanged; unknown rooms or
+  malformed inputs retain the original calculation.
 - Reuse planner outlines and selection controls, and avoid redrawing unchanged
   snapped positions. Preserve exact furniture overlap, appearance, undo and drag
   cancellation. Bound software-renderer resolution without reducing sharp HTML

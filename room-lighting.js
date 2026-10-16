@@ -246,8 +246,8 @@ function packRoomLightingGeometry(rooms, windows, capacity, maxFragmentUniforms)
   const windowRooms = rooms.flatMap((room, index) => windows.some(window => window.room === room.id) ? [index] : []);
   // Scalars in arrays may each consume a vector. Reserve the existing light,
   // shadow, material and transform uniforms before adding packed geometry,
-  // plus explicit vectors for the wall-sheen switch and facing mode.
-  const uniformVectors = 130 + capacity * 7 + rooms.length * 4 + edgeCount + windows.length * 2 + Math.max(1, windowRooms.length);
+  // plus explicit vectors for wall sheen, facing and the zero-point guard.
+  const uniformVectors = 131 + capacity * 7 + rooms.length * 4 + edgeCount + windows.length * 2 + Math.max(1, windowRooms.length);
   if (!Number.isFinite(maxFragmentUniforms) || uniformVectors > maxFragmentUniforms) return null;
   const edges = new Float32Array(Math.max(1, edgeCount) * 4);
   const ranges = new Int32Array(Math.max(1, rooms.length) * 4);
@@ -292,6 +292,16 @@ function packRoomLightingGeometry(rooms, windows, capacity, maxFragmentUniforms)
   }};
 }
 
+// Retain the original shader path for malformed light inputs: zero intensity
+// multiplied by a nonfinite color/attenuation is not necessarily zero in GLSL.
+function pointLightIsFiniteZero(light) {
+  return light.intensity === 0 &&
+    [light.color?.r,light.color?.g,light.color?.b,
+      light.position?.x,light.position?.y,light.position?.z,
+      light.distance,light.decay].every(Number.isFinite) &&
+    light.distance >= 0 && light.decay >= 0;
+}
+
 // Softly confine each fixture's direct light to its room, retaining a short
 // doorway spill. Full-height shadow geometry still blocks opaque walls/doors.
 function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {}) {
@@ -306,9 +316,12 @@ function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {
     homeWindowTransmission: {value: new Float32Array(Math.max(1, windows.length)).fill(1)}
   };
   const packed = geometryOptions.packed ? packRoomLightingGeometry(rooms, windows, capacity, geometryOptions.maxFragmentUniforms) : null;
-  if (packed) Object.assign(uniforms, packed.uniforms, {homeLightRunStarts:{value:new Int32Array(capacity)}});
+  if (packed) Object.assign(uniforms, packed.uniforms, {
+    homeLightRunStarts:{value:new Int32Array(capacity)}, homePointLightingRequired:{value:true}
+  });
   const staticRuns = new Map(), dynamicMaterials = new WeakSet();
   const geometryDeclarations = packed ? `
+    uniform bool homePointLightingRequired;
     uniform vec4 homeRoomEdges[${Math.max(1, packed.edgeCount)}];
     uniform ivec4 homeRoomRanges[${Math.max(1, rooms.length)}];
     uniform vec4 homeRoomBounds[${Math.max(1, rooms.length)}];
@@ -488,7 +501,10 @@ ${packed ? `    uniform int homeLightRunStarts[${capacity}];\n    ${geometryDecl
     /homeRoomTransmissions\[homePointRooms\[([^\]]+)\]\]/g,
     'homePointTransmission(homePointRooms[$1])'
   ).replace('max(homeRunStart, NUM_POINT_LIGHT_SHADOWS)', 'max(homeLightRunStarts[homeRun], NUM_POINT_LIGHT_SHADOWS)') : boundedPointLighting;
-  const lighting = (packed ? '' : transmissionCache) + lightChunk.slice(0, pointStart) + directPointLighting + lightChunk.slice(pointEnd);
+  // A runtime branch retains the same light slots, shadow maps and program
+  // family when every point is off. Never infer zero from a brightness epsilon.
+  const guardedPointLighting = packed ? 'if (homePointLightingRequired) {\n' + directPointLighting + '\n}\n' : directPointLighting;
+  const lighting = (packed ? '' : transmissionCache) + lightChunk.slice(0, pointStart) + guardedPointLighting + lightChunk.slice(pointEnd);
   return {
     capacity, geometryMode: packed ? 'packed' : 'literal', geometryUniformVectors: packed?.uniformVectors ?? null,
     attach(group, enabled, {staticGeometry = false} = {}) {
@@ -564,10 +580,17 @@ ${packed ? `    uniform int homeLightRunStarts[${capacity}];\n    ${geometryDecl
       // Zero-intensity fixtures retain their slots across on/off state changes.
       uniforms.homePointRooms.value.fill(0);
       uniforms.homeLitRooms.value.fill(0);
+      if (packed) uniforms.homePointLightingRequired.value = false;
       let slot = 0;
       for (const shadowed of [true, false]) for (const point of points) {
         if (point.light?.visible && Boolean(point.light.castShadow) === shadowed) {
           const room = roomIds.get(point.item.room) || 0;
+          // Unknown/nonfinite inputs and negative/nonfinite intensity retain
+          // the original path. Unbound lights also retain it: unlike known
+          // unlit rooms, they do not reject attenuation before world math.
+          if (packed && (!room || !pointLightIsFiniteZero(point.light))) {
+            uniforms.homePointLightingRequired.value = true;
+          }
           uniforms.homePointRooms.value[slot++] = room;
           if (room && point.light.intensity > 0) uniforms.homeLitRooms.value[room - 1] = 1;
         }

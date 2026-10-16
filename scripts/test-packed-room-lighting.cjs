@@ -120,7 +120,7 @@ for(let i=0;i<rooms.length;i++)assert.deepEqual(packedEdges(data,i),edgesOf(room
 for(const limit of [0,1,data.uniformVectors-1,NaN,undefined])assert.equal(context.packRoomLightingGeometry(rooms,windows,9,limit),null);
 assert(context.packRoomLightingGeometry(rooms,windows,9,data.uniformVectors));
 const withoutWallSwitch=128+9*7+rooms.length*4+rooms.reduce((sum,room)=>sum+room.polygon.length,0)+windows.length*2+Math.max(1,data.windowRoomCount);
-assert.equal(data.uniformVectors,withoutWallSwitch+2,'The private wall-sheen bool and facing mode have explicit vector allowances');
+assert.equal(data.uniformVectors,withoutWallSwitch+3,'Wall sheen, facing and the zero-point guard have explicit vector allowances');
 assert.equal(context.packRoomLightingGeometry(rooms,windows,9,withoutWallSwitch),null,'The old exact limit must fall back instead of overcommitting');
 let checked=0;
 const positions=[];
@@ -185,7 +185,7 @@ for(const p of positions) {
     if(rs.length)assert.match(packed.shader.fragmentShader,/if \(range.y < 0\)/);
     const start='#if ( NUM_POINT_LIGHTS > 0 ) && defined( RE_Direct )';
     const end='#if ( NUM_SPOT_LIGHTS > 0 ) && defined( RE_Direct )';
-    const loop=s=>s.slice(s.indexOf(start),s.indexOf(end));
+    const loop=s=>s.slice(s.indexOf(start),s.indexOf(end)).replace(/\n}\n$/, '');
     const packedLoop=loop(packed.shader.fragmentShader);
     const cachedEquivalent=packedLoop.replace(/homePointTransmission\(homePointRooms\[([^\]]+)\]\)/g,
       'homeRoomTransmissions[homePointRooms[$1]]').replace('homeLightRunStarts[homeRun]','homeRunStart');
@@ -432,7 +432,7 @@ for(const p of positions) {
   assert.equal(fullData.windowRoomCount,6,'The 24-room fixture visits only its six window rooms');
   assert.deepEqual(Array.from(fullData.uniforms.homeWindowRooms.value),[0,1,2,3,4,5]);
   const previousAllowance=130+72*7+full.length*4+full.length*4+fullWindows.length*2;
-  assert.equal(fullData.uniformVectors,previousAllowance+6,'Each new int-array element reserves a full uniform vector');
+  assert.equal(fullData.uniformVectors,previousAllowance+7,'Window-room array elements and the zero-point guard reserve full uniform vectors');
   assert.equal(context.packRoomLightingGeometry(full,fullWindows,72,fullData.uniformVectors-1),null);
   assert(context.packRoomLightingGeometry(full,fullWindows,72,fullData.uniformVectors));
   assert.equal(shaderFor(full,fullWindows,72,{packed:true,maxFragmentUniforms:previousAllowance}).shader.fragmentShader,
@@ -441,7 +441,7 @@ for(const p of positions) {
   assert.doesNotMatch(packed.shader.fragmentShader,/for \(int edge|if \(range.y < 0\)/,'An all-rectangle plan omits the generic edge loop entirely');
   assert.match(packed.shader.fragmentShader,/return length\(max\(distanceToBox, vec2\(0.0\)\)\) \+ min\(max\(distanceToBox.x, distanceToBox.y\), 0.0\);/);
   assert.equal(packed.lighting.geometryMode,'packed');
-  assert.equal(packed.lighting.geometryUniformVectors,844,'Full fixture allowance includes wall-sheen, facing and the window-room list');
+  assert.equal(packed.lighting.geometryUniformVectors,845,'Full fixture allowance includes wall-sheen, facing, zero-point guard and the window-room list');
   assert(packed.shader.fragmentShader.length<literal.shader.fragmentShader.length*.55);
   console.log(JSON.stringify({checkedRoomPoints:checked,maxNumericDelta,rooms:24,lights:72,uniformVectorAllowance:packed.lighting.geometryUniformVectors,
     literalFragmentCharacters:literal.shader.fragmentShader.length,packedFragmentCharacters:packed.shader.fragmentShader.length}));

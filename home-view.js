@@ -489,7 +489,11 @@ homeView = (() => {
   function drawSignalFrame(redraw){
     if(!active||!camera||!renderer)return;
     refreshSignalStatus();
-    if(redraw){drawScene(camera);renderCount++;}
+    if(redraw){
+      // A state update can change lights before its scheduled full frame.
+      if(roomLighting?.geometryMode==='packed')roomLighting.update(points);
+      drawScene(camera);renderCount++;
+    }
   }
   function render() {
     if(!active || !renderer)return;
@@ -514,10 +518,10 @@ homeView = (() => {
     const half=Math.max(cameraFit.height/2,cameraFit.width/aspect/2)*1.15/zoom;
     const cx=cameraFit.x+panX, cy=cameraFit.y+panY;
     camera.left=cx-half*aspect;camera.right=cx+half*aspect;camera.top=cy+half;camera.bottom=cy-half;camera.updateProjectionMatrix();
-    roomLighting?.update(points);
     if(lowerFloorContext)lowerFloorContext.visible=showLowerFloor&&!selected;
     $('homeFloorContext').disabled=!!selected;
     assumedZones?.render(selected,signalZone);refreshSignalStatus();
+    roomLighting?.update(points);
     drawScene(camera);renderCount++;
     for(const label of labels) label.el.textContent=(rect.width<600 ? roomCode(label.room) : roomName(label.room))+(label.power?' · '+label.power:'');
     for(const point of [...labels,...points.map(p=>({el:p.marker,position:p.anchor||(!isCover(p.item)&&model.control_groups?.[p.item.id]?p.position.clone().setY(p.item.position_m.y+p.item.dimensions_m.height):p.position)}))]) {
