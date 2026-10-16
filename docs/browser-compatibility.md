@@ -270,17 +270,15 @@ bounded shadow-casting prefix is now expanded into literal shader indices, as
 required for its shadow samplers. Consecutive unshadowed lights from the same room share a runtime range. A
 fragment outside that room skips the whole range; otherwise one shared loop
 evaluates every light in its original order, with the same room confinement
-and material response. Range ends use one preallocated integer array, and state
-updates do not change the shader layout.
+and material response. Room-run data use preallocated integer storage, and
+state updates do not change the shader layout.
 No light is dropped or merged. Total light count and generated room/window shader
 size remain unbounded by the rendering profile, so larger projects still need
 testing against the target GPU's limits.
 
-Each room also has its own signed-distance function with its original polygon
-edges. Transmission, daylight, and exterior-light calls select that function
-directly. This prevents software shader compilers from expanding a full
-room-selection branch chain at every call, while preserving the same boundary,
-distance, and doorway-spill calculations.
+The literal fallback gives each room its own signed-distance function. The
+packed path uses shared runtime helpers and packed geometry. Both preserve the
+original boundary, distance, and doorway-spill calculations.
 For point-light transmission, an axis-aligned room bound expanded by 0.56 m
 rejects distant fragments before evaluating the polygon: the existing spill
 already reaches zero at 0.55 m. In-range and concave boundaries still use the
@@ -356,8 +354,10 @@ reviewed `0.6.4` source base in
 immutable `v0.6.4-beta.N` and `v0.6.4-rc.N` tags. A successful RC also requires the
 configured offline fuzz campaigns and source-bound release evidence.
 
-Candidates are prereleases. Publishing one does not establish Waterfox or
-physical-device acceptance and does not deploy a Home Assistant installation.
+Candidate publication requires passing the configured browser checks. That
+evidence applies only to the verified versions and environments; it does not
+certify other Waterfox configurations or physical devices, or deploy a Home
+Assistant installation.
 The hosted drawing tool follows a separate GitHub Pages workflow: a push to
 `main` stages the allowlisted website, including `planner/editor.js`, and
 deploys it. Publishing a beta or RC is not a gate on that website deployment.
