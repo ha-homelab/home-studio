@@ -1,9 +1,12 @@
 # How Home Studio is tested and released
 
-**Verified snapshot: 2026-10-16.**
-[Home Studio v0.6.4 is released](https://github.com/ha-homelab/home-studio/releases/tag/v0.6.4).
-The final PR, beta and RC checks passed, and stable promotion preserved the
-accepted RC's package bytes.
+**Historical release snapshot: Home Studio v0.6.4, 2026-10-16.**
+The [v0.6.4 release](https://github.com/ha-homelab/home-studio/releases/tag/v0.6.4)
+passed its final PR, beta and RC checks; stable promotion preserved the accepted
+RC's package bytes. These results describe that source revision, not later
+changes or a future release. For the current policy, see
+[quality evidence and limitations](quality.md), the
+[browser matrix](platform-acceptance.md) and [release instructions](../RELEASING.md).
 
 ## From a browser stall to a reproducible check
 
@@ -45,16 +48,16 @@ Other rendering profiles retain their documented behavior. See
 [browser compatibility](browser-compatibility.md) for exact selection rules,
 limits and troubleshooting, and [architecture](architecture.md) for implementation.
 
-## What the public CI matrix covers
+## What the v0.6.4 CI matrix covered
 
 ![Coverage overview: 77 required acceptance lanes across Linux, Windows and
 macOS, comprising three install lanes and 74 browser profiles with three cases each.](assets/quality/browser-coverage.svg)
 
 A **lane** is one required test job in a particular environment. A **browser
 profile** specifies the browser build, operating system, graphics settings and
-desktop or emulated mobile view being tested. The matrix has **77 required
+desktop or emulated mobile view being tested. The v0.6.4 matrix had **77 required
 lanes: 3 package/install lanes and 74 browser profiles** across Linux, Windows
-and macOS. Each browser profile runs three cases, for **222 browser cases**:
+and macOS. Each browser profile ran three cases, for **222 browser cases**:
 
 - A generated six-room viewer with 18 linked lights.
 - A generated 24-room viewer with 72 linked lights.
@@ -67,11 +70,12 @@ preserve editing and the draft. CPU regressions and package checks separately
 cover geometry, shaders, lifecycle transitions, installation and public ZIPs.
 Fixtures are fictional and do not connect to a real Home Assistant installation.
 
-Coverage includes three pinned Playwright snapshots; Chrome and Edge channels;
+The recorded coverage included three pinned Playwright snapshots; Chrome and Edge channels;
 historical Chrome for Testing builds; official Firefox 158.0 and ESR 153.5.0;
 Waterfox 6.7.5 and 6.7.6; and native Safari. Intel Mac and masked-renderer lanes
 exercise additional software-rendering paths. The
-[exact version and lane inventory](platform-acceptance.md) is authoritative.
+[version and lane inventory](platform-acceptance.md) documents the current matrix;
+inspect the linked run reports below for the historical versions actually launched.
 
 These are representative versions, **not every historical browser**. Playwright
 WebKit is distinct from native Safari. Phone and tablet profiles emulate
@@ -89,7 +93,9 @@ For 0.6.4, the path is **reviewed PR → beta → RC → stable**. A main-branch
 starts beta preparation. An RC is explicitly requested and reruns the required
 checks and builds, adding bounded mutation fuzzing of project validation and
 geometry. Fuzzing complements browser tests; it does not simulate user interaction
-or prove all possible inputs safe.
+or prove all possible inputs safe. The [fuzzing guide](fuzzing.md) defines
+Home Studio's targets and links the shared illustrated RC process; this page
+records the results for this one release.
 
 Failed, cancelled, missing or unexpectedly skipped required checks block the
 relevant gate. A passing browser matrix alone cannot excuse a failed package or
@@ -109,14 +115,14 @@ the [release strategy](../RELEASING.md) defines the policy.
   The additional jobs validate and coordinate the overall gate.
 - [Beta run 38930021878](https://github.com/ha-homelab/home-studio/actions/runs/38930021878):
   **88 jobs passed and 3 were expected channel-specific skips**. All 77 acceptance
-  lanes and 222 cases passed. An independent check verified the retained reports,
-  source identity and published assets for
+  lanes and 222 cases passed. The run published
   [`v0.6.4-beta.2`](https://github.com/ha-homelab/home-studio/releases/tag/v0.6.4-beta.2).
 - [RC run 38932840800](https://github.com/ha-homelab/home-studio/actions/runs/38932840800):
   **89 jobs passed and 2 were expected channel-specific skips**. All 77 acceptance
   lanes and 222 cases passed; the published
   [`v0.6.4-rc.1`](https://github.com/ha-homelab/home-studio/releases/tag/v0.6.4-rc.1)
-  passed independent source, evidence and asset checks. Its two fuzz targets
+  records the same source revision in its run, release manifest and fuzz report.
+  Its two fuzz targets
   passed with **1,940,372 executions**: 1,137,499 for project validation and
   802,873 for wall geometry.
   These are actual engine execution counts, not a count of distinct bugs checked

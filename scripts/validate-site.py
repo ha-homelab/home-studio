@@ -35,7 +35,7 @@ FUZZ_REPLAY_FILES = (
 )
 
 SITE_FILES = (
-    'index.html', 'site.css', 'privacy.html', 'install.html', '404.html', '.nojekyll',
+    'index.html', 'site.css', 'privacy.html', 'install.html', 'ai-setup.html', '404.html', '.nojekyll',
     'planner/index.html', 'planner/editor.css', 'planner/editor.js', 'planner/render-capacity.js', 'planner/interaction-render.js',
     'planner/i18n.js', 'planner/validation.js', 'planner/locales/index.js',
     'planner/help.js', 'planner/help.css', 'planner/help-locales.js', 'planner/language-links.js',
@@ -50,23 +50,38 @@ SITE_FILES = (
     'planner/guide-assets/garage-and-studio.json',
     'planner/guide-assets/decor-studio.json', 'planner/guide-assets/10-decor-studio.jpg',
     'planner/guide-assets/pattern-studio.json', 'planner/guide-assets/11-pattern-studio.jpg',
+    'planner/guide-assets/12-ai-review.jpg',
     'vendor/three.module.min.js', 'vendor/THREE-LICENSE.txt',
 )
-REPO_FILES = ('docs/i18n.md', 'docs/translations/README.md',
+REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'THIRD_PARTY_NOTICES.md', 'scripts/download_tls.py', 'scripts/test-download-tls.py', 'requirements-tls-test.txt', 'requirements-strict-tls.txt', 'docs/transport-security.md', 'docs/i18n.md', 'docs/translations/README.md',
               *(f'docs/translations/README.{code}.md' for code in LOCALE_CODES if code != 'en'),
               'scripts/test-i18n.mjs', 'scripts/test-i18n-browser.cjs', 'scripts/test-validation-i18n.mjs',
               'scripts/test-help-i18n.cjs', 'scripts/test-panel-language.cjs', 'scripts/test-viewer-i18n.cjs', 'scripts/test-lock-control.cjs',
               'viewer-i18n.js', 'viewer-locales/index.json',
               *(f'viewer-locales/{code}.json' for code in LOCALE_CODES),
-              'README.md', 'LICENSE', '.gitignore', '.gitattributes', 'scripts/validate-site.py', '.github/workflows/pages.yml',
+              'README.md', 'LICENSE', 'CONTRIBUTING.md', 'SECURITY.md',
+              'GOVERNANCE.md', 'CODE_OF_CONDUCT.md', 'ROADMAP.md', 'docs/quality.md',
+              'RELEASING.md', 'CHANGELOG.md', 'docs/fuzzing.md',
+              'docs/rc-fuzzing.md', 'docs/release-workflow.md', '.gitignore', '.gitattributes', 'scripts/validate-site.py', '.github/workflows/pages.yml',
               '.github/workflows/package.yml', '.github/workflows/platform-acceptance.yml',
               '.github/actions/upload-acceptance-artifact/action.yml',
               'docs/architecture.md', 'docs/platform-acceptance.md',
-              'docs/quality-and-release.md',
+              'docs/quality-and-release.md', 'docs/VERSIONING.md',
               'docs/assets/quality/release-pipeline.svg',
               'docs/assets/quality/browser-coverage.svg',
               'docs/assets/quality/webgl-recovery.svg',
               'docs/assets/quality/fuzz-results.svg',
+              'docs/ai-planning.md', 'docs/ai-planner-architecture.md',
+              'docs/ai-provider-setup.md', 'docs/ai-local-models.md',
+              'docs/assets/ai/planning-data-flow.svg',
+              'ai/package.json', 'ai/bootstrap.js', 'ai/panel.js', 'ai/panel.css',
+              'ai/photo-worker.js', 'ai/draft.js', 'ai/json.js',
+              'ai_companion/__init__.py', 'ai_companion/assets.json',
+              'ai_companion/server.py', 'ai_companion/protocol.py',
+              'ai_companion/providers.py', 'ai_companion/transport.py',
+              'scripts/serve-ai-planner.py', 'scripts/test-ai-companion.py',
+              'scripts/test-ai-draft.mjs', 'scripts/test-ai-planner.cjs',
+              'scripts/test-ai-integration.cjs',
               'scripts/build-planner-project.py', 'scripts/install-home-assistant.py',
               'scripts/package_release.py', 'scripts/test_package_release.py',
               'scripts/test_source_replay.py', *FUZZ_REPLAY_FILES,
@@ -157,6 +172,16 @@ def validate(root):
             parser = Links()
             parser.feed(text)
             documents[relative] = parser
+    # The companion may serve only reviewed UI files, never its Python source or
+    # arbitrary repository content. Network-capable AI modules stay off Pages.
+    ai_assets = {'ai/bootstrap.js', 'ai/panel.js', 'ai/panel.css',
+                 'ai/photo-worker.js', 'ai/draft.js', 'ai/json.js'}
+    allowed = json.loads(regular_file(root, 'ai_companion/assets.json').read_text())
+    if (not isinstance(allowed, list) or not all(isinstance(name, str) for name in allowed)
+            or len(allowed) != len(set(allowed)) or set(allowed) != set(SITE_FILES) | ai_assets):
+        raise ValueError('Companion asset allowlist must exactly match reviewed UI assets')
+    if ai_assets & set(SITE_FILES):
+        raise ValueError('AI network modules must not be published on the shared Pages origin')
     for relative, parser in documents.items():
         for tag, key, link in parser.links:
             parsed = urlsplit(link)

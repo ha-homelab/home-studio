@@ -78,7 +78,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     dispose() { disposals++; }
     forceContextLoss() { losses++; }
   }
-  const c = vm.createContext({AbortController, THREE: {...THREE, WebGLRenderer: Renderer}, project, floor: () => project.floors[0],
+  const c = vm.createContext({AbortController, THREE: {...THREE, WebGLRenderer: Renderer}, project, activeFloorId: f.id, floor: () => project.floors[0],
     view: 'plan', previewDirty: true, size: {...rect}, map: {x: 0, y: 0}, devicePixelRatio: 3,
     $: get, planCanvas: get('plan-canvas'), ctx: {setTransform() {}},
     floorBounds: model.floorBounds, distance: model.distance, wallPieces: model.wallPieces,
