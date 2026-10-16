@@ -10,13 +10,59 @@ from unittest.mock import patch
 
 
 HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location('intel_comparison', HERE / 'run-intel-cgl-opaque-blend.py')
+spec = importlib.util.spec_from_file_location('intel_comparison', HERE / 'run-intel-cgl-next-candidate.py')
 comparison = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(comparison)
-ARMS = (('baseline', comparison.BASELINE), ('candidate', comparison.CANDIDATES['opaque-blend']))
+ARMS = (('baseline', comparison.BASELINE), ('candidate', comparison.CANDIDATES['next-candidate']))
 
 
 class IntelComparisonTests(unittest.TestCase):
+    def test_unselected_template_fails_before_any_source_or_host_action(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(comparison, 'source_snapshot') as snapshot, \
+             patch.object(comparison, 'indexing_command') as indexing, \
+             patch.object(comparison.subprocess, 'run') as run:
+            root = Path(directory)
+            self.assertEqual(comparison.run_comparison(root, root / 'none', root / 'out',
+                'next-candidate', 'firefox'), 1)
+            manifest = json.loads((root / 'out/comparison.json').read_text())
+            self.assertIn('Select one exact non-baseline candidate SHA', manifest['error'])
+            self.assertEqual(manifest['arms'], [])
+            self.assertFalse(manifest['releaseEligible'])
+            self.assertEqual(manifest['acceptanceStatus'], 'not-run')
+            snapshot.assert_not_called()
+            indexing.assert_not_called()
+            run.assert_not_called()
+
+    def test_selection_requires_exact_pin_proof_and_matching_workflow(self):
+        sha, proof = 'a' * 40, 'scripts/test-selected-runtime.cjs'
+        valid = f'revision: {sha}\nrevision: {sha}\nnode candidate/{proof}\n'
+        with patch.object(comparison, 'CANDIDATES', {'next-candidate': sha}), \
+             patch.object(comparison, 'CANDIDATE_CPU_CHECK', proof), \
+             patch.object(Path, 'read_text', return_value=valid):
+            comparison.validate_selection()
+            for wrong in ['main', 'UNSELECTED', '0' * 40, comparison.BASELINE, 'A' * 40, 'g' * 40]:
+                with self.subTest(revision=wrong), \
+                     patch.object(comparison, 'CANDIDATES', {'next-candidate': wrong}), \
+                     self.assertRaises(ValueError):
+                    comparison.validate_selection()
+            for wrong in ['UNSELECTED', '../test.cjs', 'scripts/test-foo.cjs;echo', '/tmp/test.cjs']:
+                with self.subTest(proof=wrong), patch.object(comparison, 'CANDIDATE_CPU_CHECK', wrong), self.assertRaises(ValueError):
+                    comparison.validate_selection()
+            for wrong in [valid.replace('revision:', 'wrong:', 1), valid.replace(proof, 'wrong'), valid + f'revision: {sha}\n']:
+                with patch.object(Path, 'read_text', return_value=wrong), self.assertRaises(ValueError):
+                    comparison.validate_selection()
+            with patch.object(comparison, 'CANDIDATES', {'next-candidate': sha, 'extra': sha}), self.assertRaises(ValueError):
+                comparison.validate_selection()
+
+    def test_selection_gate_precedes_all_checkouts_except_harness(self):
+        text = (HERE.parent / '.github/workflows/intel-cgl-next-candidate.yml').read_text()
+        gate = text.index('run: python3 harness/scripts/run-intel-cgl-next-candidate.py --validate-selection')
+        self.assertLess(gate, text.index('name: Check out the exact common baseline'))
+        self.assertLess(gate, text.index('name: Check out the exact independent candidate'))
+        self.assertLess(gate, text.index('name: Install one original checksum'))
+        self.assertNotIn('if:', text[text.rfind('      - name:', 0, gate):gate])
+
     def setUp(self):
         # Never include the caller's credentials in a failed mock-call diff.
         environment = patch.dict(comparison.os.environ, {
@@ -35,7 +81,7 @@ class IntelComparisonTests(unittest.TestCase):
         self.addCleanup(machine.stop)
 
     def run_fixture(self, exit_codes, mutate=False, mismatched_driver=False,
-                    candidate='opaque-blend', product='firefox', mutate_install=False,
+                    candidate='next-candidate', product='firefox', mutate_install=False,
                     cpu_error=False, indexing_codes=None, indexing_statuses=None):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -90,7 +136,8 @@ class IntelComparisonTests(unittest.TestCase):
             return {'revision': revision, 'files': {'viewer.js': value,
                 **{path: driver for path in comparison.DRIVER_FILES}}}
 
-        with patch.object(comparison.platform, 'system', return_value='Darwin'), \
+        with patch.object(comparison, 'validate_selection'), \
+             patch.object(comparison.platform, 'system', return_value='Darwin'), \
              patch.object(comparison.platform, 'machine', return_value='x86_64'), \
              patch.object(comparison, 'source_snapshot', side_effect=snapshot), \
              patch.object(comparison, 'host_resources', return_value={'capturedAt': 'now', 'sysctl': {'hw.logicalcpu': '4'}}), \
@@ -145,7 +192,7 @@ class IntelComparisonTests(unittest.TestCase):
     def test_exact_two_source_order(self):
         self.assertEqual(ARMS, (
             ('baseline', '7b7a896225aaf27fef26a135d654dfaddffe2c08'),
-            ('candidate', '6549b9675f6131feb529b873e110eea01bc82d33'),
+            ('candidate', 'UNSELECTED'),
         ))
 
     def test_original_command_has_only_the_standard_installation_arguments(self):
@@ -170,16 +217,17 @@ class IntelComparisonTests(unittest.TestCase):
 
     def test_rejects_non_intel_host_without_launching(self):
         with tempfile.TemporaryDirectory() as directory, \
+             patch.object(comparison, 'validate_selection'), \
              patch.object(comparison.platform, 'machine', return_value='arm64'), \
              patch.object(comparison.subprocess, 'run') as run:
             root = Path(directory)
-            self.assertEqual(comparison.run_comparison(root, root / 'missing.json', root / 'output', 'opaque-blend', 'firefox'), 1)
+            self.assertEqual(comparison.run_comparison(root, root / 'missing.json', root / 'output', 'next-candidate', 'firefox'), 1)
             run.assert_not_called()
             self.assertEqual(json.loads((root / 'output/comparison.json').read_text())['status'], 'infrastructure-error')
 
     def test_both_product_pairs_keep_fixed_revisions_versions_and_host_records(self):
         self.assertEqual(comparison.CANDIDATES, {
-            'opaque-blend': '6549b9675f6131feb529b873e110eea01bc82d33',
+            'next-candidate': 'UNSELECTED',
         })
         self.assertEqual(comparison.VERSIONS, {'firefox': '153.5.0esr', 'waterfox': '6.7.6'})
         for candidate, revision in comparison.CANDIDATES.items():
@@ -236,14 +284,14 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertEqual(data['uptimeError'], 'TimeoutExpired')
 
     def test_workflow_is_fixed_read_only_two_pair_diagnostic(self):
-        text = (HERE.parent / '.github/workflows/intel-cgl-opaque-blend.yml').read_text()
-        self.assertIn('branches: [diagnostic/intel-cgl-opaque-blend]', text)
-        self.assertIn("github.ref == 'refs/heads/diagnostic/intel-cgl-opaque-blend'", text)
+        text = (HERE.parent / '.github/workflows/intel-cgl-next-candidate.yml').read_text()
+        self.assertIn('branches: [diagnostic/intel-cgl-next-candidate]', text)
+        self.assertIn("github.ref == 'refs/heads/diagnostic/intel-cgl-next-candidate'", text)
         self.assertIn('runs-on: macos-15-intel', text)
         self.assertIn('timeout-minutes: 30', text)
         self.assertIn('max-parallel: 2', text)
         self.assertIn('fail-fast: false', text)
-        entries = re.findall(r'- product: (\S+)\n +version: (\S+)\n +candidate: (\S+)\n +revision: ([0-9a-f]{40})', text)
+        entries = re.findall(r'- product: (\S+)\n +version: (\S+)\n +candidate: (\S+)\n +revision: (\S+)', text)
         self.assertEqual(set(entries), {(product, version, candidate, revision)
             for product, version in comparison.VERSIONS.items()
             for candidate, revision in comparison.CANDIDATES.items()})
@@ -254,7 +302,7 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertIn('python3 baseline/scripts/setup-native-browser.py', text)
         self.assertIn('permissions:\n  contents: read', text)
         self.assertIn('if: ${{ always() }}', text)
-        self.assertIn('name: diagnostic-intel-cgl-opaque-blend-', text)
+        self.assertIn('name: diagnostic-intel-cgl-next-candidate-', text)
         self.assertEqual(text.count('persist-credentials: false'), 3)
         self.assertNotRegex(text, r'workflow_dispatch|pull_request|secrets\.|continue-on-error|workflow_call|diagnose-restore|diagnose-native-draw')
         uses = re.findall(r'uses: ([^\s]+)', text)
@@ -265,15 +313,15 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertNotRegex(quality, re.compile(r'^  push:', re.MULTILINE))
         for name in ('release-pipeline.yml', 'pages.yml'):
             workflow = (HERE.parent / '.github/workflows' / name).read_text()
-            self.assertNotIn('diagnostic/intel-cgl-opaque-blend', workflow)
+            self.assertNotIn('diagnostic/intel-cgl-next-candidate', workflow)
         for path in (HERE.parent / '.github/workflows').glob('intel-cgl-*.yml'):
-            if path.name != 'intel-cgl-opaque-blend.yml':
-                self.assertNotIn('diagnostic/intel-cgl-opaque-blend', path.read_text())
+            if path.name != 'intel-cgl-next-candidate.yml':
+                self.assertNotIn('diagnostic/intel-cgl-next-candidate', path.read_text())
         self.assertFalse((HERE.parent / '.github/workflows/intel-cgl-boundaries.yml').exists())
 
     def test_candidate_cpu_contract_runs_before_browser_installation(self):
-        text = (HERE.parent / '.github/workflows/intel-cgl-opaque-blend.yml').read_text()
-        commands = ['node candidate/scripts/test-shared-opaque-blend.cjs']
+        text = (HERE.parent / '.github/workflows/intel-cgl-next-candidate.yml').read_text()
+        commands = ['node candidate/' + comparison.CANDIDATE_CPU_CHECK]
         prepare = text.split('      - name: Record tooling and prepare both fixtures before timing\n', 1)[1].split('      - name:', 1)[0]
         self.assertEqual([line.strip() for line in prepare.splitlines() if line.strip().startswith('node candidate/')], commands)
         self.assertNotRegex(prepare, r'(?m)^ +if:|continue-on-error|\|\|')
