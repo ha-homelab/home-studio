@@ -503,8 +503,8 @@ before fixture fetch and iframe creation and covers frame selection through the
 first fully connected frame with every expected light rendered. Each wait uses
 the remaining budget; completing a blocked call at or after the deadline still
 fails. This is a prospective change from 30 seconds for cold viewer loads only,
-not a runtime speed improvement or a reclassification of previous failed runs,
-including R24. Planner loads retain 30 seconds. Interaction, settling, editor,
+not a runtime speed improvement or a reclassification of previous failed runs.
+Planner loads retain 30 seconds. Interaction, settling, editor,
 recovery and teardown limits are unchanged.
 
 The cold budget cannot extend the existing outer deadline: Playwright retains

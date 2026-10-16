@@ -2,6 +2,14 @@
 
 ## [0.6.4] - Development line
 
+- Give each cold viewer creation one aggregate 60-second readiness budget,
+  including fetch, frame selection and the first fully connected lit frame.
+  Apply it uniformly across browsers and both creation cycles, bounded by the
+  existing 120-second Playwright or 180-second native scenario watchdog.
+  Record monotonic load timing and reject late completion. This prospective
+  compatibility allowance can accept slower software-rendered startup; it is
+  not a speed improvement. Planner, interaction and recovery limits are unchanged.
+
 - Repaint Home and Editor mode changes even when a queued resize finds the
   previous dimensions already cached. Reuse the pending frame scheduler and
   skip the extra request if a resize or intervening draw has already painted
@@ -39,7 +47,7 @@
   preserving the pinned point, directional, shadow and indirect-light operation
   order. Independent source and material guards retain the existing paths when
   a rewrite is unsupported. These changes add no resources or quality reductions;
-  browser qualification still uses the original limits and complete matrix.
+  browser qualification still uses the documented limits and complete matrix.
 
 - Require native Linux, Windows and macOS package/install acceptance and an
   expanded browser matrix for pull requests and releases. Keep browser families,
