@@ -175,15 +175,24 @@ the original literal geometry without reducing scene contents. CPU regression
 tests cover polygon boundaries, concave rooms, window ordering and this fallback.
 
 When every visible point light belongs to a known room and has exactly zero
-intensity with valid finite inputs, the packed shader skips its point-light
-block through one shared runtime uniform. Empty visible-light sets also skip
-that block. Unknown rooms, nonzero or malformed inputs retain the original
+intensity with valid finite inputs, the packed controller sets its global and
+per-material light-run counts to zero. Its unchanged known-room transmission
+gates reject the shadowed prefix before point or shadow math because every lit-room
+mask is zero. This removes the outer shader branch while keeping the original
+point block, run records and light slots. Empty visible-light sets also have zero
+counts. Unknown rooms, nonzero or malformed inputs retain the original counts and
 calculation. Lights, their ordering, shadows and program families remain intact;
-ambient, sun and daylight calculations remain outside the guard. Both full
-Home frames and signal-only frames refresh the uniform immediately before
-drawing, including after a live update or controller replacement.
+ambient, sun and daylight calculations are unchanged. Both full Home frames and
+signal-only frames refresh the counts immediately before drawing, including after
+a live update or controller replacement. The controller capacity still covers all
+visible points, as established when Home builds or rebuilds its controls.
 
-One local native ARM64 Apple Software Renderer pair reduced the 24-room
+This candidate targets cold software-driver control-flow lowering. A CPU oracle
+checks the byte-identical pinned point block, shadow prefixes of 0/1/2/8, global
+and static counts at 18/72-light capacities, malformed inputs and off/on recovery.
+Any compiler or load-time benefit remains unproven until browser measurement.
+
+For the preceding outer-guard implementation, one local native ARM64 Apple Software Renderer pair reduced the 24-room
 two-cycle case from 56.37 to 49.84 seconds and improved both initial loads.
 The six-room total was unchanged, and some drag measurements regressed.
 Probe timings varied and some work shifted into the connected frame; these

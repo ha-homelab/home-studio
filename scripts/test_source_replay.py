@@ -29,7 +29,8 @@ class SourceReplayTests(unittest.TestCase):
             commands = [replay, ['scripts/test-light-state.cjs'],
                         ['scripts/test-tv-screen.cjs'], ['scripts/test-media-preview.cjs'],
                         ['scripts/test-native-draw-diagnostic.cjs'], ['scripts/test-glass-wall-program.cjs'],
-                        ['scripts/test-zero-point-block.cjs'], ['scripts/test-fallback-shared-program.cjs']]
+                        ['scripts/test-zero-point-block.cjs'], ['scripts/test-point-count-guard.cjs'],
+                        ['scripts/test-fallback-shared-program.cjs']]
             for paths in commands:
                 with self.subTest(command=['node', '--test', *paths]):
                     result = subprocess.run([node, '--test', *paths], cwd=source,

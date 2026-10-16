@@ -585,10 +585,10 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
     .replace('max(homeRunStart, NUM_POINT_LIGHT_SHADOWS)', 'max(homeRunData.x, NUM_POINT_LIGHT_SHADOWS)')
     .replace('homePointTransmission(homePointRooms[homeFirstLight])', 'homePointTransmission(homeRunData.z)')
     .replace('homeRunStart = homeRunEnd;', '') : boundedPointLighting;
-  // A runtime branch retains the same light slots, shadow maps and program
-  // family when every point is off. Never infer zero from a brightness epsilon.
-  const guardedPointLighting = packed ? 'if (homePointLightingRequired) {\n' + directPointLighting + '\n}\n' : directPointLighting;
-  const lighting = (packed ? '' : transmissionCache) + lightChunk.slice(0, pointStart) + guardedPointLighting + lightChunk.slice(pointEnd);
+  // Empty run counts skip provably zero unshadowed lighting without enclosing
+  // the whole block in another branch. The unchanged known-room transmission
+  // gate rejects every shadowed slot before point or shadow math in that state.
+  const lighting = (packed ? '' : transmissionCache) + lightChunk.slice(0, pointStart) + directPointLighting + lightChunk.slice(pointEnd);
   return {
     capacity, geometryMode: packed ? 'packed' : 'literal', geometryUniformVectors: packed?.uniformVectors ?? null,
     attach(group, enabled, {staticGeometry = false} = {}) {
@@ -702,6 +702,10 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
           state.uniforms.homeLightRunStarts.value,state.uniforms.homeLightRunEnds.value);
         packLightRunRecords(state.uniforms.homeLightRunStarts.value, state.uniforms.homeLightRunEnds.value,
           pointRooms, state.uniforms.homeLightRunCount.value, state.uniforms.homeLightRuns.value);
+      }
+      if (packed && !uniforms.homePointLightingRequired.value) {
+        uniforms.homeLightRunCount.value = 0;
+        for (const state of staticRuns.values()) state.uniforms.homeLightRunCount.value = 0;
       }
     }
   };

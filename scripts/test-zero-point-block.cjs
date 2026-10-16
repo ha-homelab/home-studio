@@ -32,18 +32,14 @@ vm.runInContext(source, code);
   assert.equal(flag.value, true, 'Uninitialized/replacement controllers fail open until a current update');
   assert.equal(state.shaders[1].uniforms.homePointLightingRequired, flag, 'Every material shares the same current guard');
   const shader = state.shader.fragmentShader;
-  const guarded = shader.match(/if \(homePointLightingRequired\) \{\n([\s\S]*?)\n\}\n(?=#if \( NUM_SPOT_LIGHTS)/);
-  assert(guarded, 'The runtime guard encloses exactly the complete original point block');
-  assert.match(guarded[1], /^#if \( NUM_POINT_LIGHTS > 0 \) && defined\( RE_Direct \)/);
-  assert.match(guarded[1], /i < NUM_POINT_LIGHT_SHADOWS/);
-  assert.match(guarded[1], /homeRun < homeLightRunCount/);
-  assert.match(guarded[1], /getPointLightInfo\( pointLight, geometryPosition, directLight \)/);
-  assert.doesNotMatch(guarded[1], /NUM_SPOT_LIGHTS|NUM_DIR_LIGHTS|homeDaylightIrradiance\(\)/);
-  assert.equal((shader.match(/if \(homePointLightingRequired\)/g)||[]).length, 1);
-  const executeGuard = new Function('homePointLightingRequired','visit', guarded[0].replace(guarded[1], 'visit();'));
-  for (const enabled of [false,true]) {
-    let calls=0; executeGuard(enabled,()=>calls++); assert.equal(calls, Number(enabled));
-  }
+  const pointBlock = shader.slice(shader.indexOf('#if ( NUM_POINT_LIGHTS > 0 ) && defined( RE_Direct )'),
+    shader.indexOf('#if ( NUM_SPOT_LIGHTS > 0 ) && defined( RE_Direct )'));
+  assert.match(pointBlock, /i < NUM_POINT_LIGHT_SHADOWS/);
+  assert.match(pointBlock, /homeRun < homeLightRunCount/);
+  assert.match(pointBlock, /getPointLightInfo\( pointLight, geometryPosition, directLight \)/);
+  assert.doesNotMatch(pointBlock, /NUM_SPOT_LIGHTS|NUM_DIR_LIGHTS|homeDaylightIrradiance\(\)/);
+  assert.doesNotMatch(shader, /if \(homePointLightingRequired\)/,
+    'The CPU zero proof empties run counts without a whole-block shader branch');
   const makePoint = (room, shadow=false) => {
     const light = new THREE.PointLight(0xffffff,0,7,2); light.castShadow=shadow;
     light.position.set(1,2,3); light.shadow.mapSize.set(128,128);
@@ -56,6 +52,10 @@ vm.runInContext(source, code);
   const version = state.group.children[0].material.version;
   const check = expected => {
     state.lighting.update(points); assert.equal(flag.value, expected);
+    if (!expected) for (const current of state.shaders) {
+      assert.equal(current.uniforms.homeLightRunCount.value,0,'Every static material skips zero unshadowed runs');
+      assert(current.uniforms.homeLitRooms.value.every(value=>value===0),'Every shadowed known-room gate rejects before math');
+    }
     assert.equal(state.group.children[0].material.customProgramCacheKey(),key,'Light state does not select another program family');
     assert.equal(state.group.children[0].material.version,version,'Light state does not invalidate programs');
     identity.forEach((prior,i)=>{
@@ -142,5 +142,5 @@ vm.runInContext(source, code);
   draw.drawSignalFrame(true); assert.equal(captures.at(-1),false,'A replacement controller is refreshed at the same draw boundary');
   for(const value of [state,replacement,fallback]) value.group.traverse(mesh=>{mesh.material?.dispose();mesh.geometry?.dispose();});
   console.log(JSON.stringify({status:'passed',numericInputCases:cases,drawBoundaryCaptures:captures.length,
-    scope:'One shared runtime guard; stable light/shadow/program identity; malformed/roomless fallback; signal/full/recovery/replacement draws; explicit uniform boundary.'}));
+    scope:'One shared CPU zero proof; stable light/shadow/program identity; malformed/roomless fallback; signal/full/recovery/replacement draws; explicit uniform boundary.'}));
 })().catch(error=>{console.error(error);process.exitCode=1;});
