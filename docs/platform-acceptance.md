@@ -167,8 +167,9 @@ uniform arrays, replacing repeated literal GLSL helpers with shared loops. Room
 order, doorway spill, daylight and window transmission retain the same math;
 other renderer profiles retain their original shader source. Packing is enabled
 only when the reported fragment-uniform limit covers a conservative allowance:
-128 vectors plus seven per light slot, four per room, one per polygon edge and two
-per window. The guard budgets 836 of the Apple software renderer's reported
+129 vectors (including one for the private wall-sheen switch) plus seven per light
+slot, four per room, one per polygon edge, two per window, and one per room with
+windows (at least one reserved slot). The guard budgets 843 of the Apple software renderer's reported
 1,024 vectors for the 24-room, 72-light fixture. Lower limits and larger plans fall back to
 the original literal geometry without reducing scene contents. CPU regression
 tests cover polygon boundaries, concave rooms, window ordering and this fallback.

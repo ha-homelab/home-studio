@@ -52,6 +52,49 @@ function applyWallSheen(shader) {
   ).replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += wallSheen*0.16;');
 }
 
+// Keep applyWallSheen compatible with Three's (shader, renderer) callback.
+// Only this internal helper accepts the private per-material switch.
+function applySharedWallSheen(shader, enabled) {
+  applyWallSheen(shader);
+  shader.uniforms.homeWallSheenEnabled = enabled;
+  shader.fragmentShader = 'uniform bool homeWallSheenEnabled;\n' + shader.fragmentShader
+    .replace('diffuseColor.rgb = mix(diffuseColor.rgb,wallSheen,0.48);',
+      'if (homeWallSheenEnabled) diffuseColor.rgb = mix(diffuseColor.rgb,wallSheen,0.48);')
+    .replace('totalEmissiveRadiance += wallSheen*0.16;',
+      'if (homeWallSheenEnabled) totalEmissiveRadiance += wallSheen*0.16;');
+}
+
+// Only immutable packed-Lambert walls and alpha-free floors/frames share this
+// program. NoBlending is the same disabled GPU blend state as opaque normal
+// blending, but omits Three's redundant OPAQUE shader define. Restore the
+// original setting if a later attachment is dynamic, literal or unsupported.
+const sharedWallMaterials = new WeakMap();
+function prepareSharedWallProgram(THREE, mesh, role) {
+  const material = mesh.material;
+  let state = sharedWallMaterials.get(material);
+  if (state?.blending !== undefined) {
+    if (material.blending === THREE.NoBlending) material.blending = state.blending;
+    delete state.blending;
+  }
+  if (!role || !material.isMeshLambertMaterial || material.side !== THREE.DoubleSide ||
+      material.blending !== THREE.NormalBlending || material.clippingPlanes?.length !== 1 ||
+      material.clipShadows || material.map || material.alphaMap || material.vertexColors ||
+      mesh.geometry?.getAttribute?.('color') ||
+      material.alphaTest !== 0 || material.alphaHash || material.alphaToCoverage || material.premultipliedAlpha) return false;
+  if (role === 'wall' ? material.transparent !== true : material.transparent || material.opacity !== 1) return false;
+  if (!state) {
+    state = {enabled:{value:false}};
+    sharedWallMaterials.set(material, state);
+  }
+  // Cached programs retain this same uniform object across reattachments.
+  state.enabled.value = role === 'wall';
+  if (role !== 'wall') {
+    state.blending = material.blending;
+    material.blending = THREE.NoBlending;
+  }
+  return state.enabled;
+}
+
 // Point shadows use a 4-by-2 atlas, not one mapSize-sized texture. Keep the
 // combined atlas allocation bounded as the number of linked fixtures grows.
 function pointShadowMapSize(lightCount, maxTextureSize = 4096, maxFaceSize = 512) {
@@ -133,8 +176,9 @@ function packRoomLightingGeometry(rooms, windows, capacity, maxFragmentUniforms)
   const edgeCount = rooms.reduce((sum, room) => sum + room.polygon.length, 0);
   const windowRooms = rooms.flatMap((room, index) => windows.some(window => window.room === room.id) ? [index] : []);
   // Scalars in arrays may each consume a vector. Reserve the existing light,
-  // shadow, material and transform uniforms before adding packed geometry.
-  const uniformVectors = 128 + capacity * 7 + rooms.length * 4 + edgeCount + windows.length * 2 + Math.max(1, windowRooms.length);
+  // shadow, material and transform uniforms before adding packed geometry,
+  // plus one explicit vector for the shared wall-sheen material switch.
+  const uniformVectors = 129 + capacity * 7 + rooms.length * 4 + edgeCount + windows.length * 2 + Math.max(1, windowRooms.length);
   if (!Number.isFinite(maxFragmentUniforms) || uniformVectors > maxFragmentUniforms) return null;
   const edges = new Float32Array(Math.max(1, edgeCount) * 4);
   const ranges = new Int32Array(Math.max(1, rooms.length) * 4);
@@ -380,6 +424,15 @@ ${packed ? `    uniform int homeLightRunStarts[${capacity}];\n    ${geometryDecl
     capacity, geometryMode: packed ? 'packed' : 'literal', geometryUniformVectors: packed?.uniformVectors ?? null,
     attach(group, enabled, {staticGeometry = false} = {}) {
       if (packed && staticGeometry) group?.updateWorldMatrix?.(true,true);
+      // A material reused across wall/non-wall or unknown categories cannot
+      // represent both fragment behaviours with one per-material uniform.
+      const sharedWallRoles = new Map();
+      if (packed && staticGeometry) group?.traverse(mesh => {
+        if (!mesh.material) return;
+        const category = mesh.userData.category;
+        const role = category === 'walls' ? 'wall' : ['floors','frames'].includes(category) ? 'opaque' : null;
+        sharedWallRoles.set(mesh.material, !sharedWallRoles.has(mesh.material) || sharedWallRoles.get(mesh.material) === role ? role : null);
+      });
       group?.traverse(mesh => {
         if (!mesh.material?.isMeshStandardMaterial && !mesh.material?.isMeshLambertMaterial) return;
         if (packed) {
@@ -403,8 +456,12 @@ ${packed ? `    uniform int homeLightRunStarts[${capacity}];\n    ${geometryDecl
           }
         }
         const wall = mesh.userData.category === 'walls';
+        const wallEnabled = prepareSharedWallProgram(THREE, mesh,
+          !dynamicMaterials.has(mesh.material) && sharedWallRoles.get(mesh.material));
+        const sharedWall = Boolean(wallEnabled);
         mesh.material.onBeforeCompile = shader => {
-          if (wall) applyWallSheen(shader);
+          if (sharedWall) applySharedWallSheen(shader, wallEnabled);
+          else if (wall) applyWallSheen(shader);
           // Keep uniform definitions identical in both material variants.
           Object.assign(shader.uniforms, uniforms, staticRuns.get(mesh.material)?.uniforms, {homeExteriorSurface:{value:mesh.userData.category==='stairs'?1:0}});
           // The editor needs no room/window shader, especially on software WebGL.
@@ -415,7 +472,8 @@ ${packed ? `    uniform int homeLightRunStarts[${capacity}];\n    ${geometryDecl
           );
           shader.fragmentShader = fragment + shader.fragmentShader.replace('#include <lights_fragment_begin>', lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
         };
-        mesh.material.customProgramCacheKey = () => (enabled ? fragment : 'home-editor') + (wall ? ':wall-sheen-v2' : '');
+        mesh.material.customProgramCacheKey = () => (enabled ? fragment : 'home-editor') +
+          (sharedWall ? ':wall-sheen-switch-v1' : wall ? ':wall-sheen-v2' : '');
         mesh.material.needsUpdate = true;
       });
     },
