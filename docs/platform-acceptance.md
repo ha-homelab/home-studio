@@ -174,6 +174,13 @@ windows (at least one reserved slot). The guard budgets 843 of the Apple softwar
 the original literal geometry without reducing scene contents. CPU regression
 tests cover polygon boundaries, concave rooms, window ordering and this fallback.
 
+Packed daylight traversal visits only rooms that own windows, in the original
+room order. Window order, transmission and distance calculations remain the
+same; a plan without windows omits the daylight loop. The additional index
+array is included in the uniform allowance above, including its one-slot empty
+fallback. The normal material path and low-uniform fallback keep their original
+shader source.
+
 Exactly axis-aligned rectangular rooms use a box signed-distance calculation
 instead of walking four polygon edges. Classification uses the same quantized
 coordinates as the shader and rejects repeated corners, crossed edges and
@@ -189,6 +196,18 @@ keep their existing clipping behavior. This avoids compiling an extra program
 without changing floor geometry, sidedness, illumination or drawing resolution.
 Regression checks include transformed Float32 clipping arithmetic and separate
 image comparisons from above, below, near the floor and with cutaway enabled.
+
+Eligible static Lambert walls, floors and frames also share a program with a
+private per-material wall-tint switch. Opaque floors and frames use explicit
+`NoBlending`, which preserves their already-disabled GPU blending while avoiding
+a separate opaque shader define. Walls retain their transparency and depth
+state. Textured, alpha-tested, differently sided, dynamic and mixed-role
+materials keep separate programs. A later attachment restores any owned blend
+setting and keeps cached uniform references current. Regression checks cover
+reattachment, material ownership and low-uniform fallback; visual diagnostics
+also check the actual GPU switch, blending, culling and depth state across draws.
+Fewer programs can reduce first-use work, but do not guarantee a speedup on every
+driver; the complete timed acceptance matrix remains required.
 
 Viewer receipts retain the existing native drag phase timings for Home and the
 editor, followed by the existing two-animation-frame completion wait. These

@@ -60,6 +60,10 @@
   Static opaque floors share the diffuse frame shader through a nonintersecting
   clipping plane, reducing shader variants while retaining floor and shadow
   geometry, cutaway behavior and drawing resolution.
+  Visit only window-owning rooms for packed daylight, retaining room/window
+  order and accounting for the new index array in the uniform budget. Share
+  eligible static wall, floor and frame programs through a private wall-tint
+  switch while preserving their actual blending, culling and depth state.
 - Reuse planner outlines and selection controls, and avoid redrawing unchanged
   snapped positions. Preserve exact furniture overlap, appearance, undo and drag
   cancellation. Bound software-renderer resolution without reducing sharp HTML
