@@ -102,7 +102,9 @@ class PlatformAcceptanceTests(unittest.TestCase):
         runs = '\n'.join(step.get('run', '') for step in steps)
         self.assertIn('scripts/setup-browser-toolchain.py', runs)
         self.assertIn('scripts/setup-chrome-for-testing.py', runs)
-        self.assertIn('"$HOME_STUDIO_PLAYWRIGHT_MODULE/cli.js"', runs)
+        self.assertIn('python3 scripts/install-browser-with-retry.py', runs)
+        inventory_checks = '\n'.join(step.get('run', '') for step in jobs['matrix']['steps'])
+        self.assertIn('python3 scripts/test-browser-install.py', inventory_checks)
 
     def test_touch_comparisons_only_rerun_failed_sizes_and_never_hide_a_failure(self):
         steps = workflow('platform-acceptance.yml')['jobs']['browser']['steps']
