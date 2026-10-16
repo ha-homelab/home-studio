@@ -27,8 +27,13 @@ function browserLaunchOptions(engine, headless) {
   assert(!channel || engine === 'chromium', 'Browser channels require the Chromium engine');
   if (engine === 'webkit') return {headless};
   if (engine === 'chromium') {
+    const backend = process.env.CHROMIUM_ANGLE_BACKEND || 'swiftshader';
+    assert(['metal', 'swiftshader'].includes(backend), 'CHROMIUM_ANGLE_BACKEND must be metal or swiftshader');
+    // Software rendering remains explicit on GPU-less runners. macOS can
+    // exercise its native Metal backend without forcing the SwiftShader driver.
     return {headless, channel, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
-      args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']};
+      args: ['--enable-webgl', `--use-angle=${backend}`,
+        ...(backend === 'swiftshader' ? ['--enable-unsafe-swiftshader'] : [])]};
   }
   assert.equal(engine, 'firefox', 'A supported browser engine is required');
   const backend = process.env.FIREFOX_WEBGL_BACKEND || 'default';
@@ -338,6 +343,14 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
         if (process.platform === 'darwin' && options.launch.firefoxUserPrefs?.['webgl.disable-angle'] === false) {
           check(/ANGLE Metal Renderer/i.test(record.gpu?.unmaskedRenderer || record.gpu?.renderer || ''),
             'The requested Firefox Metal ANGLE backend must be confirmed by the actual renderer');
+        }
+        if (engine === 'chromium') {
+          for (const [backend, expected] of [['metal', /ANGLE Metal Renderer/i], ['swiftshader', /SwiftShader/i]]) {
+            if (options.launch.args?.includes(`--use-angle=${backend}`)) {
+              check(expected.test(record.gpu?.unmaskedRenderer || record.gpu?.renderer || ''),
+                `The requested Chromium ${backend} ANGLE backend must be confirmed by the actual renderer`);
+            }
+          }
         }
       })()]);
       record.status = options.reportOnly ? 'observation' : 'passed';

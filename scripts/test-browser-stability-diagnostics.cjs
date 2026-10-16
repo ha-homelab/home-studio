@@ -156,6 +156,50 @@ test('the Metal profile is explicit and rejects an unconfirmed macOS backend', a
   }
 });
 
+test('Chromium ANGLE selection preserves software coverage and rejects an unconfirmed backend', async () => {
+  const previous = process.env.CHROMIUM_ANGLE_BACKEND;
+  try {
+    delete process.env.CHROMIUM_ANGLE_BACKEND;
+    assert.deepEqual(browserLaunchOptions('chromium', true).args,
+      ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']);
+    for (const backend of ['metal', 'swiftshader']) {
+      process.env.CHROMIUM_ANGLE_BACKEND = backend;
+      const launch = browserLaunchOptions('chromium', false);
+      assert.equal(launch.headless, false);
+      assert.deepEqual(launch.args, ['--enable-webgl', `--use-angle=${backend}`,
+        ...(backend === 'swiftshader' ? ['--enable-unsafe-swiftshader'] : [])]);
+      const matching = backend === 'metal'
+        ? 'ANGLE (Apple, ANGLE Metal Renderer: Apple Paravirtual device, Version 15.7.9)'
+        : 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device), SwiftShader driver)';
+      const mismatching = backend === 'metal' ? 'SwiftShader Device' : 'ANGLE Metal Renderer: Fixture GPU';
+      for (const gpu of [{unmaskedRenderer: matching}, {renderer: matching}, {renderer: mismatching}, undefined]) {
+        const fake = fakeBrowser();
+        let launched;
+        const diagnostics = suite(`chromium-${backend}`, {chromium: {launch: async value => {
+          launched = value;
+          return fake.browser;
+        }}});
+        const run = diagnostics.run('chromium', {...options, launch}, async ({record}) => { record.gpu = gpu; });
+        const expected = gpu && (gpu.unmaskedRenderer || gpu.renderer) === matching;
+        if (expected) await run;
+        else await assert.rejects(run, /must be confirmed by the actual renderer/);
+        const record = read(diagnostics, 'chromium.json');
+        assert.equal(record.status, expected ? 'passed' : 'failed');
+        assert.deepEqual(launched.args, launch.args);
+        assert.deepEqual(record.launch.args, launch.args);
+        assert(fake.context.closed && fake.browser.closed);
+      }
+    }
+    process.env.CHROMIUM_ANGLE_BACKEND = 'typo';
+    assert.throws(() => browserLaunchOptions('chromium', false), /must be metal or swiftshader/);
+    assert.deepEqual(browserLaunchOptions('webkit', false), {headless: false});
+    assert.equal(browserLaunchOptions('firefox', false).args, undefined);
+  } finally {
+    if (previous === undefined) delete process.env.CHROMIUM_ANGLE_BACKEND;
+    else process.env.CHROMIUM_ANGLE_BACKEND = previous;
+  }
+});
+
 test('the browser watchdog fails a stalled test and saves evidence before closing', async () => {
   const fake = fakeBrowser();
   const diagnostics = suite('watchdog', {firefox: {launch: async () => fake.browser}});
