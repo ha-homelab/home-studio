@@ -4,7 +4,9 @@ import importlib.util
 import json
 import io
 import http.client
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+import contextlib
+import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -149,6 +151,170 @@ class ColdSafariTransportTests(unittest.TestCase):
             with self.assertRaises(TimeoutError): client.request('GET', '/status')
         client._cold_load_deadline = None
         self.assertEqual(client.command_timeout(), 30)
+
+
+class SessionStartupTests(unittest.TestCase):
+    def test_session_completion_boundary_outer_cap_and_single_attempt(self):
+        for outer, elapsed, succeeds in ((180, 59.999, True), (180, 59.9999999, True),
+                                          (180, 60, False),
+                                          (180, 61, False), (45, 44.999, True),
+                                          (45, 45, False), (0, 0, False)):
+            with self.subTest(outer=outer, elapsed=elapsed):
+                now = [0.0]
+                client = safari.SafariWebDriver('http://fixture')
+                client._browser_deadline = outer
+                timing, calls = {}, []
+                def request(method, route, data):
+                    calls.append((method, route, client.command_timeout()))
+                    now[0] = elapsed
+                    return {'sessionId': 'known', 'capabilities': {'browserName': 'Safari'}}
+                with patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
+                     patch.object(client, 'request', side_effect=request):
+                    if succeeds:
+                        client.start(timing)
+                    else:
+                        with self.assertRaises(TimeoutError):
+                            client.start(timing)
+                    self.assertEqual(client.command_timeout(), 30)
+                self.assertEqual(calls, [('POST', '/session', min(60, outer))] if outer else [])
+                self.assertEqual(timing['budgetMs'], 60000)
+                self.assertEqual(timing['effectiveBudgetMs'], min(60, outer) * 1000)
+                self.assertEqual(timing['durationMs'], elapsed * 1000)
+                self.assertEqual(timing['completed'], succeeds)
+                self.assertEqual(timing['timedOut'], not succeeds)
+                self.assertEqual(client._browser_deadline, outer)
+                self.assertIsNone(client._session_start_deadline)
+                # A late parsed ID remains available to the existing cleanup.
+                self.assertEqual(client.session_id, 'known' if calls else None)
+
+    def test_transport_and_identity_failures_restore_ordinary_timeout(self):
+        for failure in (ValueError('invalid JSON'), RuntimeError('WebDriver rejected session'),
+                        TimeoutError('socket timeout'), None):
+            with self.subTest(failure=failure):
+                client = safari.SafariWebDriver('http://fixture')
+                timing = {}
+                response = {'sessionId': 'wrong-browser', 'capabilities': {'browserName': 'MiniBrowser'}}
+                with patch.object(client, 'request', side_effect=failure, return_value=response) as request:
+                    with self.assertRaises(type(failure) if failure else AssertionError):
+                        client.start(timing)
+                self.assertEqual(request.call_count, 1)
+                self.assertEqual(client.command_timeout(), 30)
+                self.assertFalse(timing['completed'])
+                self.assertFalse(timing['timedOut'])
+                self.assertEqual(client.session_id, None if failure else 'wrong-browser')
+
+    def test_actual_http_body_uses_remaining_session_budget(self):
+        for body_end in (59.999, 60.0):
+            with self.subTest(body_end=body_end):
+                now = [0.0]
+                class Socket:
+                    def __init__(self, payload): self.payload = payload; self.values = []
+                    def makefile(self, _mode):
+                        class Reader(io.BytesIO):
+                            def read1(self, size):
+                                now[0] = body_end
+                                return super().read1(size)
+                        reader = Reader(self.payload)
+                        reader.raw = type('Raw', (), {'_sock': self})()
+                        return reader
+                    def settimeout(self, value): self.values.append(value)
+                body = json.dumps({'value': {'sessionId': 'http-session',
+                                            'capabilities': {'browserName': 'Safari'}}}).encode()
+                sock = Socket(b'HTTP/1.1 200 OK\r\nContent-Length: ' + str(len(body)).encode() + b'\r\n\r\n' + body)
+                response = http.client.HTTPResponse(sock); response.begin()
+                client = safari.SafariWebDriver('http://fixture'); client._browser_deadline = 180
+                timing = {}
+                def opened(request, timeout):
+                    self.assertEqual((request.method, request.full_url), ('POST', 'http://fixture/session'))
+                    self.assertEqual(timeout, 60)
+                    now[0] = 40
+                    return response
+                with patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
+                     patch.object(safari.urllib.request, 'urlopen', side_effect=opened) as opening:
+                    if body_end < 60:
+                        self.assertEqual(client.start(timing)['sessionId'], 'http-session')
+                    else:
+                        with self.assertRaises(TimeoutError): client.start(timing)
+                    self.assertEqual(client.command_timeout(), 30)
+                self.assertEqual(opening.call_count, 1)
+                self.assertEqual(sock.values, [20])
+                self.assertTrue(response.isclosed())
+                self.assertEqual(timing['completed'], body_end < 60)
+                self.assertEqual(timing['timedOut'], body_end >= 60)
+
+    def test_run_case_keeps_late_start_failed_and_never_enters_application(self):
+        for name in ('viewer-6', 'planner-256'):
+            for elapsed in (35, 60):
+                with self.subTest(name=name, elapsed=elapsed), tempfile.TemporaryDirectory() as temp:
+                    now = [0.0]
+                    client = safari.SafariWebDriver('http://fixture')
+                    calls = []
+                    def request(method, route, data=None):
+                        calls.append((method, route, client.command_timeout(), data))
+                        if route == '/session':
+                            now[0] = elapsed
+                            return {'sessionId': 'owned', 'capabilities': {'browserName': 'Safari'}}
+                        return None
+                    driver = Mock(); driver.poll.return_value = None
+                    with contextlib.ExitStack() as stack:
+                        stack.enter_context(patch.object(safari.sys, 'platform', 'darwin'))
+                        stack.enter_context(patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]))
+                        stack.enter_context(patch.object(safari.subprocess, 'check_output', return_value='Safari test'))
+                        stack.enter_context(patch.object(safari.subprocess, 'Popen', return_value=driver))
+                        stack.enter_context(patch.object(safari, 'fixture_server', return_value=(Mock(), {'origin':'http://fixture', 'sourceHash':'fixed'}, {})))
+                        stack.enter_context(patch.object(safari, 'SafariWebDriver', return_value=client))
+                        stack.enter_context(patch.object(client, 'request', side_effect=request))
+                        stack.enter_context(patch.object(safari.native, 'stop'))
+                        timer = stack.enter_context(patch.object(safari.threading, 'Timer'))
+                        viewer = stack.enter_context(patch.object(safari.native, 'viewer'))
+                        planner = stack.enter_context(patch.object(safari.native, 'planner'))
+                        record = safari.run_case(Path(temp), name, '/test/safaridriver')
+                    self.assertEqual(sum(route == '/session' for _, route, _, _ in calls), 1)
+                    timer.assert_called_once()
+                    self.assertEqual(timer.call_args.args[0], 180)
+                    self.assertEqual(client._browser_deadline, 180)
+                    self.assertEqual(client.command_timeout(), 30)
+                    self.assertEqual(record['sessionStartup']['durationMs'], elapsed * 1000)
+                    self.assertEqual(record['sessionStartup']['completed'], elapsed < 60)
+                    self.assertEqual(record['sessionStartup']['timedOut'], elapsed >= 60)
+                    self.assertEqual(record['status'], 'passed' if elapsed < 60 else 'failed')
+                    self.assertEqual(record['phase'], 'completed' if elapsed < 60 else 'session-startup')
+                    self.assertEqual(viewer.call_count + planner.call_count, int(elapsed < 60))
+                    if elapsed < 60:
+                        timeout_call = next(c for c in calls if c[1].endswith('/timeouts'))
+                        self.assertEqual(timeout_call[2:], (30, {'script':30000, 'pageLoad':30000, 'implicit':0}))
+                    else:
+                        self.assertEqual(record['samples'], [])
+                    self.assertIn(('DELETE', '/session/owned', 30, None), calls)
+                    self.assertEqual(json.loads((Path(temp) / 'report.json').read_text())['status'], record['status'])
+
+    def test_session_http_error_uses_bounded_body_and_restores_scope(self):
+        class Socket:
+            def __init__(self, payload): self.payload = payload; self.values = []
+            def makefile(self, _mode):
+                class Reader(io.BytesIO): pass
+                reader = Reader(self.payload); reader.raw = type('Raw', (), {'_sock': self})()
+                return reader
+            def settimeout(self, value): self.values.append(value)
+        body = b'{"value":{"error":"session not created","message":"setup rejected"}}'
+        sock = Socket(b'HTTP/1.1 500 Error\r\nContent-Length: ' + str(len(body)).encode() + b'\r\n\r\n' + body)
+        response = http.client.HTTPResponse(sock); response.begin()
+        error = safari.urllib.error.HTTPError('http://fixture/session', 500, 'Error', response.headers, response)
+        client = safari.SafariWebDriver('http://fixture')
+        now, timing = [0], {}
+        def opened(_request, timeout):
+            self.assertEqual(timeout, 60)
+            now[0] = 40
+            raise error
+        with patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
+             patch.object(safari.urllib.request, 'urlopen', side_effect=opened) as opening:
+            with self.assertRaisesRegex(RuntimeError, 'session not created'):
+                client.start(timing)
+            self.assertEqual(client.command_timeout(), 30)
+        self.assertEqual(opening.call_count, 1)
+        self.assertEqual(sock.values, [20])
+        self.assertFalse(timing['completed'])
+        self.assertFalse(timing['timedOut'])
 
 
 if __name__ == '__main__':

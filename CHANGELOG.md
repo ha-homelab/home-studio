@@ -2,6 +2,11 @@
 
 ## [0.6.4] - Development line
 
+- Allow up to 60 seconds for Safari's initial WebDriver session request,
+  within the existing 180-second browser watchdog. Record startup timing and
+  reject late completion without retrying. Subsequent command timeouts and
+  application checks are unchanged; earlier startup failures remain failures.
+
 - Bound browser-tool installation to 12 minutes inside a 30-minute package
   validation job, allowing slow operating-system package mirrors while retaining
   required dependencies and every check. Browser bootstrap, scenario, load,

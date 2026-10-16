@@ -28,6 +28,7 @@ sys.path.insert(0, str(SCRIPTS))
 spec = importlib.util.spec_from_file_location('native_acceptance', SCRIPTS / 'test-waterfox-acceptance.py')
 native = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(native)
+SESSION_START_BUDGET_MS = 60000
 
 
 class SafariWebDriver(native.Marionette):
@@ -35,6 +36,15 @@ class SafariWebDriver(native.Marionette):
     def __init__(self, origin):
         self.origin = origin
         self.session_id = None
+
+    def command_timeout(self):
+        deadline = self.__dict__.get('_session_start_deadline')
+        if deadline is None:
+            return super().command_timeout()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('Initial Safari session exceeded its 60-second or remaining browser deadline')
+        return remaining
 
     def request(self, method, route, data=None):
         body = None if data is None else json.dumps(data).encode('utf-8')
@@ -45,10 +55,11 @@ class SafariWebDriver(native.Marionette):
         except urllib.error.HTTPError as error:
             response = error
         with response:
-            if self.__dict__.get('_cold_load_deadline') is None:
+            if (self.__dict__.get('_cold_load_deadline') is None
+                    and self.__dict__.get('_session_start_deadline') is None):
                 raw = response.read(64 * 1024 * 1024 + 1)
             else:
-                # HTTP headers and body share the same cold-load clock. Update
+                # HTTP headers and body share one cold-load or session clock. Update
                 # each bounded read's socket timeout, rather than renewing 60s.
                 body_response = response.fp if isinstance(response, urllib.error.HTTPError) else response
                 chunks, size = [], 0
@@ -57,7 +68,7 @@ class SafariWebDriver(native.Marionette):
                     if body_response.isclosed():
                         break
                     transport = getattr(getattr(body_response.fp, 'raw', None), '_sock', None)
-                    native.require(transport is not None, 'Cold Safari response requires a bounded socket')
+                    native.require(transport is not None, 'Scoped Safari response requires a bounded socket')
                     transport.settimeout(remaining)
                     chunk = body_response.read1(min(65536, 64 * 1024 * 1024 + 1 - size))
                     if not chunk:
@@ -70,11 +81,36 @@ class SafariWebDriver(native.Marionette):
                 raise RuntimeError(f'WebDriver {method} {route}: {value}')
         return value
 
-    def start(self):
-        result = self.request('POST', '/session', {'capabilities': {'alwaysMatch': {'browserName': 'safari'}}})
-        self.session_id = result['sessionId']
-        native.require(result['capabilities']['browserName'].lower() == 'safari', 'Real Safari is required')
-        return result
+    def start(self, timing=None):
+        timing = timing if timing is not None else {}
+        started = time.monotonic()
+        deadline = started + SESSION_START_BUDGET_MS / 1000
+        outer = self.__dict__.get('_browser_deadline')
+        if outer is not None:
+            deadline = min(deadline, outer)
+        timing.update(budgetMs=SESSION_START_BUDGET_MS,
+                      effectiveBudgetMs=max(0, (deadline - started) * 1000),
+                      durationMs=None, completed=False, timedOut=False)
+        previous = self.__dict__.get('_session_start_deadline')
+        self._session_start_deadline = deadline
+        completed_at = None
+        try:
+            self.command_timeout()
+            result = self.request('POST', '/session', {'capabilities': {'alwaysMatch': {'browserName': 'safari'}}})
+            # Retain a returned ID for normal cleanup even if completion is late.
+            self.session_id = result['sessionId']
+            native.require(result['capabilities']['browserName'].lower() == 'safari', 'Real Safari is required')
+            finished = time.monotonic()
+            if finished >= deadline:
+                raise TimeoutError('Initial Safari session exceeded its 60-second or remaining browser deadline')
+            completed_at = finished
+            timing['completed'] = True
+            return result
+        finally:
+            finished = completed_at if completed_at is not None else time.monotonic()
+            timing['durationMs'] = (finished - started) * 1000
+            timing['timedOut'] = completed_at is None and finished >= deadline
+            self._session_start_deadline = previous
 
     def close(self):
         if self.session_id:
@@ -179,14 +215,21 @@ def run_case(output, name, driver_path):
             watchdog = threading.Timer(180, expired)
             watchdog.daemon = True
             watchdog.start()
-            record['session'] = client.start()
+            record['phase'] = 'session-startup'
+            record['sessionStartup'] = {'budgetMs': SESSION_START_BUDGET_MS}
+            save()
+            record['session'] = client.start(record['sessionStartup'])
+            record['phase'] = 'session-configuration'
+            save()
             client.call('WebDriver:SetTimeouts', {'script': 30000, 'pageLoad': 30000, 'implicit': 0})
             client.call('WebDriver:SetWindowRect', {'width': 1440, 'height': 1000})
             record['userAgent'] = client.execute('return navigator.userAgent;')
+            record['phase'] = 'application'
             save()
             (native.planner if name == 'planner-256' else native.viewer)(client, info['origin'], project, record, save)
             client.close()
             record['sessionClosed'] = True
+            record['phase'] = 'completed'
             record['status'] = 'passed'
         except Exception as error:
             record.update(status='failed', error=str(error), traceback=traceback.format_exc())

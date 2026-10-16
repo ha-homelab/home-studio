@@ -559,6 +559,24 @@ cold measurement; its reset and the diagnostic snapshot after readiness are not.
 The separate fenced first-frame diagnostic retains its own 180-second limit and
 cannot award acceptance credit.
 
+Safari's initial WebDriver `POST /session` has a separate 60-second setup
+allowance in each case, capped by the remaining, unchanged 180-second browser
+watchdog. The single request is not retried. HTTP headers and body share that
+deadline, and late completion cannot enter the application scenario. Subsequent
+commands retain their ordinary 30-second transport timeout; the viewer's
+separate cold-load scope remains as described above. The report records
+`phase: session-startup` while that request is pending and retains
+`sessionStartup` with `budgetMs`, `effectiveBudgetMs`, `durationMs`, `completed`
+and `timedOut`. Session configuration and application work have distinct phase
+labels. Cleanup uses a returned session ID when available; otherwise stopping
+SafariDriver handles an unknown-ID startup failure. This prospective allowance
+does not reclassify earlier session timeouts as passes or change any application
+assertion, interaction or recovery limit.
+Socket operations use the remaining allowance; a blocked library call can
+return after its boundary, but still fails admission. This is not a guarantee
+of preemption at exactly 60 seconds; the unchanged outer watchdog also remains
+in force.
+
 Every viewer report and cycle sample records `loadBudgetMs: 60000`. Samples also
 record monotonic `loadMs` and `loadCompleted`; a pending or failed cold load is
 saved with `loadCompleted: false`, and detected expiry sets `loadTimedOut: true`.
