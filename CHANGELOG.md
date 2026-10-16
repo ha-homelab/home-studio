@@ -38,6 +38,8 @@
   The diffuse profile uses packed room geometry with a conservative uniform
   budget and computes transmission per light run instead of indexing a local
   fragment array; larger plans or lower limits retain the original shader path.
+  Skip absent daylight topology and polygon-distance work outside its full
+  spatial reach, retaining the same window and exterior lighting.
 - Reuse planner outlines and selection controls, and avoid redrawing unchanged
   snapped positions. Preserve exact furniture overlap, appearance, undo and drag
   cancellation. Bound software-renderer resolution without reducing sharp HTML
