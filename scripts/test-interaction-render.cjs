@@ -76,6 +76,7 @@ lifecycle.homeView=null;
 lifecycle.releaseViewerGeometryGPU=()=>lifecycleOrder.push('geometry-release');
 lifecycle.editorFloorMaterials=null;
 lifecycle.releaseViewerTextureGPU=()=>lifecycleOrder.push('texture-release');
+lifecycle.releaseWallOutlineMaterials=()=>{};
 lifecycle.releaseStaticGlassPasses=()=>lifecycleOrder.push('glass-release');
 lifecycle.disposeStaticGlassPasses=()=>lifecycleOrder.push('glass-dispose');
 vm.createContext(lifecycle);
@@ -89,7 +90,7 @@ let created=0;
 const c={editorFloorMaterials:null,homeView:null,renderProfile:{diffuseLighting:true},renderSuspended:false,renderLost:false,renderCount:0,
  interactionRenderer:null,interactionPointer:{moved:true},scene:{},THREE:{},document:{hidden:false},performance:{now:()=>0},
  wallSheenMotion:{beforeRender(){},afterRender(){}},cancelRender(){},invalidateShadows(){},
- requestRender(){history.push('request');},resize(){},observer:{disconnect(){}},releaseStaticGlassPasses(){},disposeStaticGlassPasses(){},releaseViewerGeometryGPU(){},releaseViewerTextureGPU(){},
+ requestRender(){history.push('request');},resize(){},observer:{disconnect(){}},releaseStaticGlassPasses(){},disposeStaticGlassPasses(){},releaseViewerGeometryGPU(){},releaseViewerTextureGPU(){},releaseWallOutlineMaterials(){},
  renderer:{domElement:{addEventListener:(key,fn)=>hooks[key]=fn},dispose(){},forceContextLoss(){}},
  window:{resizeModel(){},addEventListener:(key,fn)=>hooks[key]=fn},
  createInteractionRenderer(){const id=++created;return {draw(scene,camera,moving){history.push({id,moving});},dispose(){history.push({disposed:id});}}},

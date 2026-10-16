@@ -43,7 +43,7 @@ const root=path.resolve(__dirname,'..');
     function upload(g){manager.geometries.get({geometry:g},g);manager.geometries.update(g);manager.bindings.setup({},material,manager.program,g,g.index);const wire=manager.geometries.getWireframeAttribute(g);manager.attributes.update(wire,gl.ELEMENT_ARRAY_BUFFER);manager.bindings.setup({},{wireframe:true},manager.program,g,wire);}
     for(const geometry of owned)upload(geometry);
     const canvas={addEventListener(name,fn){(listeners[name]??=[]).push(fn);}};
-    const c=vm.createContext({scene,roundedWalls,Set,renderLost:false,cancelRender(){order.push('app-lost');},interactionPointer:{},interactionRenderer:null,releaseStaticGlassPasses(){},editorFloorMaterials:null,homeView:null,releaseViewerTextureGPU(){},renderer:{domElement:canvas},
+    const c=vm.createContext({scene,roundedWalls,Set,renderLost:false,cancelRender(){order.push('app-lost');},interactionPointer:{},interactionRenderer:null,releaseStaticGlassPasses(){},editorFloorMaterials:null,homeView:null,releaseViewerTextureGPU(){},releaseWallOutlineMaterials(){},renderer:{domElement:canvas},
       S:false,et:{autoReset:true},mt:{enabled:true,autoUpdate:false,needsUpdate:true,type:0},console:{log(message){order.push(message.includes('Lost')?'three-lost':'three-restored');}},
       Tt(){epoch++;manager=managers();order.push('new-managers');},renderCount:0,window:{},invalidateShadows(){order.push('app-restored');},requestRender(){order.push('app-draw-request');}});
     vm.runInContext(pinnedHandlers,c);canvas.addEventListener('webglcontextlost',c.Rt);canvas.addEventListener('webglcontextrestored',c.Pt);

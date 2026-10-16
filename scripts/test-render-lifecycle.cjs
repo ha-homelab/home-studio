@@ -21,7 +21,7 @@ const context = vm.createContext({
   updateWallOutlines() {}, updateEditorCamera() {}, resize() {},
   invalidateShadows() { invalidations++; }, report3DError(e) { throw e; },
   observer: {disconnect() { disconnects++; }},
-  releaseStaticGlassPasses() {}, disposeStaticGlassPasses() {}, releaseViewerGeometryGPU() {}, releaseViewerTextureGPU() {},
+  releaseStaticGlassPasses() {}, disposeStaticGlassPasses() {}, releaseViewerGeometryGPU() {}, releaseViewerTextureGPU() {}, releaseWallOutlineMaterials() {},
   renderer: {
     setDrawingBufferSize(width, height, ratio) { buffers.push([width,height,ratio]); },
     setPixelRatio() {throw Error('Separate pixel-ratio resizing can allocate an oversized intermediate buffer');},
@@ -226,7 +226,7 @@ function motionScheduler(diffuse = true, reduced = diffuse) {
     clearTimeout(key){timers.delete(key);},
     $(){return {getBoundingClientRect:()=>({width,height:600})};},
     observer:{disconnect(){}},wallSheenMotion:{beforeRender(){},afterRender(){}},
-    releaseStaticGlassPasses(){},disposeStaticGlassPasses(){},releaseViewerGeometryGPU(){},releaseViewerTextureGPU(){},
+    releaseStaticGlassPasses(){},disposeStaticGlassPasses(){},releaseViewerGeometryGPU(){},releaseViewerTextureGPU(){},releaseWallOutlineMaterials(){},
     updateWallOutlines(){},updateEditorCamera(){},invalidateShadows(){},
     report3DError(error){errors.push(error.message);},
     getRenderCapacity(){return {reduced,diffuseLighting:diffuse};},

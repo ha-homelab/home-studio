@@ -20,6 +20,12 @@ visible range. This retains exact shadow blockers without adding meshes or draw
 calls. Verify these callbacks again when updating the vendored Three.js version.
 At most three geometry variants are cached per wall for clipping-height changes;
 eviction disposes the replaced buffer. The four batched contour objects remain.
+Their four fixed materials are reused
+when the cutaway height changes; only their geometry is replaced and disposed.
+The objects are rebuilt in the original order, preserving transparent sorting.
+Context loss releases the materials' GPU programs while retaining their CPU
+identities, and final page teardown disposes and clears the material slots.
+This avoids unnecessary program eviction; no startup speedup is assumed.
 
 For lit wall materials, optional iridescent drift updates one shared uniform
 only during already requested frames. It schedules no frames or timers. Reduced
@@ -42,6 +48,7 @@ node scripts/test-rounded-walls.cjs
 node scripts/test-wall-tops.cjs
 node scripts/test-wall-sheen.cjs
 node scripts/test-wall-motion.cjs
+node scripts/test-wall-outline-materials.cjs
 node scripts/test-unlit-architectural-walls.cjs
 node scripts/test-viewer-startup.cjs
 ```

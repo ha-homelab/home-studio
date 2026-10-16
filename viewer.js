@@ -340,6 +340,10 @@ function wallBoundarySegments(meshes,limit,atBase=false){
   return [...segments.values()];
 }
 let wallOutlines,wallOutlineHeight;
+// The four contour materials have fixed roles. Keep their programs when only
+// cutaway geometry changes; fresh objects retain the original transparent order.
+const wallOutlineMaterials=[];
+function releaseWallOutlineMaterials(dispose=false){for(const material of wallOutlineMaterials)material?.dispose();if(dispose)wallOutlineMaterials.length=0}
 let lowerFloorContext;
 function buildLowerFloorContext(){
   const data=model.lower_floor_context;
@@ -355,13 +359,13 @@ function updateWallOutlines(){
   if(!root||wallOutlineHeight===clipping.constant)return;
   wallOutlineHeight=clipping.constant;
   updateRoundedWallGeometry(wallOutlineHeight);
-  if(wallOutlines){wallOutlines.traverse(o=>{o.geometry?.dispose();o.material?.dispose()});root.remove(wallOutlines);}
+  if(wallOutlines){wallOutlines.traverse(o=>{o.geometry?.dispose()});root.remove(wallOutlines);}
   wallOutlines=new THREE.Group();wallOutlines.name='Visible wall boundaries';
   // Draw after the translucent wall fill, while opaque furniture still occludes.
   wallOutlines.renderOrder=1;
   const geometry=positions=>new THREE.BufferGeometry().setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
   for(const [atBase,color,glow] of [[true,0x387bff,.22],[false,0x81fff0,.42]]){
-    const edges=[],halo=[];
+    const slot=atBase?0:2,edges=[],halo=[];
     for(const [a,b] of wallBoundarySegments(model.meshes,wallOutlineHeight,atBase)){
       const dx=b[0]-a[0],dz=b[2]-a[2],length=Math.hypot(dx,dz);
       if(length<1e-6)continue;
@@ -370,8 +374,8 @@ function updateWallOutlines(){
       const p=[a[0]+nx,y,a[2]+nz],q=[b[0]+nx,y,b[2]+nz],r=[b[0]-nx,y,b[2]-nz],s=[a[0]-nx,y,a[2]-nz];
       halo.push(...p,...q,...r,...p,...r,...s);
     }
-    wallOutlines.add(new THREE.Mesh(geometry(halo),new THREE.MeshBasicMaterial({color,transparent:true,opacity:glow,depthWrite:false,toneMapped:false,side:THREE.DoubleSide,forceSinglePass:true})));
-    const line=new THREE.LineSegments(geometry(edges),new THREE.LineBasicMaterial({color,transparent:true,opacity:1,depthWrite:false,toneMapped:false}));
+    wallOutlines.add(new THREE.Mesh(geometry(halo),wallOutlineMaterials[slot]??=new THREE.MeshBasicMaterial({color,transparent:true,opacity:glow,depthWrite:false,toneMapped:false,side:THREE.DoubleSide,forceSinglePass:true})));
+    const line=new THREE.LineSegments(geometry(edges),wallOutlineMaterials[slot+1]??=new THREE.LineBasicMaterial({color,transparent:true,opacity:1,depthWrite:false,toneMapped:false}));
     line.renderOrder=1;wallOutlines.add(line);
   }
   root.add(wallOutlines);
@@ -407,13 +411,13 @@ if(shape){
 const glassPasses=createStaticGlassPasses(THREE,mesh,renderProfile.diffuseLighting);root.add(mesh);if(glassPasses)root.add(glassPasses.front)}
 ground=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(60,planRadius*2),Math.max(65,planRadius*2)),createSceneMaterial({color:'#dfe3d8',roughness:1}));ground.rotation.x=-Math.PI/2;ground.position.set(planCenter[0],-1.97,planCenter[1]);ground.receiveShadow=true;scene.add(ground);grid=new THREE.GridHelper(44,44,0xc0cabe,0xd0d7cb);grid.position.set(planCenter[0],-1.96,planCenter[1]);scene.add(grid);
 editorFloorMaterials=createEditorFloorMaterials(THREE,root,ground,renderProfile);editorFloorMaterials.setHomeActive(embedded);
-renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;cancelRender();releaseViewerGeometryGPU();releaseViewerTextureGPU();editorFloorMaterials?.releaseGPU();interactionPointer=null;interactionRenderer?.dispose();interactionRenderer=null;releaseStaticGlassPasses();homeView?.releaseGPU?.();});
+renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;cancelRender();releaseViewerGeometryGPU();releaseViewerTextureGPU();releaseWallOutlineMaterials();editorFloorMaterials?.releaseGPU();interactionPointer=null;interactionRenderer?.dispose();interactionRenderer=null;releaseStaticGlassPasses();homeView?.releaseGPU?.();});
 renderer.domElement.addEventListener('webglcontextrestored',()=>{renderLost=false;invalidateShadows();const before=renderCount;window.resizeModel?.();if(renderCount===before)requestRender()});
 function updateEditorCamera(){camera.position.set(target.x+radius*Math.sin(polar)*Math.sin(azimuth),target.y+radius*Math.cos(polar),target.z+radius*Math.sin(polar)*Math.cos(azimuth));camera.lookAt(target)}
 function render(){if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;const before=renderCount;updateWallOutlines();if(homeView?.active)homeView.render();else{updateEditorCamera();drawScene(camera);renderCount++}if(renderCount>before)cancelRender()}window.renderModel=render;window.requestModelRender=requestRender;
 let viewSize='';const resize=()=>{if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;if(renderDelay)requestRender();const b=$(homeView?.active?'homeStage':'view3d').getBoundingClientRect(),ratio=renderPixelRatio(b.width,b.height),size=[homeView?.active,b.width,b.height,ratio].join();if(b.width&&b.height&&size!==viewSize){viewSize=size;renderer.setDrawingBufferSize(b.width,b.height,ratio);camera.aspect=b.width/b.height;camera.updateProjectionMatrix();render()}};window.resizeModel=resize;const observer=new ResizeObserver(resize);observer.observe($('view3d'));observer.observe($('homeStage'));
 document.addEventListener('visibilitychange',()=>{if(document.hidden){interactionPointer=null;cancelRender()}else{const before=renderCount;resize();if(renderCount===before)requestRender()}});
-window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();interactionPointer=null;if(!event.persisted){observer.disconnect();interactionRenderer?.dispose();interactionRenderer=null;homeView?.dispose?.();disposeStaticGlassPasses();editorFloorMaterials?.dispose();renderer.dispose();renderer.forceContextLoss();}});
+window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();interactionPointer=null;if(!event.persisted){observer.disconnect();interactionRenderer?.dispose();interactionRenderer=null;homeView?.dispose?.();disposeStaticGlassPasses();releaseWallOutlineMaterials(true);editorFloorMaterials?.dispose();renderer.dispose();renderer.forceContextLoss();}});
 // A resize can already paint the resumed state. Initial pageshow also needs
 // no extra frame after boot painted; leave any pending live-state request intact.
 window.addEventListener('pageshow',event=>{const resumed=renderSuspended||event.persisted,before=renderCount;renderSuspended=false;resize();if(renderCount===before&&(resumed||renderCount===0))requestRender()});
