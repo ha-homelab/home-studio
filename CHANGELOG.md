@@ -2,10 +2,15 @@
 
 ## [0.6.4] - Development line
 
+- Pace expensive Apple software motion draws using a bounded 64–250 ms
+  per-gesture delay. Input continues to update the camera, and pointer release
+  requests the ordinary full-quality frame. Other graphics profiles and all
+  acceptance deadlines remain unchanged.
+
 - Keep the desktop viewer Editor stage within the available grid height.
   Its minimum height no longer follows the drawing buffer's intrinsic aspect
-  ratio, preventing canvas size changes from expanding the page and feeding
-  extra resize work back into rendering. The mobile stage minimum, error
+  ratio, preventing canvas size changes from expanding the page. The mobile
+  stage minimum, error
   messages, drawing-buffer budgets and acceptance deadlines are unchanged.
 
 - Cap the Apple diffuse viewer at 125,000 drawing-buffer pixels

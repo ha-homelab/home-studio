@@ -312,7 +312,8 @@ record on release, cancellation, hiding or context loss. Other software keeps
 the existing 64 ms delay. No extra GL calls or GPU resources are added, and the
 62,500-pixel motion and 125,000-pixel Apple diffuse resting budgets are unchanged.
 This bounded pacing may leave time for queued input between expensive software
-draws; it is not a measured speedup or an exception to any acceptance deadline.
+draws. It measures synchronous submission and driver blocking, not asynchronous
+GPU completion, and does not create an exception to any acceptance deadline.
 Lifecycle regressions
 check that held drags still repaint, later input cannot postpone the deadline,
 and release, live-state updates, resize, suspension and context loss leave no
@@ -321,6 +322,17 @@ and a final full-resolution frame; reducing the number of draws cannot replace
 either assertion. CPU checks exercise both diffuse and physically based software
 paths, including continuous input across several deadlines. Physically based
 software frames remain full-resolution direct draws without a copy pass.
+
+A local Apple Silicon comparison using Playwright 1.62.1 / Firefox 153 and the
+Apple Software Renderer passed both original viewer cycles at six and 24 rooms.
+Home motion copies fell from two to one in all four compared gestures. Six-room
+Home drags changed from 1,094/1,048 ms to 581/571 ms. At 24 rooms, one Home drag
+became slower (553 to 697 ms), while the other improved (1,255 to 726 ms); Editor
+copy counts did not improve. The 24-room scenario was slower overall amid large
+load-time variation. Recorded camera, drawing-buffer, material, geometry,
+resource, light and shadow state matched in all three restored views. These
+ordered local runs, including a reused baseline with intervening diagnostics,
+support fewer redundant Home draws, not a general speedup or hosted Intel proof.
 
 The diffuse interaction helper prepares its framebuffer-copy texture and
 program on the first actual motion frame. Initial, resized and restored full

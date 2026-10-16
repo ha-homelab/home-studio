@@ -243,9 +243,10 @@ Later camera-motion events share one deadline: 64 ms on other software paths,
 and the last successful motion draw duration clamped to 64–250 ms on Apple
 diffuse rendering. Each event updates the camera without restarting the timer.
 The duration is local to the gesture and requires no GL query or synchronization.
-This coalesces intermediate positions; a speed improvement remains unproven.
-Pointer release,
-cancellation, resize and live-state updates bypass the delay. Hidden pages and
+It measures synchronous submission and driver blocking, not asynchronous GPU
+completion. This coalesces intermediate positions and can add up to 250 ms
+between motion frames; it does not promise a particular frame rate.
+Pointer release, cancellation, resize and live-state updates bypass the delay. Hidden pages and
 lost contexts cancel it. Software paths using physically based materials still
 draw directly at their full resolution, with the same antialiasing, materials
 and shadows; only the diffuse path uses the motion copy described above.
