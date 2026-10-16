@@ -4,11 +4,13 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
 import subprocess
 import sys
+import threading
 import time
 
 
@@ -87,6 +89,102 @@ def host_resources():
     return record
 
 
+def cpu_processes():
+    """Return only numeric process fields and executable basenames, never argv."""
+    environment = os.environ.copy()
+    environment['LC_ALL'] = 'C'
+    result = subprocess.run(
+        ['/bin/ps', '-axo', 'pid=,ppid=,%cpu=,rss=,comm='],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        check=False, timeout=2, env=environment)
+    if result.returncode:
+        return {'status': 'error', 'error': 'ps-exit', 'exitCode': result.returncode}
+    processes, discarded = [], 0
+    for line in result.stdout.splitlines():
+        try:
+            pid, ppid, cpu, rss, executable = line.strip().split(None, 4)
+            pid, ppid, cpu, rss = int(pid), int(ppid), float(cpu), int(rss)
+            if pid <= 0 or ppid < 0 or not math.isfinite(cpu) or cpu < 0 or rss < 0:
+                raise ValueError('Invalid numeric process field')
+            name = executable.rsplit('/', 1)[-1][:128]
+            if not name or any(ord(character) < 32 for character in name):
+                raise ValueError('Invalid executable name')
+            processes.append({'pid': pid, 'ppid': ppid, 'cpuPercent': cpu,
+                              'rssKiB': rss, 'name': name})
+        except ValueError:
+            discarded += 1
+    processes.sort(key=lambda process: (-process['cpuPercent'], process['pid']))
+    return {'status': 'ok', 'processes': processes[:8], 'discardedRows': discarded}
+
+
+class CPUSampler:
+    """Small passive diagnostic; failures never change the original suite result."""
+    interval = 5
+    maximum = 240
+
+    def __init__(self, path):
+        self.path = path
+        self.stop_event = threading.Event()
+        self.thread = None
+        self.started = time.monotonic()
+        self.records = 0
+        self.errors = []
+
+    def note_error(self, operation, error):
+        if len(self.errors) < 8:
+            # Exception messages can contain raw command output: retain type only.
+            self.errors.append({'operation': operation, 'type': type(error).__name__})
+
+    def sample(self, phase):
+        if self.records >= self.maximum:
+            return
+        self.records += 1
+        record = {'diagnosticOnly': True, 'sample': self.records, 'phase': phase,
+                  'capturedAt': utc_now(), 'elapsedSeconds': time.monotonic() - self.started}
+        try:
+            record.update(cpu_processes())
+        except Exception as error:
+            self.note_error('capture', error)
+            record.update(status='error', error=type(error).__name__)
+        try:
+            with self.path.open('a', encoding='utf-8') as output:
+                output.write(json.dumps(record) + '\n')
+        except Exception as error:
+            self.note_error('write', error)
+
+    def run(self):
+        try:
+            # Reserve one record for the final post-suite capture.
+            while self.records < self.maximum - 1 and not self.stop_event.wait(self.interval):
+                self.sample('during')
+        except Exception as error:
+            self.note_error('thread', error)
+
+    def start(self):
+        self.sample('before')
+        try:
+            thread = threading.Thread(target=self.run, name='diagnostic-cpu', daemon=True)
+            thread.start()
+            self.thread = thread
+        except Exception as error:
+            self.note_error('start', error)
+
+    def finish(self):
+        self.stop_event.set()
+        if self.thread is not None:
+            # Each in-flight ps has a two-second timeout; do not leave a sampler
+            # running into the next arm or its preflight/source hashing.
+            try:
+                self.thread.join()
+            except Exception as error:
+                self.note_error('join', error)
+        self.sample('after')
+        return {'file': self.path.name, 'diagnosticOnly': True,
+                'intervalSeconds': self.interval, 'maximumRecords': self.maximum,
+                'attemptedRecords': self.records, 'errors': self.errors,
+                'cpuSemantics': 'ps-reported %CPU; not interval CPU utilization'}
+
+
 def command_for(source, installation, output, product):
     # No copied fixture, monkeypatch, case filter, retry or changed deadline.
     return [sys.executable, str(source / 'scripts/test-native-browser-acceptance.py'),
@@ -144,13 +242,20 @@ def run_comparison(source_root, installation, output, candidate, product):
             write_json(arm_output / 'host-before.json', arm['hostResourcesBefore'])
             arm.update(status='running', startedAt=utc_now(), command=command)
             write_json(manifest_path, manifest)
+            sampler = CPUSampler(arm_output / 'cpu-processes.jsonl')
+            sampler.start()
             started = time.monotonic()
             try:
-                environment = os.environ.copy()
-                environment.update(PROFILE, GITHUB_SHA=revision, PYTHONUTF8='1')
-                with (arm_output / 'process.log').open('wb') as log:
-                    result = subprocess.run(command, cwd=source, env=environment,
-                                            stdout=log, stderr=subprocess.STDOUT, check=False)
+                try:
+                    environment = os.environ.copy()
+                    environment.update(PROFILE, GITHUB_SHA=revision, PYTHONUTF8='1')
+                    with (arm_output / 'process.log').open('wb') as log:
+                        result = subprocess.run(command, cwd=source, env=environment,
+                                                stdout=log, stderr=subprocess.STDOUT, check=False)
+                finally:
+                    # Preserve suite duration before waiting for sampler shutdown.
+                    arm['suiteElapsedSeconds'] = time.monotonic() - started
+                    arm['cpuSampler'] = sampler.finish()
                 arm['exitCode'] = result.returncode
                 arm['status'] = 'passed' if result.returncode == 0 else 'failed'
                 after = source_snapshot(source, revision)

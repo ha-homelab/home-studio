@@ -43,11 +43,23 @@ always states `diagnosticOnly: true`, `acceptanceStatus: not-run` and
 `releaseEligible: false`.
 
 Before each arm, bounded read-only `sysctl` and `uptime` calls collect CPU model
-and counts, machine model, memory size, boot time and load averages. No process
-inventory, environment dump or credentials are recorded. These fields do not
-measure CPU utilization, thermal throttling or hypervisor contention. The fixed
-baseline-first order and shared driver caches also limit interpretation; one
-pair is not a statistical speedup estimate.
+and counts, machine model, memory size, boot time and load averages. A separate
+`cpu-processes.jsonl` saves the eight highest `ps` CPU consumers before the suite,
+every five seconds while it runs, and after it exits. Fields are limited to PID,
+parent PID, reported CPU percentage, RSS in KiB and executable basename. No
+arguments, full executable paths, environment values or raw `ps` output are
+saved. Each capture has a two-second timeout; at most 240 records are attempted
+per arm, reserving the final record for the post-suite sample. The thread is
+stopped and joined before source verification or the next arm. Capture errors
+are retained as diagnostic records and never replace the original suite exit
+status. `suiteElapsedSeconds` excludes sampler startup and shutdown overhead.
+
+The CPU percentages are the operating system's `ps` estimates, not interval
+utilization measurements. These observations can associate active work with
+browser processes or other applications, but cannot establish thermal
+throttling or hypervisor contention. The fixed baseline-first order and shared
+driver caches also limit interpretation; one pair is not a statistical speedup
+estimate.
 
 Publish the exact candidate commit before pushing this disposable branch. The
 wrapper never substitutes a moving ref or an unavailable source. The prepared

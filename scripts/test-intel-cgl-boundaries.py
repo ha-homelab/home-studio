@@ -27,7 +27,8 @@ class IntelComparisonTests(unittest.TestCase):
         self.addCleanup(host.stop)
 
     def run_fixture(self, exit_codes, mutate=False, mismatched_driver=False,
-                    candidate='fallback-boundaries', product='firefox', mutate_install=False):
+                    candidate='fallback-boundaries', product='firefox', mutate_install=False,
+                    cpu_error=False):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
@@ -53,7 +54,10 @@ class IntelComparisonTests(unittest.TestCase):
             observed.append((arm, command))
             if mutate_install:
                 install.write_text('{"changed":true}')
-            return subprocess.CompletedProcess(command, exit_codes[len(observed) - 1])
+            result = exit_codes[len(observed) - 1]
+            if isinstance(result, Exception):
+                raise result
+            return subprocess.CompletedProcess(command, result)
 
         calls = {}
 
@@ -68,6 +72,8 @@ class IntelComparisonTests(unittest.TestCase):
              patch.object(comparison.platform, 'machine', return_value='x86_64'), \
              patch.object(comparison, 'source_snapshot', side_effect=snapshot), \
              patch.object(comparison, 'host_resources', return_value={'capturedAt': 'now', 'sysctl': {'hw.logicalcpu': '4'}}), \
+             patch.object(comparison, 'cpu_processes', return_value={'status': 'ok', 'processes': []},
+                          side_effect=OSError('private capture detail') if cpu_error else None), \
              patch.object(comparison.subprocess, 'run', side_effect=run):
             result = comparison.run_comparison(root, install, output, candidate, product)
         return result, json.loads((output / 'comparison.json').read_text()), observed, output
@@ -87,6 +93,11 @@ class IntelComparisonTests(unittest.TestCase):
             self.assertEqual((output / name / 'process.log').read_bytes(), b'original process output\n')
             self.assertEqual(json.loads((output / name / 'source-before.json').read_text()),
                              json.loads((output / name / 'source-after.json').read_text()))
+            cpu = [json.loads(line) for line in (output / name / 'cpu-processes.jsonl').read_text().splitlines()]
+            self.assertEqual([sample['phase'] for sample in cpu], ['before', 'after'])
+            arm = next(arm for arm in manifest['arms'] if arm['name'] == name)
+            self.assertEqual(arm['cpuSampler']['attemptedRecords'], 2)
+            self.assertLessEqual(arm['suiteElapsedSeconds'], arm['elapsedSeconds'])
 
     def test_all_passing_commands_are_still_only_diagnostic_evidence(self):
         result, manifest, _, _ = self.run_fixture([0] * len(ARMS))
@@ -232,6 +243,110 @@ class IntelComparisonTests(unittest.TestCase):
         for name in ('release-pipeline.yml', 'pages.yml'):
             workflow = (HERE.parent / '.github/workflows' / name).read_text()
             self.assertNotIn('diagnostic/intel-cgl-boundaries', workflow)
+
+    def test_cpu_capture_is_numeric_top_eight_and_basename_only(self):
+        rows = [f'{index} 1 {index}.5 {index * 1024} /private/parent/App {index}'
+                for index in range(1, 11)]
+        rows += ['11 1 nan 1 /private/nan', '12 1 -1 1 bad', 'bad row']
+        result = subprocess.CompletedProcess([], 0, stdout='\n'.join(rows))
+        with patch.object(comparison.subprocess, 'run', return_value=result) as run:
+            capture = comparison.cpu_processes()
+        self.assertEqual(run.call_args.args[0],
+                         ['/bin/ps', '-axo', 'pid=,ppid=,%cpu=,rss=,comm='])
+        self.assertEqual(run.call_args.kwargs['timeout'], 2)
+        self.assertEqual(run.call_args.kwargs['stderr'], subprocess.DEVNULL)
+        self.assertEqual(run.call_args.kwargs['env']['LC_ALL'], 'C')
+        self.assertEqual(capture['discardedRows'], 3)
+        self.assertEqual([row['pid'] for row in capture['processes']], list(range(10, 2, -1)))
+        self.assertEqual(capture['processes'][0],
+                         {'pid': 10, 'ppid': 1, 'cpuPercent': 10.5, 'rssKiB': 10240, 'name': 'App 10'})
+        self.assertNotIn('/private', json.dumps(capture))
+        self.assertTrue(all(set(row) == {'pid', 'ppid', 'cpuPercent', 'rssKiB', 'name'}
+                            for row in capture['processes']))
+
+    def test_cpu_errors_do_not_replace_original_suite_failures(self):
+        result, manifest, observed, output = self.run_fixture([1, 0], cpu_error=True)
+        self.assertEqual(result, 1)
+        self.assertEqual(len(observed), 2)
+        self.assertEqual([arm['exitCode'] for arm in manifest['arms']], [1, 0])
+        self.assertEqual([arm['status'] for arm in manifest['arms']], ['failed', 'passed'])
+        self.assertNotIn('private capture detail', json.dumps(manifest))
+        for arm in manifest['arms']:
+            self.assertEqual(arm['cpuSampler']['attemptedRecords'], 2)
+            records = (output / arm['name'] / 'cpu-processes.jsonl').read_text()
+            self.assertNotIn('private capture detail', records)
+            self.assertEqual([json.loads(line)['error'] for line in records.splitlines()], ['OSError'] * 2)
+
+    def test_suite_launch_exception_still_stops_sampler_and_runs_candidate(self):
+        result, manifest, observed, _ = self.run_fixture([OSError('cannot launch'), 0])
+        self.assertEqual(result, 1)
+        self.assertEqual(len(observed), 2)
+        self.assertEqual([arm['status'] for arm in manifest['arms']], ['infrastructure-error', 'passed'])
+        self.assertTrue(all(arm['cpuSampler']['attemptedRecords'] == 2 for arm in manifest['arms']))
+        self.assertFalse(any(thread.name == 'diagnostic-cpu' for thread in comparison.threading.enumerate()))
+
+    def test_cpu_capture_nonzero_exit_does_not_record_raw_output(self):
+        with patch.object(comparison.subprocess, 'run', return_value=
+                          subprocess.CompletedProcess([], 3, stdout='private output')):
+            self.assertEqual(comparison.cpu_processes(),
+                             {'status': 'error', 'error': 'ps-exit', 'exitCode': 3})
+
+    def test_cpu_sampler_bounded_reserves_final_record_and_joins(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(comparison, 'cpu_processes', return_value={'status': 'ok', 'processes': []}), \
+             patch.object(comparison.CPUSampler, 'interval', 0):
+            sampler = comparison.CPUSampler(Path(directory) / 'cpu.jsonl')
+            sampler.start()
+            sampler.thread.join(timeout=5)
+            self.assertFalse(sampler.thread.is_alive())
+            receipt = sampler.finish()
+            records = [json.loads(line) for line in sampler.path.read_text().splitlines()]
+            self.assertEqual(len(records), 240)
+            self.assertEqual([record['sample'] for record in records], list(range(1, 241)))
+            self.assertEqual(records[0]['phase'], 'before')
+            self.assertTrue(all(record['phase'] == 'during' for record in records[1:-1]))
+            self.assertEqual(records[-1]['phase'], 'after')
+            self.assertTrue(sampler.stop_event.is_set())
+            self.assertEqual(receipt['attemptedRecords'], 240)
+            self.assertEqual(receipt['errors'], [])
+
+    def test_cpu_sampler_stops_promptly_without_waiting_full_interval(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(comparison, 'cpu_processes', return_value={'status': 'ok', 'processes': []}):
+            sampler = comparison.CPUSampler(Path(directory) / 'cpu.jsonl')
+            sampler.start()
+            receipt = sampler.finish()
+            self.assertFalse(sampler.thread.is_alive())
+            self.assertTrue(sampler.stop_event.is_set())
+            self.assertEqual(receipt['attemptedRecords'], 2)
+            self.assertEqual(receipt['intervalSeconds'], 5)
+
+    def test_cpu_sampler_capture_timeout_is_recorded_without_exception_payload(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(comparison, 'cpu_processes', side_effect=
+                          subprocess.TimeoutExpired('private command', 2, output='private output')):
+            sampler = comparison.CPUSampler(Path(directory) / 'cpu.jsonl')
+            sampler.start()
+            receipt = sampler.finish()
+            records = [json.loads(line) for line in sampler.path.read_text().splitlines()]
+            self.assertEqual([record['error'] for record in records], ['TimeoutExpired'] * 2)
+            self.assertEqual(receipt['errors'], [{'operation': 'capture', 'type': 'TimeoutExpired'}] * 2)
+            self.assertNotIn('private', json.dumps(records) + json.dumps(receipt))
+            self.assertFalse(sampler.thread.is_alive())
+
+    def test_cpu_sampler_start_and_write_failures_are_bounded_diagnostics(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(comparison, 'cpu_processes', return_value={'status': 'ok', 'processes': []}), \
+             patch.object(comparison.threading.Thread, 'start', side_effect=RuntimeError('private')):
+            sampler = comparison.CPUSampler(Path(directory) / 'missing' / 'cpu.jsonl')
+            sampler.start()
+            receipt = sampler.finish()
+            self.assertIsNone(sampler.thread)
+            self.assertEqual(receipt['errors'], [
+                {'operation': 'write', 'type': 'FileNotFoundError'},
+                {'operation': 'start', 'type': 'RuntimeError'},
+                {'operation': 'write', 'type': 'FileNotFoundError'}])
+            self.assertNotIn('private', json.dumps(receipt))
 
 
 if __name__ == '__main__':
