@@ -2,6 +2,10 @@
 
 ## [0.6.4] - Development line
 
+- Prototype composable scalar point and directional Lambert bodies for the
+  packed Home renderer. Retain lighting order and shadow operations; combined
+  driver performance and visual equivalence still require acceptance.
+
 - Require native Linux, Windows and macOS package/install acceptance and an
   expanded browser matrix for pull requests and releases. Keep browser families,
   pinned historical builds, release channels and emulated touch profiles

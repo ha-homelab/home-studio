@@ -82,6 +82,7 @@ jobs:
           node scripts/test-zero-point-block.cjs
           node scripts/test-point-decay-two.cjs
           node scripts/test-cached-shadow-transmission.cjs
+          node scripts/test-literal-lambert-directional.cjs
           node scripts/test-glass-wall-program.cjs
           node scripts/test-fallback-shared-program.cjs
           node scripts/test-point-texture-current.cjs
@@ -89,6 +90,7 @@ jobs:
           node scripts/test-static-geometry-atlas.cjs
           node scripts/test-point-signal-texture.cjs
           node scripts/test-signal-texture-decay-two.cjs
+          node scripts/test-literal-lambert-point-body.cjs
           node scripts/test-render-lifecycle.cjs
           node scripts/test-interaction-render.cjs
           node --test scripts/test-render-capacity.cjs

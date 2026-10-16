@@ -677,3 +677,21 @@ four-state texture/decay proof is unchanged; an additional whole-fragment
 inverse checks ready, unproved, invalid, restored, editor and independent
 fallback states. Neither standalone measurements nor a source expansion proves
 that this combination improves hosted Intel timing or compiles on every driver.
+
+### Experimental literal Lambert point body
+
+The opt-in `literalLambertPointBody` experiment applies only to the existing
+owned, packed texture Lambert path. It reads the same two RGBA records and
+spells out pinned Three r169 point-light and Lambert operations with local
+vectors and scalars. Shadow prefixes, run scheduling, both visibility checks,
+addition order, dynamic or decay-two attenuation helpers, and all other shader
+paths remain unchanged. The editor, rejected inputs and unsupported materials
+retain the original shader. No resources or uniforms are added.
+
+This revisits the earlier `9590f994` Lambert-local experiment on the current
+texture transport; it is not a new lighting algorithm. The compiler may already
+eliminate aggregate struct traffic, so a reduction in source-level struct calls
+is not proof of less interpreter work or faster compilation. CPU tests compare
+pinned expansions and binary32 operation traces; actual eight-view pixels,
+original deadlines and hosted performance still require measurement. No Intel
+performance claim or acceptance waiver is made.
