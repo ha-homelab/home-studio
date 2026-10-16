@@ -78,6 +78,9 @@
   shadow and shader family, and refresh the shared guard at each Home draw
   boundary. Ambient, sun and daylight remain unchanged; unknown rooms or
   malformed inputs retain the original calculation.
+- Upload each packed light run as one integer vector, preserving light order,
+  room boundaries, shadow indices and the conservative uniform budget. Avoid
+  separate dynamic start/end/room lookups without changing rendered contents.
 - Reuse planner outlines and selection controls, and avoid redrawing unchanged
   snapped positions. Preserve exact furniture overlap, appearance, undo and drag
   cancellation. Bound software-renderer resolution without reducing sharp HTML

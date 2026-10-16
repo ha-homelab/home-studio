@@ -279,7 +279,21 @@ inside that bound, retaining the original order and shadow-light prefix.
 Movable furniture, deformed or unsupported geometry, and materials shared with
 movable objects retain every run. Bounds include the complete vertex buffer,
 the room's full light-transmission halo, and floating-point arithmetic slack.
-The additional uniform allowance above accounts for the selected run starts.
+Each selected run is uploaded as one integer vector containing its original
+start, exclusive end and room number. This avoids three dynamically indexed
+scalar arrays in the unshadowed loop. Shadowed slots retain the original
+constant-index room lookup. Starts and ends remain CPU scratch storage for
+filtering; inactive records are never read. The conservative uniform allowance
+above is unchanged, regardless of a driver's inactive-array elimination.
+
+The emitted run-control code is executed against an independent per-light
+oracle in CPU tests, including filtered gaps, split shadow prefixes, unknown
+rooms, empty updates and re-enabled lights. A local native ARM64 software-GL
+comparison retained identical pixels in both strict six-/24-room cases and
+eight lighting/editor views. The 24-room connected loads changed from
+10.115/10.060 to 8.152/8.264 seconds; drag results were mixed. These ordered
+same-host measurements share OS/compiler caches and do not establish a general
+speedup or replace the required hosted Intel/browser matrix.
 
 Phone and tablet profiles use **390 × 844** and **820 × 1180** CSS pixels,
 respectively, at device scale factor 2, with touch enabled. They retain the

@@ -239,14 +239,25 @@ function filterRoomLightingRuns(bounds, roomBounds, pointRooms, ends, count, tar
   return selected;
 }
 
+// Store one complete run in a single vector instead of three scalar arrays.
+// Shadowed slots still use the original constant-index room lookup.
+function packLightRunRecords(starts, ends, pointRooms, count, target) {
+  for (let run = 0; run < count; run++) {
+    const offset = run * 4, start = starts[run];
+    target[offset] = start; target[offset + 1] = ends[run];
+    target[offset + 2] = pointRooms[start]; target[offset + 3] = 0;
+  }
+}
+
 // Pack only within a conservative fragment-uniform allowance. Coordinates use
 // the same five-decimal literals as the original GLSL before Float32 storage.
 function packRoomLightingGeometry(rooms, windows, capacity, maxFragmentUniforms) {
   const edgeCount = rooms.reduce((sum, room) => sum + room.polygon.length, 0);
   const windowRooms = rooms.flatMap((room, index) => windows.some(window => window.room === room.id) ? [index] : []);
-  // Scalars in arrays may each consume a vector. Reserve the existing light,
-  // shadow, material and transform uniforms before adding packed geometry,
-  // plus explicit vectors for wall sheen, facing and the zero-point guard.
+  // Keep the conservative seven-vector per-light allowance even though packed
+  // run records now share one vector. Reserve light/shadow/material/transform
+  // state and the wall-sheen, facing and zero-point switches; do not broaden
+  // eligibility based on driver-dependent inactive-array elimination.
   const uniformVectors = 131 + capacity * 7 + rooms.length * 4 + edgeCount + windows.length * 2 + Math.max(1, windowRooms.length);
   if (!Number.isFinite(maxFragmentUniforms) || uniformVectors > maxFragmentUniforms) return null;
   const edges = new Float32Array(Math.max(1, edgeCount) * 4);
@@ -317,7 +328,8 @@ function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {
   };
   const packed = geometryOptions.packed ? packRoomLightingGeometry(rooms, windows, capacity, geometryOptions.maxFragmentUniforms) : null;
   if (packed) Object.assign(uniforms, packed.uniforms, {
-    homeLightRunStarts:{value:new Int32Array(capacity)}, homePointLightingRequired:{value:true}
+    homeLightRunStarts:{value:new Int32Array(capacity)}, homePointLightingRequired:{value:true},
+    homeLightRuns:{value:new Int32Array(capacity * 4)}
   });
   const staticRuns = new Map(), dynamicMaterials = new WeakSet();
   const geometryDeclarations = packed ? `
@@ -383,13 +395,13 @@ function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {
   const fragment = `
     varying vec3 homeWorldPosition;
     uniform int homePointRooms[${capacity}];
-    uniform int homeLightRunEnds[${capacity}];
+    ${packed ? `uniform ivec4 homeLightRuns[${capacity}];` : `uniform int homeLightRunEnds[${capacity}];`}
     uniform int homeLightRunCount;
     uniform int homeLitRooms[${Math.max(1, rooms.length)}];
     uniform float homeDaylight;
     uniform float homeExteriorSurface;
     uniform float homeWindowTransmission[${Math.max(1, windows.length)}];
-${packed ? `    uniform int homeLightRunStarts[${capacity}];\n    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, vec2 a, vec2 b, inout float d, inout bool inside) {
+${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, vec2 a, vec2 b, inout float d, inout bool inside) {
       vec2 edge = b - a;
       vec2 delta = p - a - edge * clamp(dot(p - a, edge) / dot(edge, edge), 0.0, 1.0);
       d = min(d, dot(delta, delta));
@@ -500,7 +512,12 @@ ${packed ? `    uniform int homeLightRunStarts[${capacity}];\n    ${geometryDecl
   const directPointLighting = packed ? boundedPointLighting.replace(
     /homeRoomTransmissions\[homePointRooms\[([^\]]+)\]\]/g,
     'homePointTransmission(homePointRooms[$1])'
-  ).replace('max(homeRunStart, NUM_POINT_LIGHT_SHADOWS)', 'max(homeLightRunStarts[homeRun], NUM_POINT_LIGHT_SHADOWS)') : boundedPointLighting;
+  ).replace('int homeRunStart = 0;', '')
+    .replace('int homeRunEnd = min(homeLightRunEnds[homeRun], NUM_POINT_LIGHTS);',
+      'ivec4 homeRunData = homeLightRuns[homeRun];\n      int homeRunEnd = min(homeRunData.y, NUM_POINT_LIGHTS);')
+    .replace('max(homeRunStart, NUM_POINT_LIGHT_SHADOWS)', 'max(homeRunData.x, NUM_POINT_LIGHT_SHADOWS)')
+    .replace('homePointTransmission(homePointRooms[homeFirstLight])', 'homePointTransmission(homeRunData.z)')
+    .replace('homeRunStart = homeRunEnd;', '') : boundedPointLighting;
   // A runtime branch retains the same light slots, shadow maps and program
   // family when every point is off. Never infer zero from a brightness epsilon.
   const guardedPointLighting = packed ? 'if (homePointLightingRequired) {\n' + directPointLighting + '\n}\n' : directPointLighting;
@@ -531,6 +548,7 @@ ${packed ? `    uniform int homeLightRunStarts[${capacity}];\n    ${geometryDecl
             if (!state) {
               state = {bounds:null,unbounded:dynamicMaterials.has(material),uniforms:{
                 homeLightRunStarts:{value:new Int32Array(capacity)},
+                homeLightRuns:{value:new Int32Array(capacity * 4)},
                 homeLightRunEnds:{value:new Int32Array(capacity)},homeLightRunCount:{value:0}}};
               staticRuns.set(material,state);
             }
@@ -608,10 +626,13 @@ ${packed ? `    uniform int homeLightRunStarts[${capacity}];\n    ${geometryDecl
         }
       }
       uniforms.homeLightRunCount.value = runCount;
+      if (packed) packLightRunRecords(uniforms.homeLightRunStarts.value, runs, pointRooms, runCount, uniforms.homeLightRuns.value);
       if (packed) for (const state of staticRuns.values()) {
         state.uniforms.homeLightRunCount.value = filterRoomLightingRuns(state.unbounded ? null : state.bounds,
           packed.uniforms.homeRoomBounds.value,pointRooms,runs,runCount,
           state.uniforms.homeLightRunStarts.value,state.uniforms.homeLightRunEnds.value);
+        packLightRunRecords(state.uniforms.homeLightRunStarts.value, state.uniforms.homeLightRunEnds.value,
+          pointRooms, state.uniforms.homeLightRunCount.value, state.uniforms.homeLightRuns.value);
       }
     }
   };

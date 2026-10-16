@@ -187,9 +187,19 @@ for(const p of positions) {
     const end='#if ( NUM_SPOT_LIGHTS > 0 ) && defined( RE_Direct )';
     const loop=s=>s.slice(s.indexOf(start),s.indexOf(end)).replace(/\n}\n$/, '');
     const packedLoop=loop(packed.shader.fragmentShader);
-    const cachedEquivalent=packedLoop.replace(/homePointTransmission\(homePointRooms\[([^\]]+)\]\)/g,
-      'homeRoomTransmissions[homePointRooms[$1]]').replace('homeLightRunStarts[homeRun]','homeRunStart');
+    const cachedEquivalent=packedLoop
+      .replace('ivec4 homeRunData = homeLightRuns[homeRun];\n      ', '')
+      .replaceAll('homeRunData.y','homeLightRunEnds[homeRun]')
+      .replaceAll('homeRunData.x','homeRunStart')
+      .replace('homePointTransmission(homeRunData.z)','homePointTransmission(homePointRooms[homeFirstLight])')
+      .replace(/homePointTransmission\(homePointRooms\[([^\]]+)\]\)/g,
+        'homeRoomTransmissions[homePointRooms[$1]]')
+      .replace('\n    \n    for ( int homeRun','\n    int homeRunStart = 0;\n    for ( int homeRun')
+      .replace('\n      \n    }','\n      homeRunStart = homeRunEnd;\n    }');
     assert.equal(cachedEquivalent,loop(literal.shader.fragmentShader),'Point-light order, culling and math differ only in equivalent transmission lookup');
+    assert.match(packed.shader.fragmentShader,/uniform ivec4 homeLightRuns\[/);
+    assert.doesNotMatch(packed.shader.fragmentShader,/uniform int homeLightRun(?:Starts|Ends)\[/,
+      'Packed shaders no longer declare the separate dynamic start/end arrays');
     assert.doesNotMatch(packed.shader.fragmentShader,/homeRoomTransmissions\[/,'Packed mode has no dynamically indexed local transmission array');
     assert.match(packed.shader.fragmentShader,/if \(room == 0\) return 1\.0;/,'Unbound lights keep unrestricted transmission');
     assert.match(packed.shader.fragmentShader,/homeLitRooms\[index\] != 0 && homeRoomNearby\(index\)\s*\? homeRoomTransmission\(homeRoomDistance\(index\)\) : 0\.0;/,'On-demand lookup retains lit-room and spatial guards');
@@ -209,6 +219,38 @@ for(const p of positions) {
   assert(helper,'The packed shader exposes one on-demand transmission helper');
   const evaluate=new Function('room','homeLitRooms','homeRoomNearby','homeRoomDistance','homeRoomTransmission',
     helper[1].replace(/\bint index\b/,'const index'));
+  // Execute the emitted run-control code, replacing only the already verified
+  // unchanged direct-light body with a visit recorder. This catches record
+  // channel/index, prefix-clipping and loop-bound errors independently of the
+  // CPU producer rather than reconstructing its algorithm in the test.
+  const runStart=direct.shader.fragmentShader.indexOf('for ( int homeRun = 0;');
+  assert(runStart>=0);
+  const opening=direct.shader.fragmentShader.indexOf('{',runStart);
+  let depth=1,runEnd=opening+1;
+  for(;depth;runEnd++) {
+    assert(runEnd<direct.shader.fragmentShader.length,'Run loop has balanced braces');
+    if(direct.shader.fragmentShader[runEnd]==='{')depth++;
+    if(direct.shader.fragmentShader[runEnd]==='}')depth--;
+  }
+  const emittedRun=direct.shader.fragmentShader.slice(runStart,runEnd);
+  const firstBody=emittedRun.indexOf('pointLight = pointLights[ i ];');
+  const lastCall='if (directLight.visible) RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
+  const lastBody=emittedRun.indexOf(lastCall,firstBody)+lastCall.length;
+  assert(firstBody>=0 && lastBody>firstBody);
+  const runControl=(emittedRun.slice(0,firstBody)+'visit(i,homeRunTransmission);'+emittedRun.slice(lastBody))
+    .replace(/\b(?:int|float|ivec4)\b/g,'let');
+  const executeRuns=new Function('homeLightRuns','homeLightRunCount','NUM_POINT_LIGHTS','NUM_POINT_LIGHT_SHADOWS',
+    'homePointTransmission','visit','min','max',runControl);
+  const recordValues=uniforms=>Array.from({length:uniforms.homeLightRunCount.value},(_,i)=>
+    Array.from(uniforms.homeLightRuns.value.slice(i*4,i*4+4)));
+  const visitRuns=(uniforms,count,prefix,lookup,visit)=> {
+    const records=recordValues(uniforms).map(([x,y,z,w])=>({x,y,z,w}));
+    const checkedRecords=new Proxy(records,{get:(target,key)=> {
+      assert(Number.isInteger(Number(key))&&Number(key)>=0&&Number(key)<target.length,'Only active run records are read');
+      return target[key];
+    }});
+    executeRuns(checkedRecords,records.length,count,prefix,lookup,visit,Math.min,Math.max);
+  };
   const roomNumber=room=>rooms.findIndex(value=>value.id===room)+1;
   const checkIndex=index=>assert(Number.isInteger(index)&&index>=0&&index<rooms.length,'No out-of-range room access');
   let checkedDirect=0,checkedRuns=0;
@@ -234,12 +276,7 @@ for(const p of positions) {
       for(const prefix of [0,ordered.filter(point=>point.light.castShadow).length,ordered.length]) {
         const expected=ids.flatMap((id,index)=>cached[id]!==0?[[index,cached[id]]]:[]),actual=[];
         for(let index=0;index<prefix;index++)if(lookup(ids[index])!==0)actual.push([index,lookup(ids[index])]);
-        let start=0;
-        for(const end of Array.from(uniforms.homeLightRunEnds.value).slice(0,uniforms.homeLightRunCount.value)) {
-          const first=Math.max(start,prefix);
-          if(first<end) {const value=lookup(ids[first]);if(value!==0)for(let index=first;index<end;index++)actual.push([index,value]);}
-          start=end;
-        }
+        visitRuns(uniforms,ordered.length,prefix,lookup,(index,value)=>actual.push([index,value]));
         assert.deepEqual(actual.map(v=>v[0]),expected.map(v=>v[0]),'Every contribution retains its original order');
         actual.forEach((v,i)=>near(v[1],expected[i][1],'Transmission retains polygon distance within floating-point arithmetic precision'));
         checkedRuns++;
@@ -397,6 +434,8 @@ for(const p of positions) {
   staticMaterial.onBeforeCompile(compiled);
   const selected=()=>Array.from(compiled.uniforms.homeLightRunStarts.value.slice(0,compiled.uniforms.homeLightRunCount.value));
   localLighting.update(makePoints());assert.deepEqual(selected(),[0,2,5],'Shared static material uses the union of both mesh bounds');
+  assert.deepEqual(recordValues(compiled.uniforms),[[0,2,1,0],[2,4,2,0],[5,6,0,0]],
+    'Filtered records retain global indices, roomless lights and the static material union');
   // The first retained run need not start at zero, later runs may have gaps,
   // and the actual shadow-prefix count may split a retained multi-light run.
   const gapStarts=new Int32Array(6),gapEnds=new Int32Array(6);
@@ -405,24 +444,42 @@ for(const p of positions) {
   const gapCount=context.filterRoomLightingRuns(gapBounds,closeBounds,orderedIds,orderedEnds,4,gapStarts,gapEnds);
   assert.deepEqual(Array.from(gapStarts.slice(0,gapCount)),[2,5]);
   assert.deepEqual(Array.from(gapEnds.slice(0,gapCount)),[4,6]);
+  const gapRecords=new Int32Array(24).fill(-999);
+  context.packLightRunRecords(gapStarts,gapEnds,orderedIds,gapCount,gapRecords);
+  const gapUniforms={homeLightRunCount:{value:gapCount},homeLightRuns:{value:gapRecords}};
+  assert.deepEqual(recordValues(gapUniforms),[[2,4,2,0],[5,6,0,0]]);
   for(const prefix of [0,1,2,3,4,5,6]) for(const point of [[19.5,0],[20.5,.5]]) {
     const value=index=>orderedIds[index]===0?1:transmission(distance(point,edgesOf(closeRooms[orderedIds[index]-1])));
     const expected=Array.from(orderedIds,(_,index)=>index).filter(index=>value(index)!==0),actual=[];
     for(let index=0;index<prefix;index++)if(value(index)!==0)actual.push(index);
-    for(let run=0;run<gapCount;run++)for(let index=Math.max(gapStarts[run],prefix);index<gapEnds[run];index++)
-      if(value(index)!==0)actual.push(index);
+    visitRuns(gapUniforms,orderedIds.length,prefix,room=>room===0?1:transmission(distance(point,edgesOf(closeRooms[room-1]))),
+      index=>actual.push(index));
     assert.deepEqual(actual,expected,'Filtered nonzero starts/gaps and clipped shadow prefix preserve each contribution once');
   }
   const dynamicGroup=new THREE.Group(),moving=new THREE.Mesh(box,staticMaterial);dynamicGroup.add(moving);
   localLighting.attach(dynamicGroup,true);localLighting.update(makePoints());
   assert.deepEqual(selected(),[0,2,4,5],'Sharing with mutable inventory permanently retains all original runs');
+  assert.deepEqual(recordValues(compiled.uniforms),[[0,2,1,0],[2,4,2,0],[4,5,3,0],[5,6,0,0]]);
   moving.position.x=40;moving.scale.set(-3,2,4);moving.updateMatrixWorld();localLighting.update(makePoints());
   assert.deepEqual(selected(),[0,2,4,5],'Inventory movement never relies on a cached static bound');
   const changed=makePoints();changed[2].light.visible=false;changed[4].light.intensity=0;
   localLighting.update(changed);assert.deepEqual(selected(),[0,2,3,4],'Visibility/light changes retain the current exact global run order');
+  assert.deepEqual(recordValues(compiled.uniforms),[[0,2,1,0],[2,3,2,0],[3,4,3,0],[4,5,0,0]]);
+  const recordStorage=compiled.uniforms.homeLightRuns.value;
+  const allHidden=makePoints();allHidden.forEach(point=>point.light.visible=false);
+  localLighting.update(allHidden);
+  assert.equal(compiled.uniforms.homeLightRunCount.value,0);
+  visitRuns(compiled.uniforms,0,0,()=>assert.fail('Empty runs cannot evaluate a room'),()=>assert.fail('Empty runs cannot visit a light'));
+  localLighting.update([]);
+  assert.equal(compiled.uniforms.homeLightRunCount.value,0,'Empty updates cannot revive stale records');
+  const reenabled=makePoints();reenabled.forEach((point,i)=>{point.light.intensity=0;point.light.castShadow=i===4;});
+  localLighting.update(reenabled);
+  assert.equal(compiled.uniforms.homeLightRuns.value,recordStorage,'Updates reuse the same per-material upload storage');
+  assert.deepEqual(recordValues(compiled.uniforms),[[0,1,3,0],[1,3,1,0],[3,5,2,0],[5,6,0,0]],
+    'Reenabled lights retain zero-intensity slots and current shadow-first ordering');
   const priorAllowance=128+6*6+closeRooms.length*4+closeRooms.reduce((sum,room)=>sum+room.polygon.length,0);
   assert.equal(context.createRoomLighting(THREE,closeRooms,6,[],{packed:true,maxFragmentUniforms:priorAllowance}).geometryMode,'literal',
-    'Extra start-index array is included in the conservative uniform budget');
+    'Packed run records retain the conservative per-light uniform allowance');
   staticMaterial.dispose();box.dispose();
   console.log(JSON.stringify({checkedCulledPoints}));
   const full=Array.from({length:24},(_,i)=>{const x=i%6*4,z=Math.floor(i/6)*4;return{id:`room${i}`,polygon:[[x,z],[x+4,z],[x+4,z+4],[x,z+4]]};});
