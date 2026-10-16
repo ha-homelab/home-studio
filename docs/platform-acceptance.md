@@ -732,3 +732,17 @@ lifecycle handling are added. A driver may already eliminate these copies;
 CPU whole-shader and argument-trace proofs establish neither GPU equivalence
 nor a performance improvement. Native Intel timing and pixel proof remain
 required before considering this candidate for adoption.
+
+The optional `scalarLambertAccumulators` option replaces only the main-scope
+Lambert diffuse material field and two reflected-light accumulators with three
+`vec3` locals. The existing scalar point, shadow, directional and indirect
+operations keep their original order, arithmetic and positive-zero initial
+values. Exact pinned source and aggregate-use checks fail closed. The option
+defaults off; Home opts in only through its existing owned packed texture path.
+Actual compiled spot or area lights, environment/light maps, ambient-occlusion
+maps, transmission, clearcoat, sheen, iridescence and indirect-specular features
+retain the original aggregate locals;
+PBR, editor, inactive transport and custom callbacks also retain their original
+paths. No resources, uniforms, budgets or browser requirements change. A
+compiler may already flatten these aggregates, so the CPU source and binary32
+proofs establish no GPU equivalence or performance gain.

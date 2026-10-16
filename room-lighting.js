@@ -781,6 +781,67 @@ function directShadowUniforms(THREE) {
   return text => replacements.reduce((result, [from, to]) => result.replaceAll(from, to), text);
 }
 
+// Keep the exact arithmetic but avoid whole-main aggregate locals where no
+// remaining stock feature passes them to an inout helper. Global types stay.
+function scalarLambertAccumulators(THREE, lighting, indirect) {
+  if (!lighting || !indirect || !literalLambertPointBody(THREE, false) || !literalLambertDirectional(THREE) || !literalLambertIndirect(THREE)) return null;
+  const template = THREE.ShaderLib?.lambert?.fragmentShader, chunks = THREE.ShaderChunk;
+  const initial = 'ReflectedLight reflectedLight = ReflectedLight( vec3( 0.0 ), vec3( 0.0 ), vec3( 0.0 ), vec3( 0.0 ) );';
+  const material = 'LambertMaterial material;\nmaterial.diffuseColor = diffuseColor.rgb;\nmaterial.specularStrength = specularStrength;';
+  const outgoing = 'vec3 outgoingLight = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + totalEmissiveRadiance;';
+  if (typeof template !== 'string' || chunks.lights_lambert_fragment !== material ||
+      [initial,outgoing,'#include <lights_lambert_fragment>','#include <lights_fragment_begin>','#include <lights_fragment_end>','void main() {'].some(value => template.split(value).length !== 2)) return null;
+  // These exact positive branches cannot execute under the compiled gate below.
+  // Reject a changed top-level else/elif instead of silently skipping its work.
+  const absent = new Set(['#ifdefUSE_IRIDESCENCE','#ifdefUSE_TRANSMISSION','#ifdefUSE_AOMAP','#ifdefUSE_LIGHTMAP','#ifdefUSE_ENVMAP',
+    '#ifdefined(USE_ENVMAP)&&defined(STANDARD)&&defined(ENVMAP_TYPE_CUBE_UV)',
+    '#ifdefined(USE_ENVMAP)&&defined(RE_IndirectSpecular)','#ifdefined(RE_IndirectSpecular)',
+    '#if(NUM_SPOT_LIGHTS>0)&&defined(RE_Direct)','#if(NUM_RECT_AREA_LIGHTS>0)&&defined(RE_Direct_RectArea)']);
+  const reachable = text => {
+    let depth = 0; const lines = [];
+    for (const line of text.split('\n')) {
+      const compact = line.replace(/\s+/g, '');
+      if (!depth && absent.has(compact)) {depth = 1; continue;}
+      if (depth) {
+        if (/^#if/.test(compact)) depth++;
+        else if (/^#endif/.test(compact)) depth--;
+        else if (depth === 1 && /^#(?:else|elif)/.test(compact)) return null;
+      } else lines.push(line);
+    }
+    return depth ? null : lines.join('\n');
+  };
+  const expand = (text, depth = 0) => {
+    if (depth > 24) throw new Error('Recursive Lambert include');
+    return text.replace(/#include <(\w+)>/g, (_, key) => {
+      if (typeof chunks[key] !== 'string') throw new Error('Unknown Lambert include');
+      return expand(chunks[key], depth + 1);
+    });
+  };
+  const fields = text => text.replaceAll('reflectedLight.directDiffuse','HOME_DIRECT_DIFFUSE')
+    .replaceAll('reflectedLight.indirectDiffuse','HOME_INDIRECT_DIFFUSE').replaceAll('material.diffuseColor','HOME_DIFFUSE_COLOR');
+  try {
+    // Unknown aggregate reads outside the two proven light spans are not allowed.
+    let rest = chunks.lights_fragment_begin;
+    const point = rest.indexOf('#if ( NUM_POINT_LIGHTS > 0 ) && defined( RE_Direct )'), spot = rest.indexOf('#if ( NUM_SPOT_LIGHTS > 0 ) && defined( RE_Direct )');
+    const dir = rest.indexOf('#if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )'), area = rest.indexOf('#if ( NUM_RECT_AREA_LIGHTS > 0 )');
+    if (!(point >= 0 && spot > point && dir > spot && area > dir)) return null;
+    rest = rest.slice(0,point) + rest.slice(spot,dir) + rest.slice(area);
+    const outside = template.slice(template.indexOf('void main() {')).replace(initial,'').replace(outgoing,'')
+      .replace('#include <lights_lambert_fragment>','').replace('#include <lights_fragment_begin>','').replace('#include <lights_fragment_end>','');
+    if (/\b(?:HOME_SCALAR_ACCUMULATORS|HOME_DIRECT_DIFFUSE|HOME_INDIRECT_DIFFUSE|HOME_DIFFUSE_COLOR|homeDirectDiffuse|homeIndirectDiffuse|homeDiffuseColor)\b/.test(expand(template) + lighting + indirect)) return null;
+    const pieces = [reachable(rest),reachable(expand(outside)),reachable(fields(lighting + '\n' + indirect))];
+    if (pieces.some(text => text === null || /\b(?:material|reflectedLight)\b/.test(text))) return null;
+  } catch (_) { return null; }
+  const gate = '#if NUM_SPOT_LIGHTS == 0 && NUM_RECT_AREA_LIGHTS == 0 && !defined(USE_ENVMAP) && !defined(USE_LIGHTMAP) && !defined(USE_AOMAP) && !defined(USE_IRIDESCENCE) && !defined(USE_TRANSMISSION) && !defined(USE_CLEARCOAT) && !defined(USE_SHEEN) && !defined(RE_IndirectSpecular)\n#define HOME_SCALAR_ACCUMULATORS\n#endif\n';
+  const aliases = '#ifdef HOME_SCALAR_ACCUMULATORS\n#define HOME_DIRECT_DIFFUSE homeDirectDiffuse\n#define HOME_INDIRECT_DIFFUSE homeIndirectDiffuse\n#define HOME_DIFFUSE_COLOR homeDiffuseColor\n#else\n#define HOME_DIRECT_DIFFUSE reflectedLight.directDiffuse\n#define HOME_INDIRECT_DIFFUSE reflectedLight.indirectDiffuse\n#define HOME_DIFFUSE_COLOR material.diffuseColor\n#endif\n';
+  return {fields, apply(text) {
+    return text.replace('void main() {',gate + aliases + 'void main() {')
+      .replace(initial,'#ifdef HOME_SCALAR_ACCUMULATORS\nvec3 homeDirectDiffuse = vec3( 0.0 );\nvec3 homeIndirectDiffuse = vec3( 0.0 );\n#else\n' + initial + '\n#endif')
+      .replace('#include <lights_lambert_fragment>','#ifdef HOME_SCALAR_ACCUMULATORS\nvec3 homeDiffuseColor = diffuseColor.rgb;\n#else\n' + material + '\n#endif')
+      .replace(outgoing,fields(outgoing));
+  }};
+}
+
 // Softly confine each fixture's direct light to its room, retaining a short
 // doorway spill. Full-height shadow geometry still blocks opaque walls/doors.
 function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {}) {
@@ -1026,6 +1087,13 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
   const directionalBody = packed && geometryOptions.literalLambertDirectional === true ? literalLambertDirectional(THREE) : null;
   const indirectBody = packed && pointTexture && geometryOptions.literalLambertIndirect === true ? literalLambertIndirect(THREE) : null;
   const directShadowFields = packed && pointTexture && geometryOptions.directShadowUniforms === true ? directShadowUniforms(THREE) : null;
+  const accumulatorDefinesSafe = material => {
+    for (const name in material.defines || {}) if (/^(?:HOME_SCALAR_ACCUMULATORS|HOME_DIRECT_DIFFUSE|HOME_INDIRECT_DIFFUSE|HOME_DIFFUSE_COLOR|homeDirectDiffuse|homeIndirectDiffuse|homeDiffuseColor)$/.test(name)) return false;
+    return true;
+  };
+  const scalarAccumulators = geometryOptions.scalarLambertAccumulators === true && indirectBody && directionalBody
+    ? literalRunLighting.map((run, i) => run && literalShadowPrefixes[i] && scalarLambertAccumulators(THREE,
+      run.replace(shadowPrefix,literalShadowPrefixes[i]).replace(directionalBody.original,directionalBody.replacement),indirectBody)) : [];
   const geometryFragment=geometryTexture ? geometryTexture.fragment(runFragment) : runFragment;
   const textureFragment=pointTexture ? pointTexture.fragment(geometryFragment) : geometryFragment;
   return {
@@ -1098,6 +1166,14 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
               material.customProgramCacheKey === THREE.Material.prototype.customProgramCacheKey) ||
             Boolean(glass && material.onBeforeCompile === glass.compile && material.customProgramCacheKey === glass.key));
         }
+        if (textureState && scalarAccumulators.some(Boolean)) {
+          const glass = staticGlassCallbacks.get(material);
+          textureState.accumulatorAllowed = textureState.accumulatorAllowed !== false && (
+            (material.onBeforeCompile === textureState.callback && material.customProgramCacheKey === textureState.cacheKey) ||
+            ((material.onBeforeCompile === THREE.Material.prototype.onBeforeCompile || material.onBeforeCompile === applyWallSheen) &&
+              material.customProgramCacheKey === THREE.Material.prototype.customProgramCacheKey) ||
+            Boolean(glass && material.onBeforeCompile === glass.compile && material.customProgramCacheKey === glass.key));
+        }
         const scalarDirectional = enabled && material.isMeshLambertMaterial ? directionalBody : null;
         mesh.material.onBeforeCompile = shader => {
           if (sharedWall) applySharedWallSheen(shader, wallEnabled);
@@ -1126,7 +1202,12 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
           }
           let directLighting = scalarDirectional ? selectedLighting.replace(scalarDirectional.original, scalarDirectional.replacement) : selectedLighting;
           if (textureState?.active && textureState.directShadowAllowed && material.isMeshLambertMaterial && directShadowFields) directLighting = directShadowFields(directLighting);
-          const indirectLighting = textureState?.active && material.isMeshLambertMaterial && indirectBody || '#include <lights_fragment_end>';
+          let indirectLighting = textureState?.active && material.isMeshLambertMaterial && indirectBody || '#include <lights_fragment_end>';
+          const accumulators = textureState?.active && textureState.accumulatorAllowed && accumulatorDefinesSafe(material) && material.isMeshLambertMaterial && scalarAccumulators[decayState?.active?1:0];
+          if (accumulators) {
+            directLighting = accumulators.fields(directLighting); indirectLighting = accumulators.fields(indirectLighting);
+            shader.fragmentShader = accumulators.apply(shader.fragmentShader);
+          }
           shader.fragmentShader = (textureState?.active?'uniform highp sampler2D homePointTexture;\n':'') + (textureState?.active?textureFragment:fragment) + shader.fragmentShader.replace('#include <lights_fragment_begin>', directLighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n' + indirectLighting);
         };
         mesh.material.customProgramCacheKey = () => (enabled ? fragment+(textureState?.active?':point-texture-v2'+(runTexture?':run-texture-v1':'')+(geometryTexture?':geometry-texture-v1':'')+(geometryOptions.signalTexture?':signal-texture-v1':''):'') : 'home-editor') +
@@ -1136,6 +1217,7 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
           (enabled && textureState?.active && material.isMeshLambertMaterial && literalShadowPrefixes[decayState?.active?1:0] ? ':literal-lambert-shadow-point-v1' : '') +
           (enabled && textureState?.active && material.isMeshLambertMaterial && indirectBody ? ':literal-lambert-indirect-v1' : '') +
           (enabled && textureState?.active && textureState.directShadowAllowed && material.isMeshLambertMaterial && directShadowFields ? ':direct-shadow-uniforms-v1' : '') +
+          (enabled && textureState?.active && textureState.accumulatorAllowed && accumulatorDefinesSafe(material) && material.isMeshLambertMaterial && scalarAccumulators[decayState?.active?1:0] ? ':scalar-lambert-accumulators-v1' : '') +
           (scalarDirectional ? ':literal-lambert-directional-v1' : '') +
           (decayState?.active ? ':point-decay-two-v1' : '');
         if (decayState) {decayState.callback = material.onBeforeCompile; decayState.cacheKey = material.customProgramCacheKey;}
