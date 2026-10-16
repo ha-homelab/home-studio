@@ -173,10 +173,25 @@ per window. The guard budgets 836 of the Apple software renderer's reported
 the original literal geometry without reducing scene contents. CPU regression
 tests cover polygon boundaries, concave rooms, window ordering and this fallback.
 
+Exactly axis-aligned rectangular rooms use a box signed-distance calculation
+instead of walking four polygon edges. Classification uses the same quantized
+coordinates as the shader and rejects repeated corners, crossed edges and
+collapsed bounds. Mixed plans retain the polygon calculation for every other
+room. The regression compares boundary, doorway and daylight contributions;
+separate image comparisons check the rendered result, not just CPU arithmetic.
+
 Viewer receipts retain the existing native drag phase timings for Home and the
 editor, followed by the existing two-animation-frame completion wait. These
 measurements add no input actions or rendered frames; the same total duration
 continues to determine whether the interaction passes.
+
+The diffuse viewer coalesces subsequent camera-motion frames within a fixed
+64 ms deadline after its first successful motion frame. Lifecycle regressions
+check that held drags still repaint, later input cannot postpone the deadline,
+and release, live-state updates, resize, suspension and context loss leave no
+stale delayed work. Browser acceptance still requires real motion rendering
+and a final full-resolution frame; reducing the number of draws cannot replace
+either assertion.
 
 The packed daylight path omits loops for absent exterior rooms or windows and
 rejects rooms outside the existing conservative spatial bound before calculating

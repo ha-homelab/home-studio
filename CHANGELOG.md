@@ -43,6 +43,9 @@
   cancellation and context recovery restore a full-resolution scene frame.
   Keep lights, geometry, shadows and sharp HTML controls; include the copy pass
   in real draw counts and dispose its resources with the graphics context.
+  Draw the first moved-pointer frame immediately, then combine subsequent
+  diffuse camera motion within a fixed 64 ms window. Release, cancellation,
+  resizing and live updates bypass the delay; hidden or lost contexts cancel it.
 - Reduce room-lighting shader compilation and fragment work while preserving
   light order, every illuminated fixture and nonzero light through doorways.
   The diffuse profile uses packed room geometry with a conservative uniform
@@ -52,6 +55,8 @@
   spatial reach, retaining the same window and exterior lighting.
   Fixed building geometry skips light runs with a provably zero contribution;
   movable and unsupported geometry retain all runs in their original order.
+  Exact axis-aligned rectangles use a box-distance calculation after coordinate
+  quantization; other room shapes keep their polygon calculation.
 - Reuse planner outlines and selection controls, and avoid redrawing unchanged
   snapped positions. Preserve exact furniture overlap, appearance, undo and drag
   cancellation. Bound software-renderer resolution without reducing sharp HTML

@@ -222,6 +222,13 @@ or other graphics profiles. The copy pass adds one real draw, included in the
 acceptance counters and interaction time. Its resources are disposed on context
 loss and final page teardown; page-cache suspension retains the bounded texture.
 
+On this same diffuse path, the first moved-pointer frame is scheduled normally.
+Later camera-motion events share a fixed 64 ms deadline; each event updates the
+camera, but does not restart the timer. This prevents sequential input messages
+from forcing a costly draw for every intermediate position. Pointer release,
+cancellation, resize and live-state updates bypass the delay. Hidden pages and
+lost contexts cancel it. The normal graphics path retains its frame scheduling.
+
 Gecko can report both hardware and software as `Apple M1, or similar`. For that
 exact label with a Gecko user agent, a one-time, fixed 32-by-32 raster check on
 the existing context measures capacity. Five valid pixel readbacks and a best
@@ -248,6 +255,11 @@ fragment-local array that is expensive in Apple's legacy software interpreter.
 Both paths skip unlit and distant rooms; exactly zero transmission skips the
 light's distance, attenuation, shadow, and direct surface-reflectance work.
 Nonzero contributions retain the same lighting calculation and order.
+
+The packed path recognizes exact axis-aligned rectangles after coordinate
+quantization and uses their box distance directly. Other polygons retain the
+edge calculation, including in mixed plans. This changes neither room shapes
+nor the distance at which light fades through an opening.
 
 The 24-room, 72-light acceptance fixture exposed excessive software shader
 compilation from expanding a full lighting block for every fixture. Only the
