@@ -154,8 +154,11 @@ Firefox 155/157 and native Firefox 158 rows on macOS select
 `FIREFOX_WEBGL_BACKEND=angle` and require the reported renderer to confirm Metal
 ANGLE. Playwright Firefox 153, native ESR 153, and Waterfox retain their default
 WebGL backend and select `FIREFOX_COMPOSITOR_BACKEND=software` on macOS because
-those releases precede the Metal ANGLE path. This changes the browser compositor,
-not the WebGL rendering budget; the real graphics renderer is still recorded
+those releases precede the Metal ANGLE path. These older macOS rows also set
+`FIREFOX_GPU_PROCESS=disabled`, which requests
+`layers.gpu-process.enabled=false` in each temporary browser profile. These
+settings change the compositor and process configuration, not the WebGL
+rendering budget; WebGL stays enabled, the real graphics renderer is recorded,
 and all rendering/recovery assertions remain required.
 The configured ANGLE path avoids the hosted VM's slow native CGL fallback; it
 does not certify Firefox's default graphics configuration. Historical rows
@@ -220,8 +223,9 @@ For Waterfox, change the product to `waterfox` and the version to `6.7.5` or
 `6.7.6`; the older `setup-waterfox.py` and `test-waterfox-acceptance.py` commands
 remain available. Windows extraction requires 7-Zip. On macOS, the Firefox 158 CI
 configuration additionally sets `FIREFOX_WEBGL_BACKEND=angle`. The macOS ESR
-and Waterfox rows use `FIREFOX_COMPOSITOR_BACKEND=software` with the default
-WebGL backend. These settings apply only to disposable test profiles. Keep application
+and Waterfox rows use `FIREFOX_COMPOSITOR_BACKEND=software` and
+`FIREFOX_GPU_PROCESS=disabled` with the default WebGL backend. These settings
+apply only to disposable test profiles. Keep application
 bundles unmodified so their signatures remain valid.
 
 ## Boundaries of a green result

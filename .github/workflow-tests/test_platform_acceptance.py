@@ -175,10 +175,14 @@ class PlatformAcceptanceTests(unittest.TestCase):
                          "${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && (matrix.playwright == '1.63.0' || matrix.playwright == '1.64.0') && 'angle' || 'default' }}")
         self.assertEqual(browser['FIREFOX_COMPOSITOR_BACKEND'],
                          "${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && matrix.playwright == '1.62.1' && 'software' || 'default' }}")
+        self.assertEqual(browser['FIREFOX_GPU_PROCESS'],
+                         "${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && matrix.playwright == '1.62.1' && 'disabled' || 'default' }}")
         self.assertEqual(native['FIREFOX_WEBGL_BACKEND'],
                          "${{ matrix.os == 'macos-15' && matrix.product == 'firefox' && matrix.version == '158.0' && 'angle' || 'default' }}")
         self.assertEqual(native['FIREFOX_COMPOSITOR_BACKEND'],
                          "${{ matrix.os == 'macos-15' && (matrix.product == 'waterfox' || (matrix.product == 'firefox' && matrix.version == '153.5.0esr')) && 'software' || 'default' }}")
+        self.assertEqual(native['FIREFOX_GPU_PROCESS'],
+                         "${{ matrix.os == 'macos-15' && (matrix.product == 'waterfox' || (matrix.product == 'firefox' && matrix.version == '153.5.0esr')) && 'disabled' || 'default' }}")
 
     def test_chromium_backend_uses_hosted_metal_only_on_macos(self):
         browser = workflow('platform-acceptance.yml')['jobs']['browser']['env']
