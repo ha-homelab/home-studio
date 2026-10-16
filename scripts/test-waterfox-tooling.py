@@ -117,10 +117,10 @@ class ToolingTests(unittest.TestCase):
                     setup.validate_installation(installation, 'firefox', '153.5.0esr')
 
     def test_software_compositor_is_explicit_and_preserves_webgl_preferences(self):
-        with patch.dict(acceptance.os.environ, {'FIREFOX_WEBGL_BACKEND': 'angle', 'FIREFOX_COMPOSITOR_BACKEND': 'default'}):
+        with patch.dict(acceptance.os.environ, {'FIREFOX_WEBGL_BACKEND': 'angle', 'FIREFOX_COMPOSITOR_BACKEND': 'default'}, clear=True):
             baseline = acceptance.browser_preferences(2828)
         self.assertNotIn('gfx.webrender.software', baseline)
-        with patch.dict(acceptance.os.environ, {'FIREFOX_WEBGL_BACKEND': 'angle', 'FIREFOX_COMPOSITOR_BACKEND': 'software'}):
+        with patch.dict(acceptance.os.environ, {'FIREFOX_WEBGL_BACKEND': 'angle', 'FIREFOX_COMPOSITOR_BACKEND': 'software'}, clear=True):
             requested = acceptance.browser_preferences(2828)
         self.assertEqual(requested, {**baseline, 'gfx.webrender.software': True})
         self.assertTrue(requested['webgl.force-enabled'])
@@ -172,7 +172,7 @@ class ToolingTests(unittest.TestCase):
                         acceptance.browser_preferences(2828)
 
     def test_requested_macos_backend_requires_real_metal_renderer(self):
-        with patch.dict(acceptance.os.environ, {'FIREFOX_WEBGL_BACKEND': 'angle'}):
+        with patch.dict(acceptance.os.environ, {'FIREFOX_WEBGL_BACKEND': 'angle'}, clear=True):
             prefs = acceptance.browser_preferences(2828)
         self.assertFalse(prefs['webgl.disable-angle'])
         self.assertFalse(prefs['webgl.sanitize-unmasked-renderer'])
