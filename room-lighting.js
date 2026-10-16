@@ -589,6 +589,23 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
   // family when every point is off. Never infer zero from a brightness epsilon.
   const guardedPointLighting = packed ? 'if (homePointLightingRequired) {\n' + directPointLighting + '\n}\n' : directPointLighting;
   const lighting = (packed ? '' : transmissionCache) + lightChunk.slice(0, pointStart) + guardedPointLighting + lightChunk.slice(pointEnd);
+  // Keep aggregate light/material inout calls outside Lambert's dynamic loop.
+  // These are the pinned Three operations in their original order, including
+  // both visibility tests. Shadows and other material models keep stock calls.
+  const lambertUnshadowedBody = `vec3 homeLightVector = pointLights[ i ].position - geometryPosition;
+            vec3 homeLightDirection = normalize( homeLightVector );
+            float homeLightDistance = length( homeLightVector );
+            vec3 homeLightColor = pointLights[ i ].color;
+            homeLightColor *= getDistanceAttenuation( homeLightDistance, pointLights[ i ].distance, pointLights[ i ].decay );
+            if (homeLightColor != vec3( 0.0 )) {
+              homeLightColor *= homeRunTransmission;
+              if (homeLightColor != vec3( 0.0 )) {
+                float homeDotNL = saturate( dot( geometryNormal, homeLightDirection ) );
+                vec3 homeIrradiance = homeDotNL * homeLightColor;
+                reflectedLight.directDiffuse += homeIrradiance * BRDF_Lambert( material.diffuseColor );
+              }
+            }`;
+  const lambertLighting = packed ? lighting.replace(unshadowedBody, lambertUnshadowedBody) : lighting;
   return {
     capacity, geometryMode: packed ? 'packed' : 'literal', geometryUniformVectors: packed?.uniformVectors ?? null,
     attach(group, enabled, {staticGeometry = false} = {}) {
@@ -645,9 +662,10 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
             '#include <project_vertex>',
             '#include <project_vertex>\nhomeWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;'
           );
-          shader.fragmentShader = fragment + shader.fragmentShader.replace('#include <lights_fragment_begin>', lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
+          shader.fragmentShader = fragment + shader.fragmentShader.replace('#include <lights_fragment_begin>', mesh.material.isMeshLambertMaterial ? lambertLighting : lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
         };
         mesh.material.customProgramCacheKey = () => (enabled ? fragment : 'home-editor') +
+          (enabled && packed && mesh.material.isMeshLambertMaterial ? ':lambert-point-locals-v1' : '') +
           (sharedWall ? ':wall-sheen-facing-v1' : wall ? ':wall-sheen-v2' : '') +
           (!sharedWall && staticGlassFacing.has(mesh.material) ? ':glass-facing-v1' : '');
         mesh.material.needsUpdate = true;

@@ -575,6 +575,19 @@ five-second termination grace precedes forced process-group cleanup. Partial
 logs remain available when startup, a draw or teardown fails. Neither successful
 capture nor incomplete capture changes the failed primary receipt.
 
+## Packed Lambert point-light arithmetic
+
+The packed Lambert unshadowed loop uses the pinned Three arithmetic directly
+with local vectors and scalars. It retains normalization, distance attenuation,
+both color visibility tests, room transmission, and each diffuse accumulation
+in their original order. Point-shadow prefixes, directional lighting, daylight,
+Standard/Physical materials, literal fallback, and editor shaders are unchanged.
+The CPU check compares the emitted body with the pinned stock functions, checks
+expanded shader boundaries, and exercises Float32 values and operation order.
+It also runs from the packaged source ZIP. Any reduction in driver register
+allocation work is a hypothesis until measured; identical rendering and browser
+acceptance remain required.
+
 ## Boundaries of a green result
 
 A successful matrix covers the inventory above, not every past browser or

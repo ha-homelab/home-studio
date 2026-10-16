@@ -174,6 +174,17 @@ for(const p of positions) {
     const shader={uniforms:{},vertexShader:THREE.ShaderLib.lambert.vertexShader,fragmentShader:THREE.ShaderLib.lambert.fragmentShader};
     material.onBeforeCompile(shader);material.dispose();return {lighting,shader};
   }
+  function innerLightBody(shader) {
+    const marker='for ( int i = homeFirstLight; i < homeRunEnd; i ++ )';
+    const loop=shader.indexOf(marker);assert(loop>=0);
+    const start=shader.indexOf('{',loop)+1;let depth=1,end=start;
+    for(;depth;end++) {
+      assert(end<shader.length,'Inner light loop has balanced braces');
+      if(shader[end]==='{')depth++;
+      if(shader[end]==='}')depth--;
+    }
+    return shader.slice(start,end-1);
+  }
   for(const [rs,ws,capacity] of [[[],[],0],[rooms,windows,9]]) {
     const literal=shaderFor(rs,ws,capacity),packed=shaderFor(rs,ws,capacity,{packed:true,maxFragmentUniforms:1024});
     const fallback=shaderFor(rs,ws,capacity,{packed:true,maxFragmentUniforms:1});
@@ -196,7 +207,11 @@ for(const p of positions) {
         'homeRoomTransmissions[homePointRooms[$1]]')
       .replace('\n    \n    for ( int homeRun','\n    int homeRunStart = 0;\n    for ( int homeRun')
       .replace('\n      \n    }','\n      homeRunStart = homeRunEnd;\n    }');
-    assert.equal(cachedEquivalent,loop(literal.shader.fragmentShader),'Point-light order, culling and math differ only in equivalent transmission lookup');
+    // The pinned Lambert body/operation-order equivalence has its own oracle
+    // in test-lambert-point-locals.cjs. Retain this independent exact comparison
+    // of the entire shadow prefix and run-selection/culling structure.
+    const normalized=cachedEquivalent.replace(innerLightBody(cachedEquivalent),innerLightBody(literal.shader.fragmentShader));
+    assert.equal(normalized,loop(literal.shader.fragmentShader),'Point-light order and culling differ only in equivalent transmission lookup');
     assert.match(packed.shader.fragmentShader,/uniform ivec4 homeLightRuns\[/);
     assert.doesNotMatch(packed.shader.fragmentShader,/uniform int homeLightRun(?:Starts|Ends)\[/,
       'Packed shaders no longer declare the separate dynamic start/end arrays');
@@ -219,8 +234,8 @@ for(const p of positions) {
   assert(helper,'The packed shader exposes one on-demand transmission helper');
   const evaluate=new Function('room','homeLitRooms','homeRoomNearby','homeRoomDistance','homeRoomTransmission',
     helper[1].replace(/\bint index\b/,'const index'));
-  // Execute the emitted run-control code, replacing only the already verified
-  // unchanged direct-light body with a visit recorder. This catches record
+  // Execute the emitted run-control code, replacing only the independently
+  // verified direct-light body with a visit recorder. This catches record
   // channel/index, prefix-clipping and loop-bound errors independently of the
   // CPU producer rather than reconstructing its algorithm in the test.
   const runStart=direct.shader.fragmentShader.indexOf('for ( int homeRun = 0;');
@@ -233,11 +248,7 @@ for(const p of positions) {
     if(direct.shader.fragmentShader[runEnd]==='}')depth--;
   }
   const emittedRun=direct.shader.fragmentShader.slice(runStart,runEnd);
-  const firstBody=emittedRun.indexOf('pointLight = pointLights[ i ];');
-  const lastCall='if (directLight.visible) RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
-  const lastBody=emittedRun.indexOf(lastCall,firstBody)+lastCall.length;
-  assert(firstBody>=0 && lastBody>firstBody);
-  const runControl=(emittedRun.slice(0,firstBody)+'visit(i,homeRunTransmission);'+emittedRun.slice(lastBody))
+  const runControl=emittedRun.replace(innerLightBody(emittedRun),'visit(i,homeRunTransmission);')
     .replace(/\b(?:int|float|ivec4)\b/g,'let');
   const executeRuns=new Function('homeLightRuns','homeLightRunCount','NUM_POINT_LIGHTS','NUM_POINT_LIGHT_SHADOWS',
     'homePointTransmission','visit','min','max',runControl);
