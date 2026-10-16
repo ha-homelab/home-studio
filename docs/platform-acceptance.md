@@ -79,6 +79,18 @@ intentional WebGL context loss/restoration, resource cleanup, preview
 rebuilds, continued editing/export, and draft preservation. A working 2D
 fallback does not count as a successful 3D test.
 
+The planner reuses one WebGL context during normal editing and preview cycles.
+After deliberate context loss and restoration, it rebuilds the preview with a
+fresh canvas and renderer, then explicitly retires the detached old context.
+The Playwright checks require exactly **one active context**, **two contexts
+created in total**, and **two raw loss events**: the deliberate loss while the
+original canvas is attached, and one retirement loss matched to an explicit
+request after that canvas is detached. The old context must remain lost and
+the replacement must remain attached and usable through subsequent orbiting.
+Any additional or unmatched loss still fails; retirement does not excuse an
+unexpected loss. Scene contents, resource limits, draft recovery, and continued
+editing remain required after replacement.
+
 Phone and tablet profiles use **390 × 844** and **820 × 1180** CSS pixels,
 respectively, at device scale factor 2, with touch enabled. They retain the
 actual desktop operating-system identity. Chromium exercises native touch
@@ -156,7 +168,9 @@ ANGLE. Playwright Firefox 153, native ESR 153, and Waterfox retain their default
 WebGL backend and select `FIREFOX_COMPOSITOR_BACKEND=software` on macOS because
 those releases precede the Metal ANGLE path. These older macOS rows also set
 `FIREFOX_GPU_PROCESS=disabled`, which requests
-`layers.gpu-process.enabled=false` in each temporary browser profile. These
+`layers.gpu-process.enabled=false` and `webgl.allow-in-parent=true` in each
+temporary browser profile. The latter permits WebGL in the parent process when
+the headed ESR 153 graphics path no longer has a GPU process. These
 settings change the compositor and process configuration, not the WebGL
 rendering budget; WebGL stays enabled, the real graphics renderer is recorded,
 and all rendering/recovery assertions remain required.
