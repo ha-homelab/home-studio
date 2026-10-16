@@ -2,6 +2,13 @@
 
 ## [0.6.4] - Development line
 
+- Experiment with 62,500 resting and 31,250 motion pixels in the existing Apple
+  diffuse viewer profile, including its measured masked-Apple selection. This
+  trades canvas detail for less raster work; HTML controls retain their normal
+  resolution. Antialiasing, one-context lifecycle, geometry, lights, shadows,
+  other profiles and acceptance limits are unchanged. Paired appearance and
+  performance evaluation and hosted qualification are still required.
+
 - Hide the separate authoring backdrop plane in the existing Apple diffuse
   Editor profile, including measured masked-Apple selection. Keep the grid,
   real floors, furniture and outlines. Home and other profiles retain their
