@@ -74,13 +74,66 @@ function configurePointShadows(lights, capabilities = {}, profile = {}) {
   });
 }
 
+// Bound immutable viewer building meshes using their complete position buffer.
+// Clipped wall variants retain the original full wall vertices. Dynamic inventory
+// does not opt in; unsupported vertex deformation always keeps every light run.
+function roomLightingWorldBounds(mesh) {
+  const geometry = mesh.geometry, position = geometry?.attributes?.position;
+  const elements = mesh.matrixWorld?.elements;
+  if (!geometry?.isBufferGeometry || geometry.isInstancedBufferGeometry || !position || position.isGLBufferAttribute || position.itemSize < 3 ||
+      ![position.getX,position.getY,position.getZ].every(method=>typeof method === 'function') ||
+      !position.count || mesh.isSkinnedMesh || mesh.isInstancedMesh || mesh.isBatchedMesh ||
+      geometry.morphAttributes?.position?.length || mesh.material?.displacementMap ||
+      !elements || elements.length !== 16 || !Array.from(elements).every(Number.isFinite) ||
+      elements[3] !== 0 || elements[7] !== 0 || elements[11] !== 0 || elements[15] !== 1) return null;
+  const low = [Infinity,Infinity,Infinity], high = [-Infinity,-Infinity,-Infinity];
+  for (let i = 0; i < position.count; i++) {
+    const point = [position.getX(i),position.getY(i),position.getZ(i)];
+    if (!point.every(Number.isFinite)) return null;
+    for (let axis = 0; axis < 3; axis++) {
+      low[axis] = Math.min(low[axis],point[axis]); high[axis] = Math.max(high[axis],point[axis]);
+    }
+  }
+  // Matrix uniforms use Float32. Include arithmetic-rounding slack, especially
+  // when a large translation cancels another term, before the 0.56 m room halo.
+  const e = Array.from(elements,Math.fround), bounds = [Infinity,Infinity,-Infinity,-Infinity];
+  let magnitude = 1;
+  for (const x of [low[0],high[0]]) for (const y of [low[1],high[1]]) for (const z of [low[2],high[2]]) {
+    for (const [axis,column] of [[0,0],[1,2]]) {
+      const terms = [e[column]*x,e[column+4]*y,e[column+8]*z,e[column+12]];
+      const value = terms.reduce((sum,term)=>sum+term,0);
+      bounds[axis] = Math.min(bounds[axis],value); bounds[axis+2] = Math.max(bounds[axis+2],value);
+      magnitude = Math.max(magnitude,terms.reduce((sum,term)=>sum+Math.abs(term),0));
+    }
+  }
+  const slack = magnitude*0.00001;
+  const result = [bounds[0]-slack,bounds[1]-slack,bounds[2]+slack,bounds[3]+slack];
+  return result.every(Number.isFinite) ? result : null;
+}
+
+// Keep whole existing runs in their original order. A nonintersecting room's
+// contribution is exactly zero everywhere on this material's static geometry.
+function filterRoomLightingRuns(bounds, roomBounds, pointRooms, ends, count, targetStarts, targetEnds) {
+  let start = 0, selected = 0;
+  for (let run = 0; run < count; run++) {
+    const end = ends[run], room = pointRooms[start], index = (room-1)*4;
+    if (!bounds || room === 0 || index < 0 || index+3 >= roomBounds.length ||
+        (bounds[2] >= roomBounds[index]-.56 && bounds[0] <= roomBounds[index+2]+.56 &&
+         bounds[3] >= roomBounds[index+1]-.56 && bounds[1] <= roomBounds[index+3]+.56)) {
+      targetStarts[selected] = start; targetEnds[selected++] = end;
+    }
+    start = end;
+  }
+  return selected;
+}
+
 // Pack only within a conservative fragment-uniform allowance. Coordinates use
 // the same five-decimal literals as the original GLSL before Float32 storage.
 function packRoomLightingGeometry(rooms, windows, capacity, maxFragmentUniforms) {
   const edgeCount = rooms.reduce((sum, room) => sum + room.polygon.length, 0);
   // Scalars in arrays may each consume a vector. Reserve the existing light,
   // shadow, material and transform uniforms before adding packed geometry.
-  const uniformVectors = 128 + capacity * 6 + rooms.length * 4 + edgeCount + windows.length * 2;
+  const uniformVectors = 128 + capacity * 7 + rooms.length * 4 + edgeCount + windows.length * 2;
   if (!Number.isFinite(maxFragmentUniforms) || uniformVectors > maxFragmentUniforms) return null;
   const edges = new Float32Array(Math.max(1, edgeCount) * 4);
   const ranges = new Int32Array(Math.max(1, rooms.length) * 4);
@@ -127,7 +180,8 @@ function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {
     homeWindowTransmission: {value: new Float32Array(Math.max(1, windows.length)).fill(1)}
   };
   const packed = geometryOptions.packed ? packRoomLightingGeometry(rooms, windows, capacity, geometryOptions.maxFragmentUniforms) : null;
-  if (packed) Object.assign(uniforms, packed.uniforms);
+  if (packed) Object.assign(uniforms, packed.uniforms, {homeLightRunStarts:{value:new Int32Array(capacity)}});
+  const staticRuns = new Map(), dynamicMaterials = new WeakSet();
   const geometryDeclarations = packed ? `
     uniform vec4 homeRoomEdges[${Math.max(1, packed.edgeCount)}];
     uniform ivec4 homeRoomRanges[${Math.max(1, rooms.length)}];
@@ -189,7 +243,7 @@ function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {
     uniform float homeDaylight;
     uniform float homeExteriorSurface;
     uniform float homeWindowTransmission[${Math.max(1, windows.length)}];
-${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, vec2 a, vec2 b, inout float d, inout bool inside) {
+${packed ? `    uniform int homeLightRunStarts[${capacity}];\n    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, vec2 a, vec2 b, inout float d, inout bool inside) {
       vec2 edge = b - a;
       vec2 delta = p - a - edge * clamp(dot(p - a, edge) / dot(edge, edge), 0.0, 1.0);
       d = min(d, dot(delta, delta));
@@ -299,18 +353,39 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
   const directPointLighting = packed ? boundedPointLighting.replace(
     /homeRoomTransmissions\[homePointRooms\[([^\]]+)\]\]/g,
     'homePointTransmission(homePointRooms[$1])'
-  ) : boundedPointLighting;
+  ).replace('max(homeRunStart, NUM_POINT_LIGHT_SHADOWS)', 'max(homeLightRunStarts[homeRun], NUM_POINT_LIGHT_SHADOWS)') : boundedPointLighting;
   const lighting = (packed ? '' : transmissionCache) + lightChunk.slice(0, pointStart) + directPointLighting + lightChunk.slice(pointEnd);
   return {
     capacity, geometryMode: packed ? 'packed' : 'literal', geometryUniformVectors: packed?.uniformVectors ?? null,
-    attach(group, enabled) {
+    attach(group, enabled, {staticGeometry = false} = {}) {
+      if (packed && staticGeometry) group?.updateWorldMatrix?.(true,true);
       group?.traverse(mesh => {
         if (!mesh.material?.isMeshStandardMaterial && !mesh.material?.isMeshLambertMaterial) return;
+        if (packed) {
+          const material = mesh.material;
+          if (!staticGeometry) {
+            dynamicMaterials.add(material);
+            if (staticRuns.has(material)) staticRuns.get(material).unbounded = true;
+          } else {
+            let state = staticRuns.get(material);
+            if (!state) {
+              state = {bounds:null,unbounded:dynamicMaterials.has(material),uniforms:{
+                homeLightRunStarts:{value:new Int32Array(capacity)},
+                homeLightRunEnds:{value:new Int32Array(capacity)},homeLightRunCount:{value:0}}};
+              staticRuns.set(material,state);
+            }
+            const bounds = roomLightingWorldBounds(mesh);
+            if (!bounds) state.unbounded = true;
+            else if (!state.bounds) state.bounds = bounds;
+            else state.bounds = [Math.min(state.bounds[0],bounds[0]),Math.min(state.bounds[1],bounds[1]),
+              Math.max(state.bounds[2],bounds[2]),Math.max(state.bounds[3],bounds[3])];
+          }
+        }
         const wall = mesh.userData.category === 'walls';
         mesh.material.onBeforeCompile = shader => {
           if (wall) applyWallSheen(shader);
           // Keep uniform definitions identical in both material variants.
-          Object.assign(shader.uniforms, uniforms, {homeExteriorSurface:{value:mesh.userData.category==='stairs'?1:0}});
+          Object.assign(shader.uniforms, uniforms, staticRuns.get(mesh.material)?.uniforms, {homeExteriorSurface:{value:mesh.userData.category==='stairs'?1:0}});
           // The editor needs no room/window shader, especially on software WebGL.
           if (!enabled) return;
           shader.vertexShader = 'varying vec3 homeWorldPosition;\n' + shader.vertexShader.replace(
@@ -350,11 +425,19 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
       // Reuse fixed storage; changing HA state never changes the shader layout.
       const runs = uniforms.homeLightRunEnds.value, pointRooms = uniforms.homePointRooms.value;
       runs.fill(0);
-      let runCount = 0;
+      let runCount = 0, runStart = 0;
       for (let i = 1; i <= slot; i++) {
-        if (i === slot || pointRooms[i] !== pointRooms[i - 1]) runs[runCount++] = i;
+        if (i === slot || pointRooms[i] !== pointRooms[i - 1]) {
+          if (packed) uniforms.homeLightRunStarts.value[runCount] = runStart;
+          runs[runCount++] = i; runStart = i;
+        }
       }
       uniforms.homeLightRunCount.value = runCount;
+      if (packed) for (const state of staticRuns.values()) {
+        state.uniforms.homeLightRunCount.value = filterRoomLightingRuns(state.unbounded ? null : state.bounds,
+          packed.uniforms.homeRoomBounds.value,pointRooms,runs,runCount,
+          state.uniforms.homeLightRunStarts.value,state.uniforms.homeLightRunEnds.value);
+      }
     }
   };
 }

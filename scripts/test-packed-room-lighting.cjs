@@ -107,7 +107,7 @@ for(const p of positions) {
     const loop=s=>s.slice(s.indexOf(start),s.indexOf(end));
     const packedLoop=loop(packed.shader.fragmentShader);
     const cachedEquivalent=packedLoop.replace(/homePointTransmission\(homePointRooms\[([^\]]+)\]\)/g,
-      'homeRoomTransmissions[homePointRooms[$1]]');
+      'homeRoomTransmissions[homePointRooms[$1]]').replace('homeLightRunStarts[homeRun]','homeRunStart');
     assert.equal(cachedEquivalent,loop(literal.shader.fragmentShader),'Point-light order, culling and math differ only in equivalent transmission lookup');
     assert.doesNotMatch(packed.shader.fragmentShader,/homeRoomTransmissions\[/,'Packed mode has no dynamically indexed local transmission array');
     assert.match(packed.shader.fragmentShader,/if \(room == 0\) return 1\.0;/,'Unbound lights keep unrestricted transmission');
@@ -237,6 +237,93 @@ for(const p of positions) {
     }
   }
   console.log(JSON.stringify({checkedDaylight}));
+  // Conservative static bounds are checked with actual Three transforms and
+  // independent points on each mesh, including negative/nonuniform scales.
+  const box = new THREE.BoxGeometry(1.3,2.1,.9);
+  const cullRooms = Array.from({length:25},(_,i)=>{const x=(i%5-2)*4,z=(Math.floor(i/5)-2)*4;
+    return {id:`cull${i}`,polygon:[[x,z],[x+4,z],[x+4,z+4],[x,z+4]]};});
+  const cullData = context.packRoomLightingGeometry(cullRooms,[],26,2048);
+  const pointRooms = new Int32Array([...cullRooms.map((_,i)=>i+1),0]);
+  const ends = new Int32Array(Array.from({length:26},(_,i)=>i+1));
+  let checkedCulledPoints=0;
+  for (const translation of [[0,0,0],[-8,3,-4],[5,-2,7],[100000,-3,-100000]])
+  for (const angle of [0,.3,Math.PI/2]) for (const scale of [[1,1,1],[-2,.3,1.7],[.01,4,-.2]]) {
+    const mesh = new THREE.Mesh(box,new THREE.MeshLambertMaterial());
+    mesh.position.set(...translation);mesh.rotation.set(angle/2,angle,angle/3);mesh.scale.set(...scale);mesh.updateMatrixWorld();
+    const bounds = context.roomLightingWorldBounds(mesh);assert(bounds);
+    const starts = new Int32Array(26), filteredEnds = new Int32Array(26);
+    const count = context.filterRoomLightingRuns(bounds,cullData.uniforms.homeRoomBounds.value,
+      pointRooms,ends,26,starts,filteredEnds);
+    const kept = Array.from(starts.slice(0,count));
+    assert(kept.includes(25),'Unassigned-room lights always remain');
+    assert.deepEqual(kept,[...kept].sort((a,b)=>a-b),'Original light order remains unchanged');
+    for(const x of [-.65,0,.65])for(const y of [-1.05,0,1.05])for(const z of [-.45,0,.45]) {
+      const point = new THREE.Vector3(x,y,z).applyMatrix4(mesh.matrixWorld);
+      assert(point.x>=bounds[0]&&point.x<=bounds[2]&&point.z>=bounds[1]&&point.z<=bounds[3]);
+      cullRooms.forEach((room,i)=>{if(transmission(distance([point.x,point.z],edgesOf(room)))>0)
+        assert(kept.includes(i),'Every potentially nonzero room contribution remains');});
+      checkedCulledPoints++;
+    }
+    mesh.material.dispose();
+  }
+  for(const point of positions) {
+    const starts=new Int32Array(4),endsOut=new Int32Array(4);
+    const count=context.filterRoomLightingRuns([point[0],point[1],point[0],point[1]],data.uniforms.homeRoomBounds.value,
+      new Int32Array([1,2,3,0]),new Int32Array([1,2,3,4]),4,starts,endsOut);
+    const kept=Array.from(starts.slice(0,count));assert(kept.includes(3));
+    rooms.forEach((room,i)=>{if(transmission(distance(point,edgesOf(room)))>0)assert(kept.includes(i),
+      'Concave polygons and spill-boundary samples cannot be falsely culled');});
+  }
+  const invalid = new THREE.Mesh(box,new THREE.MeshLambertMaterial());invalid.updateMatrixWorld();
+  for(const flag of ['isSkinnedMesh','isInstancedMesh','isBatchedMesh']) {
+    invalid[flag]=true;assert.equal(context.roomLightingWorldBounds(invalid),null);delete invalid[flag];
+  }
+  invalid.material.displacementMap={};assert.equal(context.roomLightingWorldBounds(invalid),null);invalid.material.displacementMap=null;
+  invalid.matrixWorld.elements[3]=.1;assert.equal(context.roomLightingWorldBounds(invalid),null);invalid.updateMatrix();invalid.updateMatrixWorld();
+  const invalidGeometry=new THREE.BufferGeometry();invalidGeometry.setAttribute('position',new THREE.Float32BufferAttribute([NaN,0,0],3));
+  invalid.geometry=invalidGeometry;assert.equal(context.roomLightingWorldBounds(invalid),null);
+  invalidGeometry.dispose();invalid.material.dispose();
+
+  const closeRooms=[{id:'near',polygon:[[-2,-2],[2,-2],[2,2],[-2,2]]},
+    {id:'far',polygon:[[18,-2],[22,-2],[22,2],[18,2]]},
+    {id:'other',polygon:[[38,-2],[42,-2],[42,2],[38,2]]}];
+  const makePoints=()=>['near','near','far','far','other','missing'].map((room,i)=>({item:{room},light:{visible:true,castShadow:i<2,intensity:1}}));
+  const localLighting=context.createRoomLighting(THREE,closeRooms,6,[],{packed:true,maxFragmentUniforms:1024});
+  const rootGroup=new THREE.Group(),staticMaterial=new THREE.MeshLambertMaterial();
+  const first=new THREE.Mesh(box,staticMaterial),second=new THREE.Mesh(box,staticMaterial);second.position.x=20;rootGroup.add(first,second);
+  localLighting.attach(rootGroup,true,{staticGeometry:true});
+  const compiled={uniforms:{},vertexShader:THREE.ShaderLib.lambert.vertexShader,fragmentShader:THREE.ShaderLib.lambert.fragmentShader};
+  staticMaterial.onBeforeCompile(compiled);
+  const selected=()=>Array.from(compiled.uniforms.homeLightRunStarts.value.slice(0,compiled.uniforms.homeLightRunCount.value));
+  localLighting.update(makePoints());assert.deepEqual(selected(),[0,2,5],'Shared static material uses the union of both mesh bounds');
+  // The first retained run need not start at zero, later runs may have gaps,
+  // and the actual shadow-prefix count may split a retained multi-light run.
+  const gapStarts=new Int32Array(6),gapEnds=new Int32Array(6);
+  const orderedIds=new Int32Array([1,1,2,2,3,0]),orderedEnds=new Int32Array([2,4,5,6]);
+  const gapBounds=[19,-1,21,1],closeBounds=context.packRoomLightingGeometry(closeRooms,[],6,1024).uniforms.homeRoomBounds.value;
+  const gapCount=context.filterRoomLightingRuns(gapBounds,closeBounds,orderedIds,orderedEnds,4,gapStarts,gapEnds);
+  assert.deepEqual(Array.from(gapStarts.slice(0,gapCount)),[2,5]);
+  assert.deepEqual(Array.from(gapEnds.slice(0,gapCount)),[4,6]);
+  for(const prefix of [0,1,2,3,4,5,6]) for(const point of [[19.5,0],[20.5,.5]]) {
+    const value=index=>orderedIds[index]===0?1:transmission(distance(point,edgesOf(closeRooms[orderedIds[index]-1])));
+    const expected=Array.from(orderedIds,(_,index)=>index).filter(index=>value(index)!==0),actual=[];
+    for(let index=0;index<prefix;index++)if(value(index)!==0)actual.push(index);
+    for(let run=0;run<gapCount;run++)for(let index=Math.max(gapStarts[run],prefix);index<gapEnds[run];index++)
+      if(value(index)!==0)actual.push(index);
+    assert.deepEqual(actual,expected,'Filtered nonzero starts/gaps and clipped shadow prefix preserve each contribution once');
+  }
+  const dynamicGroup=new THREE.Group(),moving=new THREE.Mesh(box,staticMaterial);dynamicGroup.add(moving);
+  localLighting.attach(dynamicGroup,true);localLighting.update(makePoints());
+  assert.deepEqual(selected(),[0,2,4,5],'Sharing with mutable inventory permanently retains all original runs');
+  moving.position.x=40;moving.scale.set(-3,2,4);moving.updateMatrixWorld();localLighting.update(makePoints());
+  assert.deepEqual(selected(),[0,2,4,5],'Inventory movement never relies on a cached static bound');
+  const changed=makePoints();changed[2].light.visible=false;changed[4].light.intensity=0;
+  localLighting.update(changed);assert.deepEqual(selected(),[0,2,3,4],'Visibility/light changes retain the current exact global run order');
+  const priorAllowance=128+6*6+closeRooms.length*4+closeRooms.reduce((sum,room)=>sum+room.polygon.length,0);
+  assert.equal(context.createRoomLighting(THREE,closeRooms,6,[],{packed:true,maxFragmentUniforms:priorAllowance}).geometryMode,'literal',
+    'Extra start-index array is included in the conservative uniform budget');
+  staticMaterial.dispose();box.dispose();
+  console.log(JSON.stringify({checkedCulledPoints}));
   const full=Array.from({length:24},(_,i)=>{const x=i%6*4,z=Math.floor(i/6)*4;return{id:`room${i}`,polygon:[[x,z],[x+4,z],[x+4,z+4],[x,z+4]]};});
   const fullWindows=full.slice(0,6).map((r,i)=>({room:r.id,a:[i*4+1,0],b:[i*4+2.6,0]}));
   const literal=shaderFor(full,fullWindows,72),packed=shaderFor(full,fullWindows,72,{packed:true,maxFragmentUniforms:1024});
