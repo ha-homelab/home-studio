@@ -558,7 +558,15 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
     pointLighting.indexOf(guardedDirectCall) + guardedDirectCall.length)
     .replace(/#if defined\( USE_SHADOWMAP \) && \( UNROLLED_LOOP_INDEX < NUM_POINT_LIGHT_SHADOWS \)[\s\S]*?#endif/, '')
     .replaceAll('homeRoomTransmissions[homePointRooms[ i ]]', 'homeRunTransmission');
-  const boundedPointLighting = pointLighting.replace('i < NUM_POINT_LIGHTS', 'i < NUM_POINT_LIGHT_SHADOWS')
+  // Packed transmission is pure for this fragment. Cache it within each
+  // shadow light's explicit scope, which survives Three's literal unrolling.
+  const shadowPointLighting = packed ? pointLighting.replace(
+    'if (homeRoomTransmissions[homePointRooms[ i ]] != 0.0) {',
+    '{\nfloat homeShadowTransmission = homeRoomTransmissions[homePointRooms[ i ]];\nif (homeShadowTransmission != 0.0) {'
+  ).replace('directLight.color *= homeRoomTransmissions[homePointRooms[ i ]];',
+    'directLight.color *= homeShadowTransmission;')
+    .replace(guardedDirectCall + '\n}', guardedDirectCall + '\n}\n}') : pointLighting;
+  const boundedPointLighting = shadowPointLighting.replace('i < NUM_POINT_LIGHTS', 'i < NUM_POINT_LIGHT_SHADOWS')
     .replace('#pragma unroll_loop_end', `#pragma unroll_loop_end
     int homeRunStart = 0;
     for ( int homeRun = 0; homeRun < homeLightRunCount; homeRun ++ ) {

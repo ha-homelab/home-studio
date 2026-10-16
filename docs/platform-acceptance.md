@@ -599,3 +599,16 @@ missing results. For a freeze report, collect the exact browser/OS versions,
 graphics backend, affected viewer or drawing-tool path, and a sanitized
 reproduction. See [browser compatibility](browser-compatibility.md) for prior
 measurements and the safe bug-report checklist.
+
+### Experimental cached shadow transmission
+
+The packed room shader evaluates each shadowed light's pure room-transmission
+helper once, then reuses the scalar for admission and visible-light color.
+An explicit per-light scope survives Three's literal prefix unrolling. All
+helper operations, light and shadow order, nonzero/NaN admission behavior,
+unshadowed runs, and literal/editor paths remain unchanged; no uniforms,
+textures, passes or quality limits are added. CPU traces verify that only the
+second pure call disappears. A driver may already eliminate the duplicate
+computation, so this source change has no established performance benefit.
+Actual compiled GLSL, rendered pixels and acceptance timing still require
+browser validation before adoption.
