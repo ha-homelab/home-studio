@@ -1,13 +1,13 @@
-# Disposable Intel bounded-light-bank diagnostic
+# Disposable Intel point-light-texture diagnostic
 
-Only a push to `diagnostic/intel-cgl-bank` starts this workflow. It has
+Only a push to `diagnostic/intel-cgl-texture` starts this workflow. It has
 read-only GitHub permissions and pinned actions. It does not invoke the 77-lane
 acceptance gate or publish a release. Its results are diagnostic evidence only.
 
 Two independent `macos-15-intel` jobs compare these exact sources in order:
 
 - Baseline: `13b8ed9e1f0baf68eac329764a05277377113419`.
-- Bounded PointLight bank: `3422c417faaf139f1f92f19604a80715128fa787`.
+- PointLight texture: `20ec67719a5892d56d6cf4cfe4093f97b1811d9d`.
 
 One job uses Firefox `153.5.0esr`; the other uses Waterfox `6.7.6`. Maximum
 parallelism is two. Each pair runs sequentially on one hosted VM and shares one
@@ -36,14 +36,16 @@ disposable hosted VM.
 This common normalization is not a proven cure for the Intel failures, and a
 disabled status does not prove that existing indexing workers are idle. The
 passive CPU records remain necessary context. Both sources receive the same
-normalization; the comparison varies the bank implementation, not Spotlight
+normalization; the comparison varies the point-record transport, not Spotlight
 configuration. Fixed order and shared caches still limit causal conclusions.
 
-The unchanged candidate gives eligible immutable geometry a local PointLight
-bank of at most 32 records, while retaining the original shadow prefix. It
-preserves all scene lights and selects the original full program for unsupported
-geometry or inputs. Local ARM64 startup was neutral; no Intel improvement is
-established. This is a separate, explicitly triggered contingency experiment.
+The unchanged candidate gives eligible untextured Lambert materials an exact
+Float32 texture of the original Three view-space PointLight records. Integer
+texel fetches preserve the ordered unshadowed lighting arithmetic, and the stock
+PointLight declaration retains only the original shadow prefix. Unsupported or
+nonfinite inputs select the original full program before compilation. All scene
+lights remain. No Intel improvement is established. This is a separate,
+explicitly triggered contingency experiment.
 
 The wrapper invokes each source's original `test-native-browser-acceptance.py`
 once, with its standard product, expected-version, installation and output
@@ -89,23 +91,23 @@ driver caches also limit interpretation; one pair is not a statistical speedup
 estimate.
 
 The wrapper never substitutes a moving ref or an unavailable source. Keep this
-workflow unpushed until the preceding indexing comparison is terminal and its
-evidence has been saved. A push starts these two jobs; preparing this workflow
+workflow unpushed until the preceding bank comparison is terminal, its evidence
+has been saved, and the texture candidate passes independent and pixel review. A push starts these two jobs; preparing this workflow
 authorizes no local setting change.
 
 Offline contract check, with no browser or network:
 
 ```sh
-python3 scripts/test-intel-cgl-bank.py
+python3 scripts/test-intel-cgl-texture.py
 ```
 
 The workflow supplies fixed choices. Its equivalent command on the Intel host
 is:
 
 ```sh
-python3 harness/scripts/run-intel-cgl-bank.py \
-  --source-root "$GITHUB_WORKSPACE" --candidate bounded-bank \
+python3 harness/scripts/run-intel-cgl-texture.py \
+  --source-root "$GITHUB_WORKSPACE" --candidate point-texture \
   --product firefox \
-  --installation "$RUNNER_TEMP/home-studio-intel-cgl-bank-browser/install.json" \
-  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-bank"
+  --installation "$RUNNER_TEMP/home-studio-intel-cgl-texture-browser/install.json" \
+  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-texture"
 ```
