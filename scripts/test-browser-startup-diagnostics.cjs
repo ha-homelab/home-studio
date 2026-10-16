@@ -16,7 +16,7 @@ test('startup diagnostics default to no injection, handler or source mutation', 
   assert.throws(() => createStartupDiagnostics('../outside.jsonl'), /absolute host path/);
 });
 
-function simulatedBrowser(referrer = 'http://127.0.0.1:12345/', block) {
+function simulatedBrowser(referrer = 'http://127.0.0.1:12345/', block, configure = () => {}) {
   const sent = [], calls = [];
   const gl = {VERSION:1, RENDERER:2, LINK_STATUS:3, VERTEX_SHADER:5, FRAGMENT_SHADER:6, drawingBufferWidth:500, drawingBufferHeight:500,
     getExtension:()=>({UNMASKED_RENDERER_WEBGL:4}),
@@ -25,11 +25,15 @@ function simulatedBrowser(referrer = 'http://127.0.0.1:12345/', block) {
     compileShader(){calls.push('compile');if(block === 'compile')throw Error('blocked compile');},
     linkProgram(){calls.push('link');if(block === 'link')throw Error('blocked link');},
     getProgramParameter(){calls.push('status');return true;},
+    useProgram(){calls.push('use');}, deleteProgram(){calls.push('delete');},
+    drawArrays(){calls.push('drawArrays');}, drawElements(){calls.push('drawElements');},
+    drawArraysInstanced(){calls.push('drawArraysInstanced');}, drawElementsInstanced(){calls.push('drawElementsInstanced');},
   };
   class Canvas {constructor(){this.width=500;this.height=500;}getContext(){calls.push('context');return gl;}}
   const context = {window:{}, document:{referrer}, location:{href:'about:srcdoc'}, URL,
     HTMLCanvasElement:Canvas, performance:{now:()=>7},
     fetch:(url, options)=>{sent.push({url,options,value:JSON.parse(options.body)});return Promise.resolve();}};
+  configure({gl,context,calls});
   // No parent.location is exposed: real sandboxed srcdoc cannot read it.
   vm.runInNewContext(`(${installStartupProbe.toString()})(${JSON.stringify(referrer)});`,context);
   return {context,Canvas,gl,sent,calls};
@@ -166,10 +170,10 @@ test('loopback receiver persists bounded whitelisted data, rejecting paths, priv
     assert.equal((await post(value,'/other')).status,404);
     assert.equal((await post(value)).status,204);
     assert.equal((await post(value)).status,204);
-    for(let sequence=2;sequence<=40;sequence++)assert.equal((await post({sequence,event:'context-before',time:sequence})).status,204);
-    assert.equal((await post({sequence:41,event:'context-before',time:41})).status,400);
+    for(let sequence=2;sequence<=56;sequence++)assert.equal((await post({sequence,event:'context-before',time:sequence})).status,204);
+    assert.equal((await post({sequence:57,event:'context-before',time:57})).status,400);
     const records=fs.readFileSync(filename,'utf8').trim().split('\n').map(JSON.parse);
-    assert.equal(records.length,40);
+    assert.equal(records.length,56);
     assert.deepEqual(records[0],{sourceHash,...value});
     assert.deepEqual(fs.readdirSync(directory),['startup.jsonl']);
     assert.equal(receiver.checkpointSource('a;const profile = detect();b;','const profile = detect();','profile'),
@@ -202,4 +206,161 @@ test('raster capacity checkpoints accept only bounded measured evidence or unava
     {...measured,totalMs:Infinity}, {...measured,totalMs:-1}, {...measured,totalMs:undefined},
     {status:'unavailable',samplesMs:[1,2,3]}, {status:'unavailable',bestMs:15},
     {status:'unavailable',totalMs:NaN}, {status:'unavailable',totalMs:1e10}]) assert.throws(() => check(rasterProbe));
+});
+
+test('first draw per initial program adds at most sixteen records and restores native methods', () => {
+  let original;
+  const names=['useProgram','drawArrays','drawElements','drawArraysInstanced','drawElementsInstanced'];
+  const {context,Canvas,gl,sent,calls}=simulatedBrowser(undefined,undefined,({gl})=>{
+    original=Object.fromEntries(names.map(name=>[name,gl[name]]));
+  });
+  new Canvas().getContext('webgl2');
+  context.window.__homeStudioStartupProfile({pixels:250000});
+  for(let index=1;index<=9;index++) {
+    const program=makeProgram(gl,index);
+    gl.linkProgram(program);gl.getProgramParameter(program,gl.LINK_STATUS);
+    gl.useProgram(program);
+    const kind=names[1+(index-1)%4];
+    gl[kind](4,0,3);gl[kind](4,0,3);
+  }
+  assert.equal(sent.length,56);
+  const records=sent.filter(({value})=>value.event.startsWith('draw-')).map(({value})=>value);
+  assert.equal(records.length,16);
+  assert.deepEqual(records.filter(value=>value.event==='draw-before').map(value=>value.program),[1,2,3,4,5,6,7,8]);
+  assert.deepEqual([...new Set(records.map(value=>value.drawKind))],names.slice(1));
+  assert(records.filter(value=>value.event==='draw-after').every(value=>value.durationMs===0 && value.threw===false));
+  assert(records.every(value=>JSON.stringify(value.drawingBuffer)==='[500,500]'));
+  assert.equal(calls.filter(call=>call.startsWith('draw')).length,18);
+  for(const name of names)assert.equal(gl[name],original[name]);
+  for(const {value} of sent)validateCheckpoint(value);
+});
+
+test('draw submission timing excludes diagnostic sends and preserves receiver, arguments and return value', () => {
+  let clock=0, received, programReceived, result={native:true};
+  const {Canvas,gl,sent}=simulatedBrowser(undefined,undefined,({gl,context})=>{
+    context.performance.now=()=>clock;
+    const send=context.fetch;
+    context.fetch=(...args)=>{clock+=100;return send(...args);};
+    gl.useProgram=function(...args){programReceived={receiver:this,args};return result;};
+    gl.drawElements=function(...args){received={receiver:this,args};clock+=37;return result;};
+  });
+  new Canvas().getContext('webgl2');
+  const program=makeProgram(gl,1);gl.linkProgram(program);
+  assert.equal(gl.useProgram(program,'extra'),result);
+  assert.equal(programReceived.receiver,gl);assert.deepEqual(programReceived.args,[program,'extra']);
+  for(const name of ['getParameter','getExtension','readPixels','finish','flush','fenceSync','clientWaitSync']) {
+    gl[name]=()=>{throw Error(`unexpected synchronizing/query call ${name}`);};
+  }
+  assert.equal(gl.drawElements(4,123,5123,24),result);
+  assert.equal(received.receiver,gl);assert.deepEqual(received.args,[4,123,5123,24]);
+  const after=sent.at(-1).value;
+  assert.equal(after.event,'draw-after');assert.equal(after.durationMs,37);assert.equal(after.threw,false);
+});
+
+test('native draw and useProgram exception identities survive diagnostic failures', () => {
+  for(const fault of ['none','clock','send']) {
+    const failure={nativeFailure:true};let draws=0;
+    const {Canvas,gl,sent,context}=simulatedBrowser(undefined,undefined,({gl})=>{
+      gl.drawArrays=()=>{draws++;throw failure;};
+    });
+    new Canvas().getContext('webgl2');
+    const program=makeProgram(gl,1);gl.linkProgram(program);gl.useProgram(program);
+    if(fault==='clock')context.performance.now=()=>{throw Error('clock unavailable');};
+    if(fault==='send')context.fetch=()=>{throw Error('send unavailable');};
+    assert.throws(()=>gl.drawArrays(4,0,3),error=>error===failure);
+    assert.equal(draws,1);
+    if(fault==='none') {
+      assert.equal(sent.at(-1).value.event,'draw-after');
+      assert.equal(sent.at(-1).value.threw,true);
+    }
+  }
+  const failure={useProgramFailure:true};
+  const {Canvas,gl,sent}=simulatedBrowser(undefined,undefined,({gl})=>{
+    gl.useProgram=()=>{throw failure;};
+  });
+  new Canvas().getContext('webgl2');
+  const program=makeProgram(gl,1);gl.linkProgram(program);
+  assert.throws(()=>gl.useProgram(program),error=>error===failure);
+  gl.drawArrays(4,0,3);
+  assert(!sent.some(({value})=>value.event.startsWith('draw-')));
+});
+
+test('out-of-order use and relinked program objects do not finish or replenish the initial set', () => {
+  const {Canvas,gl,sent}=simulatedBrowser();new Canvas().getContext('webgl2');
+  const initialWrapper=gl.drawElements;
+  const programs=Array.from({length:8},(_,index)=>{
+    const program=makeProgram(gl,index);gl.linkProgram(program);return program;
+  });
+  gl.useProgram(programs[7]);gl.drawElements(4,3,5123,0);
+  assert.equal(gl.drawElements,initialWrapper,'using program8 first does not end the probe');
+  gl.linkProgram(programs[7]);gl.deleteProgram(programs[7]);
+  gl.drawElements(4,3,5123,0);
+  for(const program of programs.slice(0,7)){gl.useProgram(program);gl.drawElements(4,3,5123,0);}
+  assert.notEqual(gl.drawElements,initialWrapper);
+  assert.deepEqual(sent.filter(({value})=>value.event==='draw-before').map(({value})=>value.program),[8,1,2,3,4,5,6,7]);
+});
+
+test('throwing draws still exhaust the bounded sample and restore the original method', () => {
+  const failure={nativeDrawFailure:true};let original;
+  const {Canvas,gl,sent}=simulatedBrowser(undefined,undefined,({gl})=>{
+    gl.drawElements=original=()=>{throw failure;};
+  });
+  new Canvas().getContext('webgl2');
+  for(let index=1;index<=8;index++) {
+    const program=makeProgram(gl,index);gl.linkProgram(program);gl.useProgram(program);
+    assert.throws(()=>gl.drawElements(4,3,5123,0),error=>error===failure);
+  }
+  assert.equal(gl.drawElements,original);
+  const records=sent.filter(({value})=>value.event.startsWith('draw-')).map(({value})=>value);
+  assert.equal(records.length,16);
+  assert(records.filter(value=>value.event==='draw-after').every(value=>value.threw===true));
+});
+
+test('unused programs stop at a later untracked program without clobbering replacement wrappers', () => {
+  let original;
+  const {Canvas,gl,sent}=simulatedBrowser(undefined,undefined,({gl})=>{original=gl.drawArrays;});
+  new Canvas().getContext('webgl2');
+  for(let index=1;index<=9;index++){const program=makeProgram(gl,index);gl.linkProgram(program);if(index===9)gl.useProgram(program);}
+  assert.equal(gl.drawArrays,original);
+  assert(!sent.some(({value})=>value.event.startsWith('draw-')));
+
+  const next=simulatedBrowser();new next.Canvas().getContext('webgl2');
+  const replacement=()=>{};next.gl.drawElements=replacement;
+  for(let index=1;index<=8;index++) {
+    const program=makeProgram(next.gl,index);next.gl.linkProgram(program);
+    next.gl.useProgram(program);next.gl.drawArrays(4,0,3);
+  }
+  assert.equal(next.gl.drawElements,replacement);
+});
+
+test('few-program scenes detach after a fixed observation budget with no subsequent timing overhead', () => {
+  let original,reads=0;
+  const {Canvas,gl,sent}=simulatedBrowser(undefined,undefined,({gl,context})=>{
+    original={draw:gl.drawArrays,use:gl.useProgram};context.performance.now=()=>{reads++;return 1;};
+  });
+  new Canvas().getContext('webgl2');
+  const program=makeProgram(gl,1);gl.linkProgram(program);gl.useProgram(program);
+  for(let index=1;index<4096;index++)gl.drawArrays(4,0,3);
+  assert.notEqual(gl.drawArrays,original.draw);
+  gl.drawArrays(4,0,3);
+  assert.equal(gl.drawArrays,original.draw);assert.equal(gl.useProgram,original.use);
+  const before=reads, count=sent.length;
+  for(let index=0;index<100;index++){gl.useProgram(program);gl.drawArrays(4,0,3);}
+  assert.equal(reads,before);assert.equal(sent.length,count);
+  assert.equal(sent.filter(({value})=>value.event.startsWith('draw-')).length,2);
+});
+
+test('draw schema accepts only bounded submission metadata and exception booleans', () => {
+  const before={sequence:41,event:'draw-before',time:1,program:1,drawKind:'drawElements'};
+  const after={...before,sequence:42,event:'draw-after',durationMs:3,threw:false};
+  validateCheckpoint(before);validateCheckpoint(after);validateCheckpoint({...after,threw:true});
+  for(const patch of [{program:0},{program:9},{program:null},{drawKind:'readPixels'},{drawKind:'drawRangeElements'},
+    {durationMs:-1},{durationMs:Infinity},{durationMs:NaN},{durationMs:1e10},{durationMs:undefined},
+    {durationMs:'3'},{threw:null},{threw:1},{threw:undefined},{source:'private'}]) {
+    assert.throws(()=>validateCheckpoint({...after,...patch}));
+  }
+  assert.throws(()=>validateCheckpoint({...before,durationMs:0}));
+  assert.throws(()=>validateCheckpoint({...before,threw:false}));
+  assert.throws(()=>validateCheckpoint({...after,event:'link-after'}));
+  assert.throws(()=>validateCheckpoint({...after,sequence:57}));
 });

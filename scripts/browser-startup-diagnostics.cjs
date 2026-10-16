@@ -4,7 +4,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const endpoint = '/__home-studio-startup';
 const events = new Set(['context-before','context-after','gpu','profile',
-  'compile-before','compile-after','link-before','link-after','link-status-before','link-status-after']);
+  'compile-before','compile-after','link-before','link-after','link-status-before','link-status-after',
+  'draw-before','draw-after']);
+const drawKinds = new Set(['drawArrays','drawElements','drawArraysInstanced','drawElementsInstanced']);
 
 function installStartupProbe(origin) {
   // The host injects its exact origin; sandboxed srcdoc cannot read its parent.
@@ -14,7 +16,7 @@ function installStartupProbe(origin) {
   const url = host.origin + '/__home-studio-startup';
   let sequence = 0, canvas, gl;
   const send = (event, extra = {}) => {
-    if (sequence >= 40) return;
+    if (sequence >= 56) return;
     try {
       const value = {sequence:++sequence, event, time:performance.now(), ...extra};
       if (canvas) value.canvas = [canvas.width, canvas.height];
@@ -109,15 +111,78 @@ function installStartupProbe(origin) {
       send('link-status-after',programExtra(metadata));
       return result;
     };
+    // At most one submission per initial program, rather than the first eight
+    // draws (which can all belong to the same shadow pass). This measures the
+    // synchronous API call only: queued GPU execution is deliberately not
+    // synchronized with fences, readbacks, status queries or extra rendering.
+    const drawMethods = ['drawArrays','drawElements','drawArraysInstanced','drawElementsInstanced'];
+    const sampled = new WeakSet(), installed = [];
+    let activeProgram = null, sampledPrograms = 0, observedDraws = 0, stopped = false;
+    const stopDrawProbe = () => {
+      if (stopped) return;
+      stopped = true;
+      for (const [name, original, wrapper] of installed) {
+        try { if (gl[name] === wrapper) gl[name] = original; } catch { /* Preserve later instrumentation. */ }
+      }
+    };
+    const useProgram = gl.useProgram;
+    if (typeof useProgram === 'function') {
+      const wrapper = function(...args) {
+        const result = useProgram.apply(this,args);
+        if (stopped) return result;
+        const [program] = args;
+        activeProgram = program;
+        // Program identities are the same bounded ordinals as link events.
+        if (program && programCount >= 8 && !programs.get(program)?.index) stopDrawProbe();
+        return result;
+      };
+      gl.useProgram = wrapper;
+      installed.push(['useProgram',useProgram,wrapper]);
+    }
+    for (const name of drawMethods) {
+      const draw = gl[name];
+      if (typeof draw !== 'function') continue;
+      const wrapper = function(...args) {
+        if (stopped) return draw.apply(this,args);
+        observedDraws++;
+        const metadata = activeProgram && programs.get(activeProgram);
+        const record = metadata?.index && !sampled.has(activeProgram);
+        // A deleted, unused program or a scene with fewer than eight programs
+        // cannot leave a per-frame probe installed indefinitely.
+        const finish = observedDraws >= 4096 || (record && sampledPrograms === 7);
+        if (!record) {
+          if (finish) stopDrawProbe();
+          return draw.apply(this,args);
+        }
+        sampled.add(activeProgram);
+        sampledPrograms++;
+        const extra = {program:metadata.index, drawKind:name};
+        let start, completed = false;
+        try { send('draw-before',extra); start = performance.now(); } catch { /* Timing must not prevent a draw. */ }
+        try {
+          const result = draw.apply(this,args);
+          completed = true;
+          return result;
+        }
+        finally {
+          try {
+            if (start !== undefined) send('draw-after',{...extra,durationMs:performance.now()-start,threw:!completed});
+          } catch { /* Preserve the original draw result or exception. */ }
+          if (finish) stopDrawProbe();
+        }
+      };
+      gl[name] = wrapper;
+      installed.push([name,draw,wrapper]);
+    }
     return context;
   };
 }
 
 function validateCheckpoint(value) {
   assert(value && typeof value === 'object' && !Array.isArray(value));
-  const allowed = new Set(['sequence','event','time','canvas','drawingBuffer','created','gpu','profile','program','shaders']);
+  const allowed = new Set(['sequence','event','time','canvas','drawingBuffer','created','gpu','profile','program','shaders','drawKind','durationMs','threw']);
   assert(Object.keys(value).every(key => allowed.has(key)), 'Unexpected checkpoint field');
-  assert(Number.isInteger(value.sequence) && value.sequence >= 1 && value.sequence <= 40);
+  assert(Number.isInteger(value.sequence) && value.sequence >= 1 && value.sequence <= 56);
   assert(events.has(value.event));
   assert(Number.isFinite(value.time) && value.time >= 0 && value.time <= 1e9);
   for (const key of ['canvas','drawingBuffer']) if (key in value) {
@@ -125,6 +190,15 @@ function validateCheckpoint(value) {
     assert(value[key].every(n => Number.isInteger(n) && n >= 0 && n <= 1000000));
   }
   if ('program' in value) assert(Number.isInteger(value.program) && value.program >= 1 && value.program <= 8);
+  const isDraw = value.event === 'draw-before' || value.event === 'draw-after';
+  if (isDraw) {
+    assert(Number.isInteger(value.program) && value.program >= 1 && value.program <= 8);
+    assert(drawKinds.has(value.drawKind));
+    if (value.event === 'draw-after') {
+      assert(Number.isFinite(value.durationMs) && value.durationMs >= 0 && value.durationMs <= 1e9);
+      assert(typeof value.threw === 'boolean');
+    } else assert(!('durationMs' in value) && !('threw' in value));
+  } else assert(!('drawKind' in value) && !('durationMs' in value) && !('threw' in value));
   if ('shaders' in value) {
     assert(Array.isArray(value.shaders) && value.shaders.length <= 2);
     for (const shader of value.shaders) {
@@ -206,9 +280,9 @@ function createStartupDiagnostics(filename) {
         if (rejected) return;
         try {
           const value = validateCheckpoint(JSON.parse(body));
-          // Later fixture cycles intentionally do not restart the forty-event
+          // Later fixture cycles intentionally do not restart the 56-event
           // host budget or produce HTTP errors in otherwise healthy pages.
-          if (seen.has(value.sequence) || seen.size >= 40) { end(204); return; }
+          if (seen.has(value.sequence) || seen.size >= 56) { end(204); return; }
           assert(/^[a-f0-9]{64}$/.test(sourceHash), 'Source hash required');
           fs.appendFileSync(filename, JSON.stringify({sourceHash,...value})+'\n', 'utf8');
           seen.add(value.sequence);
