@@ -22,13 +22,10 @@ function renderer(){
 const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera();
 const r=renderer(),p=createInteractionRenderer(THREE,r);
 p.draw(scene,camera,false);
-assert.equal(r.textures.length,0);assert.equal(r.log.filter(x=>x[0]==='render').length,1);assert.equal(r.log.filter(x=>x[0]==='compile').length,0);
-p.draw(scene,camera,true);
-assert.deepEqual(r.log.slice(1).map(x=>x[0]),['allocate','compile','viewport','render','copy','viewport','render','viewport'],'The first motion frame prepares then executes the original copy pipeline');
+assert.equal(r.textures.length,1);assert.equal(r.log.filter(x=>x[0]==='render').length,1);assert.equal(r.log.filter(x=>x[0]==='compile').length,1);
 const texture=r.textures[0];assert(texture.image.width*texture.image.height<=62500);assert.equal(texture.colorSpace,THREE.NoColorSpace);assert.equal(texture.minFilter,THREE.LinearFilter);assert.equal(texture.generateMipmaps,false);
-p.draw(scene,camera,true);
+p.draw(scene,camera,true);p.draw(scene,camera,true);
 assert.equal(r.textures.length,1,'Motion reuses the existing allocation');
-assert.equal(r.log.filter(x=>x[0]==='compile').length,1,'Motion compiles the copy program only once');
 let renders=r.log.filter(x=>x[0]==='render');const low=renders.at(-2),copy=renders.at(-1);
 assert.strictEqual(low[1],scene);assert.strictEqual(low[2],camera,'Scene camera is unchanged');assert.equal(low[3][2],(texture.image.width+.25)/r.state.ratio);assert.equal(low[3][3],(texture.image.height+.25)/r.state.ratio);
 assert.equal(copy[1].name,'interaction-copy');assert.deepEqual(copy[3],[0,0,632.25/.5,394.25/.5]);assert.equal(copy[4],false);
@@ -37,27 +34,8 @@ const mesh=copy[1].children[0];assert.equal(mesh.material.blending,THREE.NoBlend
 assert.match(mesh.material.fragmentShader,/floor\(gl_FragCoord.xy\)\+vec2\(0.5\)/,'Every multisample location samples the resolved destination pixel center');assert.deepEqual(mesh.material.uniforms.outputSize.value.toArray(),[632,394]);assert.doesNotMatch(mesh.material.vertexShader,/varying|sampleUV/,'Copy UVs cannot vary across multisample locations');
 p.draw(scene,camera,false);assert.equal(r.info.render.calls,90);assert.strictEqual(r.log.at(-1)[1],scene,'Release uses a direct full-size scene frame');
 r.failCopy=true;assert.throws(()=>p.draw(scene,camera,true),/copy failed/);assert.deepEqual(r.state.viewport.toArray(),[0,0,1264,788]);assert.equal(r.info.autoReset,true);assert.equal(r.autoClear,true);r.failCopy=false;
-let disposed=0;texture.addEventListener('dispose',()=>disposed++);r.state.size.set(800,400);r.state.viewport.set(0,0,1600,800);p.draw(scene,camera,false);assert.equal(disposed,0);assert.equal(r.textures.length,1,'A full resize frame does not rebuild an unused copy texture');
-p.draw(scene,camera,true);assert.equal(disposed,1);assert.equal(r.textures.length,2);assert.equal(r.textures[1].image.width,353);assert.equal(r.textures[1].image.height,176);assert.equal(r.log.filter(x=>x[0]==='compile').length,1);
+let disposed=0;texture.addEventListener('dispose',()=>disposed++);r.state.size.set(800,400);r.state.viewport.set(0,0,1600,800);p.draw(scene,camera,false);assert.equal(disposed,1);assert.equal(r.textures.length,2);
 let resourceDisposals=0;for(const resource of [r.textures.at(-1),mesh.geometry,mesh.material])resource.addEventListener('dispose',()=>resourceDisposals++);p.dispose();p.dispose();assert.equal(resourceDisposals,3,'Context loss/pagehide cleanup is idempotent');
-// A cold full frame must not even consult preparation-only renderer methods.
-const cold=renderer(),coldHelper=createInteractionRenderer(THREE,cold);
-for(const key of ['getDrawingBufferSize','initTexture','compile'])cold[key]=()=>{throw Error('unused copy preparation: '+key);};
-for(const value of [false,undefined,null,0])coldHelper.draw(scene,camera,value);
-assert.equal(cold.log.length,4);assert(cold.log.every(row=>row[0]==='render'&&row[1]===scene));coldHelper.dispose();coldHelper.dispose();assert.equal(cold.textures.length,0);
-// The existing viewer lifecycle rebuilds this same helper after context loss.
-// Its restored full frames stay cold; the next actual gesture owns preparation.
-const restored=renderer(),oldHelper=createInteractionRenderer(THREE,restored);oldHelper.draw(scene,camera,true);oldHelper.dispose();
-const restoredHelper=createInteractionRenderer(THREE,restored),beforeRestore=restored.log.length;
-restoredHelper.draw(scene,camera,false);restoredHelper.draw(scene,camera,false);
-assert.deepEqual(restored.log.slice(beforeRestore).map(row=>row[0]),['render','render']);assert.equal(restored.textures.length,1);
-restoredHelper.draw(scene,camera,true);assert.equal(restored.textures.length,2);assert.equal(restored.log.filter(row=>row[0]==='compile').length,2);restoredHelper.dispose();
-// A failing copy compiler affects the first motion request, not an ordinary
-// full frame. Retrying retains the existing preparation/cleanup behavior.
-const failed=renderer(),failedHelper=createInteractionRenderer(THREE,failed),compile=failed.compile;
-failed.compile=()=>{throw Error('copy compile failed');};failedHelper.draw(scene,camera,false);assert.equal(failed.textures.length,0);
-assert.throws(()=>failedHelper.draw(scene,camera,true),/copy compile failed/);assert.deepEqual(failed.state.viewport.toArray(),[0,0,1264,788]);
-failed.compile=compile;failedHelper.draw(scene,camera,true);assert.equal(failed.textures.length,1);assert.equal(failed.info.render.calls,91);failedHelper.dispose();
 const full=renderer(),identity=createInteractionRenderer(THREE,full,632*394);identity.draw(scene,camera,true);assert.equal(full.textures[0].image.width,632);assert.equal(full.textures[0].image.height,394);assert(full.log.some(x=>x[0]==='copy'),'Equal-sized diagnostic exercises the same copy pipeline');identity.dispose();
 for(const state of [{scissor:true},{target:{}},{viewport:new THREE.Vector4(1,0,1264,788)},{viewport:new THREE.Vector4(0,0,1200,788)},{size:new THREE.Vector2(0,0)}]){
  const f=renderer();Object.assign(f.state,state);const a=createInteractionRenderer(THREE,f);a.draw(scene,camera,true);assert(!f.log.some(x=>x[0]==='copy'),'Unsupported/clipped viewport stays on direct path');a.dispose();

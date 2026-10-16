@@ -38,9 +38,8 @@ export function createInteractionRenderer(THREE, renderer, pixels = 62500) {
   function draw(scene, camera, interacting) {
     // Unexpected targets/scissors keep the existing direct rendering path.
     if (disposed || renderer.getRenderTarget() || renderer.getScissorTest()) { renderer.render(scene, camera); return; }
-    // Full frames do not use the copy texture or program. Prepare those only
-    // when a motion frame will use them, including after context restoration.
-    if (!interacting || !prepare()) { renderer.render(scene, camera); return; }
+    const ready = prepare();
+    if (!interacting || !ready) { renderer.render(scene, camera); return; }
     renderer.getViewport(viewport);
     const ratio = renderer.getPixelRatio(), autoReset = renderer.info.autoReset, autoClear = renderer.autoClear;
     if (viewport.x !== 0 || viewport.y !== 0 || Math.floor(viewport.z * ratio) !== size.x || Math.floor(viewport.w * ratio) !== size.y) {
