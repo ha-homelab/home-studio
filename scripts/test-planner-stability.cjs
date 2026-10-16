@@ -49,7 +49,32 @@ function fixture() {
 }
 
 function instrument() {
-  const stats=window.__plannerStats={planDraws:0,canvasResizes:0,contexts:0,contextLosses:0,linkedPrograms:0,shaderErrors:[],errors:[],contextEvents:[],linkFailures:[]};
+  const stats=window.__plannerStats={planDraws:0,canvasResizes:0,contexts:0,contextLosses:0,linkedPrograms:0,shaderErrors:[],errors:[],contextEvents:[],linkFailures:[],recoveryOperations:[]};
+  window.__plannerTraceRenderer=(renderer,readLayout)=>{
+    if(!renderer || renderer.__plannerRecoveryInstrumented)return;
+    renderer.__plannerRecoveryInstrumented=true;
+    const capture=()=>{
+      try {
+        const gl=renderer.getContext(),target=renderer.getRenderTarget();
+        return {time:performance.now(),lost:gl.isContextLost(),buffer:[renderer.domElement.width,renderer.domElement.height],
+          drawingBuffer:[gl.drawingBufferWidth,gl.drawingBufferHeight],linkedPrograms:stats.linkedPrograms,
+          renderTarget:target?{width:target.width,height:target.height,texture:target.texture?.uuid}:null,...readLayout()};
+      } catch(error) { return {time:performance.now(),diagnosticError:String(error)}; }
+    };
+    for(const method of ['setDrawingBufferSize','render']) {
+      const original=renderer[method];
+      renderer[method]=function(...args) {
+        // No GL queries on ordinary editing frames; retain at most 30 recovery operations.
+        if(!window.__plannerRecoveryPhase || stats.recoveryOperations.length>=30)return original.apply(this,args);
+        const operation={method,phase:window.__plannerRecoveryPhase,before:capture()};
+        if(method==='setDrawingBufferSize')operation.requestedSize=args.slice(0,3);
+        stats.recoveryOperations.push(operation);
+        try { return original.apply(this,args); }
+        catch(error) { operation.error=String(error);throw error; }
+        finally { operation.after=capture(); }
+      };
+    }
+  };
   window.addEventListener('error', event=>stats.errors.push(event.message || String(event.error)));
   window.addEventListener('unhandledrejection', event=>stats.errors.push(String(event.reason)));
   const originalError=console.error.bind(console);
@@ -99,7 +124,17 @@ const server=http.createServer((request,response)=>{
   if(!fs.existsSync(file) || !fs.statSync(file).isFile()){response.writeHead(404).end();return;}
   let content=route==='/planner/editor.js'?editor:fs.readFileSync(file);
   if(fixtureOnly && route==='/planner/index.html')content=content.toString().replace('<head>',`<head><script>(${instrument.toString()})();</script>`);
-  if(route==='/planner/editor.js')content+=`\nwindow.__plannerScene=()=>renderer?({layout:{...size},viewport:[innerWidth,innerHeight],memory:{...renderer.info.memory},programs:renderer.info.programs.length,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,buffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),shadowMap:[previewSun.shadow.mapSize.x,previewSun.shadow.mapSize.y],orbit:[orbit.yaw,orbit.pitch,orbit.radius]}):null;`;
+  if(route==='/planner/editor.js')content+=`
+window.__plannerScene=()=>renderer?({layout:{...size},viewport:[innerWidth,innerHeight],memory:{...renderer.info.memory},programs:renderer.info.programs.length,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,buffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),shadowMap:[previewSun.shadow.mapSize.x,previewSun.shadow.mapSize.y],orbit:[orbit.yaw,orbit.pitch,orbit.radius]}):null;
+const __plannerOriginalInitPreview=initPreview;
+initPreview=function(...args){
+  const result=__plannerOriginalInitPreview.apply(this,args);
+  window.__plannerTraceRenderer?.(renderer,()=>{
+    const rect=document.querySelector('.canvas-shell').getBoundingClientRect();
+    return {layout:{...size},shell:{width:rect.width,height:rect.height},viewport:[innerWidth,innerHeight],view};
+  });
+  return result;
+};`;
   response.writeHead(200,{'Content-Type':{'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json'}[extension]||'application/octet-stream','Cache-Control':'no-store'}).end(content);
 });
 

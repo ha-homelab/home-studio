@@ -495,3 +495,75 @@ test('planner recovery variants select real actions and retain restoration check
     await assert.rejects(recover(actions,'immediate',true), /must not lose the graphics context again/);
   }
 });
+
+test('planner recovery traces loss across resize and render without sampling normal frames', () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-planner-stability.cjs'),'utf8');
+  const instrument=source.slice(source.indexOf('function instrument()'),source.indexOf('const server='));
+  class Canvas {
+    get width(){return 800;} set width(value){}
+    get height(){return 600;} set height(value){}
+    getContext(){}
+  }
+  let time=0, reads=0, lost=false, failRender=false, failLayout=false;
+  const gl={isContextLost:()=>lost,drawingBufferWidth:800,drawingBufferHeight:600};
+  const canvas={width:800,height:600}, originalError=new Error('original render failure');
+  const renderer={domElement:canvas,
+    getContext(){reads++;return gl;},getRenderTarget:()=>null,
+    setDrawingBufferSize(width,height,ratio){
+      assert.equal(this,renderer);canvas.width=width*ratio;canvas.height=height*ratio;
+      gl.drawingBufferWidth=canvas.width;gl.drawingBufferHeight=canvas.height;lost=true;return 'resized';
+    },
+    render(scene,camera){assert.equal(this,renderer);assert.equal(scene,'scene');assert.equal(camera,'camera');if(failRender)throw originalError;return 'rendered';},
+  };
+  const window={addEventListener(){}};
+  const context=vm.createContext({window,HTMLCanvasElement:Canvas,performance:{now:()=>++time},console:{error(){},info(){}}});
+  vm.runInContext(instrument+'\ninstrument();',context);
+  const readLayout=()=>{if(failLayout)throw Error('layout probe failed');return {layout:{width:800,height:600},shell:{width:700,height:500},viewport:[1280,900],view:'preview'};};
+  window.__plannerTraceRenderer(renderer,readLayout);
+  window.__plannerTraceRenderer(renderer,readLayout);
+  assert.equal(renderer.render('scene','camera'),'rendered');
+  assert.equal(reads,0,'Ordinary frames perform no GL sampling');
+  assert.equal(window.__plannerStats.recoveryOperations.length,0);
+  window.__plannerRecoveryPhase='request-restore';
+  assert.equal(renderer.setDrawingBufferSize(700,500,2),'resized');
+  const resize=JSON.parse(JSON.stringify(window.__plannerStats.recoveryOperations[0]));
+  assert.deepEqual(resize.requestedSize,[700,500,2]);
+  assert.equal(resize.before.lost,false);assert.equal(resize.after.lost,true);
+  assert.deepEqual(resize.before.buffer,[800,600]);assert.deepEqual(resize.after.drawingBuffer,[1400,1000]);
+  assert.deepEqual(resize.before.layout,{width:800,height:600});assert.deepEqual(resize.before.shell,{width:700,height:500});
+  assert(resize.after.time>resize.before.time);
+  failRender=true;
+  assert.throws(()=>renderer.render('scene','camera'),error=>error===originalError);
+  const failed=window.__plannerStats.recoveryOperations[1];
+  assert.equal(failed.before.lost,true);assert.equal(failed.after.lost,true);
+  assert.match(failed.error,/original render failure/);
+  failLayout=true;
+  assert.throws(()=>renderer.render('scene','camera'),error=>error===originalError,'A failed diagnostic cannot replace the original render exception');
+  assert.match(window.__plannerStats.recoveryOperations[2].after.diagnosticError,/layout probe failed/);
+  failLayout=false;failRender=false;
+  for(let i=0;i<30;i++)renderer.render('scene','camera');
+  assert.equal(window.__plannerStats.recoveryOperations.length,30);
+  const cappedReads=reads;
+  assert.equal(renderer.render('scene','camera'),'rendered');
+  assert.equal(reads,cappedReads,'The bounded trace stops GL sampling after 30 recovery operations');
+});
+
+test('the served planner attaches recovery tracing after lazy renderer initialization', () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-planner-stability.cjs'),'utf8');
+  const start=source.indexOf('const server=http.createServer('),end=source.indexOf('\nasync function run(',start);
+  const handle=vm.runInNewContext(source.slice(start,end)+'\nserver',{
+    http:{createServer:callback=>callback},URL,path,root:'/fixture',fixtureOnly:false,
+    fs:{existsSync:()=>true,statSync:()=>({isFile:()=>true})},
+    editor:'function initPreview(){renderer={ready:true};return 42;}',
+  });
+  let served;
+  handle({url:'/planner/editor.js'},{writeHead(){return this;},end(content){served=content;}});
+  const attached=[],context={renderer:null,size:{width:800,height:600},view:'preview',innerWidth:1280,innerHeight:900,
+    document:{querySelector:()=>({getBoundingClientRect:()=>({width:700,height:500})})},
+    window:{__plannerTraceRenderer:(renderer,readLayout)=>attached.push({renderer,layout:readLayout()})},
+  };
+  assert.equal(vm.runInNewContext(served+'\ninitPreview();',context),42);
+  assert.equal(attached.length,1);
+  assert.equal(attached[0].renderer.ready,true);
+  assert.deepEqual(JSON.parse(JSON.stringify(attached[0].layout)),{layout:{width:800,height:600},shell:{width:700,height:500},viewport:[1280,900],view:'preview'});
+});
