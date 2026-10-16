@@ -67,7 +67,7 @@ function applySharedWallSheen(shader, enabled) {
 // Two private materials retain the original glass passes while sharing the
 // DoubleSide program. Back-side normals must change in the vertex shader too:
 // shadow normal bias consumes transformedNormal before fragment lighting.
-const staticGlassFacing = new WeakMap(), staticGlassPasses = new Set();
+const staticGlassFacing = new WeakMap(), staticGlassPasses = new Set(), staticGlassCallbacks = new WeakMap();
 const bothFaces = {value:0};
 function applyStaticFacing(THREE, shader, facing) {
   shader.uniforms.homeFaceMode = facing;
@@ -113,6 +113,7 @@ function createStaticGlassPasses(THREE, mesh, diffuse) {
     staticGlassFacing.set(material, facing);
     material.onBeforeCompile = shader => applyStaticFacing(THREE, shader, facing);
     material.customProgramCacheKey = () => 'home-glass-facing-v1';
+    staticGlassCallbacks.set(material, {compile:material.onBeforeCompile, key:material.customProgramCacheKey});
     return material;
   });
   // Allocate before any later factory mesh so equal-depth passes stay adjacent.
@@ -607,6 +608,22 @@ function createPointLightTexture(THREE, capacity, packed, options, pointRooms, r
   };
 }
 
+// Keep the generic attenuation helper (including spot lights) untouched. Only
+// the point helper calls this pinned copy after the current lights prove decay 2.
+function pointDecayTwoChunk(THREE, chunk = THREE.ShaderChunk.lights_pars_begin) {
+  const attenuation = chunk.match(/float getDistanceAttenuation\([^]*?\n\}/)?.[0];
+  const exponent = ', const in float decayExponent';
+  const power = 'pow( lightDistance, decayExponent )';
+  const call = 'getDistanceAttenuation( lightDistance, pointLight.distance, pointLight.decay )';
+  const entry = '\tvoid getPointLightInfo(';
+  if (!attenuation || attenuation.split(exponent).length !== 2 || attenuation.split(power).length !== 2 ||
+      chunk.split(call).length !== 2 || chunk.split(entry).length !== 2) return null;
+  const specialized = attenuation.replace('getDistanceAttenuation', 'homePointDistanceAttenuation')
+    .replace(exponent, '').replace(power, 'pow( lightDistance, 2.0 )');
+  return chunk.replace(entry, () => specialized + '\n' + entry)
+    .replace(call, 'homePointDistanceAttenuation( lightDistance, pointLight.distance )');
+}
+
 // Softly confine each fixture's direct light to its room, retaining a short
 // doorway spill. Full-height shadow geometry still blocks opaque walls/doors.
 function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {}) {
@@ -628,6 +645,8 @@ function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {
   const geometryTexture=packed&&geometryOptions.pointTexture&&geometryOptions.geometryTexture ? createRoomGeometryTexture(THREE,packed,geometryOptions) : null;
   const runTexture=packed&&geometryOptions.pointTexture&&geometryOptions.runTexture ? createLightRunTexture(THREE,capacity,rooms.length,packed,geometryOptions) : null;
   const pointTexture=packed&&geometryOptions.pointTexture ? createPointLightTexture(THREE,capacity,packed,geometryOptions,uniforms.homePointRooms,runTexture,geometryTexture,uniforms) : null;
+  const decayChunk = packed && geometryOptions.pointDecayTwo ? pointDecayTwoChunk(THREE) : null;
+  const decayStates = new Map();
   const staticRuns = new Map(), dynamicMaterials = new WeakSet();
   const geometryDeclarations = packed ? `
     uniform bool homePointLightingRequired;
@@ -821,6 +840,8 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
   const lighting = (packed ? '' : transmissionCache) + lightChunk.slice(0, pointStart) + guardedPointLighting + lightChunk.slice(pointEnd);
   const textureParameters=pointTexture ? THREE.ShaderChunk.lights_pars_begin.replace('uniform PointLight pointLights[ NUM_POINT_LIGHTS ];',
     '#if NUM_POINT_LIGHT_SHADOWS > 0\n\tuniform PointLight pointLights[ NUM_POINT_LIGHT_SHADOWS ];\n\t#endif') : '';
+  const textureDecayChunk = pointTexture && decayChunk ? pointDecayTwoChunk(THREE, textureParameters) : decayChunk;
+  const decaySupported = Boolean(decayChunk && textureDecayChunk);
   const textureBody=unshadowedBody.replace('pointLight = pointLights[ i ];',`
             vec4 homePositionDistance=texelFetch(homePointTexture,ivec2(i*2,0),0);
             vec4 homeColorDecay=texelFetch(homePointTexture,ivec2(i*2+1,0),0);
@@ -873,6 +894,22 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
               Math.max(state.bounds[2],bounds[2]),Math.max(state.bounds[3],bounds[3])];
           }
         }
+        const material = mesh.material;
+        let decayState = decayStates.get(material);
+        if (decaySupported && material.isMeshLambertMaterial) {
+          if (!decayState) {
+            decayState = {active:false, allowed:true, meshes:new Map()};
+            decayStates.set(material, decayState);
+          }
+          const glassCallbacks = staticGlassCallbacks.get(material);
+          decayState.allowed &&= (material.onBeforeCompile === decayState.callback && material.customProgramCacheKey === decayState.cacheKey) ||
+            ((material.onBeforeCompile === THREE.Material.prototype.onBeforeCompile || material.onBeforeCompile === applyWallSheen) &&
+              material.customProgramCacheKey === THREE.Material.prototype.customProgramCacheKey) ||
+            (glassCallbacks && material.onBeforeCompile === glassCallbacks.compile && material.customProgramCacheKey === glassCallbacks.key);
+          decayState.meshes.set(mesh, group);
+          decayState.enabled = enabled;
+        }
+        if (decayState) decayState.active = false;
         const wall = mesh.userData.category === 'walls';
         const fallbackFacing=prepareFallbackBoxProgram(THREE,mesh,Boolean(packed),!packed||materialUses.get(mesh.material)===1);
         const wallEnabled = prepareSharedWallProgram(THREE, mesh,
@@ -893,12 +930,20 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
             '#include <project_vertex>',
             '#include <project_vertex>\nhomeWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;'
           );
-          if(textureState?.active)shader.fragmentShader=shader.fragmentShader.replace('#include <lights_pars_begin>',textureParameters);
+          // Select both transformations before replacing the shared include.
+          // Either proof may fail independently without discarding the other.
+          if (textureState?.active || decayState?.active) {
+            const parameters = textureState?.active
+              ? (decayState?.active ? textureDecayChunk : textureParameters) : decayChunk;
+            shader.fragmentShader = shader.fragmentShader.replace('#include <lights_pars_begin>', () => parameters);
+          }
           shader.fragmentShader = (textureState?.active?'uniform highp sampler2D homePointTexture;\n':'') + (textureState?.active?textureFragment:fragment) + shader.fragmentShader.replace('#include <lights_fragment_begin>', textureState?.active?runLighting:lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
         };
         mesh.material.customProgramCacheKey = () => (enabled ? fragment+(textureState?.active?':point-texture-v2'+(runTexture?':run-texture-v1':'')+(geometryTexture?':geometry-texture-v1':'')+(geometryOptions.signalTexture?':signal-texture-v1':''):'') : 'home-editor') +
           (sharedWall ? ':wall-sheen-facing-v1' : wall ? ':wall-sheen-v2' : '') +
-          (!sharedWall && staticGlassFacing.has(mesh.material) ? ':glass-facing-v1' : '');
+          (!sharedWall && staticGlassFacing.has(mesh.material) ? ':glass-facing-v1' : '') +
+          (decayState?.active ? ':point-decay-two-v1' : '');
+        if (decayState) {decayState.callback = material.onBeforeCompile; decayState.cacheKey = material.customProgramCacheKey;}
         if(textureState){textureState.callback=mesh.material.onBeforeCompile;textureState.cacheKey=mesh.material.customProgramCacheKey;}
         mesh.material.needsUpdate = true;
       });
@@ -931,6 +976,37 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
           }
           uniforms.homePointRooms.value[slot++] = room;
           if (room && point.light.intensity > 0) uniforms.homeLitRooms.value[room - 1] = 1;
+        }
+      }
+      if (decaySupported) {
+        const finite = value => Number.isFinite(value) && Number.isFinite(Math.fround(value));
+        // Check even zero-intensity and shadowed slots; never infer decay from
+        // room membership, brightness, or which branches happen to be visible.
+        const ready = slot > 0 && slot <= capacity && points.every(({light}) => !light?.visible ||
+          (light.isPointLight && Object.getOwnPropertyDescriptor(light, 'decay')?.value === 2 &&
+            [light.intensity, light.distance, light.color?.r, light.color?.g, light.color?.b,
+              light.position?.x, light.position?.y, light.position?.z,
+              light.color?.r * light.intensity, light.color?.g * light.intensity, light.color?.b * light.intensity].every(finite)));
+        for (const [material, state] of decayStates) {
+          let ordinary = true;
+          for (const [mesh, group] of state.meshes) {
+            let attached = false;
+            for (let node = mesh; node; node = node.parent) {
+              if (node === group) attached = true;
+              const wallShadow = node === mesh && typeof beginWallShadow === 'function' && typeof endWallShadow === 'function' &&
+                node.onBeforeShadow === beginWallShadow && node.onAfterShadow === endWallShadow;
+              if (node.onBeforeRender !== THREE.Object3D.prototype.onBeforeRender ||
+                  node.onAfterRender !== THREE.Object3D.prototype.onAfterRender ||
+                  (!wallShadow && (node.onBeforeShadow !== THREE.Object3D.prototype.onBeforeShadow ||
+                    node.onAfterShadow !== THREE.Object3D.prototype.onAfterShadow))) ordinary = false;
+            }
+            if (!attached || mesh.material !== material) state.meshes.delete(mesh);
+          }
+          const active = Boolean(ready && state.allowed && state.enabled && state.meshes.size && ordinary &&
+            material.isMeshLambertMaterial && material.onBeforeRender === THREE.Material.prototype.onBeforeRender &&
+            material.onBeforeCompile === state.callback && material.customProgramCacheKey === state.cacheKey);
+          if (state.active !== active) {state.active = active; material.needsUpdate = true;}
+          if (!state.meshes.size) decayStates.delete(material);
         }
       }
       // Include shadowed slots in the runs, then clip them against the actual
