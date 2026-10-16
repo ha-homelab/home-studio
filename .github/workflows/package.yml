@@ -42,6 +42,10 @@ jobs:
           node scripts/test-i18n.mjs
           node scripts/test-validation-i18n.mjs
           node --test scripts/test-panel-language.cjs
+      - name: Test AI draft validation and companion security without provider calls
+        run: |
+          node scripts/test-ai-draft.mjs
+          python3 scripts/test-ai-companion.py
       - name: Install browser test tools
         timeout-minutes: 12
         run: |
@@ -49,6 +53,13 @@ jobs:
           npx playwright install --with-deps chromium firefox
       - name: Test drawing, furnishing, export and installation through the editor
         run: npm run test:planner
+      - name: Test AI preview, review, undo and real local companion
+        env:
+          AI_PLANNER_ENGINES: chromium,firefox
+          AI_PLANNER_HEADED: '1'
+        run: |
+          LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-ai-planner.cjs
+          LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-ai-integration.cjs
       - name: Test language switching, right-to-left layout and project preservation
         run: node scripts/test-i18n-browser.cjs
       - name: Test localized help and offline installed viewer

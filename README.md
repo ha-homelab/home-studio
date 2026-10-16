@@ -177,6 +177,30 @@ The generic package uses HA's own authentication. It does not install HACS,
 configure SSO, trace photos, or activate household-specific TV, camera, or RF
 sensing adapters.
 
+## Draft from room photos with your own AI
+
+Run the optional local companion with Python 3.10+:
+
+```sh
+python3 scripts/serve-ai-planner.py
+```
+
+On Windows: `py -3 scripts/serve-ai-planner.py`. Choose **Plan from photos** in the
+local editor, connect your provider or local vision model, and add photos,
+instructions and measured dimensions. Furnish an existing room or create a measured
+rectangular room, preview the suggestions, then apply one undoable edit. The normal
+editor, JSON export and Home Assistant installation workflow remain the same.
+
+Credentials stay in temporary companion memory and out of project/browser storage.
+Cloud generation sends the chosen data and authentication key to your provider;
+local generation requires a loopback model runtime. There is no Home Studio AI relay.
+The hosted website does not collect keys, and the installed HA viewer has no AI dependency.
+Adapters are mock-tested; exact live model compatibility still needs a user smoke test.
+
+[Quick start](https://ha-homelab.github.io/home-studio/ai-setup.html) ·
+[Workflow and privacy](docs/ai-planning.md) · [Provider setup](docs/ai-provider-setup.md) ·
+[Local models](docs/ai-local-models.md) · [Architecture](docs/ai-planner-architecture.md)
+
 ## Shared code, private homes
 
 The public compiler, viewer, integration core, and installer can also be used by

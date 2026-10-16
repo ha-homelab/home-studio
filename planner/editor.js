@@ -19,6 +19,16 @@ const planCanvas = $('plan-canvas'), ctx = planCanvas.getContext('2d', { alpha: 
 let project = blankProject(), activeFloorId, selection = null, tool = 'select', view = 'plan', history = [], future = [], drag = null;
 let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, spaceHeld = false, saveFailed = false, previewDirty = true;
 let canvasFrame = 0, canvasSuspended = false;
+// Optional integrations render a detached candidate; project/history/storage always
+// retain the accepted document. The ordinary editor imports no AI code.
+let candidatePreview = null, editorRevision = 0;
+const editorListeners = new Set();
+function editorChanged() {
+  candidatePreview = null; editorRevision++; previewDirty = true;
+  for (const listener of editorListeners) listener(editorRevision);
+}
+const displayedProject = () => candidatePreview || project;
+const displayedFloor = () => displayedProject().floors.find(f => f.id === activeFloorId) || displayedProject().floors[0];
 function cancelCanvasRender() { if (canvasFrame) cancelAnimationFrame(canvasFrame); canvasFrame = 0; }
 function requestCanvasRender() {
   if (canvasFrame || canvasSuspended || document.hidden) return;
@@ -208,25 +218,25 @@ function transact(change, message = () => t('Project updated.'), { fit = false }
     historyPush(project); project = draft; previewDirty = true;
     if (!project.floors.some(f => f.id === activeFloorId)) activeFloorId = project.floors[0].id;
     if (!selected()) selection = null;
-    renderUI(); if (fit) { fitPlan(); fitPreview(); } renderPlan(); status(message); save();
+    editorChanged(); renderUI(); if (fit) { fitPlan(); fitPreview(); } renderPlan(); status(message); save();
     return true;
   } catch (error) { selection = priorSelection; $('project-title').value = project.title; status(() => t('Change not applied: {error}', { error: formatValidationError(error, t) }), true); renderInspector(); return false; }
 }
 function replaceProject(next, message) {
   validateProject(next); serializeProject(next); historyPush(project); project = clone(next); activeFloorId = project.floors[0].id; selection = null; drag = null; previewDirty = true;
-  setView('plan'); setTool('select'); renderUI(); fitPlan(); fitPreview(); renderPlan(); status(message); save();
+  editorChanged(); setView('plan'); setTool('select'); renderUI(); fitPlan(); fitPreview(); renderPlan(); status(message); save();
 }
 function undo(redo = false) {
   const source = redo ? future : history, destination = redo ? history : future; if (!source.length) return;
   destination.push(project); project = source.pop(); if (!project.floors.some(f => f.id === activeFloorId)) activeFloorId = project.floors[0].id;
-  selection = null; drag = null; previewDirty = true; renderUI(); renderPlan(); status(() => redo ? t('Change restored.') : t('Change undone.')); save();
+  selection = null; drag = null; previewDirty = true; editorChanged(); renderUI(); renderPlan(); status(() => redo ? t('Change restored.') : t('Change undone.')); save();
 }
 function renderUI() {
   $('project-title').value = project.title; $('floor-caption').textContent = floor().name;
   $('undo').disabled = history.length === 0; $('redo').disabled = future.length === 0;
   $('floor-list').replaceChildren();
   project.floors.forEach(f => {
-    const b = button('', () => { activeFloorId = f.id; selection = null; previewDirty = true; renderUI(); fitPlan(); fitPreview(); renderPlan(); }, 'floor-button');
+    const b = button('', () => { activeFloorId = f.id; selection = null; previewDirty = true; editorChanged(); renderUI(); fitPlan(); fitPreview(); renderPlan(); }, 'floor-button');
     b.setAttribute('aria-current', String(f.id === activeFloorId)); b.append(node('span', '', f.name), node('small', '', `${round(f.elevation_m)} m`)); $('floor-list').append(b);
   });
   $('object-list').replaceChildren();
@@ -246,7 +256,7 @@ function renderUI() {
 }
 function setSelection(next) {
   if (selection?.kind === next?.kind && selection?.id === next?.id) return;
-  selection = next;
+  selection = next; editorChanged();
   // Selection changes do not alter floor names, object labels, or their order.
   for (const b of $('object-list').children) if (b.dataset.objectId) {
     b.setAttribute('aria-pressed', String(b.dataset.objectKind === selection?.kind && b.dataset.objectId === selection?.id));
@@ -329,7 +339,7 @@ function renderInspector() {
     field(parent, t('Offset from wall start (m)'), object.offset_m, v => editObject(o => { o.offset_m = v; }), { type: 'number', min: 0, help: t('Wall starts at x {x}, z {z}. Offset locates the first edge of this opening.', { x: wall.start[0], z: wall.start[1] }) });
     const r = row(parent); field(r, t('Sill height (m)'), object.sill_m, v => editObject(o => { o.sill_m = v; }), { type: 'number', min: 0, max: f.height_m }); field(r, t('Head height (m)'), object.head_m, v => editObject(o => { o.head_m = v; }), { type: 'number', min: .05, max: f.height_m });
     parent.append(node('p', 'callout', t('These dimensions remove wall geometry in both the preview and the exported build. The window tint is only a preview aid.')));
-    parent.append(button(t('Select parent wall'), () => { selection = { kind: 'walls', id: wall.id }; renderUI(); renderPlan(); }));
+    parent.append(button(t('Select parent wall'), () => { setSelection({ kind: 'walls', id: wall.id }); renderUI(); renderPlan(); }));
   } else if (kind === 'items') {
     field(parent, t('Item name'), object.name, v => editObject(o => { o.name = v; }));
     const model = object.model_id ? getCatalogModel(object.model_id) : null;
@@ -401,7 +411,7 @@ function setTool(next) {
   if (view === 'plan') $('tool-hint').textContent = toolHint();
   planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
   if (tool !== 'select' && view !== 'plan') setView('plan');
-  $('empty-state').hidden = floor().rooms.length + floor().walls.length + floor().items.length > 0 || tool !== 'select' || view !== 'plan';
+  $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || view !== 'plan';
 }
 function setView(next) {
   view = next;
@@ -409,7 +419,7 @@ function setView(next) {
   $('plan-tab').tabIndex = next === 'plan' ? 0 : -1; $('preview-tab').tabIndex = next === 'preview' ? 0 : -1;
   $('plan-view').hidden = next !== 'plan'; $('preview-view').hidden = next !== 'preview'; $('snap-label').hidden = next !== 'plan';
   $('tool-hint').textContent = next === 'preview' ? t('Drag to orbit · scroll to zoom · arrow keys to rotate') : toolHint();
-  $('empty-state').hidden = floor().rooms.length + floor().walls.length + floor().items.length > 0 || tool !== 'select' || next !== 'plan';
+  $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || next !== 'plan';
   if (next === 'preview') renderPreview(); else renderPlan(); updateZoom();
 }
 function addOpening(wall, offset, type) {
@@ -438,7 +448,7 @@ const toScreen = p => [map.x + p[0] * map.scale, map.y + p[1] * map.scale];
 const toWorld = p => [(p[0] - map.x) / map.scale, (p[1] - map.y) / map.scale];
 function localPoint(event, canvas = planCanvas) { const r = canvas.getBoundingClientRect(); return [event.clientX - r.left, event.clientY - r.top]; }
 function fitPlan() {
-  const b = floorBounds(floor()), pad = 90;
+  const b = floorBounds(displayedFloor()), pad = 90;
   map.scale = Math.max(8, Math.min(95, (size.width - pad * 2) / Math.max(2, b.maxX - b.minX), (size.height - pad * 2) / Math.max(2, b.maxZ - b.minZ)));
   map.x = (size.width - (b.minX + b.maxX) * map.scale) / 2; map.y = (size.height - (b.minZ + b.maxZ) * map.scale) / 2; updateZoom();
 }
@@ -468,7 +478,7 @@ function renderPlan() {
   for (let x = Math.floor(top[0] / gridStep) * gridStep; x <= bottom[0]; x += gridStep) { const px = Math.round(toScreen([x, 0])[0]) + .5; ctx.strokeStyle = x === 0 ? '#c5d0bd' : '#e2e7dc'; ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, size.height); ctx.stroke(); }
   for (let z = Math.floor(top[1] / gridStep) * gridStep; z <= bottom[1]; z += gridStep) { const py = Math.round(toScreen([0, z])[1]) + .5; ctx.strokeStyle = z === 0 ? '#c5d0bd' : '#e2e7dc'; ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(size.width, py); ctx.stroke(); }
   if (map.scale >= 44) { ctx.fillStyle = '#dde4d6'; for (let x = Math.floor(top[0]); x <= bottom[0]; x += .25) for (let z = Math.floor(top[1]); z <= bottom[1]; z += .25) { const [px, py] = toScreen([x, z]); ctx.fillRect(px, py, 1, 1); } }
-  const f = floor();
+  const f = displayedFloor();
   for (const r of f.rooms) {
     const active = selection?.kind === 'rooms' && selection.id === r.id;
     path(r.polygon, true); ctx.fillStyle = COLORS[r.material]; ctx.globalAlpha = active ? .85 : .65; ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = active ? '#4a8073' : '#b4bba3'; ctx.lineWidth = active ? 2 : 1; ctx.setLineDash(active ? [5, 3] : []); ctx.stroke(); ctx.setLineDash([]);
@@ -528,6 +538,17 @@ function renderPlan() {
     else { path([a, b]); ctx.stroke(); } ctx.setLineDash([]);
     const p = toScreen(b); ctx.fillStyle = '#2c7663'; ctx.textAlign = 'left'; ctx.font = '11px sans-serif'; ctx.fillText(tool === 'room' ? `${Math.abs(b[0] - a[0]).toFixed(2)} × ${Math.abs(b[1] - a[1]).toFixed(2)} m` : `${distance(a, b).toFixed(2)} m`, p[0] + 12, p[1] - 12);
   }
+  if (candidatePreview) {
+    const accepted = floor();
+    ctx.save(); ctx.strokeStyle = '#8051ad'; ctx.lineWidth = 3; ctx.setLineDash([5, 4]);
+    for (const room of f.rooms) if (!accepted.rooms.some(r => r.id === room.id)) { path(room.polygon, true); ctx.stroke(); }
+    for (const item of f.items) if (!accepted.items.some(i => i.id === item.id)) {
+      const [x, y] = toScreen([item.position_m.x, item.position_m.z]);
+      ctx.save(); ctx.translate(x, y); ctx.rotate(-item.rotation_deg * Math.PI / 180);
+      ctx.strokeRect(-item.dimensions_m.width * map.scale / 2, -item.dimensions_m.depth * map.scale / 2, item.dimensions_m.width * map.scale, item.dimensions_m.depth * map.scale); ctx.restore();
+    }
+    ctx.restore();
+  }
   // A fixed metric scale makes the current zoom unambiguous.
   const scaleMeters = map.scale < 20 ? 5 : map.scale > 150 ? .5 : 1, sx = 20, sy = size.height - 76;
   ctx.strokeStyle = '#9bab8f'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sx, sy - 3); ctx.lineTo(sx, sy + 3); ctx.moveTo(sx, sy); ctx.lineTo(sx + scaleMeters * map.scale, sy); ctx.moveTo(sx + scaleMeters * map.scale, sy - 3); ctx.lineTo(sx + scaleMeters * map.scale, sy + 3); ctx.stroke(); ctx.fillStyle = '#8a9b7e'; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(t('{scale} m · grid {grid} m', { scale: scaleMeters, grid: gridStep }), sx, sy - 9);
@@ -570,6 +591,7 @@ planCanvas.addEventListener('pointermove', event => {
     // every catalog surface until the object's visible position actually changes.
     if (dx === drag.offset[0] && dz === drag.offset[1]) return;
     drag.offset = [dx, dz];
+    if (!drag.moved && (dx || dz)) editorChanged();
     if (dx || dz) drag.moved = true; const object = selected();
     const original = drag.original.floors.find(f => f.id === activeFloorId)[selection.kind].find(o => o.id === selection.id);
     if (selection.kind === 'rooms') object.polygon = original.polygon.map(p => [round(p[0] + dx), round(p[1] + dz)]);
@@ -643,7 +665,7 @@ function initPreview() {
     if (!previewInitialized) { fitPreview(); previewInitialized = true; }
   } catch (error) { disposePreviewRenderer(); renderer?.forceContextLoss(); previewUnavailable = true; $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
 }
-function previewFloors() { return $('all-floors').checked ? project.floors : [floor()]; }
+function previewFloors() { return $('all-floors').checked ? displayedProject().floors : [displayedFloor()]; }
 function fitPreview() {
   const floors = previewFloors(), bounds = floors.map(floorBounds), minX = Math.min(...bounds.map(b => b.minX)), maxX = Math.max(...bounds.map(b => b.maxX)), minZ = Math.min(...bounds.map(b => b.minZ)), maxZ = Math.max(...bounds.map(b => b.maxZ));
   const low = Math.min(...floors.map(f => f.elevation_m)), high = Math.max(...floors.map(f => f.elevation_m + f.height_m));
@@ -876,7 +898,7 @@ $('add-floor').addEventListener('click', () => {
   let index = 2; while (project.floors.some(f => f.id === `floor_${index}`)) index++;
   const previousId = activeFloorId, id = `floor_${index}`, next = newFloor(id, `Floor ${index}`, round(floor().elevation_m + floor().height_m + .25));
   const ok = transact(p => { p.floors.push(next); }, () => t('New floor added. Set its name and elevation in the inspector.'));
-  if (ok) { activeFloorId = id; selection = null; previewDirty = true; renderUI(); fitPlan(); fitPreview(); renderPlan(); } else activeFloorId = previousId;
+  if (ok) { activeFloorId = id; selection = null; previewDirty = true; editorChanged(); renderUI(); fitPlan(); fitPreview(); renderPlan(); } else activeFloorId = previousId;
 });
 $('start-room').addEventListener('click', () => { setTool('room'); planCanvas.focus(); });
 document.querySelectorAll('[data-tool]').forEach(b => { const label = b.querySelector('span:nth-child(2)').textContent; b.setAttribute('aria-label', label); b.title = label; b.addEventListener('click', () => { setTool(b.dataset.tool); }); });
@@ -911,7 +933,7 @@ $('build-project').addEventListener('click', () => {
 $('copy-command').addEventListener('click', async () => { try { await navigator.clipboard.writeText(BUILD_COMMAND); translatedText('copy-command', 'Copied'); } catch { translatedText('copy-command', 'Select and copy the command above'); } });
 window.addEventListener('keydown', e => {
   if (e.target.closest('input, textarea, select') || document.querySelector('dialog[open]')) return;
-  if (e.key === 'Escape') { finishPointer(null, true); selection = null; setTool('select'); renderUI(); renderPlan(); return; }
+  if (e.key === 'Escape') { finishPointer(null, true); setSelection(null); setTool('select'); renderUI(); renderPlan(); return; }
   if (e.code === 'Space' && (e.target === planCanvas || e.target === previewCanvas || e.target === document.body)) { e.preventDefault(); spaceHeld = true; if (view === 'plan') planCanvas.style.cursor = 'grab'; }
   if (e.ctrlKey || e.metaKey) {
     if (e.key.toLowerCase() === 'z') { e.preventDefault(); undo(e.shiftKey); }
@@ -994,3 +1016,29 @@ $('language-select').addEventListener('change', async event => {
 });
 renderLocale();
 if (!initialLocale.loaded) status(() => t('Language could not be loaded. English is shown instead.'), true);
+
+
+// A narrow, opt-in bridge. Snapshots are copies; preview never replaces accepted
+// state. The revision includes selection and in-progress moves, preventing late
+// results from changing a different room or overwriting an intervening edit.
+export const editorBridge = Object.freeze({
+  snapshot: () => clone(project),
+  revision: () => editorRevision,
+  selectionContext: () => ({ floorId: activeFloorId, roomId: selection?.kind === 'rooms' ? selection.id : selection?.kind === 'items' ? selected()?.room : null }),
+  subscribe(listener) { editorListeners.add(listener); return () => editorListeners.delete(listener); },
+  previewProject(candidate) {
+    validateProject(candidate); serializeProject(candidate); candidatePreview = clone(candidate); previewDirty = true;
+    $('empty-state').hidden = true; fitPlan(); fitPreview(); requestCanvasRender();
+  },
+  cancelPreview() {
+    if (!candidatePreview) return;
+    candidatePreview = null; previewDirty = true; setView(view); requestCanvasRender();
+  },
+  applyProject(candidate, baseRevision) {
+    if (baseRevision !== editorRevision || drag) throw new Error('The plan or selection changed. Generate a fresh draft.');
+    validateProject(candidate); serializeProject(candidate);
+    candidatePreview = null;
+    const next = clone(candidate);
+    return transact(draft => { for (const key of Object.keys(draft)) delete draft[key]; Object.assign(draft, next); }, 'AI draft applied. Undo restores your previous plan.', { fit: true });
+  },
+});
