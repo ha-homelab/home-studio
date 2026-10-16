@@ -222,12 +222,15 @@ or other graphics profiles. The copy pass adds one real draw, included in the
 acceptance counters and interaction time. Its resources are disposed on context
 loss and final page teardown; page-cache suspension retains the bounded texture.
 
-On this same diffuse path, the first moved-pointer frame is scheduled normally.
+On identified software paths, the first moved-pointer frame is scheduled normally.
 Later camera-motion events share a fixed 64 ms deadline; each event updates the
 camera, but does not restart the timer. This prevents sequential input messages
 from forcing a costly draw for every intermediate position. Pointer release,
 cancellation, resize and live-state updates bypass the delay. Hidden pages and
-lost contexts cancel it. The normal graphics path retains its frame scheduling.
+lost contexts cancel it. Software paths using physically based materials still
+draw directly at their full resolution, with the same antialiasing, materials
+and shadows; only the diffuse path uses the motion copy described above.
+Hardware graphics retain their original frame scheduling.
 
 Gecko can report both hardware and software as `Apple M1, or similar`. For that
 exact label with a Gecko user agent, a one-time, fixed 32-by-32 raster check on

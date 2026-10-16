@@ -102,12 +102,12 @@ function createSceneMaterial(options){if(!renderProfile.diffuseLighting)return n
 function applyStaticMeshClipping(source,material){if(['walls','frames','doors','windows'].includes(source.kind)){material.clippingPlanes=[clipping];material.clipShadows=false;return}if(!renderProfile.diffuseLighting||source.kind!=='floors'||material.transparent||material.side!==THREE.DoubleSide||!source.vertices?.length)return;let extent=1;for(const vertex of source.vertices){if(!Array.isArray(vertex)||vertex.length!==3||!vertex.every(value=>Number.isFinite(value)&&Number.isFinite(Math.fround(value))))return;for(const value of vertex)extent=Math.max(extent,Math.abs(value))}const far=extent*4;if(!Number.isFinite(Math.fround(far)))return;material.clippingPlanes=[new THREE.Plane(new THREE.Vector3(0,-1,0),far)];material.clipShadows=false}
 function selectRenderProfile(gl){const capacity=getRenderCapacity(gl);const profile=capacity.reduced?{pixels:250000,pointShadows:2,pointShadowSize:128,sunShadowSize:512,diffuseLighting:capacity.diffuseLighting}:{pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048,diffuseLighting:false};if(capacity.rasterProbe)profile.rasterProbe=capacity.rasterProbe;return profile}
 let renderRequest=0,renderDelay=0,renderSuspended=false,renderLost=false;
-let interactionRenderer=null,interactionPointer=null;
+let interactionRenderer=null,interactionPointer=null,coalesceMotion=false;
 function cancelRender(){if(renderRequest)cancelAnimationFrame(renderRequest);if(renderDelay)clearTimeout(renderDelay);renderRequest=renderDelay=0}
-// Paint the first moved-pointer frame immediately. Subsequent diffuse frames
+// Paint the first moved-pointer frame immediately. Subsequent software frames
 // share a fixed deadline; further input never postpones it. Non-motion updates
 // and pointer release bypass this delay and still use the ordinary next frame.
-function requestRender(motion=false){if(renderSuspended||renderLost||document.hidden)return;if(!motion&&renderDelay){clearTimeout(renderDelay);renderDelay=0}if(renderRequest||renderDelay)return;if(motion&&renderProfile.diffuseLighting&&interactionPointer?.moved&&interactionPointer.painted){renderDelay=setTimeout(()=>{renderDelay=0;requestRender()},64);return}renderRequest=requestAnimationFrame(()=>{renderRequest=0;try{window.renderModel?.()}catch(error){report3DError(error)}})}
+function requestRender(motion=false){if(renderSuspended||renderLost||document.hidden)return;if(!motion&&renderDelay){clearTimeout(renderDelay);renderDelay=0}if(renderRequest||renderDelay)return;if(motion&&coalesceMotion&&interactionPointer?.moved&&interactionPointer.painted){renderDelay=setTimeout(()=>{renderDelay=0;requestRender()},64);return}renderRequest=requestAnimationFrame(()=>{renderRequest=0;try{window.renderModel?.()}catch(error){report3DError(error)}})}
 function renderPixelRatio(width,height){return Math.min(Number.isFinite(devicePixelRatio)&&devicePixelRatio>0?devicePixelRatio:1,2,Math.sqrt(renderProfile.pixels/Math.max(1,width*height)))}
 function invalidateShadows(){scene?.traverse(o=>{if(o.shadow){o.shadow.autoUpdate=false;o.shadow.needsUpdate=true}})}
 // Accept only complete rectangular prisms, including the compiler's rotated walls.
@@ -298,12 +298,15 @@ function updateWallOutlines(){
   root.add(wallOutlines);
 }
 const wallSheenMotion=createWallSheenMotion();
-function drawScene(camera){if(renderSuspended||renderLost||document.hidden)return;wallSheenMotion.beforeRender();try{if(renderProfile.diffuseLighting){interactionRenderer??=createInteractionRenderer(THREE,renderer);const pointer=interactionPointer;interactionRenderer.draw(scene,camera,pointer?.moved===true);if(pointer?.moved&&interactionPointer===pointer)pointer.painted=true}else renderer.render(scene,camera)}finally{wallSheenMotion.afterRender()}}
+function drawScene(camera){if(renderSuspended||renderLost||document.hidden)return;wallSheenMotion.beforeRender();try{const pointer=interactionPointer;if(renderProfile.diffuseLighting){interactionRenderer??=createInteractionRenderer(THREE,renderer);interactionRenderer.draw(scene,camera,pointer?.moved===true)}else renderer.render(scene,camera);if(pointer?.moved&&interactionPointer===pointer)pointer.painted=true}finally{wallSheenMotion.afterRender()}}
 function report3DError(e){$('loadError').style.display='block';$('loadError').textContent='3D view could not start: '+e.message+'. Plan placement and JSON export are still available.';console.error(e)}
 try{
 scene=new THREE.Scene();scene.background=new THREE.Color('#e7e8df');camera=new THREE.PerspectiveCamera(42,1,.1,Math.max(150,planRadius*5));
 renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.localClippingEnabled=true;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.95;$('view3d').prepend(renderer.domElement);
 renderProfile=selectRenderProfile(renderer.getContext());if(renderProfile.diffuseLighting)renderer.shadowMap.type=THREE.BasicShadowMap;
+// Capacity is cached for this context. Motion scheduling is independent of
+// material quality: software PBR still draws directly at its full resolution.
+coalesceMotion=getRenderCapacity(renderer.getContext()).reduced;
 hemisphere=new THREE.HemisphereLight(0xffffff,0xa6aaa1,1.8);scene.add(hemisphere);sun=new THREE.DirectionalLight(0xfff9ee,2.3);sun.position.set(-7,22,12);sun.castShadow=true;sun.shadow.mapSize.set(renderProfile.sunShadowSize,renderProfile.sunShadowSize);Object.assign(sun.shadow.camera,{left:-16,right:16,top:22,bottom:-22,near:1,far:65});sun.shadow.normalBias=.035;sun.target.position.set(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]);scene.add(sun,sun.target);
 if(planBounds){const scale=Math.max(1,planRadius/32);sun.position.copy(sun.target.position).add(new THREE.Vector3(-7,22,12).multiplyScalar(scale));Object.assign(sun.shadow.camera,{left:-planRadius,right:planRadius,top:planRadius,bottom:-planRadius,far:Math.max(65,planRadius*4)});sun.shadow.camera.updateProjectionMatrix();}
 root=new THREE.Group();objectGroup=new THREE.Group();scene.add(root,objectGroup);buildLowerFloorContext();
@@ -334,7 +337,7 @@ window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();i
 // A resize can already paint the resumed state. Initial pageshow also needs
 // no extra frame after boot painted; leave any pending live-state request intact.
 window.addEventListener('pageshow',event=>{const resumed=renderSuspended||event.persisted,before=renderCount;renderSuspended=false;resize();if(renderCount===before&&(resumed||renderCount===0))requestRender()});
-if(renderProfile.diffuseLighting){
+if(coalesceMotion){
 renderer.domElement.addEventListener('pointerdown',event=>{if(!renderLost&&!renderSuspended&&event.button===0&&!interactionPointer)interactionPointer={id:event.pointerId,x:event.clientX,y:event.clientY,moved:false}});
 renderer.domElement.addEventListener('pointermove',event=>{if(interactionPointer?.id===event.pointerId&&Math.hypot(event.clientX-interactionPointer.x,event.clientY-interactionPointer.y)>6)interactionPointer.moved=true});
 for(const type of ['pointerup','pointercancel','lostpointercapture'])renderer.domElement.addEventListener(type,event=>{if(interactionPointer?.id!==event.pointerId)return;const redraw=interactionPointer.moved;interactionPointer=null;if(redraw)requestRender()});

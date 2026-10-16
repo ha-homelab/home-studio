@@ -44,8 +44,10 @@
   Keep lights, geometry, shadows and sharp HTML controls; include the copy pass
   in real draw counts and dispose its resources with the graphics context.
   Draw the first moved-pointer frame immediately, then combine subsequent
-  diffuse camera motion within a fixed 64 ms window. Release, cancellation,
-  resizing and live updates bypass the delay; hidden or lost contexts cancel it.
+  software camera motion within a fixed 64 ms window. Physically based software
+  rendering uses the same scheduling with its original full-resolution direct
+  draws. Release, cancellation, resizing and live updates bypass the delay;
+  hidden or lost contexts cancel it. Hardware frame scheduling is unchanged.
 - Reduce room-lighting shader compilation and fragment work while preserving
   light order, every illuminated fixture and nonzero light through doorways.
   The diffuse profile uses packed room geometry with a conservative uniform

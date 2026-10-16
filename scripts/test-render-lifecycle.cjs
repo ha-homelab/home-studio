@@ -75,8 +75,16 @@ context.requestRender();context.window.renderModel();
 assert.equal(draws,5);assert.equal(frames.size,0,'A successful explicit Home draw satisfies its pending frame');
 context.homeView=null;
 draws=1;
+const motionCapacityLine=lines.find(value=>value.startsWith('coalesceMotion='));
+assert(motionCapacityLine,'Motion eligibility uses the shared render-capacity decision');
 for (const renderer of ['ANGLE (Google, SwiftShader Device)', 'llvmpipe (LLVM 19)', 'softpipe', 'Microsoft Basic Render Driver', 'lavapipe', 'Apple Software Renderer']) {
-  const profile=context.selectRenderProfile({getExtension:()=>({UNMASKED_RENDERER_WEBGL:1}),getParameter:()=>renderer});
+  let queries=0;
+  const gl={getExtension:()=>({UNMASKED_RENDERER_WEBGL:1}),getParameter(){queries++;return renderer;}};
+  const profile=context.selectRenderProfile(gl);
+  context.renderer.getContext=()=>gl;
+  vm.runInContext(motionCapacityLine,context);
+  assert.equal(vm.runInContext('coalesceMotion',context),true);
+  assert.equal(queries,1,'Scheduling reuses cached capacity without another renderer query');
   assert.equal(profile.pixels,250000);
   assert.equal(profile.diffuseLighting,renderer==='Apple Software Renderer');
 }
@@ -84,6 +92,9 @@ for (const gl of [{getExtension:()=>null}, {getExtension(){throw Error('denied')
   ...['Apple M1', 'Apple M1, or similar', 'Apple M2', 'Apple Software Renderer, or similar'].map(renderer =>
     ({getExtension:()=>({UNMASKED_RENDERER_WEBGL:1}),getParameter:()=>renderer}))]) {
   const profile = context.selectRenderProfile(gl);
+  context.renderer.getContext=()=>gl;
+  vm.runInContext(motionCapacityLine,context);
+  assert.equal(vm.runInContext('coalesceMotion',context),false,'Unknown or hardware renderers retain normal scheduling');
   assert.equal(profile.pixels,2000000);
   assert.equal(profile.pointShadows,8);
   assert.equal(profile.pointShadowSize,512);
@@ -193,11 +204,11 @@ console.log('PASS: input coalescing, bounded buffers, idle/hidden/lost suspensio
 
 // Run the production scheduler, pointer bookkeeping and lifecycle callbacks
 // against a clock whose timer and animation-frame queues are independent.
-function motionScheduler(diffuse = true) {
-  const raf = new Map(), timers = new Map(), handlers = {}, painted = [], errors = [];
+function motionScheduler(diffuse = true, reduced = diffuse) {
+  const raf = new Map(), timers = new Map(), handlers = {}, painted = [], errors = [], paths = [];
   let time = 0, id = 0, width = 800, rejectDraw = false;
   const c = vm.createContext({
-    initialViewReady:true, renderCount:0, renderProfile:{diffuseLighting:diffuse,pixels:250000},
+    initialViewReady:true, renderCount:0, renderProfile:{diffuseLighting:diffuse,pixels:reduced?250000:2000000},
     devicePixelRatio:1, THREE:{}, scene:{}, camera:{position:0,updateProjectionMatrix(){}},
     document:{hidden:false,addEventListener:(type,fn)=>handlers[type]=fn},
     window:{addEventListener:(type,fn)=>handlers[type]=fn},
@@ -210,21 +221,29 @@ function motionScheduler(diffuse = true) {
     releaseStaticGlassPasses(){},disposeStaticGlassPasses(){},
     updateWallOutlines(){},updateEditorCamera(){},invalidateShadows(){},
     report3DError(error){errors.push(error.message);},
-    createInteractionRenderer(){return {draw(scene,camera,moving){
+    getRenderCapacity(){return {reduced,diffuseLighting:diffuse};},
+    createInteractionRenderer(){assert(diffuse,'PBR must never allocate the reduced-resolution copy renderer');return {draw(scene,camera,moving){
       if(rejectDraw){rejectDraw=false;throw Error('injected draw failure');}
+      paths.push('copy');
       painted.push({time,position:camera.position,moving});
     },dispose(){}};},
     renderer:{domElement:{addEventListener:(type,fn)=>handlers[type]=fn},
-      render(scene,camera){painted.push({time,position:camera.position,moving:false});},
+      getContext(){return {};},
+      render(scene,camera){
+        if(rejectDraw){rejectDraw=false;throw Error('injected draw failure');}
+        paths.push('direct');painted.push({time,position:camera.position,moving:false});
+      },
+      setViewport(){throw Error('Motion scheduling must not resize the viewport');},
       setDrawingBufferSize(){},dispose(){},forceContextLoss(){}},
   });
   for(const prefix of prefixes.filter(p=>p!=='function selectRenderProfile('))
     vm.runInContext(lines.find(line=>line.startsWith(prefix)),c);
   c.homeView={active:true,render(){if(width){c.drawScene(c.camera);c.renderCount++;}}};
   vm.runInContext(resizeLine.split(';const observer=')[0]+';',c);
-  const input=source.slice(source.indexOf('if(renderProfile.diffuseLighting){\nrenderer.domElement.addEventListener'),source.indexOf('let drag=null;'));
+  vm.runInContext(lines.find(line=>line.startsWith('coalesceMotion=')),c);
+  const input=source.slice(source.indexOf('if(coalesceMotion){\nrenderer.domElement.addEventListener'),source.indexOf('let drag=null;'));
   vm.runInContext(input,c);
-  return {c,raf,timers,handlers,painted,errors,
+  return {c,raf,timers,handlers,painted,errors,paths,
     read:expression=>vm.runInContext(expression,c),
     start(){handlers.pointerdown?.({button:0,pointerId:1,clientX:0,clientY:0});},
     move(position){c.camera.position=position;handlers.pointermove?.({pointerId:1,clientX:position,clientY:0});c.requestRender(true);},
@@ -233,12 +252,15 @@ function motionScheduler(diffuse = true) {
     hideStage(){width=0;},showStage(){width=800;},failNextDraw(){rejectDraw=true;},
   };
 }
-const scheduled=motionScheduler();
+// Both software profiles share scheduling. Only the existing diffuse profile
+// may use the copy renderer; reduced=true/diffuse=false keeps direct PBR draws.
+for(const diffuse of [true,false]) {
+const scheduled=motionScheduler(diffuse,true);
 scheduled.start();scheduled.move(20);
 assert.equal(scheduled.raf.size,1,'The first moved-pointer frame retains ordinary RAF latency');
 assert.equal(scheduled.timers.size,0);
 scheduled.flush();assert.equal(scheduled.read('interactionPointer.painted'),true);
-assert.deepEqual(scheduled.painted,[{time:0,position:20,moving:true}]);
+assert.deepEqual(scheduled.painted,[{time:0,position:20,moving:diffuse}]);
 scheduled.advance(10);scheduled.move(30);
 const [timer]=scheduled.timers.values();assert.equal(timer.due,74);
 scheduled.advance(20);scheduled.move(40);scheduled.move(50);
@@ -246,7 +268,7 @@ assert.equal(scheduled.timers.size,1);assert.equal([...scheduled.timers.values()
   'Later input shares the original deadline rather than debouncing it');
 scheduled.advance(43);assert.equal(scheduled.raf.size,0);
 scheduled.advance(1);assert.equal(scheduled.raf.size,1);scheduled.flush();
-assert.deepEqual(scheduled.painted.at(-1),{time:74,position:50,moving:true},
+assert.deepEqual(scheduled.painted.at(-1),{time:74,position:50,moving:diffuse},
   'A held drag paints the latest camera before pointerup');
 assert(scheduled.read('interactionPointer'),'The held-pointer frame does not end the gesture');
 assert.equal(scheduled.timers.size,0);assert.equal(scheduled.raf.size,0,'No self-sustaining motion loop');
@@ -256,15 +278,18 @@ assert.equal(scheduled.timers.size,0);assert.equal(scheduled.raf.size,1);
 scheduled.flush();assert.deepEqual(scheduled.painted.at(-1),{time:74,position:60,moving:false},
   'Release cancels the deadline and paints the latest camera at full quality');
 scheduled.advance(1000);assert.equal(scheduled.raf.size,0);assert.equal(scheduled.timers.size,0);
+assert(scheduled.paths.every(path=>path===(diffuse?'copy':'direct')));
+assert.equal(scheduled.c.renderProfile.pixels,250000,'Motion keeps the existing resting pixel budget');
+if(!diffuse)assert.equal(scheduled.read('interactionRenderer'),null,'Software PBR never creates a copy target');
 
 for(const release of ['pointerup','pointercancel','lostpointercapture']) {
-  const q=motionScheduler();q.start();q.move(20);q.flush();q.move(30);
+  const q=motionScheduler(diffuse,true);q.start();q.move(20);q.flush();q.move(30);
   q.handlers[release]({pointerId:2});assert.equal(q.timers.size,1,'Unrelated pointers cannot cancel a pending frame');
   q.handlers[release]({pointerId:1});assert.equal(q.timers.size,0);q.flush();
   assert.equal(q.painted.at(-1).moving,false);q.advance(100);assert.equal(q.raf.size,0);
 }
 for(const change of ['live','explicit','resize']) {
-  const q=motionScheduler();q.start();q.move(20);q.flush();q.move(30);
+  const q=motionScheduler(diffuse,true);q.start();q.move(20);q.flush();q.move(30);
   if(change==='live')q.c.requestRender();
   else if(change==='explicit')q.c.render();
   else q.c.window.resizeModel();
@@ -272,7 +297,7 @@ for(const change of ['live','explicit','resize']) {
   assert.equal(q.painted.at(-1).position,30);q.advance(100);assert.equal(q.raf.size,0);
 }
 for(const transition of ['visibility','context','bfcache','dispose']) {
-  const q=motionScheduler();q.start();q.move(20);q.flush();q.move(30);
+  const q=motionScheduler(diffuse,true);q.start();q.move(20);q.flush();q.move(30);
   if(transition==='visibility'){q.c.document.hidden=true;q.handlers.visibilitychange();}
   else if(transition==='context')q.handlers.webglcontextlost({preventDefault(){}});
   else q.handlers.pagehide({persisted:transition==='bfcache'});
@@ -283,17 +308,34 @@ for(const transition of ['visibility','context','bfcache','dispose']) {
   else if(transition==='bfcache')q.handlers.pageshow({persisted:true});
   q.flush();if(transition!=='dispose')assert.equal(q.painted.at(-1).moving,false);
 }
-const failed=motionScheduler();failed.start();failed.failNextDraw();failed.move(20);failed.flush();
+const failed=motionScheduler(diffuse,true);failed.start();failed.failNextDraw();failed.move(20);failed.flush();
 assert.equal(failed.errors.length,1);assert.notEqual(failed.read('interactionPointer.painted'),true,
   'An unsuccessful draw cannot mark the first motion frame complete');
 failed.move(30);assert.equal(failed.raf.size,1);assert.equal(failed.timers.size,0);failed.flush();
 assert.equal(failed.read('interactionPointer.painted'),true);
-const zero=motionScheduler();zero.start();zero.hideStage();zero.move(20);zero.flush();
+const zero=motionScheduler(diffuse,true);zero.start();zero.hideStage();zero.move(20);zero.flush();
 assert.equal(zero.painted.length,0);assert.notEqual(zero.read('interactionPointer.painted'),true);
 zero.showStage();zero.move(30);assert.equal(zero.timers.size,0);zero.flush();assert.equal(zero.painted.length,1);
-const normal=motionScheduler(false);normal.move(20);normal.flush();normal.move(30);
-assert.equal(normal.raf.size,1);assert.equal(normal.timers.size,0,'Normal rendering never receives the diffuse delay');
+
+// An arbitrarily dense stream cannot debounce the fixed deadline forever.
+// Continue moving without release through three deadlines and verify that
+// each pending frame uses the newest position, with no autonomous draw loop.
+const held=motionScheduler(diffuse,true);held.start();held.move(20);held.flush();
+for(let ms=0;ms<192;ms++) {
+  for(let burst=0;burst<20;burst++)held.move(21+ms*20+burst);
+  held.advance(1);held.flush();
+}
+assert.deepEqual(held.painted.map(frame=>frame.time),[0,64,128,192]);
+assert.equal(held.painted.at(-1).position,21+191*20+19);
+assert(held.read('interactionPointer'),'Continuous input must not end the held gesture');
+held.advance(1000);held.flush();assert.equal(held.painted.length,4);
+}
+const normal=motionScheduler(false,false);normal.start();normal.move(20);normal.flush();normal.move(30);
+assert.equal(normal.raf.size,1);assert.equal(normal.timers.size,0,'Hardware rendering never receives the software delay');
 normal.flush();assert.equal(normal.painted.length,2);
+assert.equal(normal.read('interactionPointer'),null,'Hardware keeps its original pointer path');
+assert.deepEqual(normal.paths,['direct','direct']);
+assert.equal(normal.c.renderProfile.pixels,2000000);
 assert(source.includes('drag.y=e.clientY;requestRender(true)'), 'Editor pointer movement opts into motion scheduling');
 const homeSource=fs.readFileSync(path.join(__dirname,'../home-view.js'),'utf8');
 assert(homeSource.includes('panY+=(e.clientY-start.lastY)*(camera.top-camera.bottom)/rect.height;window.requestModelRender?.(true)'),

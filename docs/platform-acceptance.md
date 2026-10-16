@@ -271,13 +271,15 @@ editor, followed by the existing two-animation-frame completion wait. These
 measurements add no input actions or rendered frames; the same total duration
 continues to determine whether the interaction passes.
 
-The diffuse viewer coalesces subsequent camera-motion frames within a fixed
+The software viewer coalesces subsequent camera-motion frames within a fixed
 64 ms deadline after its first successful motion frame. Lifecycle regressions
 check that held drags still repaint, later input cannot postpone the deadline,
 and release, live-state updates, resize, suspension and context loss leave no
 stale delayed work. Browser acceptance still requires real motion rendering
 and a final full-resolution frame; reducing the number of draws cannot replace
-either assertion.
+either assertion. CPU checks exercise both diffuse and physically based software
+paths, including continuous input across several deadlines. Physically based
+software frames remain full-resolution direct draws without a copy pass.
 
 The packed daylight path omits loops for absent exterior rooms or windows and
 rejects rooms outside the existing conservative spatial bound before calculating
