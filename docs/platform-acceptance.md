@@ -174,6 +174,34 @@ windows (at least one reserved slot). The guard budgets 845 of the Apple softwar
 the original literal geometry without reducing scene contents. CPU regression
 tests cover polygon boundaries, concave rooms, window ordering and this fallback.
 
+The isolated bounded-light-bank prototype adds an internal `boundedLightBank`
+option for Home. Eligible immutable geometry uses one PointLight struct bank,
+capped at 32 slots (18 for the six-room fixture), and packed local run records.
+The stock point-light declaration and room-index array contain only the original
+shadow prefix. Unsupported objects retain the original full program. Every
+selected nonzero contribution and its order remain unchanged; the bank's shader
+has no global-index fallback branch. The existing packed-capacity guard remains,
+with an additional conservative allowance for the bank and shadow prefix.
+
+The bank reads actual Three.js view-space records through a live uniform getter.
+The getter and original/banked run wrappers are installed in every material
+variant so cached programs, editor toggles and context restoration cannot use
+stale uniform objects. Geometry, ownership, pose and input checks run before
+drawing. Invalid ownership or geometry disables the bank and any stale original
+static subset; count or numeric overflow selects the original program. The
+factory's registered fallback boxes qualify while their pose and ownership are
+unchanged. Rounded-wall replacement buffers must fit the original proven bounds.
+
+Earlier struct-bank experiments retained the full global declaration and three
+scalar run arrays, and did not cover the current fallback-box family. Earlier
+global and compact vec4-array experiments regressed drag time. This prototype
+instead shrinks the declared interface, keeps PointLight structs and covers all
+130 structural meshes and 72 factory boxes in the 24-room fixture; its largest
+unshadowed bank contains 27 lights. CPU tests also cover the six-room fixture,
+offline first-frame eligibility and all rounded-wall height variants. These
+proofs establish data and shader contracts, not faster rendering. Strict browser
+timings and visual parity remain required before integration.
+
 When every visible point light belongs to a known room and has exactly zero
 intensity with valid finite inputs, the packed shader skips its point-light
 block through one shared runtime uniform. Empty visible-light sets also skip

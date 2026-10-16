@@ -380,6 +380,167 @@ function pointLightIsFiniteZero(light) {
     light.distance >= 0 && light.decay >= 0;
 }
 
+// A bounded shader has no reference to the global unshadowed light array.
+// Eligibility is resolved before drawing; unusual inputs use the original
+// program instead of keeping an expensive fallback branch alive in this one.
+function createRoomLightBanks(THREE, capacity, packed, maxFragmentUniforms, global) {
+  const size = Math.min(32, capacity), states = new Map();
+  const empty = {position:new THREE.Vector3(),color:new THREE.Color(0),distance:0,decay:0};
+  const shadowRooms = {value:new Int32Array(1)}, ordered = [];
+  const finite = value => Number.isFinite(value) && Number.isFinite(Math.fround(value));
+  function activate(state, active) {
+    if (state.active !== active) {state.active=active;state.material.needsUpdate=true;}
+  }
+  function rememberGeometry(state) {
+    const mesh=state.mesh,position=mesh.geometry?.attributes?.position;
+    state.geometry=mesh.geometry;state.position=position;state.positionVersion=position?.version;
+  }
+  function reject(state) {
+    state.rejected=true;
+    activate(state,false);
+    // The old static subset is also unsafe after an external geometry/pose edit.
+    if (state.original) state.original.unbounded=true;
+    return false;
+  }
+  function validGeometry(state) {
+    const mesh=state.mesh,material=mesh.material,geometry=mesh.geometry;
+    mesh.updateWorldMatrix(true,false);
+    if (state.rejected || material!==state.material || mesh.parent!==state.parent ||
+        material.onBeforeCompile!==state.callback || material.customProgramCacheKey!==state.cacheKey ||
+        !material.isMeshLambertMaterial || material.displacementMap || mesh.isSkinnedMesh ||
+        mesh.onBeforeRender!==THREE.Object3D.prototype.onBeforeRender ||
+        material.onBeforeRender!==THREE.Material.prototype.onBeforeRender ||
+        mesh.isInstancedMesh || mesh.isBatchedMesh || geometry?.isInstancedBufferGeometry ||
+        geometry?.morphAttributes?.position?.length ||
+        !mesh.matrixWorld.elements.every((value,i)=>value===state.matrix[i])) return reject(state);
+    if (state.fallback) {
+      const owner=fallbackBoxMaterials.get(material);
+      if (!owner?.active || owner.rejected || owner.mesh!==mesh || owner.geometry!==geometry ||
+          mesh.raycast!==owner.raycast || material.side!==THREE.DoubleSide ||
+          material.shadowSide!==THREE.BackSide || material.clippingPlanes!==owner.planes ||
+          material.clipShadows || material.blending!==THREE.NoBlending || material.transparent || material.opacity!==1)
+        return reject(state);
+    }
+    const position=geometry?.attributes?.position;
+    if (geometry!==state.geometry || position!==state.position || position?.version!==state.positionVersion) {
+      if (state.fallback) return reject(state);
+      // Rounded walls replace their display geometry when cut height changes.
+      // Their complete original vertices remain, and the new bounds must fit
+      // the same proven world-space envelope before its bank can be reused.
+      const bounds=roomLightingWorldBounds(mesh);
+      if (!bounds || bounds[0]<state.bounds[0] || bounds[1]<state.bounds[1] ||
+          bounds[2]>state.bounds[2] || bounds[3]>state.bounds[3]) return reject(state);
+      rememberGeometry(state);
+    }
+    return true;
+  }
+  return {
+    size,
+    attach(mesh, group, enabled, eligible, fallback, original) {
+      const material=mesh.material;
+      let state=states.get(material);
+      if (!state && !eligible) return null;
+      if (!state) {
+        state={mesh,material,active:false,rejected:false,
+          indices:new Int32Array(size).fill(-1),records:Array(size).fill(empty),runs:new Int32Array(size*4),runCount:0,
+          starts:new Int32Array(capacity),ends:new Int32Array(capacity)};
+        // Cached programs use the most recently compiled uniform map. These
+        // wrappers therefore remain installed in the full and editor variants.
+        state.uniforms={
+          homePointRooms:{get value(){return state.active ? shadowRooms.value : global.homePointRooms.value;}},
+          homeLightRuns:{get value(){return state.active ? state.runs : (state.original?.uniforms.homeLightRuns || global.homeLightRuns).value;}},
+          homeLightRunCount:{get value(){return state.active ? state.runCount : (state.original?.uniforms.homeLightRunCount || global.homeLightRunCount).value;}}
+        };
+        states.set(material,state);
+      }
+      if (state.mesh!==mesh || !eligible) reject(state);
+      state.group=group;state.enabled=enabled;state.original=original;state.fallback=fallback;
+      mesh.updateWorldMatrix(true,false);
+      state.bounds=roomLightingWorldBounds(mesh);
+      if (!state.bounds) reject(state);
+      state.parent=mesh.parent;state.matrix=Array.from(mesh.matrixWorld.elements);
+      rememberGeometry(state);
+      return state;
+    },
+    bind(state, shader) {
+      Object.assign(shader.uniforms,state.uniforms);
+      const pointUniform=shader.uniforms.pointLights;
+      shader.uniforms.homeLocalPointLights={get value(){
+        for (let local=0;local<size;local++) {
+          const index=state.indices[local],entry=index<0 ? empty : pointUniform.value[index];
+          if (!entry) throw new Error('Missing Three point-light record for bounded bank');
+          state.records[local]=entry;
+        }
+        return state.records;
+      }};
+    },
+    update(points, camera) {
+      ordered.length=0;
+      for (const shadowed of [true,false]) for (const point of points)
+        if (point.light?.visible && Boolean(point.light.castShadow)===shadowed) ordered.push(point);
+      const shadows=ordered.filter(point=>point.light.castShadow).length;
+      // Retain the original conservative seven-vector allowance for each bank
+      // entry and shadow entry; unused struct fields are not assumed optimized.
+      let ready=Boolean(camera?.isCamera && typeof camera.updateWorldMatrix==='function' &&
+        camera.layers && camera.matrixWorldInverse?.elements?.length===16 && ordered.length<=capacity &&
+        packed.uniformVectors-capacity*7+(size+Math.max(1,shadows))*7<=maxFragmentUniforms);
+      if (ready) {
+        camera.updateWorldMatrix(true,false);
+        const view=camera.matrixWorldInverse.elements;
+        const viewMagnitude=Math.max(...view.map(Math.abs));
+        if (!view.every(finite) || view[3]!==0 || view[7]!==0 || view[11]!==0 || !view[15]) ready=false;
+        for (let i=0;i<ordered.length;i++) {
+          const light=ordered[i].light;
+          if (!light.isPointLight || !global.homePointRooms.value[i] || light.map || typeof light.layers?.test!=='function' || !light.layers.test(camera.layers) ||
+              typeof light.updateWorldMatrix!=='function' ||
+              light.matrixWorld?.elements?.length!==16 ||
+              ![light.intensity,light.color?.r,light.color?.g,light.color?.b,light.distance,light.decay,
+                light.position?.x,light.position?.y,light.position?.z].every(finite)) {ready=false;break;}
+          for (let parent=light;parent;parent=parent.parent) if (!parent.visible) ready=false;
+          light.updateWorldMatrix(true,false);
+          // Conservative overflow proof only. Actual view-space/color records
+          // come from Three at upload time, with no duplicate transform math.
+          const world=light.matrixWorld.elements;
+          const positionMagnitude=Math.max(1,Math.abs(world[12]),Math.abs(world[13]),Math.abs(world[14]));
+          if (!world.every(finite) || !finite(positionMagnitude*viewMagnitude*4/Math.abs(view[15])) ||
+              ![light.color.r*light.intensity,light.color.g*light.intensity,light.color.b*light.intensity].every(finite)) {ready=false;break;}
+        }
+      }
+      if (shadowRooms.value.length!==Math.max(1,shadows)) shadowRooms.value=new Int32Array(Math.max(1,shadows));
+      shadowRooms.value.fill(0);shadowRooms.value.set(global.homePointRooms.value.subarray(0,shadows));
+      const uses=new Map();
+      for (const group of new Set([...states.values()].map(state=>state.group))) group?.traverse(mesh=>{
+        for (const material of (Array.isArray(mesh.material) ? mesh.material : [mesh.material]))
+          if (states.has(material)) uses.set(material,(uses.get(material)||0)+1);
+      });
+      for (const [material,state] of states) {
+        // Inventory rebuilds dispose old meshes and install fresh materials.
+        let attached=false;
+        for (let node=state.mesh;node;node=node.parent) if (node===state.group) attached=true;
+        if (!attached) {reject(state);states.delete(material);continue;}
+        if (uses.get(material)!==1) reject(state);
+        let usable=validGeometry(state) && state.enabled && ready;
+        const indices=state.indices,runs=state.runs;
+        let count=0,runCount=0;
+        if (usable) {
+          const selected=filterRoomLightingRuns(state.bounds,packed.uniforms.homeRoomBounds.value,
+            global.homePointRooms.value,global.homeLightRunEnds.value,global.homeLightRunCount.value,state.starts,state.ends);
+          for (let run=0;run<selected;run++) {
+            const start=Math.max(shadows,state.starts[run]),end=state.ends[run];
+            if (start>=end) continue;
+            if (count+end-start>size || runCount>=size) {usable=false;break;}
+            const offset=runCount++*4;
+            runs[offset]=count;runs[offset+1]=count+end-start;runs[offset+2]=global.homePointRooms.value[start];
+            for (let i=start;i<end;i++) indices[count++]=i;
+          }
+        }
+        indices.fill(-1,count);runs.fill(0,runCount*4);state.runCount=runCount;
+        activate(state,Boolean(usable));
+      }
+    }
+  };
+}
+
 // Softly confine each fixture's direct light to its room, retaining a short
 // doorway spill. Full-height shadow geometry still blocks opaque walls/doors.
 function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {}) {
@@ -399,6 +560,7 @@ function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {
     homeLightRuns:{value:new Int32Array(capacity * 4)}
   });
   const staticRuns = new Map(), dynamicMaterials = new WeakSet();
+  const banks=packed && geometryOptions.boundedLightBank ? createRoomLightBanks(THREE,capacity,packed,geometryOptions.maxFragmentUniforms,uniforms) : null;
   const geometryDeclarations = packed ? `
     uniform bool homePointLightingRequired;
     uniform vec4 homeRoomEdges[${Math.max(1, packed.edgeCount)}];
@@ -589,6 +751,17 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
   // family when every point is off. Never infer zero from a brightness epsilon.
   const guardedPointLighting = packed ? 'if (homePointLightingRequired) {\n' + directPointLighting + '\n}\n' : directPointLighting;
   const lighting = (packed ? '' : transmissionCache) + lightChunk.slice(0, pointStart) + guardedPointLighting + lightChunk.slice(pointEnd);
+  const bankFragment=banks ? fragment.replace(`uniform int homePointRooms[${capacity}];`,
+    '#if NUM_POINT_LIGHT_SHADOWS > 0\n    uniform int homePointRooms[NUM_POINT_LIGHT_SHADOWS];\n    #endif')
+    .replace(`uniform ivec4 homeLightRuns[${capacity}];`,`uniform ivec4 homeLightRuns[${banks.size}];`) : '';
+  const bankDirect=banks ? directPointLighting
+    .replace('min(homeRunData.y, NUM_POINT_LIGHTS)','homeRunData.y')
+    .replace('max(homeRunData.x, NUM_POINT_LIGHT_SHADOWS)','homeRunData.x')
+    .replace(unshadowedBody,unshadowedBody.replace('pointLight = pointLights[ i ];','pointLight = homeLocalPointLights[ i ];')) : '';
+  const bankLighting=banks ? lightChunk.slice(0,pointStart)+'if (homePointLightingRequired) {\n'+bankDirect+'\n}\n'+lightChunk.slice(pointEnd) : '';
+  const bankParameters=banks ? THREE.ShaderChunk.lights_pars_begin.replace('uniform PointLight pointLights[ NUM_POINT_LIGHTS ];',
+    '#if NUM_POINT_LIGHT_SHADOWS > 0\n\tuniform PointLight pointLights[ NUM_POINT_LIGHT_SHADOWS ];\n\t#endif\n'+
+    `\tuniform PointLight homeLocalPointLights[ ${banks.size} ];`) : '';
   return {
     capacity, geometryMode: packed ? 'packed' : 'literal', geometryUniformVectors: packed?.uniformVectors ?? null,
     attach(group, enabled, {staticGeometry = false} = {}) {
@@ -632,6 +805,9 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
         const wallEnabled = prepareSharedWallProgram(THREE, mesh,
           fallbackFacing ? 'opaque' : !dynamicMaterials.has(mesh.material) && sharedWallRoles.get(mesh.material));
         const sharedWall = Boolean(wallEnabled);
+        const original=staticRuns.get(mesh.material);
+        const bank=banks?.attach(mesh,group,enabled,mesh.material.isMeshLambertMaterial &&
+          (Boolean(fallbackFacing) || (staticGeometry && !original?.unbounded)),Boolean(fallbackFacing),original);
         mesh.material.onBeforeCompile = shader => {
           if (sharedWall) applySharedWallSheen(shader, wallEnabled);
           else if (wall) applyWallSheen(shader);
@@ -639,17 +815,20 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
           if (sharedWall || facing) applyStaticFacing(THREE, shader, facing || bothFaces);
           // Keep uniform definitions identical in both material variants.
           Object.assign(shader.uniforms, uniforms, staticRuns.get(mesh.material)?.uniforms, {homeExteriorSurface:{value:mesh.userData.category==='stairs'?1:0}});
+          if (bank) banks.bind(bank,shader);
           // The editor needs no room/window shader, especially on software WebGL.
           if (!enabled) return;
           shader.vertexShader = 'varying vec3 homeWorldPosition;\n' + shader.vertexShader.replace(
             '#include <project_vertex>',
             '#include <project_vertex>\nhomeWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;'
           );
-          shader.fragmentShader = fragment + shader.fragmentShader.replace('#include <lights_fragment_begin>', lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
+          if (bank?.active) shader.fragmentShader=shader.fragmentShader.replace('#include <lights_pars_begin>',bankParameters);
+          shader.fragmentShader = (bank?.active ? bankFragment : fragment) + shader.fragmentShader.replace('#include <lights_fragment_begin>', bank?.active ? bankLighting : lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
         };
-        mesh.material.customProgramCacheKey = () => (enabled ? fragment : 'home-editor') +
+        mesh.material.customProgramCacheKey = () => (enabled ? bank?.active ? bankFragment+':bounded-point-bank-v1' : fragment : 'home-editor') +
           (sharedWall ? ':wall-sheen-facing-v1' : wall ? ':wall-sheen-v2' : '') +
           (!sharedWall && staticGlassFacing.has(mesh.material) ? ':glass-facing-v1' : '');
+        if (bank) {bank.callback=mesh.material.onBeforeCompile;bank.cacheKey=mesh.material.customProgramCacheKey;}
         mesh.material.needsUpdate = true;
       });
     },
@@ -661,7 +840,7 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
       });
       else transmission.forEach((value,i)=>uniforms.homeWindowTransmission.value[i]=value);
     },
-    update(points) {
+    update(points, camera) {
       // Three.js stably sorts shadow casters before unshadowed point lights.
       // These lights have no projection maps, so traversal order breaks ties.
       // Zero-intensity fixtures retain their slots across on/off state changes.
@@ -696,6 +875,7 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
       }
       uniforms.homeLightRunCount.value = runCount;
       if (packed) packLightRunRecords(uniforms.homeLightRunStarts.value, runs, pointRooms, runCount, uniforms.homeLightRuns.value);
+      banks?.update(points,camera);
       if (packed) for (const state of staticRuns.values()) {
         state.uniforms.homeLightRunCount.value = filterRoomLightingRuns(state.unbounded ? null : state.bounds,
           packed.uniforms.homeRoomBounds.value,pointRooms,runs,runCount,
