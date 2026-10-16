@@ -247,6 +247,37 @@ async function bounded(operation, milliseconds, description) {
   } finally { clearTimeout(timer); }
 }
 
+// Host-side timestamps only: changing phases adds no browser work or awaits.
+// Live entries may finish after the watchdog wins Promise.race, so retain an
+// independent copy of the phase that was active at the actual deadline.
+function createPhaseTimings(record, now = () => performance.now()) {
+  const origin = now();
+  record.phases = [];
+  record.activePhase = null;
+  const elapsed = () => Math.round((now() - origin) * 1000) / 1000;
+  const completeAt = at => {
+    if (!record.activePhase) return;
+    record.activePhase.completedMs = at;
+    record.activePhase.durationMs = Math.round((at - record.activePhase.startedMs) * 1000) / 1000;
+    record.activePhase = null;
+  };
+  return {
+    start(name, details = {}) {
+      const at = elapsed();
+      completeAt(at);
+      const entry = {...details, name, startedMs: at, completedMs: null, durationMs: null};
+      record.phases.push(entry);
+      record.activePhase = entry;
+    },
+    complete() { completeAt(elapsed()); },
+    freezeTimeout() {
+      if (!record.timeoutPhase) record.timeoutPhase = JSON.parse(JSON.stringify({
+        elapsedMs: elapsed(), activePhase: record.activePhase,
+      }));
+    },
+  };
+}
+
 function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
   const base = path.resolve(process.env[`${prefix}_DIAGNOSTICS_DIR`] ||
     process.env.HOME_STUDIO_DIAGNOSTICS_DIR || path.join(__dirname, '..', 'acceptance-artifacts'));
@@ -291,6 +322,7 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       inputDiagnostics: options.inputDiagnostics || null, inputTrace: null,
       cleanupTimeoutsMs: {context: 5000, browser: 15000}, cleanupDurationsMs: {},
     };
+    const phases = createPhaseTimings(record);
     const file = `${engine}.json`;
     const reference = {engine, file, status: record.status};
     summary.browsers.push(reference);
@@ -348,6 +380,7 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       const deadline = new Promise((_, reject) => {
         watchdog = setTimeout(() => {
           expired = true;
+          phases.freezeTimeout();
           record.timedOut = true;
           save();
           reject(new Error(`${engine}: ${name} exceeded the ${options.deadlineMs / 1000}-second browser deadline`));
@@ -357,17 +390,20 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
         const loaded = dependencies.playwright ? {playwright: dependencies.playwright, version: 'test-double'} : loadPlaywright();
         const {playwright} = loaded;
         record.playwrightVersion = loaded.version;
+        phases.start('browser-launch');
         launchPending = true;
         try { browser = await playwright[engine].launch({...options.launch, timeout: 30000}); }
         finally { launchPending = false; }
         if (expired) { await browser.close(); clearTimeout(hardDeadline); return; }
         record.browserVersion = browser.version();
         save();
+        phases.start('browser-context');
         context = await browser.newContext(options.context);
         await context.addInitScript(inputInstrumentation);
         if (options.instrument) await context.addInitScript(options.instrument);
         page = await context.newPage();
         page.setDefaultTimeout(30000);
+        phases.start('browser-identity');
         record.identity = await browserIdentity(page, engine, options.launch, record.browserVersion);
         save();
         page.on('pageerror', error => { record.errors.push(String(error)); save(); });
@@ -410,8 +446,10 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
             options:'record-until-full', transferMode:'ReturnAsStream', streamFormat:'json'});
           record.inputTrace.status = 'recording'; save();
         }
-        await execute({browser, context, page, record, check, save});
+        phases.start('test');
+        await execute({browser, context, page, record, check, save, phases});
         // Chromium exposes UA client-hint brands only after a secure navigation.
+        phases.start('browser-final-identity');
         record.identity = await browserIdentity(page, engine, options.launch, record.browserVersion);
         save();
         if (process.platform === 'darwin' && options.launch.firefoxUserPrefs?.['webgl.disable-angle'] === false) {
@@ -426,6 +464,7 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
             }
           }
         }
+        phases.complete();
       })()]);
       record.status = options.reportOnly ? 'observation' : 'passed';
     } catch (error) {
@@ -564,4 +603,4 @@ function assertViewerInteraction(before, after) {
   } else assert.equal(passes.copy, 0, 'Other graphics profiles must retain direct rendering');
 }
 
-module.exports = {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction};
+module.exports = {createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction};

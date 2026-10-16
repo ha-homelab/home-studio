@@ -272,6 +272,15 @@ information, observations, and failures. Failed runs attempt screenshots;
 a crashed or unresponsive browser may not produce one. Job logs remain the
 evidence for dependency failures and runner-level timeouts.
 
+Playwright receipts also retain Node-side `phases` with start, completion, and
+duration times in milliseconds from the case's monotonic clock. Viewer phases
+distinguish loading, input, state updates, restoration, and iframe detachment.
+These markers add no browser evaluations or rendering work. If the whole-case
+deadline expires, `timeoutPhase` preserves the active phase before diagnostic
+capture begins. The asynchronous test callback can still finish work while
+failure evidence is captured, so later sample fields or completed phase entries
+do not prove that work finished before the deadline; consult `timeoutPhase`.
+
 Legacy native Gecko rows on macOS enable `NATIVE_STARTUP_DIAGNOSTICS=1`.
 A separate loopback fixture process saves at most forty startup checkpoints,
 including the reported renderer, selected rendering profile, first two shader

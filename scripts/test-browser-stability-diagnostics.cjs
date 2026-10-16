@@ -6,11 +6,30 @@ const path = require('node:path');
 const {EventEmitter} = require('node:events');
 const vm = require('node:vm');
 const {test, after} = require('node:test');
-const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
+const {createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
+
+test('host phase timing closes sequential phases and preserves the timeout observation', () => {
+  let now=100;
+  const record={}, phases=createPhaseTimings(record,()=>now);
+  phases.start('viewer-load',{cycle:0});
+  now=125;phases.start('light-state',{cycle:0,activeLights:72});
+  assert.deepEqual(record.phases[0],{cycle:0,name:'viewer-load',startedMs:0,completedMs:25,durationMs:25});
+  now=140;phases.freezeTimeout();
+  const frozen=JSON.stringify(record.timeoutPhase);
+  assert.deepEqual(record.timeoutPhase,{elapsedMs:40,activePhase:{cycle:0,activeLights:72,name:'light-state',startedMs:25,completedMs:null,durationMs:null}});
+  now=160;phases.start('viewer-detach',{cycle:0});
+  now=170;phases.complete();phases.complete();phases.freezeTimeout();
+  assert.equal(record.activePhase,null);
+  assert.equal(record.phases[1].durationMs,35);
+  assert.equal(record.phases[2].durationMs,10);
+  assert.equal(JSON.stringify(record.timeoutPhase),frozen,'Late completion and repeated timeout capture cannot rewrite the original active phase');
+  const empty={}, idle=createPhaseTimings(empty,()=>now);
+  idle.freezeTimeout();assert.deepEqual(empty.timeoutPhase,{elapsedMs:0,activePhase:null});
+});
 
 test('viewer drag receipts preserve native phases and the existing two-frame completion wait', async () => {
   const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
-  const start=source.indexOf('const dragCanvas = async'),end=source.indexOf('    await page.goto(origin);',start);
+  const start=source.indexOf('const dragCanvas = async'),end=source.indexOf("    phases.start('dashboard-navigation');",start);
   assert(start>=0&&end>start);
   let now=100,drags=0,frames=0,evaluations=0,fail=false;
   const phases={hoverMs:2,pressMs:3,moveMs:20,releaseMs:4};
@@ -326,6 +345,34 @@ test('screenshot failure preserves the original assertion error', async () => {
   assert.equal(record.status, 'failed');
   assert.match(record.error.message, /original test failure/);
   assert.match(record.diagnosticsErrors[0].message, /synthetic screenshot failure/);
+});
+
+test('watchdog freezes the active phase before late callback work resumes during capture', async () => {
+  const fake=fakeBrowser(), diagnostics=suite('phase-timeout',{firefox:{launch:async()=>fake.browser}});
+  let resume, lateFinished;
+  const late=new Promise(resolve=>{lateFinished=resolve;});
+  fake.page.frames=()=>[{evaluate:async()=>{
+    const atCapture=read(diagnostics);
+    assert.equal(atCapture.timeoutPhase.activePhase.name,'context-restore');
+    assert.equal(atCapture.timeoutPhase.activePhase.completedMs,null);
+    resume();await late;
+    return {stats:{gpu:{renderer:'Fictional GPU'}}};
+  }}];
+  await assert.rejects(diagnostics.run('firefox',{...options,deadlineMs:10},async({phases})=>{
+    phases.start('context-restore',{cycle:1});
+    await new Promise(resolve=>{resume=resolve;});
+    phases.start('viewer-detach',{cycle:1});
+    phases.complete();lateFinished();
+  }),/browser deadline/);
+  const record=read(diagnostics);
+  assert.equal(record.status,'failed');
+  assert.equal(record.timeoutPhase.activePhase.name,'context-restore');
+  assert.equal(record.timeoutPhase.activePhase.cycle,1);
+  assert.equal(record.timeoutPhase.activePhase.completedMs,null);
+  const lateRestore=record.phases.find(entry=>entry.name==='context-restore');
+  assert(lateRestore.completedMs>=record.timeoutPhase.elapsedMs);
+  assert(record.phases.some(entry=>entry.name==='viewer-detach'&&entry.completedMs!==null));
+  assert(fake.context.closed&&fake.browser.closed);
 });
 
 test('failed cleanup cannot convert a passing test into green acceptance', async () => {

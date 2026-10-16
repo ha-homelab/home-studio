@@ -80,8 +80,9 @@ async function run(browserName, origin, project, sourceHash) {
     fixture: {floors: 1, rooms: project.floors[0].rooms.length, lights: project.floors[0].items.length},
     launch: browserLaunchOptions(browserName, process.env.BROWSER_STABILITY_HEADED !== '1'),
     context: profile.context, profile, inputDiagnostics,
-  }, async ({browser, page, record, check, save}) => {
+  }, async ({browser, page, record, check, save, phases}) => {
   const {samples, errors, crashes, consoleErrors} = record;
+  phases.start('input-setup');
   const input = await createInputDriver(page, browserName, profile, inputDiagnostics);
   const dragCanvas = async (locator, child) => {
     await locator.scrollIntoViewIfNeeded();
@@ -101,11 +102,13 @@ async function run(browserName, origin, project, sourceHash) {
     const completed = Date.now();
     return {durationMs:completed-started,phases:{...phases,framesMs:completed-framesStarted}};
   };
+    phases.start('dashboard-navigation');
     await page.goto(origin);
     const states = Object.fromEntries(project.floors[0].items.map(item => [item.entity_id,{state:'on',name:item.name,light:{brightness:180,color_mode:'color_temp',color_temp_kelvin:3000}}]));
     states['sun.sun'] = {state:'above_horizon',elevation:30};
     for (let cycle = 0; cycle < 2; cycle++) {
       console.log(`${browserName} ${browser.version()}: loading fictional dashboard, cycle ${cycle + 1}`);
+      phases.start('viewer-load', {cycle});
       const started = Date.now();
       await page.evaluate(async ({items,states,height}) => {
         const html = await (await fetch('/viewer')).text();
@@ -125,6 +128,7 @@ async function run(browserName, origin, project, sourceHash) {
       const child = page.frames().find(value => value !== page.mainFrame());
       await child.waitForFunction(expected => window.floorplan?.renderCount > 0 && document.querySelector('#homeConnection')?.dataset.connected === 'true' && window.__browserRenderedLights === expected, project.floors[0].items.length);
       const loadMs = Date.now()-started;
+      phases.start('initial-checks', {cycle});
       const sample = {cycle,loadMs};samples.push(sample);save();
       console.log(`${browserName}: first connected draw in ${loadMs} ms`);
       const snapshot = () => child.evaluate(() => ({...window.__browserStability,renderedLights:window.__browserRenderedLights,renderCount:window.floorplan.renderCount,homeMode:window.floorplan.homeMode,scene:window.__browserScene?.()}));
@@ -145,10 +149,12 @@ async function run(browserName, origin, project, sourceHash) {
       check(pointShadows.every(([,width,height]) => width<=(software?128:512) && height<=(software?128:512)), 'Point shadow faces respect the graphics profile');
       const sunShadow = initial.scene.shadowMaps.find(([type]) => type==='DirectionalLight');
       check(sunShadow && sunShadow[1]===(software?512:2048) && sunShadow[2]===(software?512:2048), 'The sun shadow respects the graphics profile');
+      phases.start('home-idle', {cycle});
       await page.waitForTimeout(200);
       const idleBefore = (await snapshot()).renderCount;
       await page.waitForTimeout(350);
       check((await snapshot()).renderCount===idleBefore, 'An idle Home view does not continuously render');
+      phases.start('home-drag', {cycle});
       const canvas = frame.locator('#homeStage canvas');
       const homeCameraBefore = (await snapshot()).scene.camera;
       const homeDrag = await dragCanvas(canvas,child), dragMs = homeDrag.durationMs;
@@ -165,10 +171,12 @@ async function run(browserName, origin, project, sourceHash) {
       check(afterHomeDrag.errors.length===0, `No rendering errors after Home drag: ${afterHomeDrag.errors.join('; ')}`);
       check(afterHomeDrag.renderCount>idleBefore, 'Dragging Home updates the rendered scene');
       check(sample.homeCameraChanged, 'Dragging Home changes the camera used to draw the scene');
+      phases.start('editor-enter', {cycle});
       await input.tap(frame.locator('#editLayout'));
       await child.waitForFunction(() => !window.floorplan.homeMode);
       // Exercise a burst of editor wheel events in a single task, as high-frequency
       // trackpad input must not perform an unbounded number of synchronous draws.
+      phases.start('editor-settle-and-wheel', {cycle});
       const burst = await child.evaluate(async () => {
         const canvas = document.querySelector('#view3d canvas');
         const stage = document.querySelector('#view3d');
@@ -213,6 +221,7 @@ async function run(browserName, origin, project, sourceHash) {
       });
       sample.burst = burst;
       check(burst.synchronousDraws<=1 && burst.totalDraws>0 && burst.totalDraws<=2, 'Wheel bursts coalesce into at most one scheduled scene draw');
+      phases.start('editor-drag', {cycle});
       const beforeEditorDrag = await snapshot();
       const editorCameraBefore = beforeEditorDrag.scene.camera;
       const editorDrag = await dragCanvas(frame.locator('#view3d canvas'),child), editorDragMs = editorDrag.durationMs;
@@ -226,6 +235,7 @@ async function run(browserName, origin, project, sourceHash) {
         JSON.stringify(editorCameraBefore) !== JSON.stringify(editorCameraAfter));
       save();
       check(sample.editorCameraChanged, 'Dragging the editor changes the camera used to draw the scene');
+      phases.start('home-enter', {cycle});
       await input.tap(frame.locator('#openHome'));
       await child.waitForFunction(() => window.floorplan.homeMode);
       await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
@@ -235,6 +245,7 @@ async function run(browserName, origin, project, sourceHash) {
       const firstEntity = project.floors[0].items[0].entity_id;
       const oneOff = {...states,[firstEntity]:{...states[firstEntity],state:'off'}};
       for(const [next,onCount] of [[allOff,0],[oneOff,lights-1],[states,lights]]) {
+        phases.start('light-state', {cycle, activeLights:onCount});
         await page.evaluate(states => window.viewerPort.postMessage({type:'states',connected:true,states}),next);
         await child.waitForFunction(expected => document.querySelectorAll('.home-marker[data-state="on"]').length===expected,onCount);
         await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
@@ -244,6 +255,7 @@ async function run(browserName, origin, project, sourceHash) {
         check(value.scene.activePointLights===onCount, 'Only lights whose live state is on contribute intensity');
         check(value.renderedLights===onCount, 'The queued frame has rendered the new light state');
       }
+      phases.start('state-checks', {cycle});
       check(new Set(sample.statePrograms).size===1, 'All-off, partially lit and all-on states do not compile new programs');
       initial = await snapshot();
       check(initial.shaderErrors.length===0, 'Light changes and editor/Home transitions keep every shader linked');
@@ -251,6 +263,7 @@ async function run(browserName, origin, project, sourceHash) {
       check(loadMs<30000 && dragMs<15000 && editorDragMs<15000, `Load and drag remain responsive (load ${loadMs} ms, Home drag ${dragMs} ms, editor drag ${editorDragMs} ms)`);
       let recovery = null;
       if(cycle===1 && !reportOnly) {
+        phases.start('context-loss', {cycle});
         const beforeLoss = initial.renderCount;
         await child.evaluate(() => {
           const gl = document.querySelector('#homeStage canvas').getContext('webgl2');
@@ -260,12 +273,15 @@ async function run(browserName, origin, project, sourceHash) {
           extension.loseContext();
         });
         await child.waitForFunction(() => window.__browserStability.contextLosses===1);
+        phases.start('lost-resize-and-checks', {cycle});
         await page.setViewportSize(profile.emulated ? {width:profile.context.viewport.width-40,height:profile.context.viewport.height-80} : {width:1100,height:700});
         await child.evaluate(() => {for(let i=0;i<40;i++){window.requestModelRender();window.renderModel();}});
         await page.waitForTimeout(100);
         check((await snapshot()).renderCount===beforeLoss, 'Lost WebGL contexts suppress pending and explicit draws');
+        phases.start('context-restore', {cycle});
         await child.evaluate(() => window.__restoreContext());
         await child.waitForFunction(before => window.floorplan.renderCount>before,beforeLoss);
+        phases.start('restored-checks', {cycle});
         check((await snapshot()).shaderErrors.length===0, 'Restored WebGL contexts rebuild valid programs');
         const restored = await child.evaluate(() => {
           const size = document.querySelector('#homeStage').getBoundingClientRect(), scene = window.__browserScene();
@@ -274,6 +290,7 @@ async function run(browserName, origin, project, sourceHash) {
         assert.deepEqual(restored.actual,restored.expected, 'Context restoration applies viewport changes made while the context was lost');
         recovery = {before:beforeLoss,after:(await snapshot()).renderCount,contextLosses:(await snapshot()).contextLosses,drawingBuffer:restored.actual};
       }
+      phases.start('input-receipt', {cycle});
       sample.input = await child.evaluate(() => window.__acceptanceInput);
       if (inputDiagnostics.tapMode !== 'playwright') check(sample.input.trustedTouchStarts===4 && sample.input.trustedTouchEnds===4,
         'Diagnostic transport emits exactly two drag and two button touch sequences per cycle');
@@ -286,6 +303,7 @@ async function run(browserName, origin, project, sourceHash) {
       // Screenshot readback drains GPU work. Capture after latency checks so it
       // cannot accidentally warm the first interaction being measured.
       if(process.env.BROWSER_STABILITY_SCREENSHOT_DIR) {
+        phases.start('comparison-screenshot', {cycle});
         fs.mkdirSync(process.env.BROWSER_STABILITY_SCREENSHOT_DIR,{recursive:true});
         await input.tap(frame.locator('#homeZoomReset'));
         await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
@@ -293,18 +311,22 @@ async function run(browserName, origin, project, sourceHash) {
       }
       // Browser teardown and Playwright's frame registry update asynchronously.
       // Subscribe before removing the iframe so even a fast detach is observed.
+      phases.start('viewer-detach', {cycle});
       const detachStarted = Date.now();
       await Promise.all([
         page.waitForEvent('framedetached',{predicate:detached=>detached===child,timeout:30000}),
         page.evaluate(() => {window.viewerPort.close();window.viewerPort=null;document.querySelector('#viewer').remove();})
       ]);
       sample.detachMs = Date.now()-detachStarted;
+      phases.start('dashboard-after-detach', {cycle});
       assert.equal(page.frames().length,1,'Removing the floorplan releases its browsing context');
       assert.equal(await page.evaluate(() => 6*7),42,'The dashboard remains responsive after closing the floorplan');
     }
+    phases.start('final-checks');
     check(errors.length===0, `No uncaught exceptions: ${errors.join('; ')}`);
     check(crashes.length===0, 'No page crashes');
     check(consoleErrors.length===0, `No browser error logs: ${consoleErrors.join('; ')}`);
+    phases.complete();
     save();
   });
 }
