@@ -155,18 +155,19 @@ function inputInstrumentation() {
 }
 
 function viewerInputOptions(engine, profile, environment = process.env) {
-  const tapMode = environment.BROWSER_STABILITY_TOUCH_TAP ?? 'playwright';
+  const tapMode = environment.BROWSER_STABILITY_TOUCH_TAP ??
+    (engine === 'chromium' && profile.input === 'native-touch' ? 'sequential' : 'playwright');
   assert(['playwright', 'sequential', 'gesture50'].includes(tapMode),
     'BROWSER_STABILITY_TOUCH_TAP must be playwright, sequential or gesture50');
   assert(tapMode === 'playwright' || (engine === 'chromium' && profile.input === 'native-touch'),
-    'Alternative tap diagnostics require a Chromium touch profile');
+    'Native tap transports require a Chromium touch profile');
   const trace = environment.BROWSER_STABILITY_TRACE_INPUT ?? '0';
   assert(['0', '1'].includes(trace), 'BROWSER_STABILITY_TRACE_INPUT must be 0 or 1');
   assert(trace === '0' || engine === 'chromium', 'Input tracing requires Chromium');
   return {tapMode, traceInput:trace === '1'};
 }
 
-async function createInputDriver(page, engine, profile, {tapMode = 'playwright'} = {}) {
+async function createInputDriver(page, engine, profile, {tapMode = viewerInputOptions(engine, profile, {}).tapMode} = {}) {
   viewerInputOptions(engine, profile, {BROWSER_STABILITY_TOUCH_TAP:tapMode});
   const touch = profile.input === 'native-touch';
   assert(!touch || engine === 'chromium', 'Native touch drags require the Chromium CDP transport');
@@ -178,19 +179,23 @@ async function createInputDriver(page, engine, profile, {tapMode = 'playwright'}
       // visibility, stability and the hit target without an extra touch sequence.
       await locator.waitFor({state:'visible'});
       await locator.scrollIntoViewIfNeeded();
-      assert(await locator.isEnabled(), 'The diagnostic tap target must be enabled');
+      assert(await locator.isEnabled(), 'The native tap target must be enabled');
       const hit = await locator.evaluate(target => {
         const bounds = target.getBoundingClientRect();
         const element = document.elementFromPoint(bounds.x+bounds.width/2, bounds.y+bounds.height/2);
         return element === target || target.contains(element);
       });
-      assert(hit, 'The diagnostic tap target center must receive input');
+      assert(hit, 'The native tap target center must receive input');
       const bounds = await locator.boundingBox();
-      assert(bounds && bounds.width > 0 && bounds.height > 0, 'The diagnostic tap target must have visible bounds');
+      assert(bounds && bounds.width > 0 && bounds.height > 0, 'The native tap target must have visible bounds');
+      // Playwright boundingBox uses main-frame CSS coordinates, including for
+      // iframe locators; the hit test above uses the target document's coordinates.
       const x = bounds.x+bounds.width/2, y = bounds.y+bounds.height/2;
       if (tapMode === 'gesture50') {
         await cdp.send('Input.synthesizeTapGesture', {x,y,duration:50,tapCount:1,gestureSourceType:'touch'});
       } else {
+        // Share the drag session and await the start response before ending.
+        // One native sequence only: no replacement click or repeated attempt.
         await cdp.send('Input.dispatchTouchEvent', {type:'touchStart',touchPoints:[{x,y,id:0}]});
         await cdp.send('Input.dispatchTouchEvent', {type:'touchEnd',touchPoints:[]});
       }

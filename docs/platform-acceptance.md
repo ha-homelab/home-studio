@@ -244,21 +244,29 @@ Every comparison runs, and any diagnostic failure also fails that step. The
 primary check still requires all actions with immediate restoration and its
 failure still fails the job even if every diagnostic passes.
 
-If a Chromium phone/tablet viewer check fails, the job repeats only that viewer
-size in two fixed diagnostic modes: sequential native touch start/end with no
-hold, then `Input.synthesizeTapGesture` with a 50 ms press. The ordinary
-Playwright tap remains the primary transport. Each diagnostic runs the original
-two full cycles, assertions, timing limits and recovery check; no failed tap is
-retried with another transport. Target checks use visibility, enabled state,
-stable scrolling and geometric hit testing. They do not use Playwright's
-`trial:true`, which emits intercepted native input and would contaminate the
-comparison. A local passing baseline did not reproduce the intermittent hosted
-missing click, so these comparisons gather evidence rather than establish a fix.
+Chromium phone/tablet taps use one native `Input.dispatchTouchEvent` start/end
+sequence on the same CDP session as touch drags. The driver waits for the start
+response before dispatching the end. The viewer still requires exactly four
+trusted touch starts and ends per ordinary cycle, and all activation, recovery
+and latency assertions remain unchanged. Desktop and non-Chromium inputs retain
+their existing transports.
 
-These runs set `BROWSER_STABILITY_TOUCH_TAP=sequential|gesture50` and
-`BROWSER_STABILITY_TRACE_INPUT=1`. Their receipts, browser-process logs and
-Chromium input/latency/benchmark traces are under
-`diagnostics/viewer-{6,24}-touch-{sequential,gesture50}`. Trace capture is off in
+This harness change follows an intermittent missing native click in Playwright's
+concurrent start/end path and a passing serialized comparison on the same hosted
+row. It does not establish a product bug or a complete root-cause explanation.
+Target checks retain visibility, enabled state, Playwright's stable scrolling and
+geometric hit testing. Iframe locator bounds provide main-frame CSS coordinates;
+the hit test runs in the target document. No synthetic click, `trial:true` input,
+extra attempt or relaxed timeout is used.
+
+If a Chromium phone/tablet viewer check fails, the job repeats only that viewer
+size in two fixed diagnostic modes: the original Playwright tap, then
+`Input.synthesizeTapGesture` with a 50 ms press. Each runs the original two full
+cycles, assertions, timing limits and recovery check. They set
+`BROWSER_STABILITY_TOUCH_TAP=playwright|gesture50` and
+`BROWSER_STABILITY_TRACE_INPUT=1`. Receipts, browser-process logs and Chromium
+input/latency/benchmark traces are saved under
+`diagnostics/viewer-{6,24}-touch-{playwright,gesture50}`. Trace capture is off in
 primary acceptance and may affect diagnostic timings. Missing or incomplete
 requested traces fail the diagnostic. The original failed viewer step still
 fails the job even if both comparisons pass; successful viewer sizes are not

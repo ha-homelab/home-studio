@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver} = require('./browser-stability-diagnostics.cjs');
+const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions} = require('./browser-stability-diagnostics.cjs');
 const {createStartupDiagnostics} = require('./browser-startup-diagnostics.cjs');
 
 const root = path.resolve(process.env.PLANNER_STABILITY_SOURCE_ROOT || path.join(__dirname, '..'));
@@ -178,11 +178,12 @@ initPreview=function(...args){
 
 async function run(engine,origin) {
   const profile = browserProfile(engine, {viewport: {width: 1440, height: 1000}, deviceScaleFactor: 2});
+  const inputDiagnostics = viewerInputOptions(engine, profile, {});
   return diagnostics.run(engine, {
     reportOnly, deadlineMs: 180000, sourceHash, sourceHashScope: 'instrumented-planner-editor', sourceFiles,
     fixture: {floors: 2, rooms: 16, catalogItems: 256},
     launch: browserLaunchOptions(engine, process.env.PLANNER_STABILITY_HEADED !== '1'),
-    context: profile.context, profile,
+    context: profile.context, profile, inputDiagnostics,
     instrument,
   }, async ({browser, page, record, check, save}) => {
   const {samples, errors, crashes, consoleErrors} = record, external = record.external = [];
@@ -191,7 +192,7 @@ async function run(engine,origin) {
   const frames=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   const snapshot=()=>page.evaluate(()=>({stats:window.__plannerStats,preview:window.planner.getPreviewMetadata(),scene:window.__plannerScene()}));
   const getProject=()=>page.evaluate(()=>window.planner.getProject());
-  const input = await createInputDriver(page, engine, profile);
+  const input = await createInputDriver(page, engine, profile, inputDiagnostics);
   let dragPhases;
   async function prepareWorldDrag(from,to) {
     const canvas = page.locator('#plan-canvas');

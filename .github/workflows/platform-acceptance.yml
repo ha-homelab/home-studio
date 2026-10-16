@@ -192,7 +192,7 @@ jobs:
             outcome="$VIEWER_6_OUTCOME"
             if [ "$rooms" = 24 ]; then outcome="$VIEWER_24_OUTCOME"; fi
             if [ "$outcome" != failure ]; then continue; fi
-            for mode in sequential gesture50; do
+            for mode in playwright gesture50; do
               diagnostics_dir="acceptance-artifacts/diagnostics/viewer-$rooms-touch-$mode"
               mkdir -p "$diagnostics_dir"
               export HOME_STUDIO_DIAGNOSTICS_DIR="$diagnostics_dir"

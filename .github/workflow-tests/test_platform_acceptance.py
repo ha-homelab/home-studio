@@ -122,7 +122,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
         '''
         for runner in ('Linux', 'Windows'):
             for failed_sizes in ([], [6], [24], [6, 24]):
-                for failed_mode in ('none', 'sequential'):
+                for failed_mode in ('none', 'playwright'):
                     with self.subTest(runner=runner, sizes=failed_sizes, failed_mode=failed_mode), tempfile.TemporaryDirectory() as directory:
                         log = Path(directory) / 'calls.txt'
                         result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', fake_node + diagnostic['run']],
@@ -131,7 +131,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
                                  'VIEWER_24_OUTCOME':'failure' if 24 in failed_sizes else 'success'},
                             cwd=directory, capture_output=True, text=True)
                         expected = [f'scripts/test-browser-stability.cjs|{size}|{mode}'
-                                    for size in failed_sizes for mode in ('sequential', 'gesture50')]
+                                    for size in failed_sizes for mode in ('playwright', 'gesture50')]
                         self.assertEqual(log.read_text().splitlines() if log.exists() else [], expected)
                         self.assertEqual(result.returncode, 1 if failed_sizes and failed_mode != 'none' else 0, result.stderr)
 

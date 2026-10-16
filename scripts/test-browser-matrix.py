@@ -60,7 +60,7 @@ class BrowserMatrixTests(unittest.TestCase):
                         ' out.write(json.dumps({"rooms":int(os.environ["BROWSER_STABILITY_ROOMS"]),'
                         '"mode":os.environ["BROWSER_STABILITY_TOUCH_TAP"],"args":sys.argv[1:],'
                         '"trace":os.environ["BROWSER_STABILITY_TRACE_INPUT"]})+"\\n")\n'
-                        'sys.exit(1 if os.environ["BROWSER_STABILITY_TOUCH_TAP"]=="sequential" else 0)\n')
+                        'sys.exit(1 if os.environ["BROWSER_STABILITY_TOUCH_TAP"]=="playwright" else 0)\n')
                     node.chmod(0o755)
                     xvfb = folder / 'xvfb-run'
                     xvfb.write_text('#!/bin/sh\nshift\nexec "$@"\n')
@@ -74,7 +74,7 @@ class BrowserMatrixTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 1 if failed else 0, result.stderr)
                     actual = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
                     expected = [{'rooms':rooms,'mode':mode,'args':['scripts/test-browser-stability.cjs'],'trace':'1'}
-                                for rooms in failed for mode in ('sequential','gesture50')]
+                                for rooms in failed for mode in ('playwright','gesture50')]
                     self.assertEqual(actual, expected)
 
     def test_current_toolchain_matches_repository_lock(self):

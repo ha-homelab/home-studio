@@ -438,9 +438,11 @@ test('native touch drags use browser protocol and release a failed gesture', asy
   assert.deepEqual(commands[13].payload, {type:'touchEnd',touchPoints:[]});
 });
 
-test('viewer tap diagnostics validate modes and never change the default transport', async () => {
+test('Chromium touch defaults to serialized native taps with explicit comparison modes', async () => {
   const touch = {input:'native-touch',emulated:true};
-  assert.deepEqual(viewerInputOptions('chromium', touch, {}), {tapMode:'playwright',traceInput:false});
+  assert.deepEqual(viewerInputOptions('chromium', touch, {}), {tapMode:'sequential',traceInput:false});
+  assert.deepEqual(viewerInputOptions('chromium', {input:'mouse'}, {}), {tapMode:'playwright',traceInput:false});
+  assert.deepEqual(viewerInputOptions('webkit', {input:'native-tap-mouse-drag',emulated:true}, {}), {tapMode:'playwright',traceInput:false});
   for (const mode of ['', 'retry', 'gesture']) assert.throws(() =>
     viewerInputOptions('chromium', touch, {BROWSER_STABILITY_TOUCH_TAP:mode}), /must be playwright/);
   assert.throws(() => viewerInputOptions('webkit', touch, {BROWSER_STABILITY_TOUCH_TAP:'sequential'}), /Chromium touch/);
@@ -449,13 +451,13 @@ test('viewer tap diagnostics validate modes and never change the default transpo
   assert.throws(() => viewerInputOptions('firefox', touch, {BROWSER_STABILITY_TRACE_INPUT:'1'}), /requires Chromium/);
   const commands = [];
   const page = {context:()=>({newCDPSession:async()=>({send:async command=>commands.push(command)})})};
-  const driver = await createInputDriver(page, 'chromium', touch);
+  const driver = await createInputDriver(page, 'chromium', touch, {tapMode:'playwright'});
   let taps = 0;
   await driver.tap({tap:async(...args)=>{assert.equal(args.length,0);taps++;}});
   assert.equal(taps,1); assert.deepEqual(commands,[]);
 });
 
-test('each alternative sends one native tap with no trial or retry input', async () => {
+test('each native transport sends one tap with no trial or retry input', async () => {
   for (const tapMode of ['sequential','gesture50']) {
     const commands = [];
     let startAcknowledged = false;
@@ -464,10 +466,10 @@ test('each alternative sends one native tap with no trial or retry input', async
       if (payload.type === 'touchStart') {await Promise.resolve();startAcknowledged=true;}
       if (payload.type === 'touchEnd') assert(startAcknowledged, 'Start must be acknowledged before end');
     }})})};
-    let hit = true;
+    let hit = true, enabled = true;
     const locator = {tap:()=>assert.fail('No intercepted trial input'), click:()=>assert.fail('No fallback click'),
       waitFor:async options=>assert.deepEqual(options,{state:'visible'}), scrollIntoViewIfNeeded:async()=>{},
-      isEnabled:async()=>true, evaluate:async()=>hit, boundingBox:async()=>({x:20,y:30,width:60,height:40})};
+      isEnabled:async()=>enabled, evaluate:async()=>hit, boundingBox:async()=>({x:20,y:30,width:60,height:40})};
     const driver = await createInputDriver(page,'chromium',{input:'native-touch',emulated:true},{tapMode});
     await driver.tap(locator);
     if (tapMode === 'sequential') assert.deepEqual(commands,[
@@ -479,7 +481,37 @@ test('each alternative sends one native tap with no trial or retry input', async
     commands.length=0; hit=false;
     await assert.rejects(driver.tap(locator),/center must receive input/);
     assert.deepEqual(commands,[],'Failed hit testing must not dispatch any touch');
+    hit=true; enabled=false;
+    await assert.rejects(driver.tap(locator),/must be enabled/);
+    assert.deepEqual(commands,[],'Disabled controls must not receive any touch');
   }
+});
+
+test('default taps and drags share one CDP session and preserve exactly four touch sequences', async () => {
+  let sessions = 0, pendingStart = false;
+  const commands = [];
+  const page = {context:()=>({newCDPSession:async()=>{
+    sessions++; return {send:async(method,payload)=>{
+      commands.push({method,payload});
+      if(payload.type==='touchStart') {pendingStart=true;await Promise.resolve();pendingStart=false;}
+      if(payload.type==='touchEnd') assert.equal(pendingStart,false,'Never end before the start response');
+    }};
+  }})};
+  const locator = {waitFor:async()=>{},scrollIntoViewIfNeeded:async()=>{},isEnabled:async()=>true,
+    evaluate:async()=>true,boundingBox:async()=>({x:320,y:240,width:80,height:40}),
+    tap:()=>assert.fail('Default must use native CDP'),click:()=>assert.fail('No synthetic click')};
+  const driver=await createInputDriver(page,'chromium',{input:'native-touch',emulated:true});
+  await driver.drag({x:10,y:20},{x:30,y:40}); await driver.tap(locator);
+  await driver.drag({x:10,y:20},{x:30,y:40}); await driver.tap(locator);
+  assert.equal(sessions,1);
+  assert.equal(commands.filter(c=>c.payload.type==='touchStart').length,4);
+  assert.equal(commands.filter(c=>c.payload.type==='touchEnd').length,4);
+  assert.equal(commands.filter(c=>c.payload.type==='touchMove').length,24);
+  assert.deepEqual(commands[14].payload.touchPoints,[{x:360,y:260,id:0}],
+    'Native taps use main-frame CSS coordinates from the locator, including iframe offsets');
+  const viewer=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  assert.match(viewer,/trustedTouchStarts===4 && sample\.input\.trustedTouchEnds===4/,
+    'The real suite retains its exact trusted native sequence assertion');
 });
 
 function fakeInputTrace(fake, {lost=false, readFails=false} = {}) {
