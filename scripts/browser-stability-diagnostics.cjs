@@ -125,7 +125,8 @@ function inputInstrumentation() {
   const record = (event, phase) => {
     const point = event.changedTouches?.[0] || event;
     const viewport = window.visualViewport;
-    counts.events.push({type:event.type,phase,time:Math.round(performance.now()),trusted:event.isTrusted,
+    counts.events.push({type:event.type,phase,time:Math.round(performance.now()),eventTimeStamp:event.timeStamp,
+      cancelable:event.cancelable,trusted:event.isTrusted,
       target:{tag:event.target?.tagName||null,id:event.target?.id||null,container:event.target?.parentElement?.closest('[id]')?.id||null},
       pointerType:event.pointerType||null,pointerId:event.pointerId??null,client:[point.clientX??null,point.clientY??null],
       defaultPrevented:event.defaultPrevented,homeMode:window.floorplan?.homeMode??null,
@@ -135,8 +136,12 @@ function inputInstrumentation() {
   for(const type of ['pointerdown','pointerup','pointercancel','gotpointercapture','lostpointercapture','touchstart','touchend','touchcancel','click']) {
     window.addEventListener(type,event=>record(event,'capture'),{capture:true,passive:true});
   }
-  // Bubble evidence shows whether a trusted click reached the app's handler.
-  window.addEventListener('click',event=>record(event,'bubble'),{passive:true});
+  // Capture precedes later preventDefault calls. Bubble evidence retains
+  // cancellation after target handlers, and shows whether a click reached them.
+  // Native event timestamps distinguish press duration from delayed dispatch.
+  for (const type of ['pointerdown','pointerup','pointercancel','touchstart','touchend','touchcancel','click']) {
+    window.addEventListener(type,event=>record(event,'bubble'),{passive:true});
+  }
   for (const [event, key] of [['touchstart', 'trustedTouchStarts'], ['touchmove', 'trustedTouchMoves'], ['touchend', 'trustedTouchEnds']]) {
     window.addEventListener(event, value => { if (value.isTrusted) counts[key]++; }, {capture: true, passive: true});
   }

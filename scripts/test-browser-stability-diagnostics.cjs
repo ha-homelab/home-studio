@@ -445,8 +445,9 @@ test('input evidence retains event targets and viewport without changing native 
   const window={floorplan:{homeMode:false},visualViewport:{scale:1,offsetLeft:0,offsetTop:2},
     addEventListener:(type,callback,options)=>listeners.push({type,callback,capture:options===true||options?.capture})};
   vm.runInNewContext(instrument+'\ninputInstrumentation();',{window,innerWidth:375,innerHeight:784,devicePixelRatio:1,performance:{now:()=>25}});
-  const emit=(type,capture)=>{
-    const event=Object.freeze({type,target,isTrusted:true,pointerType:'touch',pointerId:7,clientX:50,clientY:100,defaultPrevented:false});
+  const emit=(type,capture,overrides={})=>{
+    const event=Object.freeze({type,target,isTrusted:true,pointerType:'touch',pointerId:7,clientX:50,clientY:100,
+      defaultPrevented:false,timeStamp:12.75,cancelable:true,...overrides});
     for(const listener of listeners)if(listener.type===type&&(capture===undefined||Boolean(listener.capture)===capture))listener.callback(event);
   };
   emit('touchstart');emit('touchend');emit('click',true);
@@ -457,6 +458,13 @@ test('input evidence retains event targets and viewport without changing native 
   assert.deepEqual(click.map(event=>[event.phase,event.homeMode]),[['capture',false],['bubble',true]]);
   assert.deepEqual(click[0].target,{tag:'BUTTON',id:'openHome',container:'toolbar'});
   assert.deepEqual(click[0].client,[50,100]);
+  assert.equal(click[0].eventTimeStamp,12.75,'Preserve the native timestamp separately from rounded observation time');
+  assert.equal(click[0].time,25);assert.equal(click[0].cancelable,true);
+  emit('pointerdown',true);emit('pointerdown',false,{defaultPrevented:true});
+  const cancellation=window.__acceptanceInput.events.slice(-2);
+  assert.equal(cancellation[0].defaultPrevented,false);
+  assert.equal(cancellation[1].defaultPrevented,true);
+  assert.equal(cancellation[1].phase,'bubble');
   assert.deepEqual(click[0].viewport,{width:375,height:784,dpr:1,scale:1,x:0,y:2});
   for(let n=0;n<100;n++)emit('pointercancel');
   assert.equal(window.__acceptanceInput.events.length,64,'Input evidence must remain bounded');
