@@ -16,7 +16,7 @@ import time
 
 BASELINE = '13b8ed9e1f0baf68eac329764a05277377113419'
 CANDIDATES = {
-    'signal-decay': 'be4c7c6d0053468604e5cc4320c0aa1721833002',
+    'signal-decay-cached': 'd94352dbf1d99ecffd65c5479ce31e76bbc8d3c4',
 }
 VERSIONS = {'firefox': '153.5.0esr', 'waterfox': '6.7.6'}
 DRIVER_FILES = (
@@ -270,7 +270,7 @@ def run_comparison(source_root, installation, output, candidate, product):
     output.mkdir(parents=True, exist_ok=True)
     manifest = {
         'schema': 1, 'diagnosticOnly': True, 'releaseEligible': False, 'acceptanceStatus': 'not-run',
-        'purpose': 'Same-host Intel Signal texture and decay-two comparison with common Spotlight normalization; never release qualification',
+        'purpose': 'Same-host Intel Signal texture, decay-two and cached transmission comparison with common Spotlight normalization; never release qualification',
         'candidate': candidate, 'product': product, 'expectedVersion': VERSIONS[product],
         'startedAt': utc_now(), 'status': 'preparing', 'arms': [],
         'order': [name for name, _ in arms],

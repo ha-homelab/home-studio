@@ -1,21 +1,22 @@
-# Disposable Intel signal-decay diagnostic
+# Disposable Intel signal-decay-cached diagnostic
 
-Only a push to `diagnostic/intel-cgl-signal-decay` starts this workflow. It has
+Only a push to `diagnostic/intel-cgl-signal-decay-cached` starts this workflow. It has
 read-only GitHub permissions and pinned actions. It does not invoke the 77-lane
 acceptance gate or publish a release. Its results are diagnostic evidence only.
 
 Two independent `macos-15-intel` jobs compare these exact sources in order:
 
 - Baseline: `13b8ed9e1f0baf68eac329764a05277377113419`.
-- Signal texture and decay-two: `be4c7c6d0053468604e5cc4320c0aa1721833002`.
+- Signal texture, decay-two and cached transmission: `d94352dbf1d99ecffd65c5479ce31e76bbc8d3c4`.
 
 One job uses Firefox `153.5.0esr`; the other uses Waterfox `6.7.6`. Maximum
 parallelism is two. Each pair runs sequentially on one hosted VM and shares one
 official browser installation verified by the original installer, checksum
 catalog and signature checks. Python 3.13, Node 22 and both locked npm dependency
 installations are prepared before either suite starts. The candidate's
-`test-signal-texture-decay-two.cjs` CPU/shader contract also runs before the browser is
-installed; failure stops preparation.
+`test-signal-texture-decay-two.cjs` and
+`test-cached-shadow-transmission.cjs` CPU/shader contracts both run before the
+browser is installed; failure stops preparation.
 
 After both sources pass preflight, the runner records `mdutil -a -s`, invokes
 `sudo -n /usr/bin/mdutil -a -i off` exactly once, and records another status.
@@ -39,7 +40,7 @@ This common normalization is not a proven cure for the Intel failures, and a
 disabled status does not prove that existing indexing workers are idle. The
 passive CPU records remain necessary context. Both sources receive the same
 normalization; the comparison varies only the composition of exact texture transport and checked point decay,
-not Spotlight configuration. Fixed order and shared caches still limit causal conclusions.
+plus pure shadow-transmission reuse, not Spotlight configuration. Fixed order and shared caches still limit causal conclusions.
 
 The candidate composes the reviewed point, run, static geometry and dynamic
 signal texture transport with the checked constant-two point attenuation
@@ -47,11 +48,13 @@ helper. A single include replacement supports all four independent transport
 and decay states. The original generic and spot helpers, point/shadow order,
 light count, visible quality and every acceptance limit remain unchanged.
 Unsupported inputs and the editor retain their original fallback paths.
-It adds no resources beyond the existing three transport textures. The
+The packed shadow prefix reuses its unchanged pure transmission result within
+each light, eliminating only the repeated call after attenuation. It adds no
+resources beyond the existing three transport textures. The
 candidate's `docs/point-decay-two.md` records the scope and CPU proof. Neither
 the failed standalone hosted decay trial nor local composition acceptance
 establishes an Intel performance improvement. This pair compares the complete
-composition against the original 13b source, not against c257 transport alone.
+composition against the original 13b source, not against either c257 or be4 alone.
 
 The wrapper invokes each source's original `test-native-browser-acceptance.py`
 once, with its standard product, expected-version, installation and output
@@ -105,16 +108,16 @@ local setting change.
 Offline contract check, with no browser or network:
 
 ```sh
-python3 scripts/test-intel-cgl-signal-decay.py
+python3 scripts/test-intel-cgl-signal-decay-cached.py
 ```
 
 The workflow supplies fixed choices. Its equivalent command on the Intel host
 is:
 
 ```sh
-python3 harness/scripts/run-intel-cgl-signal-decay.py \
-  --source-root "$GITHUB_WORKSPACE" --candidate signal-decay \
+python3 harness/scripts/run-intel-cgl-signal-decay-cached.py \
+  --source-root "$GITHUB_WORKSPACE" --candidate signal-decay-cached \
   --product firefox \
-  --installation "$RUNNER_TEMP/home-studio-intel-cgl-signal-decay-browser/install.json" \
-  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-signal-decay"
+  --installation "$RUNNER_TEMP/home-studio-intel-cgl-signal-decay-cached-browser/install.json" \
+  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-signal-decay-cached"
 ```
