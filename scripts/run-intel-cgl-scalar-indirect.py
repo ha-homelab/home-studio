@@ -15,13 +15,14 @@ import threading
 import time
 
 
-BASELINE = 'be640ec12f0acd3abf094d5f5fa03ce2ad2781fe'
+BASELINE = 'c6da122681807da85858a90a629de99997a72531'
 CANDIDATES = {
-    'scalar-shadow': 'c6da122681807da85858a90a629de99997a72531',
+    'scalar-indirect': 'f364c49422d8a549944695ad889867e98f366145',
 }
 CANDIDATE_CPU_CHECKS = ('scripts/test-literal-lambert-point-body.cjs',
                         'scripts/test-literal-lambert-directional.cjs',
-                        'scripts/test-scalar-shadow-point.cjs')
+                        'scripts/test-scalar-shadow-point.cjs',
+                        'scripts/test-scalar-indirect-lambert.cjs')
 VERSIONS = {'firefox': '153.5.0esr', 'waterfox': '6.7.6'}
 DRIVER_FILES = (
     'scripts/test-native-browser-acceptance.py', 'scripts/test-waterfox-acceptance.py',
@@ -42,18 +43,18 @@ PROFILE = {
 
 def validate_selection():
     """The prepared template cannot run with an unset or moving source."""
-    if set(CANDIDATES) != {'scalar-shadow'}:
+    if set(CANDIDATES) != {'scalar-indirect'}:
         raise ValueError('Exactly one fixed candidate is required')
-    revision = CANDIDATES['scalar-shadow']
+    revision = CANDIDATES['scalar-indirect']
     if (not re.fullmatch(r'[0-9a-f]{40}', revision) or
             revision == BASELINE or revision == '0' * 40):
         raise ValueError('Select one exact non-baseline candidate SHA before running')
-    if (not isinstance(CANDIDATE_CPU_CHECKS, tuple) or len(CANDIDATE_CPU_CHECKS) != 3 or
-            len(set(CANDIDATE_CPU_CHECKS)) != 3 or
+    if (not isinstance(CANDIDATE_CPU_CHECKS, tuple) or len(CANDIDATE_CPU_CHECKS) != 4 or
+            len(set(CANDIDATE_CPU_CHECKS)) != 4 or
             any(not isinstance(proof, str) or not re.fullmatch(r'scripts/test-[a-z0-9-]+\.cjs', proof)
                 for proof in CANDIDATE_CPU_CHECKS)):
-        raise ValueError('Select three distinct candidate CPU proofs before running')
-    workflow = Path(__file__).resolve().parents[1] / '.github/workflows/intel-cgl-scalar-shadow.yml'
+        raise ValueError('Select four distinct candidate CPU proofs before running')
+    workflow = Path(__file__).resolve().parents[1] / '.github/workflows/intel-cgl-scalar-indirect.yml'
     text = workflow.read_text(encoding='utf-8')
     if (text.count('revision: ' + revision) != 2 or
             any(text.count('node candidate/' + proof) != 1 for proof in CANDIDATE_CPU_CHECKS)):
@@ -294,7 +295,7 @@ def run_comparison(source_root, installation, output, candidate, product):
     output.mkdir(parents=True, exist_ok=True)
     manifest = {
         'schema': 1, 'diagnosticOnly': True, 'releaseEligible': False, 'acceptanceStatus': 'not-run',
-        'purpose': 'Same-host Intel scalar shadow-point Lambert comparison with common Spotlight normalization; never release qualification',
+        'purpose': 'Same-host Intel scalar indirect Lambert comparison with common Spotlight normalization; never release qualification',
         'candidate': candidate, 'product': product, 'expectedVersion': VERSIONS[product],
         'startedAt': utc_now(), 'status': 'preparing', 'arms': [],
         'order': [name for name, _ in arms],

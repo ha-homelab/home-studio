@@ -1,15 +1,15 @@
-name: Diagnostic Intel CGL scalar shadow-point Lambert
-run-name: Non-release Intel scalar shadow-point Lambert pairs with common indexing state · ${{ github.sha }}
+name: Diagnostic Intel CGL scalar indirect Lambert
+run-name: Non-release Intel scalar indirect Lambert pairs with common indexing state · ${{ github.sha }}
 
 on:
   push:
-    branches: [diagnostic/intel-cgl-scalar-shadow]
+    branches: [diagnostic/intel-cgl-scalar-indirect]
 
 permissions:
   contents: read
 
 concurrency:
-  group: diagnostic-intel-cgl-scalar-shadow
+  group: diagnostic-intel-cgl-scalar-indirect
   cancel-in-progress: false
 
 defaults:
@@ -19,7 +19,7 @@ defaults:
 jobs:
   compare:
     name: ${{ matrix.product }} · ${{ matrix.candidate }}
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-scalar-shadow' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-scalar-indirect' }}
     runs-on: macos-15-intel
     # Two sequential original three-case suites per VM; their own limits
     # are unchanged. Other pairs run on separate hosted VMs.
@@ -31,12 +31,12 @@ jobs:
         include:
           - product: firefox
             version: 153.5.0esr
-            candidate: scalar-shadow
-            revision: c6da122681807da85858a90a629de99997a72531
+            candidate: scalar-indirect
+            revision: f364c49422d8a549944695ad889867e98f366145
           - product: waterfox
             version: 6.7.6
-            candidate: scalar-shadow
-            revision: c6da122681807da85858a90a629de99997a72531
+            candidate: scalar-indirect
+            revision: f364c49422d8a549944695ad889867e98f366145
     env:
       PYTHONUTF8: '1'
       NATIVE_STARTUP_DIAGNOSTICS: '1'
@@ -51,11 +51,11 @@ jobs:
           path: harness
           persist-credentials: false
       - name: Reject an unselected or inconsistent candidate before setup
-        run: python3 harness/scripts/run-intel-cgl-scalar-shadow.py --validate-selection
+        run: python3 harness/scripts/run-intel-cgl-scalar-indirect.py --validate-selection
       - name: Check out the exact common baseline
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: be640ec12f0acd3abf094d5f5fa03ce2ad2781fe
+          ref: c6da122681807da85858a90a629de99997a72531
           path: baseline
           persist-credentials: false
       - name: Check out the exact independent candidate
@@ -72,7 +72,7 @@ jobs:
           node-version: '22'
       - name: Record tooling and prepare both fixtures before timing
         run: |
-          mkdir -p harness/diagnostics/intel-cgl-scalar-shadow
+          mkdir -p harness/diagnostics/intel-cgl-scalar-indirect
           {
             python3 --version
             node --version
@@ -80,37 +80,38 @@ jobs:
             uname -sm
             sw_vers
             /usr/sbin/sysctl machdep.cpu.brand_string hw.ncpu hw.memsize || true
-          } > harness/diagnostics/intel-cgl-scalar-shadow/toolchain.log 2>&1
-          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-scalar-shadow/baseline-npm.log
-          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-scalar-shadow/candidate-npm.log
-          python3 harness/scripts/test-intel-cgl-scalar-shadow.py
+          } > harness/diagnostics/intel-cgl-scalar-indirect/toolchain.log 2>&1
+          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-scalar-indirect/baseline-npm.log
+          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-scalar-indirect/candidate-npm.log
+          python3 harness/scripts/test-intel-cgl-scalar-indirect.py
           node candidate/scripts/test-literal-lambert-point-body.cjs
           node candidate/scripts/test-literal-lambert-directional.cjs
           node candidate/scripts/test-scalar-shadow-point.cjs
+          node candidate/scripts/test-scalar-indirect-lambert.cjs
       - name: Install one original checksum and signature verified browser per pair
         env:
-          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-scalar-shadow-browser
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-scalar-indirect-browser
           PRODUCT: ${{ matrix.product }}
           VERSION: ${{ matrix.version }}
         run: |
-          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-scalar-shadow/install.log
-          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-scalar-shadow/install.json
+          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-scalar-indirect/install.log
+          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-scalar-indirect/install.json
       - name: Normalize indexing once and run both original native suites
         env:
-          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-scalar-shadow-browser
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-scalar-indirect-browser
           PRODUCT: ${{ matrix.product }}
           CANDIDATE: ${{ matrix.candidate }}
         run: >-
-          python3 harness/scripts/run-intel-cgl-scalar-shadow.py
+          python3 harness/scripts/run-intel-cgl-scalar-indirect.py
           --source-root "$GITHUB_WORKSPACE"
           --candidate "$CANDIDATE" --product "$PRODUCT"
           --installation "$INSTALL_DIR/install.json"
-          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-scalar-shadow"
+          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-scalar-indirect"
       - name: Preserve all non-release evidence even when a source fails
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: diagnostic-intel-cgl-scalar-shadow-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: harness/diagnostics/intel-cgl-scalar-shadow/
+          name: diagnostic-intel-cgl-scalar-indirect-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: harness/diagnostics/intel-cgl-scalar-indirect/
           if-no-files-found: error
           retention-days: 14

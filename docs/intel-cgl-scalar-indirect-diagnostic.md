@@ -1,6 +1,6 @@
-# Disposable Intel scalar shadow-point Lambert diagnostic
+# Disposable Intel scalar indirect Lambert diagnostic
 
-Only a push to `diagnostic/intel-cgl-scalar-shadow` starts this workflow. It has
+Only a push to `diagnostic/intel-cgl-scalar-indirect` starts this workflow. It has
 read-only GitHub permissions and pinned actions. It does not invoke the 77-lane
 acceptance gate or publish a release. Its results are diagnostic evidence only.
 
@@ -11,17 +11,18 @@ preparation. Preparation does not authorize a push or launch.
 
 Two independent `macos-15-intel` jobs compare these sources in order:
 
-- Baseline: `be640ec12f0acd3abf094d5f5fa03ce2ad2781fe`.
-- Scalar shadow-point Lambert: `c6da122681807da85858a90a629de99997a72531`.
+- Baseline: `c6da122681807da85858a90a629de99997a72531`.
+- Scalar indirect Lambert: `f364c49422d8a549944695ad889867e98f366145`.
 - Candidate preflights: `node scripts/test-literal-lambert-point-body.cjs` and
   `node scripts/test-literal-lambert-directional.cjs`, plus
-  `node scripts/test-scalar-shadow-point.cjs`.
+  `node scripts/test-scalar-shadow-point.cjs` and
+  `node scripts/test-scalar-indirect-lambert.cjs`.
 
 One job uses Firefox `153.5.0esr`; the other uses Waterfox `6.7.6`. Maximum
 parallelism is two. Each pair runs sequentially on one hosted VM and shares one
 official browser installation verified by the original installer, checksum
 catalog and signature checks. Python 3.13, Node 22 and both locked npm dependency
-installations are prepared before either suite starts. All three selected candidate
+installations are prepared before either suite starts. All four selected candidate
 CPU proofs run before the browser is installed; failure stops preparation.
 
 After both sources pass preflight, the runner records `mdutil -a -s`, invokes
@@ -47,12 +48,12 @@ disabled status does not prove that existing indexing workers are idle. The
 passive CPU records remain necessary context. Both sources receive the same
 normalization. Fixed order and shared caches still limit causal conclusions.
 
-The baseline already contains the reviewed scalar unshadowed-point and directional
-Lambert bodies. The candidate additionally scalarizes only the cached literal
-shadow-point prefix, preserving shadow lookup, transmission and accumulation order.
-All three CPU proofs run before browser installation. The source is pinned to the signed shadow-point revision above;
+The baseline already contains the reviewed scalar unshadowed-point, directional
+and cached shadow-point Lambert bodies. The candidate additionally scalarizes the
+Lambert indirect-diffuse accumulation, preserving its arithmetic and order.
+All four CPU proofs run before browser installation. The source is pinned to the signed indirect-Lambert revision above;
 placeholders or inconsistent workflow pins still fail preflight before source
-checkouts, installation or any system command. No scalar-shadow Intel performance
+checkouts, installation or any system command. No scalar-indirect Intel performance
 claim is made. Local image evidence and this harness require review before the
 workflow is pushed.
 
@@ -110,16 +111,16 @@ local setting change.
 Offline contract check, with no browser or network:
 
 ```sh
-python3 scripts/test-intel-cgl-scalar-shadow.py
+python3 scripts/test-intel-cgl-scalar-indirect.py
 ```
 
 The workflow supplies fixed choices. Its equivalent command on the Intel host
 is:
 
 ```sh
-python3 harness/scripts/run-intel-cgl-scalar-shadow.py \
-  --source-root "$GITHUB_WORKSPACE" --candidate scalar-shadow \
+python3 harness/scripts/run-intel-cgl-scalar-indirect.py \
+  --source-root "$GITHUB_WORKSPACE" --candidate scalar-indirect \
   --product firefox \
-  --installation "$RUNNER_TEMP/home-studio-intel-cgl-scalar-shadow-browser/install.json" \
-  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-scalar-shadow"
+  --installation "$RUNNER_TEMP/home-studio-intel-cgl-scalar-indirect-browser/install.json" \
+  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-scalar-indirect"
 ```
