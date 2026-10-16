@@ -178,7 +178,7 @@ scenarios, assertions and deadlines remain required before any acceptance
 decision.
 
 The same diffuse profile uses constant-tint Basic materials for supported opaque
-static floors and the authoring background in the Editor only. These surfaces
+static floors in the Editor only. These surfaces
 keep their geometry, colors, clipping, depth behavior and shadow casting, but do
 not receive lighting or shadows in the Editor. Furniture and outlines keep their
 existing materials. Returning to Home restores the exact original floor material
@@ -188,6 +188,16 @@ Basic material per eligible mesh is retained across mode switches; context loss
 releases GPU associations for active and dormant materials, and final page cleanup
 releases both. This is an explicit Editor quality tradeoff requiring visual and
 performance evaluation; it does not change resolution, lights or acceptance limits.
+
+This profile also hides the separate authoring backdrop plane in the Editor,
+including the initial standalone view. The grid, real floors, furniture and
+outlines remain visible. The scene background replaces the flat backdrop
+surface; this is an explicit visual tradeoff, not pixel equivalence.
+Home already hides the plane, and other profiles keep their original visibility.
+The plane and its material remain owned by the existing scene and lifecycle
+cleanup. No context, antialiasing, light, resolution or browser-test setting
+changes. Qualify each revision with the complete required hosted matrix;
+local comparisons alone do not establish a cross-browser performance gain.
 
 Gecko can mask both hardware and software renderers as exactly `Apple M1, or similar`.
 Only that exact label with a Gecko user agent runs a capacity probe, once per

@@ -224,9 +224,11 @@ linked light. Architectural wall fill is an exception in both Home and Editor:
 its constant-tint Basic material keeps geometry, opacity, cutaway clipping,
 outlines and shadow casting, but receives no lighting, daylight or shadows and
 has no animated or view-dependent sheen. In the Editor only, supported opaque
-static floors and the authoring background also use constant-tint materials
-without received lighting or shadows; geometry, clipping, floor shadow casting,
-furniture and outlines are retained. Returning to Home restores the original
+static floors also use constant-tint materials without received lighting or
+shadows. The separate authoring backdrop is hidden, leaving the grid and real
+floors visible; geometry, clipping, floor shadow casting, furniture and outlines
+are retained. Other profiles retain their backdrop, and Home's existing hidden
+backdrop is unchanged. Returning to Home restores the original
 floor materials and their lighting. See the
 [profile and qualification notes](platform-acceptance.md). Packed room geometry
 for lit surfaces is enabled only within a conservative uniform budget; otherwise

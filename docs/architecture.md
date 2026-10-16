@@ -196,9 +196,13 @@ daylight and every linked light. Architectural wall fill instead uses an unlit
 Basic material in both Home and Editor: it retains its teal color, opacity,
 geometry, cutaway clipping, outlines and full-height shadow casting, but does
 not receive lighting, daylight or shadows and has no view-dependent or animated
-sheen. In the Editor only, supported opaque static floors and the authoring
-background also use constant-tint Basic materials, without received lighting or
-shadows. A bounded lazy material cache restores each original floor material
+sheen. In the Editor only, supported opaque static floors use constant-tint
+Basic materials, without received lighting or shadows. The separate authoring
+backdrop plane is hidden on this profile, while the grid and real floor geometry
+remain visible. Home already hides that backdrop; other profiles are unchanged.
+Its existing material and geometry are retained for the normal ownership and
+context-restoration lifecycle. A bounded lazy material cache restores each
+original floor material
 object before Home lighting attachment and releases active and dormant GPU
 associations on context loss. Geometry, clipping, floor shadow casting, furniture
 and outlines are retained; unsupported materials keep their original path.

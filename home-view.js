@@ -174,7 +174,8 @@ homeView = (() => {
       scene.background = new THREE.Color(value ? '#18242c' : '#e7e8df');
       // A dim base keeps unlit rooms readable while HA lights provide the contrast.
       hemisphere.intensity = value ? .16 : 1.8; sun.intensity = value ? .18 : 2.3;
-      ground.visible = grid.visible = !value;
+      // Keep the Editor grid and real floors; omit its backdrop on the diffuse profile.
+      ground.visible = !value && !renderProfile.diffuseLighting; grid.visible = !value;
       // Keep window heads visible.
       clipping.constant = value ? 2.1 : $('cutaway').checked ? 1.15 : 20;
       // Keep full-height shadow blockers when changing view modes.

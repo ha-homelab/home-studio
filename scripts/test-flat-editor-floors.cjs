@@ -8,6 +8,22 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
   assert.equal(THREE.REVISION,'169');
   function extractFunction(text,name){const start=text.indexOf('function '+name+'(');assert(start>=0,name);let end=text.indexOf('}',start);for(;end>=0;end=text.indexOf('}',end+1)){const part=text.slice(start,end+1);try{new vm.Script(part);return part;}catch{}}throw Error('Unclosed '+name);}
   const helper=extractFunction(source,'createEditorFloorMaterials');
+  // Execute the actual initial construction, before setActive runs in a
+  // standalone Editor. Only backdrop visibility may differ between profiles.
+  const initialGround=source.split('\n').find(line=>line.startsWith('ground=new THREE.Mesh('));
+  assert(initialGround,'Initial standalone ground construction is present');
+  for(const diffuseLighting of [false,true]) {
+    const scene=new THREE.Scene(),material=new THREE.MeshLambertMaterial(),
+      c=vm.createContext({THREE,scene,planRadius:40,planCenter:[7,9],renderProfile:{diffuseLighting},createSceneMaterial:()=>material});
+    vm.runInContext(initialGround,c);
+    assert.equal(c.ground.visible,!diffuseLighting);
+    assert.equal(c.grid.visible,true);assert(scene.children.includes(c.ground)&&scene.children.includes(c.grid));
+    assert.equal(c.ground.material,material);assert.equal(c.ground.receiveShadow,true);
+    assert.deepEqual(c.ground.position.toArray(),[7,-1.97,9]);
+    assert.equal(c.ground.rotation.x,-Math.PI/2);
+    assert.equal(c.ground.geometry.parameters.width,80);assert.equal(c.ground.geometry.parameters.height,80);
+    if(diffuseLighting){const legacy=initialGround.replace('ground.visible=!renderProfile.diffuseLighting;','');assert.notEqual(legacy,initialGround);vm.runInContext(legacy,c);assert.equal(c.ground.visible,true,'Negative control exposes the old standalone backdrop');}
+  }
   const context=vm.createContext({});vm.runInContext(helper,context);
   const make=(r,g,profile={diffuseLighting:true})=>context.createEditorFloorMaterials(THREE,r,g,profile);
   function material(extra={}){const m=new THREE.MeshLambertMaterial({color:0xa4bbcd,side:THREE.DoubleSide,opacity:1,transparent:false,depthWrite:true,...extra});m.clippingPlanes=[new THREE.Plane(new THREE.Vector3(0,-1,0),1.15)];return m;}

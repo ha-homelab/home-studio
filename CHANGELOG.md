@@ -2,6 +2,13 @@
 
 ## [0.6.4] - Development line
 
+- Hide the separate authoring backdrop plane in the existing Apple diffuse
+  Editor profile, including measured masked-Apple selection. Keep the grid,
+  real floors, furniture and outlines. Home and other profiles retain their
+  existing visibility; antialiasing, context lifecycle, drawing-buffer budgets
+  and acceptance limits are unchanged. This intentionally removes the flat
+  background surface; it is not a pixel-parity claim.
+
 - Retry a failed acceptance-artifact upload once with the same completed files.
   The fallback replaces an ambiguous same-name upload, logs a warning and still
   fails if transport fails again. Browser cases, outcomes and deadlines do not

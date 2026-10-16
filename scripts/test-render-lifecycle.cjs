@@ -444,8 +444,8 @@ const modeStart=homeSource.indexOf('  function attachRoomLighting() {');
 const modeEnd=homeSource.indexOf('\n  function rebuildControls()',modeStart);
 assert(modeStart>=0&&modeEnd>modeStart,'Production Home mode switch is present');
 const modeSource=homeSource.slice(modeStart,modeEnd);
-function modeScheduler(legacy=false) {
-  const q=motionScheduler(false,false), c=q.c, elements=new Map(), modes=[];
+function modeScheduler(legacy=false,diffuse=false) {
+  const q=motionScheduler(diffuse,diffuse), c=q.c, elements=new Map(), modes=[];
   let width=800;
   const element=id=>{
     if(!elements.has(id))elements.set(id,{checked:true,hidden:false,prepend(){},
@@ -523,3 +523,24 @@ restoredMode.handlers.webglcontextlost({preventDefault(){}});restoredMode.handle
 restoredMode.flush();
 assert.equal(rapidModeReturn(restoredMode),1,'The same rapid transition repaints after real loss/restore handlers');
 console.log('PASS: actual Home mode/resize race, old-code negative control, coalesced repaint and lifecycle guards');
+
+// Both raw Apple and measured masked-Apple select this existing diffuse flag;
+// other reduced and hardware profiles retain the ordinary Editor backdrop.
+for(const profile of [{name:'raw Apple',diffuse:true},{name:'masked Apple',diffuse:true},
+  {name:'other software',diffuse:false},{name:'hardware',diffuse:false}]) {
+  const q=modeScheduler(false,profile.diffuse), floor={visible:true,userData:{category:'floors'}};
+  q.c.root.children.push(floor);
+  const ground=q.c.ground,grid=q.c.grid;
+  for(let cycle=0;cycle<3;cycle++)for(const active of [false,true,false,true]) {
+    q.c.setActive(active);q.flush();q.flush();
+    assert.equal(ground.visible,!active&&!profile.diffuse,profile.name+' backdrop mode');
+    assert.equal(grid.visible,!active,profile.name+' grid remains available in Editor');
+    assert.equal(floor.visible,true,'Real floor visibility is not changed by backdrop policy');
+    assert.equal(q.c.ground,ground);assert.equal(q.c.grid,grid);
+  }
+  q.handlers.webglcontextlost({preventDefault(){}});q.handlers.webglcontextrestored();
+  q.c.setActive(false);q.flush();q.flush();
+  assert.equal(ground.visible,!profile.diffuse,'The policy survives context restoration');
+  assert.equal(grid.visible,true);assert.equal(floor.visible,true);
+}
+console.log('PASS: actual repeated Home/Editor backdrop policy, grid/floor preservation and restored mode');
