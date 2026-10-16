@@ -206,12 +206,14 @@ ratio 2, scaling below the native display resolution when necessary. When the
 reported renderer positively identifies SwiftShader, llvmpipe, softpipe,
 Lavapipe, a software rasterizer, Microsoft Basic Render, or the exact
 `Apple Software Renderer` name, the cap is 250,000 pixels, except that this
-experimental revision caps the Apple diffuse viewer at 125,000 pixels. The same
+revision caps the Apple diffuse viewer at 125,000 pixels. The same
 125,000-pixel cap applies when the masked-Apple capacity check selects diffuse
 lighting; other software renderers and the planner retain their existing caps.
 This reduces each canvas dimension by about 29% at the cap and can make edges
 and fine details softer. It is an explicit image-quality tradeoff, with no
-claimed hosted performance improvement or release qualification. All reduced
+promised speedup on an unmeasured device. A small Editor canvas-aspect change
+can result from integer drawing-buffer rounding; Home layout and HTML controls
+retain their dimensions. All reduced
 profiles keep the smaller point-shadow limits above and a 512 by 512 directional
 shadow map. Native and unknown renderers retain the 2,000,000-pixel cap and
 2048 by 2048 directional shadow map unless the masked-Apple capacity check below
