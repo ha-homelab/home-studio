@@ -365,6 +365,49 @@ class ToolingTests(unittest.TestCase):
         self.assertEqual(client.method_calls[0], unittest.mock.call.execute('return window.floorplan.renderCount;'))
         self.assertEqual(client.method_calls[-1][0], 'wait')
 
+    def test_viewer_srcdoc_preserves_literal_diagnostic_source(self):
+        class BootstrapCaptured(Exception):
+            pass
+        client = Mock()
+        client.wait.side_effect = BootstrapCaptured()
+        with self.assertRaises(BootstrapCaptured):
+            acceptance.viewer(client, 'http://127.0.0.1', {'floors': [{'items': []}]}, {'samples': []}, Mock())
+        # Exercise the actual bootstrap and both complete diagnostic helpers.
+        # No browser, network or generated JavaScript is executed beyond the
+        # bootstrap's mocked iframe transport; emitted scripts are syntax parsed.
+        script, items, states, diagnostics, frame = client.execute.call_args.args
+        javascript = r"""
+const assert = require('node:assert/strict'), vm = require('node:vm'), fs = require('node:fs');
+const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+const tokens = ["$'", '$`', '$&', '$$'];
+const head = input.diagnostics + '\nwindow.__headTokens=' + JSON.stringify(tokens) + ';\n';
+const frame = input.frame + '\nwindow.__frameTokens=' + JSON.stringify(tokens) + ';\n';
+const html = '<!doctype html><html><head></head><body><script>const renderer=null;\n</script></body>\n</html>';
+let complete;
+const captured = new Promise(resolve => { complete = resolve; });
+const context = {window:{}, crypto:{randomUUID:()=> 'fixture-token'},
+  fetch:async url=>{assert.equal(url,'/viewer');return {text:async()=>html};},
+  document:{createElement:tag=>{assert.equal(tag,'iframe');return {style:{}};},
+    body:{append:iframe=>complete(iframe.srcdoc)}},
+  arguments:[input.items,input.states,head,frame]};
+vm.runInNewContext('(function(){' + input.script + '}).apply(null,arguments)',context,{timeout:2000});
+captured.then(srcdoc=>{
+  assert(srcdoc.includes(head),'Head diagnostic source must be inserted byte-for-byte');
+  assert(srcdoc.includes(frame),'Frame diagnostic source must be inserted byte-for-byte');
+  const scripts=[...srcdoc.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)];
+  assert.equal(scripts.length,2,'Only the intended head and original viewer scripts exist');
+  for(const [index,match] of scripts.entries())new vm.Script(match[1],{filename:'emitted-srcdoc-'+index});
+  assert(srcdoc.endsWith('</script></body>\n</html>'),'The original trailing document remains intact');
+  process.stdout.write('literal-srcdoc-pass\n');
+}).catch(error=>{console.error(error.stack);process.exitCode=1;});
+"""
+        result = subprocess.run(['node', '-e', javascript], input=json.dumps({
+            'script': script, 'items': items, 'states': states,
+            'diagnostics': diagnostics, 'frame': frame}),
+            text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, 'literal-srcdoc-pass\n')
+
     def test_pointer_release_requires_a_full_scene_frame(self):
         scene = {'drawingBuffer': [632, 394],
                  'renderPasses': {'last': 'scene', 'sceneViewport': [0, 0, 632, 394]}}

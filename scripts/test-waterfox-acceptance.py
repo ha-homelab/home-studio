@@ -350,8 +350,8 @@ def viewer(client, origin, project, record, save):
     for cycle in range(2):
         started = time.monotonic()
         client.execute('''const [items,states,diagnostics,frameDiagnostics]=arguments; window.fixtureLoaded=false;window.nativeTeardown=null;window.nativeGraphicsToken=crypto.randomUUID();
-          fetch('/viewer').then(r=>r.text()).then(html=>{html=html.replace('<head>','<head><script>window.__nativeGraphicsToken='+JSON.stringify(window.nativeGraphicsToken)+';'+diagnostics+'</script>');
-            html=html.replace('</script></body>', frameDiagnostics+'</script></body>');
+          fetch('/viewer').then(r=>r.text()).then(html=>{html=html.replace('<head>',()=>'<head><script>window.__nativeGraphicsToken='+JSON.stringify(window.nativeGraphicsToken)+';'+diagnostics+'</script>');
+            html=html.replace('</script></body>', ()=>frameDiagnostics+'</script></body>');
             const iframe=document.createElement('iframe');
             iframe.id='viewer';iframe.sandbox='allow-scripts allow-downloads allow-forms';
             iframe.style.cssText='width:100%;height:740px;border:0';
