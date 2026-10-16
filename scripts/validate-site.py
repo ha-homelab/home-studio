@@ -15,7 +15,7 @@ LOCALE_CODES = (
 
 SITE_FILES = (
     'index.html', 'site.css', 'privacy.html', 'install.html', '404.html', '.nojekyll',
-    'planner/index.html', 'planner/editor.css', 'planner/editor.js', 'planner/render-capacity.js',
+    'planner/index.html', 'planner/editor.css', 'planner/editor.js', 'planner/render-capacity.js', 'planner/interaction-render.js',
     'planner/i18n.js', 'planner/validation.js', 'planner/locales/index.js',
     'planner/help.js', 'planner/help.css', 'planner/help-locales.js', 'planner/language-links.js',
     *(f'planner/locales/{code}.js' for code in LOCALE_CODES),
@@ -56,7 +56,7 @@ REPO_FILES = ('docs/i18n.md', 'docs/translations/README.md',
               'scripts/browser-matrix.json', 'scripts/browser-matrix.py',
               'scripts/setup-browser-toolchain.py', 'scripts/setup-chrome-for-testing.py',
               'scripts/test-browser-matrix.py',
-              'scripts/test-render-capacity.cjs', 'scripts/test-render-lifecycle.cjs', 'docs/browser-compatibility.md',
+              'scripts/test-render-capacity.cjs', 'scripts/test-interaction-render.cjs', 'scripts/test-render-lifecycle.cjs', 'docs/browser-compatibility.md',
               'scripts/test-planner-stability.cjs', 'scripts/test-planner-render-budget.cjs',
               'scripts/test-viewer-startup.cjs', 'scripts/test-module-expiry.cjs', 'scripts/test-floor-context.py', 'scripts/test-floor-context.cjs',
               'planner/project.py', 'planner/package.json', 'planner/catalog.json', 'planner/furniture.py',

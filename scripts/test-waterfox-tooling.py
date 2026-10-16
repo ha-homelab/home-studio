@@ -365,6 +365,36 @@ class ToolingTests(unittest.TestCase):
         self.assertEqual(client.method_calls[0], unittest.mock.call.execute('return window.floorplan.renderCount;'))
         self.assertEqual(client.method_calls[-1][0], 'wait')
 
+    def test_pointer_release_requires_a_full_scene_frame(self):
+        scene = {'drawingBuffer': [632, 394],
+                 'renderPasses': {'last': 'scene', 'sceneViewport': [0, 0, 632, 394]}}
+        acceptance.assert_full_viewer_frame(scene)
+        scene['renderPasses']['last'] = 'copy'
+        with self.assertRaisesRegex(AssertionError, 'full scene draw'):
+            acceptance.assert_full_viewer_frame(scene)
+        scene['renderPasses'] = {'last': 'scene', 'sceneViewport': [0, 0, 316, 197]}
+        with self.assertRaisesRegex(AssertionError, 'original drawing-buffer'):
+            acceptance.assert_full_viewer_frame(scene)
+
+    def test_real_gesture_requires_bounded_copy_and_full_release(self):
+        before = {'scene': {'renderPasses': {'copy': 0}}}
+        after = {'gpu': {'unmaskedRenderer': 'Apple Software Renderer'}, 'scene': {
+            'drawingBuffer': [632, 394], 'renderPasses': {'copy': 1, 'motionDrawCalls': 91, 'motionSceneDrawCalls': 90, 'last': 'scene',
+            'sceneViewport': [0, 0, 632, 394], 'motionSceneViewport': [0, 0, 316, 197],
+            'copyViewport': [0, 0, 632, 394], 'motionBuffer': [632, 394]}}}
+        acceptance.assert_viewer_interaction(before, after)
+        for patch_value in ({'copy': 0}, {'motionDrawCalls': 90}, {'motionSceneViewport': [0, 0, 632, 394]},
+                            {'copyViewport': [0, 0, 631, 394]}):
+            changed = json.loads(json.dumps(after))
+            changed['scene']['renderPasses'].update(patch_value)
+            with self.assertRaises(AssertionError):
+                acceptance.assert_viewer_interaction(before, changed)
+        after['gpu']['unmaskedRenderer'] = 'Apple M5 Pro'
+        with self.assertRaisesRegex(AssertionError, 'direct rendering'):
+            acceptance.assert_viewer_interaction(before, after)
+        after['scene']['renderPasses']['copy'] = 0
+        acceptance.assert_viewer_interaction(before, after)
+
     def test_frame_marker_updates_only_after_real_render(self):
         javascript = r"""
 const assert = require('node:assert/strict'), vm = require('node:vm'), fs = require('node:fs');
@@ -378,7 +408,10 @@ active=0;
 assert.equal(env.__nativeRenderedLights,18,'A CPU state update must not count as a frame');
 env.renderer.render();
 assert.equal(env.__nativeRenderedLights,0);
-active=9;fail=true;
+active=9;
+env.renderer.render({name:'interaction-copy'});
+assert.equal(env.__nativeRenderedLights,0,'A copy pass cannot certify new state');
+fail=true;
 assert.throws(()=>env.renderer.render());
 assert.equal(env.__nativeRenderedLights,0,'A failed draw must not count as the new state');
 """

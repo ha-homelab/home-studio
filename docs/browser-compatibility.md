@@ -213,6 +213,16 @@ light. Its packed room geometry is enabled only within a conservative uniform
 budget; otherwise the original geometry shader is used. Other identified
 software renderers retain physically based materials.
 
+While dragging this diffuse viewer, the scene uses at most 62,500 pixels inside
+its unchanged drawing buffer. A cached texture copies those pixels to the full
+canvas; releasing or cancelling the pointer draws the original full-resolution
+scene. Lights, shadows, geometry and camera calculations are retained. This
+motion-only reduction does not affect HTML controls, resting frames, the planner,
+or other graphics profiles. The copy pass adds one real draw, included in the
+acceptance counters and interaction time. Its resources are disposed on context
+loss and final page teardown; page-cache suspension retains the bounded texture.
+
+
 Gecko can report both hardware and software as `Apple M1, or similar`. For that
 exact label with a Gecko user agent, a one-time, fixed 32-by-32 raster check on
 the existing context measures capacity. Five valid pixel readbacks and a best

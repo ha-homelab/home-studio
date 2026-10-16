@@ -14,10 +14,12 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
-const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames} = require('./browser-stability-diagnostics.cjs');
+const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
 const {createStartupDiagnostics} = require('./browser-startup-diagnostics.cjs');
 
 const root = path.resolve(process.env.HOME_STUDIO_SOURCE_ROOT || path.join(__dirname, '..'));
+const sourceFiles = Object.fromEntries(['viewer.js','home-view.js','room-lighting.js','planner/render-capacity.js','planner/interaction-render.js'].filter(name=>fs.existsSync(path.join(root,name))).map(name=>[name,crypto.createHash('sha256').update(fs.readFileSync(path.join(root,name))).digest('hex')]));
+const sourceHashScope = 'instrumented-compiled-viewer';
 const fixtureOnly = process.env.HOME_STUDIO_FIXTURE_ONLY === '1';
 const startup = createStartupDiagnostics(fixtureOnly && process.env.HOME_STUDIO_STARTUP_DIAGNOSTICS_FILE);
 const diagnostics = fixtureOnly ? null : createDiagnostics('viewer', 'BROWSER_STABILITY', root);
@@ -74,7 +76,7 @@ async function run(browserName, origin, project, sourceHash) {
   const profile = browserProfile(browserName, {viewport: {width: 1280, height: 800}});
   const inputDiagnostics = viewerInputOptions(browserName, profile);
   return diagnostics.run(browserName, {
-    reportOnly, deadlineMs: 120000, sourceHash,
+    reportOnly, deadlineMs: 120000, sourceHash, sourceFiles, sourceHashScope,
     fixture: {floors: 1, rooms: project.floors[0].rooms.length, lights: project.floors[0].items.length},
     launch: browserLaunchOptions(browserName, process.env.BROWSER_STABILITY_HEADED !== '1'),
     context: profile.context, profile, inputDiagnostics,
@@ -152,6 +154,8 @@ async function run(browserName, origin, project, sourceHash) {
       sample.readyAfterDragMs = Date.now()-started;
       console.log(`${browserName}: Home drag and frame completion in ${dragMs} ms`);
       const afterHomeDrag = await snapshot();
+      sample.homeInteraction = afterHomeDrag.scene.renderPasses;
+      assertViewerInteraction(initial, afterHomeDrag);
       sample.homeCameraChanged = Boolean(homeCameraBefore && afterHomeDrag.scene.camera &&
         JSON.stringify(homeCameraBefore) !== JSON.stringify(afterHomeDrag.scene.camera));
       save();
@@ -206,10 +210,14 @@ async function run(browserName, origin, project, sourceHash) {
       });
       sample.burst = burst;
       check(burst.synchronousDraws<=1 && burst.totalDraws>0 && burst.totalDraws<=2, 'Wheel bursts coalesce into at most one scheduled scene draw');
-      const editorCameraBefore = (await snapshot()).scene.camera;
+      const beforeEditorDrag = await snapshot();
+      const editorCameraBefore = beforeEditorDrag.scene.camera;
       const editorDragMs = await dragCanvas(frame.locator('#view3d canvas'),child);
       sample.editorDragMs = editorDragMs;
-      const editorCameraAfter = (await snapshot()).scene.camera;
+      const afterEditorDrag = await snapshot();
+      const editorCameraAfter = afterEditorDrag.scene.camera;
+      sample.editorInteraction = afterEditorDrag.scene.renderPasses;
+      assertViewerInteraction(beforeEditorDrag, afterEditorDrag);
       sample.editorCameraChanged = Boolean(editorCameraBefore && editorCameraAfter &&
         JSON.stringify(editorCameraBefore) !== JSON.stringify(editorCameraAfter));
       save();
@@ -310,7 +318,7 @@ async function run(browserName, origin, project, sourceHash) {
   let html = fs.readFileSync(path.join(output,'main/index.html'),'utf8');
   html = html.replace('<head>',`<head><script>window.__HOME_FLOORPLAN_EMBED__=true;(${instrumentation.toString()})();</script>`);
   html = startup.checkpointSource(html, 'renderProfile=selectRenderProfile(renderer.getContext());', 'renderProfile');
-  html = html.replace('</script></body>', `if(renderer)(${captureViewerFrames.toString()})(renderer);window.__browserScene=()=>({rasterProbe:renderProfile.rasterProbe||null,shadowType:renderer.shadowMap.type,materialTypes:(()=>{const types=new Set();scene.traverse(o=>{for(const m of (Array.isArray(o.material)?o.material:[o.material]))if(m)types.add(m.type)});return [...types].sort()})(),camera:window.__browserCamera,drawingBuffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),programs:renderer.info.programs.length,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,triangles:renderer.info.render.triangles,drawCalls:renderer.info.render.calls,shadowMaps:(()=>{const sizes=[];scene.traverse(o=>{if(o.castShadow&&o.shadow)sizes.push([o.type,o.shadow.mapSize.x,o.shadow.mapSize.y])});return sizes})(),pointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible)n++});return n})(),activePointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible&&o.intensity>0)n++});return n})()});\n</script></body>`);
+  html = html.replace('</script></body>', `if(renderer)(${captureViewerFrames.toString()})(renderer);window.__browserScene=()=>({rasterProbe:renderProfile.rasterProbe||null,shadowType:renderer.shadowMap.type,materialTypes:(()=>{const types=new Set();scene.traverse(o=>{for(const m of (Array.isArray(o.material)?o.material:[o.material]))if(m)types.add(m.type)});return [...types].sort()})(),camera:window.__browserCamera,renderPasses:window.__browserRenderPasses,drawingBuffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),programs:renderer.info.programs.length,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,triangles:renderer.info.render.triangles,drawCalls:renderer.info.render.calls,shadowMaps:(()=>{const sizes=[];scene.traverse(o=>{if(o.castShadow&&o.shadow)sizes.push([o.type,o.shadow.mapSize.x,o.shadow.mapSize.y])});return sizes})(),pointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible)n++});return n})(),activePointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible&&o.intensity>0)n++});return n})()});\n</script></body>`);
   let sourceHash = crypto.createHash('sha256').update(html).digest('hex');
   const server = http.createServer((request,response) => {
     if(startup.handle(request,response,sourceHash))return;
@@ -326,7 +334,7 @@ async function run(browserName, origin, project, sourceHash) {
     html = startup.allowLoopback(html, origin);
     sourceHash = crypto.createHash('sha256').update(html).digest('hex');
     if(fixtureOnly) {
-      console.log(JSON.stringify({fixtureServer:true,origin:`http://127.0.0.1:${server.address().port}`,sourceHash}));
+      console.log(JSON.stringify({fixtureServer:true,origin:`http://127.0.0.1:${server.address().port}`,sourceHash,sourceFiles,sourceHashScope}));
       await new Promise(resolve=>{process.once('SIGTERM',resolve);process.once('SIGINT',resolve);});
     } else {
       await diagnostics.runAll(engines, browserName=>run(browserName,`http://127.0.0.1:${server.address().port}`,project,sourceHash));

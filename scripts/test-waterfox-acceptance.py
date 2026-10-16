@@ -96,7 +96,7 @@ if (renderer) {
   const nativeRender = renderer.render.bind(renderer);
   renderer.render = (scene, camera) => {
     const result = nativeRender(scene, camera);
-    window.__nativeRenderedLights = window.__browserScene().activePointLights;
+    if (scene?.name !== 'interaction-copy') window.__nativeRenderedLights = window.__browserScene().activePointLights;
     return result;
   };
 }
@@ -314,6 +314,31 @@ def assert_recovered_interaction(before_count, after_count, before_camera, after
     assert_recovered_graphics(stats, replacement=replacement)
 
 
+def assert_full_viewer_frame(scene):
+    passes = scene.get('renderPasses', {})
+    require(passes.get('last') == 'scene', 'Pointer release must finish with a full scene draw')
+    require(passes.get('sceneViewport') == [0, 0, *scene['drawingBuffer']],
+            'Pointer release must restore the original drawing-buffer resolution')
+
+
+def assert_viewer_interaction(before, after):
+    scene = after['scene']
+    assert_full_viewer_frame(scene)
+    passes = scene['renderPasses']
+    renderer = after['gpu'].get('unmaskedRenderer') or after['gpu']['renderer']
+    probe = scene.get('rasterProbe') or {}
+    diffuse = bool(re.fullmatch('Apple Software Renderer', renderer, re.I)) or (renderer == 'Apple M1, or similar' and probe.get('status') == 'measured' and probe.get('bestMs', 0) >= 15)
+    if diffuse:
+        require(passes['copy'] > before['scene']['renderPasses']['copy'], 'The real diffuse-viewer gesture must execute a copy pass')
+        require(passes['motionDrawCalls'] == passes['motionSceneDrawCalls'] + 1, 'The copy draw must remain in actual renderer draw-call counts')
+        motion = passes.get('motionSceneViewport')
+        require(isinstance(motion, list) and len(motion) == 4 and motion[:2] == [0, 0] and motion[2] > 0 and motion[3] > 0 and motion[2] * motion[3] <= 62500, 'Motion scene pixels must respect the bounded copy budget')
+        require(passes.get('copyViewport') == [0, 0, *passes['motionBuffer']], 'The copy pass must cover its unchanged full drawing buffer')
+        require(motion[2] <= passes['motionBuffer'][0] and motion[3] <= passes['motionBuffer'][1], 'The scene copy cannot read outside its framebuffer')
+    else:
+        require(passes['copy'] == 0, 'Other graphics profiles must retain direct rendering')
+
+
 def viewer(client, origin, project, record, save):
     client.call('WebDriver:Navigate', {'url': origin})
     client.execute('''window.addEventListener('message', event => {
@@ -348,7 +373,9 @@ def viewer(client, origin, project, record, save):
         require(initial['scene']['activePointLights'] == len(items), 'Every on-state fixture light contributes illumination')
         sample['dragMs'] = client.canvas_drag('#homeStage canvas')
         client.wait(f'window.floorplan.renderCount>{initial["renderCount"]}')
-        require(snapshot()['scene']['camera'] != initial['scene']['camera'], 'Real pointer drag changes the viewer camera')
+        sample['afterDrag'] = after_drag = snapshot()
+        require(after_drag['scene']['camera'] != initial['scene']['camera'], 'Real pointer drag changes the viewer camera')
+        assert_viewer_interaction(initial, after_drag)
         # Send real bridge state updates, including all-off and partial illumination.
         sample['states'] = [{'active': len(items), 'linkedPrograms': initial['linkedPrograms']}]
         for active in (0, max(1, len(items) // 2), len(items)):
@@ -375,6 +402,7 @@ def viewer(client, origin, project, record, save):
             sample['recoveryDragMs'] = client.canvas_drag('#homeStage canvas')
             client.wait(f'window.floorplan.renderCount>{sample["recovery"]["renderCount"]}')
             sample['afterRecoveryDrag'] = after = snapshot()
+            assert_viewer_interaction(sample['recovery'], after)
             assert_recovered_interaction(sample['recovery']['renderCount'], after['renderCount'], sample['recovery']['scene']['camera'], after['scene']['camera'], after)
         sample['final'] = snapshot()
         assert_graphics(sample['final'])

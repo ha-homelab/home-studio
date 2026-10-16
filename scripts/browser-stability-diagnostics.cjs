@@ -522,12 +522,46 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
 // change before a queued frame; only a successful draw advances this receipt.
 function captureViewerFrames(renderer) {
   const draw = renderer.render.bind(renderer);
+  const passes = window.__browserRenderPasses = {scene: 0, copy: 0, last: null, sceneViewport: null, copyViewport: null};
+  const viewport = {copy(value) {this.x=value.x;this.y=value.y;this.z=value.z;this.w=value.w;return this;}};
   renderer.render = (scene, camera) => {
     const result = draw(scene, camera);
-    window.__browserCamera = {projection: camera.projectionMatrix.toArray(), world: camera.matrixWorld.toArray()};
-    window.__browserRenderedLights = window.__browserScene().activePointLights;
+    const copy = scene?.name === 'interaction-copy';
+    const kind = copy ? 'copy' : 'scene';
+    passes[kind]++; passes.last = kind;
+    renderer.getViewport(viewport);
+    const ratio = renderer.getPixelRatio();
+    passes[kind + 'Viewport'] = [viewport.x,viewport.y,viewport.z,viewport.w].map(value=>Math.floor(value*ratio));
+    if (copy) {
+      passes.motionSceneViewport = passes.sceneViewport.slice();
+      passes.motionBuffer = [renderer.domElement.width,renderer.domElement.height];
+      passes.motionSceneDrawCalls = passes.sceneDrawCalls;
+      passes.motionDrawCalls = renderer.info.render.calls;
+      passes.motionTriangles = renderer.info.render.triangles;
+    }
+    if (!copy) {
+      passes.sceneDrawCalls = renderer.info.render.calls;
+      window.__browserCamera = {projection: camera.projectionMatrix.toArray(), world: camera.matrixWorld.toArray()};
+      window.__browserRenderedLights = window.__browserScene().activePointLights;
+    }
     return result;
   };
 }
 
-module.exports = {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames};
+function assertViewerInteraction(before, after) {
+  const scene = after.scene, passes = scene.renderPasses;
+  assert.equal(passes.last, 'scene', 'Pointer release must finish with a full scene draw');
+  assert.deepEqual(passes.sceneViewport, [0,0,...scene.drawingBuffer], 'Pointer release must restore the original drawing-buffer resolution');
+  const renderer = after.gpu.unmaskedRenderer || after.gpu.renderer;
+  const diffuse = /^Apple Software Renderer$/i.test(renderer) || (renderer === 'Apple M1, or similar' && scene.rasterProbe?.status === 'measured' && scene.rasterProbe.bestMs >= 15);
+  if (diffuse) {
+    assert(passes.copy > before.scene.renderPasses.copy, 'The real diffuse-viewer gesture must execute a copy pass');
+    assert.equal(passes.motionDrawCalls, passes.motionSceneDrawCalls+1, 'The copy draw must remain in actual renderer draw-call counts');
+    const motion = passes.motionSceneViewport;
+    assert(Array.isArray(motion) && motion.length===4 && motion[0]===0 && motion[1]===0 && motion[2]>0 && motion[3]>0 && motion[2]*motion[3]<=62500, 'Motion scene pixels must respect the bounded copy budget');
+    assert.deepEqual(passes.copyViewport, [0,0,...passes.motionBuffer], 'The copy pass must cover its unchanged full drawing buffer');
+    assert(motion[2]<=passes.motionBuffer[0] && motion[3]<=passes.motionBuffer[1], 'The scene copy cannot read outside its framebuffer');
+  } else assert.equal(passes.copy, 0, 'Other graphics profiles must retain direct rendering');
+}
+
+module.exports = {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction};

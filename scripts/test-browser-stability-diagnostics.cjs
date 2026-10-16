@@ -6,11 +6,11 @@ const path = require('node:path');
 const {EventEmitter} = require('node:events');
 const vm = require('node:vm');
 const {test, after} = require('node:test');
-const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames} = require('./browser-stability-diagnostics.cjs');
+const {createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
 
 test('Viewer frame receipts advance only after the real draw succeeds', () => {
   let active = 18, fail = false;
-  const env = {renderer: {render() {if (fail) throw Error('draw failed'); return 42;}},
+  const env = {renderer: {info:{render:{calls:1,triangles:1}},domElement:{width:632,height:394},getViewport(v){return v.copy({x:0,y:0,z:632,w:394});},getPixelRatio(){return 1;},render() {if (fail) throw Error('draw failed'); return 42;}},
     __browserScene: () => ({activePointLights: active})};
   env.window = env;
   vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer)`, env);
@@ -20,9 +20,30 @@ test('Viewer frame receipts advance only after the real draw succeeds', () => {
   assert.equal(env.__browserRenderedLights, 18, 'CPU state is not a completed frame');
   env.renderer.render({}, camera);
   assert.equal(env.__browserRenderedLights, 0);
-  active = 9; fail = true;
+  active = 9;
+  env.renderer.render({name:'interaction-copy'}, {});
+  assert.equal(env.__browserRenderedLights,0,'A copy pass cannot certify a new light state');
+  assert.deepEqual(Array.from(env.__browserCamera.world),[2],'The copy camera cannot replace the scene camera');
+  assert.equal(env.__browserRenderPasses.copy,1,'Copy passes remain visible in receipts');
+  assert.equal(env.__browserRenderPasses.scene,2);
+  assert.equal(env.__browserRenderPasses.last,'copy');
+  assert.deepEqual(Array.from(env.__browserRenderPasses.copyViewport),[0,0,632,394]);
+  fail = true;
   assert.throws(() => env.renderer.render({}, camera), /draw failed/);
   assert.equal(env.__browserRenderedLights, 0, 'A failed draw cannot certify new state');
+});
+
+test('real diffuse gestures require bounded scene and full copy passes before full-quality release', () => {
+  const before={scene:{renderPasses:{copy:0}}};
+  const after={gpu:{unmaskedRenderer:'Apple Software Renderer'},scene:{drawingBuffer:[632,394],renderPasses:{copy:1,motionDrawCalls:91,motionSceneDrawCalls:90,last:'scene',sceneViewport:[0,0,632,394],motionSceneViewport:[0,0,316,197],copyViewport:[0,0,632,394],motionBuffer:[632,394]}}};
+  assertViewerInteraction(before,after);
+  for(const change of [{copy:0},{motionDrawCalls:90},{last:'copy'},{sceneViewport:[0,0,316,197]},{motionSceneViewport:[0,0,632,394]},{copyViewport:[0,0,631,394]}]) {
+    assert.throws(()=>assertViewerInteraction(before,{...after,scene:{...after.scene,renderPasses:{...after.scene.renderPasses,...change}}}));
+  }
+  const native={...after,gpu:{unmaskedRenderer:'Apple M5 Pro'}};
+  assert.throws(()=>assertViewerInteraction(before,native),/direct rendering/);
+  native.scene={...after.scene,renderPasses:{...after.scene.renderPasses,copy:0}};
+  assertViewerInteraction(before,native);
 });
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'home-studio-diagnostics-unit-'));
