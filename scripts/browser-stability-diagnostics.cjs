@@ -40,6 +40,8 @@ function browserLaunchOptions(engine, headless) {
   assert(['default', 'angle'].includes(backend), 'FIREFOX_WEBGL_BACKEND must be default or angle');
   const compositor = process.env.FIREFOX_COMPOSITOR_BACKEND || 'default';
   assert(['default', 'software'].includes(compositor), 'FIREFOX_COMPOSITOR_BACKEND must be default or software');
+  const gpuProcess = process.env.FIREFOX_GPU_PROCESS ?? 'default';
+  assert(['default', 'disabled'].includes(gpuProcess), 'FIREFOX_GPU_PROCESS must be default or disabled');
   // GPU-less Windows runners otherwise block WebGL2 before creating a context.
   // This allows the real software backend; all rendering assertions still run.
   // https://bugzilla.mozilla.org/show_bug.cgi?id=1970486
@@ -56,6 +58,10 @@ function browserLaunchOptions(engine, headless) {
     // The requested preference is preserved in launch diagnostics; the actual
     // WebGL renderer and all acceptance assertions remain independently checked.
     ...(compositor === 'software' ? {'gfx.webrender.software': true} : {}),
+    // Software WebRender does not disable the separate GPU process on macOS.
+    // This opt-in isolates that process while retaining the WebGL backend.
+    // ESR153 defaults layers.gpu-process.force-enabled to false.
+    ...(gpuProcess === 'disabled' ? {'layers.gpu-process.enabled': false} : {}),
   }};
 }
 

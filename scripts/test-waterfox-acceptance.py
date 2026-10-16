@@ -389,6 +389,8 @@ def browser_preferences(port):
     require(backend in ('default', 'angle'), 'FIREFOX_WEBGL_BACKEND must be default or angle')
     compositor = os.environ.get('FIREFOX_COMPOSITOR_BACKEND', 'default')
     require(compositor in ('default', 'software'), 'FIREFOX_COMPOSITOR_BACKEND must be default or software')
+    gpu_process = os.environ.get('FIREFOX_GPU_PROCESS', 'default')
+    require(gpu_process in ('default', 'disabled'), 'FIREFOX_GPU_PROCESS must be default or disabled')
     prefs = {'marionette.port': port, 'browser.shell.checkDefaultBrowser': False, 'browser.aboutwelcome.enabled': False, 'browser.startup.homepage': 'about:blank', 'browser.startup.homepage_override.mstone': 'ignore', 'browser.startup.firstrunSkipsHomepage': True, 'browser.migrate.automigrate.enabled': False, 'app.update.auto': False, 'app.update.enabled': False, 'webgl.force-enabled': True, 'webgl.forbid-software': False, 'webgl.sanitize-unmasked-renderer': False}
     if backend == 'angle':
         prefs['webgl.disable-angle'] = False
@@ -398,6 +400,11 @@ def browser_preferences(port):
         # This does not select the WebGL renderer or relax graphics assertions.
         # https://github.com/mozilla-firefox/firefox/blob/esr153/modules/libpref/init/StaticPrefList.yaml
         prefs['gfx.webrender.software'] = True
+    if gpu_process == 'disabled':
+        # Software WebRender still uses the GPU process on macOS. Isolate that
+        # process in this temporary profile without changing the WebGL backend.
+        # ESR153 defaults layers.gpu-process.force-enabled to false.
+        prefs['layers.gpu-process.enabled'] = False
     return prefs
 
 

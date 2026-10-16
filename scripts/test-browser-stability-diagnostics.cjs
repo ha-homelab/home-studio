@@ -127,6 +127,45 @@ test('software compositor opt-in reaches Firefox and its receipt without changin
   }
 });
 
+test('GPU process opt-in reaches Firefox and its receipt without changing rendering preferences', async () => {
+  const names = ['FIREFOX_GPU_PROCESS', 'FIREFOX_COMPOSITOR_BACKEND', 'FIREFOX_WEBGL_BACKEND'];
+  const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
+  try {
+    delete process.env.FIREFOX_GPU_PROCESS;
+    process.env.FIREFOX_COMPOSITOR_BACKEND = 'software';
+    process.env.FIREFOX_WEBGL_BACKEND = 'angle';
+    const baseline = browserLaunchOptions('firefox', false);
+    assert.equal(baseline.firefoxUserPrefs['layers.gpu-process.enabled'], undefined);
+    process.env.FIREFOX_GPU_PROCESS = 'default';
+    assert.deepEqual(browserLaunchOptions('firefox', false), baseline);
+    process.env.FIREFOX_GPU_PROCESS = 'disabled';
+    const launch = browserLaunchOptions('firefox', false);
+    assert.deepEqual(launch.firefoxUserPrefs, {...baseline.firefoxUserPrefs, 'layers.gpu-process.enabled': false});
+    const fake = fakeBrowser();
+    let launched;
+    const diagnostics = suite('disabled-gpu-process', {firefox: {launch: async value => {
+      launched = value;
+      return fake.browser;
+    }}});
+    await diagnostics.run('firefox', {...options, launch}, async ({record}) => {
+      record.gpu = {unmaskedRenderer: 'ANGLE Metal Renderer: Fixture GPU'};
+    });
+    assert.deepEqual(launched.firefoxUserPrefs, launch.firefoxUserPrefs);
+    assert.deepEqual(read(diagnostics).launch.firefoxUserPrefs, launch.firefoxUserPrefs);
+    for (const invalid of ['', 'typo', 'false']) {
+      process.env.FIREFOX_GPU_PROCESS = invalid;
+      assert.throws(() => browserLaunchOptions('firefox', false), /must be default or disabled/);
+      assert.equal(browserLaunchOptions('chromium', false).firefoxUserPrefs, undefined);
+      assert.deepEqual(browserLaunchOptions('webkit', false), {headless: false});
+    }
+  } finally {
+    for (const name of names) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
+});
+
 test('the Metal profile is explicit and rejects an unconfirmed macOS backend', async () => {
   const previous = process.env.FIREFOX_WEBGL_BACKEND;
   try {
