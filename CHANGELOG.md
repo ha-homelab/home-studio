@@ -91,6 +91,10 @@
 - Reuse the pure room-transmission result within each packed shadowed light.
   Preserve attenuation, shadow and light order, and all unshadowed calculations;
   the change adds no texture, uniform or rendering pass.
+- Use three bounded Float32 data textures for eligible packed software-renderer
+  inputs, with an independently guarded constant-two point attenuation helper.
+  Preserve ordered lighting and shadows, exact input validation, and the original
+  uniform and editor fallback paths. No hosted Intel speedup is claimed.
 - Reuse planner outlines and selection controls, and avoid redrawing unchanged
   snapped positions. Preserve exact furniture overlap, appearance, undo and drag
   cancellation. Bound software-renderer resolution without reducing sharp HTML

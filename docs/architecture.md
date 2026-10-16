@@ -197,6 +197,18 @@ filtering are intentionally omitted on this backend. Native and other software
 renderers retain the existing Standard materials. Material selection is separate
 from catalog instancing, and TV screens and unlit overlays keep their own materials.
 
+Eligible packed Home shaders use three bounded RGBA32F tables: point records
+and dynamic room/window signals, ordered light runs, and immutable room geometry.
+Selection checks dimensions, sampler limits, exact integer metadata and finite
+Float32 values before compiling; unsupported inputs retain the uniform path.
+The constant-two point attenuation helper has an independent exact-input proof,
+so four shader/cache states preserve either valid optimization without forcing
+the other. Editor shaders retain their original path. Context loss retains CPU
+records for reupload, and teardown releases the owned textures. These changes
+preserve lighting order and arithmetic; they do not establish an Intel timing
+improvement. See [platform acceptance](platform-acceptance.md) for the required
+runtime checks and fallback coverage.
+
 The compiler creates transformed meshes for GLB, OBJ/MTL, DAE, USDA and the
 downloadable plan SVG. Item namespaces include their ordinal to avoid collisions
 between a user identifier and a generated part suffix. Runtime model data retains
