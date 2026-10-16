@@ -11,12 +11,14 @@
   Editor cutaway/full-height and Home transitions after context restoration,
   within their unchanged scenario deadlines.
 
-- Prototype an unlit architectural wall fill in the existing Apple software
-  diffuse profile, including its measured masked-Apple selection. Walls retain
+- Use an unlit architectural wall fill in the existing Apple software
+  diffuse fallback, including its measured masked-Apple selection. Walls retain
   their teal tint, opacity, cutaway geometry, outlines and shadow casting, but
-  no longer receive lighting, shadows, daylight or animated sheen. This visual
-  tradeoff also applies in the Editor. Other surfaces, lights and rendering
-  profiles are unchanged. Performance and visual acceptance remain unverified.
+  no longer receive lighting, shadows, daylight or animated/view sheen. This
+  deliberate visual tradeoff also applies in the Editor. Other surfaces,
+  lights and rendering profiles are unchanged. Qualify each revision with the
+  complete required hosted matrix; local comparisons do not establish
+  cross-browser performance or pixel parity.
 
 - Separate Playwright browser bootstrap into one aggregate 30-second budget,
   then start the existing 120-second viewer or 180-second planner scenario

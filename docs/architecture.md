@@ -188,14 +188,20 @@ reports actual draw meshes. Every rebuild
 explicitly disposes instance buffers and shared geometry; there is no persistent
 GPU cache or additional idle rendering.
 
-The legacy Apple software rasterizer also uses diffuse Lambert materials and
-unfiltered shadow maps. Its fragment interpreter spends substantial time in
-the PBR material shader even when no room light contributes. The simpler material
-keeps geometry, colors, opacity, emissive surfaces, clipping, room confinement,
-daylight and every linked light. Metallic/specular highlights and soft shadow
-filtering are intentionally omitted on this backend. Native and other software
-renderers retain the existing Standard materials. Material selection is separate
-from catalog instancing, and TV screens and unlit overlays keep their own materials.
+The legacy Apple software rasterizer uses diffuse Lambert materials for lit
+surfaces and unfiltered shadow maps. Its fragment interpreter spends substantial
+time in the PBR material shader even when no room light contributes. These lit
+surfaces keep geometry, colors, opacity, emission, clipping, room confinement,
+daylight and every linked light. Architectural wall fill instead uses an unlit
+Basic material in both Home and Editor: it retains its teal color, opacity,
+geometry, cutaway clipping, outlines and full-height shadow casting, but does
+not receive lighting, daylight or shadows and has no view-dependent or animated
+sheen. Metallic/specular highlights and soft shadow filtering are also omitted
+on this backend. Native and other software renderers retain the existing
+Standard materials, unless the measured masked-Apple capacity check selects the
+same diffuse fallback. Material selection is separate from catalog instancing;
+TV screens and unlit overlays keep their own materials. See the
+[profile and qualification notes](platform-acceptance.md) for this visual tradeoff.
 
 Eligible packed Home shaders use three bounded RGBA32F tables: point records
 and dynamic room/window signals, ordered light runs, and immutable room geometry.
@@ -385,11 +391,15 @@ resource-stability, and device-validation checks.
 
 ### Iridescent wall fill and optional motion
 
-`applyWallSheen` in `room-lighting.js` adds a teal-to-blue tint with a subtle
-violet edge and a modest pale-cyan grazing highlight to the existing wall material.
-The highlight blends at most 40%, retaining the existing 16% material opacity.
-The palette depends on viewing angle
-and a broad spatial band, computed per vertex and interpolated across each face.
+For lit wall materials, `applyWallSheen` in `room-lighting.js` adds a teal-to-blue
+tint with a subtle violet edge and a modest pale-cyan grazing highlight. The
+Apple software diffuse fallback skips this hook for its Basic wall fill in both
+Home and Editor; those walls retain a constant teal tint and the same geometry,
+opacity, clipping, outlines and shadow casting.
+
+For lit walls, the highlight blends at most 40%, retaining the existing 16%
+material opacity. The palette depends on viewing angle and a broad spatial
+band, computed per vertex and interpolated across each face.
 Fragments only blend that color into diffuse and emissive terms. Perspective
 views use the eye-to-vertex direction; orthographic views use a constant viewing
 direction, so panning does not make the tint swim across a flat wall.
@@ -408,16 +418,19 @@ device memory freeze the drift. Missing capability information also defaults to
 static when motion preferences or processor count are unavailable. Three
 consecutive CPU render submissions over 32 ms disable drift for that viewer
 session. These are conservative guards, not an Android benchmark or a GPU timing
-claim. The static tint and rounded geometry remain visible on all devices.
-Shader work stays per vertex apart from the existing fragment color blend;
+claim. Lit walls retain their static view-dependent tint; Basic walls keep their
+constant tint. Rounded geometry remains visible on all profiles. For lit walls,
+shader work stays per vertex apart from the existing fragment color blend;
 clipping and shadow occlusion are retained.
-The patch runs both on initial material compilation and when room lighting is
-attached; wall and non-wall shader cache keys remain distinct in Home and editor
-modes. `node scripts/test-wall-sheen.cjs` checks that composition against the
-vendored Three.js shader. `node scripts/test-wall-motion.cjs` checks the bounded
-phase clock, preference/device guards, slow-render fallback, and zero scheduled
-frames with deterministic clocks. Browser checks should also compare idle render counts,
-draw calls and texture/geometry counts with the same scene before and after.
+For lit materials, the patch runs on initial compilation and when room lighting
+is attached; wall and non-wall shader cache keys remain distinct in Home and
+Editor. Basic wall fill bypasses room-lighting attachment and this sheen patch.
+`node scripts/test-wall-sheen.cjs` checks that composition against the vendored
+Three.js shader. `node scripts/test-wall-motion.cjs` checks the bounded phase
+clock, preference/device guards, slow-render fallback, and zero scheduled frames
+with deterministic clocks. Browser checks should also compare idle render
+counts, draw calls and texture/geometry counts with the same scene before and
+after.
 
 ## TV frame refresh failures
 

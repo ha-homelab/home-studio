@@ -147,14 +147,15 @@ renderers and native GPUs keep the ordinary mesh path unless the narrowly gated
 capacity probe below demonstrates slow raster work.
 
 The positively identified Apple Software Renderer uses Lambert materials for
-lit surfaces and unfiltered shadows. This prototype uses an unlit Basic
-material for architectural wall fill in that same diffuse profile. Acceptance keeps the same scene, linked-light counts,
-shadow-map limits, state changes and interaction deadlines in this mode. It is
-a deliberate matte rendering profile, not a claim of pixel identity with PBR.
-CPU tests cover the actual material factories and both shader families, including
-transparency, clipping, wall tint and room-light composition.
+lit surfaces and unfiltered shadows. Its diffuse fallback uses an unlit Basic
+material for architectural wall fill. Acceptance keeps the same scene,
+linked-light counts, shadow-map limits, state changes and interaction deadlines
+in this mode. It is a deliberate matte rendering profile, not a claim of pixel
+identity with PBR.
+CPU tests cover the actual material factories and their shader families,
+including transparency, clipping, wall tint and room-light composition.
 
-The wall-fill prototype keeps the original teal tint (`0xb2d8d2`), opacity
+The unlit wall fill keeps the original teal tint (`0xb2d8d2`), opacity
 (`0.16`), transparent draw order, double-sided geometry, depth behavior,
 cutaway clipping, outlines and full-height shadow casting. Walls no longer
 receive point or directional lighting, daylight, shadows or animated/view
@@ -162,18 +163,21 @@ sheen; the constant-tint appearance also persists in the Editor. Floors,
 frames, furniture and other surfaces retain their existing materials, and all
 scene lights and shadow maps remain present. Hardware and other software
 profiles are unchanged. This is an intentional visual tradeoff, not a claim of
-pixel parity or a measured performance gain. Original browser scenarios,
-assertions and deadlines remain required before any acceptance decision.
+pixel parity. Qualify each revision with the complete required hosted matrix;
+local comparisons do not establish cross-browser performance. Original browser
+scenarios, assertions and deadlines remain required before any acceptance
+decision.
 
 Gecko can mask both hardware and software renderers as exactly `Apple M1, or similar`.
 Only that exact label with a Gecko user agent runs a capacity probe, once per
 new rendering context (including the planner's replacement context). It uses the
 existing WebGL2 context, a private 32 × 32 RGBA8 framebuffer, and a fixed
 512-iteration fragment shader: two warm draws and three timed draws, each with a
-one-pixel readback. Valid, nonzero and nonsaturated RGB readbacks that vary across the seeds, and a **minimum of at least 15 ms**
-across all three measured draws selects the same reduced pixel/shadow budgets,
-the same diffuse material profile and planner batching. This measures raster capacity; it does
-not identify the underlying GPU as software. Other renderer labels are not probed.
+one-pixel readback. Valid, nonzero and nonsaturated RGB readbacks that vary
+across the seeds, and a **minimum of at least 15 ms** across all three measured
+draws, select the same reduced pixel/shadow budgets, diffuse material profile
+and planner batching. This measures raster capacity; it does not identify the
+underlying GPU as software. Other renderer labels are not probed.
 
 Calibration with that exact workload measured 24–26 ms per draw and roughly
 200 ms total on Apple Software Renderer, versus about 1 ms per draw and 48 ms
@@ -242,7 +246,7 @@ Regression checks include transformed Float32 clipping arithmetic and separate
 image comparisons from above, below, near the floor and with cutaway enabled.
 
 Eligible static Lambert walls, floors and frames also share a program with a
-private per-material wall-tint switch. The unlit wall-fill prototype above
+private per-material wall-tint switch. The unlit wall fill described above
 bypasses this hook for Basic walls. Opaque floors and frames use explicit
 `NoBlending`, which preserves their already-disabled GPU blending while avoiding
 a separate opaque shader define. Walls retain their transparency and depth

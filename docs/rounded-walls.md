@@ -21,11 +21,17 @@ calls. Verify these callbacks again when updating the vendored Three.js version.
 At most three geometry variants are cached per wall for clipping-height changes;
 eviction disposes the replaced buffer. The four batched contour objects remain.
 
-The optional iridescent drift updates one shared uniform only during already
-requested frames. It schedules no frames or timers. Reduced motion, mobile or
-coarse-pointer devices, hidden pages, data saving, limited reported hardware, and
-repeated slow CPU render submissions keep the tint stationary. Static walls keep
-their rounded geometry and view-dependent tint.
+For lit wall materials, optional iridescent drift updates one shared uniform
+only during already requested frames. It schedules no frames or timers. Reduced
+motion, mobile or coarse-pointer devices, hidden pages, data saving, limited
+reported hardware, and repeated slow CPU render submissions keep the drift
+stationary while retaining the view-dependent tint.
+
+The [Apple software diffuse fallback](platform-acceptance.md) instead uses
+constant-tint Basic wall fill in both Home and Editor. It has no received
+lighting, daylight, shadows or view-dependent/animated sheen. Rounded geometry,
+opacity, cutaway clipping, outlines and full-height shadow casting remain the
+same; floors, furniture and scene lights retain their existing behavior.
 
 ## Automated checks
 
@@ -36,14 +42,16 @@ node scripts/test-rounded-walls.cjs
 node scripts/test-wall-tops.cjs
 node scripts/test-wall-sheen.cjs
 node scripts/test-wall-motion.cjs
+node scripts/test-unlit-architectural-walls.cjs
 node scripts/test-viewer-startup.cjs
 ```
 
 They cover closed profiles, rotations, exact cap boundaries, low walls, invalid
 shape fallback, rays through real compiled openings, narrow passage piers,
-unchanged shadow ranges, bounded caches, shader composition, motion guards, and
-startup behavior. Retain the source model before rendering and compare afterward
-when extending geometry tests; a display update must not mutate export data.
+unchanged shadow ranges, bounded caches, shader composition, motion guards,
+scoped unlit wall material selection and startup behavior. Retain the source
+model before rendering and compare afterward when extending geometry tests;
+a display update must not mutate export data.
 
 ## Browser acceptance
 

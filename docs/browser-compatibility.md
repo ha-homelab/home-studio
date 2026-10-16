@@ -211,10 +211,15 @@ shadow map. Native and unknown renderers retain the 2,000,000-pixel cap and
 2048 by 2048 directional shadow map unless the masked-Apple capacity check below
 selects the reduced profile. HTML labels and controls retain their normal
 resolution. The Apple software rasterizer uses simpler diffuse materials and
-unfiltered shadows while retaining room confinement, color and every linked
-light. Its packed room geometry is enabled only within a conservative uniform
-budget; otherwise the original geometry shader is used. Other identified
-software renderers retain physically based materials.
+unfiltered shadows for lit surfaces, retaining room confinement, color and every
+linked light. Architectural wall fill is an exception in both Home and Editor:
+its constant-tint Basic material keeps geometry, opacity, cutaway clipping,
+outlines and shadow casting, but receives no lighting, daylight or shadows and
+has no animated or view-dependent sheen. See the
+[profile and qualification notes](platform-acceptance.md). Packed room geometry
+for lit surfaces is enabled only within a conservative uniform budget; otherwise
+the original geometry shader is used. Other identified software renderers retain
+physically based materials.
 
 While dragging this diffuse viewer, the scene uses at most 62,500 pixels inside
 its unchanged drawing buffer. A cached texture copies those pixels to the full
