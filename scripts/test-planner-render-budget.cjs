@@ -156,6 +156,58 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   windowEvents.pagehide({persisted: false}); assert.equal(disposals, 2); assert.equal(losses, 2); assert.equal(disconnects, 1);
   assert.equal(vm.runInContext('worldGroup.children.length', c), 0);
 
+  // Repeated catalog furniture shares immutable vertex data, while appearance
+  // variants, materials and per-item transforms keep their existing behavior.
+  const furniture = await import('../planner/furniture.js');
+  const catalogProject = model.clone(project), catalogFloor = catalogProject.floors[0];
+  const sofa = furniture.getCatalogModel('sofa_3'), rug = furniture.getCatalogModel('rug');
+  catalogFloor.items = [sofa, sofa, sofa, rug, rug].map((design, i) => ({
+    id: `catalog_${i}`, name: design.label, type: design.type, room: 'room',
+    position_m: {x: i + 1, y: design.elevation_m, z: 2}, dimensions_m: {...design.dimensions_m},
+    rotation_deg: i * 30, entity_id: '', notes: '', model_id: design.id, style_id: design.default_style,
+    ...(i === 2 ? {color: '#c45328'} : {}), ...(i === 4 ? {pattern_id: 'checks'} : {}),
+  }));
+  catalogFloor.items[1].dimensions_m.width *= 1.5;
+  const sharedWorld = new THREE.Group();
+  const shared = vm.createContext({THREE, worldGroup: sharedWorld, previewSun: new THREE.DirectionalLight(),
+    previewMetadata: {}, previewDirty: true, previewFloors: () => catalogProject.floors,
+    assetCache: new Map(), APPEARANCE_CACHE_LIMIT: 100, buildFurnitureAsset: furniture.buildFurnitureAsset,
+    distance: model.distance, wallPieces: model.wallPieces, floorBounds: model.floorBounds,
+    COLORS: {floor: '#eeeeee', furniture: '#aaaaaa'},
+  });
+  vm.runInContext(section('function itemAsset(', 'function materialColor(') + section('function disposePreviewGeometry()', 'function drawPreview()'), shared);
+  shared.rebuildPreview();
+  const groups = sharedWorld.children.filter(object => object.isGroup);
+  assert.equal(groups.length, catalogFloor.items.length);
+  assert.equal(groups[0].children[0].geometry, groups[1].children[0].geometry, 'Repeated parts reuse one geometry even with different item dimensions');
+  assert.notEqual(groups[0].children[0].material, groups[1].children[0].material, 'Materials retain their original identity and render sorting');
+  assert.notEqual(groups[0].children[0].geometry, groups[2].children[0].geometry, 'Different cached appearances do not accidentally share mutable asset data');
+  for (const [i, group] of groups.entries()) {
+    const item = catalogFloor.items[i], asset = shared.itemAsset(item);
+    assert.deepEqual(group.position.toArray(), [item.position_m.x, catalogFloor.elevation_m + item.position_m.y, item.position_m.z]);
+    assert.deepEqual(group.scale.toArray(), [item.dimensions_m.width, item.dimensions_m.height, item.dimensions_m.depth]);
+    assert.equal(group.rotation.y, item.rotation_deg * Math.PI / 180);
+    assert.equal(group.children.length, asset.meshes.length, 'Every part remains a separate ordered mesh');
+    for (const [j, mesh] of group.children.entries()) {
+      const part = asset.meshes[j];
+      assert.deepEqual(mesh.geometry.attributes.position.array, new Float32Array(part.vertices.flat()));
+      assert.deepEqual(mesh.geometry.attributes.normal.array, new Float32Array(part.normals.flat()));
+      assert.deepEqual(Array.from(mesh.geometry.index.array), part.indices);
+      assert.deepEqual(mesh.material.color.toArray(), asset.materials[part.material].slice(0, 3));
+      assert.equal(mesh.material.roughness, .78); assert(mesh.castShadow && mesh.receiveShadow);
+    }
+  }
+  const oldGeometry = new Map(), oldMaterials = new Map();
+  sharedWorld.traverse(object => {
+    if (object.geometry && !oldGeometry.has(object.geometry)) { oldGeometry.set(object.geometry, 0); object.geometry.addEventListener('dispose', () => oldGeometry.set(object.geometry, oldGeometry.get(object.geometry) + 1)); }
+    if (object.material && !oldMaterials.has(object.material)) { oldMaterials.set(object.material, 0); object.material.addEventListener('dispose', () => oldMaterials.set(object.material, oldMaterials.get(object.material) + 1)); }
+  });
+  shared.rebuildPreview();
+  assert([...oldGeometry.values()].every(count => count === 1), 'Each shared geometry is disposed exactly once');
+  assert([...oldMaterials.values()].every(count => count === 1), 'Every material is disposed exactly once');
+  sharedWorld.traverse(object => { if (object.geometry) assert(!oldGeometry.has(object.geometry), 'A rebuild never reuses a disposed GPU resource'); });
+  shared.disposePreviewGeometry(); assert.equal(sharedWorld.children.length, 0);
+
   // Real pointer handlers: exact endpoint math, one clone per gesture, and undo/cancel.
   for (const kind of ['rooms', 'walls', 'items', 'openings']) {
     const original = model.clone(project), snapshot = JSON.stringify(original), plan = surface();

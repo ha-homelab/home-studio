@@ -648,7 +648,12 @@ function fitPreview() {
 }
 function disposePreviewGeometry() {
   if (!worldGroup) return;
-  while (worldGroup.children.length) { const child = worldGroup.children[0]; worldGroup.remove(child); child.traverse(obj => { obj.geometry?.dispose(); if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose()); else obj.material?.dispose(); }); }
+  const geometries = new Set(), materials = new Set();
+  const dispose = (resource, seen) => { if (resource && !seen.has(resource)) { seen.add(resource); resource.dispose(); } };
+  while (worldGroup.children.length) {
+    const child = worldGroup.children[0]; worldGroup.remove(child);
+    child.traverse(obj => { dispose(obj.geometry, geometries); if (Array.isArray(obj.material)) obj.material.forEach(material => dispose(material, materials)); else dispose(obj.material, materials); });
+  }
 }
 function disposePreviewRenderer() {
   if (!renderer || previewRendererDisposed) return;
@@ -658,6 +663,9 @@ function disposePreviewRenderer() {
 }
 function rebuildPreview() {
   disposePreviewGeometry();
+  // Cached asset parts are immutable. Share their geometry only within this
+  // rebuild; every mesh keeps its own material, transform and rendering order.
+  const catalogGeometries = new Map();
   let wallMeshCount = 0, openingCount = 0, roomCount = 0, itemCount = 0, catalogItemCount = 0, itemMeshCount = 0;
   const box = (width, height, depth, position, color, rotation = 0, opacity = 1) => {
     const geometry = new THREE.BoxGeometry(width, height, depth), material = new THREE.MeshStandardMaterial({ color, roughness: .78, transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
@@ -689,7 +697,11 @@ function rebuildPreview() {
       if (asset) {
         const group = new THREE.Group(); group.position.set(p.x, f.elevation_m + p.y, p.z); group.rotation.y = rotation; group.scale.set(d.width, d.height, d.depth);
         for (const part of asset.meshes) {
-          const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(part.vertices.flat(), 3)); geometry.setAttribute('normal', new THREE.Float32BufferAttribute(part.normals.flat(), 3)); geometry.setIndex(part.indices);
+          let geometry = catalogGeometries.get(part);
+          if (!geometry) {
+            geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(part.vertices.flat(), 3)); geometry.setAttribute('normal', new THREE.Float32BufferAttribute(part.normals.flat(), 3)); geometry.setIndex(part.indices);
+            catalogGeometries.set(part, geometry);
+          }
           const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(...asset.materials[part.material].slice(0, 3)), roughness: .78 });
           const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; mesh.castShadow = true; mesh.receiveShadow = true; group.add(mesh); itemMeshCount++;
         }
