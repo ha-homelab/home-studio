@@ -23,4 +23,10 @@ Je plattegrond en apparaat-ID’s kunnen privé zijn. Gebruik een fictief huis v
 
 Dit is een vertaalde snelstartgids. De volledige documentatie en geïllustreerde handleiding zijn momenteel in het Engels. Verbeteringen aan vertalingen zijn welkom.
 
+## Knoppen proberen zonder opdrachten
+
+Zet in de geïnstalleerde Home Assistant-plattegrond Dry run aan om knoppen zonder opdrachten te proberen. Schakelaars, tv-voeding, gordijnen en ingebouwde vensters met slotbediening worden geblokkeerd; de statussen blijven echt. Bewaar het adres met ?dry_run=1 als bladwijzer in deze browser. Wijzigingen aan de indeling kunnen nog steeds worden opgeslagen.
+
+[Dry run — English](../dry-run.md) · [Wiki — English](../wiki/Home.md)
+
 MIT · [LICENSE](../../LICENSE)

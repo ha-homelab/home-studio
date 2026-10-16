@@ -23,4 +23,10 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 これは翻訳版のクイックスタートです。詳しいリファレンスと図解ガイドは現在英語です。翻訳の修正を歓迎します。
 
+## 命令を送らずにボタンを試す
+
+インストール済みの Home Assistant の図で Dry run を有効にすると、命令を送らずにボタンを試せます。スイッチ、テレビの電源、カーテン、錠の操作を含む標準ダイアログを遮断し、実際の状態表示は続きます。このブラウザーで保護を維持するには、図の URL に ?dry_run=1 を付けてブックマークしてください。配置の変更は引き続き保存できます。
+
+[Dry run — English](../dry-run.md) · [Wiki — English](../wiki/Home.md)
+
 MIT · [LICENSE](../../LICENSE)

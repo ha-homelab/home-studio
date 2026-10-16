@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc">
+<title id="title">Device commands and real readings take separate paths</title><desc id="desc">A device click travels from the sandboxed viewer to the authenticated host. In Dry run the host returns no command sent, and no device service is called. With live controls, normal validation and a second guard check precede a Home Assistant service call. Real Home Assistant readings can return to the viewer in either mode. Other clients are outside this guard.</desc>
+<defs><marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8Z" fill="#557286"/></marker></defs>
+<style>text{font-family:system-ui,-apple-system,Segoe UI,sans-serif;fill:#203c4a}.title{font-size:30px;font-weight:700}.sub{font-size:18px;fill:#4f6977}.head{font-size:21px;font-weight:650}.body{font-size:18px}.small{font-size:16px;fill:#4f6977}.box{fill:#fff;stroke:#b6cad5;stroke-width:2}.line{fill:none;stroke:#557286;stroke-width:2.5;marker-end:url(#arrow)}.safe{fill:#edf7f3;stroke:#4d9777;stroke-width:2}.guard{fill:#fff6de;stroke:#cda752;stroke-width:2}</style>
+<rect width="1200" height="700" rx="20" fill="#f4f8fa"/>
+<text x="40" y="55" class="title">Device commands and real readings take separate paths</text>
+<text x="40" y="88" class="sub">The guard lives in the authenticated host, beyond the viewer sandbox.</text>
+<rect x="40" y="135" width="300" height="125" rx="12" class="box"/><text x="62" y="171" class="head">Sandboxed plan</text><text x="62" y="207" class="body">User selects a device</text><text x="62" y="235" class="small">MessagePort request</text>
+<path d="M340 197 H410" class="line"/>
+<rect x="420" y="135" width="330" height="125" rx="12" class="guard"/><text x="442" y="171" class="head">Trusted host: Dry run?</text><text x="442" y="207" class="body">On → block device request</text><text x="442" y="235" class="small">Includes native details dialogs</text>
+<path d="M750 197 H820" class="line"/>
+<rect x="830" y="135" width="330" height="125" rx="12" class="safe"/><text x="852" y="171" class="head">No command sent</text><text x="852" y="207" class="body">Release pending control</text><text x="852" y="235" class="small">Never fake a new device state</text>
+<path d="M585 260 V337" class="line"/><text x="607" y="306" class="small">Off</text>
+<rect x="420" y="350" width="330" height="130" rx="12" class="box"/><text x="442" y="387" class="head">Normal command checks</text><text x="442" y="420" class="body">Saved binding + allowed action</text><text x="442" y="451" class="small">Recheck guard before dispatch</text>
+<path d="M750 414 H820" class="line"/>
+<rect x="830" y="350" width="330" height="130" rx="12" class="box"/><text x="852" y="387" class="head">Home Assistant</text><text x="852" y="420" class="body">Service call, if permitted</text><text x="852" y="451" class="small">Physical devices and integrations</text>
+<path d="M995 480 V570 H190 V270" class="line"/><text x="346" y="560" class="body">Real readings continue in both modes</text>
+<text x="40" y="632" class="small">Scope: this plan only. Other dashboards, automations, and already-delivered commands remain independent.</text>
+</svg>

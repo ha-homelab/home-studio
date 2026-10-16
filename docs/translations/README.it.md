@@ -23,4 +23,10 @@ La pianta e gli identificativi dei dispositivi possono essere riservati. Usa una
 
 Questa è una guida rapida tradotta. La documentazione completa e la guida illustrata sono attualmente in inglese. Le correzioni delle traduzioni sono benvenute.
 
+## Provare i pulsanti senza comandi
+
+Nel piano Home Assistant installato, attiva Dry run per provare i pulsanti senza inviare comandi. Interruttori, alimentazione dei televisori, tende e finestre native con controlli delle serrature vengono bloccati; gli stati restano reali. Salva l’indirizzo del piano con ?dry_run=1 nei preferiti di questo browser. Le modifiche alla disposizione possono ancora essere salvate.
+
+[Dry run — English](../dry-run.md) · [Wiki — English](../wiki/Home.md)
+
 MIT · [LICENSE](../../LICENSE)

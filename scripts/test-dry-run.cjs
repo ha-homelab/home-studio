@@ -77,3 +77,59 @@ test('normal mode retains validated service, curtain and native details behavior
     ['ws',{type:'home_floorplan/curtain_command',entity_id:'cover.curtain',action:'close_cover'}]]);
   assert.equal(f.events[0].type,'hass-more-info');assert.equal(f.sent.length,3);assert.ok(f.sent.every(result=>result.ok));
 });
+
+test('unreadable and malformed stored preferences start safely with device commands blocked',async()=>{
+  for(const options of [{storageFails:true},{storage:new Map([['home-floorplan:dry-run','broken']])}]){
+    const f=fixture(options);assert.equal(f.panel.dryRun,true);
+    f.send({type:'toggle',entity_id:'switch.relay',request_id:'unreadable'});await flush();
+    assert.deepEqual(f.calls,[]);assert.equal(f.sent.at(-1).dry_run,true);
+  }
+});
+test('a shared preference is rechecked before dispatch even before its storage event arrives',async()=>{
+  const f=fixture();f.send({type:'toggle',entity_id:'switch.relay',request_id:'other-tab'});
+  f.storage.set('home-floorplan:dry-run','true');await flush();
+  assert.deepEqual(f.calls,[]);assert.equal(f.panel.dryRun,true);assert.equal(f.sent.at(-1).dry_run,true);
+});
+test('enabling then disabling dry run cannot release an older queued command',async()=>{
+  const f=fixture();f.send({type:'toggle',entity_id:'switch.relay',request_id:'cancelled'});
+  f.panel.setDryRun(true);f.panel.setDryRun(false);await flush();
+  assert.equal(f.panel.dryRun,false);assert.deepEqual(f.calls,[]);assert.equal(f.sent.at(-1).dry_run,true);
+  f.send({type:'toggle',entity_id:'switch.relay',request_id:'new'});await flush();
+  assert.equal(f.calls.length,1);assert.equal(f.sent.at(-1).ok,true);
+});
+test('storage changes and cleared preferences cannot override URL pinning',()=>{
+  const f=fixture();f.panel.onDryRunStorage({key:'home-floorplan:dry-run',newValue:'true'});
+  assert.equal(f.panel.dryRun,true);
+  f.panel.onDryRunStorage({key:'home-floorplan:dry-run',newValue:'false'});
+  assert.equal(f.panel.dryRun,false);
+  f.panel.onDryRunStorage({key:null,newValue:null});assert.equal(f.panel.dryRun,true);
+  f.panel.onDryRunStorage({key:'unrelated-key',newValue:'false'});assert.equal(f.panel.dryRun,true);
+  const pinned=fixture({search:'?dry_run=1'});
+  pinned.panel.onDryRunStorage({key:'home-floorplan:dry-run',newValue:'false'});assert.equal(pinned.panel.dryRun,true);
+});
+test('all 24 host languages translate the guard, errors and existing notices without state changes',()=>{
+  const f=fixture(),message={type:'toggle',entity_id:'switch.relay',request_id:'languages'};
+  f.panel.setDryRun(true);
+  const before=JSON.stringify(f.panel._hass.states);
+  const locales=JSON.parse(fs.readFileSync(path.join(__dirname,'../viewer-locales/index.json'),'utf8'));
+  const key='Dry run · no command sent. Showing live device states.';
+  for(const {code,dir} of locales){
+    const words=JSON.parse(fs.readFileSync(path.join(__dirname,`../viewer-locales/${code}.json`),'utf8'));
+    f.send({type:'view_preferences',language:code});f.send(message);
+    assert.equal(f.sent.at(-1).error,words[key],code);assert.equal(f.sent.at(-1).error_key,key);
+    assert.equal(f.panel.$('dry-run').textContent,words['Dry run: On'],code);
+    assert.equal(f.panel.$('header',false).dir,dir || 'ltr',code);
+    assert.equal(f.panel.$('notice').textContent,words[key],code);
+    assert.equal(f.panel.t('Command failed: {error}',{error:'<b>device detail</b>'}),words['Command failed: {error}'].replace('{error}','<b>device detail</b>'));
+  }
+  f.send({type:'view_preferences',language:'ru'});
+  assert.match(f.panel.$('notice').textContent,/команда не отправлена/,'existing notice follows new language');
+  assert.equal(JSON.stringify(f.panel._hass.states),before);assert.deepEqual(f.calls,[]);
+});
+test('host language query wins over saved preference and falls back safely for unsupported tags',()=>{
+  const f=fixture({search:'?lang=zh-TW&dry_run=1',storage:new Map([['home-studio.language.v1','ru']])});
+  assert.equal(f.panel.viewPreferences.language,'zh-Hant');assert.equal(f.panel.dryRun,true);
+  assert.equal(f.panel.$('dry-run').textContent,'試執行：開啟');
+  const fallback=fixture({search:'?lang=unsupported',storage:new Map([['home-studio.language.v1','ru']])});
+  assert.equal(fallback.panel.viewPreferences.language,'ru');
+});

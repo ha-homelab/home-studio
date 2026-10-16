@@ -23,4 +23,10 @@ Plán domu a identifikátory zařízení mohou být soukromé. Ve veřejných p�
 
 Toto je přeložený stručný návod. Úplná dokumentace a ilustrovaný průvodce jsou zatím v angličtině. Opravy překladů vítáme.
 
+## Zkoušení tlačítek bez příkazů
+
+V nainstalovaném plánu Home Assistant zapněte Dry run, chcete-li zkoušet tlačítka bez odesílání příkazů. Blokují se vypínače, napájení televizorů, závěsy i nativní dialogy s ovládáním zámků; stavy zůstávají skutečné. Uložte adresu plánu s ?dry_run=1 do záložek tohoto prohlížeče. Změny rozmístění lze nadále ukládat.
+
+[Dry run — English](../dry-run.md) · [Wiki — English](../wiki/Home.md)
+
 MIT · [LICENSE](../../LICENSE)

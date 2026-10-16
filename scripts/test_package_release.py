@@ -49,6 +49,21 @@ class PublicPackageTests(unittest.TestCase):
                 with self.assertRaises(FileExistsError):
                     packaging.package(root, root / "one", "a" * 40)
 
+    def test_operating_guides_work_from_the_extracted_source_archive(self):
+        import importlib.util
+        with tempfile.TemporaryDirectory(prefix='home-studio-docs-') as temp:
+            directory = Path(temp)
+            archive = packaging.package(packaging.ROOT, directory / 'release', 'a' * 40)
+            with zipfile.ZipFile(archive) as zipped:
+                zipped.extractall(directory / 'extracted')
+            extracted = directory / 'extracted/home-studio'
+            spec = importlib.util.spec_from_file_location('packaged_docs', extracted / 'scripts/validate-docs.py')
+            docs = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(docs)
+            result = docs.validate(extracted)
+            self.assertEqual(result['languages'], len(packaging.public_site.LOCALE_CODES))
+            self.assertGreater(result['guides'], result['languages'])
+
     def test_invalid_source_is_rejected_before_output(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

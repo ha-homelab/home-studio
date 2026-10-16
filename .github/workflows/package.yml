@@ -33,8 +33,13 @@ jobs:
           node scripts/test-furniture-patterns.mjs
           python3 scripts/test-inventory-appearance.py
           node --test scripts/test-inventory-appearance.cjs
+      - name: Check localized guides, wiki links and vector diagrams
+        run: |
+          python3 scripts/test-docs.py
+          python3 scripts/validate-docs.py
       - name: Check translation coverage and placeholders
         run: |
+          python3 scripts/build-panel-locales.py --check
           node scripts/test-i18n.mjs
           node scripts/test-validation-i18n.mjs
           node --test scripts/test-panel-language.cjs
@@ -51,7 +56,9 @@ jobs:
           node scripts/test-help-i18n.cjs
           node scripts/test-viewer-i18n.cjs
       - name: Test dry-run command gate without physical devices
-        run: node --test scripts/test-dry-run.cjs
+        run: |
+          node --test scripts/test-dry-run.cjs
+          node --test scripts/test-dry-run-browser.cjs
       - name: Test lock status and native controls without device commands
         run: node scripts/test-lock-control.cjs
       - name: Test bounded diagnostic display with synthetic clocks

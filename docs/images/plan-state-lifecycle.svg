@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc">
+<title id="title">Connection health and Dry run are independent</title><desc id="desc">Four states distinguish connected or disconnected Home Assistant from Dry run on or off. Connected and guarded means real readings with no device commands. Disconnected states have no trusted live readings. With a connection and Dry run off, normal validation permits user commands. Reconnecting does not disable Dry run.</desc>
+<defs><marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8Z" fill="#557286"/></marker></defs>
+<style>text{font-family:system-ui,-apple-system,Segoe UI,sans-serif;fill:#203c4a}.title{font-size:30px;font-weight:700}.sub{font-size:18px;fill:#4f6977}.head{font-size:21px;font-weight:650}.body{font-size:18px}.small{font-size:16px;fill:#4f6977}.box{fill:#fff;stroke:#b6cad5;stroke-width:2}.line{fill:none;stroke:#557286;stroke-width:2.5;marker-end:url(#arrow)}.safe{fill:#edf7f3;stroke:#4d9777;stroke-width:2}.guard{fill:#fff6de;stroke:#cda752;stroke-width:2}</style>
+<rect width="1200" height="700" rx="20" fill="#f4f8fa"/>
+<text x="40" y="55" class="title">Connection health and Dry run are independent</text>
+<text x="40" y="88" class="sub">A connection can recover without changing the device-command policy.</text>
+<text x="107" y="144" class="head">Dry run ON</text><text x="764" y="144" class="head">Dry run OFF</text>
+<rect x="65" y="170" width="440" height="140" rx="14" class="safe"/><text x="90" y="208" class="head">Connected · guarded</text><text x="90" y="246" class="body">Real readings are displayed.</text><text x="90" y="277" class="body">Device requests are blocked.</text>
+<rect x="695" y="170" width="440" height="140" rx="14" class="box"/><text x="720" y="208" class="head">Connected · live controls</text><text x="720" y="246" class="body">Real readings are displayed.</text><text x="720" y="277" class="body">Valid user commands may be sent.</text>
+<path d="M510 215 H685" class="line"/><path d="M690 273 H515" class="line"/><text x="544" y="242" class="small">User choice*</text>
+<path d="M200 315 V415" class="line"/><path d="M363 420 V320" class="line"/><text x="68" y="363" class="small">Connection</text><text x="68" y="387" class="small">lost</text><text x="385" y="363" class="small">Connection</text><text x="385" y="387" class="small">restored</text>
+<path d="M830 315 V415" class="line"/><path d="M993 420 V320" class="line"/><text x="698" y="363" class="small">Connection</text><text x="698" y="387" class="small">lost</text><text x="1015" y="363" class="small">Connection</text><text x="1015" y="387" class="small">restored</text>
+<rect x="65" y="430" width="440" height="135" rx="14" class="guard"/><text x="90" y="468" class="head">Disconnected · guarded</text><text x="90" y="506" class="body">Do not assume cached values are live.</text><text x="90" y="537" class="body">Dry run remains on.</text>
+<rect x="695" y="430" width="440" height="135" rx="14" class="box"/><text x="720" y="468" class="head">Disconnected · unavailable</text><text x="720" y="506" class="body">No trusted live connection.</text><text x="720" y="537" class="body">Device state is not inferred as “off.”</text>
+<text x="65" y="618" class="small">* A URL pinned with ?dry_run=1 prevents turning the guard off. Language changes do not alter this policy.</text>
+<text x="65" y="647" class="small">The separate legacy tablet is always guarded and withdraws snapshots older than 45 seconds.</text>
+</svg>

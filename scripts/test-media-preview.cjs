@@ -58,7 +58,7 @@ test('leaders contain only horizontal and vertical runs, including above/below c
  }
 });
 test('host restricts TV power to explicit actions on saved media entities and serializes requests',async()=>{
- let Panel;const context=vm.createContext({HTMLElement:class{},customElements:{get(){},define(name,value){Panel=value}}});
+ let Panel;const context=vm.createContext({localStorage:{getItem(){return null;}},HTMLElement:class{},customElements:{get(){},define(name,value){Panel=value}}});
  vm.runInContext(fs.readFileSync('custom_components/home_floorplan/static/panel.js','utf8'),context);
  const messages=[],calls=[];let complete;
  const panel=Object.assign(Object.create(Panel.prototype),{generation:1,savedItems:[{entity_id:'media_player.study'},{entity_id:'light.study'}],commands:new Set(),port:{postMessage:m=>messages.push(m)},notice(){},

@@ -23,4 +23,10 @@ Denah rumah dan ID entitas perangkat mungkin bersifat pribadi. Gunakan rumah fik
 
 Ini adalah panduan singkat terjemahan. Referensi lengkap dan panduan bergambar saat ini tersedia dalam bahasa Inggris. Koreksi terjemahan sangat diterima.
 
+## Mencoba tombol tanpa perintah
+
+Pada denah Home Assistant yang terpasang, aktifkan Dry run untuk mencoba tombol tanpa mengirim perintah. Sakelar, daya TV, tirai, dan dialog bawaan berisi kontrol kunci diblokir; status tetap nyata. Simpan alamat denah dengan ?dry_run=1 sebagai markah di peramban ini. Perubahan tata letak tetap dapat disimpan.
+
+[Dry run — English](../dry-run.md) · [Wiki — English](../wiki/Home.md)
+
 MIT · [LICENSE](../../LICENSE)
