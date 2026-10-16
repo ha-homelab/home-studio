@@ -296,6 +296,22 @@ either assertion. CPU checks exercise both diffuse and physically based software
 paths, including continuous input across several deadlines. Physically based
 software frames remain full-resolution direct draws without a copy pass.
 
+The diffuse interaction helper prepares its framebuffer-copy texture and
+program on the first actual motion frame. Initial, resized and restored full
+frames draw the scene directly without allocating or compiling unused copy
+resources. The motion viewport, copy shader, filtering, frame statistics,
+release frame and disposal behavior are unchanged. A later motion frame sizes
+the texture from the current drawing buffer before copying.
+This defers one copy-texture initialization and one copy-program compile
+request; the helper's CPU-side camera, geometry and material still exist and
+retain their original cleanup.
+
+This moves copy preparation into the first gesture; it does not remove that
+work or establish a speedup. The original first-drag, load and recovery limits
+remain mandatory. CPU checks cover cold full frames, first-motion preparation,
+resize, reconstruction, errors and cleanup; real driver timing and pixels still
+require browser validation.
+
 The packed daylight path omits loops for absent exterior rooms or windows and
 rejects rooms outside the existing conservative spatial bound before calculating
 polygon distance. The bound contains the full daylight and exterior transition;
