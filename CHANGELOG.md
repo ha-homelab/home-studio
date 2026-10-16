@@ -36,7 +36,8 @@
 - Reduce room-lighting shader compilation and fragment work while preserving
   light order, every illuminated fixture and nonzero light through doorways.
   The diffuse profile uses packed room geometry with a conservative uniform
-  budget; larger plans or lower limits retain the original shader path.
+  budget and computes transmission per light run instead of indexing a local
+  fragment array; larger plans or lower limits retain the original shader path.
 - Reuse planner outlines and selection controls, and avoid redrawing unchanged
   snapped positions. Preserve exact furniture overlap, appearance, undo and drag
   cancellation. Bound software-renderer resolution without reducing sharp HTML

@@ -105,7 +105,13 @@ for(const p of positions) {
     const start='#if ( NUM_POINT_LIGHTS > 0 ) && defined( RE_Direct )';
     const end='#if ( NUM_SPOT_LIGHTS > 0 ) && defined( RE_Direct )';
     const loop=s=>s.slice(s.indexOf(start),s.indexOf(end));
-    assert.equal(loop(packed.shader.fragmentShader),loop(literal.shader.fragmentShader),'Point-light loop is byte-identical');
+    const packedLoop=loop(packed.shader.fragmentShader);
+    const cachedEquivalent=packedLoop.replace(/homePointTransmission\(homePointRooms\[([^\]]+)\]\)/g,
+      'homeRoomTransmissions[homePointRooms[$1]]');
+    assert.equal(cachedEquivalent,loop(literal.shader.fragmentShader),'Point-light order, culling and math differ only in equivalent transmission lookup');
+    assert.doesNotMatch(packed.shader.fragmentShader,/homeRoomTransmissions\[/,'Packed mode has no dynamically indexed local transmission array');
+    assert.match(packed.shader.fragmentShader,/if \(room == 0\) return 1\.0;/,'Unbound lights keep unrestricted transmission');
+    assert.match(packed.shader.fragmentShader,/homeLitRooms\[index\] != 0 && homeRoomNearby\(index\)\s*\? homeRoomTransmission\(homeRoomDistance\(index\)\) : 0\.0;/,'On-demand lookup retains lit-room and spatial guards');
     const values=ws.map((_,i)=>.1+i*.2);
     packed.lighting.environment(.7,values);
     if(ws.length) {
@@ -115,6 +121,53 @@ for(const p of positions) {
         'A partial environment update retains untouched window values');
     }
   }
+  // Execute the actual scalar GLSL helper as JavaScript, against an independent
+  // precomputed-cache oracle. The unchanged geometry math is checked above.
+  const direct=shaderFor(rooms,windows,12,{packed:true,maxFragmentUniforms:1024});
+  const helper=direct.shader.fragmentShader.match(/float homePointTransmission\(int room\) \{([\s\S]*?)\n    \}/);
+  assert(helper,'The packed shader exposes one on-demand transmission helper');
+  const evaluate=new Function('room','homeLitRooms','homeRoomNearby','homeRoomDistance','homeRoomTransmission',
+    helper[1].replace(/\bint index\b/,'const index'));
+  const roomNumber=room=>rooms.findIndex(value=>value.id===room)+1;
+  const checkIndex=index=>assert(Number.isInteger(index)&&index>=0&&index<rooms.length,'No out-of-range room access');
+  let checkedDirect=0,checkedRuns=0;
+  for(const mask of [0,1,2,3,4,5,6,7])for(const mode of ['grouped','interleaved','hidden']) {
+    const points=Array.from({length:12},(_,i)=>({item:{room:i===11?'unknown':rooms[mode==='grouped'?Math.floor(i/4):i%3].id},
+      light:{visible:mode!=='hidden'||i%4!==1,castShadow:i<2||i===7,intensity:mask&(1<<(i%3))?1:0}}));
+    direct.lighting.update(points);
+    const uniforms=direct.shader.uniforms;
+    const ordered=points.filter(p=>p.light.visible).sort((a,b)=>Number(b.light.castShadow)-Number(a.light.castShadow));
+    const ids=ordered.map(p=>roomNumber(p.item.room));
+    assert.deepEqual(Array.from(uniforms.homePointRooms.value).slice(0,ids.length),ids);
+    const lit=Array.from(uniforms.homeLitRooms.value);
+    const guardedLit=new Proxy(lit,{get:(target,key)=>{checkIndex(Number(key));return target[key];}});
+    for(const p of positions) {
+      const cached=[1,...rooms.map((room,index)=>lit[index]?transmission(distance(p,edgesOf(room))):0)];
+      const lookup=id=>evaluate(id,guardedLit,index=>{
+        checkIndex(index);const b=data.uniforms.homeRoomBounds.value.slice(index*4,index*4+4);
+        return p[0]>=b[0]-.56&&p[1]>=b[1]-.56&&p[0]<=b[2]+.56&&p[1]<=b[3]+.56;
+      },index=>{checkIndex(index);return distance(p,packedEdges(data,index));},transmission);
+      for(let id=0;id<=rooms.length;id++) {
+        assert.equal(lookup(id),cached[id],'Actual direct helper equals independent per-room cache');checkedDirect++;
+      }
+      for(const prefix of [0,ordered.filter(point=>point.light.castShadow).length,ordered.length]) {
+        const expected=ids.flatMap((id,index)=>cached[id]!==0?[[index,cached[id]]]:[]),actual=[];
+        for(let index=0;index<prefix;index++)if(lookup(ids[index])!==0)actual.push([index,lookup(ids[index])]);
+        let start=0;
+        for(const end of Array.from(uniforms.homeLightRunEnds.value).slice(0,uniforms.homeLightRunCount.value)) {
+          const first=Math.max(start,prefix);
+          if(first<end) {const value=lookup(ids[first]);if(value!==0)for(let index=first;index<end;index++)actual.push([index,value]);}
+          start=end;
+        }
+        assert.deepEqual(actual,expected,'Every shadow-prefix/runtime-run contribution retains its original order and exact transmission');
+        checkedRuns++;
+      }
+    }
+  }
+  // Empty geometry and unknown/unassigned room IDs must never index room -1.
+  assert.equal(evaluate(0,new Proxy([],{get:()=>{throw Error('Unexpected room read');}}),
+    ()=>{throw Error('Unexpected bounds read');},()=>{throw Error('Unexpected geometry read');},transmission),1);
+  console.log(JSON.stringify({checkedDirect,checkedRuns}));
   const full=Array.from({length:24},(_,i)=>{const x=i%6*4,z=Math.floor(i/6)*4;return{id:`room${i}`,polygon:[[x,z],[x+4,z],[x+4,z+4],[x,z+4]]};});
   const fullWindows=full.slice(0,6).map((r,i)=>({room:r.id,a:[i*4+1,0],b:[i*4+2.6,0]}));
   const literal=shaderFor(full,fullWindows,72),packed=shaderFor(full,fullWindows,72,{packed:true,maxFragmentUniforms:1024});

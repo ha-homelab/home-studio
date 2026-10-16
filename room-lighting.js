@@ -230,11 +230,17 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
       // Outdoor surfaces retain a gentle base at night and brighten with the sun.
       return 3.14159265 * vec3(0.93,0.97,1.0) *
         (homeDaylight * min(incoming,1.05) + exterior * (0.16 + 1.1*homeDaylight));
-    }
+    }${packed ? `
+    float homePointTransmission(int room) {
+      if (room == 0) return 1.0;
+      int index = room - 1;
+      return homeLitRooms[index] != 0 && homeRoomNearby(index)
+        ? homeRoomTransmission(homeRoomDistance(index)) : 0.0;
+    }` : ''}
   `;
-  // Cache each room once per fragment, rather than evaluating its polygon for
-  // every light fixture in that room.
-  // Unlit rooms are skipped without changing the shader's fixed light count.
+  // The literal shader caches each lit room once per fragment. The packed
+  // software path uses direct lookups below: a dynamically indexed local float
+  // array is expensive on Apple's legacy fragment interpreter.
   const transmissionCache = `
     #if NUM_POINT_LIGHTS > 0
       float homeRoomTransmissions[${rooms.length + 1}];
@@ -286,7 +292,13 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
       }
       homeRunStart = homeRunEnd;
     }`);
-  const lighting = transmissionCache + lightChunk.slice(0, pointStart) + boundedPointLighting + lightChunk.slice(pointEnd);
+  // Keep shadow sampler indices literal and share one lookup per unshadowed
+  // room run. Both paths retain exactly the same zero-transmission culling.
+  const directPointLighting = packed ? boundedPointLighting.replace(
+    /homeRoomTransmissions\[homePointRooms\[([^\]]+)\]\]/g,
+    'homePointTransmission(homePointRooms[$1])'
+  ) : boundedPointLighting;
+  const lighting = (packed ? '' : transmissionCache) + lightChunk.slice(0, pointStart) + directPointLighting + lightChunk.slice(pointEnd);
   return {
     capacity, geometryMode: packed ? 'packed' : 'literal', geometryUniformVectors: packed?.uniformVectors ?? null,
     attach(group, enabled) {

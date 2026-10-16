@@ -232,10 +232,13 @@ change. Fixtures keep their shader slots when switched off, using zero intensity
 instead of changing the compiled light count. An initial host inventory identical
 to the viewer's current inventory does not rebuild the scene.
 
-The room-light shader evaluates room transmission at most once per lit room per
-fragment and skips unlit rooms. An exactly zero cached transmission skips that
+The normal room-light shader caches transmission once per lit room per fragment.
+The packed diffuse path calculates it on demand for the bounded shadow prefix
+and once per consecutive unshadowed room run, avoiding a dynamically indexed
+fragment-local array that is expensive in Apple's legacy software interpreter.
+Both paths skip unlit and distant rooms; exactly zero transmission skips the
 light's distance, attenuation, shadow, and direct surface-reflectance work.
-Nonzero contributions retain the same lighting calculation.
+Nonzero contributions retain the same lighting calculation and order.
 
 The 24-room, 72-light acceptance fixture exposed excessive software shader
 compilation from expanding a full lighting block for every fixture. Only the
