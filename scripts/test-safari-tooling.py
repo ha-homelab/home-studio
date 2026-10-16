@@ -76,11 +76,14 @@ class TransportTests(unittest.TestCase):
         self.client.start()
         self.value = None
         self.client.drag([1, 2], [11, 12])
-        self.assertEqual(self.requests[-1][1], '/session/test-session/actions')
-        actions = self.requests[-1][2]['actions'][0]
+        self.assertEqual(self.requests[-2][1], '/session/test-session/actions')
+        actions = self.requests[-2][2]['actions'][0]
         self.assertEqual(actions['parameters']['pointerType'], 'mouse')
         self.assertEqual(actions['actions'][1]['type'], 'pointerDown')
         self.assertEqual(actions['actions'][-1]['type'], 'pointerUp')
+        self.assertEqual(self.requests[-1][1], '/session/test-session/execute/async')
+        self.assertEqual(set(self.requests[-1][2]), {'script', 'args'})
+        self.assertEqual(self.requests[-1][2]['script'].count('requestAnimationFrame'), 2)
 
     def test_frame_switch_and_unsupported_commands(self):
         self.client.start()

@@ -63,6 +63,24 @@ class Socket:
 
 
 class ToolingTests(unittest.TestCase):
+    def test_drag_budget_includes_queued_animation_frames(self):
+        client = acceptance.Marionette.__new__(acceptance.Marionette)
+        for draw_seconds in (2.8, 15):
+            now, calls = [0.0], []
+            def call(name, body):
+                calls.append((name, body))
+                now[0] += .2 if name == 'WebDriver:PerformActions' else draw_seconds
+            client.call = call
+            with patch.object(acceptance.time, 'monotonic', lambda: now[0]):
+                if draw_seconds == 15:
+                    with self.assertRaisesRegex(AssertionError, 'drag exceeded 15 seconds'):
+                        client.drag([1, 2], [11, 12])
+                else:
+                    self.assertEqual(client.drag([1, 2], [11, 12]), 3000)
+            self.assertEqual([entry[0] for entry in calls], ['WebDriver:PerformActions', 'WebDriver:ExecuteAsyncScript'])
+            self.assertEqual(calls[1][1]['script'].count('requestAnimationFrame'), 2)
+            self.assertEqual(calls[1][1]['args'], [])
+
     def firefox_installation(self, version='153.5.0esr'):
         return {
             'product': 'Firefox', 'release': version, 'platform': 'linux-x64',

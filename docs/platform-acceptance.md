@@ -182,6 +182,9 @@ and check draft preservation. They use the actual installed browser protocol
 and record the browser's reported identity. These suites are separate evidence
 from Playwright's patched browser builds and do not claim assertion-for-assertion
 identity with the Playwright runner.
+Both drivers include two animation frames after pointer release in their drag
+timings. A fast input acknowledgement alone is not rendering responsiveness;
+the native 15-second viewer and 10-second planner limits include this draw wait.
 
 ## Reproducibility and evidence
 

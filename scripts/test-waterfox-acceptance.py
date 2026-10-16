@@ -235,6 +235,12 @@ class Marionette:
         actions.append({'type': 'pointerUp', 'button': 0})
         started = time.monotonic()
         self.call('WebDriver:PerformActions', {'actions': [{'type': 'pointer', 'id': 'mouse', 'parameters': {'pointerType': 'mouse'}, 'actions': actions}]})
+        # A driver can acknowledge pointer actions before the requested scene
+        # draw. Match the Playwright path: include two animation frames in the
+        # interaction budget instead of reporting only input-delivery latency.
+        self.call('WebDriver:ExecuteAsyncScript', {
+            'script': 'const done=arguments[arguments.length-1];requestAnimationFrame(()=>requestAnimationFrame(()=>done(true)));',
+            'args': [], 'newSandbox': False, 'sandbox': None})
         elapsed = round((time.monotonic() - started) * 1000)
         require(elapsed < 15000, f'Real pointer drag exceeded 15 seconds: {elapsed} ms')
         return elapsed

@@ -70,18 +70,19 @@ class SafariWebDriver(native.Marionette):
             'WebDriver:PerformActions': ('POST', '/actions'),
             'WebDriver:TakeScreenshot': ('GET', '/screenshot'),
             'WebDriver:ExecuteScript': ('POST', '/execute/sync'),
+            'WebDriver:ExecuteAsyncScript': ('POST', '/execute/async'),
             'WebDriver:SetTimeouts': ('POST', '/timeouts'),
             'WebDriver:SetWindowRect': ('POST', '/window/rect'),
         }
         if name not in routes:
             raise ValueError(f'Unsupported shared WebDriver operation: {name}')
         method, route = routes[name]
-        if name == 'WebDriver:ExecuteScript':
+        if name in ('WebDriver:ExecuteScript', 'WebDriver:ExecuteAsyncScript'):
             data = {key: data[key] for key in ('script', 'args')}
         value = self.request(method, '/session/' + self.session_id + route, data if method != 'GET' else None)
         # Preserve the shared client's response shape without unwrapping a
         # page-returned object that happens to have a property named "value".
-        return {'value': value} if name in ('WebDriver:ExecuteScript', 'WebDriver:TakeScreenshot') else value
+        return {'value': value} if name in ('WebDriver:ExecuteScript', 'WebDriver:ExecuteAsyncScript', 'WebDriver:TakeScreenshot') else value
 
 
 def fixture_server(name, log):
