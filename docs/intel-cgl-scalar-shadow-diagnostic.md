@@ -1,26 +1,27 @@
-# Disposable Intel combined scalar Lambert bodies diagnostic
+# Disposable Intel scalar shadow-point Lambert diagnostic
 
-Only a push to `diagnostic/intel-cgl-scalar-combined` starts this workflow. It has
+Only a push to `diagnostic/intel-cgl-scalar-shadow` starts this workflow. It has
 read-only GitHub permissions and pinned actions. It does not invoke the 77-lane
 acceptance gate or publish a release. Its results are diagnostic evidence only.
 
 This prepared comparison selects one exact runtime candidate. The selection
 validator rejects placeholders, moving refs, the baseline itself, mismatched
-workflow pins and either missing CPU proof command before source checkout or host
+workflow pins and any missing CPU proof command before source checkout or host
 preparation. Preparation does not authorize a push or launch.
 
 Two independent `macos-15-intel` jobs compare these sources in order:
 
-- Baseline: `7b7a896225aaf27fef26a135d654dfaddffe2c08`.
-- Combined scalar Lambert bodies: `be640ec12f0acd3abf094d5f5fa03ce2ad2781fe`.
+- Baseline: `be640ec12f0acd3abf094d5f5fa03ce2ad2781fe`.
+- Scalar shadow-point Lambert: `c6da122681807da85858a90a629de99997a72531`.
 - Candidate preflights: `node scripts/test-literal-lambert-point-body.cjs` and
-  `node scripts/test-literal-lambert-directional.cjs`.
+  `node scripts/test-literal-lambert-directional.cjs`, plus
+  `node scripts/test-scalar-shadow-point.cjs`.
 
 One job uses Firefox `153.5.0esr`; the other uses Waterfox `6.7.6`. Maximum
 parallelism is two. Each pair runs sequentially on one hosted VM and shares one
 official browser installation verified by the original installer, checksum
 catalog and signature checks. Python 3.13, Node 22 and both locked npm dependency
-installations are prepared before either suite starts. Both selected candidate
+installations are prepared before either suite starts. All three selected candidate
 CPU proofs run before the browser is installed; failure stops preparation.
 
 After both sources pass preflight, the runner records `mdutil -a -s`, invokes
@@ -46,11 +47,12 @@ disabled status does not prove that existing indexing workers are idle. The
 passive CPU records remain necessary context. Both sources receive the same
 normalization. Fixed order and shared caches still limit causal conclusions.
 
-The candidate combines the independently reviewed scalar point-light and
-scalar directional-light Lambert bodies. Both CPU proofs run before browser
-installation. The source is pinned to the signed combined revision above;
+The baseline already contains the reviewed scalar unshadowed-point and directional
+Lambert bodies. The candidate additionally scalarizes only the cached literal
+shadow-point prefix, preserving shadow lookup, transmission and accumulation order.
+All three CPU proofs run before browser installation. The source is pinned to the signed shadow-point revision above;
 placeholders or inconsistent workflow pins still fail preflight before source
-checkouts, installation or any system command. No combined Intel performance
+checkouts, installation or any system command. No scalar-shadow Intel performance
 claim is made. Local image evidence and this harness require review before the
 workflow is pushed.
 
@@ -108,16 +110,16 @@ local setting change.
 Offline contract check, with no browser or network:
 
 ```sh
-python3 scripts/test-intel-cgl-scalar-combined.py
+python3 scripts/test-intel-cgl-scalar-shadow.py
 ```
 
 The workflow supplies fixed choices. Its equivalent command on the Intel host
 is:
 
 ```sh
-python3 harness/scripts/run-intel-cgl-scalar-combined.py \
-  --source-root "$GITHUB_WORKSPACE" --candidate scalar-combined \
+python3 harness/scripts/run-intel-cgl-scalar-shadow.py \
+  --source-root "$GITHUB_WORKSPACE" --candidate scalar-shadow \
   --product firefox \
-  --installation "$RUNNER_TEMP/home-studio-intel-cgl-scalar-combined-browser/install.json" \
-  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-scalar-combined"
+  --installation "$RUNNER_TEMP/home-studio-intel-cgl-scalar-shadow-browser/install.json" \
+  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-scalar-shadow"
 ```
