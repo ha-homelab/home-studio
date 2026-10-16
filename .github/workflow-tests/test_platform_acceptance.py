@@ -28,6 +28,21 @@ def inventory():
 
 
 class PlatformAcceptanceTests(unittest.TestCase):
+    def test_cached_shadow_transmission_cpu_proof_is_unconditional(self):
+        steps = workflow('package.yml')['jobs']['package']['steps']
+        command = 'node scripts/test-cached-shadow-transmission.cjs'
+        self.assertEqual(sum(step.get('run', '').count(command) for step in steps), 1)
+        step = next(step for step in steps if command in step.get('run', ''))
+        self.assertIn(command, [line.strip() for line in step['run'].splitlines()])
+        self.assertNotIn('if', step)
+        self.assertNotIn('continue-on-error', step)
+        spec = importlib.util.spec_from_file_location('site_inventory', ROOT / 'scripts/validate-site.py')
+        site = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(site)
+        self.assertIn('scripts/test-cached-shadow-transmission.cjs', site.REPO_FILES)
+        replay = (ROOT / 'scripts/test_source_replay.py').read_text(encoding='utf-8')
+        self.assertIn("['scripts/test-cached-shadow-transmission.cjs']", replay)
+
     def test_signal_texture_decay_two_cpu_proof_is_unconditional(self):
         steps = workflow('package.yml')['jobs']['package']['steps']
         command = 'node scripts/test-signal-texture-decay-two.cjs'
