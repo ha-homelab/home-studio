@@ -1,26 +1,27 @@
-# Disposable Intel literal Lambert body diagnostic
+# Disposable Intel combined scalar Lambert bodies diagnostic
 
-Only a push to `diagnostic/intel-cgl-next-candidate` starts this workflow. It has
+Only a push to `diagnostic/intel-cgl-scalar-combined` starts this workflow. It has
 read-only GitHub permissions and pinned actions. It does not invoke the 77-lane
 acceptance gate or publish a release. Its results are diagnostic evidence only.
 
 This prepared comparison selects one exact runtime candidate. The selection
 validator rejects placeholders, moving refs, the baseline itself, mismatched
-workflow pins and a missing CPU proof command before source checkout or host
+workflow pins and either missing CPU proof command before source checkout or host
 preparation. Preparation does not authorize a push or launch.
 
 Two independent `macos-15-intel` jobs compare these sources in order:
 
 - Baseline: `7b7a896225aaf27fef26a135d654dfaddffe2c08`.
-- Literal Lambert body: `47b751b834028efe8596c8178c77255678762423`.
-- Candidate preflight: `node scripts/test-literal-lambert-point-body.cjs`.
+- Combined scalar Lambert bodies: `be640ec12f0acd3abf094d5f5fa03ce2ad2781fe`.
+- Candidate preflights: `node scripts/test-literal-lambert-point-body.cjs` and
+  `node scripts/test-literal-lambert-directional.cjs`.
 
 One job uses Firefox `153.5.0esr`; the other uses Waterfox `6.7.6`. Maximum
 parallelism is two. Each pair runs sequentially on one hosted VM and shares one
 official browser installation verified by the original installer, checksum
 catalog and signature checks. Python 3.13, Node 22 and both locked npm dependency
-installations are prepared before either suite starts. The selected candidate's
-tracked CPU proof runs before the browser is installed; failure stops preparation.
+installations are prepared before either suite starts. Both selected candidate
+CPU proofs run before the browser is installed; failure stops preparation.
 
 After both sources pass preflight, the runner records `mdutil -a -s`, invokes
 `sudo -n /usr/bin/mdutil -a -i off` exactly once, and records another status.
@@ -45,18 +46,18 @@ disabled status does not prove that existing indexing workers are idle. The
 passive CPU records remain necessary context. Both sources receive the same
 normalization. Fixed order and shared caches still limit causal conclusions.
 
-The candidate replaces aggregate struct traffic only in the eligible packed,
-texture-backed unshadowed Lambert body with the same ordered scalar/vector
-operations. Shadow prefix, run scheduling, attenuation and other shader paths
-are preserved. Existing CPU proofs pass; the local ARM comparison was neutral
-for load time and improved drag by roughly 8%. This does not establish an Intel
-benefit, and no performance result from this prepared comparison exists yet.
-The exact source and evidence still require review before the workflow is pushed.
+The candidate combines the independently reviewed scalar point-light and
+scalar directional-light Lambert bodies. Both CPU proofs run before browser
+installation. The source is pinned to the signed combined revision above;
+placeholders or inconsistent workflow pins still fail preflight before source
+checkouts, installation or any system command. No combined Intel performance
+claim is made. Local image evidence and this harness require review before the
+workflow is pushed.
 
 The wrapper invokes each source's original `test-native-browser-acceptance.py`
 once, with its standard product, expected-version, installation and output
-arguments. Viewer 6/24 rooms and planner 256 items, both cycles, all semantic and
-graphics checks, 30-second load limits, 15-second viewer and 10-second planner
+arguments. Both original cycles of viewer 6/24 rooms, the original planner 256-item case,
+all semantic and graphics checks, 30-second load limits, 15-second viewer and 10-second planner
 interaction limits, and the original browser watchdog remain unchanged. A failed baseline does not prevent
 the candidate from running once, and any failed arm keeps the job red. The
 30-minute job envelope includes setup and both suites; it does not extend an
@@ -107,16 +108,16 @@ local setting change.
 Offline contract check, with no browser or network:
 
 ```sh
-python3 scripts/test-intel-cgl-next-candidate.py
+python3 scripts/test-intel-cgl-scalar-combined.py
 ```
 
 The workflow supplies fixed choices. Its equivalent command on the Intel host
 is:
 
 ```sh
-python3 harness/scripts/run-intel-cgl-next-candidate.py \
-  --source-root "$GITHUB_WORKSPACE" --candidate next-candidate \
+python3 harness/scripts/run-intel-cgl-scalar-combined.py \
+  --source-root "$GITHUB_WORKSPACE" --candidate scalar-combined \
   --product firefox \
-  --installation "$RUNNER_TEMP/home-studio-intel-cgl-next-candidate-browser/install.json" \
-  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-next-candidate"
+  --installation "$RUNNER_TEMP/home-studio-intel-cgl-scalar-combined-browser/install.json" \
+  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-scalar-combined"
 ```

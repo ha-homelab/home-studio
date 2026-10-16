@@ -17,9 +17,10 @@ import time
 
 BASELINE = '7b7a896225aaf27fef26a135d654dfaddffe2c08'
 CANDIDATES = {
-    'next-candidate': '47b751b834028efe8596c8178c77255678762423',
+    'scalar-combined': 'be640ec12f0acd3abf094d5f5fa03ce2ad2781fe',
 }
-CANDIDATE_CPU_CHECK = 'scripts/test-literal-lambert-point-body.cjs'
+CANDIDATE_CPU_CHECKS = ('scripts/test-literal-lambert-point-body.cjs',
+                        'scripts/test-literal-lambert-directional.cjs')
 VERSIONS = {'firefox': '153.5.0esr', 'waterfox': '6.7.6'}
 DRIVER_FILES = (
     'scripts/test-native-browser-acceptance.py', 'scripts/test-waterfox-acceptance.py',
@@ -40,18 +41,21 @@ PROFILE = {
 
 def validate_selection():
     """The prepared template cannot run with an unset or moving source."""
-    if set(CANDIDATES) != {'next-candidate'}:
+    if set(CANDIDATES) != {'scalar-combined'}:
         raise ValueError('Exactly one fixed candidate is required')
-    revision = CANDIDATES['next-candidate']
+    revision = CANDIDATES['scalar-combined']
     if (not re.fullmatch(r'[0-9a-f]{40}', revision) or
             revision == BASELINE or revision == '0' * 40):
         raise ValueError('Select one exact non-baseline candidate SHA before running')
-    if not re.fullmatch(r'scripts/test-[a-z0-9-]+\.cjs', CANDIDATE_CPU_CHECK):
-        raise ValueError('Select the candidate CPU proof before running')
-    workflow = Path(__file__).resolve().parents[1] / '.github/workflows/intel-cgl-next-candidate.yml'
+    if (not isinstance(CANDIDATE_CPU_CHECKS, tuple) or len(CANDIDATE_CPU_CHECKS) != 2 or
+            len(set(CANDIDATE_CPU_CHECKS)) != 2 or
+            any(not isinstance(proof, str) or not re.fullmatch(r'scripts/test-[a-z0-9-]+\.cjs', proof)
+                for proof in CANDIDATE_CPU_CHECKS)):
+        raise ValueError('Select both distinct candidate CPU proofs before running')
+    workflow = Path(__file__).resolve().parents[1] / '.github/workflows/intel-cgl-scalar-combined.yml'
     text = workflow.read_text(encoding='utf-8')
     if (text.count('revision: ' + revision) != 2 or
-            text.count('node candidate/' + CANDIDATE_CPU_CHECK) != 1):
+            any(text.count('node candidate/' + proof) != 1 for proof in CANDIDATE_CPU_CHECKS)):
         raise ValueError('Workflow candidate pins or CPU proof disagree with the runner')
 
 
@@ -289,7 +293,7 @@ def run_comparison(source_root, installation, output, candidate, product):
     output.mkdir(parents=True, exist_ok=True)
     manifest = {
         'schema': 1, 'diagnosticOnly': True, 'releaseEligible': False, 'acceptanceStatus': 'not-run',
-        'purpose': 'Same-host Intel Selected runtime candidate comparison with common Spotlight normalization; never release qualification',
+        'purpose': 'Same-host Intel combined scalar Lambert comparison with common Spotlight normalization; never release qualification',
         'candidate': candidate, 'product': product, 'expectedVersion': VERSIONS[product],
         'startedAt': utc_now(), 'status': 'preparing', 'arms': [],
         'order': [name for name, _ in arms],

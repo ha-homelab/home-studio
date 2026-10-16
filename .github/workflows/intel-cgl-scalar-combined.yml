@@ -1,15 +1,15 @@
-name: Diagnostic Intel CGL literal Lambert body
-run-name: Non-release Intel literal Lambert body pairs with common indexing state · ${{ github.sha }}
+name: Diagnostic Intel CGL combined scalar Lambert bodies
+run-name: Non-release Intel combined scalar Lambert bodies pairs with common indexing state · ${{ github.sha }}
 
 on:
   push:
-    branches: [diagnostic/intel-cgl-next-candidate]
+    branches: [diagnostic/intel-cgl-scalar-combined]
 
 permissions:
   contents: read
 
 concurrency:
-  group: diagnostic-intel-cgl-next-candidate
+  group: diagnostic-intel-cgl-scalar-combined
   cancel-in-progress: false
 
 defaults:
@@ -19,7 +19,7 @@ defaults:
 jobs:
   compare:
     name: ${{ matrix.product }} · ${{ matrix.candidate }}
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-next-candidate' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-scalar-combined' }}
     runs-on: macos-15-intel
     # Two sequential original three-case suites per VM; their own limits
     # are unchanged. Other pairs run on separate hosted VMs.
@@ -31,12 +31,12 @@ jobs:
         include:
           - product: firefox
             version: 153.5.0esr
-            candidate: next-candidate
-            revision: 47b751b834028efe8596c8178c77255678762423
+            candidate: scalar-combined
+            revision: be640ec12f0acd3abf094d5f5fa03ce2ad2781fe
           - product: waterfox
             version: 6.7.6
-            candidate: next-candidate
-            revision: 47b751b834028efe8596c8178c77255678762423
+            candidate: scalar-combined
+            revision: be640ec12f0acd3abf094d5f5fa03ce2ad2781fe
     env:
       PYTHONUTF8: '1'
       NATIVE_STARTUP_DIAGNOSTICS: '1'
@@ -51,7 +51,7 @@ jobs:
           path: harness
           persist-credentials: false
       - name: Reject an unselected or inconsistent candidate before setup
-        run: python3 harness/scripts/run-intel-cgl-next-candidate.py --validate-selection
+        run: python3 harness/scripts/run-intel-cgl-scalar-combined.py --validate-selection
       - name: Check out the exact common baseline
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -72,7 +72,7 @@ jobs:
           node-version: '22'
       - name: Record tooling and prepare both fixtures before timing
         run: |
-          mkdir -p harness/diagnostics/intel-cgl-next-candidate
+          mkdir -p harness/diagnostics/intel-cgl-scalar-combined
           {
             python3 --version
             node --version
@@ -80,35 +80,36 @@ jobs:
             uname -sm
             sw_vers
             /usr/sbin/sysctl machdep.cpu.brand_string hw.ncpu hw.memsize || true
-          } > harness/diagnostics/intel-cgl-next-candidate/toolchain.log 2>&1
-          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-next-candidate/baseline-npm.log
-          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-next-candidate/candidate-npm.log
-          python3 harness/scripts/test-intel-cgl-next-candidate.py
+          } > harness/diagnostics/intel-cgl-scalar-combined/toolchain.log 2>&1
+          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-scalar-combined/baseline-npm.log
+          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-scalar-combined/candidate-npm.log
+          python3 harness/scripts/test-intel-cgl-scalar-combined.py
           node candidate/scripts/test-literal-lambert-point-body.cjs
+          node candidate/scripts/test-literal-lambert-directional.cjs
       - name: Install one original checksum and signature verified browser per pair
         env:
-          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-next-candidate-browser
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-scalar-combined-browser
           PRODUCT: ${{ matrix.product }}
           VERSION: ${{ matrix.version }}
         run: |
-          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-next-candidate/install.log
-          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-next-candidate/install.json
+          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-scalar-combined/install.log
+          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-scalar-combined/install.json
       - name: Normalize indexing once and run both original native suites
         env:
-          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-next-candidate-browser
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-scalar-combined-browser
           PRODUCT: ${{ matrix.product }}
           CANDIDATE: ${{ matrix.candidate }}
         run: >-
-          python3 harness/scripts/run-intel-cgl-next-candidate.py
+          python3 harness/scripts/run-intel-cgl-scalar-combined.py
           --source-root "$GITHUB_WORKSPACE"
           --candidate "$CANDIDATE" --product "$PRODUCT"
           --installation "$INSTALL_DIR/install.json"
-          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-next-candidate"
+          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-scalar-combined"
       - name: Preserve all non-release evidence even when a source fails
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: diagnostic-intel-cgl-next-candidate-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: harness/diagnostics/intel-cgl-next-candidate/
+          name: diagnostic-intel-cgl-scalar-combined-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: harness/diagnostics/intel-cgl-scalar-combined/
           if-no-files-found: error
           retention-days: 14
