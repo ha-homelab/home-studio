@@ -1,15 +1,15 @@
-name: Diagnostic Intel CGL point-light texture
-run-name: Non-release Intel point-light texture pairs with common indexing state · ${{ github.sha }}
+name: Diagnostic Intel CGL point-light and run texture
+run-name: Non-release Intel point-light and run texture pairs with common indexing state · ${{ github.sha }}
 
 on:
   push:
-    branches: [diagnostic/intel-cgl-texture]
+    branches: [diagnostic/intel-cgl-run-texture]
 
 permissions:
   contents: read
 
 concurrency:
-  group: diagnostic-intel-cgl-texture
+  group: diagnostic-intel-cgl-run-texture
   cancel-in-progress: false
 
 defaults:
@@ -19,7 +19,7 @@ defaults:
 jobs:
   compare:
     name: ${{ matrix.product }} · ${{ matrix.candidate }}
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-texture' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-run-texture' }}
     runs-on: macos-15-intel
     # Two sequential original three-case suites per VM; their own limits
     # are unchanged. Other pairs run on separate hosted VMs.
@@ -31,12 +31,12 @@ jobs:
         include:
           - product: firefox
             version: 153.5.0esr
-            candidate: point-texture
-            revision: 20ec67719a5892d56d6cf4cfe4093f97b1811d9d
+            candidate: point-run-texture
+            revision: 0b45c8a9ecbb3f53a025a6e7ca210b8da4040ff4
           - product: waterfox
             version: 6.7.6
-            candidate: point-texture
-            revision: 20ec67719a5892d56d6cf4cfe4093f97b1811d9d
+            candidate: point-run-texture
+            revision: 0b45c8a9ecbb3f53a025a6e7ca210b8da4040ff4
     env:
       PYTHONUTF8: '1'
       NATIVE_STARTUP_DIAGNOSTICS: '1'
@@ -70,41 +70,41 @@ jobs:
           node-version: '22'
       - name: Record tooling and prepare both fixtures before timing
         run: |
-          mkdir -p harness/diagnostics/intel-cgl-texture
+          mkdir -p harness/diagnostics/intel-cgl-run-texture
           {
             python3 --version
             node --version
             npm --version
             uname -sm
             sw_vers
-          } > harness/diagnostics/intel-cgl-texture/toolchain.log 2>&1
-          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-texture/baseline-npm.log
-          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-texture/candidate-npm.log
-          python3 harness/scripts/test-intel-cgl-texture.py
+          } > harness/diagnostics/intel-cgl-run-texture/toolchain.log 2>&1
+          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-run-texture/baseline-npm.log
+          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-run-texture/candidate-npm.log
+          python3 harness/scripts/test-intel-cgl-run-texture.py
       - name: Install one original checksum and signature verified browser per pair
         env:
-          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-texture-browser
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-run-texture-browser
           PRODUCT: ${{ matrix.product }}
           VERSION: ${{ matrix.version }}
         run: |
-          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-texture/install.log
-          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-texture/install.json
+          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-run-texture/install.log
+          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-run-texture/install.json
       - name: Normalize indexing once and run both original native suites
         env:
-          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-texture-browser
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-run-texture-browser
           PRODUCT: ${{ matrix.product }}
           CANDIDATE: ${{ matrix.candidate }}
         run: >-
-          python3 harness/scripts/run-intel-cgl-texture.py
+          python3 harness/scripts/run-intel-cgl-run-texture.py
           --source-root "$GITHUB_WORKSPACE"
           --candidate "$CANDIDATE" --product "$PRODUCT"
           --installation "$INSTALL_DIR/install.json"
-          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-texture"
+          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-run-texture"
       - name: Preserve all non-release evidence even when a source fails
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: diagnostic-intel-cgl-texture-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: harness/diagnostics/intel-cgl-texture/
+          name: diagnostic-intel-cgl-run-texture-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: harness/diagnostics/intel-cgl-run-texture/
           if-no-files-found: error
           retention-days: 14
