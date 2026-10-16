@@ -10,10 +10,10 @@ from unittest.mock import patch
 
 
 HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location('intel_comparison', HERE / 'run-intel-cgl-boundaries.py')
+spec = importlib.util.spec_from_file_location('intel_comparison', HERE / 'run-intel-cgl-bank.py')
 comparison = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(comparison)
-ARMS = (('baseline', comparison.BASELINE), ('candidate', comparison.CANDIDATES['fallback-boundaries']))
+ARMS = (('baseline', comparison.BASELINE), ('candidate', comparison.CANDIDATES['bounded-bank']))
 
 
 class IntelComparisonTests(unittest.TestCase):
@@ -27,7 +27,7 @@ class IntelComparisonTests(unittest.TestCase):
         self.addCleanup(host.stop)
 
     def run_fixture(self, exit_codes, mutate=False, mismatched_driver=False,
-                    candidate='fallback-boundaries', product='firefox', mutate_install=False,
+                    candidate='bounded-bank', product='firefox', mutate_install=False,
                     cpu_error=False):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -122,7 +122,7 @@ class IntelComparisonTests(unittest.TestCase):
     def test_exact_two_source_order(self):
         self.assertEqual(ARMS, (
             ('baseline', '13b8ed9e1f0baf68eac329764a05277377113419'),
-            ('candidate', '800acbda7b8692b8c18d73e4be7b00211c552ff3'),
+            ('candidate', '3422c417faaf139f1f92f19604a80715128fa787'),
         ))
 
     def test_original_command_has_only_the_standard_installation_arguments(self):
@@ -150,13 +150,13 @@ class IntelComparisonTests(unittest.TestCase):
              patch.object(comparison.platform, 'machine', return_value='arm64'), \
              patch.object(comparison.subprocess, 'run') as run:
             root = Path(directory)
-            self.assertEqual(comparison.run_comparison(root, root / 'missing.json', root / 'output', 'fallback-boundaries', 'firefox'), 1)
+            self.assertEqual(comparison.run_comparison(root, root / 'missing.json', root / 'output', 'bounded-bank', 'firefox'), 1)
             run.assert_not_called()
             self.assertEqual(json.loads((root / 'output/comparison.json').read_text())['status'], 'infrastructure-error')
 
     def test_both_product_pairs_keep_fixed_revisions_versions_and_host_records(self):
         self.assertEqual(comparison.CANDIDATES, {
-            'fallback-boundaries': '800acbda7b8692b8c18d73e4be7b00211c552ff3',
+            'bounded-bank': '3422c417faaf139f1f92f19604a80715128fa787',
         })
         self.assertEqual(comparison.VERSIONS, {'firefox': '153.5.0esr', 'waterfox': '6.7.6'})
         for candidate, revision in comparison.CANDIDATES.items():
@@ -213,9 +213,9 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertEqual(data['uptimeError'], 'TimeoutExpired')
 
     def test_workflow_is_fixed_read_only_two_pair_diagnostic(self):
-        text = (HERE.parent / '.github/workflows/intel-cgl-boundaries.yml').read_text()
-        self.assertIn('branches: [diagnostic/intel-cgl-boundaries]', text)
-        self.assertIn("github.ref == 'refs/heads/diagnostic/intel-cgl-boundaries'", text)
+        text = (HERE.parent / '.github/workflows/intel-cgl-bank.yml').read_text()
+        self.assertIn('branches: [diagnostic/intel-cgl-bank]', text)
+        self.assertIn("github.ref == 'refs/heads/diagnostic/intel-cgl-bank'", text)
         self.assertIn('runs-on: macos-15-intel', text)
         self.assertIn('timeout-minutes: 30', text)
         self.assertIn('max-parallel: 2', text)
@@ -231,7 +231,7 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertIn('python3 baseline/scripts/setup-native-browser.py', text)
         self.assertIn('permissions:\n  contents: read', text)
         self.assertIn('if: ${{ always() }}', text)
-        self.assertIn('name: diagnostic-intel-cgl-boundaries-', text)
+        self.assertIn('name: diagnostic-intel-cgl-bank-', text)
         self.assertEqual(text.count('persist-credentials: false'), 3)
         self.assertNotRegex(text, r'workflow_dispatch|pull_request|secrets\.|continue-on-error|workflow_call|diagnose-restore|diagnose-native-draw')
         uses = re.findall(r'uses: ([^\s]+)', text)
@@ -242,7 +242,11 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertNotRegex(quality, re.compile(r'^  push:', re.MULTILINE))
         for name in ('release-pipeline.yml', 'pages.yml'):
             workflow = (HERE.parent / '.github/workflows' / name).read_text()
-            self.assertNotIn('diagnostic/intel-cgl-boundaries', workflow)
+            self.assertNotIn('diagnostic/intel-cgl-bank', workflow)
+        for path in (HERE.parent / '.github/workflows').glob('intel-cgl-*.yml'):
+            if path.name != 'intel-cgl-bank.yml':
+                self.assertNotIn('diagnostic/intel-cgl-bank', path.read_text())
+        self.assertFalse((HERE.parent / '.github/workflows/intel-cgl-boundaries.yml').exists())
 
     def test_cpu_capture_is_numeric_top_eight_and_basename_only(self):
         rows = [f'{index} 1 {index}.5 {index * 1024} /private/parent/App {index}'

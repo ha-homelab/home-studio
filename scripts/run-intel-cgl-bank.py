@@ -16,7 +16,7 @@ import time
 
 BASELINE = '13b8ed9e1f0baf68eac329764a05277377113419'
 CANDIDATES = {
-    'fallback-boundaries': '800acbda7b8692b8c18d73e4be7b00211c552ff3',
+    'bounded-bank': '3422c417faaf139f1f92f19604a80715128fa787',
 }
 VERSIONS = {'firefox': '153.5.0esr', 'waterfox': '6.7.6'}
 DRIVER_FILES = (
@@ -197,7 +197,7 @@ def run_comparison(source_root, installation, output, candidate, product):
     output.mkdir(parents=True, exist_ok=True)
     manifest = {
         'schema': 1, 'diagnosticOnly': True, 'releaseEligible': False, 'acceptanceStatus': 'not-run',
-        'purpose': 'Same-host Intel native fallback program boundary comparison; never release qualification',
+        'purpose': 'Same-host Intel native bounded PointLight bank comparison; never release qualification',
         'candidate': candidate, 'product': product, 'expectedVersion': VERSIONS[product],
         'startedAt': utc_now(), 'status': 'preparing', 'arms': [],
         'order': [name for name, _ in arms],
