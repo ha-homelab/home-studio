@@ -187,16 +187,15 @@ for(const p of positions) {
     const end='#if ( NUM_SPOT_LIGHTS > 0 ) && defined( RE_Direct )';
     const loop=s=>s.slice(s.indexOf(start),s.indexOf(end)).replace(/\n}\n$/, '');
     const packedLoop=loop(packed.shader.fragmentShader);
-    const cachedEquivalent=packedLoop
-      .replace('ivec4 homeRunData = homeLightRuns[homeRun];\n      ', '')
-      .replaceAll('homeRunData.y','homeLightRunEnds[homeRun]')
-      .replaceAll('homeRunData.x','homeRunStart')
-      .replace('homePointTransmission(homeRunData.z)','homePointTransmission(homePointRooms[homeFirstLight])')
-      .replace(/homePointTransmission\(homePointRooms\[([^\]]+)\]\)/g,
-        'homeRoomTransmissions[homePointRooms[$1]]')
-      .replace('\n    \n    for ( int homeRun','\n    int homeRunStart = 0;\n    for ( int homeRun')
-      .replace('\n      \n    }','\n      homeRunStart = homeRunEnd;\n    }');
-    assert.equal(cachedEquivalent,loop(literal.shader.fragmentShader),'Point-light order, culling and math differ only in equivalent transmission lookup');
+    const prefixEnd='#pragma unroll_loop_end';
+    const prefix=s=>s.slice(0,s.indexOf(prefixEnd)+prefixEnd.length);
+    assert.equal(prefix(packedLoop).replace(/homePointTransmission\(homePointRooms\[([^\]]+)\]\)/g,
+      'homeRoomTransmissions[homePointRooms[$1]]'),prefix(loop(literal.shader.fragmentShader)),
+      'The complete shadow-light prefix is unchanged');
+    const body=s=>s.slice(s.lastIndexOf('pointLight = pointLights[ i ];'),s.lastIndexOf('if (directLight.visible) RE_Direct(')+
+      'if (directLight.visible) RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );'.length);
+    assert.equal(body(packedLoop),body(loop(literal.shader.fragmentShader)),
+      'The complete unshadowed arithmetic and accumulation body is unchanged');
     assert.match(packed.shader.fragmentShader,/uniform ivec4 homeLightRuns\[/);
     assert.doesNotMatch(packed.shader.fragmentShader,/uniform int homeLightRun(?:Starts|Ends)\[/,
       'Packed shaders no longer declare the separate dynamic start/end arrays');
@@ -223,9 +222,9 @@ for(const p of positions) {
   // unchanged direct-light body with a visit recorder. This catches record
   // channel/index, prefix-clipping and loop-bound errors independently of the
   // CPU producer rather than reconstructing its algorithm in the test.
-  const runStart=direct.shader.fragmentShader.indexOf('for ( int homeRun = 0;');
+  const runStart=direct.shader.fragmentShader.indexOf('{\n      int homeRun = 0;');
   assert(runStart>=0);
-  const opening=direct.shader.fragmentShader.indexOf('{',runStart);
+  const opening=runStart;
   let depth=1,runEnd=opening+1;
   for(;depth;runEnd++) {
     assert(runEnd<direct.shader.fragmentShader.length,'Run loop has balanced braces');

@@ -574,17 +574,32 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
       }
       homeRunStart = homeRunEnd;
     }`);
-  // Keep shadow sampler indices literal and share one lookup per unshadowed
-  // room run. Both paths retain exactly the same zero-transmission culling.
-  const directPointLighting = packed ? boundedPointLighting.replace(
+  // Keep one backedge in the packed path. A nonempty run computes transmission
+  // once; zero runs advance wholesale, retaining the original light/add order.
+  const flatRunLoop = `
+    {
+      int homeRun = 0;
+      int i = 0;
+      int homeRunEnd = 0;
+      float homeRunTransmission = 0.0;
+      while (homeRun < homeLightRunCount || i < homeRunEnd) {
+        if (i >= homeRunEnd) {
+          ivec4 homeRunData = homeLightRuns[homeRun];
+          homeRun++;
+          i = max(homeRunData.x, NUM_POINT_LIGHT_SHADOWS);
+          homeRunEnd = min(homeRunData.y, NUM_POINT_LIGHTS);
+          if (i >= homeRunEnd) continue;
+          homeRunTransmission = homePointTransmission(homeRunData.z);
+          if (homeRunTransmission == 0.0) { i = homeRunEnd; continue; }
+        }
+        ${unshadowedBody}
+        i++;
+      }
+    }`;
+  const directPointLighting = packed ? pointLighting.replace('i < NUM_POINT_LIGHTS', 'i < NUM_POINT_LIGHT_SHADOWS').replace(
     /homeRoomTransmissions\[homePointRooms\[([^\]]+)\]\]/g,
     'homePointTransmission(homePointRooms[$1])'
-  ).replace('int homeRunStart = 0;', '')
-    .replace('int homeRunEnd = min(homeLightRunEnds[homeRun], NUM_POINT_LIGHTS);',
-      'ivec4 homeRunData = homeLightRuns[homeRun];\n      int homeRunEnd = min(homeRunData.y, NUM_POINT_LIGHTS);')
-    .replace('max(homeRunStart, NUM_POINT_LIGHT_SHADOWS)', 'max(homeRunData.x, NUM_POINT_LIGHT_SHADOWS)')
-    .replace('homePointTransmission(homePointRooms[homeFirstLight])', 'homePointTransmission(homeRunData.z)')
-    .replace('homeRunStart = homeRunEnd;', '') : boundedPointLighting;
+  ).replace('#pragma unroll_loop_end', '#pragma unroll_loop_end' + flatRunLoop) : boundedPointLighting;
   // A runtime branch retains the same light slots, shadow maps and program
   // family when every point is off. Never infer zero from a brightness epsilon.
   const guardedPointLighting = packed ? 'if (homePointLightingRequired) {\n' + directPointLighting + '\n}\n' : directPointLighting;
@@ -647,7 +662,7 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
           );
           shader.fragmentShader = fragment + shader.fragmentShader.replace('#include <lights_fragment_begin>', lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
         };
-        mesh.material.customProgramCacheKey = () => (enabled ? fragment : 'home-editor') +
+        mesh.material.customProgramCacheKey = () => (enabled ? fragment+(packed?':flat-runs-v1':'') : 'home-editor') +
           (sharedWall ? ':wall-sheen-facing-v1' : wall ? ':wall-sheen-v2' : '') +
           (!sharedWall && staticGlassFacing.has(mesh.material) ? ':glass-facing-v1' : '');
         mesh.material.needsUpdate = true;

@@ -308,6 +308,16 @@ eight lighting/editor views. The 24-room connected loads changed from
 same-host measurements share OS/compiler caches and do not establish a general
 speedup or replace the required hosted Intel/browser matrix.
 
+The packed shader's experimental run traversal uses one state-machine loop:
+it evaluates transmission once per nonempty clipped run, jumps over zero runs,
+and visits the remaining lights in the original order. The complete light
+body, literal shadow prefix and literal fallback remain unchanged. Unlike an
+earlier per-light flat-loop experiment, this keeps the packed run lookup and
+whole-run culling. CPU proofs compare transmission-call and light-visit order,
+including NaN and negative values, and expand the pinned Three.js shader; they
+do not establish driver compilation, pixel equivalence or a performance gain.
+Those require the unchanged browser acceptance cases and visual comparisons.
+
 Phone and tablet profiles use **390 × 844** and **820 × 1180** CSS pixels,
 respectively, at device scale factor 2, with touch enabled. They retain the
 actual desktop operating-system identity. Chromium exercises native touch
