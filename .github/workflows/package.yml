@@ -14,6 +14,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: Check Python common errors
+        run: |
+          python3 -m pip install ruff==0.14.0
+          python3 -m ruff check --select F scripts
       - name: Test strict download transport with synthetic certificate chains
         run: |
           python3 -m pip install -r requirements-tls-test.txt

@@ -22,6 +22,8 @@ skip failed tests to obtain a green run.
 Use Python 3.10+ and the Node/browser versions pinned by CI. Run:
 
 ```sh
+python3 -m pip install ruff==0.14.0
+python3 -m ruff check --select F scripts
 python3 scripts/validate-site.py
 python3 scripts/test-install-home-assistant.py
 python3 scripts/test-public-package.py

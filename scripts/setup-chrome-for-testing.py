@@ -9,7 +9,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
 from download_tls import open_download
 import zipfile
 from pathlib import Path, PurePosixPath

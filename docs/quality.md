@@ -13,3 +13,5 @@ and network-application vulnerabilities. The maintainer also confirms no bug,
 enhancement or vulnerability reports outside GitHub in the preceding 12 months.
 These are human attestations. Public issue history and current diagnostics must
 also be checked when updating the OpenSSF assessment.
+
+CI runs the complete Pyflakes-derived Ruff F rules over Python scripts to catch undefined names, unused imports, accidental shadowing and other common errors. CodeQL security-and-quality analysis additionally covers first-party Python and JavaScript. Resolve substantive findings before merge; this does not claim every optional style warning is enabled.
