@@ -97,20 +97,23 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   vm.runInContext(scheduler + section('// On-demand 3D rendering.', '// Project actions and keyboard navigation.') + section('let firstResize =', 'window.planner ='), c);
   c.renderPreview(); assert.equal(constructions, 0, 'Plan-only use creates no WebGL context');
   for (const label of ['SwiftShader', 'llvmpipe', 'softpipe', 'lavapipe', 'Microsoft Basic Render Driver', 'Apple Software Renderer']) {
-    assert.equal(c.previewRenderProfile({getExtension: () => ({UNMASKED_RENDERER_WEBGL: 1}), getParameter: () => label}).pixels, 250000);
+    const profile = c.previewRenderProfile({getExtension: () => ({UNMASKED_RENDERER_WEBGL: 1}), getParameter: () => label});
+    assert.equal(profile.pixels, 250000);
+    assert.equal(profile.instanceCatalog, label === 'Apple Software Renderer', 'Only positively identified Apple software rendering batches catalog parts');
   }
   for (const gl of [null, {getExtension: () => null}, {getExtension() { throw Error('blocked'); }},
     ...['Apple M1', 'Apple M1, or similar', 'Apple M2', 'Apple Software Renderer, or similar'].map(label =>
       ({getExtension: () => ({UNMASKED_RENDERER_WEBGL: 1}), getParameter: () => label}))]) {
     assert.equal(c.previewRenderProfile(gl).pixels, 2000000);
     assert.equal(c.previewRenderProfile(gl).shadowSize, 2048);
+    assert.equal(c.previewRenderProfile(gl).instanceCatalog, false);
   }
   for (const [w, h] of [[800, 600], [3840, 2160], [7680, 4320]]) for (const budget of [250000, 2000000, 4000000]) {
     const r = c.canvasPixelRatio(w, h, budget); assert(w * h * r * r <= budget + .001); assert(r <= 2);
   }
   c.view = 'preview'; c.renderPreview();
   assert.equal(constructions, 1); assert.equal(draws, 1); assert.equal(shadows, 1);
-  assert.equal(vm.runInContext('previewInstancing', c), true, 'The detected software profile enables catalog batching');
+  assert.equal(vm.runInContext('previewInstancing', c), false, 'SwiftShader retains ordinary catalog meshes');
   assert.equal(vm.runInContext('previewSun.shadow.mapSize.x', c), 512);
   assert.equal(vm.runInContext('previewSun.shadow.autoUpdate', c), false);
   const canvas = get('preview-canvas');

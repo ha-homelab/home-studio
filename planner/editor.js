@@ -617,15 +617,18 @@ const orbit = { yaw: -Math.PI / 3, pitch: .8, radius: 17, baseRadius: 17, target
 function previewRenderProfile(gl) {
   try {
     const info = gl.getExtension('WEBGL_debug_renderer_info');
-    if (info && /swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe|^Apple Software Renderer$/i.test(gl.getParameter(info.UNMASKED_RENDERER_WEBGL))) return { pixels: 250000, shadowSize: 512 };
+    const name = info && gl.getParameter(info.UNMASKED_RENDERER_WEBGL);
+    if (/swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe|^Apple Software Renderer$/i.test(name)) {
+      return { pixels: 250000, shadowSize: 512, instanceCatalog: /^Apple Software Renderer$/i.test(name) };
+    }
   } catch { /* A hidden renderer name keeps the normal rendering profile. */ }
-  return { pixels: 2000000, shadowSize: 2048 };
+  return { pixels: 2000000, shadowSize: 2048, instanceCatalog: false };
 }
 function initPreview() {
   if (renderer || previewUnavailable) return;
   try {
     renderer = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: true, alpha: false }); previewRendererDisposed = false; renderer.setClearColor(0xf2f4ed); renderer.outputColorSpace = THREE.SRGBColorSpace;
-    const profile = previewRenderProfile(renderer.getContext()); previewPixels = profile.pixels; previewInstancing = profile.pixels === 250000;
+    const profile = previewRenderProfile(renderer.getContext()); previewPixels = profile.pixels; previewInstancing = profile.instanceCatalog;
     renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = .9; renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(40, 1, .02, 1500); scene.add(new THREE.HemisphereLight(0xffffff, 0xc7cfbc, 1.7));
     previewSun = new THREE.DirectionalLight(0xfff6e6, 2.5); previewSun.castShadow = true; previewSun.shadow.mapSize.set(profile.shadowSize, profile.shadowSize); previewSun.shadow.normalBias = .025; previewSun.shadow.bias = -.0002; scene.add(previewSun); scene.add(previewSun.target);

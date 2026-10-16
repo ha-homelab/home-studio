@@ -173,13 +173,15 @@ users. Its pixel cache retains at most 32 thumbnails. Geometry and top-view
 caches are bounded independently of catalog growth. The full library is not
 copied into the installed HA runtime.
 
-The planner shares immutable catalog-part geometry within each 3D rebuild. Its
-software-renderer profile additionally instances repeated, disjoint opaque parts
-to reduce draw submissions. A bounded sweep excludes furniture that intersects
-other items or architecture, retaining its ordinary materials and draw order;
-dense scenes fall back to ordinary meshes. Native and unknown renderers retain
-the ordinary path. Instancing preserves geometry, colors, lights and logical
-item/part counts, but its GPU transform arithmetic can produce small rasterization
+The planner shares immutable catalog-part geometry within each 3D rebuild. A
+positively identified Apple Software Renderer additionally instances repeated,
+disjoint opaque parts to reduce draw submissions. A bounded sweep excludes
+furniture that intersects other items or architecture, retaining its ordinary
+materials and draw order;
+dense scenes fall back to ordinary meshes. Native, unknown and other software
+renderers, including SwiftShader, retain the ordinary path. Instancing preserves
+geometry, colors, lights and logical item/part counts, but its GPU transform
+arithmetic can produce small rasterization
 differences. Separate shader variants can add first-use compilation; fewer draw
 submissions do not guarantee a faster first load. The diagnostic mesh count
 reports actual draw meshes. Every rebuild

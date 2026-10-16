@@ -49,7 +49,7 @@ function makeProgram(gl, index) {
 test('opaque-frame probe records eight distinct programs within forty safe checkpoints', () => {
   const {context,Canvas,gl,sent,calls} = simulatedBrowser();
   assert.equal(new Canvas().getContext('webgl2'),gl);
-  context.window.__homeStudioStartupProfile({pixels:250000,pointShadows:2,pointShadowSize:128,sunShadowSize:512});
+  context.window.__homeStudioStartupProfile({pixels:250000,pointShadows:2,pointShadowSize:128,sunShadowSize:512,instanceCatalog:true});
   for (let index=1;index<=9;index++) {
     const program=makeProgram(gl,index);
     gl.linkProgram(program);
@@ -77,7 +77,18 @@ test('opaque-frame probe records eight distinct programs within forty safe check
   assert.notEqual(first.shaders[0].fingerprint,first.shaders[1].fingerprint);
   assert(!JSON.stringify(sent).includes('private-source'));
   assert.equal(sent[3].value.profile.pixels,250000);
+  assert.equal(sent[3].value.profile.instanceCatalog,true);
   assert.equal(sent[2].value.gpu.renderer,'Apple Software Renderer');
+});
+
+test('startup profiles accept only the exact optional catalog-instancing boolean', () => {
+  const profile = {sequence:1,event:'profile',time:1,profile:{pixels:250000,shadowSize:512}};
+  for (const value of [true,false]) assert.equal(validateCheckpoint({...profile,
+    profile:{...profile.profile,instanceCatalog:value}}).profile.instanceCatalog,value);
+  for (const value of [0,1,'true',null,{},[]]) assert.throws(()=>validateCheckpoint({...profile,
+    profile:{...profile.profile,instanceCatalog:value}}));
+  assert.throws(()=>validateCheckpoint({...profile,profile:{pixels:true}}));
+  assert.throws(()=>validateCheckpoint({...profile,profile:{privateFlag:true}}));
 });
 
 test('a later blocked lighting link retains program identity and source fingerprints', () => {
