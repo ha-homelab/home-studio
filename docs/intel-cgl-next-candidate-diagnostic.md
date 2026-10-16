@@ -1,20 +1,19 @@
-# Disposable Intel next-candidate diagnostic
+# Disposable Intel literal Lambert body diagnostic
 
 Only a push to `diagnostic/intel-cgl-next-candidate` starts this workflow. It has
 read-only GitHub permissions and pinned actions. It does not invoke the 77-lane
 acceptance gate or publish a release. Its results are diagnostic evidence only.
 
-This is an intentionally unselected, unpushed template. `UNSELECTED` is not a
-source revision or a runnable CPU proof. `--validate-selection` fails before
-any source checkout, installation or host preparation. The runner independently
-rejects the placeholder before source hashing or Spotlight control. A later
-reviewed change must set one full candidate commit and its tracked Node proof
-consistently in the runner and workflow; no branch, tag or moving ref is accepted.
+This prepared comparison selects one exact runtime candidate. The selection
+validator rejects placeholders, moving refs, the baseline itself, mismatched
+workflow pins and a missing CPU proof command before source checkout or host
+preparation. Preparation does not authorize a push or launch.
 
-After selection, two independent `macos-15-intel` jobs compare these sources in order:
+Two independent `macos-15-intel` jobs compare these sources in order:
 
 - Baseline: `7b7a896225aaf27fef26a135d654dfaddffe2c08`.
-- Selected runtime candidate: `UNSELECTED`.
+- Literal Lambert body: `47b751b834028efe8596c8178c77255678762423`.
+- Candidate preflight: `node scripts/test-literal-lambert-point-body.cjs`.
 
 One job uses Firefox `153.5.0esr`; the other uses Waterfox `6.7.6`. Maximum
 parallelism is two. Each pair runs sequentially on one hosted VM and shares one
@@ -46,9 +45,13 @@ disabled status does not prove that existing indexing workers are idle. The
 passive CPU records remain necessary context. Both sources receive the same
 normalization. Fixed order and shared caches still limit causal conclusions.
 
-No candidate is selected or performance claim made here. Candidate source,
-focused proof and existing local pixel evidence must be reviewed before this
-workflow is pushed. Preparation is not authorization to dispatch or run it.
+The candidate replaces aggregate struct traffic only in the eligible packed,
+texture-backed unshadowed Lambert body with the same ordered scalar/vector
+operations. Shadow prefix, run scheduling, attenuation and other shader paths
+are preserved. Existing CPU proofs pass; the local ARM comparison was neutral
+for load time and improved drag by roughly 8%. This does not establish an Intel
+benefit, and no performance result from this prepared comparison exists yet.
+The exact source and evidence still require review before the workflow is pushed.
 
 The wrapper invokes each source's original `test-native-browser-acceptance.py`
 once, with its standard product, expected-version, installation and output
@@ -72,7 +75,9 @@ hashes, installation/toolchain logs and the comparison manifest. That manifest
 always states `diagnosticOnly: true`, `acceptanceStatus: not-run` and
 `releaseEligible: false`.
 
-Before each arm, bounded read-only `sysctl` and `uptime` calls collect CPU model
+The toolchain prelude also records `machdep.cpu.brand_string`, `hw.ncpu` and
+`hw.memsize` using an optional read-only `sysctl` call. Before each arm, bounded
+read-only `sysctl` and `uptime` calls collect CPU model
 and counts, machine model, memory size, boot time and load averages. A separate
 `cpu-processes.jsonl` saves the eight highest `ps` CPU consumers before the suite,
 every five seconds while it runs, and after it exits. Fields are limited to PID,

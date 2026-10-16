@@ -19,6 +19,7 @@ ARMS = (('baseline', comparison.BASELINE), ('candidate', comparison.CANDIDATES['
 class IntelComparisonTests(unittest.TestCase):
     def test_unselected_template_fails_before_any_source_or_host_action(self):
         with tempfile.TemporaryDirectory() as directory, \
+             patch.object(comparison, 'CANDIDATES', {'next-candidate': 'UNSELECTED'}), \
              patch.object(comparison, 'source_snapshot') as snapshot, \
              patch.object(comparison, 'indexing_command') as indexing, \
              patch.object(comparison.subprocess, 'run') as run:
@@ -54,6 +55,12 @@ class IntelComparisonTests(unittest.TestCase):
                     comparison.validate_selection()
             with patch.object(comparison, 'CANDIDATES', {'next-candidate': sha, 'extra': sha}), self.assertRaises(ValueError):
                 comparison.validate_selection()
+
+    def test_optional_toolchain_cpu_identity_precedes_browser_installation(self):
+        text = (HERE.parent / '.github/workflows/intel-cgl-next-candidate.yml').read_text()
+        command = '/usr/sbin/sysctl machdep.cpu.brand_string hw.ncpu hw.memsize || true'
+        self.assertEqual(text.count(command), 1)
+        self.assertLess(text.index(command), text.index('name: Install one original checksum'))
 
     def test_selection_gate_precedes_all_checkouts_except_harness(self):
         text = (HERE.parent / '.github/workflows/intel-cgl-next-candidate.yml').read_text()
@@ -190,9 +197,10 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertEqual(self.indexing_calls, [])
 
     def test_exact_two_source_order(self):
+        self.assertEqual(comparison.CANDIDATE_CPU_CHECK, 'scripts/test-literal-lambert-point-body.cjs')
         self.assertEqual(ARMS, (
             ('baseline', '7b7a896225aaf27fef26a135d654dfaddffe2c08'),
-            ('candidate', 'UNSELECTED'),
+            ('candidate', '47b751b834028efe8596c8178c77255678762423'),
         ))
 
     def test_original_command_has_only_the_standard_installation_arguments(self):
@@ -227,7 +235,7 @@ class IntelComparisonTests(unittest.TestCase):
 
     def test_both_product_pairs_keep_fixed_revisions_versions_and_host_records(self):
         self.assertEqual(comparison.CANDIDATES, {
-            'next-candidate': 'UNSELECTED',
+            'next-candidate': '47b751b834028efe8596c8178c77255678762423',
         })
         self.assertEqual(comparison.VERSIONS, {'firefox': '153.5.0esr', 'waterfox': '6.7.6'})
         for candidate, revision in comparison.CANDIDATES.items():
@@ -324,7 +332,9 @@ class IntelComparisonTests(unittest.TestCase):
         commands = ['node candidate/' + comparison.CANDIDATE_CPU_CHECK]
         prepare = text.split('      - name: Record tooling and prepare both fixtures before timing\n', 1)[1].split('      - name:', 1)[0]
         self.assertEqual([line.strip() for line in prepare.splitlines() if line.strip().startswith('node candidate/')], commands)
-        self.assertNotRegex(prepare, r'(?m)^ +if:|continue-on-error|\|\|')
+        # Only the explicitly optional read-only CPU identity may fail open.
+        strict = prepare.replace('/usr/sbin/sysctl machdep.cpu.brand_string hw.ncpu hw.memsize || true', '')
+        self.assertNotRegex(strict, r'(?m)^ +if:|continue-on-error|\|\|')
         for command in commands:
             self.assertEqual(text.count(command), 1)
             self.assertLess(text.index(command), text.index('      - name: Install one original checksum'))

@@ -1,5 +1,5 @@
-name: Diagnostic Intel CGL selected runtime candidate
-run-name: Non-release Intel selected runtime candidate pairs with common indexing state · ${{ github.sha }}
+name: Diagnostic Intel CGL literal Lambert body
+run-name: Non-release Intel literal Lambert body pairs with common indexing state · ${{ github.sha }}
 
 on:
   push:
@@ -32,11 +32,11 @@ jobs:
           - product: firefox
             version: 153.5.0esr
             candidate: next-candidate
-            revision: UNSELECTED
+            revision: 47b751b834028efe8596c8178c77255678762423
           - product: waterfox
             version: 6.7.6
             candidate: next-candidate
-            revision: UNSELECTED
+            revision: 47b751b834028efe8596c8178c77255678762423
     env:
       PYTHONUTF8: '1'
       NATIVE_STARTUP_DIAGNOSTICS: '1'
@@ -79,11 +79,12 @@ jobs:
             npm --version
             uname -sm
             sw_vers
+            /usr/sbin/sysctl machdep.cpu.brand_string hw.ncpu hw.memsize || true
           } > harness/diagnostics/intel-cgl-next-candidate/toolchain.log 2>&1
           npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-next-candidate/baseline-npm.log
           npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-next-candidate/candidate-npm.log
           python3 harness/scripts/test-intel-cgl-next-candidate.py
-          node candidate/UNSELECTED
+          node candidate/scripts/test-literal-lambert-point-body.cjs
       - name: Install one original checksum and signature verified browser per pair
         env:
           INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-next-candidate-browser
