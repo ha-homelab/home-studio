@@ -439,14 +439,45 @@ information, observations, and failures. Failed runs attempt screenshots;
 a crashed or unresponsive browser may not produce one. Job logs remain the
 evidence for dependency failures and runner-level timeouts.
 
-Playwright receipts also retain Node-side `phases` with start, completion, and
-duration times in milliseconds from the case's monotonic clock. Viewer phases
-distinguish loading, input, state updates, restoration, and iframe detachment.
-These markers add no browser evaluations or rendering work. If the whole-case
-deadline expires, `timeoutPhase` preserves the active phase before diagnostic
-capture begins. The asynchronous test callback can still finish work while
-failure evidence is captured, so later sample fields or completed phase entries
-do not prove that work finished before the deadline; consult `timeoutPhase`.
+Playwright uses two consecutive budgets. One aggregate **30-second bootstrap**
+budget covers loading the automation module, launch, context creation, init
+scripts, page creation, initial browser identity, listeners and optional input
+tracing. It is not renewed as setup stages complete. Immediately before the
+scenario callback, the watchdog switches once to the existing **120-second
+viewer** or **180-second planner** budget. That scenario budget includes all
+scenario cycles, interactions and recovery, final browser identity and final checks;
+phase changes never renew it. Existing load, drag, step and cleanup limits,
+assertions, browser profiles and scene quality remain unchanged. No retry or
+platform-specific allowance is added.
+
+This is a prospective acceptance-contract change: the previous shared helper
+charged bootstrap against the scenario budget. Separating it adds at most
+**30 seconds** to the permitted wall time. It does not improve runtime performance
+or reclassify any historical failure. The hard process timer is **185 seconds
+for a viewer** or **245 seconds for a planner**, measured from the same case
+start and including the existing 35-second failure/cleanup allowance. Requested
+input tracing retains its additional 11-second cleanup allowance. An unresolved
+launch or late resource cleanup leaves that hard timer armed. Late setup
+results are closed rather than entering the application. Monotonic checks reject
+late successful callbacks even when the event loop delayed a timer callback.
+
+Playwright receipts identify this contract with `deadlineScope.version: 2` and
+record `bootstrapMs`, `scenarioMs` and `hardProcessMs`. Measured
+`bootstrapDurationMs`, `scenarioStartedMs`, `scenarioDurationMs` and
+`scenarioCompletedMs` use the case's monotonic clock, as do Node-side `phases`
+with start, completion and duration times. `scenarioCompletedMs` is populated
+only after the scenario, final identity and final checks complete within the
+budget; subsequent cleanup can still fail the case. A bootstrap failure leaves
+the scenario fields null. Timed-out durations can exceed their budgets because
+of delayed callback delivery; they never imply success. Viewer phases
+distinguish loading, input, state updates, restoration and iframe detachment.
+These markers add no browser evaluations or rendering work. On deadline expiry,
+`timeoutScope` distinguishes bootstrap from scenario and `timeoutPhase` preserves
+the active phase before diagnostic capture begins. The asynchronous scenario
+callback can still finish work while failure evidence is captured, so later
+sample fields or completed phase entries do not prove that work finished before
+the deadline; consult the retained timeout and status. Native Gecko and Safari
+acceptance timing is unchanged by this Playwright contract.
 
 Legacy native Gecko rows on macOS enable `NATIVE_STARTUP_DIAGNOSTICS=1`.
 A separate loopback fixture process saves at most 56 startup checkpoints,

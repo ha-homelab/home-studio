@@ -1121,3 +1121,258 @@ test('the first replacement drawing buffer uses actual layout before ResizeObser
     assert.deepEqual(h.allocations[0],[774,724,Math.sqrt(2000000/(774*724))]);
   }
 });
+
+// Execute the actual shared helper with a deterministic host clock. Timers are
+// delivered separately from elapsed time so overdue-microtask races are real.
+function clockedDiagnostics(label, configure = () => {}) {
+  let now = 0, next = 0;
+  const timers = new Map(), exits = [], calls = [];
+  const clock = {
+    now: () => { clock.beforeRead?.(); return now; },
+    beforeRead: null,
+    elapse(ms) { now += ms; },
+    setTimeout(callback, delay) {
+      const timer = {id: ++next, at: now + delay, callback, unref() { return this; }};
+      timers.set(timer.id, timer); return timer;
+    },
+    clearTimeout(timer) { if (timer) timers.delete(timer.id); },
+    async flush() { for (let i = 0; i < 60; i++) await Promise.resolve(); },
+    async advance(ms) {
+      const target = now + ms;
+      while (true) {
+        const timer = [...timers.values()].filter(t => t.at <= target).sort((a,b) => a.at-b.at || a.id-b.id)[0];
+        if (!timer) break;
+        now = Math.max(now, timer.at); timers.delete(timer.id); timer.callback(); await this.flush();
+      }
+      now = Math.max(now, target); await this.flush();
+    },
+    pending: () => [...timers.values()].map(t => t.at), exits, calls,
+  };
+  const fake = fakeBrowser();
+  fake.page.close = async () => { calls.push('page-close'); fake.page.closed = true; };
+  fake.context.close = async () => { calls.push('context-close'); fake.context.closed = true; };
+  fake.browser.close = async () => { calls.push('browser-close'); fake.browser.closed = true; };
+  const playwright = {firefox:{launch:async () => fake.browser},chromium:{launch:async () => fake.browser}};
+  const settings = {load() {}, fake, playwright, clock}; configure(settings);
+  const loaded = {exports:{}};
+  const nativeRequire = require('node:module').createRequire(path.join(__dirname,'browser-stability-diagnostics.cjs'));
+  const env = {module:loaded,exports:loaded.exports,__dirname,
+    require(name) { if(name==='playwright'){settings.load();return playwright;} if(name==='playwright/package.json')return {version:'clock-test'};return nativeRequire(name); },
+    console:{log(){},warn(){}}, performance:{now:clock.now},setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,
+    Buffer,process:{env:{STABILITY_UNIT_DIAGNOSTICS_DIR:directory,GITHUB_SHA:'clock-test'},platform:process.platform,arch:process.arch,version:process.version,exit:code=>exits.push(code)},
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'browser-stability-diagnostics.cjs'),'utf8'),env,{filename:'actual-browser-stability-diagnostics.cjs'});
+  const diagnostics=loaded.exports.createDiagnostics(label,'STABILITY_UNIT',path.join(__dirname,'..'));
+  return {diagnostics,fake,clock};
+}
+function deferred() { let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject}; }
+
+test('bootstrap and scenario have separate absolute budgets including final identity', async () => {
+  const {diagnostics,fake,clock}=clockedDiagnostics('split-budget',({clock,fake,playwright})=>{
+    playwright.firefox.launch=async()=>{clock.elapse(12000);return fake.browser;};
+    fake.browser.newContext=async()=>{clock.elapse(8000);return fake.context;};
+    const identity=fake.page.evaluate;let identities=0;
+    fake.page.evaluate=async()=>{clock.elapse(++identities===1?9999:499);return identity();};
+  });
+  const result=await diagnostics.run('firefox',options,async()=>clock.elapse(500));
+  assert.equal(result.status,'passed');assert.equal(result.bootstrapDurationMs,29999);
+  assert.equal(result.scenarioStartedMs,29999);assert.equal(result.scenarioDurationMs,999);
+  assert.equal(result.deadlineScope.bootstrapMs,30000);assert.equal(result.deadlineScope.scenarioMs,1000);
+  assert.equal(result.deadlineScope.hardProcessMs,66000);
+  assert(fake.context.closed&&fake.browser.closed);assert.equal(clock.pending().length,0);
+});
+
+test('all synchronous bootstrap stages count and overdue completion cannot enter the app', async () => {
+  for (const stage of ['module','launch','context','init','custom-init','page','default-timeout','identity','listeners','trace-session','trace-start']) {
+    let executed=0;
+    const {diagnostics,clock}=clockedDiagnostics('overdue-'+stage,settings=>{
+      const {fake,playwright,clock}=settings,late=()=>clock.elapse(30000);
+      if(stage==='module')settings.load=late;
+      if(stage==='launch')playwright.firefox.launch=async()=>{late();return fake.browser;};
+      if(stage==='context')fake.browser.newContext=async()=>{late();return fake.context;};
+      if(stage==='init'||stage==='custom-init'){let n=0;fake.context.addInitScript=async()=>{if(++n===(stage==='init'?1:2))late();};}
+      if(stage==='page')fake.context.newPage=async()=>{late();return fake.page;};
+      if(stage==='default-timeout')fake.page.setDefaultTimeout=late;
+      if(stage==='identity'){const identity=fake.page.evaluate;fake.page.evaluate=async()=>{late();return identity();};}
+      if(stage==='listeners'){const on=fake.page.on;fake.page.on=function(...args){if(args[0]==='requestfailed')late();return on.apply(this,args);};}
+      if(stage.startsWith('trace')){
+        playwright.chromium.launch=playwright.firefox.launch;
+        fake.context.newCDPSession=async()=>{if(stage==='trace-session')late();return {send:async()=>{if(stage==='trace-start')late();},detach:async()=>{}};};
+      }
+    });
+    const tracing=stage.startsWith('trace');
+    await assert.rejects(diagnostics.run(tracing?'chromium':'firefox',{...options,instrument:()=>{},inputDiagnostics:tracing?{traceInput:true}:null},async()=>{executed++;}),/30-second bootstrap deadline/);
+    const record=read(diagnostics,tracing?'chromium.json':'firefox.json');
+    assert.equal(executed,0,stage);assert.equal(record.timeoutScope,'bootstrap',stage);
+    assert.equal(record.bootstrapDurationMs,30000,stage);assert.equal(record.scenarioStartedMs,null,stage);
+    assert.equal(record.status,'failed',stage);assert.deepEqual(clock.exits,[],stage);
+  }
+});
+
+test('bootstrap timeout is aggregate and cannot be renewed by context or identity progress', async () => {
+  let executed=0;
+  const {diagnostics}=clockedDiagnostics('aggregate-setup',({fake,clock,playwright})=>{
+    playwright.firefox.launch=async()=>{clock.elapse(15000);return fake.browser;};
+    fake.context.newPage=async()=>{clock.elapse(10000);return fake.page;};
+    const identity=fake.page.evaluate;fake.page.evaluate=async()=>{clock.elapse(5000);return identity();};
+  });
+  await assert.rejects(diagnostics.run('firefox',options,async()=>executed++),/bootstrap deadline/);
+  assert.equal(executed,0);assert.equal(read(diagnostics).bootstrapDurationMs,30000);
+});
+
+test('hanging bootstrap stages time out and late resources close without entering the app', async () => {
+  for(const stage of ['launch','context','init','page','identity','trace-session','trace-start']) {
+    const gate=deferred();let executed=0;
+    const {diagnostics,fake,clock}=clockedDiagnostics('hanging-'+stage,({fake,playwright})=>{
+      if(stage==='launch')playwright.firefox.launch=()=>gate.promise;
+      if(stage==='context')fake.browser.newContext=()=>gate.promise;
+      if(stage==='init')fake.context.addInitScript=()=>gate.promise;
+      if(stage==='page')fake.context.newPage=()=>gate.promise;
+      if(stage==='identity')fake.page.evaluate=()=>gate.promise;
+      if(stage.startsWith('trace'))fake.context.newCDPSession=()=>stage==='trace-session'?gate.promise:Promise.resolve({send:()=>gate.promise,detach:async()=>{}});
+    });
+    const tracing=stage.startsWith('trace');
+    const pending=diagnostics.run(tracing?'chromium':'firefox',{...options,inputDiagnostics:tracing?{traceInput:true}:null},async()=>executed++).then(()=>null,error=>error);
+    await clock.flush();await clock.advance(30000);
+    const error=await pending;assert.match(error.message,/bootstrap deadline/,stage);
+    const before=read(diagnostics,tracing?'chromium.json':'firefox.json');
+    assert.equal(before.status,'failed');assert.equal(before.timeoutScope,'bootstrap');assert.equal(executed,0);
+    const late=stage==='launch'?fake.browser:stage==='context'?fake.context:stage==='page'?fake.page:stage==='trace-session'?{detach:async()=>clock.calls.push('trace-detach')}:{};
+    gate.resolve(late);await clock.flush();
+    const after=read(diagnostics,tracing?'chromium.json':'firefox.json');
+    assert.deepEqual(after.error,before.error,'Late completion cannot replace original failure');
+    assert.equal(after.scenarioStartedMs,null);assert.equal(executed,0);
+    if(stage==='launch')assert(fake.browser.closed);
+    if(stage==='context')assert(fake.context.closed);
+    if(stage==='page')assert(fake.page.closed);
+    if(stage==='trace-session')assert(clock.calls.includes('trace-detach'));
+    assert.equal(clock.pending().length,0,stage);
+  }
+});
+
+test('scenario late execute or final identity completion remains failed before delayed timers fire', async () => {
+  for(const stage of ['execute','final-identity']) {
+    let evaluations=0;
+    const {diagnostics,clock}=clockedDiagnostics('late-'+stage,({fake,clock})=>{
+      const identity=fake.page.evaluate;
+      fake.page.evaluate=async()=>{if(++evaluations===2&&stage==='final-identity')clock.elapse(1000);return identity();};
+    });
+    await assert.rejects(diagnostics.run('firefox',options,async()=>{
+      if(stage==='execute')clock.elapse(1000);
+    }),/browser deadline/);
+    const record=read(diagnostics);assert.equal(record.timeoutScope,'scenario');assert.equal(record.scenarioDurationMs,1000);
+    assert.equal(record.scenarioCompletedMs,null);
+    if(stage==='execute')assert.equal(evaluations,1,'No final identity after overdue execute');
+  }
+  const {diagnostics,clock}=clockedDiagnostics('late-final-check');
+  await assert.rejects(diagnostics.run('chromium',{...options,launch:{headless:true,args:['--use-angle=swiftshader']}},async({record})=>{
+    Object.defineProperty(record,'gpu',{get(){clock.elapse(1000);return {renderer:'SwiftShader'};},configurable:true});
+  }),/browser deadline/);
+  assert.equal(read(diagnostics,'chromium.json').timeoutScope,'scenario');
+});
+
+test('a never-resolving launch retains the absolute hard process cap', async () => {
+  const {diagnostics,clock}=clockedDiagnostics('hard-launch',({playwright})=>{playwright.firefox.launch=()=>new Promise(()=>{});});
+  const pending=diagnostics.run('firefox',options,async()=>assert.fail('Must not enter app')).catch(error=>error);
+  await clock.flush();await clock.advance(30000);assert.match((await pending).message,/bootstrap/);
+  assert(clock.pending().includes(66000));await clock.advance(35999);assert.deepEqual(clock.exits,[]);
+  await clock.advance(1);assert.deepEqual(clock.exits,[1]);assert.equal(read(diagnostics).hardDeadlineExceeded,true);
+});
+
+
+test('failed late bootstrap cleanup retains the hard cap and original timeout', async () => {
+  for(const stage of ['launch','context','page','trace-session']) {
+    for(const hangs of [false,true]) {
+      const gate=deferred();let executed=0;
+      const {diagnostics,clock}=clockedDiagnostics(`late-close-${stage}-${hangs}`,({fake,playwright})=>{
+        if(stage==='launch')playwright.firefox.launch=()=>gate.promise;
+        if(stage==='context')fake.browser.newContext=()=>gate.promise;
+        if(stage==='page')fake.context.newPage=()=>gate.promise;
+        if(stage==='trace-session')fake.context.newCDPSession=()=>gate.promise;
+      });
+      const trace=stage==='trace-session',engine=trace?'chromium':'firefox';
+      const pending=diagnostics.run(engine,{...options,inputDiagnostics:trace?{traceInput:true}:null},async()=>executed++).catch(error=>error);
+      await clock.flush();await clock.advance(30000);
+      assert.match((await pending).message,/bootstrap deadline/);
+      const original=read(diagnostics,`${engine}.json`).error;
+      const close=()=>hangs?new Promise(()=>{}):Promise.reject(Error('synthetic late cleanup failure'));
+      gate.resolve(trace?{detach:close}:{close});await clock.flush();
+      if(hangs)await clock.advance(stage==='launch'?15000:trace?1000:5000);
+      const record=read(diagnostics,`${engine}.json`);
+      assert.deepEqual(record.error,original);assert.equal(record.cleanupErrors.length,1);
+      assert.equal(executed,0);assert.equal(record.scenarioStartedMs,null);
+      const hard=trace?77000:66000;
+      assert.deepEqual(clock.pending(),[hard]);await clock.advance(hard-clock.now());
+      assert.deepEqual(clock.exits,[1]);assert.equal(read(diagnostics,`${engine}.json`).hardDeadlineExceeded,true);
+    }
+  }
+});
+
+test('viewer and planner phases and cycles cannot renew the scenario deadline', async () => {
+  for(const deadlineMs of [120000,180000]) {
+    const {diagnostics,clock}=clockedDiagnostics(`aggregate-scenario-${deadlineMs}`,({clock,playwright,fake})=>{
+      playwright.firefox.launch=async()=>{clock.elapse(12000);return fake.browser;};
+    });
+    await assert.rejects(diagnostics.run('firefox',{...options,deadlineMs},async({phases})=>{
+      for(let cycle=0;cycle<2;cycle++) {
+        phases.start('viewer-load',{cycle});clock.elapse(deadlineMs/4);
+        phases.start('state-changes',{cycle});clock.elapse(deadlineMs/4);
+      }
+      phases.start('recovery');
+    }),/browser deadline/);
+    const record=read(diagnostics);
+    assert.equal(record.deadlineScope.scenarioMs,deadlineMs);
+    assert.equal(record.deadlineScope.hardProcessMs,deadlineMs+65000);
+    assert.equal(record.bootstrapDurationMs,12000);assert.equal(record.scenarioStartedMs,12000);
+    assert.equal(record.scenarioDurationMs,deadlineMs);assert.equal(record.scenarioCompletedMs,null);
+    assert.equal(record.timeoutScope,'scenario');assert.equal(record.timeoutPhase.elapsedMs,12000+deadlineMs);
+    assert.equal(record.timeoutPhase.activePhase.name,'recovery');assert.equal(clock.pending().length,0);
+  }
+});
+
+test('successful final completion and phase timestamps share the case clock', async () => {
+  const {diagnostics,clock}=clockedDiagnostics('completion-clock',({fake,clock,playwright})=>{
+    playwright.firefox.launch=async()=>{clock.elapse(500);return fake.browser;};
+  });
+  const record=await diagnostics.run('firefox',options,async({phases})=>{
+    clock.elapse(200);phases.start('final-checks');clock.elapse(100);
+  });
+  assert.equal(record.bootstrapDurationMs,500);assert.equal(record.scenarioStartedMs,500);
+  assert.equal(record.scenarioDurationMs,300);assert.equal(record.scenarioCompletedMs,800);
+  assert.equal(record.phases.find(phase=>phase.name==='test').startedMs,500);
+  assert.equal(record.phases.at(-1).completedMs,800);assert.equal(record.timedOut,undefined);
+});
+
+test('invalid scenario budgets fail before module loading or application work', async () => {
+  for(const deadlineMs of [0,-1,NaN,Infinity,1.5]) {
+    const {diagnostics}=clockedDiagnostics('invalid-budget',settings=>{settings.load=()=>assert.fail('Do not load browser');});
+    await assert.rejects(diagnostics.run('firefox',{...options,deadlineMs},async()=>assert.fail('Do not execute')),/positive integer/);
+  }
+});
+
+
+test('bootstrap crossing its limit at the scenario handoff never starts execute', async () => {
+  let executed=0;
+  const {diagnostics,clock}=clockedDiagnostics('handoff-boundary',({clock,fake})=>{
+    fakeInputTrace(fake);
+    const sessionFor=fake.context.newCDPSession;
+    fake.context.newCDPSession=async()=>{
+      const session=await sessionFor(),send=session.send;
+      session.send=async(method,...args)=>{
+        const result=await send(method,...args);
+        if(method==='Tracing.start') {
+          clock.elapse(29999);let reads=0;
+          clock.beforeRead=()=>{if(++reads===2){clock.elapse(1);clock.beforeRead=null;}};
+        }
+        return result;
+      };
+      return session;
+    };
+  });
+  await assert.rejects(diagnostics.run('chromium',{...options,inputDiagnostics:{traceInput:true}},async()=>executed++),/bootstrap deadline/);
+  const record=read(diagnostics,'chromium.json');
+  assert.equal(executed,0);assert.equal(record.bootstrapDurationMs,30000);
+  assert.equal(record.timeoutScope,'bootstrap');assert.equal(record.scenarioStartedMs,null);
+  assert.equal(record.deadlineScope.hardProcessMs,77000);
+  assert.equal(record.inputTrace.status,'saved');assert.deepEqual(record.diagnosticsErrors,[]);
+});

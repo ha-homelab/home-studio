@@ -250,8 +250,7 @@ async function bounded(operation, milliseconds, description) {
 // Host-side timestamps only: changing phases adds no browser work or awaits.
 // Live entries may finish after the watchdog wins Promise.race, so retain an
 // independent copy of the phase that was active at the actual deadline.
-function createPhaseTimings(record, now = () => performance.now()) {
-  const origin = now();
+function createPhaseTimings(record, now = () => performance.now(), origin = now()) {
   record.phases = [];
   record.activePhase = null;
   const elapsed = () => Math.round((now() - origin) * 1000) / 1000;
@@ -322,13 +321,29 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       inputDiagnostics: options.inputDiagnostics || null, inputTrace: null,
       cleanupTimeoutsMs: {context: 5000, browser: 15000}, cleanupDurationsMs: {},
     };
-    const phases = createPhaseTimings(record);
+    assert(Number.isSafeInteger(options.deadlineMs) && options.deadlineMs > 0, 'Scenario deadline must be a positive integer');
+    const bootstrapMs = 30000, caseStarted = performance.now();
+    record.deadlineScope = {version: 2, bootstrapMs, scenarioMs: options.deadlineMs,
+      scenario: 'execute-through-final-identity-and-checks',
+      hardProcessMs: bootstrapMs + options.deadlineMs + 35000 + (options.inputDiagnostics?.traceInput ? 11000 : 0)};
+    record.bootstrapDurationMs = null;
+    record.scenarioStartedMs = null;
+    record.scenarioDurationMs = null;
+    record.scenarioCompletedMs = null;
+    const phases = createPhaseTimings(record, undefined, caseStarted);
     const file = `${engine}.json`;
     const reference = {engine, file, status: record.status};
     summary.browsers.push(reference);
     const save = () => { write(file, record); reference.status = record.status; saveSummary(); };
     save();
-    let browser, context, page, failure, expired = false, watchdog, launchPending = false, traceSession;
+    let browser, context, page, failure, expired = false, watchdog, traceSession;
+    let scope = 'bootstrap', scopeStarted = caseStarted, deadlineAt = caseStarted + bootstrapMs;
+    let deadlineError, rejectDeadline, bootstrapPending = 0, cleanupFinished = false, browserClosed = true, lateCleanupFailed = false;
+    const duration = start => Math.round((performance.now() - start) * 1000) / 1000;
+    const finishTiming = () => {
+      if (scope === 'bootstrap') record.bootstrapDurationMs ??= duration(caseStarted);
+      else record.scenarioDurationMs ??= duration(scopeStarted);
+    };
     const hardDeadline = setTimeout(() => {
       const error = new Error(`${engine}: browser cleanup exceeded the hard process deadline`);
       record.status = 'failed';
@@ -341,8 +356,53 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       try { save(); } finally { process.exit(1); }
     // Trace draining has its own bound; scene and browser-close limits are
     // unchanged. Only requested diagnostic traces need this extra cleanup room.
-    }, options.deadlineMs + 35000 + (options.inputDiagnostics?.traceInput ? 11000 : 0));
+    }, Math.max(0, caseStarted + record.deadlineScope.hardProcessMs - performance.now()));
     hardDeadline.unref();
+    const clearHardIfClosed = () => {
+      if (cleanupFinished && browserClosed && !bootstrapPending && !lateCleanupFailed) clearTimeout(hardDeadline);
+    };
+    const expire = () => {
+      if (expired) return deadlineError;
+      expired = true;
+      finishTiming();
+      phases.freezeTimeout();
+      record.timedOut = true;
+      record.timeoutScope = scope;
+      deadlineError = new Error(scope === 'bootstrap'
+        ? `${engine}: browser bootstrap exceeded the 30-second bootstrap deadline`
+        : `${engine}: ${name} exceeded the ${options.deadlineMs / 1000}-second browser deadline`);
+      save();
+      rejectDeadline(deadlineError);
+      return deadlineError;
+    };
+    const checkDeadline = () => {
+      // Timers cannot run while JS is busy. A late successful callback must fail
+      // even if its microtask runs before the overdue timer callback.
+      if (expired || performance.now() >= deadlineAt) throw expire();
+    };
+    const armWatchdog = () => {
+      clearTimeout(watchdog);
+      watchdog = setTimeout(expire, Math.max(0, deadlineAt - performance.now()));
+    };
+    const bootstrap = async (operation, lateResource) => {
+      checkDeadline();
+      bootstrapPending++;
+      try {
+        const result = await operation();
+        try { checkDeadline(); }
+        catch (error) {
+          // The main failure path may already have closed its known resources.
+          // Do not adopt a late context/page/browser or proceed into the app.
+          if (lateResource && result) {
+            const limit = lateResource === 'browser' ? 15000 : lateResource === 'trace' ? 1000 : 5000;
+            try { await bounded(() => lateResource === 'trace' ? result.detach() : result.close(), limit, `${engine} late ${lateResource} cleanup`); }
+            catch (cleanupError) { lateCleanupFailed = true; record.cleanupErrors.push(errorDetails(cleanupError)); save(); }
+          }
+          throw error;
+        }
+        return result;
+      } finally { bootstrapPending--; clearHardIfClosed(); }
+    };
     async function capture(screenshot) {
       if (!page || page.isClosed()) return;
       try {
@@ -377,35 +437,29 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       else assert(condition, message);
     };
     try {
-      const deadline = new Promise((_, reject) => {
-        watchdog = setTimeout(() => {
-          expired = true;
-          phases.freezeTimeout();
-          record.timedOut = true;
-          save();
-          reject(new Error(`${engine}: ${name} exceeded the ${options.deadlineMs / 1000}-second browser deadline`));
-        }, options.deadlineMs);
-      });
+      const deadline = new Promise((_, reject) => { rejectDeadline = reject; });
+      armWatchdog();
       await Promise.race([deadline, (async () => {
-        const loaded = dependencies.playwright ? {playwright: dependencies.playwright, version: 'test-double'} : loadPlaywright();
+        phases.start('browser-module');
+        const loaded = await bootstrap(() => dependencies.playwright ? {playwright: dependencies.playwright, version: 'test-double'} : loadPlaywright());
         const {playwright} = loaded;
         record.playwrightVersion = loaded.version;
         phases.start('browser-launch');
-        launchPending = true;
-        try { browser = await playwright[engine].launch({...options.launch, timeout: 30000}); }
-        finally { launchPending = false; }
-        if (expired) { await browser.close(); clearTimeout(hardDeadline); return; }
+        browser = await bootstrap(() => playwright[engine].launch({...options.launch, timeout: 30000}), 'browser');
+        browserClosed = false;
         record.browserVersion = browser.version();
         save();
         phases.start('browser-context');
-        context = await browser.newContext(options.context);
-        await context.addInitScript(inputInstrumentation);
-        if (options.instrument) await context.addInitScript(options.instrument);
-        page = await context.newPage();
+        context = await bootstrap(() => browser.newContext(options.context), 'context');
+        phases.start('browser-initialization');
+        await bootstrap(() => context.addInitScript(inputInstrumentation));
+        if (options.instrument) await bootstrap(() => context.addInitScript(options.instrument));
+        page = await bootstrap(() => context.newPage(), 'page');
         page.setDefaultTimeout(30000);
         phases.start('browser-identity');
-        record.identity = await browserIdentity(page, engine, options.launch, record.browserVersion);
+        record.identity = await bootstrap(() => browserIdentity(page, engine, options.launch, record.browserVersion));
         save();
+        phases.start('browser-listeners');
         page.on('pageerror', error => { record.errors.push(String(error)); save(); });
         page.on('crash', () => { record.crashes.push('Page crashed'); save(); });
         page.on('console', message => {
@@ -437,20 +491,36 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
             resourceType: request.resourceType(), error: request.failure()?.errorText || null});
           save();
         });
+        checkDeadline();
         if (options.inputDiagnostics?.traceInput) {
           assert.equal(engine, 'chromium', 'Input tracing requires Chromium');
           record.inputTrace = {file:`${engine}-input-trace.json`, status:'starting',
             categories:'input,latencyInfo,benchmark,disabled-by-default-devtools.timeline.inputs'};
-          traceSession = await context.newCDPSession(page);
-          await traceSession.send('Tracing.start', {categories:record.inputTrace.categories,
-            options:'record-until-full', transferMode:'ReturnAsStream', streamFormat:'json'});
+          phases.start('browser-tracing');
+          traceSession = await bootstrap(() => context.newCDPSession(page), 'trace');
+          await bootstrap(() => traceSession.send('Tracing.start', {categories:record.inputTrace.categories,
+            options:'record-until-full', transferMode:'ReturnAsStream', streamFormat:'json'}));
           record.inputTrace.status = 'recording'; save();
         }
+        // Compare and reuse one timestamp so the transition cannot grant a
+        // scenario budget to bootstrap work that has already expired.
+        const scenarioStart = performance.now();
+        if (expired || scenarioStart >= deadlineAt) throw expire();
+        record.bootstrapDurationMs = Math.round((scenarioStart - caseStarted) * 1000) / 1000;
+        // Exactly one reset, immediately before the unchanged scenario callback.
+        scope = 'scenario';
+        scopeStarted = scenarioStart;
+        record.scenarioStartedMs = record.bootstrapDurationMs;
+        deadlineAt = scopeStarted + options.deadlineMs;
+        armWatchdog();
         phases.start('test');
+        checkDeadline();
         await execute({browser, context, page, record, check, save, phases});
+        checkDeadline();
         // Chromium exposes UA client-hint brands only after a secure navigation.
         phases.start('browser-final-identity');
         record.identity = await browserIdentity(page, engine, options.launch, record.browserVersion);
+        checkDeadline();
         save();
         if (process.platform === 'darwin' && options.launch.firefoxUserPrefs?.['webgl.disable-angle'] === false) {
           check(/ANGLE Metal Renderer/i.test(record.gpu?.unmaskedRenderer || record.gpu?.renderer || ''),
@@ -464,10 +534,16 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
             }
           }
         }
+        checkDeadline();
         phases.complete();
       })()]);
+      const completed = performance.now();
+      if (expired || completed >= deadlineAt) throw expire();
+      record.scenarioDurationMs = Math.round((completed - scopeStarted) * 1000) / 1000;
+      record.scenarioCompletedMs = Math.round((completed - caseStarted) * 1000) / 1000;
       record.status = options.reportOnly ? 'observation' : 'passed';
     } catch (error) {
+      finishTiming();
       failure = error;
       record.status = 'failed';
       record.error = errorDetails(error);
@@ -510,7 +586,7 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       // Write before teardown: evidence must survive a hung or failing browser close.
       record.finishedAt = new Date().toISOString();
       save();
-      let browserClosed = !browser;
+      browserClosed = !browser;
       for (const [label, resource] of [['context', context], ['browser', browser]]) {
         if (!resource) continue;
         const cleanupStarted = Date.now();
@@ -525,7 +601,8 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       save();
       // An unresolved Playwright transport may keep Node alive after close times out.
       // Leave the unreferenced hard deadline armed in that case.
-      if (browserClosed && !launchPending) clearTimeout(hardDeadline);
+      cleanupFinished = true;
+      clearHardIfClosed();
       console.log(`${engine}: ${record.status}; evidence ${path.join(directory, file)}`);
     }
     if (failure) throw failure;

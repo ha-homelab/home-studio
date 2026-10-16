@@ -2,6 +2,15 @@
 
 ## [0.6.4] - Development line
 
+- Separate Playwright browser bootstrap into one aggregate 30-second budget,
+  then start the existing 120-second viewer or 180-second planner scenario
+  budget immediately before application work. Keep all per-step checks, cleanup
+  limits and assertions, including final identity, and reject late setup or
+  callback completion. Record both scopes and their measured durations. This
+  prospective contract adds at most 30 seconds to allowed wall time; it is not
+  a runtime speedup and does not reclassify previous failures. Native Gecko and
+  Safari timing is unchanged.
+
 - Express eligible packed Lambert lighting with local vectors and scalars,
   preserving the pinned point, directional, shadow and indirect-light operation
   order. Independent source and material guards retain the existing paths when
