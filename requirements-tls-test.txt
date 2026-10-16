@@ -1,2 +1,3 @@
-# Synthetic TLS certificate fixtures only; not an application dependency.
+# Synthetic TLS fixtures and optional strict TLS metadata checks.
+# Intel macOS runtime uses the native Security framework instead.
 cryptography==50.0.1

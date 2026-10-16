@@ -5,25 +5,28 @@ import ssl
 
 
 def client_context(*, strict=False, cafile=None):
-    """Keep platform trust and optionally require 128-bit transport security.
-
-    OpenSSL security level 3 rejects RSA/DH keys below 3072 bits (including
-    marginal keys rounded by level 2), short EC keys and static RSA exchange.
-    Preserve a stronger system policy and its existing cipher selection.
-    """
+    """Verify TLS and optionally enforce exact full-chain public-key minimums."""
     context = ssl.create_default_context(cafile=cafile)
     context.minimum_version = max(context.minimum_version, ssl.TLSVersion.TLSv1_2)
     if strict:
         if ssl.OPENSSL_VERSION_INFO < (3, 0, 0):
             raise RuntimeError("Strict TLS requires OpenSSL 3 or newer")
-        if context.security_level < 3:
-            suites = ":".join(
-                cipher["name"]
-                for cipher in context.get_ciphers()
-                if cipher["protocol"] != "TLSv1.3"
-            )
-            context.set_ciphers(f"{suites}:@SECLEVEL=3")
+        if __package__:
+            from .tls_key_policy import enforce_peer_key_policy
+        else:
+            from tls_key_policy import enforce_peer_key_policy
+        context = enforce_peer_key_policy(context)
     return context
+
+
+def configured_context():
+    """Use the same opt-in policy for owned downloads and cloud AI transport."""
+    import os
+
+    mode = os.environ.get("HOME_STUDIO_STRICT_TLS", "0")
+    if mode not in {"0", "1"}:
+        raise ValueError("HOME_STUDIO_STRICT_TLS must be 0 or 1")
+    return client_context(strict=mode == "1")
 
 
 def open_download(url, *, timeout=60):

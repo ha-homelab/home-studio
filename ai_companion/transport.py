@@ -7,6 +7,8 @@ import threading
 import time
 from urllib.parse import urlsplit
 
+from scripts.download_tls import configured_context
+
 from .protocol import CompanionError, MAX_UPSTREAM_BYTES, dumps, parse_json
 from .providers import normalize_endpoint, request_headers, request_payload, extract_draft
 
@@ -105,7 +107,7 @@ def _connect(connection, hostname, port, tls, control, deadline, local=False):
                 raise CompanionError("endpoint_rejected", "Connected peer was not loopback.", 400)
             if tls:
                 # The original fixed hostname remains the TLS identity and Host header.
-                connection.sock = ssl.create_default_context().wrap_socket(sock, server_hostname=hostname)
+                connection.sock = configured_context().wrap_socket(sock, server_hostname=hostname)
                 control.attach(connection)
             connection.sock.settimeout(max(0.1, min(30, deadline - time.monotonic())))
             return

@@ -2,6 +2,11 @@
 """Synthetic real TLS handshakes and client wiring; no network or live keys."""
 
 import datetime
+import http.client
+import socket
+import sys
+import threading
+import time
 import ssl
 import tempfile
 import unittest
@@ -16,6 +21,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from ai_companion import transport
+from ai_companion.protocol import CompanionError
 from download_tls import client_context, open_download
 
 
@@ -91,7 +99,7 @@ def handshake(client, server, *, hostname="synthetic.test"):
 class StrictTlsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.strong = rsa.generate_private_key(public_exponent=65537, key_size=3072)
+        cls.strong = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         cls.weak = rsa.generate_private_key(public_exponent=65537, key_size=2047)
 
     def contexts(self, directory, weak_part, version):
@@ -134,13 +142,57 @@ class StrictTlsTests(unittest.TestCase):
                     client, server = self.contexts(d, weak_part, version)
                     if weak_part:
                         with self.assertRaisesRegex(
-                            ssl.SSLCertVerificationError, "key too weak"
+                            ssl.SSLError, "below the supported security minimum|key too weak"
                         ):
                             handshake(client, server)
                     else:
                         self.assertEqual(
                             handshake(client, server), version.name.replace("_", ".")
                         )
+
+    def test_actual_ai_transport_uses_verified_policy_before_application_data(self):
+        for version in (ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3):
+            for weak_part in (None, "root", "intermediate", "leaf"):
+                with self.subTest(version=version, weak_part=weak_part), tempfile.TemporaryDirectory() as d:
+                    client, server = self.contexts(d, weak_part, version)
+                    received = []
+                    with socket.socket() as listener:
+                        listener.bind(("127.0.0.1", 0))
+                        listener.listen(1)
+                        listener.settimeout(5)
+                        port = listener.getsockname()[1]
+
+                        def serve():
+                            peer, _ = listener.accept()
+                            peer.settimeout(5)
+                            try:
+                                with server.wrap_socket(peer, server_side=True) as stream:
+                                    received.append(stream.recv(1))
+                            except (ssl.SSLError, BrokenPipeError, ConnectionResetError):
+                                received.append(b"")
+                            finally:
+                                peer.close()
+
+                        worker = threading.Thread(target=serve)
+                        worker.start()
+                        connection = http.client.HTTPConnection("synthetic.test", port)
+                        control = transport.RequestControl()
+                        address = [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", port))]
+                        try:
+                            with patch.object(transport, "_resolve", return_value=address), patch.object(transport, "configured_context", return_value=client) as factory:
+                                if weak_part:
+                                    with self.assertRaises(CompanionError):
+                                        transport._connect(connection, "synthetic.test", port, True, control, time.monotonic() + 5)
+                                else:
+                                    transport._connect(connection, "synthetic.test", port, True, control, time.monotonic() + 5)
+                                    connection.sock.sendall(b"x")
+                                factory.assert_called_once_with()
+                        finally:
+                            connection.close()
+                            control.detach()
+                            worker.join(6)
+                        self.assertFalse(worker.is_alive())
+                        self.assertEqual(received, [b"" if weak_part else b"x"])
 
     def test_verifies_hostname_and_trust(self):
         with tempfile.TemporaryDirectory() as d:
@@ -174,7 +226,7 @@ class StrictTlsTests(unittest.TestCase):
                 open_download('https://synthetic.test/file')
             handlers = factory.call_args.args
             context = next(x._context for x in handlers if isinstance(x, HTTPSHandler))
-            self.assertGreaterEqual(context.security_level, 3)
+            self.assertGreaterEqual(context.security_level, 2)
             redirect = next(x for x in handlers if isinstance(x, urllib.request.HTTPRedirectHandler))
             with self.assertRaises(ValueError):
                 redirect.redirect_request(urllib.request.Request('https://synthetic.test'),
