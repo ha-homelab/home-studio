@@ -20,6 +20,10 @@
 - Reuse immutable furniture-part geometry within each preview rebuild. Keep
   every mesh, material, transform and shadow while disposing shared geometry
   exactly once; do not carry GPU resources across rebuilds or context recovery.
+- Batch disjoint furniture parts on positively identified software renderers to
+  reduce draw calls. Keep overlapping objects in their original rendering order
+  and bound the overlap search. Native and unidentified GPU paths retain normal
+  meshes; additional instanced shaders can add first-use compilation work.
 - Set direct touch manipulation on viewer controls while retaining page pinch
   zoom. Keep native touch interaction checks separate from mouse acceptance.
 - Reduce room-lighting shader compilation and fragment work while preserving

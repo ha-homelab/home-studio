@@ -109,6 +109,14 @@ Any additional or unmatched loss still fails; retirement does not excuse an
 unexpected loss. Scene contents, resource limits, draft recovery, and continued
 editing remain required after replacement.
 
+The planner shares immutable catalog geometry within each rebuild. On positively
+identified software renderers it also batches disjoint furniture parts, while
+overlapping furniture and architecture retain their ordinary drawing order.
+Geometry, appearance, instance bounds, cleanup and dense-scene fallback have
+separate regression checks. Batching reduces draw calls but adds instanced shader
+variants; it does not guarantee faster first-use compilation. Native and hidden
+GPU identities keep the ordinary mesh path.
+
 Phone and tablet profiles use **390 × 844** and **820 × 1180** CSS pixels,
 respectively, at device scale factor 2, with touch enabled. They retain the
 actual desktop operating-system identity. Chromium exercises native touch
