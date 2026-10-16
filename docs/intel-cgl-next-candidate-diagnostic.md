@@ -1,6 +1,6 @@
-# Disposable Intel literal Lambert body diagnostic
+# Disposable Intel directional Lambert diagnostic
 
-Only a push to `diagnostic/intel-cgl-next-candidate` starts this workflow. It has
+Only a push to `diagnostic/intel-cgl-directional-lambert` starts this workflow. It has
 read-only GitHub permissions and pinned actions. It does not invoke the 77-lane
 acceptance gate or publish a release. Its results are diagnostic evidence only.
 
@@ -12,8 +12,8 @@ preparation. Preparation does not authorize a push or launch.
 Two independent `macos-15-intel` jobs compare these sources in order:
 
 - Baseline: `7b7a896225aaf27fef26a135d654dfaddffe2c08`.
-- Literal Lambert body: `47b751b834028efe8596c8178c77255678762423`.
-- Candidate preflight: `node scripts/test-literal-lambert-point-body.cjs`.
+- Scalar directional Lambert: `d56ea11869c4af6c9db21c4940134905736f9887`.
+- Candidate preflight: `node scripts/test-literal-lambert-directional.cjs`.
 
 One job uses Firefox `153.5.0esr`; the other uses Waterfox `6.7.6`. Maximum
 parallelism is two. Each pair runs sequentially on one hosted VM and shares one
@@ -45,13 +45,18 @@ disabled status does not prove that existing indexing workers are idle. The
 passive CPU records remain necessary context. Both sources receive the same
 normalization. Fixed order and shared caches still limit causal conclusions.
 
-The candidate replaces aggregate struct traffic only in the eligible packed,
-texture-backed unshadowed Lambert body with the same ordered scalar/vector
-operations. Shadow prefix, run scheduling, attenuation and other shader paths
-are preserved. Existing CPU proofs pass; the local ARM comparison was neutral
-for load time and improved drag by roughly 8%. This does not establish an Intel
-benefit, and no performance result from this prepared comparison exists yet.
+The candidate replaces aggregate struct traffic only in the eligible packed
+Home directional Lambert body with the same ordered scalar/vector operations.
+The directional shadow factor, BRDF, accumulation order and all point-light
+paths are preserved. Exact pinned-source guards retain the original shader if
+a relevant chunk changes. Existing CPU proofs pass; local ARM timing is not an
+Intel result. No performance result from this prepared comparison exists yet.
 The exact source and evidence still require review before the workflow is pushed.
+
+The internal `next-candidate` selection key and existing helper/output paths are
+retained so the runner functions are unchanged. Only the fixed candidate SHA
+and CPU proof constant differ from the reviewed `f70e566` runner. Workflow and
+artifact identities distinguish this directional experiment.
 
 The wrapper invokes each source's original `test-native-browser-acceptance.py`
 once, with its standard product, expected-version, installation and output

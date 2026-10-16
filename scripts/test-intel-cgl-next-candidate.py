@@ -197,10 +197,10 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertEqual(self.indexing_calls, [])
 
     def test_exact_two_source_order(self):
-        self.assertEqual(comparison.CANDIDATE_CPU_CHECK, 'scripts/test-literal-lambert-point-body.cjs')
+        self.assertEqual(comparison.CANDIDATE_CPU_CHECK, 'scripts/test-literal-lambert-directional.cjs')
         self.assertEqual(ARMS, (
             ('baseline', '7b7a896225aaf27fef26a135d654dfaddffe2c08'),
-            ('candidate', '47b751b834028efe8596c8178c77255678762423'),
+            ('candidate', 'd56ea11869c4af6c9db21c4940134905736f9887'),
         ))
 
     def test_original_command_has_only_the_standard_installation_arguments(self):
@@ -235,7 +235,7 @@ class IntelComparisonTests(unittest.TestCase):
 
     def test_both_product_pairs_keep_fixed_revisions_versions_and_host_records(self):
         self.assertEqual(comparison.CANDIDATES, {
-            'next-candidate': '47b751b834028efe8596c8178c77255678762423',
+            'next-candidate': 'd56ea11869c4af6c9db21c4940134905736f9887',
         })
         self.assertEqual(comparison.VERSIONS, {'firefox': '153.5.0esr', 'waterfox': '6.7.6'})
         for candidate, revision in comparison.CANDIDATES.items():
@@ -293,8 +293,8 @@ class IntelComparisonTests(unittest.TestCase):
 
     def test_workflow_is_fixed_read_only_two_pair_diagnostic(self):
         text = (HERE.parent / '.github/workflows/intel-cgl-next-candidate.yml').read_text()
-        self.assertIn('branches: [diagnostic/intel-cgl-next-candidate]', text)
-        self.assertIn("github.ref == 'refs/heads/diagnostic/intel-cgl-next-candidate'", text)
+        self.assertIn('branches: [diagnostic/intel-cgl-directional-lambert]', text)
+        self.assertIn("github.ref == 'refs/heads/diagnostic/intel-cgl-directional-lambert'", text)
         self.assertIn('runs-on: macos-15-intel', text)
         self.assertIn('timeout-minutes: 30', text)
         self.assertIn('max-parallel: 2', text)
@@ -310,7 +310,7 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertIn('python3 baseline/scripts/setup-native-browser.py', text)
         self.assertIn('permissions:\n  contents: read', text)
         self.assertIn('if: ${{ always() }}', text)
-        self.assertIn('name: diagnostic-intel-cgl-next-candidate-', text)
+        self.assertIn('name: diagnostic-intel-cgl-directional-lambert-', text)
         self.assertEqual(text.count('persist-credentials: false'), 3)
         self.assertNotRegex(text, r'workflow_dispatch|pull_request|secrets\.|continue-on-error|workflow_call|diagnose-restore|diagnose-native-draw')
         uses = re.findall(r'uses: ([^\s]+)', text)
@@ -321,10 +321,10 @@ class IntelComparisonTests(unittest.TestCase):
         self.assertNotRegex(quality, re.compile(r'^  push:', re.MULTILINE))
         for name in ('release-pipeline.yml', 'pages.yml'):
             workflow = (HERE.parent / '.github/workflows' / name).read_text()
-            self.assertNotIn('diagnostic/intel-cgl-next-candidate', workflow)
+            self.assertNotIn('diagnostic/intel-cgl-directional-lambert', workflow)
         for path in (HERE.parent / '.github/workflows').glob('intel-cgl-*.yml'):
             if path.name != 'intel-cgl-next-candidate.yml':
-                self.assertNotIn('diagnostic/intel-cgl-next-candidate', path.read_text())
+                self.assertNotIn('diagnostic/intel-cgl-directional-lambert', path.read_text())
         self.assertFalse((HERE.parent / '.github/workflows/intel-cgl-boundaries.yml').exists())
 
     def test_candidate_cpu_contract_runs_before_browser_installation(self):

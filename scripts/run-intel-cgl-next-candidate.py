@@ -17,9 +17,9 @@ import time
 
 BASELINE = '7b7a896225aaf27fef26a135d654dfaddffe2c08'
 CANDIDATES = {
-    'next-candidate': '47b751b834028efe8596c8178c77255678762423',
+    'next-candidate': 'd56ea11869c4af6c9db21c4940134905736f9887',
 }
-CANDIDATE_CPU_CHECK = 'scripts/test-literal-lambert-point-body.cjs'
+CANDIDATE_CPU_CHECK = 'scripts/test-literal-lambert-directional.cjs'
 VERSIONS = {'firefox': '153.5.0esr', 'waterfox': '6.7.6'}
 DRIVER_FILES = (
     'scripts/test-native-browser-acceptance.py', 'scripts/test-waterfox-acceptance.py',

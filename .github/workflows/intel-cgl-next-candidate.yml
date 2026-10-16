@@ -1,15 +1,15 @@
-name: Diagnostic Intel CGL literal Lambert body
-run-name: Non-release Intel literal Lambert body pairs with common indexing state · ${{ github.sha }}
+name: Diagnostic Intel CGL directional Lambert
+run-name: Non-release Intel directional Lambert pairs with common indexing state · ${{ github.sha }}
 
 on:
   push:
-    branches: [diagnostic/intel-cgl-next-candidate]
+    branches: [diagnostic/intel-cgl-directional-lambert]
 
 permissions:
   contents: read
 
 concurrency:
-  group: diagnostic-intel-cgl-next-candidate
+  group: diagnostic-intel-cgl-directional-lambert
   cancel-in-progress: false
 
 defaults:
@@ -19,7 +19,7 @@ defaults:
 jobs:
   compare:
     name: ${{ matrix.product }} · ${{ matrix.candidate }}
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-next-candidate' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-directional-lambert' }}
     runs-on: macos-15-intel
     # Two sequential original three-case suites per VM; their own limits
     # are unchanged. Other pairs run on separate hosted VMs.
@@ -32,11 +32,11 @@ jobs:
           - product: firefox
             version: 153.5.0esr
             candidate: next-candidate
-            revision: 47b751b834028efe8596c8178c77255678762423
+            revision: d56ea11869c4af6c9db21c4940134905736f9887
           - product: waterfox
             version: 6.7.6
             candidate: next-candidate
-            revision: 47b751b834028efe8596c8178c77255678762423
+            revision: d56ea11869c4af6c9db21c4940134905736f9887
     env:
       PYTHONUTF8: '1'
       NATIVE_STARTUP_DIAGNOSTICS: '1'
@@ -84,7 +84,7 @@ jobs:
           npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-next-candidate/baseline-npm.log
           npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-next-candidate/candidate-npm.log
           python3 harness/scripts/test-intel-cgl-next-candidate.py
-          node candidate/scripts/test-literal-lambert-point-body.cjs
+          node candidate/scripts/test-literal-lambert-directional.cjs
       - name: Install one original checksum and signature verified browser per pair
         env:
           INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-next-candidate-browser
@@ -108,7 +108,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: diagnostic-intel-cgl-next-candidate-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: diagnostic-intel-cgl-directional-lambert-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: harness/diagnostics/intel-cgl-next-candidate/
           if-no-files-found: error
           retention-days: 14
