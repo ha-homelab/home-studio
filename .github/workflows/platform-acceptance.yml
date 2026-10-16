@@ -76,6 +76,7 @@ jobs:
       HOME_STUDIO_EXPECT_BROWSER_VERSION: ${{ matrix.browser_version }}
       CFT_VERSION: ${{ matrix.cft }}
       PLAYWRIGHT_VERSION: ${{ matrix.playwright }}
+      CHROMIUM_ANGLE_BACKEND: ${{ matrix.os == 'macos-15' && matrix.engine == 'chromium' && 'metal' || 'swiftshader' }}
       FIREFOX_WEBGL_BACKEND: ${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && (matrix.playwright == '1.63.0' || matrix.playwright == '1.64.0') && 'angle' || 'default' }}
       FIREFOX_COMPOSITOR_BACKEND: ${{ matrix.os == 'macos-15' && matrix.engine == 'firefox' && matrix.playwright == '1.62.1' && 'software' || 'default' }}
     steps:

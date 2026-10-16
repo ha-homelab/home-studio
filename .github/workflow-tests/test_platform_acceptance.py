@@ -180,6 +180,11 @@ class PlatformAcceptanceTests(unittest.TestCase):
         self.assertEqual(native['FIREFOX_COMPOSITOR_BACKEND'],
                          "${{ matrix.os == 'macos-15' && (matrix.product == 'waterfox' || (matrix.product == 'firefox' && matrix.version == '153.5.0esr')) && 'software' || 'default' }}")
 
+    def test_chromium_backend_uses_hosted_metal_only_on_macos(self):
+        browser = workflow('platform-acceptance.yml')['jobs']['browser']['env']
+        self.assertEqual(browser['CHROMIUM_ANGLE_BACKEND'],
+                         "${{ matrix.os == 'macos-15' && matrix.engine == 'chromium' && 'metal' || 'swiftshader' }}")
+
     def test_every_browser_lane_preserves_failure_evidence(self):
         jobs = workflow('platform-acceptance.yml')['jobs']
         for name in ('browser', 'native-browser', 'safari'):

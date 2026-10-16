@@ -144,8 +144,11 @@ primary check still requires all actions with immediate restoration and its
 failure still fails the job even if every diagnostic passes.
 
 Check the first failed assertion and actual renderer before comparing timings.
-Chromium uses SwiftShader to exercise software rendering. Linux runs headed
-browsers under Xvfb with software GL. Firefox profiles force WebGL enablement
+Chromium rows explicitly request `CHROMIUM_ANGLE_BACKEND=swiftshader` on
+Linux and Windows, and `CHROMIUM_ANGLE_BACKEND=metal` on macOS. The actual
+renderer must confirm the requested backend. Hosted macOS Metal exercises the
+runner's virtual graphics device; it does not certify a physical Mac GPU.
+Linux runs headed browsers under Xvfb with software GL. Firefox profiles force WebGL enablement
 and disclose the actual renderer rather than a sanitized GPU name. Playwright
 Firefox 155/157 and native Firefox 158 rows on macOS select
 `FIREFOX_WEBGL_BACKEND=angle` and require the reported renderer to confirm Metal
@@ -192,7 +195,9 @@ system libraries may require `install --with-deps`; headed CI parity also
 requires `BROWSER_STABILITY_HEADED=1`, `PLANNER_STABILITY_HEADED=1`, and
 `xvfb-run -a`. `PYTHON` selects the compiler interpreter, and `PYTHONUTF8=1`
 matches CI. Change both engine variables together; `webkit` and `firefox` are
-also supported. Select `HOME_STUDIO_BROWSER_PROFILE=phone` or `tablet` for
+also supported. For macOS Chromium CI parity, set
+`CHROMIUM_ANGLE_BACKEND=metal`; the default `swiftshader` remains available for
+software-renderer comparisons. Select `HOME_STUDIO_BROWSER_PROFILE=phone` or `tablet` for
 emulation, or leave the default `desktop` profile. For an already-installed
 branded browser, `HOME_STUDIO_BROWSER_CHANNEL=chrome`, `chrome-beta`, `msedge`,
 or `msedge-beta` selects its channel; omit the pinned-major expectation for a
