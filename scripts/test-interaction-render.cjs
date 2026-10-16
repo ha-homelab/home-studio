@@ -58,7 +58,7 @@ lifecycleOrder.length=0;lifecycleHandlers.pagehide({persisted:false});assert.equ
 // Re-enter the actual draw path after context restoration and page-cache resume.
 const hooks={}, history=[];
 let created=0;
-const c={renderProfile:{diffuseLighting:true},renderSuspended:false,renderLost:false,
+const c={renderProfile:{diffuseLighting:true},renderSuspended:false,renderLost:false,renderCount:0,
  interactionRenderer:null,interactionPointer:{moved:true},scene:{},THREE:{},document:{hidden:false},
  wallSheenMotion:{beforeRender(){},afterRender(){}},cancelRender(){},invalidateShadows(){},
  requestRender(){history.push('request');},resize(){},observer:{disconnect(){}},
@@ -73,7 +73,7 @@ c.drawScene({});assert.deepEqual(history.at(-1),{id:1,moving:true});
 hooks.webglcontextlost({preventDefault(){}});c.drawScene({});assert.equal(created,1,'Lost contexts cannot allocate or render');
 hooks.webglcontextrestored();c.drawScene({});assert.equal(created,2);assert.deepEqual(history.at(-1),{id:2,moving:false},'Restoration recreates the helper and draws full quality');
 c.interactionPointer={moved:true};hooks.pagehide({persisted:true});c.drawScene({});assert.equal(created,2);
-hooks.pageshow();c.drawScene({});assert.equal(created,2,'Page cache resumes its one bounded helper');assert.deepEqual(history.at(-1),{id:2,moving:false},'Page-cache resume cannot retain a low-resolution gesture');
+hooks.pageshow({persisted:true});c.drawScene({});assert.equal(created,2,'Page cache resumes its one bounded helper');assert.deepEqual(history.at(-1),{id:2,moving:false},'Page-cache resume cannot retain a low-resolution gesture');
 hooks.pagehide({persisted:false});assert.equal(history.filter(v=>v.disposed===2).length,1);assert.equal(c.interactionRenderer,null);
 console.log('Interaction-copy: allocation, copy/color contract, frame counts, bounds, cleanup and release tests passed');
 })().catch(e=>{console.error(e);process.exitCode=1});

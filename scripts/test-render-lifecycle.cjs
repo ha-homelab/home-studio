@@ -118,13 +118,74 @@ let prevented=false;
 context.requestRender(); listeners.webglcontextlost({preventDefault(){prevented=true;}});
 assert.ok(prevented); assert.equal(frames.size,0); context.requestRender(); context.render(); assert.equal(draws,2);
 box={width:600,height:800};context.window.resizeModel();assert.equal(buffers.length,2);
-listeners.webglcontextrestored(); assert.equal(invalidations,1); assert.equal(frames.size,1);
+listeners.webglcontextrestored(); assert.equal(invalidations,1); assert.equal(frames.size,0,'A restoration resize already painted the current state');
 assert.equal(buffers.length,3,'Restoration applies a resize skipped while context was lost');
-assert.equal(context.camera.aspect,.75);flush();assert.equal(draws,4);
+assert.equal(context.camera.aspect,.75);flush();assert.equal(draws,3,'Restoration must not redraw the resized frame');
 context.requestRender(); events.pagehide({persisted:true});
 assert.equal(frames.size,0); assert.equal(disposals,0,'Back-forward cache retains usable resources');
-events.pageshow(); flush(); assert.equal(draws,5);
+events.pageshow({persisted:true}); flush(); assert.equal(draws,4,'An unchanged-size BFCache return still paints once');
+// Initial pageshow must neither duplicate a completed offline frame nor
+// cancel the live state that arrived after it was painted.
+let before=draws;
+events.pageshow({persisted:false});assert.equal(frames.size,0);assert.equal(draws,before);
+context.requestRender();const pending=[...frames.keys()];events.pageshow({persisted:false});
+assert.deepEqual([...frames.keys()],pending,'Initial pageshow preserves the queued live-state render');
+flush();assert.equal(draws,before+1);
+
+// Both resume paths can resize synchronously. That completed draw satisfies
+// the resume request; flushing animation callbacks must not paint it again.
+for(const kind of ['visibility','bfcache']) {
+  before=draws;
+  if(kind==='visibility'){context.document.hidden=true;events.visibilitychange();}
+  else events.pagehide({persisted:true});
+  box={width:box.width+20,height:box.height+10};
+  if(kind==='visibility'){context.document.hidden=false;events.visibilitychange();}
+  else events.pageshow({persisted:true});
+  assert.equal(draws,before+1,kind+' resize paints immediately');
+  assert.equal(frames.size,0,kind+' resize does not queue a duplicate');
+  flush();assert.equal(draws,before+1);
+}
+
+// With no size change, restoration still needs a frame. While hidden, that
+// frame waits for visibility instead of drawing into a lost/hidden surface.
+before=draws;
+listeners.webglcontextlost({preventDefault(){}});listeners.webglcontextrestored();
+assert.equal(draws,before);assert.equal(frames.size,1);flush();assert.equal(draws,before+1);
+before=draws;context.document.hidden=true;events.visibilitychange();
+listeners.webglcontextlost({preventDefault(){}});listeners.webglcontextrestored();
+assert.equal(draws,before);assert.equal(frames.size,0);
+context.document.hidden=false;events.visibilitychange();flush();assert.equal(draws,before+1);
+
+// A zero-sized Home stage must retain its pending state. It renders when the
+// real resize handler sees usable dimensions, with no self-sustaining loop.
+context.homeView={active:true,render(){if(box.width&&box.height){draws++;context.renderCount++;}}};
+box={width:0,height:0};before=draws;
+context.requestRender();events.pageshow({persisted:false});assert.equal(frames.size,1);
+flush();assert.equal(draws,before);assert.equal(frames.size,0);
+box={width:480,height:320};context.window.resizeModel();assert.equal(draws,before+1);
+
+// pageshow can precede the embedded boot gate, or be the first opportunity to
+// paint a visible offline page. Neither order may lose the initial frame.
+context.renderCount=0;context.initialViewReady=false;vm.runInContext("viewSize=''",context);
+before=draws;events.pageshow({persisted:false});flush();assert.equal(draws,before);
+context.initialViewReady=true;context.window.resizeModel();assert.equal(draws,before+1);
+events.pageshow({persisted:false});assert.equal(frames.size,0);
+context.renderCount=0;vm.runInContext("viewSize=''",context);
+before=draws;events.pageshow({persisted:false});assert.equal(draws,before+1);assert.equal(frames.size,0);
+context.renderCount=0;vm.runInContext("viewSize=''",context);
+context.document.hidden=true;before=draws;events.pageshow({persisted:false});
+assert.equal(draws,before);assert.equal(frames.size,0,'Hidden initial pageshow never renders');
+context.document.hidden=false;events.visibilitychange();
+assert.equal(draws,before+1);assert.equal(frames.size,0,'Visibility paints the initial resize only once');
+// A context can restore while its page is still in the back-forward cache.
+// Drawing remains suspended until pageshow, then an unchanged size renders once.
+before=draws;events.pagehide({persisted:true});
+listeners.webglcontextlost({preventDefault(){}});listeners.webglcontextrestored();
+assert.equal(draws,before);assert.equal(frames.size,0);
+events.pageshow({persisted:true});assert.equal(frames.size,1);flush();assert.equal(draws,before+1);
+context.homeView=null;
+const beforeTeardown=draws;
 context.requestRender(); events.pagehide({persisted:false});
 assert.equal(frames.size,0); assert.equal(disposals,1); assert.equal(losses,1); assert.equal(disconnects,1);
-context.requestRender(); context.drawScene({}); assert.equal(draws,5);
+context.requestRender(); context.drawScene({}); assert.equal(draws,beforeTeardown);
 console.log('PASS: input coalescing, bounded buffers, idle/hidden/lost suspension, restoration and GPU teardown');
