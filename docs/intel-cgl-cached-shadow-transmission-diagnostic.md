@@ -1,20 +1,20 @@
-# Disposable Intel constant-point-decay diagnostic
+# Disposable Intel cached-shadow-transmission diagnostic
 
-Only a push to `diagnostic/intel-cgl-point-decay-two` starts this workflow. It has
+Only a push to `diagnostic/intel-cgl-cached-shadow-transmission` starts this workflow. It has
 read-only GitHub permissions and pinned actions. It does not invoke the 77-lane
 acceptance gate or publish a release. Its results are diagnostic evidence only.
 
 Two independent `macos-15-intel` jobs compare these exact sources in order:
 
 - Baseline: `13b8ed9e1f0baf68eac329764a05277377113419`.
-- Constant point decay: `cbcfca552850a8fec51769dddbcefde7393e7fa8`.
+- Cached shadow transmission: `61501507c2fd00d48b32127c1d6956861baf8de7`.
 
 One job uses Firefox `153.5.0esr`; the other uses Waterfox `6.7.6`. Maximum
 parallelism is two. Each pair runs sequentially on one hosted VM and shares one
 official browser installation verified by the original installer, checksum
 catalog and signature checks. Python 3.13, Node 22 and both locked npm dependency
 installations are prepared before either suite starts. The candidate's
-`test-point-decay-two.cjs` CPU/shader contract also runs before the browser is
+`test-cached-shadow-transmission.cjs` CPU/shader contract also runs before the browser is
 installed; failure stops preparation.
 
 After both sources pass preflight, the runner records `mdutil -a -s`, invokes
@@ -38,20 +38,17 @@ disposable hosted VM.
 This common normalization is not a proven cure for the Intel failures, and a
 disabled status does not prove that existing indexing workers are idle. The
 passive CPU records remain necessary context. Both sources receive the same
-normalization; the comparison varies only the point attenuation specialization,
+normalization; the comparison varies only the shadow-prefix transmission caching,
 not Spotlight configuration. Fixed order and shared caches still limit causal conclusions.
 
-The unchanged candidate specializes only the packed Lambert point attenuation
-helper after every visible registered point has exact decay 2, including
-zero-intensity and shadowed lights. It preserves `pow(lightDistance, 2.0)`, the
-cutoff operations, all light slots, the shadow prefix and lighting order. The
-original generic attenuation and spot helper remain unchanged. Unproved inputs,
-external callbacks and unsupported materials retain the original shader; the
-editor and literal path are unchanged. This source has no texture-transport
-changes. Its complete-point-set and owned-callback contract is documented in
-the candidate's `docs/point-decay-two.md`. Constant and dynamic `pow` may be
-lowered or rounded differently by a driver. Local strict acceptance is not
-proof of pixel equivalence or an Intel speedup; those require separate evidence.
+The candidate evaluates each packed shadow-prefix light's pure room
+transmission once and reuses that scalar for admission and visible-light color.
+Explicit per-light scopes survive Three's literal prefix unrolling. Helper
+operations, point and shadow order, nonzero and NaN behavior, unshadowed runs,
+and literal/editor code are unchanged. It adds no uniform, texture or pass.
+The candidate's `docs/platform-acceptance.md` describes the scope and CPU proof.
+A compiler may already remove the duplicate call, so source equivalence and
+local strict acceptance do not establish an Intel performance improvement.
 
 The wrapper invokes each source's original `test-native-browser-acceptance.py`
 once, with its standard product, expected-version, installation and output
@@ -105,16 +102,16 @@ local setting change.
 Offline contract check, with no browser or network:
 
 ```sh
-python3 scripts/test-intel-cgl-point-decay-two.py
+python3 scripts/test-intel-cgl-cached-shadow-transmission.py
 ```
 
 The workflow supplies fixed choices. Its equivalent command on the Intel host
 is:
 
 ```sh
-python3 harness/scripts/run-intel-cgl-point-decay-two.py \
-  --source-root "$GITHUB_WORKSPACE" --candidate point-decay-two \
+python3 harness/scripts/run-intel-cgl-cached-shadow-transmission.py \
+  --source-root "$GITHUB_WORKSPACE" --candidate cached-shadow-transmission \
   --product firefox \
-  --installation "$RUNNER_TEMP/home-studio-intel-cgl-point-decay-two-browser/install.json" \
-  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-point-decay-two"
+  --installation "$RUNNER_TEMP/home-studio-intel-cgl-cached-shadow-transmission-browser/install.json" \
+  --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-cached-shadow-transmission"
 ```
