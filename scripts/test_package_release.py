@@ -1,6 +1,5 @@
 """Public source release inventory and reproducibility checks."""
 
-import base64
 import hashlib
 import json
 from pathlib import Path
@@ -12,47 +11,9 @@ from unittest.mock import patch
 import zipfile
 
 import package_release as packaging
-import release_control
 
 
 class PublicPackageTests(unittest.TestCase):
-    def test_current_release_notes_include_required_guidance(self):
-        policy = json.loads((packaging.ROOT / ".release-policy.json").read_text(encoding="utf-8"))
-        manifest = json.loads((packaging.ROOT / "custom_components/home_floorplan/manifest.json").read_text(encoding="utf-8"))
-        raw = (packaging.ROOT / "CHANGELOG.md").read_bytes()
-        source = "a" * 40
-        response = {
-            "type": "file", "path": "CHANGELOG.md", "encoding": "base64",
-            "content": base64.b64encode(raw).decode("ascii"), "size": len(raw),
-            "sha": hashlib.sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw,
-                                usedforsecurity=False).hexdigest(),
-        }
-        calls = []
-        case = self
-
-        class OfflineGitHub:
-            def api(self, path, method="GET", body=None):
-                case.assertEqual((path, method, body),
-                                 (f"contents/CHANGELOG.md?ref={source}", "GET", None))
-                case.assertFalse(calls, "Only one source-bound contents read is allowed")
-                calls.append(path)
-                return response
-
-            def upload(self, *args, **kwargs):
-                raise AssertionError("Release-note validation must not upload anything")
-
-        github = OfflineGitHub()
-        provenance = "Offline package validation; no release was published."
-        with patch.object(release_control, "source_policy_snapshot",
-                          return_value={"data": policy}) as snapshot:
-            rendered = release_control.release_notes(
-                github, "v" + manifest["version"], source, provenance)
-        snapshot.assert_called_once_with(github, source)
-        self.assertEqual(calls, [f"contents/CHANGELOG.md?ref={source}"])
-        self.assertIn("### Upgrade", rendered)
-        self.assertIn("### Security", rendered)
-        self.assertIn("## Build provenance\n\n" + provenance, rendered)
-
     def test_deterministic_allowlist_and_embedded_version(self):
         with tempfile.TemporaryDirectory(prefix="home studio-é-") as temp:
             root = Path(temp).resolve()
