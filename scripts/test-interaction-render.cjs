@@ -20,6 +20,22 @@ function renderer(){
  };return r;
 }
 const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera();
+// The viewer's diffuse-only override keeps the generic helper default unchanged.
+// Compare actual texture and viewport allocation at resting and motion budgets.
+for (const [width,height] of [[292,213],[329,189],[100,80]]) {
+ const limited=renderer();limited.state.size.set(width,height);limited.state.viewport.set(0,0,width/.5,height/.5);
+ const helper=createInteractionRenderer(THREE,limited,31250);
+ helper.draw(scene,camera,false);assert.equal(limited.textures.length,0,'Resting frames remain direct');
+ helper.draw(scene,camera,true);
+ const scale=Math.min(1,Math.sqrt(31250/(width*height))),texture=limited.textures[0];
+ assert.equal(texture.image.width,Math.max(1,Math.floor(width*scale)));
+ assert.equal(texture.image.height,Math.max(1,Math.floor(height*scale)));
+ assert(texture.image.width*texture.image.height<=31250);
+ const draws=limited.log.filter(value=>value[0]==='render');
+ assert.deepEqual(draws.at(-2)[3],[0,0,(texture.image.width+.25)/.5,(texture.image.height+.25)/.5]);
+ assert.deepEqual(draws.at(-1)[3],[0,0,(width+.25)/.5,(height+.25)/.5],'Copy covers the entire resting buffer');
+ helper.draw(scene,camera,false);assert.equal(limited.info.render.calls,90,'Release retains every scene draw');helper.dispose();
+}
 const r=renderer(),p=createInteractionRenderer(THREE,r);
 p.draw(scene,camera,false);
 assert.equal(r.textures.length,0);assert.equal(r.log.filter(x=>x[0]==='render').length,1);assert.equal(r.log.filter(x=>x[0]==='compile').length,0);
@@ -93,7 +109,7 @@ const c={editorFloorMaterials:null,homeView:null,renderProfile:{diffuseLighting:
  requestRender(){history.push('request');},resize(){},observer:{disconnect(){}},releaseStaticGlassPasses(){},disposeStaticGlassPasses(){},releaseViewerGeometryGPU(){},releaseViewerTextureGPU(){},releaseWallOutlineMaterials(){},
  renderer:{domElement:{addEventListener:(key,fn)=>hooks[key]=fn},dispose(){},forceContextLoss(){}},
  window:{resizeModel(){},addEventListener:(key,fn)=>hooks[key]=fn},
- createInteractionRenderer(){const id=++created;return {draw(scene,camera,moving){history.push({id,moving});},dispose(){history.push({disposed:id});}}},
+ createInteractionRenderer(three,renderer,pixels){assert.equal(three,c.THREE);assert.equal(renderer,c.renderer);assert.equal(pixels,31250,'Diffuse viewer forwards its motion budget after creation and restoration');const id=++created;return {draw(scene,camera,moving){history.push({id,moving});},dispose(){history.push({disposed:id});}}},
 };
 vm.createContext(c);
 for(const prefix of ['function drawScene(',"renderer.domElement.addEventListener('webglcontextlost'", "renderer.domElement.addEventListener('webglcontextrestored'", "window.addEventListener('pagehide'", "window.addEventListener('pageshow'"])

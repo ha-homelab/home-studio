@@ -128,7 +128,7 @@ test('both real profile selectors use measured capacity and retain its evidence'
     const a = planner.indexOf('function previewRenderProfile('), b = planner.indexOf('\nfunction initPreview()',a);
     vm.runInContext(viewer + '\n' + planner.slice(a,b), f.context);
     const v = f.context.selectRenderProfile(f.gl), p = f.context.previewRenderProfile(f.gl);
-    assert.equal(v.pixels, reduced ? 125000 : 2000000);
+    assert.equal(v.pixels, reduced ? 62500 : 2000000);
     assert.equal(p.pixels, reduced ? 250000 : 2000000);
     for (const profile of [v,p]) {
       assert.equal(profile.diffuseLighting, reduced);

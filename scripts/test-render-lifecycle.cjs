@@ -85,7 +85,7 @@ for (const renderer of ['ANGLE (Google, SwiftShader Device)', 'llvmpipe (LLVM 19
   vm.runInContext(motionCapacityLine,context);
   assert.equal(vm.runInContext('coalesceMotion',context),true);
   assert.equal(queries,1,'Scheduling reuses cached capacity without another renderer query');
-  assert.equal(profile.pixels,renderer==='Apple Software Renderer'?125000:250000);
+  assert.equal(profile.pixels,renderer==='Apple Software Renderer'?62500:250000);
   assert.equal(profile.diffuseLighting,renderer==='Apple Software Renderer');
 }
 for (const gl of [{getExtension:()=>null}, {getExtension(){throw Error('denied');}},
@@ -108,7 +108,7 @@ assert.equal(context.renderProfile.pointShadowSize,128);
 assert.equal(context.renderProfile.sunShadowSize,512);
 context.renderProfile=context.selectRenderProfile({getExtension:()=>({UNMASKED_RENDERER_WEBGL:1}),getParameter:()=>"Apple Software Renderer"});
 for(const [w,h] of [[1280,800],[3840,2160],[800,1280]]) {
-  assert.ok(w*h*context.renderPixelRatio(w,h)**2<=125000.001,'Apple diffuse viewer buffers stay within 125,000 pixels');
+  assert.ok(w*h*context.renderPixelRatio(w,h)**2<=62500.001,'Apple diffuse viewer buffers stay within 62,500 pixels');
 }
 assert.equal(context.renderProfile.pointShadows,2);
 assert.equal(context.renderProfile.pointShadowSize,128);
@@ -215,7 +215,7 @@ function motionScheduler(diffuse = true, reduced = diffuse) {
   const raf = new Map(), timers = new Map(), handlers = {}, painted = [], errors = [], paths = [];
   let time = 0, id = 0, width = 800, rejectDraw = false, drawDuration = 0, clockReads = 0, afterDraw = null;
   const c = vm.createContext({
-    editorFloorMaterials:null, initialViewReady:true, renderCount:0, renderProfile:{diffuseLighting:diffuse,pixels:reduced?(diffuse?125000:250000):2000000},
+    editorFloorMaterials:null, initialViewReady:true, renderCount:0, renderProfile:{diffuseLighting:diffuse,pixels:reduced?(diffuse?62500:250000):2000000},
     devicePixelRatio:1, THREE:{}, scene:{}, camera:{position:0,updateProjectionMatrix(){}},
     document:{hidden:false,addEventListener:(type,fn)=>handlers[type]=fn},
     window:{addEventListener:(type,fn)=>handlers[type]=fn},
@@ -289,7 +289,7 @@ scheduled.flush();assert.deepEqual(scheduled.painted.at(-1),{time:74,position:60
   'Release cancels the deadline and paints the latest camera at full quality');
 scheduled.advance(1000);assert.equal(scheduled.raf.size,0);assert.equal(scheduled.timers.size,0);
 assert(scheduled.paths.every(path=>path===(diffuse?'copy':'direct')));
-assert.equal(scheduled.c.renderProfile.pixels,diffuse?125000:250000,'Motion preserves the selected resting pixel budget');
+assert.equal(scheduled.c.renderProfile.pixels,diffuse?62500:250000,'Motion preserves the selected resting pixel budget');
 if(!diffuse)assert.equal(scheduled.read('interactionRenderer'),null,'Software PBR never creates a copy target');
 
 for(const release of ['pointerup','pointercancel','lostpointercapture']) {
