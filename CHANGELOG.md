@@ -36,6 +36,8 @@
 - Coalesce live entity updates into scheduled frames and reuse unchanged host
   inventory. Readiness checks now wait for a completed frame with the expected
   light state rather than accepting an updated state that has not been drawn.
+  Avoid a second identical frame when a resize already repaints a restored or
+  resumed viewer; keep pending live updates and back-forward cache recovery.
 - Bound pointer-motion rendering on the legacy diffuse profile to 62,500
   pixels, copying the result into the unchanged canvas. Pointer release,
   cancellation and context recovery restore a full-resolution scene frame.
@@ -54,6 +56,9 @@
   snapped positions. Preserve exact furniture overlap, appearance, undo and drag
   cancellation. Bound software-renderer resolution without reducing sharp HTML
   controls or treating a 2D fallback as a successful 3D test.
+- Retry only interrupted browser downloads, with three bounded attempts and
+  retained logs. Certificate, signature, installation and acceptance failures
+  remain failures; test execution is never automatically retried.
 - Fix portable package metadata, Unicode paths and Windows installer path checks.
   Preserve backups, rollback and files belonging to other Home Assistant features.
 
