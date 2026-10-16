@@ -17,7 +17,7 @@ jobs:
       - name: Check Python common errors
         run: |
           python3 -m pip install ruff==0.14.0
-          python3 -m ruff check --select F scripts
+          python3 -m ruff check --select F --ignore-noqa scripts
       - name: Test strict download transport with synthetic certificate chains
         run: |
           python3 -m pip install -r requirements-tls-test.txt
