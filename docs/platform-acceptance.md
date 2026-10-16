@@ -237,17 +237,6 @@ while the ordinary wall/floor/frame mode retains its original normal handling.
 No light, shadow, drawing resolution or glass detail is removed. Unsupported
 glass and other rendering profiles retain the original path.
 
-Factory-owned, opaque fallback boxes can use the same packed Lambert program
-with facing mode `+1` and the wall tint disabled. A nonbinding plane keeps the
-clipping program compatible without applying the cutaway to these objects.
-The original material, geometry, object order and live emissive updates remain
-in place. Main-pass GPU culling becomes an equivalent face discard; CPU picking
-retains `FrontSide`, and an explicit `BackSide` shadow side retains the original
-BasicShadowMap behavior. Unsupported, shared or externally changed materials
-fall back to their original settings. This adds no uniform slots or GPU objects.
-The source proof covers compiled prefixes and cache keys, mirrored picking,
-Float32 clipping, and controller replacement; it does not establish a speedup.
-
 The extra facing uniform is included in the allowance above. The explicit
 passes remain valid with literal room lighting when packing does not fit.
 Context loss releases the owned material programs before the renderer replaces

@@ -133,73 +133,6 @@ function createStaticGlassPasses(THREE, mesh, diffuse) {
 function releaseStaticGlassPasses() {for (const passes of staticGlassPasses) passes.releaseGPU();}
 function disposeStaticGlassPasses() {for (const passes of staticGlassPasses) passes.dispose();}
 
-// Only the viewer's plain fallback-box factory registers these meshes. Their
-// pose changes through an inventory rebuild; live color/emissive updates remain
-// on the same material. No GPU resource or geometry clone is introduced.
-const fallbackBoxMaterials = new WeakMap();
-function registerFallbackBoxProgram(THREE, mesh, diffuse) {
-  const material = mesh.material;
-  if (!diffuse || !mesh.isMesh || mesh.isSkinnedMesh || mesh.isInstancedMesh || mesh.isBatchedMesh ||
-      mesh.parent || mesh.children.length || !(mesh.geometry instanceof THREE.BoxGeometry) ||
-      !material?.isMeshLambertMaterial || mesh.raycast !== THREE.Mesh.prototype.raycast ||
-      material.onBeforeCompile !== THREE.Material.prototype.onBeforeCompile ||
-      material.customProgramCacheKey !== THREE.Material.prototype.customProgramCacheKey) return;
-  const state = {mesh,geometry:mesh.geometry,original:{side:material.side,shadowSide:material.shadowSide,
-    clippingPlanes:material.clippingPlanes,clipShadows:material.clipShadows,blending:material.blending},
-    facing:{value:1},planes:[new THREE.Plane(new THREE.Vector3(0,-1,0),4)],raycast:null,active:false,rejected:false};
-  fallbackBoxMaterials.set(material,state);
-  state.raycast = function(raycaster, intersections) {
-    if (!state.active || this.material !== material || material.side!==THREE.DoubleSide) return THREE.Mesh.prototype.raycast.call(this,raycaster,intersections);
-    // GPU face discard replaces culling, but CPU picking must retain FrontSide.
-    const side=material.side;
-    try {material.side=THREE.FrontSide;return THREE.Mesh.prototype.raycast.call(this,raycaster,intersections);}
-    finally {material.side=side;}
-  };
-}
-function prepareFallbackBoxProgram(THREE, mesh, packed, exclusive) {
-  const material=mesh.material,state=fallbackBoxMaterials.get(material);
-  if (!state) return null;
-  if (state.active) {
-    const assigned={side:THREE.DoubleSide,shadowSide:THREE.BackSide,clippingPlanes:state.planes,
-      clipShadows:false,blending:THREE.NoBlending};
-    for (const key of Object.keys(assigned)) {
-      if (material[key]===assigned[key]) material[key]=state.original[key];
-      else state.rejected=true; // Never overwrite a non-owned external edit.
-    }
-    if(state.mesh.raycast===state.raycast) state.mesh.raycast=THREE.Mesh.prototype.raycast;
-    else state.rejected=true;
-    state.active=false;
-  }
-  if (mesh!==state.mesh || !exclusive) state.rejected=true;
-  if (!packed || state.rejected || mesh.geometry!==state.geometry || mesh.raycast!==THREE.Mesh.prototype.raycast ||
-      material.side!==THREE.FrontSide || material.shadowSide!==null || material.clippingPlanes?.length || material.clipShadows ||
-      material.blending!==THREE.NormalBlending || material.transparent || material.opacity!==1 ||
-      material.flatShading || material.wireframe || material.vertexColors || material.stencilWrite ||
-      material.alphaTest!==0 || material.alphaHash || material.alphaToCoverage || material.premultipliedAlpha ||
-      (material.defines && Object.keys(material.defines).length) ||
-      Object.keys(material).some(key=>(key==='map'||key.endsWith('Map'))&&material[key]) ||
-      mesh.geometry.getAttribute('color') || Object.keys(mesh.geometry.morphAttributes).length) return null;
-  const position=mesh.geometry.getAttribute('position'),normal=mesh.geometry.getAttribute('normal');
-  if(!position || !normal || position.itemSize!==3 || normal.itemSize!==3 || position.count!==normal.count || !position.count) return null;
-  mesh.updateWorldMatrix(true,false);
-  const point=new THREE.Vector3();
-  let extent=1;
-  for(let i=0;i<position.count;i++) {
-    point.fromBufferAttribute(position,i).applyMatrix4(mesh.matrixWorld);
-    for(const value of point.toArray()) {
-      if(!Number.isFinite(value)||!Number.isFinite(Math.fround(value))) return null;
-      extent=Math.max(extent,Math.abs(value));
-    }
-  }
-  const far=extent*4;
-  if(!Number.isFinite(Math.fround(far))) return null;
-  state.planes[0].constant=far;
-  material.side=THREE.DoubleSide;material.shadowSide=THREE.BackSide;
-  material.clippingPlanes=state.planes;material.clipShadows=false;
-  mesh.raycast=state.raycast;state.active=true;
-  return state.facing;
-}
-
 // Only immutable packed-Lambert walls and alpha-free floors/frames share this
 // program. NoBlending is the same disabled GPU blend state as opaque normal
 // blending, but omits Three's redundant OPAQUE shader define. Restore the
@@ -595,8 +528,7 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
       if (packed && staticGeometry) group?.updateWorldMatrix?.(true,true);
       // A material reused across wall/non-wall or unknown categories cannot
       // represent both fragment behaviours with one per-material uniform.
-      const sharedWallRoles = new Map(), materialUses = new Map();
-      if(packed) group?.traverse(mesh => {if(fallbackBoxMaterials.has(mesh.material)) materialUses.set(mesh.material,(materialUses.get(mesh.material)||0)+1);});
+      const sharedWallRoles = new Map();
       if (packed && staticGeometry) group?.traverse(mesh => {
         if (!mesh.material) return;
         const category = mesh.userData.category;
@@ -628,14 +560,13 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
           }
         }
         const wall = mesh.userData.category === 'walls';
-        const fallbackFacing=prepareFallbackBoxProgram(THREE,mesh,Boolean(packed),!packed||materialUses.get(mesh.material)===1);
         const wallEnabled = prepareSharedWallProgram(THREE, mesh,
-          fallbackFacing ? 'opaque' : !dynamicMaterials.has(mesh.material) && sharedWallRoles.get(mesh.material));
+          !dynamicMaterials.has(mesh.material) && sharedWallRoles.get(mesh.material));
         const sharedWall = Boolean(wallEnabled);
         mesh.material.onBeforeCompile = shader => {
           if (sharedWall) applySharedWallSheen(shader, wallEnabled);
           else if (wall) applyWallSheen(shader);
-          const facing = fallbackFacing || staticGlassFacing.get(mesh.material);
+          const facing = staticGlassFacing.get(mesh.material);
           if (sharedWall || facing) applyStaticFacing(THREE, shader, facing || bothFaces);
           // Keep uniform definitions identical in both material variants.
           Object.assign(shader.uniforms, uniforms, staticRuns.get(mesh.material)?.uniforms, {homeExteriorSurface:{value:mesh.userData.category==='stairs'?1:0}});

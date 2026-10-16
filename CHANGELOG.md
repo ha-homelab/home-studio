@@ -83,11 +83,6 @@
 - Upload each packed light run as one integer vector, preserving light order,
   room boundaries, shadow indices and the conservative uniform budget. Avoid
   separate dynamic start/end/room lookups without changing rendered contents.
-- Share the packed diffuse program with factory-created fallback boxes. Keep
-  their original geometry, live color, shadows and front-face picking; only
-  owned, eligible materials participate, and unsupported or externally changed
-  materials retain their original path. This removes another cold shader family
-  in both the Home view and editor without changing drawing resolution.
 - Reuse planner outlines and selection controls, and avoid redrawing unchanged
   snapped positions. Preserve exact furniture overlap, appearance, undo and drag
   cancellation. Bound software-renderer resolution without reducing sharp HTML
