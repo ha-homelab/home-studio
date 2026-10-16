@@ -731,15 +731,17 @@ function drawPreview() {
 function renderPreview() { if (view !== 'preview' || canvasSuspended || document.hidden || previewLost) return; initPreview(); if (!renderer || previewUnavailable) return; if (previewDirty) rebuildPreview(); drawPreview(); }
 function zoomPreview(factor) { orbit.radius = Math.max(1, Math.min(600, orbit.radius / factor)); requestCanvasRender(); }
 let previewCanvas = $('preview-canvas'), previewEvents;
-function releasePreviewPointer() {
-  const pointer = orbit.pointer; orbit.pointer = null;
+function releasePreviewPointer(event) {
+  const pointer = orbit.pointer;
+  if (event && pointer && event.pointerId !== pointer.id) return;
+  orbit.pointer = null;
   if (pointer && previewCanvas.hasPointerCapture(pointer.id)) previewCanvas.releasePointerCapture(pointer.id);
 }
 function bindPreviewCanvas() {
   previewEvents = new AbortController();
   const canvas = previewCanvas, options = { signal: previewEvents.signal };
   canvas.addEventListener('pointerdown', e => {
-    if (e.button !== 0 || previewLost || previewUnavailable) return;
+    if (e.button !== 0 || orbit.pointer || previewLost || previewUnavailable) return;
     e.preventDefault(); canvas.focus();
     orbit.pointer = { id: e.pointerId, x: e.clientX, y: e.clientY, yaw: orbit.yaw, pitch: orbit.pitch };
     canvas.setPointerCapture(e.pointerId);

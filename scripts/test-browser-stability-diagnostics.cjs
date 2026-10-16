@@ -575,6 +575,24 @@ test('fresh preview retires old resources and handlers while preserving orbit, p
   assert.equal(h.evaluate('orbit.yaw'),finalOrbit,'Final teardown removes input listeners');
 });
 
+test('replacement preview keeps the active orbit when another pointer presses or releases', () => {
+  const h=freshPreviewHarness();h.lose();h.restore();h.flush();
+  const canvas=h.canvas;
+  canvas.emit('pointerdown',{button:0,pointerId:1,clientX:10,clientY:20});
+  canvas.emit('pointerdown',{button:0,pointerId:2,clientX:100,clientY:200});
+  assert.equal(h.evaluate('orbit.pointer.id'),1,'A second pointer cannot replace the active gesture');
+  assert(!canvas.hasPointerCapture(2));
+  const yaw=h.evaluate('orbit.yaw');
+  canvas.emit('pointermove',{pointerId:2,clientX:180,clientY:250});
+  assert.equal(h.evaluate('orbit.yaw'),yaw);
+  canvas.emit('pointerup',{pointerId:2});canvas.emit('pointercancel',{pointerId:2});
+  assert.equal(h.evaluate('orbit.pointer.id'),1,'Unrelated up/cancel events cannot end the active gesture');
+  canvas.emit('pointermove',{pointerId:1,clientX:40,clientY:30});
+  assert.notEqual(h.evaluate('orbit.yaw'),yaw);
+  canvas.emit('pointerup',{pointerId:1});
+  assert.equal(h.evaluate('orbit.pointer'),null);assert(!canvas.hasPointerCapture(1));
+});
+
 test('restoration while in the page cache retires the context and resumes rendering on pageshow', () => {
   const h=freshPreviewHarness();h.lose();
   const pagehide=new Event('pagehide');Object.assign(pagehide,{persisted:true});h.window.dispatchEvent(pagehide);
