@@ -93,6 +93,7 @@ jobs:
           node scripts/test-literal-lambert-point-body.cjs
           node scripts/test-scalar-shadow-point.cjs
           node scripts/test-scalar-indirect-lambert.cjs
+          node scripts/test-direct-shadow-uniforms.cjs
           node scripts/test-render-lifecycle.cjs
           node scripts/test-interaction-render.cjs
           node --test scripts/test-render-capacity.cjs

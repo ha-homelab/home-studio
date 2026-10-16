@@ -765,6 +765,22 @@ function literalLambertDirectional(THREE) {
   return {original, replacement};
 }
 
+// Remove only the two pinned fragment shadow-parameter copies. The uniforms
+// are read-only during a draw; sampler indices and call argument order stay put.
+function directShadowUniforms(THREE) {
+  if (!literalLambertPointBody(THREE, false) || !literalLambertDirectional(THREE)) return null;
+  const replacements = [];
+  for (const [type, name, fields] of [
+    ['PointLightShadow', 'pointLightShadow', ['shadowMapSize','shadowIntensity','shadowBias','shadowRadius','shadowCameraNear','shadowCameraFar']],
+    ['DirectionalLightShadow', 'directionalLightShadow', ['shadowMapSize','shadowIntensity','shadowBias','shadowRadius']]
+  ]) {
+    if ((THREE.ShaderChunk.lights_fragment_begin.match(new RegExp('\\b' + name + '\\b', 'g')) || []).length !== fields.length + 2) return null;
+    replacements.push([type + ' ' + name + ';', ''], [name + ' = ' + name + 's[ i ];', '']);
+    for (const field of fields) replacements.push([name + '.' + field, name + 's[ i ].' + field]);
+  }
+  return text => replacements.reduce((result, [from, to]) => result.replaceAll(from, to), text);
+}
+
 // Softly confine each fixture's direct light to its room, retaining a short
 // doorway spill. Full-height shadow geometry still blocks opaque walls/doors.
 function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {}) {
@@ -1009,6 +1025,7 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
     'uniform highp sampler2D homeRunTexture; uniform int homeRunBlock;') : fragment;
   const directionalBody = packed && geometryOptions.literalLambertDirectional === true ? literalLambertDirectional(THREE) : null;
   const indirectBody = packed && pointTexture && geometryOptions.literalLambertIndirect === true ? literalLambertIndirect(THREE) : null;
+  const directShadowFields = packed && pointTexture && geometryOptions.directShadowUniforms === true ? directShadowUniforms(THREE) : null;
   const geometryFragment=geometryTexture ? geometryTexture.fragment(runFragment) : runFragment;
   const textureFragment=pointTexture ? pointTexture.fragment(geometryFragment) : geometryFragment;
   return {
@@ -1073,6 +1090,14 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
           fallbackFacing ? 'opaque' : !dynamicMaterials.has(mesh.material) && sharedWallRoles.get(mesh.material));
         const sharedWall = Boolean(wallEnabled);
         const textureState=pointTexture?.attach(mesh,group,enabled);
+        if (textureState && directShadowFields) {
+          const glass = staticGlassCallbacks.get(material);
+          textureState.directShadowAllowed = textureState.directShadowAllowed !== false && (
+            (material.onBeforeCompile === textureState.callback && material.customProgramCacheKey === textureState.cacheKey) ||
+            ((material.onBeforeCompile === THREE.Material.prototype.onBeforeCompile || material.onBeforeCompile === applyWallSheen) &&
+              material.customProgramCacheKey === THREE.Material.prototype.customProgramCacheKey) ||
+            Boolean(glass && material.onBeforeCompile === glass.compile && material.customProgramCacheKey === glass.key));
+        }
         const scalarDirectional = enabled && material.isMeshLambertMaterial ? directionalBody : null;
         mesh.material.onBeforeCompile = shader => {
           if (sharedWall) applySharedWallSheen(shader, wallEnabled);
@@ -1099,7 +1124,8 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
           if (textureState?.active && material.isMeshLambertMaterial && literalShadowPrefixes[decayState?.active?1:0]) {
             selectedLighting = selectedLighting.replace(shadowPrefix,literalShadowPrefixes[decayState?.active?1:0]);
           }
-          const directLighting = scalarDirectional ? selectedLighting.replace(scalarDirectional.original, scalarDirectional.replacement) : selectedLighting;
+          let directLighting = scalarDirectional ? selectedLighting.replace(scalarDirectional.original, scalarDirectional.replacement) : selectedLighting;
+          if (textureState?.active && textureState.directShadowAllowed && material.isMeshLambertMaterial && directShadowFields) directLighting = directShadowFields(directLighting);
           const indirectLighting = textureState?.active && material.isMeshLambertMaterial && indirectBody || '#include <lights_fragment_end>';
           shader.fragmentShader = (textureState?.active?'uniform highp sampler2D homePointTexture;\n':'') + (textureState?.active?textureFragment:fragment) + shader.fragmentShader.replace('#include <lights_fragment_begin>', directLighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n' + indirectLighting);
         };
@@ -1109,6 +1135,7 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
           (enabled && textureState?.active && literalRunLighting[decayState?.active?1:0] ? ':literal-lambert-point-body-v1' : '') +
           (enabled && textureState?.active && material.isMeshLambertMaterial && literalShadowPrefixes[decayState?.active?1:0] ? ':literal-lambert-shadow-point-v1' : '') +
           (enabled && textureState?.active && material.isMeshLambertMaterial && indirectBody ? ':literal-lambert-indirect-v1' : '') +
+          (enabled && textureState?.active && textureState.directShadowAllowed && material.isMeshLambertMaterial && directShadowFields ? ':direct-shadow-uniforms-v1' : '') +
           (scalarDirectional ? ':literal-lambert-directional-v1' : '') +
           (decayState?.active ? ':point-decay-two-v1' : '');
         if (decayState) {decayState.callback = material.onBeforeCompile; decayState.cacheKey = material.customProgramCacheKey;}

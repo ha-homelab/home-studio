@@ -711,3 +711,17 @@ A driver may already inline these calls; exact rendered comparisons and the
 complete required browser matrix remain necessary. See the
 [Lambert implementation notes](literal-lambert-directional.md) for boundaries
 and the callback contract.
+
+The `directShadowUniforms` option avoids copying the complete fragment
+`PointLightShadow` and `DirectionalLightShadow` structs into temporary locals.
+It reads each used field from the same uniform index at the original shadow
+call. Samplers, conditions, argument order, shadow math, vertex normal bias and
+all other lighting operations remain unchanged. This is a separate opt-in
+rewrite for the active, owned point-texture Lambert path; the scalar-body
+options remain independent.
+
+Exact point/directional source guards and complete token counts reject unknown
+source. PBR, editor, inactive texture and custom-callback variants retain their
+original copies. The option defaults off and Home enables it for its existing
+rendering profile. It adds no resources or uniform slots. A driver may already
+eliminate these copies; source inverses alone do not establish a speedup.
