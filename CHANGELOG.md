@@ -57,6 +57,9 @@
   movable and unsupported geometry retain all runs in their original order.
   Exact axis-aligned rectangles use a box-distance calculation after coordinate
   quantization; other room shapes keep their polygon calculation.
+  Static opaque floors share the diffuse frame shader through a nonintersecting
+  clipping plane, reducing shader variants while retaining floor and shadow
+  geometry, cutaway behavior and drawing resolution.
 - Reuse planner outlines and selection controls, and avoid redrawing unchanged
   snapped positions. Preserve exact furniture overlap, appearance, undo and drag
   cancellation. Bound software-renderer resolution without reducing sharp HTML

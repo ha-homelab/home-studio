@@ -180,6 +180,15 @@ collapsed bounds. Mixed plans retain the polygon calculation for every other
 room. The regression compares boundary, doorway and daylight contributions;
 separate image comparisons check the rendered result, not just CPU arithmetic.
 
+Static opaque floors on the diffuse profile share the clipped shader variant
+already used by window frames. Each floor receives a valid plane beyond all its
+vertices, independent of the user's cutaway plane; it cannot remove that floor
+or clip its shadow pass. Unsupported, transparent and other-profile surfaces
+keep their existing clipping behavior. This avoids compiling an extra program
+without changing floor geometry, sidedness, illumination or drawing resolution.
+Regression checks include transformed Float32 clipping arithmetic and separate
+image comparisons from above, below, near the floor and with cutaway enabled.
+
 Viewer receipts retain the existing native drag phase timings for Home and the
 editor, followed by the existing two-animation-frame completion wait. These
 measurements add no input actions or rendered frames; the same total duration
