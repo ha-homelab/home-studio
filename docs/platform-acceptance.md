@@ -96,6 +96,10 @@ fallback does not count as a successful 3D test.
 The planner reuses one WebGL context during normal editing and preview cycles.
 After deliberate context loss and restoration, it replaces the canvas, retires
 the detached old context, and rebuilds the preview with a fresh renderer.
+The lost canvas is reduced to zero dimensions before restoration. Acceptance
+requires its restored native buffer to be at most one pixel per dimension,
+while the replacement uses the current full preview size. This avoids retaining
+two full-size drawing buffers during recovery.
 The recovery checks require exactly **one active context**, **two contexts
 created in total**, and **two raw loss events**: the deliberate loss while the
 original canvas is attached, and one retirement loss matched to an explicit

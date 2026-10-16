@@ -14,7 +14,12 @@
   fresh canvas. Preserve edits, camera orientation, zoom, keyboard focus and JSON
   export without retaining old input handlers or GPU resources. Refresh the
   actual canvas layout before allocating the replacement drawing buffer,
-  including when a resize notification is still pending.
+  including when a resize notification is still pending. Release the lost
+  canvas's backing size so its retired context does not allocate another
+  full-size buffer during restoration.
+- Reuse immutable furniture-part geometry within each preview rebuild. Keep
+  every mesh, material, transform and shadow while disposing shared geometry
+  exactly once; do not carry GPU resources across rebuilds or context recovery.
 - Set direct touch manipulation on viewer controls while retaining page pinch
   zoom. Keep native touch interaction checks separate from mouse acceptance.
 - Reduce room-lighting shader compilation and fragment work while preserving
