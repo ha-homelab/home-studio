@@ -222,7 +222,6 @@ or other graphics profiles. The copy pass adds one real draw, included in the
 acceptance counters and interaction time. Its resources are disposed on context
 loss and final page teardown; page-cache suspension retains the bounded texture.
 
-
 Gecko can report both hardware and software as `Apple M1, or similar`. For that
 exact label with a Gecko user agent, a one-time, fixed 32-by-32 raster check on
 the existing context measures capacity. Five valid pixel readbacks and a best

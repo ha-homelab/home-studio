@@ -33,6 +33,14 @@
   readback, and restores every changed graphics state.
 - Set direct touch manipulation on viewer controls while retaining page pinch
   zoom. Keep native touch interaction checks separate from mouse acceptance.
+- Coalesce live entity updates into scheduled frames and reuse unchanged host
+  inventory. Readiness checks now wait for a completed frame with the expected
+  light state rather than accepting an updated state that has not been drawn.
+- Bound pointer-motion rendering on the legacy diffuse profile to 62,500
+  pixels, copying the result into the unchanged canvas. Pointer release,
+  cancellation and context recovery restore a full-resolution scene frame.
+  Keep lights, geometry, shadows and sharp HTML controls; include the copy pass
+  in real draw counts and dispose its resources with the graphics context.
 - Reduce room-lighting shader compilation and fragment work while preserving
   light order, every illuminated fixture and nonzero light through doorways.
   The diffuse profile uses packed room geometry with a conservative uniform
