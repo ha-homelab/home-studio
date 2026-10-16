@@ -142,7 +142,7 @@ function packRoomLightingGeometry(rooms, windows, capacity, maxFragmentUniforms)
   const segments = new Float32Array(Math.max(1, windows.length) * 4), windowIndices = [];
   const windowSlots = new Int32Array(windows.length).fill(-1);
   const number = value => Number(Number(value).toFixed(5));
-  let edge = 0;
+  let edge = 0, rectanglesOnly = true;
   rooms.forEach((room, index) => {
     const start = edge, windowStart = windowIndices.length;
     room.polygon.forEach((a, i) => {
@@ -155,12 +155,23 @@ function packRoomLightingGeometry(rooms, windows, capacity, maxFragmentUniforms)
       windowSlots[source] = windowIndices.length;
       windowIndices.push(source);
     });
-    ranges.set([start, edge, windowStart, windowIndices.length], index * 4);
     const xs = room.polygon.map(point => point[0]), zs = room.polygon.map(point => point[1]);
     bounds.set([Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs)].map(number), index * 4);
+    const corners = room.polygon.map(point => point.map(value => Math.fround(number(value))));
+    const [left, bottom, right, top] = bounds.subarray(index * 4, index * 4 + 4);
+    const rectangle = corners.length === 4 && left < right && bottom < top &&
+      new Set(corners.map(point => point.join(','))).size === 4 && corners.every(([x, z], i) => {
+        const next = corners[(i + 1) % 4];
+        return (x === left || x === right) && (z === bottom || z === top) &&
+          (x === next[0] || z === next[1]);
+      });
+    rectanglesOnly = rectanglesOnly && rectangle;
+    // A negative edge end marks an exact axis-aligned rectangle. The bound is
+    // its signed-distance shape; arbitrary and rotated polygons keep all edges.
+    ranges.set([start, rectangle ? -edge : edge, windowStart, windowIndices.length], index * 4);
     exterior[index] = room.exterior === true ? 1 : 0;
   });
-  return {edgeCount, uniformVectors, windowIndices, windowSlots, uniforms: {
+  return {edgeCount, rectanglesOnly, uniformVectors, windowIndices, windowSlots, uniforms: {
     homeRoomEdges:{value:edges}, homeRoomRanges:{value:ranges}, homeRoomBounds:{value:bounds},
     homeRoomExterior:{value:exterior}, homeWindowSegments:{value:segments},
   }};
@@ -191,20 +202,26 @@ function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {
   ` : '';
   const glslNumber = n => Number(n).toFixed(5);
   const glslVector = p => `vec2(${p.map(glslNumber).join(',')})`;
+  const boxDistance = `vec4 bounds = homeRoomBounds[room];
+      vec2 distanceToBox = max(bounds.xy - p, p - bounds.zw);
+      return length(max(distanceToBox, vec2(0.0))) + min(max(distanceToBox.x, distanceToBox.y), 0.0);`;
   // Call sites already know their room. Separate functions prevent a shader
   // compiler from inlining every room's branch chain at every literal call.
   const roomDistances = packed ? `
     float homeRoomDistance(int room) {
       vec2 p = homeWorldPosition.xz;
-      float distanceToRoom = 100000000.0;
+      ${packed.rectanglesOnly ? boxDistance : `float distanceToRoom = 100000000.0;
       bool inside = false;
       ivec4 range = homeRoomRanges[room];
+      if (range.y < 0) {
+        ${boxDistance}
+      }
       for (int edge = range.x; edge < range.y; edge++) {
         vec4 segment = homeRoomEdges[edge];
         homeRoomEdge(p, segment.xy, segment.zw, distanceToRoom, inside);
       }
       float distance = sqrt(distanceToRoom);
-      return inside ? -distance : distance;
+      return inside ? -distance : distance;`}
     }
   ` : rooms.map((room, i) => `float homeRoomDistance${i + 1}() {
     vec2 p = homeWorldPosition.xz;

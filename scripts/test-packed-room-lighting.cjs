@@ -27,9 +27,34 @@ function glow(p,edge) {
 }
 function packedEdges(data,room) {
   const range=data.uniforms.homeRoomRanges.value,edges=data.uniforms.homeRoomEdges.value,result=[];
-  for(let i=range[room*4];i<range[room*4+1];i++)result.push(Array.from(edges.slice(i*4,i*4+4)));
+  for(let i=range[room*4];i<Math.abs(range[room*4+1]);i++)result.push(Array.from(edges.slice(i*4,i*4+4)));
   return result;
 }
+// Execute the production box expression, translating only vector syntax. The
+// independent reference remains the original quantized polygon-edge walk.
+const boxSource=source.match(/const boxDistance = `([\s\S]*?)`;/)?.[1];
+assert(boxSource,'The rectangle specialization exposes its production expression');
+const boxBody=boxSource.replace(/\bvec[24] (\w+) =/g,'const $1 =')
+  .replace('bounds.xy - p','subtract(bounds.slice(0,2), p)')
+  .replace('p - bounds.zw','subtract(p, bounds.slice(2,4))')
+  .replaceAll('distanceToBox.x','distanceToBox[0]').replaceAll('distanceToBox.y','distanceToBox[1]');
+const evaluateBox=new Function('homeRoomBounds','room','p','max','min','length','vec2','subtract',boxBody);
+const boxMax=(a,b)=>Array.isArray(a)?a.map((value,index)=>Math.max(value,Array.isArray(b)?b[index]:b)):Math.max(a,b);
+function packedDistance(data, room, p) {
+  if(data.uniforms.homeRoomRanges.value[room*4+1]>=0)return distance(p,packedEdges(data,room));
+  return evaluateBox([Array.from(data.uniforms.homeRoomBounds.value.slice(room*4,room*4+4))],0,p,
+    boxMax,Math.min,value=>Math.sqrt(value.reduce((sum,n)=>sum+n*n,0)),value=>[value,value],
+    (a,b)=>a.map((value,index)=>value-b[index]));
+}
+// This bound covers JavaScript double arithmetic on Float32-quantized geometry,
+// not GLSL Float32 execution. Rendered comparisons remain necessary for both
+// all-rectangle and mixed/concave scenes before accepting the specialization.
+let maxNumericDelta=0;
+const near = (actual, expected, message) => {
+  const delta=Math.abs(actual-expected);
+  maxNumericDelta=Math.max(maxNumericDelta,delta);
+  assert(delta<1e-12,`${message ? message+': ' : ''}${actual} differs from ${expected}`);
+};
 const rooms=[
   {id:'A',polygon:[[.123456,0],[4,0],[4,4],[.123456,4]]},
   {id:'B',exterior:true,polygon:[[4,0],[8,0],[8,4],[6,4],[6,2],[4,2]]},
@@ -41,6 +66,52 @@ const windows=[
 ];
 const data=context.packRoomLightingGeometry(rooms,windows,9,1024);
 assert(data);
+assert.equal(data.rectanglesOnly,false);
+assert.deepEqual(Array.from(data.uniforms.homeRoomRanges.value).filter((_,i)=>i%4===1),[-4,10,-14]);
+const rejectedRectangles=[
+  [[0,0],[2,1],[1,3],[-1,2]], // Rotated rectangle.
+  [[0,0],[3,0],[2,2],[0,2]], // Trapezoid.
+  [[0,0],[2,2],[2,0],[0,2]], // Crossed corners are not a rectangle boundary.
+  [[0,0],[2,0],[2,0],[0,0]], // Degenerate/repeated points.
+  [[0,0],[2,0],[2,2],[2.000001,2]], // Distinct inputs become a repeated corner after decimal rounding.
+  [[1,0],[1.000004,0],[1.000004,2],[1,2]], // Width collapses after decimal rounding.
+  [[1e8,0],[1e8+1,0],[1e8+1,2],[1e8,2]], // Width collapses only after Float32 packing.
+  [[0,0],[4.000006,0],[4,3],[0,3]], // Decimal rounding retains a non-axis-aligned edge.
+  [[0,0],[1,0],[2,0],[3,0]], // Zero-height bound despite four distinct vertices.
+  [[0,0],[2,0],[2,2],[1,2],[0,2]], // Conservative four-corner classification.
+];
+const acceptedRectangles=[
+  [[0,0],[4,0],[4,3],[0,3]],
+  [[-3.123456,2.654324],[5.987654,2.654324],[5.987654,8.012345],[-3.123456,8.012345]],
+  [[.000001,0],[4.000004,.000003],[4,3],[0,3.000002]], // Only the packed polygon is rectangular.
+  [[9996,0],[10000.000001,0],[10000.0004,3],[9996,3]], // Float32 removes the residual diagonal.
+];
+let checkedRectanglePoints=0;
+for(const [polygons,expected] of [[rejectedRectangles,false],[acceptedRectangles,true]])
+for(const original of polygons)for(const reversed of [false,true])for(let offset=0;offset<original.length;offset++) {
+  const ordered=reversed?[...original].reverse():original;
+  const polygon=ordered.slice(offset).concat(ordered.slice(0,offset));
+  const packed=context.packRoomLightingGeometry([{id:'shape',polygon}],[],1,1024);
+  assert.equal(packed.rectanglesOnly,expected,'Classification uses the exact quantized polygon in either winding');
+  assert.equal(packed.uniforms.homeRoomRanges.value[1]<0,expected);
+  assert.deepEqual(packedEdges(packed,0),edgesOf({polygon}),'The original packed edges remain available');
+  if(!expected)continue;
+  const [left,bottom,right,top]=packed.uniforms.homeRoomBounds.value;
+  const center=[(left+right)/2,(bottom+top)/2],points=[center,[left,bottom],[right,top],[left,top],[right,bottom]];
+  for(const threshold of [0,.015,.04,.1,.55,.56])for(const delta of [-1e-7,0,1e-7])for(const sign of [-1,1]) {
+    const gap=sign*(threshold+delta),diagonal=gap/Math.sqrt(2);
+    points.push([left-gap,center[1]],[right+gap,center[1]],[center[0],bottom-gap],[center[0],top+gap]);
+    points.push([left-diagonal,bottom-diagonal],[right+diagonal,bottom-diagonal],
+      [left-diagonal,top+diagonal],[right+diagonal,top+diagonal]);
+  }
+  for(const point of points) {
+    const originalDistance=distance(point,edgesOf({polygon})),actual=packedDistance(packed,0,point);
+    near(actual,originalDistance,'Rectangle and polygon distance at edges/corners/transition boundaries');
+    near(transmission(actual),transmission(originalDistance),'Point-light transmission at transition boundaries');
+    near(1-smooth(0,.04,actual),1-smooth(0,.04,originalDistance),'Exterior illumination at transition boundaries');
+    checkedRectanglePoints++;
+  }
+}
 assert.deepEqual(Array.from(data.windowIndices),[1,3,0],'Grouped windows retain each room’s original accumulation order');
 for(let i=0;i<rooms.length;i++)assert.deepEqual(packedEdges(data,i),edgesOf(rooms[i]));
 for(const limit of [0,1,data.uniformVectors-1,NaN,undefined])assert.equal(context.packRoomLightingGeometry(rooms,windows,9,limit),null);
@@ -53,8 +124,10 @@ for(const room of rooms)for(const vertex of room.polygon)for(const delta of [0,.
 }
 for(const p of positions) {
   for(let room=0;room<rooms.length;room++) {
-    const original=distance(p,edgesOf(rooms[room])),packed=distance(p,packedEdges(data,room));
-    assert.equal(packed,original);assert.equal(transmission(packed),transmission(original));
+    const original=distance(p,edgesOf(rooms[room])),packed=packedDistance(data,room,p);
+    if(data.uniforms.homeRoomRanges.value[room*4+1]>=0)assert.equal(packed,original,'Nonrectangle edge distance stays bit-identical');
+    else near(packed,original);
+    near(transmission(packed),transmission(original));
     const xs=rooms[room].polygon.map(v=>v[0]),zs=rooms[room].polygon.map(v=>v[1]);
     const oldBounds=[Math.min(...xs),Math.min(...zs),Math.max(...xs),Math.max(...zs)].map(rounded);
     assert.deepEqual(Array.from(data.uniforms.homeRoomBounds.value.slice(room*4,room*4+4)),oldBounds);
@@ -63,7 +136,7 @@ for(const p of positions) {
   for(const day of [0,.2,1])for(const blinds of [[1,1,1,1],[0,.3,0,.8]]) {
     let oldIncoming=0,newIncoming=0,oldExterior=0,newExterior=0;
     rooms.forEach((room,i)=>{
-      const oldDistance=distance(p,edgesOf(room)),newDistance=distance(p,packedEdges(data,i));
+      const oldDistance=distance(p,edgesOf(room)),newDistance=packedDistance(data,i,p);
       if(room.exterior)oldExterior=Math.max(oldExterior,1-smooth(0,.04,oldDistance));
       if(data.uniforms.homeRoomExterior.value[i])newExterior=Math.max(newExterior,1-smooth(0,.04,newDistance));
       if(day>0 && oldDistance<=.015)for(let w=0;w<windows.length;w++)if(windows[w].room===room.id)
@@ -72,7 +145,7 @@ for(const p of positions) {
       if(day>0 && newDistance<=.015)for(let w=ranges[i*4+2];w<ranges[i*4+3];w++)
         newIncoming+=Math.fround(blinds[data.windowIndices[w]])*glow(p,Array.from(segments.slice(w*4,w*4+4)));
     });
-    assert.equal(newIncoming,oldIncoming);assert.equal(newExterior,oldExterior);
+    near(newIncoming,oldIncoming);near(newExterior,oldExterior);
   }
 }
 
@@ -102,6 +175,8 @@ for(const p of positions) {
     assert.equal(fallback.shader.fragmentShader,literal.shader.fragmentShader,'Low-budget fallback is the unchanged literal shader');
     assert.doesNotMatch(packed.shader.fragmentShader,/homeRoomDistance\d+\(/);
     assert.equal((packed.shader.fragmentShader.match(/float homeRoomDistance\(/g)||[]).length,1);
+    assert(packed.shader.fragmentShader.includes(boxSource),'The numeric oracle executes the expression emitted into the shader');
+    if(rs.length)assert.match(packed.shader.fragmentShader,/if \(range.y < 0\)/);
     const start='#if ( NUM_POINT_LIGHTS > 0 ) && defined( RE_Direct )';
     const end='#if ( NUM_SPOT_LIGHTS > 0 ) && defined( RE_Direct )';
     const loop=s=>s.slice(s.indexOf(start),s.indexOf(end));
@@ -146,9 +221,9 @@ for(const p of positions) {
       const lookup=id=>evaluate(id,guardedLit,index=>{
         checkIndex(index);const b=data.uniforms.homeRoomBounds.value.slice(index*4,index*4+4);
         return p[0]>=b[0]-.56&&p[1]>=b[1]-.56&&p[0]<=b[2]+.56&&p[1]<=b[3]+.56;
-      },index=>{checkIndex(index);return distance(p,packedEdges(data,index));},transmission);
+      },index=>{checkIndex(index);return packedDistance(data,index,p);},transmission);
       for(let id=0;id<=rooms.length;id++) {
-        assert.equal(lookup(id),cached[id],'Actual direct helper equals independent per-room cache');checkedDirect++;
+        near(lookup(id),cached[id],'Actual direct helper equals independent per-room cache');checkedDirect++;
       }
       for(const prefix of [0,ordered.filter(point=>point.light.castShadow).length,ordered.length]) {
         const expected=ids.flatMap((id,index)=>cached[id]!==0?[[index,cached[id]]]:[]),actual=[];
@@ -159,7 +234,8 @@ for(const p of positions) {
           if(first<end) {const value=lookup(ids[first]);if(value!==0)for(let index=first;index<end;index++)actual.push([index,value]);}
           start=end;
         }
-        assert.deepEqual(actual,expected,'Every shadow-prefix/runtime-run contribution retains its original order and exact transmission');
+        assert.deepEqual(actual.map(v=>v[0]),expected.map(v=>v[0]),'Every contribution retains its original order');
+        actual.forEach((v,i)=>near(v[1],expected[i][1],'Transmission retains polygon distance within floating-point arithmetic precision'));
         checkedRuns++;
       }
     }
@@ -189,13 +265,14 @@ for(const p of positions) {
   }
   const daylightPositions=[...positions];
   for(const room of rooms)for(const vertex of room.polygon)
-    for(const edge of [.015,.04,.55,.56])for(const delta of [-1e-7,0,1e-7])
+    for(const edge of [.015,.04,.1,.55,.56])for(const delta of [-1e-7,0,1e-7])
       for(const axis of [0,1])for(const sign of [-1,1]) {
         const point=[...vertex];point[axis]+=sign*(edge+delta);daylightPositions.push(point);
       }
   let checkedDaylight=0;
   for(const [inputRooms,inputWindows] of [
     [rooms,windows], [rooms.map(room=>({...room,exterior:false})),windows],
+    [rooms.filter((_,index)=>index!==1).map(room=>({...room,exterior:true})),windows],
     [rooms,[]], [rooms,[windows[2]]], [[],windows], [[],[]],
   ]) {
     const packedGeometry=context.packRoomLightingGeometry(inputRooms,inputWindows,9,1024);
@@ -230,13 +307,13 @@ for(const p of positions) {
         point[0]<=bounds[index*4+2]+.56&&point[1]<=bounds[index*4+3]+.56;
       const actual=evaluateDaylight(materialExterior,day,packedGeometry.uniforms.homeRoomExterior.value,ranges,segments,
         packedGeometry.windowIndices.map(index=>incomingByWindow[index]),nearby,
-        index=>{assert(nearby(index),'Distance is evaluated only after the conservative bounds guard');return distance(point,edgesOf(inputRooms[index]));},
+        index=>{assert(nearby(index),'Distance is evaluated only after the conservative bounds guard');return packedDistance(packedGeometry,index,point);},
         (a,b)=>{actualOrder.push(sourceForSegment.get(a));return glow(point,[...a,...b]);},Math.max,Math.min,smooth);
-      assert.deepEqual(actual,expected,'Actual packed daylight equals original unguarded polygon/window accumulation');
+      actual.forEach((channel,index)=>near(channel,expected[index],'Actual packed daylight equals original unguarded polygon/window accumulation'));
       assert.deepEqual(actualOrder,expectedOrder,'Mapped window contribution order is unchanged');checkedDaylight++;
     }
   }
-  console.log(JSON.stringify({checkedDaylight}));
+  console.log(JSON.stringify({checkedDaylight,checkedRectanglePoints}));
   // Conservative static bounds are checked with actual Three transforms and
   // independent points on each mesh, including negative/nonuniform scales.
   const box = new THREE.BoxGeometry(1.3,2.1,.9);
@@ -327,8 +404,11 @@ for(const p of positions) {
   const full=Array.from({length:24},(_,i)=>{const x=i%6*4,z=Math.floor(i/6)*4;return{id:`room${i}`,polygon:[[x,z],[x+4,z],[x+4,z+4],[x,z+4]]};});
   const fullWindows=full.slice(0,6).map((r,i)=>({room:r.id,a:[i*4+1,0],b:[i*4+2.6,0]}));
   const literal=shaderFor(full,fullWindows,72),packed=shaderFor(full,fullWindows,72,{packed:true,maxFragmentUniforms:1024});
+  assert.equal(context.packRoomLightingGeometry(full,fullWindows,72,1024).rectanglesOnly,true);
+  assert.doesNotMatch(packed.shader.fragmentShader,/for \(int edge|if \(range.y < 0\)/,'An all-rectangle plan omits the generic edge loop entirely');
+  assert.match(packed.shader.fragmentShader,/return length\(max\(distanceToBox, vec2\(0.0\)\)\) \+ min\(max\(distanceToBox.x, distanceToBox.y\), 0.0\);/);
   assert.equal(packed.lighting.geometryMode,'packed');
   assert(packed.shader.fragmentShader.length<literal.shader.fragmentShader.length*.55);
-  console.log(JSON.stringify({checkedRoomPoints:checked,rooms:24,lights:72,uniformVectorAllowance:packed.lighting.geometryUniformVectors,
+  console.log(JSON.stringify({checkedRoomPoints:checked,maxNumericDelta,rooms:24,lights:72,uniformVectorAllowance:packed.lighting.geometryUniformVectors,
     literalFragmentCharacters:literal.shader.fragmentShader.length,packedFragmentCharacters:packed.shader.fragmentShader.length}));
 })().catch(error=>{console.error(error);process.exitCode=1;});
