@@ -25,6 +25,23 @@ setup = load('native_browser')
 acceptance = load('test-waterfox-acceptance')
 
 
+def replacement_stats():
+    return {'contexts':2, 'contextLosses':2, 'retiredContextLosses':1,
+            'gpu':{'version':'WebGL 2.0'}, 'linkedPrograms':4, 'shaderErrors':[], 'errors':[],
+            'contextLossRequests':[
+                {'id':1, 'contextId':1, 'attached':True, 'retirement':False, 'matched':True},
+                {'id':2, 'contextId':1, 'attached':False, 'retirement':True, 'matched':True}],
+            'contextEvents':[
+                {'type':'webglcontextlost', 'contextId':1, 'lossRequest':1, 'retired':False},
+                {'type':'webglcontextlost', 'contextId':1, 'lossRequest':2, 'retired':True}],
+            'contextStates':[
+                {'id':1, 'attached':False, 'lost':True, 'restores':1},
+                {'id':2, 'attached':True, 'lost':False, 'restores':0}],
+            'nativeGraphics':{'contexts':2, 'errors':[], 'samples':[{'label':'recovery', 'states':[
+                {'id':1, 'attached':False, 'lost':True}, {'id':2, 'attached':True, 'lost':False}]}],
+                'lossRequests':[{'contextId':1, 'attached':True}, {'contextId':1, 'attached':False}]}}
+
+
 class Socket:
     def __init__(self, *messages):
         self.chunks = []
@@ -423,6 +440,88 @@ for (const child of [false, true]) {
         for changed in ({'contexts': 0}, {'linkedPrograms': 0}, {'gpu': {'version': 'WebGL 1.0'}}, {'shaderErrors': ['failed']}, {'errors': ['uncaught']}):
             with self.subTest(changed=changed), self.assertRaises(AssertionError):
                 acceptance.assert_graphics({**stats, **changed})
+
+    def test_replacement_requires_matched_retirement_and_one_live_context(self):
+        acceptance.assert_recovered_interaction(4, 5, [0, 1], [1, 2], replacement_stats(), replacement=True)
+        # The viewer keeps its original one-context contract.
+        with self.assertRaises(AssertionError):
+            acceptance.assert_recovered_graphics(replacement_stats())
+        invalid = [
+            (['contexts'], 3), (['contextLosses'], 3), (['retiredContextLosses'], 2),
+            (['contextLossRequests', 1, 'matched'], False),
+            (['contextLossRequests', 1, 'retirement'], False),
+            (['contextLossRequests', 1, 'contextId'], 2),
+            (['contextEvents', 1, 'lossRequest'], None),
+            (['contextEvents', 1, 'retired'], False),
+            (['contextStates', 0, 'lost'], False), (['contextStates', 0, 'attached'], True),
+            (['contextStates', 1, 'lost'], True), (['contextStates', 1, 'restores'], 1),
+            (['nativeGraphics', 'contexts'], 1),
+            (['nativeGraphics', 'samples', 0, 'states', 0, 'lost'], False),
+            (['nativeGraphics', 'samples', 0, 'states', 1, 'lost'], True),
+            (['nativeGraphics', 'lossRequests'], [{'contextId':1, 'attached':True}]),
+            (['nativeGraphics', 'errors'], [{'code':1282, 'label':'before-context-loss'}]),
+            (['errors'], ['replacement failed']), (['shaderErrors'], [None]),
+        ]
+        for path, value in invalid:
+            stats = replacement_stats()
+            target = stats
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            with self.subTest(path=path), self.assertRaises(AssertionError):
+                acceptance.assert_recovered_interaction(4, 5, [0, 1], [1, 2], stats, replacement=True)
+
+    def test_replacement_teardown_requires_retired_context_and_explicit_final_cleanup(self):
+        stats = replacement_stats()
+        evidence = stats.pop('nativeGraphics')
+        evidence['application'] = stats
+        evidence['samples'][-1]['label'] = 'pagehide'
+        evidence['samples'][-1]['states'][1]['lost'] = True
+        stats['contextStates'][1]['lost'] = True
+        evidence['lossRequests'].append({'contextId':2, 'attached':True})
+        stats['contextLossRequests'].append({'id':3, 'contextId':2, 'attached':True, 'retirement':False, 'matched':False})
+        # pagehide may save before the asynchronous final loss event arrives.
+        acceptance.assert_native_graphics(evidence, teardown=True, replacement=True)
+        stats['contextLossRequests'][-1]['matched'] = True
+        stats['contextEvents'].append({'type':'webglcontextlost', 'contextId':2, 'lossRequest':3, 'retired':False})
+        stats['contextLosses'] = 3
+        acceptance.assert_native_graphics(evidence, teardown=True, replacement=True)
+        for path, value in [(['lossRequests'], []),
+                            (['samples', 0, 'states', 0, 'lost'], False),
+                            (['application', 'contextEvents', 2, 'lossRequest'], None),
+                            (['application', 'contextLossRequests', 2, 'contextId'], 1),
+                            (['application', 'errors'], ['late disposal failure'])]:
+            changed = json.loads(json.dumps(evidence))
+            target = changed
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            with self.subTest(path=path), self.assertRaises(AssertionError):
+                acceptance.assert_native_graphics(changed, teardown=True, replacement=True)
+
+    def test_native_monitor_independently_tracks_replaced_context_and_loss_requests(self):
+        javascript = r"""
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+class Canvas {
+  constructor(){this.isConnected=true;this.lost=false;const canvas=this;
+    const extension={loseContext(){canvas.lost=true;}};
+    this.gl={NO_ERROR:0,getError:()=>0,isContextLost:()=>canvas.lost,getExtension:()=>extension};}
+  getContext(){return this.gl;}
+}
+const env={HTMLCanvasElement:Canvas,document:{readyState:'complete'},addEventListener(){}};
+env.window=env;env.parent=env;vm.runInNewContext(fs.readFileSync(0,'utf8'),env);
+const old=new Canvas(),first=old.getContext('webgl2');
+first.getExtension('WEBGL_lose_context').loseContext();old.lost=false;old.isConnected=false;
+first.getExtension('webgl_lose_context').loseContext();
+const active=new Canvas();active.getContext('webgl2');active.getContext('webgl2');
+const value=env.__sampleNativeGraphics('recovery');
+assert.equal(value.contexts,2,'Repeated getContext does not invent a third context');
+assert.deepEqual(JSON.parse(JSON.stringify(value.lossRequests)),[{contextId:1,attached:true},{contextId:1,attached:false}]);
+assert.deepEqual(JSON.parse(JSON.stringify(value.samples.at(-1).states)),[{id:1,attached:false,lost:true},{id:2,attached:true,lost:false}]);
+"""
+        result = subprocess.run(['node', '-e', javascript], input=acceptance.NATIVE_GL_DIAGNOSTICS,
+                                text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == '__main__':

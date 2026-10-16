@@ -31,10 +31,10 @@ ROOT = Path(__file__).resolve().parents[1]
 NATIVE_GL_DIAGNOSTICS = r"""
 (() => {
   const contexts = [], seen = new WeakSet(), extensions = new WeakSet();
-  const evidence = {contexts: 0, samples: [], errors: []};
+  const evidence = {contexts: 0, samples: [], errors: [], lossRequests: []};
   const remember = (code, label) => { if (code !== 0) evidence.errors.push({code, label}); };
   const sample = window.__sampleNativeGraphics = label => {
-    const states = contexts.map(({gl, read}) => {
+    const states = contexts.map(({id, canvas, gl, read}) => {
       const lost = gl.isContextLost();
       if (!lost) {
         for (let n = 0; n < 32; n++) {
@@ -44,7 +44,7 @@ NATIVE_GL_DIAGNOSTICS = r"""
           if (n === 31) throw Error('WebGL error queue did not drain');
         }
       }
-      return {lost};
+      return {id, attached:canvas.isConnected === true, lost};
     });
     evidence.samples.push({label, states});
     return JSON.parse(JSON.stringify(evidence));
@@ -54,15 +54,20 @@ NATIVE_GL_DIAGNOSTICS = r"""
     const gl = original.apply(this, args);
     if (!gl || !String(args[0]).startsWith('webgl') || seen.has(gl)) return gl;
     seen.add(gl); evidence.contexts++; const read = gl.getError.bind(gl);
-    contexts.push({gl, read});
+    const tracked = {id:evidence.contexts, canvas:this, gl, read};
+    contexts.push(tracked);
     gl.getError = () => { const code = read(); if (!gl.isContextLost()) remember(code, 'application-getError'); return code; };
     const getExtension = gl.getExtension.bind(gl);
     gl.getExtension = name => {
       const extension = getExtension(name);
-      if (name === 'WEBGL_lose_context' && extension && !extensions.has(extension)) {
+      if (String(name).toLowerCase() === 'webgl_lose_context' && extension && !extensions.has(extension)) {
         extensions.add(extension); const lose = extension.loseContext.bind(extension);
         // forceContextLoss at teardown clears GL errors. Preserve them first.
-        extension.loseContext = () => { sample('before-context-loss'); return lose(); };
+        extension.loseContext = () => {
+          sample('before-context-loss');
+          evidence.lossRequests.push({contextId:tracked.id, attached:tracked.canvas.isConnected === true});
+          return lose();
+        };
       }
       return extension;
     };
@@ -71,7 +76,10 @@ NATIVE_GL_DIAGNOSTICS = r"""
   const arm = () => window.addEventListener('pagehide', () => {
     const value = sample('pagehide');
     const stats = window.__plannerStats || window.__browserStability;
-    value.application = stats ? {errors:stats.errors, shaderErrors:stats.shaderErrors, contextLosses:stats.contextLosses} : null;
+    value.application = stats ? {errors:stats.errors, shaderErrors:stats.shaderErrors, contexts:stats.contexts,
+      contextLosses:stats.contextLosses, retiredContextLosses:stats.retiredContextLosses,
+      contextLossRequests:stats.contextLossRequests, contextEvents:stats.contextEvents,
+      contextStates:window.__plannerContextStates?.()} : null;
     if (parent !== window) parent.postMessage({type:'native-gl-teardown', token:window.__nativeGraphicsToken, evidence:value}, '*');
     else sessionStorage.setItem('home-studio.native-gl-teardown', JSON.stringify(value));
   });
@@ -93,11 +101,21 @@ if (renderer) {
 """
 
 
-def assert_native_graphics(evidence, teardown=False):
-    require(isinstance(evidence, dict) and evidence.get('contexts') == 1, 'Native GL diagnostics must observe the real context')
+def assert_native_graphics(evidence, teardown=False, replacement=False):
+    require(isinstance(evidence, dict) and evidence.get('contexts') == (2 if replacement else 1), 'Native GL diagnostics must observe the expected real contexts')
     require(bool(evidence.get('samples')), 'Native GL diagnostics must sample the actual error queue')
     require(isinstance(evidence.get('errors'), list), 'Native GL diagnostics must contain an error list')
     require(not evidence['errors'], 'Actual WebGL errors: ' + str(evidence['errors']))
+    if replacement:
+        states = evidence['samples'][-1].get('states')
+        require(isinstance(states, list) and len(states) == 2, 'Native GL diagnostics must retain both context states')
+        require(states[0] == {'id':1, 'attached':False, 'lost':True}, 'The retired native context must remain detached and lost')
+        require(states[1].get('id') == 2 and states[1].get('attached') is True, 'Exactly one replacement native context must remain attached')
+        require(isinstance(states[1].get('lost'), bool) and (teardown or states[1]['lost'] is False), 'The replacement native context must remain live before teardown')
+        requests = [{'contextId':1, 'attached':True}, {'contextId':1, 'attached':False}]
+        if teardown:
+            requests.append({'contextId':2, 'attached':True})
+        require(evidence.get('lossRequests') == requests, 'Native context loss requests must match deliberate loss, retirement and final teardown')
     if teardown:
         require(evidence['samples'][-1].get('label') == 'pagehide', 'Actual navigation/teardown must finish before checking GL errors')
         application = evidence.get('application')
@@ -106,8 +124,10 @@ def assert_native_graphics(evidence, teardown=False):
         require(isinstance(application.get('shaderErrors'), list), 'Teardown must retain shader errors')
         require(not application['errors'], 'Browser errors during teardown: ' + str(application['errors']))
         require(not application['shaderErrors'], 'Shader errors during teardown: ' + str(application['shaderErrors']))
-        # App disposal intentionally loses its context; recovery counts are
-        # asserted before navigation, not after this final cleanup.
+        if replacement:
+            assert_replacement_lifecycle(application, teardown=True)
+        # Planner teardown must match its final explicit loss request even when
+        # the asynchronous loss event has not arrived before pagehide completes.
 
 
 def update_viewer_state(client, states, active):
@@ -231,24 +251,52 @@ class Marionette:
         destination.write_bytes(base64.b64decode(data))
 
 
-def assert_graphics(stats):
-    require(stats['contexts'] == 1, 'Exactly one real WebGL context must be created')
+def assert_replacement_lifecycle(stats, teardown=False):
+    require(stats.get('contexts') == 2, 'Planner recovery must create exactly one replacement context')
+    require(stats.get('retiredContextLosses') == 1, 'Planner recovery must retire exactly the original context')
+    requests = stats.get('contextLossRequests')
+    require(isinstance(requests, list) and len(requests) == (3 if teardown else 2), 'Planner recovery must retain every explicit context loss request')
+    for index, request in enumerate(requests):
+        expected = {'id':index + 1, 'contextId':2 if index == 2 else 1,
+                    'attached':index != 1, 'retirement':index == 1}
+        require(all(request.get(key) == value for key, value in expected.items()), 'Planner context loss requests must identify the active and retired canvases')
+        require(isinstance(request.get('matched'), bool), 'Every context loss request must record whether its event arrived')
+        require(index == 2 or request['matched'], 'Deliberate loss and retirement requests must match actual loss events')
+    losses = [event for event in stats.get('contextEvents', []) if event.get('type') == 'webglcontextlost']
+    matched = [request for request in requests if request['matched']]
+    require(len(losses) == len(matched) == stats.get('contextLosses'), 'Every raw context loss must match one explicit request')
+    for event, request in zip(losses, matched):
+        require(event.get('contextId') == request['contextId'] and event.get('lossRequest') == request['id']
+                and event.get('retired') is request['retirement'], 'Unexpected context loss cannot count as intentional retirement')
+    states = stats.get('contextStates')
+    require(isinstance(states, list) and len(states) == 2, 'Planner recovery must retain both native context identities')
+    require(states[0] == {'id':1, 'attached':False, 'lost':True, 'restores':1}, 'The original context must remain retired after its single restoration')
+    require(states[1].get('id') == 2 and states[1].get('attached') is True and states[1].get('restores') == 0,
+            'Only the replacement context may remain attached')
+    require(isinstance(states[1].get('lost'), bool) and (teardown or states[1]['lost'] is False), 'The replacement context cannot be lost before teardown')
+
+
+def assert_graphics(stats, replacement=False):
+    require(stats['contexts'] == (2 if replacement else 1), 'The expected number of real WebGL contexts must be created')
     require(stats['gpu']['version'].startswith('WebGL 2'), 'A real WebGL2 context is required')
     require(stats['linkedPrograms'] > 0, 'Actual WebGL programs must link')
     require(not stats['shaderErrors'], 'Shader link errors: ' + str(stats['shaderErrors']))
     require(not stats['errors'], 'Browser errors: ' + str(stats['errors']))
-    assert_native_graphics(stats.get('nativeGraphics'))
+    assert_native_graphics(stats.get('nativeGraphics'), replacement=replacement)
+    if replacement:
+        assert_replacement_lifecycle(stats)
 
 
-def assert_recovered_graphics(stats):
-    assert_graphics(stats)
-    require(stats.get('contextLosses') == 1, 'Recovery must have exactly the one deliberate context loss')
+def assert_recovered_graphics(stats, replacement=False):
+    assert_graphics(stats, replacement=replacement)
+    if not replacement:
+        require(stats.get('contextLosses') == 1, 'Recovery must have exactly the one deliberate context loss')
 
 
-def assert_recovered_interaction(before_count, after_count, before_camera, after_camera, stats):
+def assert_recovered_interaction(before_count, after_count, before_camera, after_camera, stats, replacement=False):
     require(after_count > before_count, 'Recovered pointer input must produce a new frame')
     require(after_camera != before_camera, 'Recovered pointer input must change the camera')
-    assert_recovered_graphics(stats)
+    assert_recovered_graphics(stats, replacement=replacement)
 
 
 def viewer(client, origin, project, record, save):
@@ -349,7 +397,7 @@ def planner(client, origin, project, record, save):
     client.execute("document.querySelector('#preview-tab').click();document.querySelector('#all-floors').click();return true;")
     client.wait('window.planner.getPreviewMetadata().items===256 && window.planner.getPreviewMetadata().renderCount>0')
     sample['previewLoadMs'] = round((time.monotonic() - started) * 1000)
-    snapshot = lambda: client.execute('return {stats:{...window.__plannerStats,nativeGraphics:window.__sampleNativeGraphics("planner-snapshot")},preview:window.planner.getPreviewMetadata(),scene:window.__plannerScene()};')
+    snapshot = lambda: client.execute('return {stats:{...window.__plannerStats,contextStates:window.__plannerContextStates(),nativeGraphics:window.__sampleNativeGraphics("planner-snapshot")},preview:window.planner.getPreviewMetadata(),scene:window.__plannerScene()};')
     sample['initial'] = initial = snapshot()
     save()
     require(sample['previewLoadMs'] < 30000, 'Planner preview exceeded 30 seconds')
@@ -365,15 +413,16 @@ def planner(client, origin, project, record, save):
     time.sleep(.1)
     require(snapshot()['preview']['renderCount'] == before, 'A lost context suppresses preview draws')
     client.execute('window.restoreTestContext();return true;')
-    client.wait(f'window.planner.getPreviewMetadata().renderCount>{before}')
+    client.wait(f'window.planner.getPreviewMetadata().renderCount>{before} && window.__plannerStats.contextLossRequests.some(request=>request.retirement && request.matched)')
     sample['recovery'] = snapshot()
-    assert_recovered_graphics(sample['recovery']['stats'])
+    assert_recovered_graphics(sample['recovery']['stats'], replacement=True)
+    require(client.execute('return document.querySelectorAll("#preview-canvas").length;') == 1, 'Planner recovery keeps exactly one preview canvas')
     require(client.execute('return window.planner.getProject();') == saved, 'Graphics recovery preserves edited furniture')
     sample['recoveryOrbitMs'] = client.canvas_drag('#preview-canvas')
     require(sample['recoveryOrbitMs'] < 10000, 'Recovered planner orbit exceeded 10 seconds')
     client.wait(f'window.planner.getPreviewMetadata().renderCount>{sample["recovery"]["preview"]["renderCount"]}')
     sample['afterRecoveryOrbit'] = after = snapshot()
-    assert_recovered_interaction(sample['recovery']['preview']['renderCount'], after['preview']['renderCount'], sample['recovery']['scene']['orbit'], after['scene']['orbit'], after['stats'])
+    assert_recovered_interaction(sample['recovery']['preview']['renderCount'], after['preview']['renderCount'], sample['recovery']['scene']['orbit'], after['scene']['orbit'], after['stats'], replacement=True)
     save()
     client.screenshot(Path(record['output']) / 'planner-recovered.png')
     client.call('WebDriver:Navigate', {'url': url})
@@ -381,7 +430,7 @@ def planner(client, origin, project, record, save):
     require(client.execute('return window.planner.getProject();') == saved, 'Reopening the planner restores its edited draft')
     sample['teardownGraphics'] = client.execute("return JSON.parse(sessionStorage.getItem('home-studio.native-gl-teardown'));")
     save()
-    assert_native_graphics(sample['teardownGraphics'], teardown=True)
+    assert_native_graphics(sample['teardownGraphics'], teardown=True, replacement=True)
 
 
 def browser_preferences(port):
