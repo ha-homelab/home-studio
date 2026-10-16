@@ -99,10 +99,19 @@ const viewer=fs.readFileSync(path.join(root,'viewer.js'),'utf8');
     assert.equal(stack.length,0);return out.join('\n');
   }
   const stockNormal=preprocess(THREE.ShaderChunk.normal_fragment_begin,new Set());
-  const candidateNormal=preprocess(THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;',''),new Set(['DOUBLE_SIDED']));
+  const normalStart=firstShader.fragmentShader.indexOf('float faceDirection ='),normalEnd=firstShader.fragmentShader.indexOf('vec3 nonPerturbedNormal = normal;');
+  assert(normalStart>=0&&normalEnd>normalStart);
+  const emittedNormal=firstShader.fragmentShader.slice(normalStart,normalEnd+'vec3 nonPerturbedNormal = normal;'.length);
+  const normalGuard='if (homeFaceMode == 0) normal *= faceDirection;';
+  assert.equal(emittedNormal.split(normalGuard).length-1,1);
+  const candidateNormal=preprocess(emittedNormal.replace(normalGuard,''),new Set(['DOUBLE_SIDED']));
   assert.equal(candidateNormal,stockNormal,'mode +1 yields byte-identical active normal expressions, including all retained normal stages');
   assert.equal(preprocess(THREE.ShaderChunk.defaultnormal_vertex,new Set(['DOUBLE_SIDED'])),preprocess(THREE.ShaderChunk.defaultnormal_vertex,new Set()));
-  let rays=0,bounds=0,normals=0,clipChecks=0,faceChecks=0;
+  const discardMatch=firstShader.fragmentShader.match(/if \(([^\n]+)\) discard;/);
+  assert(discardMatch,'the actual emitted fragment must contain its facing discard');
+  const emittedDiscard=Function('homeFaceMode','gl_FrontFacing','return ('+discardMatch[1]+');');
+  let rays=0,bounds=0,clipChecks=0,faceChecks=0;
+  const seenFaces=new Set();
   for(const scale of [[1,1,1],[-1.2,.8,1.4],[1,-1,1],[1,1,-1]])for(const position of [[2,1.5,-3],[1e5,-1e5,1e5],[-1e8,1e8,-1e8]]){
     object.scale.set(...scale);object.position.set(...position);reference.scale.copy(object.scale);reference.position.copy(object.position);
     objects.updateMatrixWorld(true);referenceGroup.updateMatrixWorld(true);lighting.attach(objects,true);
@@ -120,13 +129,16 @@ const viewer=fs.readFileSync(path.join(root,'viewer.js'),'utf8');
     }
     for(const eye of [[0,10,20],[20,10,0],[-10,5,-15]]){
       const camera=new THREE.PerspectiveCamera(42,1.4,.1,1e10);camera.position.copy(object.position).add(new THREE.Vector3(...eye));camera.lookAt(object.position);camera.updateMatrixWorld(true);
-      const normalMatrix=new THREE.Matrix3().getNormalMatrix(new THREE.Matrix4().multiplyMatrices(camera.matrixWorldInverse,object.matrixWorld));
       const viewPlane=plane.clone().applyMatrix4(camera.matrixWorldInverse),planeNormal=viewPlane.normal.toArray().map(Math.fround),constant=Math.fround(viewPlane.constant);
       for(let triangle=0;triangle<geometry.index.count;triangle+=3){
         const vertices=[0,1,2].map(offset=>new THREE.Vector3().fromBufferAttribute(geometry.attributes.position,geometry.index.getX(triangle+offset)).applyMatrix4(object.matrixWorld));
         const [a,b,c]=vertices.map(v=>v.clone().project(camera)),ccw=(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x)>0;
         const frontFacing=object.matrixWorld.determinant()<0?!ccw:ccw;
-        assert.equal(!(!frontFacing),frontFacing,'mode +1 discard retains the original FrontSide face set');faceChecks++;
+        // Three reverses GL front winding for a negative object determinant;
+        // the original FrontSide material keeps exactly this raster face set.
+        const stockSurvives=frontFacing;
+        assert.equal(!emittedDiscard(1,frontFacing),stockSurvives,'actual emitted mode +1 predicate retains the stock front face');
+        seenFaces.add(frontFacing);faceChecks++;
         for(let i=0;i<=3;i++)for(let j=0;j<=3-i;j++){
           const point=vertices[0].clone().multiplyScalar(i/3).addScaledVector(vertices[1],j/3).addScaledVector(vertices[2],1-(i+j)/3);
           const view=point.applyMatrix4(camera.matrixWorldInverse).toArray().map(Math.fround);
@@ -134,14 +146,9 @@ const viewer=fs.readFileSync(path.join(root,'viewer.js'),'utf8');
           assert(dot<=constant,'camera-transformed Float32 plane preserves interior triangle samples');clipChecks++;
         }
       }
-      for(let i=0;i<geometry.attributes.normal.count;i++){
-        const stock=new THREE.Vector3().fromBufferAttribute(geometry.attributes.normal,i).applyMatrix3(normalMatrix),candidate=stock.clone();
-        // Mode +1 applies neither FLIP_SIDED nor DoubleSide fragment inversion.
-        assert.deepEqual(candidate.toArray(),stock.toArray());
-        assert.deepEqual(candidate.clone().transformDirection(camera.matrixWorld).toArray(),stock.clone().transformDirection(camera.matrixWorld).toArray());normals++;
-      }
     }
   }
+  assert.deepEqual([...seenFaces].sort(),[false,true],'both front and back raster cases were exercised');
   // Exact original fields return across distinct controllers and Home/editor switches.
   const original={side:THREE.FrontSide,shadowSide:null,blending:THREE.NormalBlending,clippingPlanes:null,clipShadows:false};
   for(const [packed,limit] of [[false,1024],[true,1],[true,1024],[false,1024],[true,1024]]){
@@ -173,5 +180,5 @@ const viewer=fs.readFileSync(path.join(root,'viewer.js'),'utf8');
   assert.equal(externallyBlended.raycast,THREE.Mesh.prototype.raycast);
   const ordinary=box(false),ordinaryGroup=new THREE.Group();ordinaryGroup.add(ordinary);controller().attach(ordinaryGroup,true);assert.equal(ordinary.material.side,THREE.FrontSide);
   for(const key of ['position','normal'])assert.deepEqual(Array.from(geometry.attributes[key].array),values[key]);assert.deepEqual(Array.from(geometry.index.array),values.index);
-  console.log(`fallback shared program: ${compiled} compiled material cases, ${rays} picking rays, ${bounds} world bounds, ${clipChecks} Float32 clip samples, ${faceChecks} faces, ${normals} transformed normals PASS`);
+  console.log(`fallback shared program: ${compiled} compiled material cases, ${rays} picking rays, ${bounds} world bounds, ${clipChecks} Float32 clip samples, ${faceChecks} emitted-predicate cases, active normal-stage byte parity PASS`);
 })().catch(error=>{console.error(error);process.exitCode=1;});
