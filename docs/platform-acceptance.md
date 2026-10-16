@@ -80,9 +80,9 @@ rebuilds, continued editing/export, and draft preservation. A working 2D
 fallback does not count as a successful 3D test.
 
 The planner reuses one WebGL context during normal editing and preview cycles.
-After deliberate context loss and restoration, it rebuilds the preview with a
-fresh canvas and renderer, then explicitly retires the detached old context.
-The Playwright checks require exactly **one active context**, **two contexts
+After deliberate context loss and restoration, it replaces the canvas, retires
+the detached old context, and rebuilds the preview with a fresh renderer.
+The recovery checks require exactly **one active context**, **two contexts
 created in total**, and **two raw loss events**: the deliberate loss while the
 original canvas is attached, and one retirement loss matched to an explicit
 request after that canvas is detached. The old context must remain lost and
