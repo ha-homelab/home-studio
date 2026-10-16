@@ -718,3 +718,17 @@ off by default and enabled by Home, with an independent cache tag and no new
 resources or uniforms. This may make aggregate state easier for a compiler to
 scalarize, but the driver may already inline it. CPU inverse and binary32
 proofs do not establish GLSL compilation, pixel parity or a performance gain.
+
+The experimental `directShadowUniforms` option removes only the pinned fragment
+`PointLightShadow` and `DirectionalLightShadow` local copies in the packed,
+active point-texture Lambert path. Each used field is read from its original
+same-index uniform at the unchanged shadow call. Samplers, conditions, argument
+order, shadow math, vertex normal bias and all other lighting operations stay
+unchanged. The option defaults off; Home opts in within the existing owned
+texture selection. Exact point/directional source guards fail closed, and PBR,
+editor, inactive texture and custom-callback variants retain the original
+copies. Scalar-body options remain independent. No resources, uniform slots or
+lifecycle handling are added. A driver may already eliminate these copies;
+CPU whole-shader and argument-trace proofs establish neither GPU equivalence
+nor a performance improvement. Native Intel timing and pixel proof remain
+required before considering this candidate for adoption.
