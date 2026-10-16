@@ -18,6 +18,8 @@ jobs:
         run: python3 scripts/validate-site.py
       - name: Test archive validation, installation, backup and rollback
         run: python3 scripts/test-install-home-assistant.py
+      - name: Test ephemeral Intel runner preparation without system commands
+        run: python3 scripts/test-intel-macos-ci.py
       - name: Build and install a fictional home in an isolated directory
         run: python3 scripts/test-public-package.py
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7

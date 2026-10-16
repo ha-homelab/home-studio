@@ -14,6 +14,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / '.github/workflows'
 PLATFORMS = {'ubuntu-24.04', 'windows-2022', 'macos-15'}
+PREPARED_OR_OTHER_OS = "${{ !cancelled() && (matrix.os != 'macos-15-intel' || steps.prepare_intel.outcome == 'success') }}"
 
 
 def workflow(name):
@@ -28,6 +29,60 @@ def inventory():
 
 
 class PlatformAcceptanceTests(unittest.TestCase):
+    def test_intel_preparation_is_required_only_for_the_three_existing_rows(self):
+        jobs = workflow('platform-acceptance.yml')['jobs']
+        rows = inventory()
+        selected = [(job, row['id']) for job, key in [('browser', 'browser'), ('native-browser', 'native')]
+                    for row in rows[key]['include'] if row['os'] == 'macos-15-intel']
+        self.assertEqual(set(selected), {('browser', 'firefox-153.0-pw1.62.1-desktop'),
+                                       ('native-browser', 'firefox-153.5.0esr'),
+                                       ('native-browser', 'waterfox-6.7.6')})
+        browser_rows = sum(len(value['include']) for value in rows.values()) + 1
+        self.assertEqual(browser_rows, 74)
+        self.assertEqual(browser_rows + len(jobs['install']['strategy']['matrix']['os']), 77)
+        self.assertEqual(browser_rows * 3, 222)
+        for job_name, job in jobs.items():
+            preparations = [step for step in job['steps'] if step.get('id') == 'prepare_intel']
+            if job_name not in ('browser', 'native-browser'):
+                self.assertEqual(preparations, [])
+                continue
+            self.assertEqual(len(preparations), 1)
+            step = preparations[0]
+            self.assertEqual(step['if'], "${{ matrix.os == 'macos-15-intel' }}")
+            self.assertNotIn('continue-on-error', step)
+            path = ('acceptance-artifacts/runner-environment' if job_name == 'browser'
+                    else '"$NATIVE_BROWSER_DIAGNOSTICS_DIR/runner-environment"')
+            self.assertEqual(step['run'], 'python3 scripts/prepare-intel-macos-ci.py --output ' + path)
+            steps = job['steps']
+            python_index = next(i for i, value in enumerate(steps) if 'actions/setup-python@' in value.get('uses', ''))
+            node_index = next(i for i, value in enumerate(steps) if 'actions/setup-node@' in value.get('uses', ''))
+            self.assertLess(python_index, steps.index(step))
+            self.assertLess(steps.index(step), node_index)
+            upload = next(value for value in steps if 'actions/upload-artifact@' in value.get('uses', ''))
+            self.assertEqual(upload['if'], '${{ always() }}')
+            self.assertEqual(upload['with']['if-no-files-found'], 'error')
+        browser = {step.get('id'): step for step in jobs['browser']['steps']}
+        self.assertNotIn('if', browser['viewer_6_acceptance'])
+        for name in ('viewer_24_acceptance', 'planner_acceptance'):
+            self.assertEqual(browser[name]['if'], PREPARED_OR_OTHER_OS)
+        native = next(step for step in jobs['native-browser']['steps'] if step.get('id') == 'native_acceptance')
+        self.assertNotIn('if', native)  # GitHub's default success() blocks it after failed preparation.
+
+    def test_intel_preparation_mocks_replay_unconditionally_from_public_source(self):
+        command = 'python3 scripts/test-intel-macos-ci.py'
+        matches = [step for step in workflow('package.yml')['jobs']['package']['steps']
+                   if command in step.get('run', '')]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]['run'], command)
+        self.assertNotIn('if', matches[0])
+        self.assertNotIn('continue-on-error', matches[0])
+        spec = importlib.util.spec_from_file_location('site_inventory', ROOT / 'scripts/validate-site.py')
+        site = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(site)
+        for name in ('prepare-intel-macos-ci.py', 'test-intel-macos-ci.py'):
+            self.assertIn('scripts/' + name, site.REPO_FILES)
+        self.assertIn("'scripts/test-intel-macos-ci.py'", (ROOT / 'scripts/test_source_replay.py').read_text())
+
     def test_zero_point_block_cpu_proof_is_unconditional(self):
         steps = workflow('package.yml')['jobs']['package']['steps']
         command = 'node scripts/test-zero-point-block.cjs'
@@ -131,7 +186,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
                          ['viewer_6_acceptance', 'viewer_24_acceptance', 'viewer_touch_diagnostics'])
         viewer = [step for step in viewer_commands if step['id'] in {'viewer_6_acceptance', 'viewer_24_acceptance'}]
         self.assertNotIn('if', viewer[0])
-        self.assertEqual(viewer[1]['if'], '${{ !cancelled() }}')
+        self.assertEqual(viewer[1]['if'], PREPARED_OR_OTHER_OS)
         planner = [step for step in steps if step.get('id') == 'planner_acceptance']
         self.assertEqual(len(viewer), 2)
         self.assertEqual(len(planner), 1)
@@ -206,7 +261,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
         diagnostic = [step for step in steps if step.get('id') == 'planner_recovery_diagnostics']
         self.assertEqual(len(diagnostic), 1)
         diagnostic = diagnostic[0]
-        self.assertEqual(primary['if'], '${{ !cancelled() }}')
+        self.assertEqual(primary['if'], PREPARED_OR_OTHER_OS)
         self.assertNotIn('PLANNER_STABILITY_RESTORE_LAYOUT', primary['env'])
         self.assertNotIn('PLANNER_STABILITY_RECOVERY_ACTIONS', primary['env'])
         self.assertNotIn('DEBUG', primary['env'])

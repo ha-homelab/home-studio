@@ -91,6 +91,10 @@ jobs:
         id: python
         with:
           python-version: '3.13'
+      - name: Prepare the ephemeral Intel macOS runner
+        id: prepare_intel
+        if: ${{ matrix.os == 'macos-15-intel' }}
+        run: python3 scripts/prepare-intel-macos-ci.py --output acceptance-artifacts/runner-environment
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '22'
@@ -126,7 +130,7 @@ jobs:
           fi
       - name: Test generated viewer with 24 rooms and 72 lights
         id: viewer_24_acceptance
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && (matrix.os != 'macos-15-intel' || steps.prepare_intel.outcome == 'success') }}
         env:
           HOME_STUDIO_DIAGNOSTICS_DIR: acceptance-artifacts/viewer-24
           BROWSER_STABILITY_ROOMS: '24'
@@ -138,7 +142,7 @@ jobs:
           fi
       - name: Test drawing and 3D preview with 2 floors and 256 items
         id: planner_acceptance
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && (matrix.os != 'macos-15-intel' || steps.prepare_intel.outcome == 'success') }}
         env:
           HOME_STUDIO_DIAGNOSTICS_DIR: acceptance-artifacts/planner
         run: |
@@ -236,6 +240,10 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.13'
+      - name: Prepare the ephemeral Intel macOS runner
+        id: prepare_intel
+        if: ${{ matrix.os == 'macos-15-intel' }}
+        run: python3 scripts/prepare-intel-macos-ci.py --output "$NATIVE_BROWSER_DIAGNOSTICS_DIR/runner-environment"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '22'

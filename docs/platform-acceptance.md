@@ -59,6 +59,21 @@ about physical Intel GPUs. GitHub documents `macos-15-intel` as a standard
 The manifest lists these three targets explicitly rather than expanding every
 browser onto another platform.
 
+Before browser tooling is installed, these three Intel rows run
+`scripts/prepare-intel-macos-ci.py`. The helper requires all five host indicators:
+GitHub Actions, a GitHub-hosted runner, macOS runner OS, Python on Darwin, and
+x86_64 architecture. It records Spotlight status, disables indexing once, and
+verifies that exactly the original volumes report disabled indexing. Commands
+have 15-second limits and bounded output; any unsupported host, command failure,
+unknown status or changed volume inventory fails preparation and prevents the
+browser suites from running. The existing artifact retains `runner-environment/`
+receipts even on failure. This changes only the disposable CI host: it does not
+delete indexes, stop services, change updates, or wait for a quiet machine.
+Disabled indexing does not guarantee idle workers or passing acceptance. This
+normalizes observed background work without a desktop performance claim; all
+77 required lanes, 74 browser artifacts, 222 primary cases, and their original
+browser pins, scene quality and deadlines remain unchanged.
+
 Playwright **1.64.0** pins Chromium **156.0.8078.4**, Firefox **157.0**, and
 WebKit **27.2**. Playwright **1.63.0** pins Chromium **153.0.8010.12**, Firefox
 **155.0**, and WebKit **26.6**. Playwright **1.62.1** pins Chromium

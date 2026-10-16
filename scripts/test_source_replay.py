@@ -35,9 +35,10 @@ class SourceReplayTests(unittest.TestCase):
                     result = subprocess.run([node, '--test', *paths], cwd=source,
                                             capture_output=True, text=True, timeout=60)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            result = subprocess.run([sys.executable, 'scripts/test-native-draw-diagnostic.py'],
-                                    cwd=source, capture_output=True, text=True, timeout=60)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            for script in ('scripts/test-native-draw-diagnostic.py', 'scripts/test-intel-macos-ci.py'):
+                result = subprocess.run([sys.executable, script], cwd=source,
+                                        capture_output=True, text=True, timeout=60)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             # Binary corpus support must never become an unchecked archive inlet.
             for name, expected in packaging.public_site.BINARY_REPLAY_SEEDS.items():
                 path = source / name
