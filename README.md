@@ -179,6 +179,11 @@ sensing adapters.
 
 ## Shared code, private homes
 
+Planning an AI-assisted workflow? Read the [photo-to-plan proposal](docs/ai-planning.md),
+including cloud-provider and local-model setup, session privacy, and an implementation
+roadmap. This is design documentation; the released editor does not accept AI keys
+or generate plans from photos yet.
+
 The public compiler, viewer, integration core, and installer can also be used by
 a private project. Keep plans, photos, entity bindings, credentials, and any
 `private_site` / `private_site_config` extensions in that private project.
