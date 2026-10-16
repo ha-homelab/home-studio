@@ -23,4 +23,10 @@ Sơ đồ nhà và ID thực thể của thiết bị có thể là thông tin r
 
 Đây là hướng dẫn nhanh đã dịch. Tài liệu tham khảo đầy đủ và hướng dẫn có hình hiện bằng tiếng Anh. Chúng tôi hoan nghênh các sửa đổi bản dịch.
 
+## Thử nút mà không gửi lệnh
+
+Trong sơ đồ Home Assistant đã cài đặt, bật Dry run để thử các nút mà không gửi lệnh. Công tắc, nguồn TV, rèm và hộp thoại gốc có điều khiển khóa đều bị chặn; trạng thái vẫn là dữ liệu thực. Lưu địa chỉ sơ đồ với ?dry_run=1 vào dấu trang của trình duyệt này. Vẫn có thể lưu thay đổi bố cục.
+
+[Dry run — English](../dry-run.md) · [Wiki — English](../wiki/Home.md)
+
 MIT · [LICENSE](../../LICENSE)

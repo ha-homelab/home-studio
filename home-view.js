@@ -20,6 +20,9 @@ homeView = (() => {
     return room?[{id:o.id,room:room.id,a:horizontal?[xm(x0),zm(z)]:[xm(x),zm(z0)],b:horizontal?[xm(x1),zm(z)]:[xm(x),zm(z1)]}]:[];
   });
   const pending = new Map(), errors = new Map();
+  let curtainError=null;
+  const errorText=value=>value && typeof value==='object' ? vt(value.key,value.params) : value || '';
+  const commandError=message=>typeof message.error_key==='string' ? {key:message.error_key,params:message.error_params || {}} : message.error || {key:'The command could not be sent.'};
   let countdownTimer, moduleItem;
   let sequence = 0, zoom = 1, panX = 0, panY = 0, controlsCollapsed = false;
   const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6m-5 3h4M8.5 14.5a6 6 0 1 1 7 0L15 16H9z"/></svg>';
@@ -366,7 +369,7 @@ homeView = (() => {
     }
     $('homeSummary').textContent=vt('{on} on · {total} linked · {motion} active sensors · {unavailable} unavailable',{on,total,motion,unavailable});
     $('homeEmpty').hidden=total>0;
-    $('homeFeedback').textContent=[...errors.values()].at(-1)||(!renderer ? vt('The 3D view is unavailable in this browser. Use the device cards to control your lights.') : '');
+    $('homeFeedback').textContent=errorText([...errors.values()].at(-1))||(!renderer ? vt('The 3D view is unavailable in this browser. Use the device cards to control your lights.') : '');
     $('homeFeedback').hidden=!$('homeFeedback').textContent;
     if(moduleItem)updateModuleDialog();
     // Run the clock only through warm-up, including its transition to zero.
@@ -382,7 +385,7 @@ homeView = (() => {
   function activateDevice(item,quick=true,tvPower=false) {
     const state=deviceDisplayState(item);
     if(receiverSpec(item)&&bridge&&haConnected){inspectActivitySource(item);return;}
-    if(isCover(item)&&bridge&&haConnected){curtainItem=item;curtainDirty=false;curtainCheckCycle=null;$('curtainChecked').checked=false;$('curtainError').hidden=true;updateCurtainDialog();$('curtainDialog').showModal();const action=curtainStateFor(item).action;if(quick&&action)curtainCommand(action);return;}
+    if(isCover(item)&&bridge&&haConnected){curtainItem=item;curtainDirty=false;curtainCheckCycle=null;curtainError=null;$('curtainChecked').checked=false;$('curtainError').hidden=true;updateCurtainDialog();$('curtainDialog').showModal();const action=curtainStateFor(item).action;if(quick&&action)curtainCommand(action);return;}
     // Locks always use HA's explicit lock/unlock controls, never a toggle.
     if(bridge && haConnected && haStates[item.entity_id] && !tvPower && (isTV(item)||isMotion(item)||isLock(item))){bridge.postMessage({type:'more_info',entity_id:item.entity_id});return;}
     if (!bridge || !haConnected || !['on','off'].includes(state) || pending.has(item.entity_id)) return;
@@ -390,7 +393,7 @@ homeView = (() => {
     const request_id='home_'+(++sequence);
     const timer=setTimeout(() => {
       if(pending.get(item.entity_id)?.request_id!==request_id)return;
-      pending.delete(item.entity_id); errors.set(item.entity_id,`${item.name}: state change was not confirmed. Check the device before trying again.`); refreshControls();
+      pending.delete(item.entity_id); errors.set(item.entity_id,{key:'{name}: state change was not confirmed. Check the device before trying again.',params:{name:item.name}}); refreshControls();
     },12000);
     pending.set(item.entity_id,{request_id,before:state,timer});
     bridge.postMessage({type:tvPower?'tv_power':'toggle',...(tvPower?{action:state==='on'?'turn_off':'turn_on'}:{}),entity_id:item.entity_id,request_id}); refreshControls();
@@ -399,18 +402,20 @@ homeView = (() => {
   function handleCommandResult(message) {
     if(curtainCommands.get(message.entity_id)===message.request_id){
       curtainCommands.delete(message.entity_id);
-      if(curtainItem?.entity_id===message.entity_id){$('curtainError').hidden=message.ok;$('curtainError').textContent=message.error||'';}
+      if(curtainItem?.entity_id===message.entity_id)curtainError=message.ok ? null : commandError(message);
       refreshControls();
       return;
     }
     const entry=pending.get(message.entity_id);
     if(!entry || entry.request_id!==message.request_id || message.ok)return;
     clearTimeout(entry.timer); pending.delete(message.entity_id);
-    errors.set(message.entity_id,message.error || 'The command could not be sent.'); refreshControls();
+    errors.set(message.entity_id,commandError(message)); refreshControls();
   }
 
   function updateCurtainDialog(){
     if(!curtainItem)return;
+    $('curtainError').hidden=!curtainError;
+    $('curtainError').textContent=errorText(curtainError);
     const info=curtainStateFor(curtainItem),entity=haStates[curtainItem.entity_id],features=entity?.cover?.supported_features||0;
     const ready=info.ready&&haConnected&&!curtainCommands.has(curtainItem.entity_id);
     $('curtainTitle').textContent=curtainItem.name;
@@ -434,10 +439,11 @@ homeView = (() => {
     if(feature&&!(haStates[entity_id]?.cover?.supported_features&feature))return;
     if(action==='record_position_check'&&(!$('curtainChecked').checked||info.remembered))return;
     const request_id='curtain_'+(++sequence);curtainCommands.set(entity_id,request_id);
+    curtainError=null;
     $('curtainError').hidden=true;
     bridge.postMessage({type:'curtain_command',entity_id,action,request_id,...(action==='set_cover_position'?{position:Number($('curtainPosition').value)}:{})});
     refreshControls();
-    setTimeout(()=>{if(curtainCommands.get(entity_id)!==request_id)return;curtainCommands.delete(entity_id);if(curtainItem?.entity_id===entity_id){$('curtainError').hidden=false;$('curtainError').textContent='Command confirmation timed out. Check device state before retrying.';}refreshControls();},15000);
+    setTimeout(()=>{if(curtainCommands.get(entity_id)!==request_id)return;curtainCommands.delete(entity_id);if(curtainItem?.entity_id===entity_id)curtainError={key:'Command confirmation timed out. Check device state before retrying.'};refreshControls();},15000);
   }
   $('curtainChecked').onchange=updateCurtainDialog;
   $('curtainRecordCheck').onclick=()=>curtainCommand('record_position_check');

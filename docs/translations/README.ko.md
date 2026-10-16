@@ -23,4 +23,10 @@ python3 scripts/build-planner-project.py --project /path/to/project.json --outpu
 
 이 문서는 번역된 빠른 시작 안내입니다. 전체 참고 문서와 그림 안내는 현재 영어로 제공됩니다. 번역 수정에 참여해 주세요.
 
+## 명령 없이 버튼 시험하기
+
+설치된 Home Assistant 평면도에서 Dry run을 켜면 명령을 보내지 않고 버튼을 시험할 수 있습니다. 스위치, TV 전원, 커튼 및 잠금 제어가 포함된 기본 대화상자가 차단되며 실제 상태는 계속 표시됩니다. 이 브라우저에서 보호하려면 평면도 URL에 ?dry_run=1을 붙여 북마크하세요. 배치 변경은 계속 저장할 수 있습니다.
+
+[Dry run — English](../dry-run.md) · [Wiki — English](../wiki/Home.md)
+
 MIT · [LICENSE](../../LICENSE)

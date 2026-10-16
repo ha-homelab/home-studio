@@ -21,3 +21,6 @@ release-assets/
 .release-plan.json
 release-inputs-*.json
 acceptance-artifacts/
+
+# Optional local environment for rendering documentation charts.
+.venv-docs/

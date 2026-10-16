@@ -23,4 +23,10 @@ Ev planınız ve cihaz kimlikleri özel olabilir. Herkese açık örneklerde kur
 
 Bu, çevrilmiş bir hızlı başlangıç kılavuzudur. Tam başvuru belgeleri ve resimli kılavuz şu anda İngilizcedir. Çeviri düzeltmelerine katkıda bulunabilirsiniz.
 
+## Komut göndermeden düğmeleri deneme
+
+Kurulu Home Assistant planında düğmeleri komut göndermeden denemek için Dry run modunu açın. Anahtarlar, TV gücü, perdeler ve kilit kontrolleri içeren yerel pencereler engellenir; durumlar gerçek kalır. Plan adresini ?dry_run=1 ile bu tarayıcıya yer imi olarak kaydedin. Yerleşim değişiklikleri yine kaydedilebilir.
+
+[Dry run — English](../dry-run.md) · [Wiki — English](../wiki/Home.md)
+
 MIT · [LICENSE](../../LICENSE)

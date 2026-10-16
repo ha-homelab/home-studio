@@ -23,4 +23,10 @@ Dein Grundriss und Gerätekennungen können vertraulich sein. Teile öffentliche
 
 Dies ist eine übersetzte Kurzanleitung. Die vollständige Referenz und die bebilderte Anleitung sind derzeit auf Englisch. Übersetzungskorrekturen sind willkommen.
 
+## Gerätetasten ohne Befehlsversand
+
+Aktivieren Sie im installierten Home-Assistant-Plan Dry run, um Gerätetasten ohne Befehlsversand auszuprobieren. Schalter, TV-Stromversorgung, Vorhänge und native Dialoge mit Schlosssteuerung werden blockiert; die Zustände bleiben echt. Speichern Sie die Planadresse mit ?dry_run=1 als Lesezeichen für diesen Browser. Änderungen an der Anordnung können weiterhin gespeichert werden.
+
+[Dry run — English](../dry-run.md) · [Wiki — English](../wiki/Home.md)
+
 MIT · [LICENSE](../../LICENSE)
