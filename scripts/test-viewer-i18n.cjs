@@ -97,6 +97,13 @@ assert.equal(context.viewerStateLabel('on'), 'On');
     assert.equal(await page.locator('h1').textContent(), 'User <room> __VIEWER_I18N_DATA__');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2), 'RTL layout stays within the viewport');
     if(screenshotDir){fs.mkdirSync(screenshotDir,{recursive:true});await page.screenshot({path:path.join(screenshotDir,'viewer-ar.png'),fullPage:true});}
+    // RTL text can resize the stage after the synchronous language update.
+    // Let fonts/layout and the ensuing ResizeObserver render finish before
+    // measuring idle work; the strict no-render observation below is unchanged.
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
     const count = await page.evaluate(() => window.floorplan.renderCount);
     await page.waitForTimeout(150);
     assert.equal(await page.evaluate(() => window.floorplan.renderCount), count, 'language switching does not start an idle loop');
