@@ -74,6 +74,7 @@ jobs:
       - name: Test render budgets and page lifecycle
         run: |
           node scripts/test-home-render-budget.cjs
+          node scripts/test-packed-room-lighting.cjs
           node scripts/test-render-lifecycle.cjs
           node --test scripts/test-render-capacity.cjs
           node --test scripts/test-browser-stability-diagnostics.cjs

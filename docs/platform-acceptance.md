@@ -158,6 +158,17 @@ The planner receipt retains its existing `sourceHash` with explicit
 original editor and shared capacity helper. These name the critical source
 inputs; the recorded Git revision identifies the full checkout.
 
+The diffuse profile also packs immutable room polygons, bounds and window segments into
+uniform arrays, replacing repeated literal GLSL helpers with shared loops. Room
+order, doorway spill, daylight and window transmission retain the same math;
+other renderer profiles retain their original shader source. Packing is enabled
+only when the reported fragment-uniform limit covers a conservative allowance:
+128 vectors plus six per light slot, four per room, one per polygon edge and two
+per window. The guard budgets 764 of the Apple software renderer's reported
+1,024 vectors for the 24-room, 72-light fixture. Lower limits and larger plans fall back to
+the original literal geometry without reducing scene contents. CPU regression
+tests cover polygon boundaries, concave rooms, window ordering and this fallback.
+
 Phone and tablet profiles use **390 × 844** and **820 × 1180** CSS pixels,
 respectively, at device scale factor 2, with touch enabled. They retain the
 actual desktop operating-system identity. Chromium exercises native touch

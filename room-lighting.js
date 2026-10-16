@@ -74,9 +74,48 @@ function configurePointShadows(lights, capabilities = {}, profile = {}) {
   });
 }
 
+// Pack only within a conservative fragment-uniform allowance. Coordinates use
+// the same five-decimal literals as the original GLSL before Float32 storage.
+function packRoomLightingGeometry(rooms, windows, capacity, maxFragmentUniforms) {
+  const edgeCount = rooms.reduce((sum, room) => sum + room.polygon.length, 0);
+  // Scalars in arrays may each consume a vector. Reserve the existing light,
+  // shadow, material and transform uniforms before adding packed geometry.
+  const uniformVectors = 128 + capacity * 6 + rooms.length * 4 + edgeCount + windows.length * 2;
+  if (!Number.isFinite(maxFragmentUniforms) || uniformVectors > maxFragmentUniforms) return null;
+  const edges = new Float32Array(Math.max(1, edgeCount) * 4);
+  const ranges = new Int32Array(Math.max(1, rooms.length) * 4);
+  const bounds = new Float32Array(Math.max(1, rooms.length) * 4);
+  const exterior = new Int32Array(Math.max(1, rooms.length));
+  const segments = new Float32Array(Math.max(1, windows.length) * 4), windowIndices = [];
+  const windowSlots = new Int32Array(windows.length).fill(-1);
+  const number = value => Number(Number(value).toFixed(5));
+  let edge = 0;
+  rooms.forEach((room, index) => {
+    const start = edge, windowStart = windowIndices.length;
+    room.polygon.forEach((a, i) => {
+      const b = room.polygon[(i + 1) % room.polygon.length];
+      edges.set([...a, ...b].map(number), edge++ * 4);
+    });
+    windows.forEach((window, source) => {
+      if (window.room !== room.id) return;
+      segments.set([...window.a, ...window.b].map(number), windowIndices.length * 4);
+      windowSlots[source] = windowIndices.length;
+      windowIndices.push(source);
+    });
+    ranges.set([start, edge, windowStart, windowIndices.length], index * 4);
+    const xs = room.polygon.map(point => point[0]), zs = room.polygon.map(point => point[1]);
+    bounds.set([Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs)].map(number), index * 4);
+    exterior[index] = room.exterior === true ? 1 : 0;
+  });
+  return {edgeCount, uniformVectors, windowIndices, windowSlots, uniforms: {
+    homeRoomEdges:{value:edges}, homeRoomRanges:{value:ranges}, homeRoomBounds:{value:bounds},
+    homeRoomExterior:{value:exterior}, homeWindowSegments:{value:segments},
+  }};
+}
+
 // Softly confine each fixture's direct light to its room, retaining a short
 // doorway spill. Full-height shadow geometry still blocks opaque walls/doors.
-function createRoomLighting(THREE, rooms, capacity, windows) {
+function createRoomLighting(THREE, rooms, capacity, windows, geometryOptions = {}) {
   capacity = Math.max(1, capacity);
   const roomIds = new Map(rooms.map((room, i) => [room.id, i + 1]));
   const uniforms = {
@@ -87,11 +126,33 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
     homeDaylight: {value: 0},
     homeWindowTransmission: {value: new Float32Array(Math.max(1, windows.length)).fill(1)}
   };
+  const packed = geometryOptions.packed ? packRoomLightingGeometry(rooms, windows, capacity, geometryOptions.maxFragmentUniforms) : null;
+  if (packed) Object.assign(uniforms, packed.uniforms);
+  const geometryDeclarations = packed ? `
+    uniform vec4 homeRoomEdges[${Math.max(1, packed.edgeCount)}];
+    uniform ivec4 homeRoomRanges[${Math.max(1, rooms.length)}];
+    uniform vec4 homeRoomBounds[${Math.max(1, rooms.length)}];
+    uniform int homeRoomExterior[${Math.max(1, rooms.length)}];
+    uniform vec4 homeWindowSegments[${Math.max(1, windows.length)}];
+  ` : '';
   const glslNumber = n => Number(n).toFixed(5);
   const glslVector = p => `vec2(${p.map(glslNumber).join(',')})`;
   // Call sites already know their room. Separate functions prevent a shader
   // compiler from inlining every room's branch chain at every literal call.
-  const roomDistances = rooms.map((room, i) => `float homeRoomDistance${i + 1}() {
+  const roomDistances = packed ? `
+    float homeRoomDistance(int room) {
+      vec2 p = homeWorldPosition.xz;
+      float distanceToRoom = 100000000.0;
+      bool inside = false;
+      ivec4 range = homeRoomRanges[room];
+      for (int edge = range.x; edge < range.y; edge++) {
+        vec4 segment = homeRoomEdges[edge];
+        homeRoomEdge(p, segment.xy, segment.zw, distanceToRoom, inside);
+      }
+      float distance = sqrt(distanceToRoom);
+      return inside ? -distance : distance;
+    }
+  ` : rooms.map((room, i) => `float homeRoomDistance${i + 1}() {
     vec2 p = homeWorldPosition.xz;
     float distanceToRoom = 100000000.0;
     bool inside = false;
@@ -102,7 +163,14 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
   // Transmission reaches exactly zero at 0.55 m from a room. A slightly
   // wider axis-aligned bound rejects distant rooms before their polygon edges
   // are evaluated, retaining concave shapes and every doorway-spill fragment.
-  const roomBounds = rooms.map((room, i) => {
+  const roomBounds = packed ? `
+    bool homeRoomNearby(int room) {
+      vec2 p = homeWorldPosition.xz;
+      vec4 bounds = homeRoomBounds[room];
+      return all(greaterThanEqual(p, bounds.xy - vec2(0.56))) &&
+        all(lessThanEqual(p, bounds.zw + vec2(0.56)));
+    }
+  ` : rooms.map((room, i) => {
     const xs = room.polygon.map(p => p[0]), zs = room.polygon.map(p => p[1]);
     return `bool homeRoomNearby${i + 1}() {
       vec2 p = homeWorldPosition.xz;
@@ -119,7 +187,7 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
     uniform float homeDaylight;
     uniform float homeExteriorSurface;
     uniform float homeWindowTransmission[${Math.max(1, windows.length)}];
-    void homeRoomEdge(vec2 p, vec2 a, vec2 b, inout float d, inout bool inside) {
+${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, vec2 a, vec2 b, inout float d, inout bool inside) {
       vec2 edge = b - a;
       vec2 delta = p - a - edge * clamp(dot(p - a, edge) / dot(edge, edge), 0.0, 1.0);
       d = min(d, dot(delta, delta));
@@ -140,10 +208,20 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
     }
     vec3 homeDaylightIrradiance() {
       float exterior = homeExteriorSurface;
-      ${rooms.filter(room=>room.exterior===true).map(room=>`exterior = max(exterior, 1.0-smoothstep(0.0,0.04,homeRoomDistance${roomIds.get(room.id)}()));`).join('\n')}
+      ${packed ? `for (int room = 0; room < ${rooms.length}; room++) {
+        if (homeRoomExterior[room] != 0) exterior = max(exterior, 1.0-smoothstep(0.0,0.04,homeRoomDistance(room)));
+      }` : rooms.filter(room=>room.exterior===true).map(room=>`exterior = max(exterior, 1.0-smoothstep(0.0,0.04,homeRoomDistance${roomIds.get(room.id)}()));`).join('\n')}
       float incoming = 0.0;
       if (homeDaylight > 0.0) {
-        ${rooms.map(room=>{
+        ${packed ? `for (int room = 0; room < ${rooms.length}; room++) {
+          ivec4 range = homeRoomRanges[room];
+          if (range.z < range.w && homeRoomDistance(room) <= 0.015) {
+            for (int window = range.z; window < range.w; window++) {
+              vec4 segment = homeWindowSegments[window];
+              incoming += homeWindowTransmission[window] * homeWindowGlow(segment.xy, segment.zw);
+            }
+          }
+        }` : rooms.map(room=>{
           const openings=windows.flatMap((window,i)=>window.room===room.id?[{...window,index:i}]:[]);
           return openings.length?`if (homeRoomDistance${roomIds.get(room.id)}() <= 0.015) {\n${openings.map(window=>`incoming += homeWindowTransmission[${window.index}] * homeWindowGlow(${glslVector(window.a)}, ${glslVector(window.b)});`).join('\n')}\n}`:'';
         }).join('\n')}
@@ -154,14 +232,16 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
         (homeDaylight * min(incoming,1.05) + exterior * (0.16 + 1.1*homeDaylight));
     }
   `;
-  // Use literal room indices so each polygon is evaluated at most once per
-  // fragment, instead of being inlined into every unrolled point-light slot.
+  // Cache each room once per fragment, rather than evaluating its polygon for
+  // every light fixture in that room.
   // Unlit rooms are skipped without changing the shader's fixed light count.
   const transmissionCache = `
     #if NUM_POINT_LIGHTS > 0
       float homeRoomTransmissions[${rooms.length + 1}];
       homeRoomTransmissions[0] = 1.0;
-      ${rooms.map((_, i) => `homeRoomTransmissions[${i + 1}] = homeLitRooms[${i}] != 0 && homeRoomNearby${i + 1}() ? homeRoomTransmission(homeRoomDistance${i + 1}()) : 0.0;`).join('\n')}
+      ${packed ? `for (int room = 0; room < ${rooms.length}; room++) {
+        homeRoomTransmissions[room + 1] = homeLitRooms[room] != 0 && homeRoomNearby(room) ? homeRoomTransmission(homeRoomDistance(room)) : 0.0;
+      }` : rooms.map((_, i) => `homeRoomTransmissions[${i + 1}] = homeLitRooms[${i}] != 0 && homeRoomNearby${i + 1}() ? homeRoomTransmission(homeRoomDistance${i + 1}()) : 0.0;`).join('\n')}
     #endif
   `;
   const lightChunk = THREE.ShaderChunk.lights_fragment_begin;
@@ -208,7 +288,7 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
     }`);
   const lighting = transmissionCache + lightChunk.slice(0, pointStart) + boundedPointLighting + lightChunk.slice(pointEnd);
   return {
-    capacity,
+    capacity, geometryMode: packed ? 'packed' : 'literal', geometryUniformVectors: packed?.uniformVectors ?? null,
     attach(group, enabled) {
       group?.traverse(mesh => {
         if (!mesh.material?.isMeshStandardMaterial && !mesh.material?.isMeshLambertMaterial) return;
@@ -231,7 +311,11 @@ function createRoomLighting(THREE, rooms, capacity, windows) {
     },
     environment(daylight, transmission) {
       uniforms.homeDaylight.value=daylight;
-      transmission.forEach((value,i)=>uniforms.homeWindowTransmission.value[i]=value);
+      if (packed) transmission.forEach((value, source) => {
+        const index = packed.windowSlots[source];
+        if (index >= 0) uniforms.homeWindowTransmission.value[index] = value;
+      });
+      else transmission.forEach((value,i)=>uniforms.homeWindowTransmission.value[i]=value);
     },
     update(points) {
       // Three.js stably sorts shadow casters before unshadowed point lights.
