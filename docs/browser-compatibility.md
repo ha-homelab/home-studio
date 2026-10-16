@@ -169,7 +169,9 @@ does not use the generated viewer's room-light or point-shadow budget.
 
 Hidden pages suspend drawing. A lost WebGL context pauses the 3D preview while
 2D editing and JSON export remain available. When the browser restores the
-context, the preview redraws at the current viewport size. Discarding a page
+context, the planner retires it and builds a fresh canvas and renderer at the
+current viewport size, preserving the camera and edited project. Old canvas
+listeners are removed before the replacement receives input. Discarding a page
 disconnects the resize observer, disposes preview geometry, materials, shadows,
 and the renderer, and releases the context. A retained back/forward-cache page
 suspends and resumes instead of disposing its scene.
@@ -304,10 +306,10 @@ captures out of public reports.
 
 ## Candidate releases
 
-The stable `v0.6.2` base is already occupied. The next repair candidates use the
-reviewed `0.6.3` source base in
+The stable `v0.6.3` base is already occupied. The next repair candidates use the
+reviewed `0.6.4` source base in
 `custom_components/home_floorplan/manifest.json`; the release workflow allocates
-immutable `v0.6.3-beta.N` and `v0.6.3-rc.N` tags. A successful RC also requires the
+immutable `v0.6.4-beta.N` and `v0.6.4-rc.N` tags. A successful RC also requires the
 configured offline fuzz campaigns and source-bound release evidence.
 
 Candidates are prereleases. Publishing one does not establish Waterfox or
