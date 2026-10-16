@@ -20,5 +20,9 @@ the 77-lane gate is involved. The separate artifact is explicitly diagnostic
 and non-release evidence. It retains original receipts, per-command exit codes
 and logs, exact source/driver hashes before and after execution, and the shared
 installation receipt. Hash checks reject any diagnostic modification of the
-original primary JSON receipts. Running manifests and incremental helper logs
+original primary JSON receipts, including added or deleted receipts outside
+the adapter-owned `primary/diagnostics` subtree. The helper writes into
+`primary/diagnostics/first-frame`; its generated receipts are excluded from
+that comparison.
+Running manifests and incremental helper logs
 remain available if a process fails. No environment dump is recorded.

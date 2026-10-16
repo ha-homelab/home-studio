@@ -49,7 +49,9 @@ def snapshot(source):
 
 
 def json_receipts(directory):
-    return {str(path.relative_to(directory)): digest(path) for path in directory.rglob('*.json')}
+    # Only the adapter-owned root diagnostics subtree may add new receipts.
+    return {str(path.relative_to(directory)): digest(path) for path in directory.rglob('*.json')
+            if path.relative_to(directory).parts[0] != 'diagnostics'}
 
 
 def run(source, installation, output):
@@ -101,7 +103,7 @@ def run(source, installation, output):
         save(manifest, record)
         if primary_exit != 0:
             diagnostic_exit = invoke('draw-diagnostic', 'diagnose-native-draw.py', [
-                '--primary-output', str(primary), '--output', str(output / 'diagnostics/first-frame')])
+                '--primary-output', str(primary), '--output', str(primary / 'diagnostics/first-frame')])
         record.update(primaryExitCode=primary_exit, diagnosticExitCode=diagnostic_exit)
         after = snapshot(source)
         save(output / 'source-after.json', after)

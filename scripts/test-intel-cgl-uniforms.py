@@ -1,5 +1,7 @@
 """Offline isolation and failure-preservation contracts; no browser starts."""
 import importlib.util
+from contextlib import redirect_stdout
+import io
 import json
 from pathlib import Path
 import re
@@ -13,6 +15,9 @@ HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('uniform_diagnostic', HERE / 'run-intel-cgl-uniforms.py')
 diagnostic = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(diagnostic)
+adapter_spec = importlib.util.spec_from_file_location('actual_draw_adapter', HERE / 'diagnose-native-draw.py')
+adapter = importlib.util.module_from_spec(adapter_spec)
+adapter_spec.loader.exec_module(adapter)
 
 
 class IntelUniformTests(unittest.TestCase):
@@ -23,7 +28,8 @@ class IntelUniformTests(unittest.TestCase):
         host = patch.object(diagnostic.platform, 'platform', return_value='Darwin-test-x86_64')
         host.start(); self.addCleanup(host.stop)
 
-    def execute(self, primary_exit=1, diagnostic_exit=0, mutate_receipt=False, mutate_source=False):
+    def execute(self, primary_exit=1, diagnostic_exit=0, mutate_receipt=False, mutate_source=False,
+                actual_adapter=False):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         root = Path(directory.name); output = root / 'output'
@@ -44,9 +50,35 @@ class IntelUniformTests(unittest.TestCase):
             if len(commands) == 1:
                 primary = output / 'primary'; primary.mkdir()
                 (primary / 'summary.json').write_bytes(b'{"originalTestReceipt":true}\n')
+                (primary / 'viewer-6').mkdir()
+                (primary / 'viewer-6/report.json').write_text(json.dumps({
+                    'suite': 'viewer-6', 'status': 'failed' if primary_exit else 'passed',
+                    'os': {'platform': 'darwin'}, 'sourceRevision': diagnostic.REVISION,
+                    'startupCheckpoints': [{'event': 'gpu', 'gpu': {'renderer': 'Apple Software Renderer'}}]}))
                 return subprocess.CompletedProcess(command, primary_exit)
             self.assertEqual(record['primaryExitCode'], primary_exit)
-            if mutate_receipt:
+            if actual_adapter:
+                def worker(worker_command, destination):
+                    self.assertIn('--failure', worker_command)
+                    self.assertEqual(Path(worker_command[-1]), (output / 'primary/viewer-6/report.json').resolve())
+                    (destination / 'viewer-6').mkdir()
+                    (destination / 'viewer-6/browser.log').write_text('HOME_NATIVE_DRAW {"event":"draw-after","draw":1}\n')
+                    (destination / 'viewer-6/report.json').write_text('{"diagnosticOnly":true}')
+                    return 0, False
+                with patch.object(adapter.sys, 'argv', command[1:]), \
+                     patch.object(adapter.sys, 'platform', 'darwin'), \
+                     patch.object(adapter, 'supervise', side_effect=worker), redirect_stdout(io.StringIO()):
+                    return subprocess.CompletedProcess(command, adapter.main())
+            generated = Path(command[-1]); generated.mkdir(parents=True)
+            (generated / 'diagnostic.json').write_text('{"diagnosticOnly":true}')
+            if mutate_receipt == 'add':
+                (output / 'primary/unexpected.json').write_text('{}')
+            elif mutate_receipt == 'delete':
+                (output / 'primary/summary.json').unlink()
+            elif mutate_receipt == 'nested-diagnostics':
+                other = output / 'primary/viewer-6/diagnostics'
+                other.mkdir(); (other / 'unexpected.json').write_text('{}')
+            elif mutate_receipt:
                 (output / 'primary/summary.json').write_text('{"modified":true}')
             return subprocess.CompletedProcess(command, diagnostic_exit)
 
@@ -78,7 +110,21 @@ class IntelUniformTests(unittest.TestCase):
                   '--installation', str(output.parent / 'install.json')]
         self.assertEqual(commands[0][2:], common + ['--output', str(output / 'primary')])
         self.assertEqual(commands[1][2:], common + ['--primary-output', str(output / 'primary'),
-                          '--output', str(output / 'diagnostics/first-frame')])
+                          '--output', str(output / 'primary/diagnostics/first-frame')])
+
+    def test_real_adapter_main_accepts_owned_path_and_rejects_old_sibling_path(self):
+        result, record, commands, output = self.execute(actual_adapter=True)
+        self.assertEqual(result, 1)  # Successful diagnostics never repair primary failure.
+        self.assertEqual(record['status'], 'failed')
+        self.assertEqual(record['diagnosticExitCode'], 0)
+        self.assertTrue(record['primaryReceiptsUnchanged'])
+        generated = json.loads((output / 'primary/diagnostics/first-frame/diagnostic.json').read_text())
+        self.assertEqual(generated['status'], 'diagnostic-completed')
+        self.assertTrue(generated['primaryUnchanged'])
+        self.assertEqual(generated['capturedEvents'], 1)
+        invalid = [*commands[1][1:-1], str(output / 'diagnostics/first-frame')]
+        with patch.object(adapter.sys, 'argv', invalid), self.assertRaises(ValueError):
+            adapter.main()
 
     def test_successful_primary_never_runs_failure_diagnostic(self):
         result, record, commands, _ = self.execute(primary_exit=0)
@@ -99,6 +145,14 @@ class IntelUniformTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertEqual(record['status'], 'infrastructure-error')
         self.assertIn('changed the original primary receipts', record['error'])
+
+    def test_added_deleted_or_nested_nonowned_receipts_are_rejected(self):
+        for mutation in ('add', 'delete', 'nested-diagnostics'):
+            with self.subTest(mutation=mutation):
+                result, record, _, _ = self.execute(mutate_receipt=mutation)
+                self.assertEqual(result, 1)
+                self.assertEqual(record['status'], 'infrastructure-error')
+                self.assertIn('changed the original primary receipts', record['error'])
 
     def test_modified_source_is_rejected(self):
         result, record, _, _ = self.execute(mutate_source=True)
