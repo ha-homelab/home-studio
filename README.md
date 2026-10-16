@@ -260,3 +260,8 @@ validation and geometry. See the [fuzzing guide](docs/fuzzing.md) for targets,
 budgets, synthetic data rules and reproduction, and [release instructions](RELEASING.md)
 for versioned source ZIPs. Beta builds and ordinary pull requests do not run
 mutation campaigns.
+
+
+## Contributing and security
+
+See [contribution and test requirements](CONTRIBUTING.md), [private security reporting](SECURITY.md), [governance](GOVERNANCE.md) and the [roadmap](ROADMAP.md).

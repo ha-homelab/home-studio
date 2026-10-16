@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Document private security reporting, source contribution and maintainer responsibilities. Add first-party Python/JavaScript CodeQL analysis and include project policies in public source packages.
+
 ## [0.6.4] - Development line
 
 - Bound the existing Apple diffuse viewer to 62,500 resting and 31,250 motion
