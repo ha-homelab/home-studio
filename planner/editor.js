@@ -612,7 +612,7 @@ planCanvas.addEventListener('wheel', e => { e.preventDefault(); zoomPlan(Math.ex
 
 // On-demand 3D rendering. Opening cuts and solid wall pieces use the same metric project.
 let renderer = null, scene = null, camera = null, worldGroup = null, previewSun = null, previewUnavailable = false, previewMetadata = {};
-let previewLost = false, previewSize = '', previewPixels = 2000000;
+let previewLost = false, previewSize = '', previewPixels = 2000000, previewInitialized = false, previewRendererDisposed = false;
 const orbit = { yaw: -Math.PI / 3, pitch: .8, radius: 17, baseRadius: 17, target: new THREE.Vector3(4, 0, 3), pointer: null };
 function previewRenderProfile(gl) {
   try {
@@ -624,7 +624,7 @@ function previewRenderProfile(gl) {
 function initPreview() {
   if (renderer || previewUnavailable) return;
   try {
-    renderer = new THREE.WebGLRenderer({ canvas: $('preview-canvas'), antialias: true, alpha: false }); renderer.setClearColor(0xf2f4ed); renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: true, alpha: false }); previewRendererDisposed = false; renderer.setClearColor(0xf2f4ed); renderer.outputColorSpace = THREE.SRGBColorSpace;
     const profile = previewRenderProfile(renderer.getContext()); previewPixels = profile.pixels;
     renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = .9; renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(40, 1, .02, 1500); scene.add(new THREE.HemisphereLight(0xffffff, 0xc7cfbc, 1.7));
@@ -632,8 +632,9 @@ function initPreview() {
     // Orbiting moves only the camera. Reuse shadows until scene geometry changes.
     previewSun.shadow.autoUpdate = false; previewSun.shadow.needsUpdate = true;
     const fill = new THREE.DirectionalLight(0xdce9f2, .5); fill.position.set(12, 10, -10); scene.add(fill);
-    worldGroup = new THREE.Group(); scene.add(worldGroup); fitPreview();
-  } catch (error) { renderer?.dispose(); renderer?.forceContextLoss(); previewUnavailable = true; $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
+    worldGroup = new THREE.Group(); scene.add(worldGroup);
+    if (!previewInitialized) { fitPreview(); previewInitialized = true; }
+  } catch (error) { disposePreviewRenderer(); renderer?.forceContextLoss(); previewUnavailable = true; $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
 }
 function previewFloors() { return $('all-floors').checked ? project.floors : [floor()]; }
 function fitPreview() {
@@ -648,6 +649,12 @@ function fitPreview() {
 function disposePreviewGeometry() {
   if (!worldGroup) return;
   while (worldGroup.children.length) { const child = worldGroup.children[0]; worldGroup.remove(child); child.traverse(obj => { obj.geometry?.dispose(); if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose()); else obj.material?.dispose(); }); }
+}
+function disposePreviewRenderer() {
+  if (!renderer || previewRendererDisposed) return;
+  disposePreviewGeometry();
+  if (previewSun) { previewSun.shadow.dispose(); previewSun.shadow.map = null; previewSun.shadow.mapPass = null; }
+  renderer.dispose(); previewRendererDisposed = true;
 }
 function rebuildPreview() {
   disposePreviewGeometry();
@@ -723,33 +730,60 @@ function drawPreview() {
 }
 function renderPreview() { if (view !== 'preview' || canvasSuspended || document.hidden || previewLost) return; initPreview(); if (!renderer || previewUnavailable) return; if (previewDirty) rebuildPreview(); drawPreview(); }
 function zoomPreview(factor) { orbit.radius = Math.max(1, Math.min(600, orbit.radius / factor)); requestCanvasRender(); }
-const previewCanvas = $('preview-canvas');
-previewCanvas.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); previewCanvas.focus(); orbit.pointer = { x: e.clientX, y: e.clientY, yaw: orbit.yaw, pitch: orbit.pitch }; previewCanvas.setPointerCapture(e.pointerId); });
-previewCanvas.addEventListener('pointermove', e => { if (!orbit.pointer) return; orbit.yaw = orbit.pointer.yaw - (e.clientX - orbit.pointer.x) * .007; orbit.pitch = Math.max(.1, Math.min(1.5, orbit.pointer.pitch + (e.clientY - orbit.pointer.y) * .007)); requestCanvasRender(); });
-for (const event of ['pointerup', 'pointercancel']) previewCanvas.addEventListener(event, e => { orbit.pointer = null; if (previewCanvas.hasPointerCapture(e.pointerId)) previewCanvas.releasePointerCapture(e.pointerId); });
-previewCanvas.addEventListener('wheel', e => { e.preventDefault(); zoomPreview(Math.exp(-e.deltaY * .0015)); }, { passive: false });
-previewCanvas.addEventListener('keydown', e => {
-  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-'].includes(e.key)) return; e.preventDefault();
-  if (e.key === 'ArrowLeft') orbit.yaw -= .12; if (e.key === 'ArrowRight') orbit.yaw += .12; if (e.key === 'ArrowUp') orbit.pitch = Math.min(1.5, orbit.pitch + .1); if (e.key === 'ArrowDown') orbit.pitch = Math.max(.1, orbit.pitch - .1);
-  if (e.key === '+' || e.key === '=') zoomPreview(1.15); else if (e.key === '-') zoomPreview(1 / 1.15); else requestCanvasRender();
-});
-previewCanvas.addEventListener('webglcontextlost', e => {
-  e.preventDefault(); previewLost = true; cancelCanvasRender();
-  // Three.js replaces its GPU caches on restoration. Dispose old scene callbacks
-  // while GL is lost, before they can delete resources from the restored context.
-  disposePreviewGeometry(); previewDirty = true;
-  if (previewSun) { previewSun.shadow.dispose(); previewSun.shadow.map = null; previewSun.shadow.mapPass = null; }
-  $('preview-error').hidden = false; translatedText('preview-error', 'The graphics context was lost. Reload to restore 3D. Your local draft and JSON export remain available.');
-});
-previewCanvas.addEventListener('webglcontextrestored', () => {
-  previewLost = false; previewSize = '';
-  if (previewSun) previewSun.shadow.needsUpdate = true;
-  $('preview-error').hidden = true;
-  // A viewport change can precede its ResizeObserver callback. Refresh the
-  // layout before the first restored frame allocates its drawing buffer.
-  resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect());
-  requestCanvasRender();
-});
+let previewCanvas = $('preview-canvas'), previewEvents;
+function releasePreviewPointer() {
+  const pointer = orbit.pointer; orbit.pointer = null;
+  if (pointer && previewCanvas.hasPointerCapture(pointer.id)) previewCanvas.releasePointerCapture(pointer.id);
+}
+function bindPreviewCanvas() {
+  previewEvents = new AbortController();
+  const canvas = previewCanvas, options = { signal: previewEvents.signal };
+  canvas.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || previewLost || previewUnavailable) return;
+    e.preventDefault(); canvas.focus();
+    orbit.pointer = { id: e.pointerId, x: e.clientX, y: e.clientY, yaw: orbit.yaw, pitch: orbit.pitch };
+    canvas.setPointerCapture(e.pointerId);
+  }, options);
+  canvas.addEventListener('pointermove', e => {
+    if (!orbit.pointer || orbit.pointer.id !== e.pointerId) return;
+    orbit.yaw = orbit.pointer.yaw - (e.clientX - orbit.pointer.x) * .007;
+    orbit.pitch = Math.max(.1, Math.min(1.5, orbit.pointer.pitch + (e.clientY - orbit.pointer.y) * .007)); requestCanvasRender();
+  }, options);
+  for (const event of ['pointerup', 'pointercancel']) canvas.addEventListener(event, releasePreviewPointer, options);
+  canvas.addEventListener('wheel', e => { e.preventDefault(); zoomPreview(Math.exp(-e.deltaY * .0015)); }, { ...options, passive: false });
+  canvas.addEventListener('keydown', e => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-'].includes(e.key)) return; e.preventDefault();
+    if (e.key === 'ArrowLeft') orbit.yaw -= .12; if (e.key === 'ArrowRight') orbit.yaw += .12; if (e.key === 'ArrowUp') orbit.pitch = Math.min(1.5, orbit.pitch + .1); if (e.key === 'ArrowDown') orbit.pitch = Math.max(.1, orbit.pitch - .1);
+    if (e.key === '+' || e.key === '=') zoomPreview(1.15); else if (e.key === '-') zoomPreview(1 / 1.15); else requestCanvasRender();
+  }, options);
+  canvas.addEventListener('webglcontextlost', e => {
+    e.preventDefault(); previewLost = true; cancelCanvasRender(); releasePreviewPointer();
+    // Release old scene callbacks and Three's context listeners while GL is
+    // lost. Nothing from this renderer may run against a restored context.
+    disposePreviewRenderer(); previewDirty = true;
+    $('preview-error').hidden = false; translatedText('preview-error', 'The graphics context was lost. Reload to restore 3D. Your local draft and JSON export remain available.');
+  }, options);
+  canvas.addEventListener('webglcontextrestored', () => {
+    if (!previewLost) return;
+    const retired = renderer, focused = document.activeElement === canvas;
+    previewEvents.abort();
+    // A new canvas guarantees a new native context, not just new Three caches.
+    // The old renderer has already been disposed while its context was lost.
+    const replacement = canvas.cloneNode(false);
+    replacement.width = 0; replacement.height = 0;
+    canvas.replaceWith(replacement); previewCanvas = replacement; bindPreviewCanvas();
+    renderer = scene = camera = worldGroup = previewSun = null;
+    previewLost = false; previewSize = ''; previewDirty = true;
+    // Retire the detached context before the next frame creates its replacement.
+    // Its loss is intentional cleanup; no app handlers remain on that canvas.
+    retired?.forceContextLoss();
+    $('preview-error').hidden = true;
+    resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect());
+    if (focused) previewCanvas.focus({ preventScroll: true });
+    requestCanvasRender();
+  }, options);
+}
+bindPreviewCanvas();
 
 // Project actions and keyboard navigation.
 function exportProject() {
@@ -848,7 +882,7 @@ canvasObserver.observe(document.querySelector('.canvas-shell'));
 document.addEventListener('visibilitychange', () => { if (document.hidden) cancelCanvasRender(); else { resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); } });
 window.addEventListener('pagehide', event => {
   canvasSuspended = true; cancelCanvasRender();
-  if (!event.persisted) { canvasObserver.disconnect(); disposePreviewGeometry(); previewSun?.shadow.dispose(); renderer?.dispose(); renderer?.forceContextLoss(); }
+  if (!event.persisted) { canvasObserver.disconnect(); previewEvents.abort(); releasePreviewPointer(); disposePreviewRenderer(); renderer?.forceContextLoss(); }
 });
 window.addEventListener('pageshow', () => { canvasSuspended = false; resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); });
 window.planner = Object.freeze({ getProject: () => clone(project), getPreviewMetadata: () => ({ ...previewMetadata }), getView: () => view, getSelection: () => selection && { ...selection }, worldToScreen: point => toScreen(point), validate: () => validateProject(clone(project), { complete: true }) });

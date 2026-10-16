@@ -52,7 +52,9 @@ function fixture() {
 }
 
 function instrument() {
-  const stats=window.__plannerStats={planDraws:0,canvasResizes:0,contexts:0,contextLosses:0,linkedPrograms:0,shaderErrors:[],errors:[],contextEvents:[],linkFailures:[],recoveryOperations:[]};
+  const stats=window.__plannerStats={planDraws:0,canvasResizes:0,contexts:0,contextLosses:0,retiredContextLosses:0,linkedPrograms:0,shaderErrors:[],errors:[],contextEvents:[],contextLossRequests:[],linkFailures:[],recoveryOperations:[]};
+  const contexts=[];
+  window.__plannerContextStates=()=>contexts.map(({id,canvas,gl,restores})=>({id,attached:canvas.isConnected,lost:gl.isContextLost(),restores}));
   window.__plannerTraceRenderer=(renderer,readLayout)=>{
     if(!renderer || renderer.__plannerRecoveryInstrumented)return;
     renderer.__plannerRecoveryInstrumented=true;
@@ -95,7 +97,21 @@ function instrument() {
       const clear=context.clearRect.bind(context);context.clearRect=(...values)=>{stats.planDraws++;return clear(...values);};
     }
     if(String(args[0]).startsWith('webgl')) {
-      stats.contexts++;
+      const tracked={id:++stats.contexts,canvas:this,gl:context,restores:0,pendingLosses:[]};contexts.push(tracked);
+      const getExtension=context.getExtension.bind(context),extensions=new WeakSet();
+      context.getExtension=name=>{
+        const extension=getExtension(name);
+        if(String(name).toLowerCase()==='webgl_lose_context' && extension && !extensions.has(extension)) {
+          extensions.add(extension);const lose=extension.loseContext.bind(extension);
+          extension.loseContext=(...args)=>{
+            const request={id:stats.contextLossRequests.length+1,contextId:tracked.id,attached:this.isConnected,
+              retirement:this.isConnected===false&&document.getElementById('preview-canvas')!==this,matched:false};
+            tracked.pendingLosses.push(request);stats.contextLossRequests.push(request);
+            return lose(...args);
+          };
+        }
+        return extension;
+      };
       const info=context.getExtension('WEBGL_debug_renderer_info');
       stats.gpu={version:context.getParameter(context.VERSION),renderer:info?context.getParameter(info.UNMASKED_RENDERER_WEBGL):context.getParameter(context.RENDERER)};
       console.info('[home-studio-test-gpu]' + JSON.stringify(stats.gpu));
@@ -108,8 +124,13 @@ function instrument() {
         }
       };
       for(const type of ['webglcontextlost','webglcontextrestored']) this.addEventListener(type,event=>{
+        const request=type==='webglcontextlost'?tracked.pendingLosses.shift():null;
+        if(request)request.matched=true;
+        const retired=Boolean(request?.retirement && tracked.restores===1 && this.isConnected===false && document.getElementById('preview-canvas')!==this);
         if(type==='webglcontextlost')stats.contextLosses++;
-        stats.contextEvents.push({type,statusMessage:event.statusMessage||'',lost:context.isContextLost(),phase:window.__plannerRecoveryPhase||'edit-and-preview',time:performance.now(),buffer:[this.width,this.height],view:window.planner?.getView(),linkedPrograms:stats.linkedPrograms});
+        if(retired)stats.retiredContextLosses++;
+        if(type==='webglcontextrestored')tracked.restores++;
+        stats.contextEvents.push({type,contextId:tracked.id,attached:this.isConnected,retired,lossRequest:request?.id||null,statusMessage:event.statusMessage||'',lost:context.isContextLost(),phase:window.__plannerRecoveryPhase||'edit-and-preview',time:performance.now(),buffer:[this.width,this.height],view:window.planner?.getView(),linkedPrograms:stats.linkedPrograms});
       });
     }
     return context;
@@ -312,7 +333,15 @@ async function run(engine,origin) {
       check(restoreSnapshot.preview.renderCount===before.preview.renderCount,'Recovery actions while the graphics context is lost must not draw');
       await input.tap(page.locator('#preview-tab'));await page.waitForFunction(count=>window.planner.getPreviewMetadata().renderCount>count,before.preview.renderCount);await frames();
       recovery.after=await snapshot();save();
-      check(recovery.after.stats.contextLosses===1,'Restoration must not lose the graphics context again');
+      recovery.contexts=await page.evaluate(()=>window.__plannerContextStates());save();
+      check(recovery.after.stats.contexts===2,'Recovery creates exactly one replacement WebGL context');
+      assert.deepEqual(recovery.after.stats.contextLossRequests.map(({contextId,attached,retirement,matched})=>({contextId,attached,retirement,matched})),
+        [{contextId:1,attached:true,retirement:false,matched:true},{contextId:1,attached:false,retirement:true,matched:true}],
+        'Both deliberate losses must match actual loseContext requests on the original context');
+      check(recovery.after.stats.contextLosses===2&&recovery.after.stats.retiredContextLosses===1,'Restoration must have only the deliberate loss and detached-context retirement');
+      assert.deepEqual(recovery.contexts,[{id:1,attached:false,lost:true,restores:1},{id:2,attached:true,lost:false,restores:0}],
+        'The retired context is released and exactly one replacement context remains active');
+      check(await page.locator('#preview-canvas').count()===1,'Recovery keeps exactly one preview canvas');
       check(recovery.after.stats.shaderErrors.length===0,'Restored preview shaders link successfully');
       const restored=recovery.after;
       check(consoleErrors.length===0,'Restoring and rebuilding preview geometry produces no browser graphics errors');
@@ -320,6 +349,21 @@ async function run(engine,origin) {
       assert.deepEqual(restored.scene.memory,samples[0].scene.memory,'Restoration rebuilds the scene without leaking or omitting GPU resources');
       assert.deepEqual(restored.scene.buffer,[Math.floor(restored.preview.viewport.width*restored.scene.pixelRatio),Math.floor(restored.preview.viewport.height*restored.scene.pixelRatio)],'Restoration uses the current viewport size');
       assert.deepEqual(await getProject(),exported,'Graphics restoration preserves the exported project');
+      await page.locator('#preview-canvas').scrollIntoViewIfNeeded();
+      const recoveredBox=await page.locator('#preview-canvas').boundingBox(),recoveredOrbitStart=Date.now();
+      await input.drag({x:recoveredBox.x+recoveredBox.width*.4,y:recoveredBox.y+recoveredBox.height*.4},
+        {x:recoveredBox.x+recoveredBox.width*.55,y:recoveredBox.y+recoveredBox.height*.5});await frames();
+      recovery.orbitMs=Date.now()-recoveredOrbitStart;recovery.afterOrbit=await snapshot();
+      recovery.afterOrbit.contexts=await page.evaluate(()=>window.__plannerContextStates());save();
+      assert.deepEqual(recovery.afterOrbit.contexts,recovery.contexts,'Orbiting preserves exactly one live replacement context');
+      check(recovery.orbitMs<10000,'The replacement preview remains responsive to orbit input');
+      assert.notDeepEqual(recovery.afterOrbit.scene.orbit,restored.scene.orbit,'Replacement canvas input changes the camera');
+      check(recovery.afterOrbit.preview.renderCount>restored.preview.renderCount,'Replacement canvas orbit renders a new frame');
+      check(recovery.afterOrbit.stats.contextLosses===2&&recovery.afterOrbit.stats.retiredContextLosses===1&&recovery.afterOrbit.stats.contexts===2,
+        'Orbiting the replacement cannot lose or allocate another context');
+      check(recovery.afterOrbit.stats.shaderErrors.length===0&&recovery.afterOrbit.stats.errors.length===0&&consoleErrors.length===0,
+        'Replacement canvas orbit has no shader, JavaScript or browser graphics errors');
+      assert.deepEqual(await getProject(),exported,'Replacement canvas input preserves the edited project');
     }
     record.input=await page.evaluate(()=>window.__acceptanceInput);
     if(profile.emulated) check(record.input.trustedTouchStarts>0&&record.input.trustedTouchEnds>0,

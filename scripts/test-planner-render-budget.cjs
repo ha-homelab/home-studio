@@ -13,7 +13,7 @@ function section(start, end) {
 }
 function surface() {
   return {events: {}, style: {}, hidden: true, checked: false,
-    addEventListener(name, fn) { this.events[name] = fn; },
+    addEventListener(name, fn, options = {}) { this.events[name] = fn; options.signal?.addEventListener('abort', () => { delete this.events[name]; }, {once: true}); },
     focus() {}, setPointerCapture() {}, hasPointerCapture() { return false; }};
 }
 function frames(context) {
@@ -55,7 +55,11 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   f.openings.push({id: 'door', wall_id: 'wall', type: 'door', offset_m: 1, width_m: .9, sill_m: 0, head_m: 2});
   f.items.push({id: 'item', name: 'Item', type: 'furniture', room: 'room', position_m: {x: 2, y: 0, z: 2}, dimensions_m: {width: 1, depth: 1, height: 1}, rotation_deg: 0, entity_id: '', notes: ''});
   model.validateProject(project);
-  const elements = new Map(), get = id => { if (!elements.has(id)) elements.set(id, surface()); return elements.get(id); };
+  const elements = new Map(), makeSurface = id => {
+    const canvas = surface();
+    canvas.cloneNode = () => makeSurface(id); canvas.replaceWith = next => elements.set(id, next);
+    return canvas;
+  }, get = id => { if (!elements.has(id)) elements.set(id, makeSurface(id)); return elements.get(id); };
   const documentEvents = {}, windowEvents = {}, buffers = [];
   let constructions = 0, draws = 0, shadows = 0, disposals = 0, losses = 0, disconnects = 0, planDraws = 0;
   let rect = {width: 3840, height: 2160};
@@ -73,7 +77,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     dispose() { disposals++; }
     forceContextLoss() { losses++; }
   }
-  const c = vm.createContext({THREE: {...THREE, WebGLRenderer: Renderer}, project, floor: () => project.floors[0],
+  const c = vm.createContext({AbortController, THREE: {...THREE, WebGLRenderer: Renderer}, project, floor: () => project.floors[0],
     view: 'plan', previewDirty: true, size: {...rect}, map: {x: 0, y: 0}, devicePixelRatio: 3,
     $: get, planCanvas: get('plan-canvas'), ctx: {setTransform() {}},
     floorBounds: model.floorBounds, distance: model.distance, wallPieces: model.wallPieces,
@@ -145,9 +149,11 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   c.view = 'preview'; canvas.events.webglcontextrestored(); clock.flush();
   assert.equal(draws, beforeLost + 1); assert.equal(buffers.at(-1)[0], 600); assert.equal(buffers.at(-1)[1], 800);
   assert.equal(get('preview-error').hidden, true); assert.equal(shadows, 3);
-  windowEvents.pagehide({persisted: true}); assert.equal(disposals, 0); c.requestCanvasRender(); assert.equal(clock.pending.size, 0);
-  windowEvents.pageshow(); clock.flush(); assert.equal(constructions, 1);
-  windowEvents.pagehide({persisted: false}); assert.equal(disposals, 1); assert.equal(losses, 1); assert.equal(disconnects, 1);
+  assert.notEqual(get('preview-canvas'), canvas, 'Recovery replaces the native context canvas');
+  assert.equal(Object.keys(canvas.events).length, 0, 'Retired canvas listeners are removed');
+  windowEvents.pagehide({persisted: true}); assert.equal(disposals, 1); c.requestCanvasRender(); assert.equal(clock.pending.size, 0);
+  windowEvents.pageshow(); clock.flush(); assert.equal(constructions, 2);
+  windowEvents.pagehide({persisted: false}); assert.equal(disposals, 2); assert.equal(losses, 2); assert.equal(disconnects, 1);
   assert.equal(vm.runInContext('worldGroup.children.length', c), 0);
 
   // Real pointer handlers: exact endpoint math, one clone per gesture, and undo/cancel.

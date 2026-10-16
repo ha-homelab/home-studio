@@ -455,46 +455,137 @@ test('input evidence retains event targets and viewport without changing native 
   assert.equal(window.__acceptanceInput.events.length,64,'Input evidence must remain bounded');
 });
 
-test('planner disposes geometry and shadow callbacks before restoring the GL context', () => {
+function freshPreviewHarness(view = 'preview') {
   const source = fs.readFileSync(path.join(__dirname, '../planner/editor.js'), 'utf8');
   const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
-  let lost = false, scheduled = 0, cancelled = 0;
-  const disposed = [], handlers = {};
-  const resource = name => ({dispose() {
-    assert(lost, 'Old WebGL resources must be released while their context is lost');
-    disposed.push(name);
-  }});
-  const objects = [{geometry:resource('geometry'),material:[resource('material-a'),resource('material-b')]}];
-  const group = {children:[{traverse: callback => objects.forEach(callback)}],
-    remove(child) { this.children.splice(this.children.indexOf(child), 1); }};
-  const shadow = {map:resource('shadow-map'),mapPass:resource('shadow-pass'),needsUpdate:false,
-    dispose() { this.map?.dispose(); this.mapPass?.dispose(); }};
-  const error = {hidden:true};
-  const context = vm.createContext({worldGroup:group,previewSun:{shadow},
-    previewCanvas:{addEventListener: (name, callback) => { handlers[name] = callback; }},
-    cancelCanvasRender: () => cancelled++,requestCanvasRender: () => scheduled++,$: () => error,translatedText() {},
-    resizeCanvases() {},document:{querySelector:()=>({getBoundingClientRect:()=>({width:640,height:480})})}});
-  vm.runInContext("let previewLost = false, previewDirty = false, previewSize = 'before';\n" +
-    section('function disposePreviewGeometry()', 'function rebuildPreview()') +
-    section("previewCanvas.addEventListener('webglcontextlost'", '// Project actions and keyboard navigation.'), context);
-  lost = true;
-  let prevented = false;
-  handlers.webglcontextlost({preventDefault() { prevented = true; }});
-  assert(prevented);
-  assert.equal(cancelled, 1);
-  assert.equal(scheduled, 0, 'A lost context cannot schedule drawing');
-  assert.deepEqual(disposed, ['geometry','material-a','material-b','shadow-map','shadow-pass']);
-  assert.equal(group.children.length, 0);
-  assert.equal(shadow.map, null);
-  assert.equal(shadow.mapPass, null);
-  assert.equal(vm.runInContext('previewDirty && previewLost', context), true);
-  lost = false;
-  handlers.webglcontextrestored();
-  shadow.dispose(); // Later page teardown must not invoke stale target callbacks.
-  assert.equal(scheduled, 1);
-  assert.equal(shadow.needsUpdate, true);
-  assert.equal(error.hidden, true);
-  assert.equal(vm.runInContext("!previewLost && previewSize === '' && previewDirty", context), true);
+  const traces = [], canvases = [], renderers = [], scheduled = [], allocations = [];
+  const error = {hidden:true}, rect = {width:774,height:724};
+  let context, activeCanvas, currentFocus, layoutReads = 0, fitCalls = 0, reusedRestores = 0;
+  class Canvas extends EventTarget {
+    constructor() { super(); this.id='preview-canvas';this.width=934;this.height=824;this.isConnected=true;this.attributes={tabindex:'0','aria-label':'Preview'};this.captured=new Set();canvases.push(this); }
+    focus() { currentFocus=this; }
+    setPointerCapture(id) { this.captured.add(id); }
+    hasPointerCapture(id) { return this.captured.has(id); }
+    releasePointerCapture(id) { this.captured.delete(id); }
+    cloneNode() {const copy=new Canvas();copy.isConnected=false;copy.attributes={...this.attributes};return copy;}
+    replaceWith(next) { assert.equal(activeCanvas,this);this.isConnected=false;next.isConnected=true;activeCanvas=next; }
+    emit(type, values={}) { const event=new Event(type,{cancelable:true});Object.assign(event,values);this.dispatchEvent(event);return event; }
+  }
+  activeCanvas=new Canvas();
+  const vector = () => ({x:0,y:0,z:0,set(x,y,z){Object.assign(this,{x,y,z});}});
+  const resource = name => ({dispose(){traces.push(name);}});
+  class Group {
+    constructor() {this.children=[];}
+    add(child) {this.children.push(child);}
+    remove(child) {this.children.splice(this.children.indexOf(child),1);}
+  }
+  class Renderer {
+    constructor({canvas}) {
+      this.domElement=canvas;this.shadowMap={};this.id=renderers.length+1;this.lost=false;renderers.push(this);
+      this.restored=()=>reusedRestores++;
+      canvas.addEventListener('webglcontextrestored',this.restored);
+    }
+    setClearColor() {}
+    getContext() {return {getExtension:()=>null};}
+    setDrawingBufferSize(...args) {allocations.push(args);}
+    render() {assert(!this.lost&&!this.disposed);traces.push(`render-${this.id}`);}
+    dispose() { assert(this.lost || vm.runInContext('canvasSuspended',context));this.disposed=true;traces.push(`dispose-${this.id}`);this.domElement.removeEventListener('webglcontextrestored',this.restored); }
+    forceContextLoss() {this.lost=true;traces.push(`retire-${this.id}`);this.domElement.emit('webglcontextlost');}
+  }
+  class Light {constructor(){this.position=vector();this.target={position:vector()};this.shadow={mapSize:{set(){}},map:resource('shadow-map'),mapPass:resource('shadow-pass'),dispose(){this.map?.dispose();this.mapPass?.dispose();}};}}
+  const document = {hidden:false,get activeElement(){return currentFocus;},querySelector:()=>({getBoundingClientRect:()=>{layoutReads++;return rect;}})};
+  const window = new EventTarget();
+  context=vm.createContext({AbortController,console,document,window,devicePixelRatio:2,
+    THREE:{WebGLRenderer:Renderer,Scene:Group,Group,Vector3:class {constructor(x,y,z){Object.assign(this,vector(),{x,y,z});}},HemisphereLight:Light,DirectionalLight:Light,
+      PerspectiveCamera:class {constructor(){this.position=vector();}lookAt(){}updateProjectionMatrix(){} }},
+    $:id=>id==='preview-canvas'?activeCanvas:error,translatedText(){},
+    fitPreview(){fitCalls++;},fitPlan(){},updateZoom(){},previewFloors:()=>[],
+    cancelCanvasRender(){traces.push('cancel');},onSchedule:value=>scheduled.push(JSON.parse(JSON.stringify(value))),
+    testMesh:()=>({traverse(callback){callback({geometry:resource('geometry'),material:[resource('material-a'),resource('material-b')]});}}),
+    planCanvas:{},ctx:{setTransform(){}},canvasObserver:{disconnect(){traces.push('disconnect');}},
+  });
+  vm.runInContext(`
+    let previewDirty=true,canvasSuspended=false,size={width:934,height:824},view=${JSON.stringify(view)};
+    let firstResize=false,planSize='old',map={x:0,y:0};
+    const project={floors:[{items:[{position_m:{x:7,z:9}}]}]};
+    function requestCanvasRender(){if(!canvasSuspended&&!document.hidden)onSchedule(size);}
+    ${section('function canvasPixelRatio(', 'let startupMessage')}
+    ${section('let renderer =', 'function previewFloors()')}
+    ${section('function disposePreviewGeometry()', 'function rebuildPreview()')}
+    function rebuildPreview(){worldGroup.add(testMesh());previewDirty=false;}
+    ${section('function drawPreview()', '// Project actions and keyboard navigation.')}
+    ${section('function resizeCanvases(', 'const canvasObserver')}
+    ${section("window.addEventListener('pagehide'", "window.planner =")}
+    initPreview();rebuildPreview();
+  `,context);
+  const evaluate = code => vm.runInContext(code,context);
+  return {traces,canvases,renderers,scheduled,allocations,error,rect,window,evaluate,
+    get canvas(){return activeCanvas;},get layoutReads(){return layoutReads;},get fitCalls(){return fitCalls;},get reusedRestores(){return reusedRestores;},
+    lose(){const renderer=renderers.at(-1);renderer.lost=true;return renderer.domElement.emit('webglcontextlost');},
+    restore(){const renderer=renderers.at(-1);renderer.lost=false;renderer.domElement.emit('webglcontextrestored');},
+    flush(){evaluate("view='preview';renderPreview();");},
+  };
+}
+
+test('fresh preview retires old resources and handlers while preserving orbit, project and canvas identity', () => {
+  const h=freshPreviewHarness();
+  const original=h.canvas, project=h.evaluate('JSON.stringify(project)');
+  original.focus();original.emit('pointerdown',{button:0,pointerId:9,clientX:10,clientY:20});
+  assert(original.hasPointerCapture(9));
+  h.evaluate('orbit.yaw=.7;orbit.pitch=.9;orbit.radius=42;orbit.baseRadius=30;orbit.target.set(4,5,6)');
+  const orbit=h.evaluate('JSON.stringify({...orbit,pointer:null})');
+  assert(h.lose().defaultPrevented);
+  assert(!original.hasPointerCapture(9));
+  assert.equal(h.evaluate('orbit.pointer'),null);
+  assert.deepEqual(h.traces,['cancel','geometry','material-a','material-b','shadow-map','shadow-pass','dispose-1']);
+  h.restore();
+  assert.notEqual(h.canvas,original);
+  assert.deepEqual(h.canvas.attributes,original.attributes);
+  assert.equal(h.reusedRestores,0,'Disposed Three listeners cannot initialize a restored native context');
+  assert.equal(h.renderers.length,1,'No renderer is allocated in the restored event');
+  assert(h.renderers[0].lost&&h.renderers[0].disposed);
+  assert.equal(h.canvases.filter(canvas=>canvas.isConnected).length,1);
+  assert.equal(h.evaluate('JSON.stringify({...orbit,pointer:null})'),orbit);
+  assert.equal(h.evaluate('JSON.stringify(project)'),project);
+  assert.equal(h.error.hidden,true);
+  assert(h.evaluate('document.activeElement === previewCanvas'),'Canvas focus survives replacement');
+  h.flush();
+  assert.equal(h.renderers.length,2);
+  assert.equal(h.renderers.filter(renderer=>!renderer.lost).length,1);
+  assert.equal(h.fitCalls,2,'Replacement initialization must not refit and reset the saved orbit');
+  assert.equal(h.evaluate('JSON.stringify({...orbit,pointer:null})'),orbit);
+  const before=h.evaluate('orbit.yaw');
+  original.emit('pointerdown',{button:0,pointerId:3,clientX:10,clientY:20});
+  original.emit('pointermove',{pointerId:3,clientX:40,clientY:30});
+  original.emit('keydown',{key:'ArrowLeft'});original.emit('wheel',{deltaY:10});
+  assert.equal(h.evaluate('orbit.yaw'),before,'The detached canvas has no surviving input callbacks');
+  h.canvas.emit('pointerdown',{button:0,pointerId:4,clientX:10,clientY:20});
+  h.canvas.emit('pointermove',{pointerId:4,clientX:40,clientY:30});
+  h.canvas.emit('pointerup',{pointerId:4});h.flush();
+  assert.notEqual(h.evaluate('orbit.yaw'),before,'Replacement canvas still supports actual pointer orbit');
+  assert(!h.canvas.hasPointerCapture(4));
+  assert.equal(h.evaluate('JSON.stringify(project)'),project);
+  h.lose();h.restore();h.flush();
+  assert.equal(h.renderers.length,3);
+  assert.equal(h.renderers.filter(renderer=>!renderer.lost).length,1,'Repeated recovery does not leak active contexts');
+  assert.equal(h.canvases.filter(canvas=>canvas.isConnected).length,1);
+  const pagehide=new Event('pagehide');Object.assign(pagehide,{persisted:false});h.window.dispatchEvent(pagehide);
+  assert(h.renderers.every(renderer=>renderer.disposed&&renderer.lost),'Final navigation releases every context');
+  const finalOrbit=h.evaluate('orbit.yaw');h.canvas.emit('keydown',{key:'ArrowLeft'});
+  assert.equal(h.evaluate('orbit.yaw'),finalOrbit,'Final teardown removes input listeners');
+});
+
+test('restoration while in the page cache retires the context and resumes rendering on pageshow', () => {
+  const h=freshPreviewHarness();h.lose();
+  const pagehide=new Event('pagehide');Object.assign(pagehide,{persisted:true});h.window.dispatchEvent(pagehide);
+  const scheduled=h.scheduled.length;h.restore();
+  assert.equal(h.scheduled.length,scheduled,'A cached page cannot schedule a preview frame');
+  assert(h.evaluate('canvasSuspended && !previewLost'));
+  assert.equal(h.renderers.length,1);
+  h.window.dispatchEvent(new Event('pageshow'));h.flush();
+  assert(h.evaluate('!canvasSuspended && !previewLost'));
+  assert.equal(h.renderers.length,2);
+  assert.equal(h.renderers.filter(renderer=>!renderer.lost).length,1);
 });
 
 test('planner records the phase and lost state of failed restored shader links', () => {
@@ -525,6 +616,41 @@ test('planner records the phase and lost state of failed restored shader links',
   assert.deepEqual(stats.contextEvents[2].buffer,[1462,1367]);
 });
 
+test('a detached context loss is retirement only when its actual loseContext request was recorded', () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-planner-stability.cjs'),'utf8');
+  const instrument=source.slice(source.indexOf('function instrument()'),source.indexOf('const server='));
+  for(const [detached,requested,expected] of [[true,false,0],[true,true,1],[false,true,0]]) {
+    let lost=false,current;
+    const extension={loseContext(){lost=true;},restoreContext(){lost=false;}};
+    const gl={VERSION:1,RENDERER:2,LINK_STATUS:3,getExtension:name=>name==='WEBGL_lose_context'?extension:null,
+      getParameter:()=> 'WebGL 2.0',linkProgram(){},getProgramParameter:()=>true,isContextLost:()=>lost};
+    class Canvas extends EventEmitter {
+      constructor(){super();this.isConnected=true;}
+      get width(){return 800;}set width(value){}
+      get height(){return 600;}set height(value){}
+      getContext(){return gl;}
+      addEventListener(name,callback){this.on(name,callback);}
+    }
+    const window={addEventListener(){},planner:{getView:()=> 'preview'}};
+    const context=vm.createContext({window,HTMLCanvasElement:Canvas,document:{getElementById:()=>current},
+      performance:{now:()=>100},console:{error(){},info(){}}});
+    vm.runInContext(instrument+'\ninstrument();',context);
+    const canvas=current=new Canvas();const ext=canvas.getContext('webgl2').getExtension('WEBGL_lose_context');
+    ext.loseContext();canvas.emit('webglcontextlost',{});
+    ext.restoreContext();canvas.emit('webglcontextrestored',{});
+    if(detached){canvas.isConnected=false;current={};}
+    if(requested)ext.loseContext();else lost=true;
+    canvas.emit('webglcontextlost',{});
+    const stats=JSON.parse(JSON.stringify(window.__plannerStats));
+    assert.equal(stats.contextLosses,2,'Every real and synthetic event remains counted');
+    assert.equal(stats.retiredContextLosses,expected);
+    assert.equal(stats.contextEvents[2].retired,Boolean(expected));
+    assert.equal(stats.contextEvents[2].lossRequest,requested?2:null);
+    assert.equal(stats.contextLossRequests.length,requested?2:1);
+    assert(stats.contextLossRequests.every(request=>request.matched));
+  }
+});
+
 test('planner recovery variants select real actions and retain restoration checks', async () => {
   const source = fs.readFileSync(path.join(__dirname, 'test-planner-stability.cjs'), 'utf8');
   const settings = source.slice(source.indexOf('const restoreLayout ='), source.indexOf('const diagnostics ='));
@@ -536,32 +662,33 @@ test('planner recovery variants select real actions and retain restoration check
   async function recover(actions, layoutMode, secondLoss = false) {
     const env = {PLANNER_STABILITY_RESTORE_LAYOUT:layoutMode};
     if (actions !== undefined) env.PLANNER_STABILITY_RECOVERY_ACTIONS=actions;
-    const trace = [], record = {}, checks = [], stats = {contextLosses:0,shaderErrors:[]};
+    const trace = [], record = {}, checks = [], stats = {contextLosses:0,retiredContextLosses:0,contexts:1,contextLossRequests:[],shaderErrors:[],errors:[]};
     const project = {floors:[{items:[{position_m:{x:2,z:1}}]}]};
-    const memory = {geometries:2077,textures:1};
+    const memory = {geometries:2077,textures:1}, orbit=[0,0,10];
     let lost=false, renderCount=1, viewport={width:1440,height:1000}, exported, resizedWhileLost=false;
     const beforeImmediateRestore=[];
     const recordRoundTrip=operation=>{if(resizedWhileLost&&layoutMode==='immediate')beforeImmediateRestore.push(operation);};
     const copy = value => JSON.parse(JSON.stringify(value));
     const current = () => copy({stats,preview:{renderCount,catalogItems:256,viewport},
-      scene:{memory,pixelRatio:1,buffer:[viewport.width,viewport.height]}});
+      scene:{memory,pixelRatio:1,buffer:[viewport.width,viewport.height],orbit}});
     const extension = {
-      loseContext() {lost=true;stats.contextLosses++;trace.push('lose');},
-      restoreContext() {assert(lost);lost=false;resizedWhileLost=false;if(secondLoss)stats.contextLosses++;trace.push('restore');},
+      loseContext() {lost=true;stats.contextLosses++;stats.contextLossRequests.push({contextId:1,attached:true,retirement:false,matched:true});trace.push('lose');},
+      restoreContext() {assert(lost);lost=false;resizedWhileLost=false;stats.contextLosses++;stats.retiredContextLosses=1;stats.contexts=2;stats.contextLossRequests.push({contextId:1,attached:false,retirement:true,matched:true});if(secondLoss)stats.contextLosses++;trace.push('restore');},
     };
     const window = {__plannerStats:stats,planner:{getPreviewMetadata:()=>current().preview},
-      __plannerScene:()=>({layout:viewport})};
+      __plannerScene:()=>({layout:viewport}),
+      __plannerContextStates:()=>[{id:1,attached:false,lost:true,restores:1},{id:2,attached:true,lost:false,restores:0}]};
     const document = {querySelector: selector => selector === '.canvas-shell'
       ? {getBoundingClientRect:()=>viewport}
       : {getContext:()=>({getExtension:()=>extension})}};
     const page = {
-      locator: selector => selector,
+      locator: selector => selector==='#preview-canvas'?{count:async()=>1,scrollIntoViewIfNeeded:async()=>{},boundingBox:async()=>({x:0,y:0,width:800,height:600})}:selector,
       evaluate: async (callback, argument) => {recordRoundTrip('evaluate');return callback(argument);},
       waitForFunction: async (callback, argument) => assert(callback(argument)),
       waitForEvent: async event => {assert.equal(event,'download');return {path:async ()=>'fixture-export.json'};},
       setViewportSize: async size => {assert(lost);trace.push('resize');viewport=copy(size);resizedWhileLost=true;},
     };
-    const input = {tap:async selector => {
+    const input = {drag:async()=>{orbit[0]+=.2;renderCount++;},tap:async selector => {
       if(selector==='#preview-tab'&&!lost)renderCount++;
       if(selector==='#export-project'){assert(lost);trace.push('export');exported=copy(project);}
     }};
@@ -598,10 +725,10 @@ test('planner recovery variants select real actions and retain restoration check
         'The checkpoint must precede the restored draw');
       assert.equal(project.floors[0].items[0].position_m.x,edit?1.5:2);
       assert.deepEqual(project,exported,'Each selected sequence preserves its own exported project');
-      assert(checks.includes('Restoration must not lose the graphics context again'));
+      assert(checks.includes('Restoration must have only the deliberate loss and detached-context retirement'));
       assert(checks.includes('Restored preview shaders link successfully'));
     }
-    await assert.rejects(recover(actions,'immediate',true), /must not lose the graphics context again/);
+    await assert.rejects(recover(actions,'immediate',true), /must have only the deliberate loss and detached-context retirement/);
   }
 });
 
@@ -689,42 +816,15 @@ test('planner operation tracing is opt-in and primary acceptance makes no layout
   }
 });
 
-test('the first restored drawing buffer uses actual layout before ResizeObserver delivery', () => {
-  const source=fs.readFileSync(path.join(__dirname,'../planner/editor.js'),'utf8');
-  const section=(start,end)=>source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start)));
+test('the first replacement drawing buffer uses actual layout before ResizeObserver delivery', () => {
   for(const view of ['plan','preview']) {
-    const handlers={},allocations=[],scheduled=[],rect={width:774,height:724};
-    let layoutReads=0;
-    const context=vm.createContext({
-      previewCanvas:{addEventListener:(name,callback)=>{handlers[name]=callback;}},
-      previewSun:{shadow:{needsUpdate:false}},
-      document:{hidden:false,querySelector:()=>({getBoundingClientRect:()=>{layoutReads++;return rect;}})},
-      planCanvas:{},ctx:{setTransform(){}},devicePixelRatio:2,
-      renderer:{setDrawingBufferSize:(...args)=>allocations.push(args),render(){}},
-      camera:{position:{set(){}},lookAt(){},updateProjectionMatrix(){}},scene:{},
-      previewFloors:()=>[],fitPreview(){},fitPlan(){},updateZoom(){},
-      cancelCanvasRender(){},$:()=>({hidden:false}),translatedText(){},
-      onSchedule:layout=>scheduled.push(JSON.parse(JSON.stringify(layout))),
-    });
-    vm.runInContext(`
-      let previewLost=true,previewSize='old',previewPixels=2000000,previewUnavailable=false;
-      let size={width:934,height:824},canvasSuspended=false,firstResize=false,planSize='old';
-      let map={x:0,y:0},view=${JSON.stringify(view)},previewMetadata={};
-      const orbit={yaw:0,pitch:1,radius:100,baseRadius:100,target:{x:0,y:0,z:0}};
-      function requestCanvasRender(){onSchedule(size);}
-      ${section('function canvasPixelRatio(', 'let startupMessage')}
-      ${section('function resizeCanvases(', 'const canvasObserver')}
-      ${section('function drawPreview()', 'function renderPreview()')}
-      ${section("previewCanvas.addEventListener('webglcontextlost'", '// Project actions and keyboard navigation.')}
-    `,context);
-    handlers.webglcontextrestored();
-    assert.equal(layoutReads,1,'Restoration reads the current shell before any observer callback');
-    assert.equal(allocations.length,0,'Restoration schedules drawing instead of drawing during the context event');
-    assert(scheduled.length>0);
-    assert(scheduled.every(layout=>layout.width===774&&layout.height===724),'All restored frame requests see refreshed layout');
-    vm.runInContext("view='preview';drawPreview();",context);
-    assert.equal(allocations.length,1);
-    assert.deepEqual(allocations[0],[774,724,Math.sqrt(2000000/(774*724))]);
-    assert.equal(context.previewSun.shadow.needsUpdate,true);
+    const h=freshPreviewHarness(view);h.lose();h.restore();
+    assert.equal(h.layoutReads,1);
+    assert.equal(h.allocations.length,0,'The context event only schedules rendering');
+    assert(h.scheduled.length>0);
+    assert(h.scheduled.every(layout=>layout.width===774&&layout.height===724));
+    h.flush();
+    assert.equal(h.allocations.length,1);
+    assert.deepEqual(h.allocations[0],[774,724,Math.sqrt(2000000/(774*724))]);
   }
 });
