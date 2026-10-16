@@ -180,7 +180,9 @@ homeView = (() => {
     if (overlayGroup) overlayGroup.visible = value;
     if(!value)for(const point of points)clearTrail(point);
     if (!value) showMode(false);
-    refreshControls(); requestAnimationFrame(() => window.resizeModel?.());
+    refreshControls();
+    const before=window.floorplan?.renderCount;
+    requestAnimationFrame(()=>{window.resizeModel?.();if(window.floorplan?.renderCount===before)window.requestModelRender?.()});
   }
 
   function rebuildControls() {

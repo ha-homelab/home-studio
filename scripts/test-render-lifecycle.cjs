@@ -341,3 +341,90 @@ const homeSource=fs.readFileSync(path.join(__dirname,'../home-view.js'),'utf8');
 assert(homeSource.includes('panY+=(e.clientY-start.lastY)*(camera.top-camera.bottom)/rect.height;window.requestModelRender?.(true)'),
   'Home pointer movement opts into the same scheduler after updating the camera');
 console.log('PASS: first motion RAF, fixed held-drag deadlines, latest camera, full-quality release and lifecycle cancellation');
+
+// Execute the actual mode switch, resize cache, cutaway handler and scheduler.
+// Editor can draw directly before its queued resize runs, leaving the cache at
+// the old Home dimensions when Home is selected again.
+const modeStart=homeSource.indexOf('  function setActive(value) {');
+const modeEnd=homeSource.indexOf('\n  function rebuildControls()',modeStart);
+assert(modeStart>=0&&modeEnd>modeStart,'Production Home mode switch is present');
+const modeSource=homeSource.slice(modeStart,modeEnd);
+function modeScheduler(legacy=false) {
+  const q=motionScheduler(false,false), c=q.c, elements=new Map(), modes=[];
+  let width=800;
+  const element=id=>{
+    if(!elements.has(id))elements.set(id,{checked:true,hidden:false,prepend(){},
+      getBoundingClientRect:()=>({width,height:600})});
+    return elements.get(id);
+  };
+  Object.assign(c,{active:true,previewTV(){},lowerFloorContext:null,showLowerFloor:false,selected:null,
+    THREE:{Color:class {constructor(value){this.value=value;}}},hemisphere:{},sun:{},ground:{},grid:{},
+    clipping:{constant:2.1},roomLighting:null,root:{children:[]},objectGroup:{},overlayGroup:null,points:[],
+    clearTrail(){},showMode(){},refreshControls(){},updateFixtureShadows(){},updateHeightCaption(){},$:element});
+  c.document.body={classList:{toggle(){}}};
+  c.window.floorplan={get renderCount(){return c.renderCount;}};
+  c.homeView={get active(){return c.active;},render(){c.drawScene(c.camera);c.renderCount++;}};
+  const draw=c.drawScene;
+  c.drawScene=camera=>{modes.push(c.active?'home':'editor');draw(camera);};
+  const oldTail='refreshControls(); requestAnimationFrame(() => window.resizeModel?.());';
+  const tailStart=modeSource.indexOf('    refreshControls();');
+  assert(tailStart>=0);
+  vm.runInContext(legacy?modeSource.slice(0,tailStart)+'    '+oldTail+'\n  }':modeSource,c);
+  const cutaway=lines.find(line=>line.startsWith("$('cutaway').onchange="));
+  assert(cutaway);
+  vm.runInContext(cutaway.slice(0,cutaway.indexOf(';for(const k'))+';',c);
+  c.window.resizeModel();
+  assert.equal(modes.at(-1),'home','Initial resize populates the Home size cache');
+  return Object.assign(q,{modes,element,setWidth(value){width=value;},
+    // A cancelled callback must not execute later in the same browser frame.
+    flush(){for(const [id,fn] of [...q.raf])if(q.raf.delete(id))fn();},
+    cutaway(value){element('cutaway').checked=value;element('cutaway').onchange();}});
+}
+function rapidModeReturn(q) {
+  q.c.setActive(false);
+  q.cutaway(true);q.cutaway(false);
+  assert.equal(q.modes.at(-1),'editor');
+  const before=q.c.renderCount;
+  q.c.setActive(true);
+  q.flush();q.flush();
+  return q.c.renderCount-before;
+}
+const oldMode=modeScheduler(true);
+assert.equal(rapidModeReturn(oldMode),0,'Negative control reproduces the old Home no-redraw race');
+assert.equal(oldMode.modes.at(-1),'editor');
+const fastMode=modeScheduler();
+assert.equal(rapidModeReturn(fastMode),1,'Rapid Editor cutaway/full then Home paints Home exactly once');
+assert.equal(fastMode.modes.at(-1),'home');assert.equal(fastMode.raf.size,0);
+// A mode-key resize, a real size change and an earlier ResizeObserver repaint
+// all satisfy the request without creating a duplicate frame.
+for(const change of ['mode','size','observer','explicit','stable','repeated']) {
+  const q=modeScheduler(), before=q.c.renderCount;
+  q.c.setActive(change==='mode'?false:true);
+  if(change==='size'||change==='observer')q.setWidth(720);
+  if(change==='observer')q.c.window.resizeModel();
+  if(change==='explicit')q.c.window.renderModel();
+  if(change==='repeated'){q.c.setActive(true);q.c.setActive(true);}
+  q.flush();q.flush();q.flush();
+  assert.equal(q.c.renderCount,before+1,change+' paints once across resize and RAF coalescing');
+  assert.equal(q.raf.size,0,change+' leaves no idle animation loop');
+}
+for(const transition of ['visibility','context','bfcache','dispose']) {
+  const q=modeScheduler(), before=q.c.renderCount;
+  q.c.setActive(false);q.c.setActive(true);
+  if(transition==='visibility'){q.c.document.hidden=true;q.handlers.visibilitychange();}
+  else if(transition==='context')q.handlers.webglcontextlost({preventDefault(){}});
+  else q.handlers.pagehide({persisted:transition==='bfcache'});
+  q.flush();q.flush();
+  assert.equal(q.c.renderCount,before,transition+' suppresses mode callbacks while inactive');
+  assert.equal(q.raf.size,0);
+  if(transition==='visibility'){q.c.document.hidden=false;q.handlers.visibilitychange();}
+  else if(transition==='context')q.handlers.webglcontextrestored();
+  else if(transition==='bfcache')q.handlers.pageshow({persisted:true});
+  q.flush();q.flush();
+  assert.equal(q.c.renderCount,before+(transition==='dispose'?0:1),transition+' preserves lifecycle recovery');
+}
+const restoredMode=modeScheduler();
+restoredMode.handlers.webglcontextlost({preventDefault(){}});restoredMode.handlers.webglcontextrestored();
+restoredMode.flush();
+assert.equal(rapidModeReturn(restoredMode),1,'The same rapid transition repaints after real loss/restore handlers');
+console.log('PASS: actual Home mode/resize race, old-code negative control, coalesced repaint and lifecycle guards');

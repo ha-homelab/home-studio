@@ -2,6 +2,12 @@
 
 ## [0.6.4] - Development line
 
+- Repaint Home and Editor mode changes even when a queued resize finds the
+  previous dimensions already cached. Reuse the pending frame scheduler and
+  skip the extra request if a resize or intervening draw has already painted
+  the new mode, including rapid cutaway/full-height/Home transitions after
+  context recovery. Rendering quality and browser acceptance limits are unchanged.
+
 - Release viewer geometry GPU associations while a WebGL context is lost,
   including hidden objects and inactive rounded-wall variants. Preserve CPU
   geometry for upload after restoration. Release owned shadow targets and TV
