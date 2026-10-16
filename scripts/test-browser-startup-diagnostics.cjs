@@ -18,9 +18,10 @@ test('startup diagnostics default to no injection, handler or source mutation', 
 
 function simulatedBrowser(referrer = 'http://127.0.0.1:12345/', block) {
   const sent = [], calls = [];
-  const gl = {VERSION:1, RENDERER:2, LINK_STATUS:3, drawingBufferWidth:500, drawingBufferHeight:500,
+  const gl = {VERSION:1, RENDERER:2, LINK_STATUS:3, VERTEX_SHADER:5, FRAGMENT_SHADER:6, drawingBufferWidth:500, drawingBufferHeight:500,
     getExtension:()=>({UNMASKED_RENDERER_WEBGL:4}),
     getParameter:key=>key === 1 ? 'WebGL 2.0' : 'Apple Software Renderer',
+    createShader(type){return {type};}, shaderSource(){}, attachShader(){},
     compileShader(){calls.push('compile');if(block === 'compile')throw Error('blocked compile');},
     linkProgram(){calls.push('link');if(block === 'link')throw Error('blocked link');},
     getProgramParameter(){calls.push('status');return true;},
@@ -34,26 +35,77 @@ function simulatedBrowser(referrer = 'http://127.0.0.1:12345/', block) {
   return {context,Canvas,gl,sent,calls};
 }
 
-test('opaque-frame probe keeps original calls and emits at most ten safe loopback checkpoints', () => {
+function makeProgram(gl, index) {
+  const program = {};
+  for (const type of [gl.VERTEX_SHADER,gl.FRAGMENT_SHADER]) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader,`private-source-${index}-${type}`);
+    gl.compileShader(shader);
+    gl.attachShader(program,shader);
+  }
+  return program;
+}
+
+test('opaque-frame probe records eight distinct programs within forty safe checkpoints', () => {
   const {context,Canvas,gl,sent,calls} = simulatedBrowser();
-  const canvas = new Canvas();
-  assert.equal(canvas.getContext('webgl2'),gl);
+  assert.equal(new Canvas().getContext('webgl2'),gl);
   context.window.__homeStudioStartupProfile({pixels:250000,pointShadows:2,pointShadowSize:128,sunShadowSize:512});
-  gl.compileShader({});gl.linkProgram({});assert.equal(gl.getProgramParameter({},gl.LINK_STATUS),true);
-  gl.compileShader({});gl.linkProgram({});gl.getProgramParameter({},gl.LINK_STATUS);
+  for (let index=1;index<=9;index++) {
+    const program=makeProgram(gl,index);
+    gl.linkProgram(program);
+    assert.equal(gl.getProgramParameter(program,gl.LINK_STATUS),true);
+    // Repeated queries/relinks must neither consume the budget nor disappear
+    // from the application's actual GL calls.
+    gl.linkProgram(program);gl.getProgramParameter(program,gl.LINK_STATUS);
+  }
   new Canvas().getContext('webgl2');
   context.window.__homeStudioStartupProfile({pixels:2000000});
-  assert.equal(sent.length,10);
-  assert.deepEqual(sent.map(item=>item.value.event),['context-before','context-after','gpu','profile',
-    'compile-before','compile-after','link-before','link-after','link-status-before','link-status-after']);
-  assert.deepEqual(calls,['context','compile','link','status','compile','link','status','context']);
+  assert.equal(sent.length,40);
+  assert.deepEqual(sent.slice(0,8).map(item=>item.value.event),['context-before','context-after','gpu','profile',
+    'compile-before','compile-after','compile-before','compile-after']);
+  assert.deepEqual(sent.filter(item=>item.value.event==='link-before').map(item=>item.value.program),[1,2,3,4,5,6,7,8]);
+  assert.equal(calls.filter(call=>call==='link').length,18);
+  assert.equal(calls.filter(call=>call==='status').length,18);
+  assert.equal(calls.filter(call=>call==='compile').length,18);
   for (const item of sent) {
     assert.equal(item.url,'http://127.0.0.1:12345/__home-studio-startup');
     assert.equal(item.options.mode,'no-cors');
     validateCheckpoint(item.value);
   }
+  const first = sent.find(item=>item.value.event==='link-before').value;
+  assert.deepEqual(first.shaders.map(shader=>shader.type),['vertex','fragment']);
+  assert.notEqual(first.shaders[0].fingerprint,first.shaders[1].fingerprint);
+  assert(!JSON.stringify(sent).includes('private-source'));
   assert.equal(sent[3].value.profile.pixels,250000);
   assert.equal(sent[2].value.gpu.renderer,'Apple Software Renderer');
+});
+
+test('a later blocked lighting link retains program identity and source fingerprints', () => {
+  const {Canvas,gl,sent} = simulatedBrowser(undefined,'link');
+  new Canvas().getContext('webgl2');
+  const first=makeProgram(gl,1);
+  assert.throws(()=>gl.linkProgram(first),/blocked link/);
+  const second=makeProgram(gl,2);
+  assert.throws(()=>gl.linkProgram(second),/blocked link/);
+  assert.equal(sent.at(-1).value.event,'link-before');
+  assert.equal(sent.at(-1).value.program,2);
+  assert.equal(sent.at(-1).value.shaders.length,2);
+  assert(!JSON.stringify(sent).includes('private-source'));
+});
+
+test('fingerprints hash bounded prefixes and schema rejects full sources or malformed metadata', () => {
+  const {Canvas,gl,sent} = simulatedBrowser();new Canvas().getContext('webgl2');
+  const shader=gl.createShader(gl.FRAGMENT_SHADER), program={};
+  gl.shaderSource(shader,'a'.repeat(100000));gl.attachShader(program,shader);gl.linkProgram(program);
+  const value=sent.at(-1).value, metadata=value.shaders[0];
+  assert.equal(metadata.length,100000);assert.equal(metadata.hashedLength,65536);
+  assert.match(metadata.fingerprint,/^fnv1a32:[0-9a-f]{8}$/);
+  validateCheckpoint(value);
+  for (const change of [{source:'private'},{length:-1},{hashedLength:100000},{fingerprint:'private'}, {type:'program'}]) {
+    assert.throws(()=>validateCheckpoint({...value,shaders:[{...metadata,...change}]}));
+  }
+  assert.throws(()=>validateCheckpoint({...value,program:9}));
+  assert.throws(()=>validateCheckpoint({...value,shaders:[metadata,metadata,metadata]}));
 });
 
 test('a blocked first GL call retains its before checkpoint and preserves the exception', () => {
@@ -101,10 +153,10 @@ test('loopback receiver persists bounded whitelisted data, rejecting paths, priv
     assert.equal((await post(value,'/other')).status,404);
     assert.equal((await post(value)).status,204);
     assert.equal((await post(value)).status,204);
-    for(let sequence=2;sequence<=10;sequence++)assert.equal((await post({sequence,event:'context-before',time:sequence})).status,204);
-    assert.equal((await post({sequence:11,event:'context-before',time:11})).status,400);
+    for(let sequence=2;sequence<=40;sequence++)assert.equal((await post({sequence,event:'context-before',time:sequence})).status,204);
+    assert.equal((await post({sequence:41,event:'context-before',time:41})).status,400);
     const records=fs.readFileSync(filename,'utf8').trim().split('\n').map(JSON.parse);
-    assert.equal(records.length,10);
+    assert.equal(records.length,40);
     assert.deepEqual(records[0],{sourceHash,...value});
     assert.deepEqual(fs.readdirSync(directory),['startup.jsonl']);
     assert.equal(receiver.checkpointSource('a;const profile = detect();b;','const profile = detect();','profile'),

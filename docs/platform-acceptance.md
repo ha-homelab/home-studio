@@ -160,9 +160,13 @@ a crashed or unresponsive browser may not produce one. Job logs remain the
 evidence for dependency failures and runner-level timeouts.
 
 Legacy native Gecko rows on macOS enable `NATIVE_STARTUP_DIAGNOSTICS=1`.
-A separate loopback fixture process saves at most ten startup checkpoints,
-including the reported renderer, selected rendering profile and initial shader
-operations, even if the browser's main thread later stalls. Only these served
+A separate loopback fixture process saves at most forty startup checkpoints,
+including the reported renderer, selected rendering profile, first two shader
+compilations and first eight program links/status queries, even if the browser's
+main thread later stalls. Program indices distinguish an initial shadow shader
+from later lighting programs. Shader metadata includes type, source length and
+a nonsecurity FNV-1a fingerprint of at most the first 65,536 UTF-16 code units;
+the hashed length is explicit, and shader source text is never retained or sent. Only these served
 diagnostic fixtures permit requests to their exact loopback origin; the shipped
 viewer and ordinary test fixtures retain their original connection policy.
 The mode is recorded in each receipt and defaults to off for local runs.
