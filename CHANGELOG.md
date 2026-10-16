@@ -12,6 +12,8 @@
 - Fix WebKit preview recovery by releasing geometry and shadow resources while
   the graphics context is lost, before rebuilding them. Preserve edits and JSON
   export through context loss without stale GPU callbacks or missing furniture.
+  Refresh the actual canvas layout before allocating the first restored drawing
+  buffer, including when a resize notification is still pending.
 - Reduce room-lighting shader compilation and fragment work while preserving
   light order, every illuminated fixture and nonzero light through doorways.
 - Reuse planner outlines and selection controls, and avoid redrawing unchanged
