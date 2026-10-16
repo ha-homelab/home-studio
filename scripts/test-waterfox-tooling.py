@@ -560,9 +560,9 @@ class MaskedCapacityTests(unittest.TestCase):
                  'drawingBuffer':[500,500] if reduced else [1400,1000],
                  'materialTypes':['MeshLambertMaterial' if reduced else 'MeshStandardMaterial','MeshBasicMaterial'],
                  'shadowType':0 if reduced else 2, 'pointLights':18,
-                 'shadowMaps':[['DirectionalLight',size,size]] + [['PointLight',128 if reduced else 512,128 if reduced else 512]] * (2 if reduced else 8),
+                 'shadowMaps':[['DirectionalLight',size,size]] + [['PointLight',128 if reduced else 256,128 if reduced else 256]] * (2 if reduced else 8),
                  'shadowMap':[size,size]}
-        gpu = {'unmaskedRenderer':'Apple M1, or similar','textureUnits':16}
+        gpu = {'renderer':'Apple M1, or similar'} if planner else {'renderer':'WebKit WebGL', 'unmaskedRenderer':'Apple M1, or similar','textureUnits':16,'maxTextureSize':4096}
         snapshot = {'scene':scene, **({'stats':{'gpu':gpu}} if planner else {'gpu':gpu})}
         return {'preferences':{'webgl.sanitize-unmasked-renderer':True}, 'userAgent':'Mozilla/5.0 Gecko/20100101 Firefox/153.0',
                 'suite':'planner-256' if planner else 'viewer-6', 'samples':[{'initial':snapshot}]}
@@ -608,6 +608,42 @@ class MaskedCapacityTests(unittest.TestCase):
         record = self.record()
         record['userAgent'] = 'AppleWebKit/537.36 like Gecko'
         with self.assertRaisesRegex(AssertionError, 'actual Gecko'):
+            acceptance.assert_masked_capacity(record)
+
+    def test_planner_and_viewer_renderer_schemas_remain_exact(self):
+        for planner in (False, True):
+            for unmasked in (None, '', 'Apple M1, or similar'):
+                record = self.record(planner=planner)
+                snapshot = record['samples'][0]['initial']
+                gpu = snapshot.get('stats', snapshot)['gpu']
+                gpu.update(renderer='Apple M1, or similar', unmaskedRenderer=unmasked)
+                acceptance.assert_masked_capacity(record)
+            for renderer, unmasked in [('Other GPU', None), ('Apple M1, or similar', 'Other GPU'), ('Apple Software Renderer', '')]:
+                gpu.update(renderer=renderer, unmaskedRenderer=unmasked)
+                with self.assertRaisesRegex(AssertionError, 'opaque Apple'):
+                    acceptance.assert_masked_capacity(record)
+
+    def test_point_shadow_faces_obey_texture_and_aggregate_atlas_budgets(self):
+        for count, limit, ceiling, expected in [
+            (0,4096,512,512), (2,4096,128,128), (2,4096,512,512), (8,4096,512,256),
+            (8,1024,512,256), (8,512,512,128), (2,256,128,64), (0,64,512,16),
+            (8,1000,512,128), (8,16384,512,256)]:
+            with self.subTest(count=count, limit=limit, ceiling=ceiling):
+                self.assertEqual(acceptance.expected_point_shadow_face(count,limit,ceiling),expected)
+        for count in (0,2,8):
+            record = self.record(reduced=False)
+            scene = record['samples'][0]['initial']['scene']
+            scene['pointLights'] = count
+            face = 256 if count == 8 else 512
+            scene['shadowMaps'] = [['DirectionalLight',2048,2048]] + [['PointLight',face,face]] * count
+            acceptance.assert_masked_capacity(record)
+            if count:
+                scene['shadowMaps'][-1] = ['PointLight',face//2,face//2]
+                with self.assertRaisesRegex(AssertionError, 'Actual point shadows'):
+                    acceptance.assert_masked_capacity(record)
+        record = self.record(reduced=False)
+        del record['samples'][0]['initial']['gpu']['maxTextureSize']
+        with self.assertRaisesRegex(AssertionError, 'actual texture size limit'):
             acceptance.assert_masked_capacity(record)
 
     def test_unmasked_rows_keep_their_existing_acceptance_path(self):

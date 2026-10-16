@@ -472,6 +472,16 @@ def browser_preferences(port):
     return prefs
 
 
+def expected_point_shadow_face(count, max_texture_size, ceiling):
+    """Largest power of two satisfying face, 4x2 atlas and total-pixel limits."""
+    require(type(count) is int and count >= 0, 'A nonnegative point shadow count is required')
+    require(type(max_texture_size) is int and max_texture_size >= 4, 'The actual texture size limit is required')
+    require(type(ceiling) is int and ceiling >= 1, 'A positive profile shadow ceiling is required')
+    aggregate = math.isqrt((8 * 1024 * 1024) // (max(1, count) * 8))
+    bound = max(1, min(ceiling, max_texture_size // 4, aggregate))
+    return 1 << (bound.bit_length() - 1)
+
+
 def assert_masked_capacity(record):
     """Derive expectations from raw identity and probe evidence, never selected profile flags."""
     if record['preferences'].get('webgl.sanitize-unmasked-renderer') is not True:
@@ -486,7 +496,7 @@ def assert_masked_capacity(record):
                 continue
             snapshot = sample[key]
             gpu = snapshot.get('stats', snapshot)['gpu']
-            require(gpu.get('unmaskedRenderer') == 'Apple M1, or similar', 'The masked lane must exercise the exact opaque Apple label')
+            require((gpu.get('unmaskedRenderer') or gpu.get('renderer')) == 'Apple M1, or similar', 'The masked lane must exercise the exact opaque Apple label')
             scene = snapshot['scene']
             probe = scene.get('rasterProbe')
             require(isinstance(probe, dict) and set(probe) == {'status','samplesMs','pixels','bestMs','totalMs'}, 'Masked acceptance requires complete independent raster evidence')
@@ -518,7 +528,7 @@ def assert_masked_capacity(record):
                 require(sun and all(entry[1:] == [shadow_size, shadow_size] for entry in sun), 'Actual sun shadows must match measured capacity')
                 count = max(0, min(scene['pointLights'], 2 if reduced else 8, gpu['textureUnits'] - 4))
                 require(len(points) == count, 'Actual point shadow count must match measured capacity and samplers')
-                face = 128 if reduced else 512
+                face = expected_point_shadow_face(count, gpu.get('maxTextureSize'), 128 if reduced else 512)
                 require(all(entry[1:] == [face, face] for entry in points), 'Actual point shadows must match measured capacity')
 
 
