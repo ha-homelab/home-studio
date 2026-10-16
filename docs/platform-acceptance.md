@@ -303,8 +303,17 @@ editor, followed by the existing two-animation-frame completion wait. These
 measurements add no input actions or rendered frames; the same total duration
 continues to determine whether the interaction passes.
 
-The software viewer coalesces subsequent camera-motion frames within a fixed
-64 ms deadline after its first successful motion frame. Lifecycle regressions
+The software viewer paints the first moved-pointer frame immediately. Apple
+diffuse rendering measures the elapsed time of each successful motion draw with
+two monotonic clock reads, then bounds the next motion delay to 64–250 ms.
+That deadline is fixed when scheduled; later input does not postpone it. The
+measurement belongs to the current gesture and is discarded with its pointer
+record on release, cancellation, hiding or context loss. Other software keeps
+the existing 64 ms delay. No extra GL calls or GPU resources are added, and the
+62,500-pixel motion and 125,000-pixel Apple diffuse resting budgets are unchanged.
+This bounded pacing may leave time for queued input between expensive software
+draws; it is not a measured speedup or an exception to any acceptance deadline.
+Lifecycle regressions
 check that held drags still repaint, later input cannot postpone the deadline,
 and release, live-state updates, resize, suspension and context loss leave no
 stale delayed work. Browser acceptance still requires real motion rendering

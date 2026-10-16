@@ -213,12 +213,13 @@ console.log('PASS: input coalescing, bounded buffers, idle/hidden/lost suspensio
 // against a clock whose timer and animation-frame queues are independent.
 function motionScheduler(diffuse = true, reduced = diffuse) {
   const raf = new Map(), timers = new Map(), handlers = {}, painted = [], errors = [], paths = [];
-  let time = 0, id = 0, width = 800, rejectDraw = false;
+  let time = 0, id = 0, width = 800, rejectDraw = false, drawDuration = 0, clockReads = 0, afterDraw = null;
   const c = vm.createContext({
     initialViewReady:true, renderCount:0, renderProfile:{diffuseLighting:diffuse,pixels:reduced?(diffuse?125000:250000):2000000},
     devicePixelRatio:1, THREE:{}, scene:{}, camera:{position:0,updateProjectionMatrix(){}},
     document:{hidden:false,addEventListener:(type,fn)=>handlers[type]=fn},
     window:{addEventListener:(type,fn)=>handlers[type]=fn},
+    performance:{now(){clockReads++;return time;}},
     requestAnimationFrame(fn){raf.set(++id,fn);return id;},
     cancelAnimationFrame(key){raf.delete(key);},
     setTimeout(fn,delay){timers.set(++id,{fn,due:time+delay});return id;},
@@ -233,12 +234,13 @@ function motionScheduler(diffuse = true, reduced = diffuse) {
       if(rejectDraw){rejectDraw=false;throw Error('injected draw failure');}
       paths.push('copy');
       painted.push({time,position:camera.position,moving});
+      time+=drawDuration;const callback=afterDraw;afterDraw=null;callback?.();
     },dispose(){}};},
     renderer:{domElement:{addEventListener:(type,fn)=>handlers[type]=fn},
       getContext(){return {};},
       render(scene,camera){
         if(rejectDraw){rejectDraw=false;throw Error('injected draw failure');}
-        paths.push('direct');painted.push({time,position:camera.position,moving:false});
+        paths.push('direct');painted.push({time,position:camera.position,moving:false});time+=drawDuration;
       },
       setViewport(){throw Error('Motion scheduling must not resize the viewport');},
       setDrawingBufferSize(){},dispose(){},forceContextLoss(){}},
@@ -257,6 +259,7 @@ function motionScheduler(diffuse = true, reduced = diffuse) {
     flush(){const queue=[...raf.values()];raf.clear();queue.forEach(fn=>fn());},
     advance(ms){const end=time+ms;while(true){const next=[...timers].filter(([,v])=>v.due<=end).sort((a,b)=>a[1].due-b[1].due)[0];if(!next)break;time=next[1].due;timers.delete(next[0]);next[1].fn();}time=end;},
     hideStage(){width=0;},showStage(){width=800;},failNextDraw(){rejectDraw=true;},
+    duration(ms){drawDuration=ms;},clockReads:()=>clockReads,now:()=>time,afterNextDraw(callback){afterDraw=callback;},
   };
 }
 // Both software profiles share scheduling. Only the existing diffuse profile
@@ -348,6 +351,91 @@ const homeSource=fs.readFileSync(path.join(__dirname,'../home-view.js'),'utf8');
 assert(homeSource.includes('panY+=(e.clientY-start.lastY)*(camera.top-camera.bottom)/rect.height;window.requestModelRender?.(true)'),
   'Home pointer movement opts into the same scheduler after updating the camera');
 console.log('PASS: first motion RAF, fixed held-drag deadlines, latest camera, full-quality release and lifecycle cancellation');
+
+// Time only successful Apple diffuse motion draws. The clock advances inside
+// the real draw helper, while timers and RAF remain independently controlled.
+for(const [duration,expected] of [[0,64],[1,64],[63,64],[64,64],[125.5,125.5],[250,250],[1600,250]]) {
+  const q=motionScheduler();q.duration(duration);q.start();q.move(20);
+  assert.equal(q.timers.size,0,'First motion remains immediate even on a slow renderer');q.flush();
+  assert.equal(q.read('interactionPointer.frameDelay'),expected);
+  assert.equal(q.clockReads(),2,'Motion timing reads only the monotonic clock');
+  q.move(30);const timer=[...q.timers.values()][0];
+  assert.equal(timer.due,duration+expected,'Draw duration selects the next fixed deadline');
+  q.advance(expected/2);q.move(40);q.move(50);
+  assert.equal([...q.timers.values()][0],timer,'Later input cannot postpone an adaptive deadline');
+  q.advance(expected/2);q.flush();
+  assert.equal(q.painted.at(-1).position,50,'The scheduled draw uses the latest camera');
+  assert.equal(q.painted.at(-1).time,duration+expected);
+}
+for(const release of ['pointerup','pointercancel','lostpointercapture']) {
+  const q=motionScheduler();q.duration(1600);q.start();q.move(20);q.flush();q.move(30);
+  const completed=q.now();q.handlers[release]({pointerId:1});assert.equal(q.timers.size,0);
+  q.duration(0);q.flush();assert.deepEqual(q.painted.at(-1),{time:completed,position:30,moving:false});
+  assert.equal(q.clockReads(),2,'The full release draw does not become a motion timing sample');
+  q.advance(1000);q.flush();assert.equal(q.painted.length,2);
+}
+const fullFrame=motionScheduler();fullFrame.c.render();fullFrame.start();fullFrame.c.render();
+assert.equal(fullFrame.clockReads(),0,'Full frames and unmoved pointers do not sample the clock');
+const dense=motionScheduler();dense.duration(1600);dense.start();dense.move(20);dense.flush();
+for(let cycle=0;cycle<3;cycle++) {
+  const before=dense.now();dense.move(30+cycle*1000);
+  for(let ms=0;ms<250;ms++){dense.move(31+cycle*1000+ms);dense.advance(1);}
+  assert.equal(dense.raf.size,1);dense.flush();assert.equal(dense.painted.at(-1).time,before+250);
+  assert.equal(dense.painted.at(-1).position,280+cycle*1000);
+}
+assert.equal(dense.painted.length,4,'Continuous input cannot postpone any adaptive deadline');
+dense.advance(1000);dense.flush();assert.equal(dense.painted.length,4,'No autonomous render loop');
+const adapting=motionScheduler();adapting.duration(1800);adapting.start();adapting.move(20);adapting.flush();
+adapting.duration(100);adapting.move(30);adapting.advance(250);adapting.flush();
+assert.equal(adapting.read('interactionPointer.frameDelay'),100,'A later fast successful draw replaces the cold cost');
+adapting.move(40);assert.equal([...adapting.timers.values()][0].due,adapting.now()+100);
+adapting.handlers.pointerup({pointerId:1});adapting.flush();
+assert.equal(adapting.painted.at(-1).moving,false,'Adaptive pacing never defers the full release draw');
+adapting.start();adapting.move(20);assert.equal(adapting.timers.size,0,'New gestures do not inherit cold duration');
+adapting.duration(0);adapting.flush();assert.equal(adapting.read('interactionPointer.frameDelay'),64);
+for(const diffuse of [false,true]) for(const change of ['live','explicit','resize']) {
+  const q=motionScheduler(diffuse,true);q.duration(1600);q.start();q.move(20);q.flush();q.move(30);
+  if(change==='live')q.c.requestRender();else if(change==='explicit')q.c.render();else q.c.window.resizeModel();
+  assert.equal(q.timers.size,0,'Non-motion '+change+' bypasses even the maximum adaptive wait');q.flush();
+  assert.equal(q.painted.at(-1).position,30);
+}
+for(const transition of ['visibility','context','bfcache','dispose']) {
+  const q=motionScheduler();q.duration(1600);q.start();q.move(20);q.flush();q.move(30);
+  if(transition==='visibility'){q.c.document.hidden=true;q.handlers.visibilitychange();}
+  else if(transition==='context')q.handlers.webglcontextlost({preventDefault(){}});
+  else q.handlers.pagehide({persisted:transition==='bfcache'});
+  assert.equal(q.timers.size,0);assert.equal(q.read('interactionPointer'),null);
+  if(transition==='visibility'){q.c.document.hidden=false;q.handlers.visibilitychange();}
+  else if(transition==='context')q.handlers.webglcontextrestored();
+  else if(transition==='bfcache')q.handlers.pageshow({persisted:true});
+  q.flush();q.advance(1000);assert.equal(q.timers.size,0);
+  if(transition!=='dispose') {
+    q.duration(0);q.start();q.move(20);assert.equal(q.timers.size,0);q.flush();
+    assert.equal(q.read('interactionPointer.frameDelay'),64,'Resumed gestures cannot inherit stale duration');
+  }
+}
+const noSuccess=motionScheduler();noSuccess.duration(1600);noSuccess.start();noSuccess.failNextDraw();noSuccess.move(20);noSuccess.flush();
+assert.equal(noSuccess.read('interactionPointer.frameDelay'),undefined,'A failed draw records no duration');
+noSuccess.duration(100);noSuccess.move(30);noSuccess.flush();
+assert.equal(noSuccess.read('interactionPointer.frameDelay'),100);
+noSuccess.failNextDraw();noSuccess.move(40);noSuccess.advance(100);noSuccess.flush();
+assert.equal(noSuccess.read('interactionPointer.frameDelay'),100,'A later failure preserves the last successful measurement');
+const stale=motionScheduler();stale.duration(1600);stale.start();stale.move(20);
+stale.afterNextDraw(()=>{stale.handlers.pointerup({pointerId:1});stale.start();});stale.flush();
+assert.equal(stale.read('interactionPointer.frameDelay'),undefined,'A replaced pointer cannot receive the old draw duration');
+assert.notEqual(stale.read('interactionPointer.painted'),true);
+for(const [diffuse,reduced] of [[false,true],[false,false]]) {
+  const q=motionScheduler(diffuse,reduced);q.duration(1600);q.start();q.move(20);q.flush();q.move(30);
+  assert.equal(q.clockReads(),0,'Other renderer profiles do not sample motion duration');
+  if(reduced)assert.equal([...q.timers.values()][0].due,q.now()+64,'Other software keeps its fixed64ms behavior');
+  else {assert.equal(q.timers.size,0);assert.equal(q.raf.size,1);}
+}
+for(const elapsed of [NaN,Infinity,-10]) {
+  const q=motionScheduler();let calls=0;q.c.performance.now=()=>calls++?elapsed:0;
+  q.start();q.move(20);q.flush();assert.equal(q.read('interactionPointer.frameDelay'),64,'Invalid/backward clocks cannot create unbounded delays');
+}
+console.log('PASS: per-gesture Apple diffuse adaptive64–250ms pacing, successful-draw timing, fixed deadlines and unchanged bypasses');
+
 
 // Execute the actual mode switch, resize cache, cutaway handler and scheduler.
 // Editor can draw directly before its queued resize runs, leaving the cache at

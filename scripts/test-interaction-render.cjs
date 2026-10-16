@@ -86,7 +86,7 @@ lifecycleOrder.length=0;lifecycleHandlers.pagehide({persisted:false});assert.equ
 const hooks={}, history=[];
 let created=0;
 const c={homeView:null,renderProfile:{diffuseLighting:true},renderSuspended:false,renderLost:false,renderCount:0,
- interactionRenderer:null,interactionPointer:{moved:true},scene:{},THREE:{},document:{hidden:false},
+ interactionRenderer:null,interactionPointer:{moved:true},scene:{},THREE:{},document:{hidden:false},performance:{now:()=>0},
  wallSheenMotion:{beforeRender(){},afterRender(){}},cancelRender(){},invalidateShadows(){},
  requestRender(){history.push('request');},resize(){},observer:{disconnect(){}},releaseStaticGlassPasses(){},disposeStaticGlassPasses(){},releaseViewerGeometryGPU(){},releaseViewerTextureGPU(){},
  renderer:{domElement:{addEventListener:(key,fn)=>hooks[key]=fn},dispose(){},forceContextLoss(){}},

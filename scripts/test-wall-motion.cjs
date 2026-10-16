@@ -111,7 +111,7 @@ const calls = [];
 const context = vm.createContext({
   scene: {},
   renderProfile: {diffuseLighting: false},
-  interactionRenderer: null, interactionPointer: {moved: true}, THREE: {},
+  interactionRenderer: null, interactionPointer: {moved: true}, THREE: {}, performance: {now: () => 0},
   createInteractionRenderer: () => ({draw: () => {calls.push('copy draw'); throw Error('GPU copy unavailable');}}),
   renderSuspended: false, renderLost: false, document: {hidden: false},
   wallSheenMotion: {beforeRender: () => calls.push('before'), afterRender: () => calls.push('after')},

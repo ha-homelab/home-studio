@@ -239,9 +239,12 @@ acceptance counters and interaction time. Its resources are disposed on context
 loss and final page teardown; page-cache suspension retains the bounded texture.
 
 On identified software paths, the first moved-pointer frame is scheduled normally.
-Later camera-motion events share a fixed 64 ms deadline; each event updates the
-camera, but does not restart the timer. This prevents sequential input messages
-from forcing a costly draw for every intermediate position. Pointer release,
+Later camera-motion events share one deadline: 64 ms on other software paths,
+and the last successful motion draw duration clamped to 64–250 ms on Apple
+diffuse rendering. Each event updates the camera without restarting the timer.
+The duration is local to the gesture and requires no GL query or synchronization.
+This coalesces intermediate positions; a speed improvement remains unproven.
+Pointer release,
 cancellation, resize and live-state updates bypass the delay. Hidden pages and
 lost contexts cancel it. Software paths using physically based materials still
 draw directly at their full resolution, with the same antialiasing, materials
