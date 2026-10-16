@@ -64,6 +64,15 @@
   order and accounting for the new index array in the uniform budget. Share
   eligible static wall, floor and frame programs through a private wall-tint
   switch while preserving their actual blending, culling and depth state.
+- Share that diffuse program with eligible static window glass while retaining
+  both ordered alpha passes. Private facing uniforms and early fragment discard
+  replace hardware face culling, preserving visible faces, vertex normals and
+  shadow normal bias, including mirrored transforms. Keep the original geometry,
+  cutaway plane and depth state; release owned material programs at context loss
+  and include the extra uniform in the conservative capacity guard. Other
+  rendering profiles and unsupported glass retain their original path. Local
+  startup improved, but interaction results varied; full browser acceptance
+  remains required.
 - Reuse planner outlines and selection controls, and avoid redrawing unchanged
   snapped positions. Preserve exact furniture overlap, appearance, undo and drag
   cancellation. Bound software-renderer resolution without reducing sharp HTML

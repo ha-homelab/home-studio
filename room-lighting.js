@@ -64,6 +64,75 @@ function applySharedWallSheen(shader, enabled) {
       'if (homeWallSheenEnabled) totalEmissiveRadiance += wallSheen*0.16;');
 }
 
+// Two private materials retain the original glass passes while sharing the
+// DoubleSide program. Back-side normals must change in the vertex shader too:
+// shadow normal bias consumes transformedNormal before fragment lighting.
+const staticGlassFacing = new WeakMap(), staticGlassPasses = new Set();
+const bothFaces = {value:0};
+function applyStaticFacing(THREE, shader, facing) {
+  shader.uniforms.homeFaceMode = facing;
+  shader.vertexShader = 'uniform int homeFaceMode;\n' + shader.vertexShader.replace(
+    '#include <defaultnormal_vertex>', '#include <defaultnormal_vertex>\nif (homeFaceMode < 0) transformedNormal = -transformedNormal;');
+  shader.fragmentShader = 'uniform int homeFaceMode;\n' + shader.fragmentShader
+    .replace('void main() {', 'void main() {\nif ((homeFaceMode < 0 && gl_FrontFacing) || (homeFaceMode > 0 && !gl_FrontFacing)) discard;')
+    .replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace(
+      'normal *= faceDirection;', 'if (homeFaceMode == 0) normal *= faceDirection;'));
+}
+
+function createStaticGlassPasses(THREE, mesh, diffuse) {
+  const original = mesh.material, geometry = mesh.geometry;
+  if (!diffuse || mesh.userData.category !== 'windows' || !mesh.isMesh || mesh.isSkinnedMesh || mesh.isInstancedMesh || mesh.isBatchedMesh ||
+      mesh.parent || mesh.children.length || mesh.castShadow || mesh.boundingSphere !== undefined ||
+      !original?.isMeshLambertMaterial || !original.transparent || original.side !== THREE.DoubleSide || original.forceSinglePass !== false ||
+      original.blending !== THREE.NormalBlending || original.premultipliedAlpha || original.stencilWrite ||
+      original.flatShading || original.wireframe || original.vertexColors || original.alphaTest !== 0 || original.alphaHash || original.alphaToCoverage ||
+      (original.defines && Object.keys(original.defines).length) ||
+      original.clippingPlanes?.length !== 1 || original.clipShadows ||
+      Object.keys(original).some(key => (key === 'map' || key.endsWith('Map')) && original[key]) ||
+      original.onBeforeCompile !== THREE.Material.prototype.onBeforeCompile || original.onBeforeRender !== THREE.Material.prototype.onBeforeRender ||
+      original.customProgramCacheKey !== THREE.Material.prototype.customProgramCacheKey ||
+      ['onBeforeRender','onAfterRender','onBeforeShadow','onAfterShadow'].some(key => mesh[key] !== THREE.Object3D.prototype[key]) ||
+      !geometry?.isBufferGeometry || geometry.isInstancedBufferGeometry || geometry.groups.length ||
+      Object.keys(geometry.morphAttributes).length ||
+      Object.keys(geometry.attributes).some(key => !['position','normal'].includes(key)) ||
+      geometry.drawRange.start !== 0 || geometry.drawRange.count !== Infinity) return null;
+  const position = geometry.attributes.position, normal = geometry.attributes.normal, index = geometry.index;
+  if (!position || !normal || !position.count || position.itemSize !== 3 || normal.itemSize !== 3 || position.count !== normal.count ||
+      position.isInterleavedBufferAttribute || normal.isInterleavedBufferAttribute || position.normalized || normal.normalized ||
+      !(position.array instanceof Float32Array) || !(normal.array instanceof Float32Array) ||
+      !index || !index.count || index.itemSize !== 1 || index.normalized || index.count % 3 ||
+      ![Uint16Array,Uint32Array].some(type => index.array instanceof type) ||
+      !position.array.every(Number.isFinite) || !normal.array.every(Number.isFinite) || !index.array.every(value => value < position.count)) return null;
+  geometry.computeBoundingSphere();
+  if (!Number.isFinite(geometry.boundingSphere.radius) || !geometry.boundingSphere.center.toArray().every(Number.isFinite)) return null;
+  const materials = [-1,1].map(value => {
+    const material = original.clone(), facing = {value};
+    // Keep the same live cutaway plane, not Material.copy's cloned plane.
+    material.clippingPlanes = original.clippingPlanes;
+    material.forceSinglePass = true;
+    staticGlassFacing.set(material, facing);
+    material.onBeforeCompile = shader => applyStaticFacing(THREE, shader, facing);
+    material.customProgramCacheKey = () => 'home-glass-facing-v1';
+    return material;
+  });
+  // Allocate before any later factory mesh so equal-depth passes stay adjacent.
+  const front = new THREE.Mesh(geometry, materials[1]).copy(mesh, false);
+  front.material = materials[1]; front.userData = mesh.userData;
+  mesh.material = materials[0];
+  mesh.boundingSphere = geometry.boundingSphere.clone(); front.boundingSphere = geometry.boundingSphere.clone();
+  let disposed = false;
+  const passes = {front, releaseGPU() {if (!disposed) materials.forEach(material => material.dispose());}, dispose() {
+    if (disposed) return;
+    passes.releaseGPU(); disposed = true;
+    front.removeFromParent(); mesh.material = original; delete mesh.boundingSphere;
+    materials.forEach(material => staticGlassFacing.delete(material)); staticGlassPasses.delete(passes);
+  }};
+  staticGlassPasses.add(passes);
+  return passes;
+}
+function releaseStaticGlassPasses() {for (const passes of staticGlassPasses) passes.releaseGPU();}
+function disposeStaticGlassPasses() {for (const passes of staticGlassPasses) passes.dispose();}
+
 // Only immutable packed-Lambert walls and alpha-free floors/frames share this
 // program. NoBlending is the same disabled GPU blend state as opaque normal
 // blending, but omits Three's redundant OPAQUE shader define. Restore the
@@ -81,14 +150,14 @@ function prepareSharedWallProgram(THREE, mesh, role) {
       material.clipShadows || material.map || material.alphaMap || material.vertexColors ||
       mesh.geometry?.getAttribute?.('color') ||
       material.alphaTest !== 0 || material.alphaHash || material.alphaToCoverage || material.premultipliedAlpha) return false;
-  if (role === 'wall' ? material.transparent !== true : material.transparent || material.opacity !== 1) return false;
+  if (role === 'wall' || role === 'glass' ? material.transparent !== true : material.transparent || material.opacity !== 1) return false;
   if (!state) {
     state = {enabled:{value:false}};
     sharedWallMaterials.set(material, state);
   }
   // Cached programs retain this same uniform object across reattachments.
   state.enabled.value = role === 'wall';
-  if (role !== 'wall') {
+  if (role === 'opaque') {
     state.blending = material.blending;
     material.blending = THREE.NoBlending;
   }
@@ -177,8 +246,8 @@ function packRoomLightingGeometry(rooms, windows, capacity, maxFragmentUniforms)
   const windowRooms = rooms.flatMap((room, index) => windows.some(window => window.room === room.id) ? [index] : []);
   // Scalars in arrays may each consume a vector. Reserve the existing light,
   // shadow, material and transform uniforms before adding packed geometry,
-  // plus one explicit vector for the shared wall-sheen material switch.
-  const uniformVectors = 129 + capacity * 7 + rooms.length * 4 + edgeCount + windows.length * 2 + Math.max(1, windowRooms.length);
+  // plus explicit vectors for the wall-sheen switch and facing mode.
+  const uniformVectors = 130 + capacity * 7 + rooms.length * 4 + edgeCount + windows.length * 2 + Math.max(1, windowRooms.length);
   if (!Number.isFinite(maxFragmentUniforms) || uniformVectors > maxFragmentUniforms) return null;
   const edges = new Float32Array(Math.max(1, edgeCount) * 4);
   const ranges = new Int32Array(Math.max(1, rooms.length) * 4);
@@ -430,7 +499,8 @@ ${packed ? `    uniform int homeLightRunStarts[${capacity}];\n    ${geometryDecl
       if (packed && staticGeometry) group?.traverse(mesh => {
         if (!mesh.material) return;
         const category = mesh.userData.category;
-        const role = category === 'walls' ? 'wall' : ['floors','frames'].includes(category) ? 'opaque' : null;
+        const role = category === 'walls' ? 'wall' : ['floors','frames'].includes(category) ? 'opaque' :
+          category === 'windows' && staticGlassFacing.has(mesh.material) ? 'glass' : null;
         sharedWallRoles.set(mesh.material, !sharedWallRoles.has(mesh.material) || sharedWallRoles.get(mesh.material) === role ? role : null);
       });
       group?.traverse(mesh => {
@@ -462,6 +532,8 @@ ${packed ? `    uniform int homeLightRunStarts[${capacity}];\n    ${geometryDecl
         mesh.material.onBeforeCompile = shader => {
           if (sharedWall) applySharedWallSheen(shader, wallEnabled);
           else if (wall) applyWallSheen(shader);
+          const facing = staticGlassFacing.get(mesh.material);
+          if (sharedWall || facing) applyStaticFacing(THREE, shader, facing || bothFaces);
           // Keep uniform definitions identical in both material variants.
           Object.assign(shader.uniforms, uniforms, staticRuns.get(mesh.material)?.uniforms, {homeExteriorSurface:{value:mesh.userData.category==='stairs'?1:0}});
           // The editor needs no room/window shader, especially on software WebGL.
@@ -473,7 +545,8 @@ ${packed ? `    uniform int homeLightRunStarts[${capacity}];\n    ${geometryDecl
           shader.fragmentShader = fragment + shader.fragmentShader.replace('#include <lights_fragment_begin>', lighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n#include <lights_fragment_end>');
         };
         mesh.material.customProgramCacheKey = () => (enabled ? fragment : 'home-editor') +
-          (sharedWall ? ':wall-sheen-switch-v1' : wall ? ':wall-sheen-v2' : '');
+          (sharedWall ? ':wall-sheen-facing-v1' : wall ? ':wall-sheen-v2' : '') +
+          (!sharedWall && staticGlassFacing.has(mesh.material) ? ':glass-facing-v1' : '');
         mesh.material.needsUpdate = true;
       });
     },

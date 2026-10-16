@@ -50,18 +50,20 @@ function input(enabled){const handlers={};const context={renderProfile:{diffuseL
 const {context,handlers}=input(true);handlers.pointerdown({button:0,pointerId:1,clientX:20,clientY:20});handlers.pointermove({pointerId:1,clientX:40,clientY:20});assert.equal(context.interactionPointer.moved,true);handlers.pointerup({pointerId:2});assert(context.interactionPointer,'Unrelated pointer release does not end motion');handlers.pointerup({pointerId:1});assert.equal(context.interactionPointer,null);assert.equal(context.renders,1,'Release schedules one direct full-quality frame');handlers.lostpointercapture({pointerId:1});assert.equal(context.renders,1,'Duplicate capture release adds no frame');assert.deepEqual(Object.keys(input(false).handlers),[],'Normal GPUs have no interaction hooks');
 const lifecycleHandlers={}, lifecycleOrder=[];
 const lifecycle={renderLost:false,renderSuspended:false,interactionPointer:{moved:true},interactionRenderer:{dispose(){lifecycleOrder.push('dispose');}},cancelRender(){lifecycleOrder.push('cancel');},observer:{disconnect(){lifecycleOrder.push('disconnect');}},renderer:{domElement:{addEventListener:(name,fn)=>lifecycleHandlers[name]=fn},dispose(){lifecycleOrder.push('renderer-dispose');},forceContextLoss(){lifecycleOrder.push('force-loss');}},window:{addEventListener:(name,fn)=>lifecycleHandlers[name]=fn}};
+lifecycle.releaseStaticGlassPasses=()=>lifecycleOrder.push('glass-release');
+lifecycle.disposeStaticGlassPasses=()=>lifecycleOrder.push('glass-dispose');
 vm.createContext(lifecycle);
 for(const prefix of ["renderer.domElement.addEventListener('webglcontextlost'","window.addEventListener('pagehide'"]){vm.runInContext(text.split('\n').find(line=>line.startsWith(prefix)),lifecycle);}
-lifecycleHandlers.webglcontextlost({preventDefault(){lifecycleOrder.push('prevent');}});assert.equal(lifecycle.renderLost,true);assert.equal(lifecycle.interactionPointer,null);assert.equal(lifecycle.interactionRenderer,null);assert.deepEqual(lifecycleOrder,['prevent','cancel','dispose']);
+lifecycleHandlers.webglcontextlost({preventDefault(){lifecycleOrder.push('prevent');}});assert.equal(lifecycle.renderLost,true);assert.equal(lifecycle.interactionPointer,null);assert.equal(lifecycle.interactionRenderer,null);assert.deepEqual(lifecycleOrder,['prevent','cancel','dispose','glass-release']);
 lifecycleOrder.length=0;lifecycle.interactionRenderer={dispose(){lifecycleOrder.push('dispose');}};lifecycle.interactionPointer={moved:true};lifecycleHandlers.pagehide({persisted:true});assert.equal(lifecycle.renderSuspended,true);assert.equal(lifecycle.interactionPointer,null);assert(lifecycle.interactionRenderer,'BFCache retains bounded resources');assert.deepEqual(lifecycleOrder,['cancel']);
-lifecycleOrder.length=0;lifecycleHandlers.pagehide({persisted:false});assert.equal(lifecycle.interactionRenderer,null);assert.deepEqual(lifecycleOrder,['cancel','disconnect','dispose','renderer-dispose','force-loss'],'Copy resources are released before native context retirement');
+lifecycleOrder.length=0;lifecycleHandlers.pagehide({persisted:false});assert.equal(lifecycle.interactionRenderer,null);assert.deepEqual(lifecycleOrder,['cancel','disconnect','dispose','glass-dispose','renderer-dispose','force-loss'],'Copy resources are released before native context retirement');
 // Re-enter the actual draw path after context restoration and page-cache resume.
 const hooks={}, history=[];
 let created=0;
 const c={renderProfile:{diffuseLighting:true},renderSuspended:false,renderLost:false,renderCount:0,
  interactionRenderer:null,interactionPointer:{moved:true},scene:{},THREE:{},document:{hidden:false},
  wallSheenMotion:{beforeRender(){},afterRender(){}},cancelRender(){},invalidateShadows(){},
- requestRender(){history.push('request');},resize(){},observer:{disconnect(){}},
+ requestRender(){history.push('request');},resize(){},observer:{disconnect(){}},releaseStaticGlassPasses(){},disposeStaticGlassPasses(){},
  renderer:{domElement:{addEventListener:(key,fn)=>hooks[key]=fn},dispose(){},forceContextLoss(){}},
  window:{resizeModel(){},addEventListener:(key,fn)=>hooks[key]=fn},
  createInteractionRenderer(){const id=++created;return {draw(scene,camera,moving){history.push({id,moving});},dispose(){history.push({disposed:id});}}},

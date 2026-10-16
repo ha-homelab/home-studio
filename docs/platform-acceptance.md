@@ -167,9 +167,9 @@ uniform arrays, replacing repeated literal GLSL helpers with shared loops. Room
 order, doorway spill, daylight and window transmission retain the same math;
 other renderer profiles retain their original shader source. Packing is enabled
 only when the reported fragment-uniform limit covers a conservative allowance:
-129 vectors (including one for the private wall-sheen switch) plus seven per light
+130 vectors (including the private wall-sheen and glass-facing switches) plus seven per light
 slot, four per room, one per polygon edge, two per window, and one per room with
-windows (at least one reserved slot). The guard budgets 843 of the Apple software renderer's reported
+windows (at least one reserved slot). The guard budgets 844 of the Apple software renderer's reported
 1,024 vectors for the 24-room, 72-light fixture. Lower limits and larger plans fall back to
 the original literal geometry without reducing scene contents. CPU regression
 tests cover polygon boundaries, concave rooms, window ordering and this fallback.
@@ -178,8 +178,8 @@ Packed daylight traversal visits only rooms that own windows, in the original
 room order. Window order, transmission and distance calculations remain the
 same; a plan without windows omits the daylight loop. The additional index
 array is included in the uniform allowance above, including its one-slot empty
-fallback. The normal material path and low-uniform fallback keep their original
-shader source.
+fallback. The normal material path keeps its original shader source; the
+low-uniform fallback retains the original literal room-lighting functions.
 
 Exactly axis-aligned rectangular rooms use a box signed-distance calculation
 instead of walking four polygon edges. Classification uses the same quantized
@@ -208,6 +208,35 @@ reattachment, material ownership and low-uniform fallback; visual diagnostics
 also check the actual GPU switch, blending, culling and depth state across draws.
 Fewer programs can reduce first-use work, but do not guarantee a speedup on every
 driver; the complete timed acceptance matrix remains required.
+
+Eligible static, smooth, unmapped window glass on the diffuse profile shares
+that program through a private facing uniform. Two adjacent meshes retain the
+original ordered back and front alpha passes, using the same geometry, live
+cutaway plane, transforms and depth state. Each pass has its own material so
+Three uploads the correct facing value. GL culling is disabled for this
+`DoubleSide` program; an early fragment discard preserves the original visible
+faces. The back pass also reverses the vertex normal before shadow normal bias,
+while the ordinary wall/floor/frame mode retains its original normal handling.
+No light, shadow, drawing resolution or glass detail is removed. Unsupported
+glass and other rendering profiles retain the original path.
+
+The extra facing uniform is included in the allowance above. The explicit
+passes remain valid with literal room lighting when packing does not fit.
+Context loss releases the owned material programs before the renderer replaces
+its caches; final disposal restores the original mesh material and removes the
+added pass. Geometry is shared rather than cloned, and public mesh counts
+continue to report physical meshes. CPU tests compare actual pinned Three
+prefixes, expanded shaders and cache keys, including mirrored normal/bias
+arithmetic. Separate visual captures check 15 views, including cutaway, near
+glass and mirrored transforms, and read back the actual per-draw facing state.
+
+One local native ARM64 CGL comparison reduced the 24-room case from 56.213 s
+to 52.192 s, with initial draws falling from 12.334/12.418 s to 10.838/10.714 s.
+Its ordinary drags were about 1% slower; the six-room comparison also had slower
+second-cycle drag and recovery despite faster startup. Both sizes retained
+identical final scene pixels and passed the unchanged strict checks. These are
+sequential runs with shared compiler caches on one physical host, not a speed
+guarantee or evidence that hosted Intel acceptance passes.
 
 Viewer receipts retain the existing native drag phase timings for Home and the
 editor, followed by the existing two-animation-frame completion wait. These

@@ -322,15 +322,15 @@ if(shape){
   mesh.onBeforeShadow=beginWallShadow;mesh.onAfterShadow=endWallShadow;
   roundedWalls.push({mesh,source:m,shape,cache:new Map([[Math.min(shape.top,clipping.constant),geometry]])});
 }
-root.add(mesh)}
+const glassPasses=createStaticGlassPasses(THREE,mesh,renderProfile.diffuseLighting);root.add(mesh);if(glassPasses)root.add(glassPasses.front)}
 ground=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(60,planRadius*2),Math.max(65,planRadius*2)),createSceneMaterial({color:'#dfe3d8',roughness:1}));ground.rotation.x=-Math.PI/2;ground.position.set(planCenter[0],-1.97,planCenter[1]);ground.receiveShadow=true;scene.add(ground);grid=new THREE.GridHelper(44,44,0xc0cabe,0xd0d7cb);grid.position.set(planCenter[0],-1.96,planCenter[1]);scene.add(grid);
-renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;cancelRender();interactionPointer=null;interactionRenderer?.dispose();interactionRenderer=null;});
+renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;cancelRender();interactionPointer=null;interactionRenderer?.dispose();interactionRenderer=null;releaseStaticGlassPasses();});
 renderer.domElement.addEventListener('webglcontextrestored',()=>{renderLost=false;invalidateShadows();const before=renderCount;window.resizeModel?.();if(renderCount===before)requestRender()});
 function updateEditorCamera(){camera.position.set(target.x+radius*Math.sin(polar)*Math.sin(azimuth),target.y+radius*Math.cos(polar),target.z+radius*Math.sin(polar)*Math.cos(azimuth));camera.lookAt(target)}
 function render(){if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;const before=renderCount;updateWallOutlines();if(homeView?.active)homeView.render();else{updateEditorCamera();drawScene(camera);renderCount++}if(renderCount>before)cancelRender()}window.renderModel=render;window.requestModelRender=requestRender;
 let viewSize='';const resize=()=>{if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;if(renderDelay)requestRender();const b=$(homeView?.active?'homeStage':'view3d').getBoundingClientRect(),ratio=renderPixelRatio(b.width,b.height),size=[homeView?.active,b.width,b.height,ratio].join();if(b.width&&b.height&&size!==viewSize){viewSize=size;renderer.setDrawingBufferSize(b.width,b.height,ratio);camera.aspect=b.width/b.height;camera.updateProjectionMatrix();render()}};window.resizeModel=resize;const observer=new ResizeObserver(resize);observer.observe($('view3d'));observer.observe($('homeStage'));
 document.addEventListener('visibilitychange',()=>{if(document.hidden){interactionPointer=null;cancelRender()}else{const before=renderCount;resize();if(renderCount===before)requestRender()}});
-window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();interactionPointer=null;if(!event.persisted){observer.disconnect();interactionRenderer?.dispose();interactionRenderer=null;renderer.dispose();renderer.forceContextLoss();}});
+window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();interactionPointer=null;if(!event.persisted){observer.disconnect();interactionRenderer?.dispose();interactionRenderer=null;disposeStaticGlassPasses();renderer.dispose();renderer.forceContextLoss();}});
 // A resize can already paint the resumed state. Initial pageshow also needs
 // no extra frame after boot painted; leave any pending live-state request intact.
 window.addEventListener('pageshow',event=>{const resumed=renderSuspended||event.persisted,before=renderCount;renderSuspended=false;resize();if(renderCount===before&&(resumed||renderCount===0))requestRender()});
