@@ -252,11 +252,23 @@ sequence on the same CDP session as touch drags. The driver waits for the start
 response before dispatching the end. The viewer still requires exactly four
 trusted touch starts and ends per ordinary cycle, and all activation, recovery
 and latency assertions remain unchanged. Desktop and non-Chromium inputs retain
-their existing transports.
+their existing transports. Native touch drags keep the finger stationary for
+100 ms after the final move and before release. This time remains inside the
+reported release latency and the unchanged drag budget; it sends no extra input.
+`inputDiagnostics.dragReleaseHoldMs` records 100 for native touch and 0 otherwise.
 
-This harness change follows an intermittent missing native click in Playwright's
-concurrent start/end path and a passing serialized comparison on the same hosted
-row. It does not establish a product bug or a complete root-cause explanation.
+The stationary end distinguishes an intentional orbit/placement drag from a
+flick. A failing Chromium 156 trace showed the editor drag starting a browser
+fling, followed by the next button tap being suppressed when it cancelled that
+fling, even though the canvas touch action was `none`. Chromium's
+[velocity tracker](https://github.com/chromium/chromium/blob/156.0.8078.4/ui/events/velocity_tracker/velocity_tracker.cc#L298-L311)
+clears release velocity after 80 ms without movement. The hold acts before
+release, without delaying or retrying the subsequent activation.
+
+The serialized tap transport was introduced after an intermittent missing native
+click in Playwright's concurrent start/end path and a passing serialized comparison
+on the same hosted row. Subsequent traces identified the preceding drag's fling
+as a separate source of tap suppression; serialization alone did not prevent it.
 Target checks retain visibility, enabled state, Playwright's stable scrolling and
 geometric hit testing. Iframe locator bounds provide main-frame CSS coordinates;
 the hit test runs in the target document. No synthetic click, `trial:true` input,

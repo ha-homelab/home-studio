@@ -154,6 +154,8 @@ function inputInstrumentation() {
   }, true);
 }
 
+const TOUCH_DRAG_RELEASE_HOLD_MS = 100;
+
 function viewerInputOptions(engine, profile, environment = process.env) {
   const tapMode = environment.BROWSER_STABILITY_TOUCH_TAP ??
     (engine === 'chromium' && profile.input === 'native-touch' ? 'sequential' : 'playwright');
@@ -164,7 +166,7 @@ function viewerInputOptions(engine, profile, environment = process.env) {
   const trace = environment.BROWSER_STABILITY_TRACE_INPUT ?? '0';
   assert(['0', '1'].includes(trace), 'BROWSER_STABILITY_TRACE_INPUT must be 0 or 1');
   assert(trace === '0' || engine === 'chromium', 'Input tracing requires Chromium');
-  return {tapMode, traceInput:trace === '1'};
+  return {tapMode, traceInput:trace === '1', dragReleaseHoldMs:profile.input === 'native-touch' ? TOUCH_DRAG_RELEASE_HOLD_MS : 0};
 }
 
 async function createInputDriver(page, engine, profile, {tapMode = viewerInputOptions(engine, profile, {}).tapMode} = {}) {
@@ -218,6 +220,10 @@ async function createInputDriver(page, engine, profile, {tapMode = viewerInputOp
         } else await page.mouse.move(to.x, to.y, {steps: 12});
         marks.push(Date.now());
         if (beforeRelease) await beforeRelease();
+        // End an intentional drag with a stationary finger, not a synthetic flick.
+        // Chromium clears release velocity after 80 ms without movement. Keep
+        // this real hold inside the measured release and overall drag budgets.
+        if (touch) await new Promise(resolve => setTimeout(resolve, TOUCH_DRAG_RELEASE_HOLD_MS));
       } finally {
         if (touch) await cdp.send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []});
         else await page.mouse.up();

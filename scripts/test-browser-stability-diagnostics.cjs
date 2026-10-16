@@ -438,11 +438,31 @@ test('native touch drags use browser protocol and release a failed gesture', asy
   assert.deepEqual(commands[13].payload, {type:'touchEnd',touchPoints:[]});
 });
 
+test('native drag holds its final position before release within the measured budget', async t => {
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:1000});
+  const commands = [];
+  const page = {context:()=>({newCDPSession:async()=>({send:async(method,payload)=>commands.push({method,payload})})})};
+  const driver = await createInputDriver(page,'chromium',{input:'native-touch',emulated:true});
+  let finished = false;
+  const drag = driver.drag({x:10,y:20},{x:100,y:200}).then(value=>{finished=true;return value;});
+  await new Promise(setImmediate);
+  assert.equal(commands.length,13,'Only start and twelve moves precede the stationary hold');
+  assert.deepEqual(commands.at(-1).payload.touchPoints,[{x:100,y:200,id:0}]);
+  t.mock.timers.tick(99); await new Promise(setImmediate);
+  assert.equal(finished,false); assert.equal(commands.length,13,'No early release or extra input');
+  t.mock.timers.tick(1);
+  const timings = await drag;
+  assert.equal(timings.releaseMs,100,'The hold is included in measured drag latency');
+  assert.equal(commands.length,14);
+  assert.deepEqual(commands.at(-1),{method:'Input.dispatchTouchEvent',payload:{type:'touchEnd',touchPoints:[]}});
+  assert(commands.every(command=>command.method==='Input.dispatchTouchEvent'),'No synthetic click or extra transport');
+});
+
 test('Chromium touch defaults to serialized native taps with explicit comparison modes', async () => {
   const touch = {input:'native-touch',emulated:true};
-  assert.deepEqual(viewerInputOptions('chromium', touch, {}), {tapMode:'sequential',traceInput:false});
-  assert.deepEqual(viewerInputOptions('chromium', {input:'mouse'}, {}), {tapMode:'playwright',traceInput:false});
-  assert.deepEqual(viewerInputOptions('webkit', {input:'native-tap-mouse-drag',emulated:true}, {}), {tapMode:'playwright',traceInput:false});
+  assert.deepEqual(viewerInputOptions('chromium', touch, {}), {tapMode:'sequential',traceInput:false,dragReleaseHoldMs:100});
+  assert.deepEqual(viewerInputOptions('chromium', {input:'mouse'}, {}), {tapMode:'playwright',traceInput:false,dragReleaseHoldMs:0});
+  assert.deepEqual(viewerInputOptions('webkit', {input:'native-tap-mouse-drag',emulated:true}, {}), {tapMode:'playwright',traceInput:false,dragReleaseHoldMs:0});
   for (const mode of ['', 'retry', 'gesture']) assert.throws(() =>
     viewerInputOptions('chromium', touch, {BROWSER_STABILITY_TOUCH_TAP:mode}), /must be playwright/);
   assert.throws(() => viewerInputOptions('webkit', touch, {BROWSER_STABILITY_TOUCH_TAP:'sequential'}), /Chromium touch/);
