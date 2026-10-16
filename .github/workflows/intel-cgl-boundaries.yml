@@ -1,0 +1,110 @@
+name: Diagnostic Intel CGL fallback boundaries
+run-name: Non-release Intel fallback boundary pairs · ${{ github.sha }}
+
+on:
+  push:
+    branches: [diagnostic/intel-cgl-boundaries]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnostic-intel-cgl-boundaries
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  compare:
+    name: ${{ matrix.product }} · ${{ matrix.candidate }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/diagnostic/intel-cgl-boundaries' }}
+    runs-on: macos-15-intel
+    # Two sequential original three-case suites per VM; their own limits
+    # are unchanged. Other pairs run on separate hosted VMs.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - product: firefox
+            version: 153.5.0esr
+            candidate: fallback-boundaries
+            revision: 800acbda7b8692b8c18d73e4be7b00211c552ff3
+          - product: waterfox
+            version: 6.7.6
+            candidate: fallback-boundaries
+            revision: 800acbda7b8692b8c18d73e4be7b00211c552ff3
+    env:
+      PYTHONUTF8: '1'
+      NATIVE_STARTUP_DIAGNOSTICS: '1'
+      FIREFOX_RENDERER_VISIBILITY: unmasked
+      FIREFOX_WEBGL_BACKEND: default
+      FIREFOX_COMPOSITOR_BACKEND: software
+      FIREFOX_GPU_PROCESS: disabled
+    steps:
+      - name: Check out the diagnostic harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: harness
+          persist-credentials: false
+      - name: Check out the exact common baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: 13b8ed9e1f0baf68eac329764a05277377113419
+          path: baseline
+          persist-credentials: false
+      - name: Check out the exact independent candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ matrix.revision }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+      - name: Record tooling and prepare both fixtures before timing
+        run: |
+          mkdir -p harness/diagnostics/intel-cgl-boundaries
+          {
+            python3 --version
+            node --version
+            npm --version
+            uname -sm
+            sw_vers
+          } > harness/diagnostics/intel-cgl-boundaries/toolchain.log 2>&1
+          npm --prefix baseline ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-boundaries/baseline-npm.log
+          npm --prefix candidate ci --ignore-scripts --no-audit --no-fund 2>&1 | tee harness/diagnostics/intel-cgl-boundaries/candidate-npm.log
+          python3 harness/scripts/test-intel-cgl-boundaries.py
+      - name: Install one original checksum and signature verified browser per pair
+        env:
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-browser
+          PRODUCT: ${{ matrix.product }}
+          VERSION: ${{ matrix.version }}
+        run: |
+          python3 baseline/scripts/setup-native-browser.py --product "$PRODUCT" --version "$VERSION" --output "$INSTALL_DIR" 2>&1 | tee harness/diagnostics/intel-cgl-boundaries/install.log
+          cp "$INSTALL_DIR/install.json" harness/diagnostics/intel-cgl-boundaries/install.json
+      - name: Run both original native suites once, retaining any failure
+        env:
+          INSTALL_DIR: ${{ runner.temp }}/home-studio-intel-cgl-browser
+          PRODUCT: ${{ matrix.product }}
+          CANDIDATE: ${{ matrix.candidate }}
+        run: >-
+          python3 harness/scripts/run-intel-cgl-boundaries.py
+          --source-root "$GITHUB_WORKSPACE"
+          --candidate "$CANDIDATE" --product "$PRODUCT"
+          --installation "$INSTALL_DIR/install.json"
+          --output "$GITHUB_WORKSPACE/harness/diagnostics/intel-cgl-boundaries"
+      - name: Preserve all non-release evidence even when a source fails
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostic-intel-cgl-boundaries-${{ matrix.product }}-${{ matrix.candidate }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: harness/diagnostics/intel-cgl-boundaries/
+          if-no-files-found: error
+          retention-days: 14
