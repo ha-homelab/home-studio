@@ -643,5 +643,21 @@ export default {
   "Room name is required.": "Room name is required.",
   "Width and depth must be between 0.25 and 100 m.": "Width and depth must be between 0.25 and 100 m.",
   "Room ready. Add a door or an item, then preview and export.": "Room ready. Add a door or an item, then preview and export.",
-  "Close": "Close"
+  "Close": "Close",
+  // Browser draft recovery.
+  "Draft recovery": "Draft recovery",
+  "Autosave paused · review drafts": "Autosave paused · review drafts",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "Another tab changed the saved draft. Export your version or choose which draft to keep.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "The saved draft could not be opened. Its original data is kept for recovery.",
+  "Saved draft": "Saved draft",
+  "Previous project": "Previous project",
+  "Download original data": "Download original data",
+  "Load saved draft": "Load saved draft",
+  "Restore previous project": "Restore previous project",
+  "Replace saved draft with this version": "Replace saved draft with this version",
+  "Replacing keeps the existing saved draft as a recovery copy.": "Replacing keeps the existing saved draft as a recovery copy.",
+  "No previous project is available.": "No previous project is available.",
+  "This browser cannot coordinate draft saves.": "This browser cannot coordinate draft saves.",
+  "No saved draft is available.": "No saved draft is available.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving."
 };

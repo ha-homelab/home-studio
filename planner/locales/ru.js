@@ -642,5 +642,21 @@ export default {
   "Room name is required.": "Укажите название комнаты.",
   "Width and depth must be between 0.25 and 100 m.": "Ширина и глубина должны быть от 0,25 до 100 м.",
   "Room ready. Add a door or an item, then preview and export.": "Комната готова. Добавьте дверь или предмет, затем откройте предпросмотр и экспортируйте.",
-  "Close": "Закрыть"
+  "Close": "Закрыть",
+  // Browser draft recovery.
+  "Draft recovery": "Восстановление черновиков",
+  "Autosave paused · review drafts": "Автосохранение приостановлено · проверьте черновики",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "Другая вкладка изменила сохранённый черновик. Экспортируйте свою версию или выберите, какой черновик оставить.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "Не удалось открыть сохранённый черновик. Его исходные данные сохранены для восстановления.",
+  "Saved draft": "Сохранённый черновик",
+  "Previous project": "Предыдущий проект",
+  "Download original data": "Скачать исходные данные",
+  "Load saved draft": "Загрузить сохранённый черновик",
+  "Restore previous project": "Восстановить предыдущий проект",
+  "Replace saved draft with this version": "Заменить сохранённый черновик этой версией",
+  "Replacing keeps the existing saved draft as a recovery copy.": "При замене существующий сохранённый черновик остаётся как копия для восстановления.",
+  "No previous project is available.": "Предыдущий проект недоступен.",
+  "This browser cannot coordinate draft saves.": "Этот браузер не может согласовывать сохранение черновиков между вкладками.",
+  "No saved draft is available.": "Сохранённый черновик недоступен.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Автосохранение недоступно. Продолжить в этой вкладке без сохранения? Экспортируйте JSON перед выходом."
 };

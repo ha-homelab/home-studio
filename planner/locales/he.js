@@ -642,5 +642,21 @@ export default {
   "Room name is required.": "נדרש שם לחדר.",
   "Width and depth must be between 0.25 and 100 m.": "הרוחב והעומק חייבים להיות בין 0.25 ל־100 מ׳.",
   "Room ready. Add a door or an item, then preview and export.": "החדר מוכן. הוסיפו דלת או פריט, ואז הציגו תצוגה מקדימה וייצאו.",
-  "Close": "סגירה"
+  "Close": "סגירה",
+  // Browser draft recovery.
+  "Draft recovery": "שחזור טיוטות",
+  "Autosave paused · review drafts": "השמירה האוטומטית מושהית · בדקו את הטיוטות",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "כרטיסייה אחרת שינתה את הטיוטה השמורה. יצאו את הגרסה שלכם או בחרו איזו טיוטה לשמור.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "לא ניתן לפתוח את הטיוטה השמורה. הנתונים המקוריים שלה נשמרו לצורך שחזור.",
+  "Saved draft": "טיוטה שמורה",
+  "Previous project": "פרויקט קודם",
+  "Download original data": "הורדת הנתונים המקוריים",
+  "Load saved draft": "טעינת הטיוטה השמורה",
+  "Restore previous project": "שחזור הפרויקט הקודם",
+  "Replace saved draft with this version": "החלפת הטיוטה השמורה בגרסה זו",
+  "Replacing keeps the existing saved draft as a recovery copy.": "בעת ההחלפה הטיוטה השמורה הקיימת נשמרת כעותק לשחזור.",
+  "No previous project is available.": "אין פרויקט קודם זמין.",
+  "This browser cannot coordinate draft saves.": "הדפדפן הזה אינו יכול לתאם שמירת טיוטות.",
+  "No saved draft is available.": "אין טיוטה שמורה זמינה.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "השמירה האוטומטית אינה זמינה. להמשיך בכרטיסייה זו ללא שמירה? יצאו JSON לפני היציאה."
 };

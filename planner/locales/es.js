@@ -642,5 +642,21 @@ export default {
   "Room name is required.": "El nombre de la habitación es obligatorio.",
   "Width and depth must be between 0.25 and 100 m.": "El ancho y el fondo deben estar entre 0,25 y 100 m.",
   "Room ready. Add a door or an item, then preview and export.": "Habitación lista. Añade una puerta o un objeto, luego previsualiza y exporta.",
-  "Close": "Cerrar"
+  "Close": "Cerrar",
+  // Browser draft recovery.
+  "Draft recovery": "Recuperación de borradores",
+  "Autosave paused · review drafts": "Autoguardado en pausa · revisar borradores",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "Otra pestaña cambió el borrador guardado. Exporta tu versión o elige qué borrador conservar.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "No se pudo abrir el borrador guardado. Sus datos originales se conservan para recuperarlos.",
+  "Saved draft": "Borrador guardado",
+  "Previous project": "Proyecto anterior",
+  "Download original data": "Descargar datos originales",
+  "Load saved draft": "Cargar borrador guardado",
+  "Restore previous project": "Restaurar proyecto anterior",
+  "Replace saved draft with this version": "Reemplazar el borrador guardado con esta versión",
+  "Replacing keeps the existing saved draft as a recovery copy.": "Al reemplazarlo, el borrador guardado actual se conserva como copia de recuperación.",
+  "No previous project is available.": "No hay ningún proyecto anterior disponible.",
+  "This browser cannot coordinate draft saves.": "Este navegador no puede coordinar el guardado de borradores.",
+  "No saved draft is available.": "No hay ningún borrador guardado disponible.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "El autoguardado no está disponible. ¿Continuar en esta pestaña sin guardar? Exporta el JSON antes de salir."
 };

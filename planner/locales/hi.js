@@ -643,5 +643,21 @@ export default {
   "Room name is required.": "कमरे का नाम ज़रूरी है।",
   "Width and depth must be between 0.25 and 100 m.": "चौड़ाई और गहराई 0.25 से 100 मीटर के बीच होनी चाहिए।",
   "Room ready. Add a door or an item, then preview and export.": "कमरा तैयार है। दरवाज़ा या सामान जोड़ें, फिर पूर्वावलोकन करके निर्यात करें।",
-  "Close": "बंद करें"
+  "Close": "बंद करें",
+  // Browser draft recovery.
+  "Draft recovery": "प्रारूप की बहाली",
+  "Autosave paused · review drafts": "अपने-आप सहेजना रुका हुआ है · प्रारूपों की समीक्षा करें",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "किसी दूसरे टैब ने सहेजा गया प्रारूप बदल दिया है। अपना संस्करण निर्यात करें या चुनें कि कौन-सा प्रारूप रखना है।",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "सहेजा गया प्रारूप खोला नहीं जा सका। बहाली के लिए उसका मूल डेटा सुरक्षित रखा गया है।",
+  "Saved draft": "सहेजा गया प्रारूप",
+  "Previous project": "पिछली परियोजना",
+  "Download original data": "मूल डेटा डाउनलोड करें",
+  "Load saved draft": "सहेजा गया प्रारूप लोड करें",
+  "Restore previous project": "पिछली परियोजना बहाल करें",
+  "Replace saved draft with this version": "सहेजे गए प्रारूप को इस संस्करण से बदलें",
+  "Replacing keeps the existing saved draft as a recovery copy.": "बदलते समय मौजूदा सहेजे गए प्रारूप को बहाली की प्रति के रूप में रखा जाता है।",
+  "No previous project is available.": "कोई पिछली परियोजना उपलब्ध नहीं है।",
+  "This browser cannot coordinate draft saves.": "यह ब्राउज़र प्रारूप सहेजने का समन्वय नहीं कर सकता।",
+  "No saved draft is available.": "कोई सहेजा गया प्रारूप उपलब्ध नहीं है।",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "अपने-आप सहेजना उपलब्ध नहीं है। क्या इस टैब में बिना सहेजे जारी रखें? जाने से पहले JSON निर्यात करें।"
 };

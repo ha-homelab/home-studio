@@ -643,5 +643,21 @@ export default {
   "Room name is required.": "Nama ruangan wajib diisi.",
   "Width and depth must be between 0.25 and 100 m.": "Lebar dan kedalaman harus antara 0,25 dan 100 m.",
   "Room ready. Add a door or an item, then preview and export.": "Ruangan siap. Tambahkan pintu atau benda, lalu pratinjau dan ekspor.",
-  "Close": "Tutup"
+  "Close": "Tutup",
+  // Browser draft recovery.
+  "Draft recovery": "Pemulihan draf",
+  "Autosave paused · review drafts": "Simpan otomatis dijeda · tinjau draf",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "Tab lain mengubah draf tersimpan. Ekspor versi Anda atau pilih draf yang ingin disimpan.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "Draf tersimpan tidak dapat dibuka. Data aslinya disimpan untuk pemulihan.",
+  "Saved draft": "Draf tersimpan",
+  "Previous project": "Proyek sebelumnya",
+  "Download original data": "Unduh data asli",
+  "Load saved draft": "Muat draf tersimpan",
+  "Restore previous project": "Pulihkan proyek sebelumnya",
+  "Replace saved draft with this version": "Ganti draf tersimpan dengan versi ini",
+  "Replacing keeps the existing saved draft as a recovery copy.": "Saat diganti, draf tersimpan yang ada tetap disimpan sebagai salinan pemulihan.",
+  "No previous project is available.": "Tidak ada proyek sebelumnya yang tersedia.",
+  "This browser cannot coordinate draft saves.": "Browser ini tidak dapat mengoordinasikan penyimpanan draf.",
+  "No saved draft is available.": "Tidak ada draf tersimpan yang tersedia.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Simpan otomatis tidak tersedia. Lanjutkan di tab ini tanpa menyimpan? Ekspor JSON sebelum keluar."
 };

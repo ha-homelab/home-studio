@@ -643,5 +643,21 @@ export default {
   "Room name is required.": "ต้องระบุชื่อห้อง",
   "Width and depth must be between 0.25 and 100 m.": "ความกว้างและความลึกต้องอยู่ระหว่าง 0.25 ถึง 100 ม.",
   "Room ready. Add a door or an item, then preview and export.": "ห้องพร้อมแล้ว เพิ่มประตูหรือสิ่งของ จากนั้นดูตัวอย่างและส่งออก",
-  "Close": "ปิด"
+  "Close": "ปิด",
+  // Browser draft recovery.
+  "Draft recovery": "กู้คืนฉบับร่าง",
+  "Autosave paused · review drafts": "หยุดบันทึกอัตโนมัติชั่วคราว · ตรวจสอบฉบับร่าง",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "แท็บอื่นเปลี่ยนฉบับร่างที่บันทึกไว้ โปรดส่งออกเวอร์ชันของคุณหรือเลือกฉบับร่างที่ต้องการเก็บไว้",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "ไม่สามารถเปิดฉบับร่างที่บันทึกไว้ได้ ข้อมูลต้นฉบับยังคงเก็บไว้เพื่อกู้คืน",
+  "Saved draft": "ฉบับร่างที่บันทึกไว้",
+  "Previous project": "โปรเจกต์ก่อนหน้า",
+  "Download original data": "ดาวน์โหลดข้อมูลต้นฉบับ",
+  "Load saved draft": "โหลดฉบับร่างที่บันทึกไว้",
+  "Restore previous project": "คืนค่าโปรเจกต์ก่อนหน้า",
+  "Replace saved draft with this version": "แทนที่ฉบับร่างที่บันทึกไว้ด้วยเวอร์ชันนี้",
+  "Replacing keeps the existing saved draft as a recovery copy.": "เมื่อแทนที่ ฉบับร่างที่บันทึกอยู่จะถูกเก็บไว้เป็นสำเนาสำหรับกู้คืน",
+  "No previous project is available.": "ไม่มีโปรเจกต์ก่อนหน้า",
+  "This browser cannot coordinate draft saves.": "เบราว์เซอร์นี้ไม่สามารถประสานการบันทึกฉบับร่างระหว่างแท็บได้",
+  "No saved draft is available.": "ไม่มีฉบับร่างที่บันทึกไว้",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "ไม่สามารถบันทึกอัตโนมัติได้ ต้องการดำเนินการต่อในแท็บนี้โดยไม่บันทึกหรือไม่? โปรดส่งออก JSON ก่อนออก"
 };

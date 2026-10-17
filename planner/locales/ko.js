@@ -643,5 +643,21 @@ export default {
   "Room name is required.": "방 이름을 입력하세요.",
   "Width and depth must be between 0.25 and 100 m.": "너비와 깊이는 0.25~100 m여야 합니다.",
   "Room ready. Add a door or an item, then preview and export.": "방이 준비되었습니다. 문이나 물건을 추가한 뒤 미리 보고 내보내세요.",
-  "Close": "닫기"
+  "Close": "닫기",
+  // Browser draft recovery.
+  "Draft recovery": "초안 복구",
+  "Autosave paused · review drafts": "자동 저장 일시 중지 · 초안 검토",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "다른 탭에서 저장된 초안을 변경했습니다. 현재 버전을 내보내거나 유지할 초안을 선택하세요.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "저장된 초안을 열 수 없습니다. 원본 데이터는 복구를 위해 보관됩니다.",
+  "Saved draft": "저장된 초안",
+  "Previous project": "이전 프로젝트",
+  "Download original data": "원본 데이터 다운로드",
+  "Load saved draft": "저장된 초안 불러오기",
+  "Restore previous project": "이전 프로젝트 복원",
+  "Replace saved draft with this version": "저장된 초안을 이 버전으로 교체",
+  "Replacing keeps the existing saved draft as a recovery copy.": "교체 시 기존에 저장된 초안이 복구용 사본으로 보관됩니다.",
+  "No previous project is available.": "이전 프로젝트가 없습니다.",
+  "This browser cannot coordinate draft saves.": "이 브라우저는 탭 간 초안 저장을 조정할 수 없습니다.",
+  "No saved draft is available.": "저장된 초안이 없습니다.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "자동 저장을 사용할 수 없습니다. 저장하지 않고 이 탭에서 계속할까요? 나가기 전에 JSON을 내보내세요."
 };

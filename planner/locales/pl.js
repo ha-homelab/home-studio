@@ -642,5 +642,21 @@ export default {
   "Room name is required.": "Nazwa pokoju jest wymagana.",
   "Width and depth must be between 0.25 and 100 m.": "Szerokość i głębokość muszą wynosić od 0,25 do 100 m.",
   "Room ready. Add a door or an item, then preview and export.": "Pokój gotowy. Dodaj drzwi lub przedmiot, potem wyświetl podgląd i eksportuj.",
-  "Close": "Zamknij"
+  "Close": "Zamknij",
+  // Browser draft recovery.
+  "Draft recovery": "Odzyskiwanie szkiców",
+  "Autosave paused · review drafts": "Automatyczny zapis wstrzymany · przejrzyj szkice",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "Inna karta zmieniła zapisany szkic. Wyeksportuj swoją wersję lub wybierz szkic, który chcesz zachować.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "Nie udało się otworzyć zapisanego szkicu. Jego oryginalne dane zostały zachowane do odzyskania.",
+  "Saved draft": "Zapisany szkic",
+  "Previous project": "Poprzedni projekt",
+  "Download original data": "Pobierz oryginalne dane",
+  "Load saved draft": "Wczytaj zapisany szkic",
+  "Restore previous project": "Przywróć poprzedni projekt",
+  "Replace saved draft with this version": "Zastąp zapisany szkic tą wersją",
+  "Replacing keeps the existing saved draft as a recovery copy.": "Podczas zastępowania dotychczasowy zapisany szkic zostaje zachowany jako kopia do odzyskania.",
+  "No previous project is available.": "Brak poprzedniego projektu.",
+  "This browser cannot coordinate draft saves.": "Ta przeglądarka nie może koordynować zapisywania szkiców.",
+  "No saved draft is available.": "Brak zapisanego szkicu.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Automatyczny zapis jest niedostępny. Kontynuować w tej karcie bez zapisywania? Przed wyjściem wyeksportuj JSON."
 };

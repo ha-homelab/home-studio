@@ -643,5 +643,21 @@ export default {
   "Room name is required.": "請輸入房間名稱。",
   "Width and depth must be between 0.25 and 100 m.": "寬度和深度必須介於 0.25 至 100 公尺之間。",
   "Room ready. Add a door or an item, then preview and export.": "房間已就緒。加入門或物品，然後預覽並匯出。",
-  "Close": "關閉"
+  "Close": "關閉",
+  // Browser draft recovery.
+  "Draft recovery": "草稿復原",
+  "Autosave paused · review drafts": "自動儲存已暫停 · 檢查草稿",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "另一個分頁更改了已儲存的草稿。請匯出你的版本或選擇要保留的草稿。",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "無法開啟已儲存的草稿。原始資料已保留，可用於復原。",
+  "Saved draft": "已儲存的草稿",
+  "Previous project": "上一個專案",
+  "Download original data": "下載原始資料",
+  "Load saved draft": "載入已儲存的草稿",
+  "Restore previous project": "還原上一個專案",
+  "Replace saved draft with this version": "以此版本取代已儲存的草稿",
+  "Replacing keeps the existing saved draft as a recovery copy.": "取代時，現有的已儲存草稿會保留為復原副本。",
+  "No previous project is available.": "沒有可用的上一個專案。",
+  "This browser cannot coordinate draft saves.": "此瀏覽器無法協調分頁之間的草稿儲存。",
+  "No saved draft is available.": "沒有可用的已儲存草稿。",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "無法自動儲存。要在此分頁中繼續而不儲存嗎？請在離開前匯出 JSON。"
 };

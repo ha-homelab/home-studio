@@ -643,5 +643,21 @@ export default {
   "Room name is required.": "نام اتاق لازم است.",
   "Width and depth must be between 0.25 and 100 m.": "عرض و عمق باید بین ۰٫۲۵ و ۱۰۰ متر باشند.",
   "Room ready. Add a door or an item, then preview and export.": "اتاق آماده است. یک در یا وسیله اضافه کنید، سپس پیش‌نمایش را ببینید و خروجی بگیرید.",
-  "Close": "بستن"
+  "Close": "بستن",
+  // Browser draft recovery.
+  "Draft recovery": "بازیابی پیش‌نویس",
+  "Autosave paused · review drafts": "ذخیرهٔ خودکار متوقف شده · پیش‌نویس‌ها را بررسی کنید",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "برگهٔ دیگری پیش‌نویس ذخیره‌شده را تغییر داده است. نسخهٔ خود را صادر کنید یا انتخاب کنید کدام پیش‌نویس نگه داشته شود.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "پیش‌نویس ذخیره‌شده باز نشد. داده‌های اصلی آن برای بازیابی نگه داشته شده‌اند.",
+  "Saved draft": "پیش‌نویس ذخیره‌شده",
+  "Previous project": "پروژهٔ قبلی",
+  "Download original data": "دریافت داده‌های اصلی",
+  "Load saved draft": "بارگذاری پیش‌نویس ذخیره‌شده",
+  "Restore previous project": "بازیابی پروژهٔ قبلی",
+  "Replace saved draft with this version": "جایگزینی پیش‌نویس ذخیره‌شده با این نسخه",
+  "Replacing keeps the existing saved draft as a recovery copy.": "هنگام جایگزینی، پیش‌نویس ذخیره‌شدهٔ فعلی به‌عنوان نسخه‌ای برای بازیابی نگه داشته می‌شود.",
+  "No previous project is available.": "پروژهٔ قبلی در دسترس نیست.",
+  "This browser cannot coordinate draft saves.": "این مرورگر نمی‌تواند ذخیرهٔ پیش‌نویس‌ها را هماهنگ کند.",
+  "No saved draft is available.": "پیش‌نویس ذخیره‌شده‌ای در دسترس نیست.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "ذخیرهٔ خودکار در دسترس نیست. در این برگه بدون ذخیره‌کردن ادامه می‌دهید؟ پیش از خروج، JSON را صادر کنید."
 };

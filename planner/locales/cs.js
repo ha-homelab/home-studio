@@ -642,5 +642,21 @@ export default {
   "Room name is required.": "Název místnosti je povinný.",
   "Width and depth must be between 0.25 and 100 m.": "Šířka a hloubka musí být mezi 0,25 a 100 m.",
   "Room ready. Add a door or an item, then preview and export.": "Místnost je připravena. Přidejte dveře nebo předmět, pak otevřete náhled a exportujte.",
-  "Close": "Zavřít"
+  "Close": "Zavřít",
+  // Browser draft recovery.
+  "Draft recovery": "Obnovení konceptů",
+  "Autosave paused · review drafts": "Automatické ukládání pozastaveno · zkontrolujte koncepty",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "Jiná karta změnila uložený koncept. Exportujte svou verzi nebo vyberte koncept, který chcete zachovat.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "Uložený koncept se nepodařilo otevřít. Jeho původní data jsou zachována pro obnovení.",
+  "Saved draft": "Uložený koncept",
+  "Previous project": "Předchozí projekt",
+  "Download original data": "Stáhnout původní data",
+  "Load saved draft": "Načíst uložený koncept",
+  "Restore previous project": "Obnovit předchozí projekt",
+  "Replace saved draft with this version": "Nahradit uložený koncept touto verzí",
+  "Replacing keeps the existing saved draft as a recovery copy.": "Při nahrazení se stávající uložený koncept zachová jako kopie pro obnovení.",
+  "No previous project is available.": "Není k dispozici žádný předchozí projekt.",
+  "This browser cannot coordinate draft saves.": "Tento prohlížeč nedokáže koordinovat ukládání konceptů.",
+  "No saved draft is available.": "Není k dispozici žádný uložený koncept.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Automatické ukládání není dostupné. Pokračovat v této kartě bez ukládání? Před odchodem exportujte JSON."
 };

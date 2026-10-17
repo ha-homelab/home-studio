@@ -643,5 +643,21 @@ export default {
   "Room name is required.": "Cần nhập tên phòng.",
   "Width and depth must be between 0.25 and 100 m.": "Chiều rộng và chiều sâu phải từ 0,25 đến 100 m.",
   "Room ready. Add a door or an item, then preview and export.": "Phòng đã sẵn sàng. Thêm cửa hoặc đồ vật, rồi xem trước và xuất.",
-  "Close": "Đóng"
+  "Close": "Đóng",
+  // Browser draft recovery.
+  "Draft recovery": "Khôi phục bản nháp",
+  "Autosave paused · review drafts": "Tự động lưu đã tạm dừng · xem lại bản nháp",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "Một thẻ khác đã thay đổi bản nháp đã lưu. Hãy xuất phiên bản của bạn hoặc chọn bản nháp muốn giữ lại.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "Không thể mở bản nháp đã lưu. Dữ liệu gốc được giữ lại để khôi phục.",
+  "Saved draft": "Bản nháp đã lưu",
+  "Previous project": "Dự án trước",
+  "Download original data": "Tải dữ liệu gốc xuống",
+  "Load saved draft": "Tải bản nháp đã lưu",
+  "Restore previous project": "Khôi phục dự án trước",
+  "Replace saved draft with this version": "Thay bản nháp đã lưu bằng phiên bản này",
+  "Replacing keeps the existing saved draft as a recovery copy.": "Khi thay thế, bản nháp hiện đã lưu được giữ lại làm bản sao khôi phục.",
+  "No previous project is available.": "Không có dự án trước.",
+  "This browser cannot coordinate draft saves.": "Trình duyệt này không thể phối hợp việc lưu bản nháp giữa các thẻ.",
+  "No saved draft is available.": "Không có bản nháp đã lưu.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Không thể tự động lưu. Tiếp tục trong thẻ này mà không lưu? Hãy xuất JSON trước khi rời đi."
 };

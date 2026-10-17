@@ -643,5 +643,21 @@ export default {
   "Room name is required.": "部屋の名前を入力してください。",
   "Width and depth must be between 0.25 and 100 m.": "幅と奥行きは0.25〜100 mにしてください。",
   "Room ready. Add a door or an item, then preview and export.": "部屋ができました。ドアやアイテムを追加し、プレビューして書き出しましょう。",
-  "Close": "閉じる"
+  "Close": "閉じる",
+  // Browser draft recovery.
+  "Draft recovery": "下書きの復元",
+  "Autosave paused · review drafts": "自動保存を一時停止中 · 下書きを確認",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "別のタブで保存済みの下書きが変更されました。現在のバージョンを書き出すか、残す下書きを選んでください。",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "保存済みの下書きを開けませんでした。元のデータは復元用に保持されています。",
+  "Saved draft": "保存済みの下書き",
+  "Previous project": "前のプロジェクト",
+  "Download original data": "元のデータをダウンロード",
+  "Load saved draft": "保存済みの下書きを読み込む",
+  "Restore previous project": "前のプロジェクトを復元",
+  "Replace saved draft with this version": "保存済みの下書きをこのバージョンで置き換える",
+  "Replacing keeps the existing saved draft as a recovery copy.": "置き換える際に、既存の保存済み下書きは復元用のコピーとして保持されます。",
+  "No previous project is available.": "前のプロジェクトはありません。",
+  "This browser cannot coordinate draft saves.": "このブラウザーは下書きの保存をタブ間で調整できません。",
+  "No saved draft is available.": "保存済みの下書きはありません。",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "自動保存できません。このタブで保存せずに続行しますか？離れる前にJSONを書き出してください。"
 };

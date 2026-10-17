@@ -643,5 +643,21 @@ export default {
   "Room name is required.": "请输入房间名称。",
   "Width and depth must be between 0.25 and 100 m.": "宽度和深度必须介于 0.25 至 100 米之间。",
   "Room ready. Add a door or an item, then preview and export.": "房间已就绪。添加门或物品，然后预览并导出。",
-  "Close": "关闭"
+  "Close": "关闭",
+  // Browser draft recovery.
+  "Draft recovery": "草稿恢复",
+  "Autosave paused · review drafts": "自动保存已暂停 · 检查草稿",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "另一个标签页更改了已保存的草稿。请导出你的版本或选择要保留的草稿。",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "无法打开已保存的草稿。原始数据已保留，可用于恢复。",
+  "Saved draft": "已保存的草稿",
+  "Previous project": "上一个项目",
+  "Download original data": "下载原始数据",
+  "Load saved draft": "加载已保存的草稿",
+  "Restore previous project": "恢复上一个项目",
+  "Replace saved draft with this version": "用此版本替换已保存的草稿",
+  "Replacing keeps the existing saved draft as a recovery copy.": "替换时，现有的已保存草稿会作为恢复副本保留。",
+  "No previous project is available.": "没有可用的上一个项目。",
+  "This browser cannot coordinate draft saves.": "此浏览器无法协调标签页之间的草稿保存。",
+  "No saved draft is available.": "没有可用的已保存草稿。",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "无法自动保存。要在此标签页中继续而不保存吗？请在离开前导出 JSON。"
 };

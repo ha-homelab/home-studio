@@ -642,5 +642,21 @@ export default {
   "Room name is required.": "Een kamernaam is vereist.",
   "Width and depth must be between 0.25 and 100 m.": "Breedte en diepte moeten tussen 0,25 en 100 m liggen.",
   "Room ready. Add a door or an item, then preview and export.": "Kamer klaar. Voeg een deur of voorwerp toe, bekijk het voorbeeld en exporteer.",
-  "Close": "Sluiten"
+  "Close": "Sluiten",
+  // Browser draft recovery.
+  "Draft recovery": "Concepten herstellen",
+  "Autosave paused · review drafts": "Automatisch opslaan gepauzeerd · concepten bekijken",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "Een ander tabblad heeft het opgeslagen concept gewijzigd. Exporteer je versie of kies welk concept je wilt behouden.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "Het opgeslagen concept kon niet worden geopend. De oorspronkelijke gegevens blijven bewaard voor herstel.",
+  "Saved draft": "Opgeslagen concept",
+  "Previous project": "Vorig project",
+  "Download original data": "Oorspronkelijke gegevens downloaden",
+  "Load saved draft": "Opgeslagen concept laden",
+  "Restore previous project": "Vorig project herstellen",
+  "Replace saved draft with this version": "Opgeslagen concept vervangen door deze versie",
+  "Replacing keeps the existing saved draft as a recovery copy.": "Bij het vervangen blijft het bestaande opgeslagen concept bewaard als herstelkopie.",
+  "No previous project is available.": "Er is geen vorig project beschikbaar.",
+  "This browser cannot coordinate draft saves.": "Deze browser kan het opslaan van concepten niet coördineren.",
+  "No saved draft is available.": "Er is geen opgeslagen concept beschikbaar.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Automatisch opslaan is niet beschikbaar. Doorgaan op dit tabblad zonder op te slaan? Exporteer JSON voordat je vertrekt."
 };

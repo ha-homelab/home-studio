@@ -642,5 +642,21 @@ export default {
   "Room name is required.": "اسم الغرفة مطلوب.",
   "Width and depth must be between 0.25 and 100 m.": "يجب أن يتراوح العرض والعمق بين 0.25 و100 م.",
   "Room ready. Add a door or an item, then preview and export.": "الغرفة جاهزة. أضف بابًا أو عنصرًا، ثم عاين المشروع وصدّره.",
-  "Close": "إغلاق"
+  "Close": "إغلاق",
+  // Browser draft recovery.
+  "Draft recovery": "استعادة المسودات",
+  "Autosave paused · review drafts": "الحفظ التلقائي متوقف مؤقتًا · راجع المسودات",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "غيّرت علامة تبويب أخرى المسودة المحفوظة. صدّر نسختك أو اختر المسودة التي تريد الاحتفاظ بها.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "تعذّر فتح المسودة المحفوظة. تم الاحتفاظ ببياناتها الأصلية لاستعادتها.",
+  "Saved draft": "المسودة المحفوظة",
+  "Previous project": "المشروع السابق",
+  "Download original data": "تنزيل البيانات الأصلية",
+  "Load saved draft": "تحميل المسودة المحفوظة",
+  "Restore previous project": "استعادة المشروع السابق",
+  "Replace saved draft with this version": "استبدال المسودة المحفوظة بهذه النسخة",
+  "Replacing keeps the existing saved draft as a recovery copy.": "يحتفظ الاستبدال بالمسودة المحفوظة الحالية كنسخة للاستعادة.",
+  "No previous project is available.": "لا يوجد مشروع سابق متاح.",
+  "This browser cannot coordinate draft saves.": "لا يمكن لهذا المتصفح تنسيق حفظ المسودات.",
+  "No saved draft is available.": "لا توجد مسودة محفوظة متاحة.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "الحفظ التلقائي غير متاح. هل تريد المتابعة في علامة التبويب هذه دون حفظ؟ صدّر ملف JSON قبل المغادرة."
 };

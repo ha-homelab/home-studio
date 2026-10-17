@@ -642,5 +642,21 @@ export default {
   "Room name is required.": "Ein Raumname ist erforderlich.",
   "Width and depth must be between 0.25 and 100 m.": "Breite und Tiefe müssen zwischen 0,25 und 100 m liegen.",
   "Room ready. Add a door or an item, then preview and export.": "Raum fertig. Füge eine Tür oder einen Gegenstand hinzu, dann öffne die Vorschau und exportiere.",
-  "Close": "Schließen"
+  "Close": "Schließen",
+  // Browser draft recovery.
+  "Draft recovery": "Entwürfe wiederherstellen",
+  "Autosave paused · review drafts": "Automatisches Speichern pausiert · Entwürfe prüfen",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "Ein anderer Tab hat den gespeicherten Entwurf geändert. Exportiere deine Version oder wähle den Entwurf, den du behalten möchtest.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "Der gespeicherte Entwurf konnte nicht geöffnet werden. Seine ursprünglichen Daten bleiben zur Wiederherstellung erhalten.",
+  "Saved draft": "Gespeicherter Entwurf",
+  "Previous project": "Vorheriges Projekt",
+  "Download original data": "Ursprüngliche Daten herunterladen",
+  "Load saved draft": "Gespeicherten Entwurf laden",
+  "Restore previous project": "Vorheriges Projekt wiederherstellen",
+  "Replace saved draft with this version": "Gespeicherten Entwurf durch diese Version ersetzen",
+  "Replacing keeps the existing saved draft as a recovery copy.": "Beim Ersetzen bleibt der bisher gespeicherte Entwurf als Wiederherstellungskopie erhalten.",
+  "No previous project is available.": "Es ist kein vorheriges Projekt verfügbar.",
+  "This browser cannot coordinate draft saves.": "Dieser Browser kann das Speichern von Entwürfen nicht koordinieren.",
+  "No saved draft is available.": "Es ist kein gespeicherter Entwurf verfügbar.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Automatisches Speichern ist nicht verfügbar. In diesem Tab ohne Speichern fortfahren? Exportiere JSON, bevor du ihn verlässt."
 };

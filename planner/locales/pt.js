@@ -642,5 +642,21 @@ export default {
   "Room name is required.": "O nome do cômodo é obrigatório.",
   "Width and depth must be between 0.25 and 100 m.": "A largura e a profundidade devem estar entre 0,25 e 100 m.",
   "Room ready. Add a door or an item, then preview and export.": "Cômodo pronto. Adicione uma porta ou um objeto, depois visualize e exporte.",
-  "Close": "Fechar"
+  "Close": "Fechar",
+  // Browser draft recovery.
+  "Draft recovery": "Recuperação de rascunhos",
+  "Autosave paused · review drafts": "Gravação automática em pausa · rever rascunhos",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "Outro separador alterou o rascunho guardado. Exporte a sua versão ou escolha o rascunho a manter.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "Não foi possível abrir o rascunho guardado. Os dados originais são mantidos para recuperação.",
+  "Saved draft": "Rascunho guardado",
+  "Previous project": "Projeto anterior",
+  "Download original data": "Transferir dados originais",
+  "Load saved draft": "Carregar rascunho guardado",
+  "Restore previous project": "Restaurar projeto anterior",
+  "Replace saved draft with this version": "Substituir o rascunho guardado por esta versão",
+  "Replacing keeps the existing saved draft as a recovery copy.": "A substituição mantém o rascunho atualmente guardado como cópia de recuperação.",
+  "No previous project is available.": "Não há nenhum projeto anterior disponível.",
+  "This browser cannot coordinate draft saves.": "Este navegador não consegue coordenar a gravação de rascunhos.",
+  "No saved draft is available.": "Não há nenhum rascunho guardado disponível.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "A gravação automática está indisponível. Continuar neste separador sem guardar? Exporte o JSON antes de sair."
 };

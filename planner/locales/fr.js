@@ -642,5 +642,21 @@ export default {
   "Room name is required.": "Le nom de la pièce est obligatoire.",
   "Width and depth must be between 0.25 and 100 m.": "La largeur et la profondeur doivent être comprises entre 0,25 et 100 m.",
   "Room ready. Add a door or an item, then preview and export.": "Pièce prête. Ajoutez une porte ou un objet, puis prévisualisez et exportez.",
-  "Close": "Fermer"
+  "Close": "Fermer",
+  // Browser draft recovery.
+  "Draft recovery": "Récupération des brouillons",
+  "Autosave paused · review drafts": "Enregistrement automatique en pause · examiner les brouillons",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "Un autre onglet a modifié le brouillon enregistré. Exportez votre version ou choisissez le brouillon à conserver.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "Impossible d’ouvrir le brouillon enregistré. Ses données d’origine sont conservées pour permettre leur récupération.",
+  "Saved draft": "Brouillon enregistré",
+  "Previous project": "Projet précédent",
+  "Download original data": "Télécharger les données d’origine",
+  "Load saved draft": "Charger le brouillon enregistré",
+  "Restore previous project": "Restaurer le projet précédent",
+  "Replace saved draft with this version": "Remplacer le brouillon enregistré par cette version",
+  "Replacing keeps the existing saved draft as a recovery copy.": "Le remplacement conserve le brouillon actuellement enregistré comme copie de récupération.",
+  "No previous project is available.": "Aucun projet précédent n’est disponible.",
+  "This browser cannot coordinate draft saves.": "Ce navigateur ne peut pas coordonner l’enregistrement des brouillons.",
+  "No saved draft is available.": "Aucun brouillon enregistré n’est disponible.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "L’enregistrement automatique est indisponible. Continuer dans cet onglet sans enregistrer ? Exportez le JSON avant de quitter."
 };

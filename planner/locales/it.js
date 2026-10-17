@@ -642,5 +642,21 @@ export default {
   "Room name is required.": "Il nome della stanza è obbligatorio.",
   "Width and depth must be between 0.25 and 100 m.": "Larghezza e profondità devono essere comprese tra 0,25 e 100 m.",
   "Room ready. Add a door or an item, then preview and export.": "Stanza pronta. Aggiungi una porta o un oggetto, poi visualizza ed esporta.",
-  "Close": "Chiudi"
+  "Close": "Chiudi",
+  // Browser draft recovery.
+  "Draft recovery": "Recupero delle bozze",
+  "Autosave paused · review drafts": "Salvataggio automatico in pausa · controlla le bozze",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "Un’altra scheda ha modificato la bozza salvata. Esporta la tua versione o scegli quale bozza conservare.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "Impossibile aprire la bozza salvata. I dati originali sono conservati per il recupero.",
+  "Saved draft": "Bozza salvata",
+  "Previous project": "Progetto precedente",
+  "Download original data": "Scarica i dati originali",
+  "Load saved draft": "Carica la bozza salvata",
+  "Restore previous project": "Ripristina il progetto precedente",
+  "Replace saved draft with this version": "Sostituisci la bozza salvata con questa versione",
+  "Replacing keeps the existing saved draft as a recovery copy.": "La sostituzione conserva la bozza attualmente salvata come copia di recupero.",
+  "No previous project is available.": "Nessun progetto precedente disponibile.",
+  "This browser cannot coordinate draft saves.": "Questo browser non può coordinare il salvataggio delle bozze.",
+  "No saved draft is available.": "Nessuna bozza salvata disponibile.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Il salvataggio automatico non è disponibile. Continuare in questa scheda senza salvare? Esporta il JSON prima di uscire."
 };

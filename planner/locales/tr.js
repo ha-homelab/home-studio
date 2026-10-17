@@ -642,5 +642,21 @@ export default {
   "Room name is required.": "Oda adı gereklidir.",
   "Width and depth must be between 0.25 and 100 m.": "Genişlik ve derinlik 0,25 ile 100 m arasında olmalıdır.",
   "Room ready. Add a door or an item, then preview and export.": "Oda hazır. Kapı veya eşya ekleyin, ardından önizleyin ve dışa aktarın.",
-  "Close": "Kapat"
+  "Close": "Kapat",
+  // Browser draft recovery.
+  "Draft recovery": "Taslak kurtarma",
+  "Autosave paused · review drafts": "Otomatik kayıt duraklatıldı · taslakları inceleyin",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "Başka bir sekme kayıtlı taslağı değiştirdi. Sürümünüzü dışa aktarın veya hangi taslağın tutulacağını seçin.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "Kayıtlı taslak açılamadı. Özgün verileri kurtarma için saklanıyor.",
+  "Saved draft": "Kayıtlı taslak",
+  "Previous project": "Önceki proje",
+  "Download original data": "Özgün verileri indir",
+  "Load saved draft": "Kayıtlı taslağı yükle",
+  "Restore previous project": "Önceki projeyi geri yükle",
+  "Replace saved draft with this version": "Kayıtlı taslağı bu sürümle değiştir",
+  "Replacing keeps the existing saved draft as a recovery copy.": "Değiştirme sırasında mevcut kayıtlı taslak kurtarma kopyası olarak saklanır.",
+  "No previous project is available.": "Kullanılabilir önceki proje yok.",
+  "This browser cannot coordinate draft saves.": "Bu tarayıcı sekmeler arasında taslak kayıtlarını koordine edemiyor.",
+  "No saved draft is available.": "Kullanılabilir kayıtlı taslak yok.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Otomatik kayıt kullanılamıyor. Bu sekmede kaydetmeden devam edilsin mi? Ayrılmadan önce JSON dosyasını dışa aktarın."
 };

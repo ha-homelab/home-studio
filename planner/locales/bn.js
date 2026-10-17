@@ -642,5 +642,21 @@ export default {
   "Room name is required.": "ঘরের নাম দিতে হবে।",
   "Width and depth must be between 0.25 and 100 m.": "প্রস্থ ও গভীরতা ০.২৫ থেকে ১০০ মিটারের মধ্যে হতে হবে।",
   "Room ready. Add a door or an item, then preview and export.": "ঘর প্রস্তুত। দরজা বা জিনিস যোগ করুন, তারপর পূর্বরূপ দেখে রপ্তানি করুন।",
-  "Close": "বন্ধ করুন"
+  "Close": "বন্ধ করুন",
+  // Browser draft recovery.
+  "Draft recovery": "খসড়া পুনরুদ্ধার",
+  "Autosave paused · review drafts": "স্বয়ংক্রিয় সংরক্ষণ স্থগিত · খসড়াগুলি পর্যালোচনা করুন",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "অন্য একটি ট্যাব সংরক্ষিত খসড়াটি পরিবর্তন করেছে। আপনার সংস্করণটি রপ্তানি করুন অথবা কোন খসড়াটি রাখবেন তা বেছে নিন।",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "সংরক্ষিত খসড়াটি খোলা যায়নি। পুনরুদ্ধারের জন্য এর মূল তথ্য রাখা হয়েছে।",
+  "Saved draft": "সংরক্ষিত খসড়া",
+  "Previous project": "আগের প্রকল্প",
+  "Download original data": "মূল তথ্য ডাউনলোড করুন",
+  "Load saved draft": "সংরক্ষিত খসড়া লোড করুন",
+  "Restore previous project": "আগের প্রকল্প পুনরুদ্ধার করুন",
+  "Replace saved draft with this version": "সংরক্ষিত খসড়াটি এই সংস্করণ দিয়ে প্রতিস্থাপন করুন",
+  "Replacing keeps the existing saved draft as a recovery copy.": "প্রতিস্থাপনের সময় বর্তমান সংরক্ষিত খসড়াটি পুনরুদ্ধারের কপি হিসেবে রাখা হয়।",
+  "No previous project is available.": "আগের কোনো প্রকল্প পাওয়া যায়নি।",
+  "This browser cannot coordinate draft saves.": "এই ব্রাউজার খসড়া সংরক্ষণের সমন্বয় করতে পারে না।",
+  "No saved draft is available.": "কোনো সংরক্ষিত খসড়া পাওয়া যায়নি।",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "স্বয়ংক্রিয় সংরক্ষণ উপলব্ধ নেই। সংরক্ষণ না করেই এই ট্যাবে চালিয়ে যাবেন? চলে যাওয়ার আগে JSON রপ্তানি করুন।"
 };

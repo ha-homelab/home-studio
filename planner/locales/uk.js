@@ -642,5 +642,21 @@ export default {
   "Room name is required.": "Укажіть назву кімнати.",
   "Width and depth must be between 0.25 and 100 m.": "Ширина та глибина мають бути від 0,25 до 100 м.",
   "Room ready. Add a door or an item, then preview and export.": "Кімната готова. Додайте двері або предмет, потім перегляньте й експортуйте.",
-  "Close": "Закрити"
+  "Close": "Закрити",
+  // Browser draft recovery.
+  "Draft recovery": "Відновлення чернеток",
+  "Autosave paused · review drafts": "Автозбереження призупинено · перевірте чернетки",
+  "Another tab changed the saved draft. Export your version or choose which draft to keep.": "Інша вкладка змінила збережену чернетку. Експортуйте свою версію або виберіть, яку чернетку залишити.",
+  "The saved draft could not be opened. Its original data is kept for recovery.": "Не вдалося відкрити збережену чернетку. Її початкові дані збережено для відновлення.",
+  "Saved draft": "Збережена чернетка",
+  "Previous project": "Попередній проєкт",
+  "Download original data": "Завантажити початкові дані",
+  "Load saved draft": "Відкрити збережену чернетку",
+  "Restore previous project": "Відновити попередній проєкт",
+  "Replace saved draft with this version": "Замінити збережену чернетку цією версією",
+  "Replacing keeps the existing saved draft as a recovery copy.": "Під час заміни наявна збережена чернетка залишається як копія для відновлення.",
+  "No previous project is available.": "Попередній проєкт недоступний.",
+  "This browser cannot coordinate draft saves.": "Цей браузер не може узгоджувати збереження чернеток між вкладками.",
+  "No saved draft is available.": "Збережена чернетка недоступна.",
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Автозбереження недоступне. Продовжити в цій вкладці без збереження? Експортуйте JSON перед виходом."
 };
