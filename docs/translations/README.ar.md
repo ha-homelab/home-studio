@@ -11,7 +11,7 @@
 
 نزّل مجموعة الأدوات الكاملة وفك ضغطها. ثبّت Python 3.10 أو أحدث. نفّذ الأمر التالي داخل مجلد الأدوات:
 
-[ZIP](https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip)
+[ZIP](https://github.com/ha-homelab/home-studio/releases/latest)
 
 ```sh
 python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package

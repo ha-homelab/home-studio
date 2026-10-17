@@ -9,7 +9,7 @@ Zeichne dein Zuhause im Browser. Du brauchst kein Konto. Die Sprache wählst du 
 
 Lade das vollständige Werkzeugpaket herunter und entpacke es. Installiere Python 3.10 oder neuer. Führe im Paketordner Folgendes aus:
 
-[ZIP](https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip)
+[ZIP](https://github.com/ha-homelab/home-studio/releases/latest)
 
 ```sh
 python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package

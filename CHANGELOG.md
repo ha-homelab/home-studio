@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.8.0] - First-session usability
+
+- Open fictional practice, decor, pattern, and garage examples directly from the
+  website or the persistent Examples gallery. Start a measured room with an
+  optional wall outline in one undoable operation.
+- Preserve inspector focus and invalid values while editing dimensions. Detect
+  competing browser drafts, retain a previous-project checkpoint, and offer
+  explicit recovery and export instead of silently replacing saved work.
+- Keep graphics startup errors visible in Home mode and provide a working
+  Plan & placement recovery path when WebGL creation or the first draw fails.
+- Route installation downloads to the latest stable toolkit and clarify archive
+  selection, startup after replacement, browser storage, and remaining geometry
+  limitations. No new runtime dependency or continuous rendering loop is added.
+
+### Upgrade
+
+Export your project JSON before updating. Schema 1 projects remain compatible.
+Rebuild and reinstall generated viewers to receive the graphics recovery fix;
+editor improvements are available in the hosted planner. Existing backups and
+explicit installation replacement rules remain in effect.
+
 ## [0.7.0] - Development line
 
 - Add optional AI room drafting with 15 configured cloud and local provider

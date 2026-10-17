@@ -9,7 +9,7 @@ Gambar rumah Anda di browser. Tidak perlu akun. Pilih bahasa di bagian atas edit
 
 Unduh dan ekstrak paket alat lengkap. Pasang Python 3.10 atau lebih baru. Jalankan perintah berikut di folder paket alat:
 
-[ZIP](https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip)
+[ZIP](https://github.com/ha-homelab/home-studio/releases/latest)
 
 ```sh
 python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package

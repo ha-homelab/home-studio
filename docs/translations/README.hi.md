@@ -9,7 +9,7 @@
 
 पूरा टूलकिट डाउनलोड करके निकालें। Python 3.10 या नया संस्करण स्थापित करें। टूलकिट के फ़ोल्डर में यह चलाएँ:
 
-[ZIP](https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip)
+[ZIP](https://github.com/ha-homelab/home-studio/releases/latest)
 
 ```sh
 python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package

@@ -9,7 +9,7 @@ Evinizi tarayıcıda çizin. Hesap gerekmez. Dili düzenleyicinin üst kısmınd
 
 Araçların tamamını indirip arşivi açın. Python 3.10 veya üzerini kurun. Araç klasöründe şu komutu çalıştırın:
 
-[ZIP](https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip)
+[ZIP](https://github.com/ha-homelab/home-studio/releases/latest)
 
 ```sh
 python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package

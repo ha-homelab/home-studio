@@ -9,7 +9,7 @@ Nakreslete svůj domov v prohlížeči. Nepotřebujete účet. Jazyk vyberete v 
 
 Stáhněte a rozbalte kompletní sadu nástrojů. Nainstalujte Python 3.10 nebo novější. Ve složce nástrojů spusťte:
 
-[ZIP](https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip)
+[ZIP](https://github.com/ha-homelab/home-studio/releases/latest)
 
 ```sh
 python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package

@@ -1,5 +1,16 @@
 # Home studio
 
+**Draw your home, explore it in 3D, and make it your Home Assistant dashboard.**
+
+**[Try a furnished example](https://ha-homelab.github.io/home-studio/planner/?example=practice)** ·
+**[Start your own plan](https://ha-homelab.github.io/home-studio/planner/)** ·
+**[Get the latest stable release](https://github.com/ha-homelab/home-studio/releases/latest)**
+
+No account or installation is needed to try the editor. Start with room
+measurements and walls, choose from 195 furniture designs, or open an editable
+example and experiment. The editor supports 24 languages. When you are ready,
+the local compiler and installer bring your plan into Home Assistant.
+
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15584/badge)](https://www.bestpractices.dev/projects/15584)
 
 [![Fuzzing: RC only](https://img.shields.io/badge/Fuzzing-RC%20only-blue)](docs/fuzzing.md)
@@ -7,10 +18,9 @@
 **[How we test and release Home Studio](docs/quality-and-release.md)** — illustrated
 browser coverage, recovery checks, and verified release results.
 
-**[Start drawing](https://ha-homelab.github.io/home-studio/planner/)** ·
 **[Illustrated drawing guide](https://ha-homelab.github.io/home-studio/planner/guide.html)** ·
 **[Install in Home Assistant](https://ha-homelab.github.io/home-studio/install.html)** ·
-**[Download the complete ZIP](https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip)**
+**[Saving and recovery](docs/first-session.md)**
 
 Draw rooms, add walls, doors and windows, place furniture, and explore your
 design in 3D. The browser editor needs no account or installation. Use a desktop
@@ -139,8 +149,9 @@ not a way to download or replace furniture models.
 
 1. Follow the [drawing guide](https://ha-homelab.github.io/home-studio/planner/guide.html)
    and choose **Export JSON** in the editor. Keep that file as your source.
-2. [Download the complete ZIP](https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip),
-   extract it, and open a terminal in the extracted `home-studio-main` folder.
+2. Open the [latest stable release](https://github.com/ha-homelab/home-studio/releases/latest),
+   choose `home-studio-VERSION.zip` under **Assets** (not GitHub's **Source code**
+   ZIP), extract it, and open a terminal in the extracted `home-studio` folder.
 3. Check `python3 --version`. Use Python 3.10 or newer. On Windows, `py -3` may be
    your Python command; substitute it for `python3` in these examples.
 4. Run the build below. Replace `/path/to/project.json` with your exported file's

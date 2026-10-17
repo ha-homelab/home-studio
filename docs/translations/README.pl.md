@@ -9,7 +9,7 @@ Narysuj swój dom w przeglądarce. Konto nie jest potrzebne. Wybierz język u g�
 
 Pobierz i rozpakuj pełny zestaw narzędzi. Zainstaluj Python 3.10 lub nowszy. W folderze narzędzi uruchom:
 
-[ZIP](https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip)
+[ZIP](https://github.com/ha-homelab/home-studio/releases/latest)
 
 ```sh
 python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package

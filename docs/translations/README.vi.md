@@ -9,7 +9,7 @@ Vẽ ngôi nhà của bạn trong trình duyệt mà không cần tài khoản. 
 
 Tải xuống và giải nén bộ công cụ đầy đủ. Cài Python 3.10 trở lên. Chạy lệnh sau trong thư mục bộ công cụ:
 
-[ZIP](https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip)
+[ZIP](https://github.com/ha-homelab/home-studio/releases/latest)
 
 ```sh
 python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package

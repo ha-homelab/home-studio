@@ -65,7 +65,7 @@
         <section class="step" id="home-assistant" aria-labelledby="home-assistant-title">
           <p class="step-label">03 · FROM DRAWING TO INSTALLED PANEL</p>
           <h2 id="home-assistant-title">Take your plan into Home Assistant</h2>
-          <p>The complete public toolkit includes a local compiler, a Home Assistant integration, and its installer. Keep your exported JSON, <a href="https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip">download the complete ZIP</a>, and follow the <a href="../install.html">installation guide</a>.</p>
+          <p>The complete public toolkit includes a local compiler, a Home Assistant integration, and its installer. Keep your exported JSON, <a href="https://github.com/ha-homelab/home-studio/releases/latest">download the complete ZIP</a>, and follow the <a href="../install.html">installation guide</a>.</p>
           <dl class="distinctions">
             <div><dt>In the browser</dt><dd>Draw, preview, and save editable JSON. Entering an entity ID records a mapping; this editor does not connect to or control Home Assistant.</dd></div>
             <div><dt>On your computer</dt><dd>Python 3.10+ builds your private viewer, model exports, and installation archive. The compiler and installer need no extra Python packages.</dd></div>
@@ -79,7 +79,7 @@
           <details>
             <summary>Use the downloaded toolkit's editor offline</summary>
             <div class="detail-body">
-              <p>The hosted planner needs no setup. To use a downloaded copy, extract the <a href="https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip">complete ZIP</a> and keep its folders together. From the extracted toolkit folder, run:</p>
+              <p>The hosted planner needs no setup. To use a downloaded copy, extract the <a href="https://github.com/ha-homelab/home-studio/releases/latest">complete ZIP</a> and keep its folders together. From the extracted toolkit folder, run:</p>
               <pre><code>python3 -m http.server 8099 --bind 127.0.0.1</code></pre>
               <p>Open <a href="http://127.0.0.1:8099/planner/">http://127.0.0.1:8099/planner/</a> and keep the terminal running while you draw. Double-clicking index.html is not supported.</p>
               <p>Use Export JSON and Open JSON to move your drawing between the hosted and local copies; their browser storage is separate. The toolkit also includes the compiler and installer; run those separately in your terminal when you follow the <a href="../install.html">installation guide</a>.</p>

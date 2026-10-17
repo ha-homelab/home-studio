@@ -9,7 +9,7 @@
 
 下载并解压完整工具包。安装 Python 3.10 或更新版本。在工具包目录中运行：
 
-[ZIP](https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip)
+[ZIP](https://github.com/ha-homelab/home-studio/releases/latest)
 
 ```sh
 python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package

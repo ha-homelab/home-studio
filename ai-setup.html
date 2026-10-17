@@ -18,7 +18,7 @@
     <p>This optional feature runs through a small companion on your computer. It needs Python 3.10 or newer and either your own provider API key or a running local vision model. The ordinary online drawing editor still works without either.</p>
     <figure class="ai-guide-preview"><img src="./planner/guide-assets/12-ai-review.jpg" width="1500" height="1000" alt="Local Home Studio editor showing a detached room draft in 3D and the candidate review panel before Apply."><figcaption>A synthetic test example: the draft is visible in 3D while the saved plan stays unchanged. This verifies the editor workflow; it is not a demonstration of a live model's accuracy.</figcaption></figure>
     <h2>1. Open your local studio</h2>
-    <p><a href="https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip">Download the complete toolkit</a> and extract it. Open a terminal in the extracted folder. On macOS or Linux, run:</p>
+    <p>Open the <a href="https://github.com/ha-homelab/home-studio/releases/latest">latest stable release</a>, download <code>home-studio-VERSION.zip</code> under <strong>Assets</strong>, and extract it. Open a terminal in the extracted <code>home-studio</code> folder. On macOS or Linux, run:</p>
     <pre><code>python3 scripts/serve-ai-planner.py</code></pre>
     <p>On Windows, use <code>py -3 scripts/serve-ai-planner.py</code>. Open the local address printed by the command, then choose <strong>Plan from photos</strong> in the editor. Keep the terminal open while working. If the port is busy, add <code>--port 8100</code>.</p>
     <p>If you already drew a plan on this website, first choose <strong>Export JSON</strong>, then open that file in the local editor. Website and local drafts have separate browser storage.</p>

@@ -9,7 +9,7 @@ Dessinez votre logement dans le navigateur. Aucun compte n’est nécessaire. Ch
 
 Téléchargez et décompressez la boîte à outils complète. Installez Python 3.10 ou une version ultérieure. Dans le dossier des outils, exécutez :
 
-[ZIP](https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip)
+[ZIP](https://github.com/ha-homelab/home-studio/releases/latest)
 
 ```sh
 python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package

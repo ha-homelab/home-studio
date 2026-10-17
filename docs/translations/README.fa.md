@@ -11,7 +11,7 @@
 
 بستهٔ کامل ابزارها را دانلود و استخراج کنید. Python 3.10 یا جدیدتر را نصب کنید. در پوشهٔ ابزارها اجرا کنید:
 
-[ZIP](https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip)
+[ZIP](https://github.com/ha-homelab/home-studio/releases/latest)
 
 ```sh
 python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package
