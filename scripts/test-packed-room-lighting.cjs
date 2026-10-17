@@ -158,7 +158,7 @@ for(const p of positions) {
 (async()=>{
   const THREE=await import('data:text/javascript;base64,'+fs.readFileSync(path.join(root,'vendor/three.module.min.js')).toString('base64'));
   const construction=fs.readFileSync(path.join(root,'home-view.js'),'utf8').split('\n')
-    .find(line=>line.trimStart().startsWith('if(!roomLighting || roomLighting.capacity<lightCount)'));
+    .find(line=>line.includes('roomLighting.capacity<lightCount'));
   assert(construction,'Exercise the actual Home lighting construction');
   for(const [diffuseLighting,maxFragmentUniforms,expected] of [[false,1024,'literal'],[true,1024,'packed'],[true,128,'literal']]) {
     const state={THREE,model:{rooms},lightCount:9,daylightWindows:windows,renderProfile:{diffuseLighting},

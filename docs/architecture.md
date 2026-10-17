@@ -101,7 +101,9 @@ The landing page links directly to four fixed fictional examples. The planner's
 `onboarding.js` accepts only their allowlisted IDs; it lazily imports local
 `planner/examples/*.js` modules. No arbitrary URL is fetched, and the hosted
 editor keeps `connect-src 'none'`. Example modules contain the same source data
-as the downloadable lesson JSON. Loading an example uses the same project
+as the downloadable lesson JSON. Edit the canonical `planner/guide-assets/*.json`
+files, then run `python3 scripts/build-example-modules.py`; CI checks generated
+bytes and validates each example through the project model. Loading an example uses the same project
 replacement boundary as opening a file, and consumes the launch query so a
 reload does not overwrite subsequent edits.
 
