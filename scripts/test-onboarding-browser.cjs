@@ -147,15 +147,27 @@ const server = http.createServer((request, response) => {
     await page.goto(url + '?example=https%3A%2F%2Fexample.invalid%2Ffile.js'); await ready();
     assert.deepEqual(await project(), beforeInvalid);
     assert.equal(requests.filter(request => /\/examples\//.test(request)).length, requestCount);
-    const cleanContext = await browser.newContext({ locale: 'en-US' });
-    const cleanPage = await cleanContext.newPage();
-    let unexpectedConfirmation = false;
-    cleanPage.on('dialog', dialog => { unexpectedConfirmation = true; void dialog.dismiss(); });
-    await cleanPage.goto(url + '?example=practice');
-    await cleanPage.waitForFunction(() => window.planner?.getView() === 'preview');
-    assert.equal(unexpectedConfirmation, false, 'Clean example launch needs no replacement confirmation');
-    assert.deepEqual(await cleanPage.evaluate(() => window.planner.getProject()), practice);
-    await cleanContext.close();
+    // Each direct example must finish a real render and leave the editor usable.
+    for (const [example, fixture] of [['practice', 'practice-home'], ['decor', 'decor-studio'],
+      ['patterns', 'pattern-studio'], ['garage', 'garage-and-studio']]) {
+      const cleanContext = await browser.newContext({ locale: 'en-US' });
+      const cleanPage = await cleanContext.newPage();
+      let unexpectedConfirmation = false;
+      cleanPage.on('pageerror', error => errors.push(`${example}: ${error}`));
+      cleanPage.on('dialog', dialog => { unexpectedConfirmation = true; void dialog.dismiss(); });
+      await cleanPage.goto(url + '?example=' + example);
+      await cleanPage.waitForFunction(() => window.planner?.getView() === 'preview' &&
+        window.planner.getPreviewMetadata().renderCount > 0, null, { timeout: 20000 });
+      assert.equal(unexpectedConfirmation, false, `${example}: clean launch needs no replacement confirmation`);
+      const expected = JSON.parse(fs.readFileSync(path.join(root, `planner/guide-assets/${fixture}.json`)));
+      assert.deepEqual(await cleanPage.evaluate(() => window.planner.getProject()), expected);
+      const metadata = await cleanPage.evaluate(() => window.planner.getPreviewMetadata());
+      assert.equal(metadata.error, undefined, `${example}: preview has no rendering error`);
+      assert.equal(metadata.items, expected.floors[0].items.length, `${example}: preview includes every item`);
+      await cleanPage.locator('#plan-tab').click({ timeout: 5000 });
+      assert.equal(await cleanPage.evaluate(() => window.planner.getView()), 'plan', `${example}: 2D control responds after rendering`);
+      await cleanContext.close();
+    }
 
     // Model a replacement waiting for the draft lock, without changing the real
     // editor's storage implementation. Accepted commits cannot be canceled halfway.
