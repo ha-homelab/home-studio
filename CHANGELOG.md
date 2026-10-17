@@ -21,6 +21,15 @@ Rebuild and reinstall generated viewers to receive the graphics recovery fix;
 editor improvements are available in the hosted planner. Existing backups and
 explicit installation replacement rules remain in effect.
 
+### Security
+
+Browser drafts and recovery copies can contain private home layouts and device
+bindings. They remain in this browser's site storage; clearing site data removes
+them. Export backups privately and use fictional examples when reporting bugs.
+The example picker accepts only bundled example identifiers, not remote project
+URLs. Optional AI provider data handling is unchanged; review the
+[privacy boundaries](docs/ai-planning.md) before supplying photos or credentials.
+
 ## [0.7.0] - Development line
 
 - Add optional AI room drafting with 15 configured cloud and local provider
