@@ -112,7 +112,9 @@ objects. This small entry point reduces setup work without changing schema 1.
 
 `draft-storage.js` owns persistent draft arbitration and recovery. A stored
 revision comparison detects competing changes, with Web Locks serializing
-cooperating tabs where available. Recovery decisions are explicit: load the
+cooperating tabs where available. An older tab running a previous release does
+not participate in that lock protocol; byte comparisons detect many such changes
+but cannot make an older client's writes atomic. Recovery decisions are explicit: load the
 saved version, export the current version, or deliberately replace the stored
 copy. One validated previous-project checkpoint is retained for project
 replacement. Damaged raw data has its own download path. Browser storage is a
