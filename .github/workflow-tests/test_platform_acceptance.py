@@ -142,7 +142,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
         self.assertNotIn('continue-on-error', install)
         self.assertEqual(install['run'].splitlines(), [
             'npm ci --ignore-scripts --no-audit --no-fund',
-            'npx playwright install --with-deps chromium firefox',
+            'npx playwright install --with-deps chromium firefox webkit',
         ])
         for command in ('npm run test:planner', 'node scripts/test-i18n-browser.cjs',
                         'node scripts/test-help-i18n.cjs', 'node scripts/test-viewer-i18n.cjs',
@@ -155,6 +155,17 @@ class PlatformAcceptanceTests(unittest.TestCase):
 
     def test_package_browser_setup_has_separate_bounded_envelope(self):
         self.assert_package_setup_budget(workflow('package.yml'))
+
+    def test_first_session_runs_in_each_installed_engine(self):
+        steps = workflow('package.yml')['jobs']['package']['steps']
+        matches = [step for step in steps if step.get('name') == 'First-room and example workflow']
+        self.assertEqual(len(matches), 1)
+        step = matches[0]
+        self.assertNotIn('if', step)
+        self.assertNotIn('continue-on-error', step)
+        self.assertIn('for engine in chromium firefox webkit; do', step['run'])
+        self.assertIn('PLANNER_EDITING_ENGINE="$engine" node scripts/test-planner-editing.cjs', step['run'])
+        self.assertIn('ONBOARDING_ENGINE="$engine" ONBOARDING_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-onboarding-browser.cjs', step['run'])
 
     def test_package_setup_contract_rejects_unbounded_or_optional_work(self):
         original = workflow('package.yml')
