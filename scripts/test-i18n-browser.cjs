@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
 const load = file => import(pathToFileURL(path.join(root, file)).href);
 const served = new Map([
   ['/home-studio/planner/', ['planner/index.html', 'text/html']],
-  ...['editor', 'model', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity', 'interaction-render'].map(name => [`/home-studio/planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
+  ...['editor', 'model', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity', 'interaction-render', 'onboarding', 'draft-storage', 'inspector-dom'].map(name => [`/home-studio/planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
   ...fs.readdirSync(path.join(root, 'planner/locales')).filter(name => name.endsWith('.js')).map(name => [`/home-studio/planner/locales/${name}`, [`planner/locales/${name}`, 'text/javascript']]),
   ['/home-studio/planner/editor.css', ['planner/editor.css', 'text/css']],
   ['/home-studio/vendor/three.module.min.js', ['vendor/three.module.min.js', 'text/javascript']],
@@ -46,10 +46,10 @@ const served = new Map([
       await page.locator('#language-select').selectOption(code);
       await page.waitForFunction(expected => document.documentElement.lang === expected && new URL(location.href).searchParams.get('lang') === expected, code);
     };
-    await page.getByLabel('Width (m)', { exact: true }).fill('8.75');
+    await page.locator('#inspector-body').getByLabel('Width (m)', { exact: true }).fill('8.75');
     await change('ru');
     const ru = (await load('planner/locales/ru.js')).default;
-    assert.equal(await page.getByLabel(ru['Width (m)'], { exact: true }).inputValue(), '8.75', 'unfinished room dimensions survive language switch');
+    assert.equal(await page.locator('#inspector-body').getByLabel(ru['Width (m)'], { exact: true }).inputValue(), '8.75', 'unfinished room dimensions survive language switch');
 
     const fixture = JSON.parse(fs.readFileSync(path.join(root, 'planner/guide-assets/pattern-studio.json'), 'utf8'));
     fixture.title = 'Untouched title <b>غرفة</b>';

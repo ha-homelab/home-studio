@@ -127,5 +127,6 @@
   "Open sidebar": "Zijbalk openen",
   "Reload saved plan": "Opgeslagen plattegrond herladen",
   "Connecting to Home Assistant…": "Verbinden met Home Assistant…",
-  "Connected · placements are saved in Home Assistant": "Verbonden · plaatsingen worden opgeslagen in Home Assistant"
+  "Connected · placements are saved in Home Assistant": "Verbonden · plaatsingen worden opgeslagen in Home Assistant",
+  "3D view could not start. Plan editing and JSON export are still available.": "De 3D-weergave kon niet worden gestart. Je kunt de plattegrond nog bewerken en JSON exporteren."
 }

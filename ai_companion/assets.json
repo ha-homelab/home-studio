@@ -71,5 +71,12 @@
   "ai/photo-worker.js",
   "ai/draft.js",
   "ai/json.js",
-  "planner/guide-assets/12-ai-review.jpg"
+  "planner/guide-assets/12-ai-review.jpg",
+  "planner/onboarding.js",
+  "planner/examples/practice.js",
+  "planner/examples/decor.js",
+  "planner/examples/patterns.js",
+  "planner/examples/garage.js",
+  "planner/draft-storage.js",
+  "planner/inspector-dom.js"
 ]

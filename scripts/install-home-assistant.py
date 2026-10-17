@@ -426,7 +426,8 @@ def print_result(result: Result):
     print(f"1. In {result.target.parent.parent / 'configuration.yaml'}, add this top-level entry once (keep an existing entry):")
     print("\n   home_floorplan:\n")
     print("2. Run the Home Assistant YAML configuration check (or ha core check on HAOS).")
-    print("3. If the check succeeds, restart Home Assistant from Settings > System > Restart Home Assistant.")
+    print("3. If the check succeeds and Core is stopped, start it from your host or console (ha core start on HAOS).")
+    print("   If Core is running, restart it from Settings > System > Restart Home Assistant.")
     print("4. Sign in as an administrator and open 3D Home in the sidebar.")
     print("Configuration YAML and saved .storage data were not changed. Home Assistant was not restarted.")
 

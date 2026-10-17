@@ -127,5 +127,6 @@
   "Open sidebar": "Seitenleiste öffnen",
   "Reload saved plan": "Gespeicherten Plan neu laden",
   "Connecting to Home Assistant…": "Verbindung zu Home Assistant wird hergestellt…",
-  "Connected · placements are saved in Home Assistant": "Verbunden · Platzierungen werden in Home Assistant gespeichert"
+  "Connected · placements are saved in Home Assistant": "Verbunden · Platzierungen werden in Home Assistant gespeichert",
+  "3D view could not start. Plan editing and JSON export are still available.": "Die 3D-Ansicht konnte nicht gestartet werden. Grundrissbearbeitung und JSON-Export sind weiterhin verfügbar."
 }

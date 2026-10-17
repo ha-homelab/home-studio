@@ -95,6 +95,44 @@ Offline previews use their own browser preference; installed plans receive
 the HA host preference. Neither changes the project schema. Update compiler
 and viewer sources together when consuming this package in a private builder.
 
+## First-session authoring and recovery
+
+The landing page links directly to four fixed fictional examples. The planner's
+`onboarding.js` accepts only their allowlisted IDs; it lazily imports local
+`planner/examples/*.js` modules. No arbitrary URL is fetched, and the hosted
+editor keeps `connect-src 'none'`. Example modules contain the same source data
+as the downloadable lesson JSON. Edit the canonical `planner/guide-assets/*.json`
+files, then run `python3 scripts/build-example-modules.py`; CI checks generated
+bytes and validates each example through the project model. Loading an example uses the same project
+replacement boundary as opening a file, and consumes the launch query so a
+reload does not overwrite subsequent edits.
+
+The measured starter adds a room and, when requested, its wall outline in one
+history transaction. It uses the existing geometry model and does not infer a
+new wall topology. Rooms, walls, openings, and furnishings remain separate
+objects. This small entry point reduces setup work without changing schema 1.
+
+`draft-storage.js` owns persistent draft arbitration and recovery. A stored
+revision comparison detects competing changes, with Web Locks serializing
+cooperating tabs where available. An older tab running a previous release does
+not participate in that lock protocol; byte comparisons detect many such changes
+but cannot make an older client's writes atomic. Recovery decisions are explicit: load the
+saved version, export the current version, or deliberately replace the stored
+copy. One validated previous-project checkpoint is retained for project
+replacement. Damaged raw data has its own download path. Browser storage is a
+convenience cache, not a backup; JSON export remains the portable source.
+
+`inspector-dom.js` preserves editing continuity when inspector controls are
+refreshed. Invalid values remain visible for correction, and normal Tab or
+pointer navigation must retain the intended next field. Browser regressions
+cover this interaction alongside recovery after reload and multi-tab writes.
+
+The installed viewer's graphics-recovery banner is outside the editor-only
+container, so Home mode cannot hide an initialization failure. Renderer-dependent
+lighting setup is guarded, and a failed first draw stops the initial render gate.
+The 2D placement/export path remains reachable without retrying a broken 3D draw.
+See [the first-session guide](first-session.md) for the user-facing workflow.
+
 ## Furniture authoring and export
 
 `planner/catalog.json` is the canonical, versioned library of original low-poly

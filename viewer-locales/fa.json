@@ -127,5 +127,6 @@
   "Open sidebar": "باز کردن نوار کناری",
   "Reload saved plan": "بارگیری مجدد نقشهٔ ذخیره‌شده",
   "Connecting to Home Assistant…": "در حال اتصال به Home Assistant…",
-  "Connected · placements are saved in Home Assistant": "متصل · جای‌گذاری‌ها در Home Assistant ذخیره می‌شوند"
+  "Connected · placements are saved in Home Assistant": "متصل · جای‌گذاری‌ها در Home Assistant ذخیره می‌شوند",
+  "3D view could not start. Plan editing and JSON export are still available.": "نمای سه‌بعدی شروع نشد. ویرایش نقشه و خروجی JSON همچنان در دسترس هستند."
 }

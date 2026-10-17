@@ -127,5 +127,6 @@
   "Open sidebar": "Apri barra laterale",
   "Reload saved plan": "Ricarica pianta salvata",
   "Connecting to Home Assistant…": "Connessione a Home Assistant…",
-  "Connected · placements are saved in Home Assistant": "Connesso · le posizioni vengono salvate in Home Assistant"
+  "Connected · placements are saved in Home Assistant": "Connesso · le posizioni vengono salvate in Home Assistant",
+  "3D view could not start. Plan editing and JSON export are still available.": "Impossibile avviare la vista 3D. Puoi ancora modificare la pianta ed esportare il JSON."
 }

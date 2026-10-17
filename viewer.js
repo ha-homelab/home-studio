@@ -88,7 +88,7 @@ try{items=reconcileStoredAppearance(validateInventoryItems(items))}catch(e){item
 const inventoryNodes=new Map(),objectsById=new Map();
 let renderer,scene,camera,objectGroup,root,hemisphere,sun,ground,grid,homeView=null,radius=planRadius,azimuth=.57,polar=.48,target=new THREE.Vector3(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]),clipping=new THREE.Plane(new THREE.Vector3(0,-1,0),20),renderCount=0;
 // Defer embedded drawing to the next frame.
-let initialViewReady=!embedded;
+let initialViewReady=!embedded,failed3D=false;
 // Software WebGL runs fragment shaders on the CPU. Bound its canvas and shadows;
 // controls remain sharp HTML and every fixture keeps its lighting and interaction.
 let renderProfile={pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048,diffuseLighting:false};
@@ -382,7 +382,10 @@ function updateWallOutlines(){
 }
 const wallSheenMotion=createWallSheenMotion();
 function drawScene(camera){if(renderSuspended||renderLost||document.hidden)return;wallSheenMotion.beforeRender();try{const pointer=interactionPointer,started=renderProfile.diffuseLighting&&pointer?.moved?performance.now():null;if(renderProfile.diffuseLighting){interactionRenderer??=createInteractionRenderer(THREE,renderer,31250);interactionRenderer.draw(scene,camera,pointer?.moved===true)}else renderer.render(scene,camera);if(pointer?.moved&&interactionPointer===pointer){pointer.painted=true;if(started!==null){const elapsed=performance.now()-started;pointer.frameDelay=Number.isFinite(elapsed)?Math.min(250,Math.max(64,elapsed)):64}}}finally{wallSheenMotion.afterRender()}}
-function report3DError(e){$('loadError').style.display='block';$('loadError').textContent='3D view could not start: '+e.message+'. Plan placement and JSON export are still available.';console.error(e)}
+// Keep the recovery controls outside both view modes. A failed renderer stays
+// paused until reload; editing or saving the 2D plan must not retry that draw.
+function report3DError(e){failed3D=true;initialViewReady=false;cancelRender();$('loadError').style.display='block';$('mode3d').disabled=true;$('openHome').disabled=true;console.error(e)}
+$('recoverPlan').onclick=()=>{homeView?.setActive(false);showMode(true);$('loadError').style.display='none';setEditorStatus('3D view could not start. Plan editing and JSON export are still available.');$('modePlan').focus();};
 try{
 scene=new THREE.Scene();scene.background=new THREE.Color('#e7e8df');camera=new THREE.PerspectiveCamera(42,1,.1,Math.max(150,planRadius*5));
 renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.localClippingEnabled=true;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.95;$('view3d').prepend(renderer.domElement);
@@ -432,7 +435,7 @@ $('resetView').onclick=()=>{$('focusRoom').value='';target.set(planCenter[0],pla
 $('cutaway').onchange=()=>{const cutaway=$('cutaway').checked;clipping.constant=cutaway?1.15:20;updateHeightCaption();render()};for(const k of ['fixtures','stairs'])$(k).onchange=()=>{root.children.filter(m=>m.userData.category===k).forEach(m=>m.visible=$(k).checked);invalidateShadows();render()};resize();
 }catch(e){report3DError(e)}
 function showMode(plan){$('view3d').style.display=plan?'none':'block';$('planPane').style.display=plan?'block':'none';$('modePlan').classList.toggle('active',plan);$('mode3d').classList.toggle('active',!plan)}$('mode3d').onclick=()=>showMode(false);$('modePlan').onclick=()=>showMode(true);
-function focusRoom(id){const room=model.rooms.find(room=>room.id===id);if(!room){$('resetView').click();return}const view=model.room_views?.[id]||{};const points=room.polygon.map(([x,z])=>[xm(x),zm(z)]),xs=points.map(p=>p[0]),zs=points.map(p=>p[1]);target.set((Math.min(...xs)+Math.max(...xs))/2,planBounds?model.ceiling_height_m/2:.45,(Math.min(...zs)+Math.max(...zs))/2);radius=Math.max(5,planBounds?model.ceiling_height_m*2:0,Math.hypot(Math.max(...xs)-Math.min(...xs),Math.max(...zs)-Math.min(...zs))*1.45);azimuth=view.azimuth_rad??-.16;polar=view.polar_rad??.74;$('room').value=id;$('focusRoom').value=id;showMode(false);window.renderModel?.()}
+function focusRoom(id){const room=model.rooms.find(room=>room.id===id);if(!room){$('resetView').click();return}$('room').value=id;$('focusRoom').value=id;if(failed3D){showMode(true);return}const view=model.room_views?.[id]||{};const points=room.polygon.map(([x,z])=>[xm(x),zm(z)]),xs=points.map(p=>p[0]),zs=points.map(p=>p[1]);target.set((Math.min(...xs)+Math.max(...xs))/2,planBounds?model.ceiling_height_m/2:.45,(Math.min(...zs)+Math.max(...zs))/2);radius=Math.max(5,planBounds?model.ceiling_height_m*2:0,Math.hypot(Math.max(...xs)-Math.min(...xs),Math.max(...zs)-Math.min(...zs))*1.45);azimuth=view.azimuth_rad??-.16;polar=view.polar_rad??.74;showMode(false);window.renderModel?.()}
 $('focusRoom').onchange=()=>focusRoom($('focusRoom').value);
 function rebuildInventoryView(){
 for(const id of Object.keys(tvEntities))applyTVFrame(null,false,id);inventoryNodes.clear();objectsById.clear();
@@ -498,4 +501,4 @@ document.querySelector('aside').inert=false;if(inventoryChanged)rebuildInventory
 });
 }
 refreshViewerLanguage(false);
-rebuildInventoryView();if(embedded){homeView.setActive(true);requestAnimationFrame(()=>{initialViewReady=true;try{window.resizeModel?.();}catch(e){report3DError(e)}})}else if(model.initial_room)focusRoom(model.initial_room);window.floorplan={model,get locale(){return viewerI18n.locale},get homeMode(){return homeView.active},get illuminated(){return homeView.illuminated},get items(){return items},get renderCount(){return renderCount},get meshCount(){return root?.children.length||0},get objectCount(){return objectGroup?.children.length||0},get translucentObjectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh&&o.material.transparent&&o.material.opacity<1&&!o.material.depthWrite)n++});return n},get objectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh)n++});return n}};
+rebuildInventoryView();if(embedded){homeView?.setActive(true);requestAnimationFrame(()=>{initialViewReady=!failed3D;try{window.resizeModel?.();}catch(e){report3DError(e);}})}else if(model.initial_room)focusRoom(model.initial_room);window.floorplan={model,get locale(){return viewerI18n.locale},get homeMode(){return homeView?.active??false},get illuminated(){return homeView?.illuminated??[]},get items(){return items},get renderCount(){return renderCount},get meshCount(){return root?.children.length||0},get objectCount(){return objectGroup?.children.length||0},get translucentObjectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh&&o.material.transparent&&o.material.opacity<1&&!o.material.depthWrite)n++});return n},get objectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh)n++});return n}};

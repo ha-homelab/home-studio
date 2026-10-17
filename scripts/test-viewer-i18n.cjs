@@ -8,7 +8,9 @@ const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 const { gzipSync } = require('node:zlib');
 const { pathToFileURL } = require('node:url');
-const { chromium } = require('playwright');
+const browserTypes = require('playwright');
+const engine = process.env.VIEWER_I18N_ENGINE || 'chromium';
+assert.ok(['chromium', 'firefox', 'webkit'].includes(engine), 'supported viewer test engine');
 const root = path.resolve(__dirname, '..');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8');
 const locales = JSON.parse(read('viewer-locales/index.json'));
@@ -75,7 +77,10 @@ assert.equal(context.viewerStateLabel('on'), 'On');
     assert.ok(!html.includes('planner/locales/'), 'editor translations are not embedded');
     assert.ok(!html.includes('__VIEWER_I18N_JS__'));
     assert.ok(html.includes('User &lt;room&gt; __VIEWER_I18N_DATA__'), 'user tokens are not expanded');
-    browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined, args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+    browser = await browserTypes[engine].launch({ headless: true, ...(engine === 'chromium' ? {
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
+      args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+    } : {}) });
     const browserContext = await browser.newContext({ viewport: { width: 1400, height: 1000 }, locale: 'en-US', offline: true });
     const page = await browserContext.newPage(), errors = [], requests = [];
     page.on('pageerror', error => errors.push(String(error)));
@@ -155,9 +160,77 @@ assert.equal(context.viewerStateLabel('on'), 'On');
       await frame.locator('[data-state-for="living_light"]').filter({ hasText: state }).waitFor({state:'attached'});
       assert.equal(await frame.locator('[data-state-for="living_light"]').textContent(), state);
     }
+    // A visible fallback must survive the real Home-mode CSS and an opaque
+    // iframe. Neither a missing WebGL context nor a failed first draw may
+    // prevent editing and exporting the host's saved inventory.
+    for (const failure of ['webgl', 'first-draw']) {
+      const recovery = await browserContext.newPage();
+      recovery.on('pageerror', error => errors.push(String(error)));
+      recovery.on('request', request => { if (!/^(about|data|blob):/.test(request.url())) requests.push(request.url()); });
+      const prefix = failure === 'webgl'
+        ? '<script>const getContext=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return /^webgl/.test(type)?null:getContext.call(this,type,...args)};<\/script>'
+        : '';
+      const content = (failure === 'first-draw' ? html.replace('function drawScene(camera){', 'function drawScene(camera){throw Error("Synthetic first-draw failure");') : html)
+        .replace('<body>', '<body><script>window.__HOME_FLOORPLAN_EMBED__=true;<\/script>' + prefix);
+      await recovery.setContent('<iframe id="viewer" sandbox="allow-scripts allow-downloads allow-forms" style="width:1250px;height:900px;border:0"></iframe>');
+      await recovery.evaluate(content => { document.getElementById('viewer').srcdoc = content; }, content);
+      const recovered = recovery.frameLocator('#viewer');
+      await recovered.locator('#homeConnection').filter({ hasText: 'Disconnected' }).waitFor();
+      assert.equal(await recovered.locator('body').evaluate(body => body.classList.contains('home-mode')), true);
+      assert.equal(await recovered.locator('#loadError').isVisible(), true, `${failure}: error is visible outside the hidden editor`);
+      assert.equal(await recovered.locator('#loadError').evaluate(node => {
+        const rect = node.getBoundingClientRect(); return rect.top >= 0 && rect.bottom <= innerHeight;
+      }), true, `${failure}: recovery is inside the viewport`);
+      assert.equal(await recovered.locator('#loadError').textContent().then(text => text.includes('Synthetic')), false, 'the public recovery message does not copy arbitrary exception details');
+      await recovery.evaluate(() => {
+        const iframe = document.getElementById('viewer'), channel = new MessageChannel();
+        window.testMessages = []; window.testPort = channel.port1;
+        channel.port1.onmessage = event => window.testMessages.push(event.data);
+        const items = JSON.parse(iframe.srcdoc.match(/<script id="modelData" type="application\/json">([\s\S]*?)<\/script>/)[1]).inventory;
+        items[0].name = 'Saved host placement';
+        window.savedItems = items;
+        iframe.contentWindow.postMessage({ type: 'home-floorplan:init', items, preferences: { language: 'ar' } }, '*', [channel.port2]);
+        channel.port1.postMessage({ type: 'states', connected: false, states: {} });
+      });
+      await recovered.locator('#recoverPlan').filter({ hasText: dictionaries.ar['Plan & placement'] }).waitFor();
+      assert.equal(await recovered.locator('#loadError p').textContent(), dictionaries.ar['3D view could not start. Plan editing and JSON export are still available.']);
+      if (screenshotDir) await recovery.screenshot({ path: path.join(screenshotDir, `recovery-${failure}.png`), fullPage: true });
+      await recovered.locator('#recoverPlan').click();
+      assert.equal(await recovered.locator('#planPane').isVisible(), true);
+      assert.equal(await recovered.locator('#loadError').isHidden(), true);
+      assert.equal(await recovered.locator('aside').evaluate(node => node.inert), false);
+      assert.equal(await recovered.locator('#modePlan').evaluate(node => document.activeElement === node), true);
+      assert.equal(await recovered.locator('#mode3d').isDisabled(), true);
+      assert.equal(await recovered.locator('#openHome').isDisabled(), true);
+      const focusedRoom = await recovered.locator('#focusRoom option').nth(1).getAttribute('value');
+      await recovered.locator('#focusRoom').selectOption(focusedRoom);
+      assert.equal(await recovered.locator('#room').inputValue(), focusedRoom, `${failure}: room selection still sets the placement room`);
+      assert.equal(await recovered.locator('#planPane').isVisible(), true, `${failure}: room focus stays in the working 2D plan`);
+      assert.equal(await recovered.locator('#view3d').isHidden(), true);
+      await recovered.locator('#focusRoom').selectOption('');
+      assert.equal(await recovered.locator('#planPane').isVisible(), true, `${failure}: whole-floor focus stays in the working 2D plan`);
+      await recovered.locator('#items li').first().getByRole('button', { name: dictionaries.ar.Edit, exact: true }).click();
+      assert.equal(await recovered.locator('#name').inputValue(), 'Saved host placement');
+      await recovered.locator('#name').fill('Edited after 3D failure');
+      await recovered.locator('#addItem').click();
+      await recovery.waitForFunction(() => window.testMessages.some(message => message.type === 'save'));
+      const saved = await recovery.evaluate(() => window.testMessages.find(message => message.type === 'save').items);
+      assert.equal(saved[0].name, 'Edited after 3D failure');
+      const originalSaved = await recovery.evaluate(() => window.savedItems);
+      assert.deepEqual(saved.slice(1), originalSaved.slice(1), 'recovery preserves other saved placements');
+      for (const key of ['id', 'position_m', 'dimensions_m', 'entity_id']) assert.deepEqual(saved[0][key], originalSaved[0][key], key);
+      const downloadEvent = recovery.waitForEvent('download');
+      await recovered.locator('#export').click();
+      const download = await downloadEvent;
+      const exported = JSON.parse(fs.readFileSync(await download.path(), 'utf8'));
+      assert.deepEqual(exported.items, saved, `${failure}: exported inventory matches the edited saved placements`);
+      assert.equal(await recovered.locator('#loadError').isHidden(), true, 'editing and export do not retry the failed renderer');
+      assert.deepEqual(await recovery.evaluate(() => window.testMessages.filter(message => !['model_config', 'save'].includes(message.type))), [], 'recovery sends no device commands');
+      await recovery.close();
+    }
     assert.deepEqual(errors, []);
     assert.deepEqual(requests, []);
-    console.log(`PASS: 24 viewer catalogs; fallback, query/storage/browser/host preference; offline generated viewer; RTL, unchanged drafts/items; opaque srcdoc MessagePort; no device commands. Catalog gzip: ${gzipSync(JSON.stringify(data)).length} bytes.`);
+    console.log(`PASS (${engine}): 24 viewer catalogs; fallback, query/storage/browser/host preference; offline generated viewer; RTL, unchanged drafts/items; opaque srcdoc MessagePort; visible WebGL/first-draw recovery, editing and JSON export; no device commands. Catalog gzip: ${gzipSync(JSON.stringify(data)).length} bytes.`);
   } finally {
     await browser?.close(); fs.rmSync(temp, { recursive: true, force: true });
   }

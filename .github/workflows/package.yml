@@ -63,7 +63,7 @@ jobs:
         timeout-minutes: 12
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
-          npx playwright install --with-deps chromium firefox
+          npx playwright install --with-deps chromium firefox webkit
       - name: Test drawing, furnishing, export and installation through the editor
         run: npm run test:planner
       - name: Test AI preview, review, undo and real local companion
@@ -75,6 +75,15 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-ai-integration.cjs
       - name: Test language switching, right-to-left layout and project preservation
         run: node scripts/test-i18n-browser.cjs
+      - name: First-room and example workflow
+        run: |
+          python3 scripts/build-example-modules.py --check
+          node scripts/test-onboarding.mjs
+          node scripts/test-draft-storage.mjs
+          for engine in chromium firefox webkit; do
+            PLANNER_EDITING_ENGINE="$engine" node scripts/test-planner-editing.cjs
+            ONBOARDING_ENGINE="$engine" ONBOARDING_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-onboarding-browser.cjs
+          done
       - name: Test localized help and offline installed viewer
         run: |
           node scripts/test-help-i18n.cjs

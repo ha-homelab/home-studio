@@ -25,7 +25,7 @@
       <h1>Bring your plan<br>into Home Assistant.</h1>
       <p class="lead">Draw in your browser. Build on your computer. Install a private 3D panel in your own Home Assistant.</p>
       <p>The complete public toolkit includes the editor, compiler, integration, and local installer. You need Python 3.10 or newer on the computer that builds the package, and an existing Home Assistant installation with administrator access.</p>
-      <div class="hero-actions"><a class="button" href="https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip">Download the complete ZIP <span aria-hidden="true">↓</span></a><a class="text-link" href="./planner/guide.html">Start with the illustrated drawing guide</a></div>
+      <div class="hero-actions"><a class="button" href="https://github.com/ha-homelab/home-studio/releases/latest">Get the stable toolkit <span aria-hidden="true">↓</span></a><a class="text-link" href="./planner/guide.html">Start with the illustrated drawing guide</a></div>
       <p class="small">The website saves a browser draft; it does not connect to Home Assistant. The commands below run in your terminal. No HA URL or token is sent to this website or to the installer.</p>
     </section>
     <div class="guide-layout">
@@ -60,11 +60,12 @@
           <p class="step-label">02 · A COMPLETE LOCAL TOOLKIT</p>
           <h2>Download and open the toolkit</h2>
           <ol class="instructions">
-            <li><a href="https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip">Download the complete repository ZIP</a> and extract it. Open the resulting <code>home-studio-main</code> folder.</li>
+            <li>Open the <a href="https://github.com/ha-homelab/home-studio/releases/latest">latest stable release</a>. Under <strong>Assets</strong>, download <code>home-studio-VERSION.zip</code>, where VERSION is the release number. Choose this packaged toolkit, not GitHub's <strong>Source code</strong> ZIP. Extract it and open the resulting <code>home-studio</code> folder.</li>
             <li>Open a terminal in that folder. You should see <code>scripts</code>, <code>planner</code>, and <code>custom_components</code> alongside <code>README.md</code>.</li>
             <li>Run <code>python3 --version</code>. If needed, install Python 3.10 or newer from <a href="https://www.python.org/downloads/">python.org</a>. The compiler and installer use the standard library; no <code>pip install</code> step is needed.</li>
           </ol>
           <p>On Windows, your command may be <code>py -3</code>; use that wherever this guide says <code>python3</code>. Replace example paths with real paths on your computer, and put quotes around a path containing spaces. A downloaded website page by itself is not the complete toolkit.</p>
+          <p>The release includes a matching <code>.sha256</code> file for checking the download. Beta and release-candidate packages are previews; the link above selects the stable release.</p>
         </section>
         <section class="step" id="build">
           <p class="step-label">03 · MAKE YOUR VIEWER AND PACKAGE</p>

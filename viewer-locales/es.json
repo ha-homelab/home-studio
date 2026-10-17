@@ -127,5 +127,6 @@
   "Open sidebar": "Abrir barra lateral",
   "Reload saved plan": "Recargar plano guardado",
   "Connecting to Home Assistant…": "Conectando con Home Assistant…",
-  "Connected · placements are saved in Home Assistant": "Conectado · las posiciones se guardan en Home Assistant"
+  "Connected · placements are saved in Home Assistant": "Conectado · las posiciones se guardan en Home Assistant",
+  "3D view could not start. Plan editing and JSON export are still available.": "No se pudo iniciar la vista 3D. Puedes seguir editando el plano y exportando JSON."
 }

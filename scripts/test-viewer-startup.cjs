@@ -5,12 +5,13 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../viewer.js'), 'utf8');
 
-function exercise(embedded, {hidden = false, initialRoom = null, failRender = false} = {}) {
+function exercise(embedded, {hidden = false, initialRoom = null, failRender = false, homeAvailable = true} = {}) {
   const errors = [], calls = [], sizes = [], frames = [];
   const loadError = {style: {}};
   const box = {width: hidden ? 0 : 800, height: hidden ? 0 : 600};
   const c = vm.createContext({
     embedded, window: {}, homeView: null, renderCount: 0, scene: {},
+    viewerI18n: {locale: 'en'}, items: [], root: null, objectGroup: null,
     document: {hidden: false}, renderSuspended: false, renderLost: false, devicePixelRatio: 1, renderProfile: {pixels: 2000000},
     requestRender() {}, renderRequest: 0, renderDelay: 0, interactionPointer: null, cancelAnimationFrame() {}, clearTimeout() {},
     model: {initial_room: initialRoom}, camera: {updateProjectionMatrix() {}},
@@ -36,7 +37,7 @@ function exercise(embedded, {hidden = false, initialRoom = null, failRender = fa
   const report = lines.find(line => line.startsWith('function report3DError('));
   vm.runInContext([declaration, report, drawScene, pixelRatio, cancelRender, render, resize].join('\n'), c);
   c.window.resizeModel(); // The existing resize before Home is initialized.
-  c.homeView = {
+  if (homeAvailable) c.homeView = {
     active: false,
     setActive(value) {
       this.active = value;
@@ -49,7 +50,8 @@ function exercise(embedded, {hidden = false, initialRoom = null, failRender = fa
       c.renderCount++;
     },
   };
-  const bootstrap = lines.find(line => line.startsWith('rebuildInventoryView();if(embedded)')).split('window.floorplan=')[0];
+  const bootstrap = lines.find(line => line.startsWith('rebuildInventoryView();if(embedded)'));
+  assert(bootstrap, 'The actual viewer bootstrap and diagnostic API must be present');
   vm.runInContext(bootstrap + 'this.completed=true;', c);
   const flushFrames = () => { while (frames.length) frames.shift()(); };
   return {c, calls, sizes, box, frames, flushFrames, errors, loadError};
@@ -57,6 +59,7 @@ function exercise(embedded, {hidden = false, initialRoom = null, failRender = fa
 
 const home = exercise(true);
 assert.equal(home.c.completed, true);
+assert.equal(home.c.window.floorplan.homeMode, true);
 assert.deepEqual(home.calls, [], 'Embedded bootstrap publishes before drawing');
 assert.deepEqual(home.sizes, [], 'Skipped startup sizes must not poison the resize cache');
 // An init/state message can arrive before a rendering opportunity. Preserve it,
@@ -99,15 +102,31 @@ const failed = exercise(true, {failRender: true});
 failed.flushFrames();
 assert.deepEqual(failed.errors, ['first draw failed']);
 assert.equal(failed.loadError.style.display, 'block');
-assert.match(failed.loadError.textContent, /first draw failed/);
 assert.equal(failed.c.completed, true, 'A first-draw error must not abort publication');
+failed.c.window.resizeModel();
+failed.c.window.renderModel();
+assert.deepEqual(failed.errors, ['first draw failed'], 'Recovery edits and resize must not retry the failed renderer');
 for (const initialRoom of [null, 'L']) {
   const standalone = exercise(false, {initialRoom});
   assert.deepEqual(standalone.calls.map(call => call.mode), initialRoom ? ['editor', 'editor', 'editor'] : ['editor', 'editor']);
   assert.deepEqual(standalone.sizes, [[800, 600]]);
   assert.equal(standalone.c.focused, initialRoom || undefined);
 }
-console.log('PASS: deferred initial Home, early state/mode changes, frame ordering, hidden panels, resize, standalone and first-draw fallback.');
+for (const embedded of [false, true]) {
+  const missingHome = exercise(embedded, {homeAvailable: false});
+  assert.equal(missingHome.c.completed, true, 'Missing Home view does not abort bootstrap');
+  const diagnostics = missingHome.c.window.floorplan;
+  assert.equal(diagnostics.homeMode, false);
+  assert.deepEqual(Array.from(diagnostics.illuminated), []);
+  assert.equal(diagnostics.locale, 'en');
+  assert.equal(diagnostics.items, missingHome.c.items);
+  for (const key of ['meshCount', 'objectCount', 'translucentObjectMeshCount', 'objectMeshCount']) assert.equal(diagnostics[key], 0);
+  missingHome.flushFrames();
+  assert(missingHome.calls.length > 0 && missingHome.calls.every(call => call.mode === 'editor'), 'The editor still renders without Home view');
+  assert.equal(diagnostics.renderCount, missingHome.c.renderCount);
+  assert.deepEqual(missingHome.errors, []);
+}
+console.log('PASS: deferred initial Home, early state/mode changes, frame ordering, hidden panels, resize, standalone, absent Home diagnostics and first-draw fallback.');
 
 // A matching host handshake must not discard the geometry and shadow maps just
 // built at boot. Execute the actual handler, validator and reconciler together.

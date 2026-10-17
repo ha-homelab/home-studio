@@ -9,7 +9,7 @@
 
 সম্পূর্ণ টুলকিট ডাউনলোড করে খুলুন। Python 3.10 বা নতুন সংস্করণ ইনস্টল করুন। টুলকিটের ফোল্ডারে চালান:
 
-[ZIP](https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip)
+[ZIP](https://github.com/ha-homelab/home-studio/releases/latest)
 
 ```sh
 python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package

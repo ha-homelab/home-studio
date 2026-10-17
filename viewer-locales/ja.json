@@ -127,5 +127,6 @@
   "Open sidebar": "サイドバーを開く",
   "Reload saved plan": "保存済みの間取り図を再読み込み",
   "Connecting to Home Assistant…": "Home Assistant に接続中…",
-  "Connected · placements are saved in Home Assistant": "接続済み · 配置は Home Assistant に保存されます"
+  "Connected · placements are saved in Home Assistant": "接続済み · 配置は Home Assistant に保存されます",
+  "3D view could not start. Plan editing and JSON export are still available.": "3D表示を開始できませんでした。間取りの編集とJSONのエクスポートは引き続き利用できます。"
 }

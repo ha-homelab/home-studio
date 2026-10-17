@@ -1,16 +1,21 @@
 import './language-links.js';
+import { addMeasuredRoom, installOnboarding } from './onboarding.js';
+import { createDraftStorage, DRAFT_KEY, PREVIOUS_KEY, DAMAGED_KEY } from './draft-storage.js';
+import { reconcileInspector } from './inspector-dom.js';
 import { getRenderCapacity } from './render-capacity.js';
 import { formatValidationError } from './validation.js';
 import { t, LOCALES, initI18n, setLocale, getLocale, onLocaleChange, translateStatic } from './i18n.js';
 
 import * as THREE from '../vendor/three.module.min.js';
-import { LIMITS, ITEM_TYPES, clone, round, distance, signedArea, pointInPolygon, projectOnWall, nextId, newFloor, blankProject, demoProject, outlineRoom, validateProject, wallPieces, floorBounds } from './model.js';
+import { LIMITS, ITEM_TYPES, clone, round, distance, signedArea, pointInPolygon, projectOnWall, nextId, newFloor, blankProject, outlineRoom, validateProject, wallPieces, floorBounds } from './model.js';
 import { CATALOG } from './catalog.js';
 import { getCatalogModel, getCatalogStyle, buildFurnitureAsset, PATTERNS, supportsFurniturePattern } from './furniture.js';
 
 const initialLocale = await initI18n();
 const $ = id => document.getElementById(id);
-const STORAGE_KEY = 'home-studio.project.v1';
+const draftStorage = createDraftStorage({ validate: validateProject, maxBytes: LIMITS.bytes });
+let recoverySnapshot = null, recoveryBusy = false, saveSequence = 0, pendingSaves = 0;
+let committingField = null, inspectorScope = '';
 const BUILD_COMMAND = 'python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package';
 const LABELS = { furniture: 'Furniture', lamp: 'Lamp', chandelier: 'Ceiling light', tv: 'TV / display', appliance: 'Appliance', switch: 'Switch', outlet: 'Outlet', sensor: 'Sensor' };
 const COLORS = { floor: '#e7dac2', tile: '#e0e8df', deck: '#d8dfbe', furniture: '#96aca6', lamp: '#d9ae68', chandelier: '#d9ae68', tv: '#677d89', appliance: '#a1abb0', switch: '#b4c39d', outlet: '#b4c39d', sensor: '#c4b09a' };
@@ -48,20 +53,18 @@ let libraryShown = 0;
 // Keep a fully populated floor plus catalog thumbnails without clearing every
 // entry during a redraw; evict only the oldest appearance when the bound is hit.
 const APPEARANCE_CACHE_LIMIT = LIMITS.items + THUMBNAIL_CACHE_LIMIT;
-try {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) {
-    if (new Blob([saved]).size > LIMITS.bytes) throw new Error(t('Saved draft is too large.'));
-    const restored = validateProject(JSON.parse(saved)); serializeProject(restored);
-    project = restored; startupMessage = () => t('Restored your local draft.');
-  }
-} catch (error) { startupMessage = () => t('Could not restore local draft: {error} A blank project is open.', { error: formatValidationError(error, t) }); saveFailed = true; }
+const restoredDraft = draftStorage.read();
+if (restoredDraft.current) { project = restoredDraft.current; startupMessage = () => t('Restored your local draft.'); }
+else if (restoredDraft.error) {
+  startupMessage = () => t('Could not restore local draft: {error} A blank project is open.', { error: formatValidationError(restoredDraft.error, t) });
+  saveFailed = true;
+}
 activeFloorId = project.floors[0].id;
 const floor = () => project.floors.find(f => f.id === activeFloorId) || project.floors[0];
 const selected = () => selection ? floor()[selection.kind]?.find(o => o.id === selection.id) : null;
 const snap = value => $('snap').checked ? Math.round(value * 4) / 4 : round(value);
 function node(tag, className, text) { const n = document.createElement(tag); if (className) n.className = className; if (text !== undefined) n.textContent = text; return n; }
-function button(text, handler, className = 'quiet') { const b = node('button', className, text); b.type = 'button'; b.addEventListener('click', handler); return b; }
+function button(text, handler, className = 'quiet') { const b = node('button', className, text); b.type = 'button'; b.onclick = handler; b.dataset.inspectorKey = `button:${text}`; return b; }
 function status(message, error = false) {
   lastStatus = { message, error };
   const text = typeof message === 'function' ? message() : message;
@@ -200,31 +203,59 @@ function serializeProject(value) {
   if (new Blob([serialized]).size > LIMITS.bytes) throw new Error(t('Project would exceed the 2 MB limit (2,000,000 UTF-8 bytes). Shorten notes or remove items before adding more.'));
   return serialized;
 }
-function save() {
-  try {
-    const serialized = serializeProject(project);
-    localStorage.setItem(STORAGE_KEY, serialized); saveFailed = false;
-    translatedText('save-status', 'Saved in this browser'); $('save-status').classList.remove('problem');
-  } catch (error) {
-    saveFailed = true; translatedText('save-status', 'Autosave unavailable · export a backup'); $('save-status').classList.add('problem');
-    status(() => t('Autosave failed: {error}. Export JSON to keep your work.', { error: formatValidationError(error, t) }), true);
-  }
+function showDraftProblem(result) {
+  saveFailed = true;
+  translatedText('save-status', result.status === 'unavailable' ? 'Autosave unavailable · export a backup' : 'Autosave paused · review drafts');
+  $('save-status').classList.add('problem');
+  if (result.error) status(() => t('Autosave failed: {error}. Export JSON to keep your work.', { error: t(formatValidationError(result.error, t)) }), true);
+  else status(() => t(result.status === 'unavailable' ? 'Autosave unavailable · export a backup' : result.status === 'unreadable' ? 'The saved draft could not be opened. Its original data is kept for recovery.' : 'Another tab changed the saved draft. Export your version or choose which draft to keep.'), true);
+}
+async function save(options) {
+  const sequence = ++saveSequence;
+  pendingSaves++;
+  if (!saveFailed) translatedText('save-status', 'Local draft · export to keep a copy');
+  let result;
+  try { const { raw = serializeProject(project), ...writeOptions } = options || {}; result = await draftStorage.save(raw, writeOptions); }
+  catch (error) { result = { status: 'unavailable', error }; }
+  finally { pendingSaves--; }
+  if (sequence !== saveSequence || result.status === 'cancelled') return result;
+  if (result.status === 'saved') {
+    saveFailed = false; translatedText('save-status', 'Saved in this browser'); $('save-status').classList.remove('problem');
+  } else showDraftProblem(result);
+  if ($('recovery-dialog').open) renderRecovery();
+  return result;
 }
 function historyPush(previous) { history.push(previous); if (history.length > 60) history.shift(); future = []; }
 function transact(change, message = () => t('Project updated.'), { fit = false } = {}) {
   const draft = clone(project), priorSelection = selection && { ...selection };
   try {
     change(draft, draft.floors.find(f => f.id === activeFloorId) || draft.floors[0]); validateProject(draft); serializeProject(draft);
+    if (committingField) { committingField.inspectorDraft = false; committingField.removeAttribute('aria-invalid'); }
     historyPush(project); project = draft; previewDirty = true;
     if (!project.floors.some(f => f.id === activeFloorId)) activeFloorId = project.floors[0].id;
     if (!selected()) selection = null;
     editorChanged(); renderUI(); if (fit) { fitPlan(); fitPreview(); } renderPlan(); status(message); save();
     return true;
-  } catch (error) { selection = priorSelection; $('project-title').value = project.title; status(() => t('Change not applied: {error}', { error: formatValidationError(error, t) }), true); renderInspector(); return false; }
+  } catch (error) { if (committingField) { committingField.inspectorDraft = true; committingField.setAttribute('aria-invalid', 'true'); } selection = priorSelection; $('project-title').value = project.title; status(() => t('Change not applied: {error}', { error: formatValidationError(error, t) }), true); renderInspector(); return false; }
 }
-function replaceProject(next, message) {
-  validateProject(next); serializeProject(next); historyPush(project); project = clone(next); activeFloorId = project.floors[0].id; selection = null; drag = null; previewDirty = true;
-  editorChanged(); setView('plan'); setTool('select'); renderUI(); fitPlan(); fitPreview(); renderPlan(); status(message); save();
+async function replaceProject(next, message) {
+  validateProject(next); const raw = serializeProject(next), previous = serializeProject(project);
+  const result = await save({ raw, previous: hasContent() ? previous : undefined, isCurrent: () => serializeProject(project) === previous });
+  if (result.status !== 'saved') {
+    if (result.status === 'unavailable' && confirm(t('Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.'))) {
+      installRecoveredProject(next); showDraftProblem(result); return true;
+    }
+    if (result.status !== 'cancelled') { renderRecovery(); if (!$('recovery-dialog').open) $('recovery-dialog').showModal(); }
+    return false;
+  }
+  installRecoveredProject(next);
+  status(message);
+  return true;
+}
+function installRecoveredProject(next) {
+  historyPush(project); project = clone(next); activeFloorId = project.floors[0].id;
+  selection = null; drag = null; previewDirty = true; inspectorScope = '';
+  editorChanged(); setView('plan'); setTool('select'); renderUI(); fitPlan(); fitPreview(); renderPlan();
 }
 function undo(redo = false) {
   const source = redo ? future : history, destination = redo ? history : future; if (!source.length) return;
@@ -234,23 +265,26 @@ function undo(redo = false) {
 function renderUI() {
   $('project-title').value = project.title; $('floor-caption').textContent = floor().name;
   $('undo').disabled = history.length === 0; $('redo').disabled = future.length === 0;
-  $('floor-list').replaceChildren();
+  const floorList = node('div');
   project.floors.forEach(f => {
     const b = button('', () => { activeFloorId = f.id; selection = null; previewDirty = true; editorChanged(); renderUI(); fitPlan(); fitPreview(); renderPlan(); }, 'floor-button');
-    b.setAttribute('aria-current', String(f.id === activeFloorId)); b.append(node('span', '', f.name), node('small', '', `${round(f.elevation_m)} m`)); $('floor-list').append(b);
+    b.dataset.inspectorKey = `floor:${f.id}`;
+    b.setAttribute('aria-current', String(f.id === activeFloorId)); b.append(node('span', '', f.name), node('small', '', `${round(f.elevation_m)} m`)); floorList.append(b);
   });
-  $('object-list').replaceChildren();
+  reconcileInspector($('floor-list'), floorList);
+  const objectList = node('div');
   let count = 0;
   for (const [kind, icon] of [['rooms', '▱'], ['walls', '╱'], ['openings', '⊟'], ['items', '▣']]) for (const object of floor()[kind]) {
     count++;
     const b = button('', () => { setTool('select'); setSelection({ kind, id: object.id }); }, 'object-button');
-    b.dataset.objectKind = kind; b.dataset.objectId = object.id;
+    b.dataset.objectKind = kind; b.dataset.objectId = object.id; b.dataset.inspectorKey = `object:${kind}:${object.id}`;
     b.setAttribute('aria-pressed', String(selection?.kind === kind && selection?.id === object.id));
     b.append(node('span', 'object-icon', icon), node('span', '', object.name || (kind === 'openings' ? `${t(object.type)} · ${object.id}` : object.id.replaceAll('_', ' '))));
-    b.title = t('{kind}: {name}', { kind: t(kind === 'openings' ? 'opening' : kind.slice(0, -1)), name: object.name || object.id }); $('object-list').append(b);
+    b.title = t('{kind}: {name}', { kind: t(kind === 'openings' ? 'opening' : kind.slice(0, -1)), name: object.name || object.id }); objectList.append(b);
   }
   $('object-count').textContent = String(count);
-  if (!count) $('object-list').append(node('p', 'object-empty', t('Your rooms, walls, and items will appear here.')));
+  if (!count) objectList.append(node('p', 'object-empty', t('Your rooms, walls, and items will appear here.')));
+  reconcileInspector($('object-list'), objectList);
   $('empty-state').hidden = count > 0 || tool !== 'select' || view !== 'plan';
   renderInspector(); if (view === 'preview') renderPreview();
 }
@@ -270,14 +304,31 @@ function field(parent, label, value, onChange, { type = 'text', min, max, step =
   else if (!rows) { input.type = type; if (type === 'number') { input.step = step; if (min !== undefined) input.min = String(min); if (max !== undefined) input.max = String(max); } }
   if (rows) input.rows = rows; input.value = String(value ?? ''); input.readOnly = readOnly;
   if (dir) input.dir = dir;
-  input.setAttribute('aria-label', label); input.addEventListener('change', () => { if (onChange) onChange(type === 'number' ? Number(input.value) : input.value); });
+  input.setAttribute('aria-label', label); input.dataset.inspectorKey = `input:${label}`; wrap.dataset.inspectorKey = `field:${label}`;
+  input.oninput = event => { event.currentTarget.inspectorDraft = true; };
+  input.onchange = event => {
+    if (!onChange) return;
+    committingField = event.currentTarget;
+    try { onChange(type === 'number' ? (committingField.value.trim() ? Number(committingField.value) : NaN) : committingField.value); }
+    finally { committingField = null; }
+  };
   wrap.append(title, input); if (help) wrap.append(node('small', '', help)); parent.append(wrap); return input;
 }
 function row(parent, triple = false) { const r = node('div', `field-row${triple ? ' triple' : ''}`); parent.append(r); return r; }
 function section(parent, text) { parent.append(node('h3', 'inspector-section-title', text)); }
 function editObject(change, message) { transact((_p, f) => { const o = f[selection.kind].find(item => item.id === selection.id); change(o, f); }, message); }
+function inspectorValue(input) {
+  return [...$('inspector-body').querySelectorAll('input')].find(control => control.dataset.inspectorKey === input.dataset.inspectorKey)?.value ?? input.value;
+}
 function renderInspector() {
-  const parent = $('inspector-body'); parent.replaceChildren(); const object = selected(), f = floor();
+  const parent = $('inspector-body'), next = node('div');
+  const scope = `${project.id || ''}:${activeFloorId}:${selection?.kind || ''}:${selection?.id || ''}`;
+  buildInspector(next);
+  if (scope === inspectorScope) reconcileInspector(parent, next);
+  else { parent.replaceChildren(...next.childNodes); inspectorScope = scope; }
+}
+function buildInspector(parent) {
+  const object = selected(), f = floor();
   if (!object) {
     $('inspector-title').textContent = t('Floor settings'); $('inspector-subtitle').textContent = t('A good plan starts with the basics.');
     field(parent, t('Floor name'), f.name, v => transact((_p, d) => { d.name = v; }, () => t('Floor renamed.')));
@@ -290,7 +341,7 @@ function renderInspector() {
     const x = field(origin, t('Start x (m)'), proposedX, null, { type: 'number', min: -100, max: 100 }), z = field(origin, t('Start z (m)'), 0, null, { type: 'number', min: -100, max: 100 });
     const width = field(dims, t('Width (m)'), 4, null, { type: 'number', min: .25, max: 100 }), depth = field(dims, t('Depth (m)'), 4, null, { type: 'number', min: .25, max: 100 });
     parent.append(button(t('Add room'), () => {
-      const sx = Number(x.value), sz = Number(z.value), w = Number(width.value), d = Number(depth.value);
+      const sx = Number(inspectorValue(x)), sz = Number(inspectorValue(z)), w = Number(inspectorValue(width)), d = Number(inspectorValue(depth));
       if (w < .05 || d < .05) return status(() => t('Room width and depth must be at least 0.05 m.'), true);
       transact((_p, target) => { const id = nextId(target, 'room'); target.rooms.push({ id, name: `Room ${target.rooms.length + 1}`, polygon: [[sx, sz], [round(sx + w), sz], [round(sx + w), round(sz + d)], [sx, round(sz + d)]], material: 'floor' }); selection = { kind: 'rooms', id }; }, () => t('Room added. Choose Build wall outline to create its walls.'), { fit: true });
     }, 'primary'));
@@ -326,7 +377,7 @@ function renderInspector() {
     section(parent, t('Create a junction'));
     const split = field(parent, t('Split distance from start (m)'), round(length / 2), null, { type: 'number', min: .05, max: round(length - .05), help: t('Split this segment so another wall can meet at an endpoint. A split cannot pass through an opening.') });
     parent.append(button(t('Split wall'), () => editObject((o, d) => {
-      const at = Number(split.value); if (at < .05 || at > length - .05) throw new Error(t('Split point must be at least 0.05 m from each end.'));
+      const at = Number(inspectorValue(split)); if (at < .05 || at > length - .05) throw new Error(t('Split point must be at least 0.05 m from each end.'));
       if (d.openings.some(c => c.wall_id === o.id && c.offset_m < at && c.offset_m + c.width_m > at)) throw new Error(t('Move the split point outside the opening.'));
       const mid = [round(o.start[0] + (o.end[0] - o.start[0]) * at / length), round(o.start[1] + (o.end[1] - o.start[1]) * at / length)];
       const second = { id: nextId(d, 'wall'), start: mid, end: [...o.end], thickness_m: o.thickness_m }; o.end = mid; d.walls.push(second);
@@ -880,7 +931,6 @@ function exportProject() {
 }
 function hasContent() { return project.floors.length > 1 || project.floors.some(f => ['rooms', 'walls', 'openings', 'items'].some(k => f[k].length)); }
 $('new-project').addEventListener('click', () => { if (!hasContent() || confirm(t('Start a new blank project? Export JSON first if you need a separate copy of the current plan. You can undo this.'))) replaceProject(blankProject(), () => t('New blank project created.')); });
-$('load-demo').addEventListener('click', () => { if (!hasContent() || confirm(t('Replace the current plan with a fictional demo? You can undo this.'))) replaceProject(demoProject(), () => t('Fictional demo loaded. All names, geometry, and entities are examples.')); });
 $('open-project').addEventListener('click', () => $('file-input').click());
 $('file-input').addEventListener('change', async e => {
   const file = e.target.files[0]; e.target.value = ''; if (!file) return;
@@ -888,10 +938,67 @@ $('file-input').addEventListener('change', async e => {
     if (file.size > LIMITS.bytes) throw new Error(t('Project file is too large. Maximum size is 2 MB.'));
     const parsed = JSON.parse(await file.text()); validateProject(parsed);
     if (hasContent() && !confirm(t('Open this project and replace the current plan? Export the current plan first if needed. You can undo this.'))) return;
-    replaceProject(parsed, () => t('Project opened and validated.'));
+    await replaceProject(parsed, () => t('Project opened and validated.'));
   } catch (error) { status(() => t('Import rejected: {error} Your current plan is unchanged.', { error: formatValidationError(error, t) }), true); }
 });
 $('export-project').addEventListener('click', exportProject); $('build-export').addEventListener('click', exportProject);
+function renderRecovery() {
+  try {
+    recoverySnapshot = draftStorage.inspect();
+    const changed = draftStorage.changed();
+    $('recovery-message').textContent = t(recoverySnapshot.error ? 'The saved draft could not be opened. Its original data is kept for recovery.' : changed === 'conflict' ? 'Another tab changed the saved draft. Export your version or choose which draft to keep.' : changed === 'unavailable' ? 'Autosave unavailable · export a backup' : 'Drafts stay in this browser. Export to keep a copy.');
+    $('recovery-current').textContent = recoverySnapshot.current?.title || '—';
+    $('recovery-previous').textContent = recoverySnapshot.previous?.title || t('No previous project is available.');
+    $('recovery-load').disabled = !recoverySnapshot.current;
+    $('recovery-restore').disabled = !recoverySnapshot.previous;
+    $('recovery-original').disabled = recoverySnapshot.damaged === null;
+    $('recovery-replace').disabled = false;
+  } catch (error) {
+    recoverySnapshot = null; showDraftProblem({ status: 'unavailable', error });
+    $('recovery-message').textContent = t('Autosave unavailable · export a backup');
+    for (const id of ['recovery-load', 'recovery-restore', 'recovery-original', 'recovery-replace']) $(id).disabled = true;
+  }
+  if (recoveryBusy) for (const control of $('recovery-dialog').querySelectorAll('button')) control.disabled = true;
+  else { $('recovery-export').disabled = false; $('recovery-dialog').querySelector('[data-close]').disabled = false; }
+}
+$('draft-recovery').addEventListener('click', () => { renderRecovery(); $('recovery-dialog').showModal(); });
+$('recovery-export').addEventListener('click', exportProject);
+$('recovery-original').addEventListener('click', () => {
+  if (recoverySnapshot?.damaged === null || !recoverySnapshot) return;
+  const url = URL.createObjectURL(new Blob([recoverySnapshot.damaged], { type: 'application/octet-stream' }));
+  const link = node('a'); link.href = url; link.download = 'original-draft.json'; document.body.append(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+async function recoverDraft(action) {
+  const snapshot = recoverySnapshot;
+  if (!snapshot || recoveryBusy) return;
+  recoveryBusy = true;
+  for (const control of $('recovery-dialog').querySelectorAll('button')) control.disabled = true;
+  pendingSaves++;
+  let result;
+  try {
+    if (action === 'load') result = await draftStorage.load(snapshot, serializeProject(project));
+    else if (action === 'restore') result = await draftStorage.save(snapshot.previousRaw, { replace: snapshot });
+    else result = await draftStorage.save(serializeProject(project), { replace: snapshot });
+    if (result.status === 'saved') {
+      if (action !== 'replace') installRecoveredProject(action === 'load' ? result.current : snapshot.previous);
+      saveFailed = false; translatedText('save-status', 'Saved in this browser'); $('save-status').classList.remove('problem');
+      status(() => t('Restored your local draft.')); $('recovery-dialog').close();
+    } else showDraftProblem(result);
+  } catch (error) { showDraftProblem({ status: 'unavailable', error }); }
+  finally { pendingSaves--; recoveryBusy = false; renderRecovery(); }
+}
+$('recovery-dialog').addEventListener('cancel', event => { if (recoveryBusy) event.preventDefault(); });
+$('recovery-load').addEventListener('click', () => recoverDraft('load'));
+$('recovery-restore').addEventListener('click', () => recoverDraft('restore'));
+$('recovery-replace').addEventListener('click', () => recoverDraft('replace'));
+window.addEventListener('storage', event => {
+  if (event.key !== null && ![DRAFT_KEY, PREVIOUS_KEY, DAMAGED_KEY].includes(event.key)) return;
+  const problem = draftStorage.changed();
+  if (problem) showDraftProblem({ status: problem });
+  if ($('recovery-dialog').open) renderRecovery();
+});
+
 $('project-title').addEventListener('change', e => transact(p => { p.title = e.target.value; }, () => t('Project renamed.')));
 $('add-floor').addEventListener('click', () => {
   if (project.floors.length >= LIMITS.floors) return status(() => t('A project supports up to {count} floors.', { count: LIMITS.floors }), true);
@@ -900,7 +1007,6 @@ $('add-floor').addEventListener('click', () => {
   const ok = transact(p => { p.floors.push(next); }, () => t('New floor added. Set its name and elevation in the inspector.'));
   if (ok) { activeFloorId = id; selection = null; previewDirty = true; editorChanged(); renderUI(); fitPlan(); fitPreview(); renderPlan(); } else activeFloorId = previousId;
 });
-$('start-room').addEventListener('click', () => { setTool('room'); planCanvas.focus(); });
 document.querySelectorAll('[data-tool]').forEach(b => { const label = b.querySelector('span:nth-child(2)').textContent; b.setAttribute('aria-label', label); b.title = label; b.addEventListener('click', () => { setTool(b.dataset.tool); }); });
 $('place-type').addEventListener('change', () => { placementModelId = null; updatePlacement(); setTool('item'); renderInspector(); });
 $('browse-items').addEventListener('click', openLibrary);
@@ -949,7 +1055,7 @@ window.addEventListener('keydown', e => {
 });
 window.addEventListener('keyup', e => { if (e.code === 'Space') { spaceHeld = false; planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair'; } });
 window.addEventListener('blur', () => { spaceHeld = false; orbit.pointer = null; if (drag) finishPointer(null, true); });
-window.addEventListener('beforeunload', e => { if (saveFailed && hasContent()) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', e => { if ((saveFailed || pendingSaves) && hasContent()) { e.preventDefault(); e.returnValue = ''; } });
 let firstResize = true, planSize = '';
 function resizeCanvases(rect) {
   if (rect.width < 1 || rect.height < 1) return;
@@ -980,7 +1086,7 @@ if (saveFailed) { translatedText('save-status', 'Draft restore unavailable · ex
 
 function renderLocale() {
   // Switching a presentation preference must not discard an unfinished form.
-  const drafts = [...$('inspector-body').querySelectorAll('input,select,textarea')].map(input => ({ value: input.value, checked: input.checked }));
+  const drafts = [...$('inspector-body').querySelectorAll('input,select,textarea')].map(input => ({ value: input.value, checked: input.checked, draft: input.inspectorDraft, invalid: input.getAttribute('aria-invalid') }));
   translateStatic();
   $('language-select').value = getLocale();
   document.querySelectorAll('[data-tool]').forEach(element => {
@@ -989,11 +1095,16 @@ function renderLocale() {
   });
   renderCategories(); updatePlacement(); renderUI(); renderPlan();
   [...$('inspector-body').querySelectorAll('input,select,textarea')].forEach((input, index) => {
-    if (drafts[index]) { input.value = drafts[index].value; if (input.type === 'checkbox') input.checked = drafts[index].checked; }
+    if (drafts[index]) {
+      input.value = drafts[index].value; input.inspectorDraft = drafts[index].draft;
+      if (drafts[index].invalid) input.setAttribute('aria-invalid', drafts[index].invalid);
+      if (input.type === 'checkbox') input.checked = drafts[index].checked;
+    }
   });
   if (view === 'preview') $('tool-hint').textContent = t('Drag to orbit · scroll to zoom · arrow keys to rotate');
   if ($('library-dialog').open) renderLibrary();
   if (buildValidationText) $('build-validation').textContent = buildValidationText();
+  if ($('recovery-dialog').open) renderRecovery();
   if (lastStatus) status(lastStatus.message, lastStatus.error);
 }
 for (const locale of LOCALES) {
@@ -1015,6 +1126,18 @@ $('language-select').addEventListener('change', async event => {
   }
 });
 renderLocale();
+installOnboarding({
+  t, getFloor: floor, hasContent, replaceProject, validateProject, status, onLocaleChange,
+  createRoom(options) {
+    const ok = transact((_p, target) => { selection = { kind: 'rooms', id: addMeasuredRoom(target, options) }; },
+      () => options.walls ? t('Room ready. Add a door or an item, then preview and export.') : t('Room added. Choose Build wall outline to create its walls.'), { fit: true });
+    if (ok) { setView('plan'); setTool('select'); }
+    return { ok, error: !ok && lastStatus ? (typeof lastStatus.message === 'function' ? lastStatus.message() : lastStatus.message) : '' };
+  },
+  preview() { setView('preview'); $('preview-tab').focus(); },
+  draw() { setTool('room'); planCanvas.focus(); },
+  focusPlan() { planCanvas.focus(); },
+});
 if (!initialLocale.loaded) status(() => t('Language could not be loaded. English is shown instead.'), true);
 
 

@@ -1,0 +1,47 @@
+name: Something is not working
+description: Help us reproduce a drawing, preview, or installation problem.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve Home studio. Please do not attach credentials, real home photos, or a private project export. A small fictional example is best. Report security vulnerabilities privately using SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Home studio release or commit
+      description: Include the version you built or installed, or say that you are using the hosted planner.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where does the problem happen?
+      options:
+        - Hosted drawing editor
+        - Local drawing editor or AI companion
+        - Generated local preview
+        - Installed Home Assistant panel
+        - Build or installation command
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and operating system
+      description: Include exact versions if available. For rendering problems, the device or GPU model is useful too.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Error message or fictional example
+      description: Remove tokens, private URLs, device IDs, names, and home details from logs and screenshots before sharing them.

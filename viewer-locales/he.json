@@ -127,5 +127,6 @@
   "Open sidebar": "פתיחת סרגל הצד",
   "Reload saved plan": "טעינה מחדש של התוכנית השמורה",
   "Connecting to Home Assistant…": "מתחבר ל־Home Assistant…",
-  "Connected · placements are saved in Home Assistant": "מחובר · המיקומים נשמרים ב־Home Assistant"
+  "Connected · placements are saved in Home Assistant": "מחובר · המיקומים נשמרים ב־Home Assistant",
+  "3D view could not start. Plan editing and JSON export are still available.": "לא ניתן היה להפעיל את תצוגת התלת־ממד. עדיין אפשר לערוך את התוכנית ולייצא JSON."
 }

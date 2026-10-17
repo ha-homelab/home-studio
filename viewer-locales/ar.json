@@ -127,5 +127,6 @@
   "Open sidebar": "فتح الشريط الجانبي",
   "Reload saved plan": "إعادة تحميل المخطط المحفوظ",
   "Connecting to Home Assistant…": "جارٍ الاتصال بـ Home Assistant…",
-  "Connected · placements are saved in Home Assistant": "متصل · تُحفظ مواضع العناصر في Home Assistant"
+  "Connected · placements are saved in Home Assistant": "متصل · تُحفظ مواضع العناصر في Home Assistant",
+  "3D view could not start. Plan editing and JSON export are still available.": "تعذّر بدء العرض ثلاثي الأبعاد. لا يزال تعديل المخطط وتصديره بصيغة JSON متاحين."
 }

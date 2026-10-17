@@ -6,7 +6,7 @@
   <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Draw and explore your home in 3D. A free browser editor, optional AI drafts from room photos, and a local toolkit for your own Home Assistant panel.">
-  <title>Home studio · Draw a place of your own</title>
+  <title>Home studio · Your home, in 3D and Home Assistant</title>
   <link rel="stylesheet" href="./planner/guide.css">
   <link rel="stylesheet" href="./site.css">
 </head>
@@ -18,19 +18,24 @@
   </header>
   <main id="start">
     <section class="hero">
-      <p class="eyebrow">A SKETCHBOOK FOR YOUR HOME</p>
-      <h1>Draw a place<br>of your own.</h1>
-      <p class="lead">Start with a room. Give it walls, a doorway and a little light. Then tilt your drawing into 3D.</p>
-      <p>No account, download or coding needed to start. Open the editor in a desktop browser; a mouse or trackpad makes drawing easier.</p>
+      <p class="eyebrow">DRAW IT. MAKE IT YOURS. BRING IT HOME.</p>
+      <h1>Your home.<br>In 3D. In Home Assistant.</h1>
+      <p class="lead">Create a home you recognize, then turn it into a dashboard you can touch. Start with a ready-made example or your first room's measurements.</p>
+      <p>Try the editor without an account or installation. Drawing works best on a desktop with a mouse or trackpad. When you are ready, the local toolkit builds your private Home Assistant panel.</p>
       <div class="hero-actions">
-        <a class="button" href="./planner/">Start drawing <span aria-hidden="true">→</span></a>
-        <a class="text-link" href="./ai-setup.html">Plan from photos with your AI →</a>
+        <a class="button" href="./planner/?example=decor">Try an example <span aria-hidden="true">→</span></a>
+        <a class="text-link" href="./planner/">Start my own plan →</a>
       </div>
+      <ul class="hero-facts" aria-label="Included in Home Studio"><li>Free &amp; open source</li><li>24 editor languages</li><li>195 built-in designs</li><li>No account required</li></ul>
       <p class="small">Your design stays in this browser. Export a project file to keep a portable copy. <a href="./privacy.html">How your data is handled</a></p>
     </section>
     <section class="preview-section" aria-labelledby="preview-title">
-      <div class="preview-heading"><p class="eyebrow">FROM FLAT SHAPES TO A SPACE YOU CAN SEE</p><h2 id="preview-title">A small first project.<br>A useful new skill.</h2><p>This fictional two-room home is the exercise in our illustrated guide. Each step shows what to click and what you should see.</p></div>
-      <a href="./planner/guide.html#preview"><img src="./planner/guide-assets/06-preview.jpg" width="1280" height="720" alt="The guide's fictional Living room and Studio in the editor's 3D preview, with a shared doorway, a window and a table."></a>
+      <div class="preview-heading"><p class="eyebrow">START WITH SOMETHING YOU CAN CHANGE</p><h2 id="preview-title">Open it. Turn it.<br>Make it your own.</h2><p>Explore a furnished fictional studio right in the editor. Move the furniture, add a window, or try a different finish. If you already have a drawing, you choose whether to replace it.</p></div>
+      <a href="./planner/?example=decor"><img src="./planner/guide-assets/10-decor-studio.jpg" width="1440" height="1000" alt="Open a furnished studio with a sofa, rug, lamps, plants and wall decorations."></a>
+      <div class="example-links" aria-label="More editable examples">
+        <a href="./planner/?example=patterns"><img loading="lazy" src="./planner/guide-assets/11-pattern-studio.jpg" width="1280" height="720" alt="A studio with patterned textiles and coordinated furniture."><strong>Play with color &amp; pattern <span aria-hidden="true">↗</span></strong></a>
+        <a href="./planner/?example=garage"><img loading="lazy" src="./planner/guide-assets/09-garage-studio.jpg" width="1280" height="720" alt="A fictional garage and creative studio with vehicles, instruments and outdoor furniture."><strong>Explore a garage &amp; studio <span aria-hidden="true">↗</span></strong></a>
+      </div>
     </section>
     <section class="ai-feature" aria-labelledby="ai-title">
       <div><p class="eyebrow">A NEW WAY TO BEGIN</p><h2 id="ai-title">Your photos.<br>Your model. Your home.</h2><p>Let a vision model sketch a measured room or suggest furniture for one you have already drawn. Preview its proposal, choose what to keep, and make the final edits yourself.</p><a class="button" href="./ai-setup.html">Plan from photos <span aria-hidden="true">→</span></a></div>
@@ -38,10 +43,10 @@
     </section>
     <section class="start-cards" aria-label="Three ways to begin">
       <article><p class="eyebrow">01 · FOLLOW ALONG</p><h2>Learn by making.</h2><p>Seven illustrated steps take you from an empty page to a finished first sketch. No technical background expected.</p><a href="./planner/guide.html">Open the illustrated guide →</a></article>
-      <article><p class="eyebrow">02 · EXPLORE</p><h2>Try a ready-made sketch.</h2><p>Download the practice project, open the editor and choose <strong>Open JSON</strong>. Move a table, resize a room, or orbit the 3D view.</p><a href="./planner/guide-assets/practice-home.json" download>Download the practice project →</a></article>
+      <article><p class="eyebrow">02 · EXPLORE</p><h2>Skip the blank page.</h2><p>Open a ready-made example in one step. The editor's <strong>Examples</strong> button keeps them within reach while you work.</p><a href="./planner/?example=practice">Open the practice home →</a></article>
       <article><p class="eyebrow">03 · BRING IT HOME</p><h2>Your plan, in Home Assistant.</h2><p>Export your drawing, download the complete toolkit, and build your private 3D Home panel with the local compiler and installer.</p><a href="./install.html">Build and install, step by step →</a></article>
     </section>
-    <section class="closing-note"><h2>Start in the browser.<br>Build something of your own.</h2><p>Draw and preview multiple floors here, then keep an editable JSON copy. When you are ready, the complete public toolkit turns that design into a viewer and Home Assistant package on your computer. Draw manually on this website, or use the optional local AI companion to draft from photos. Your installed Home Assistant viewer does not need an AI key or model.</p><div class="hero-actions"><a class="button" href="./planner/">Open Home studio <span aria-hidden="true">→</span></a><a class="text-link" href="https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip">Download the complete toolkit</a></div></section>
+    <section class="closing-note"><h2>Start in the browser.<br>Build something of your own.</h2><p>Draw and preview multiple floors here, then keep an editable JSON copy. When you are ready, the complete public toolkit turns that design into a viewer and Home Assistant package on your computer. Draw manually on this website, or use the optional local AI companion to draft from photos. Your installed Home Assistant viewer does not need an AI key or model.</p><div class="hero-actions"><a class="button" href="./planner/">Open Home studio <span aria-hidden="true">→</span></a><a class="text-link" href="https://github.com/ha-homelab/home-studio/releases/latest">Download the complete toolkit</a></div></section>
   </main>
   <footer class="site-footer"><span>Home studio</span><nav aria-label="Footer"><a href="./planner/guide.html">Drawing guide</a><a href="./install.html">Install</a><a href="./ai-setup.html">Plan from photos</a><a href="./privacy.html">Privacy</a><a href="https://github.com/ha-homelab/home-studio">Source &amp; MIT license</a><a href="./vendor/THREE-LICENSE.txt">Three.js license</a></nav></footer>
 </body>

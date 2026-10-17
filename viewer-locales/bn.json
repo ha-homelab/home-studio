@@ -127,5 +127,6 @@
   "Open sidebar": "সাইডবার খুলুন",
   "Reload saved plan": "সংরক্ষিত নকশা পুনরায় লোড করুন",
   "Connecting to Home Assistant…": "Home Assistant-এর সঙ্গে সংযুক্ত হচ্ছে…",
-  "Connected · placements are saved in Home Assistant": "সংযুক্ত · অবস্থানগুলো Home Assistant-এ সংরক্ষিত হয়"
+  "Connected · placements are saved in Home Assistant": "সংযুক্ত · অবস্থানগুলো Home Assistant-এ সংরক্ষিত হয়",
+  "3D view could not start. Plan editing and JSON export are still available.": "ত্রিমাত্রিক দৃশ্য চালু করা যায়নি। নকশা সম্পাদনা ও JSON রপ্তানি এখনও করা যাবে।"
 }

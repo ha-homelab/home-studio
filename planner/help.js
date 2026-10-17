@@ -74,7 +74,7 @@ function renderInstall(steps) {
     'Download project.json and keep it somewhere you can find again. This file contains your drawing and any entity IDs you entered. It is not an installed dashboard.',
   ], { image: '06-preview.jpg' }).item);
   const download = card('Get the complete toolkit.', ["Download and extract the public package. The local compiler and installer use Python's standard library; no extra packages are needed."]);
-  download.body.append(link(t('Download the complete ZIP ↗'), 'https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip', 'text-link'));
+  download.body.append(link(t('Download the complete ZIP ↗'), 'https://github.com/ha-homelab/home-studio/releases/latest', 'text-link'));
   steps.append(download.item);
   const build = card('Build, preview, and install.', ['Open a terminal in the extracted toolkit folder. Replace the project path with the location of your exported file; quote paths containing spaces.']);
   build.body.append(codeBlock('build'), paragraph('This creates your viewer and installation archive. Follow the guide to preview and install it. Keep your editable JSON outside the generated output folder.'), element('h4', t('Preview')), codeBlock('preview'));

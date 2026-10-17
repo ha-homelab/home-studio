@@ -9,7 +9,7 @@
 
 Завантажте й розпакуйте повний набір інструментів. Установіть Python 3.10 або новішу версію. У папці набору виконайте:
 
-[ZIP](https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip)
+[ZIP](https://github.com/ha-homelab/home-studio/releases/latest)
 
 ```sh
 python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package

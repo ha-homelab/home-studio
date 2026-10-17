@@ -9,7 +9,7 @@ Teken je huis in de browser. Je hebt geen account nodig. Kies bovenaan in de edi
 
 Download en pak de volledige gereedschapsset uit. Installeer Python 3.10 of nieuwer. Voer in de map van de gereedschapsset het volgende uit:
 
-[ZIP](https://github.com/ha-homelab/home-studio/archive/refs/heads/main.zip)
+[ZIP](https://github.com/ha-homelab/home-studio/releases/latest)
 
 ```sh
 python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package

@@ -38,6 +38,7 @@ SITE_FILES = (
     'index.html', 'site.css', 'privacy.html', 'install.html', 'ai-setup.html', '404.html', '.nojekyll',
     'planner/index.html', 'planner/editor.css', 'planner/editor.js', 'planner/render-capacity.js', 'planner/interaction-render.js',
     'planner/i18n.js', 'planner/validation.js', 'planner/locales/index.js',
+    'planner/draft-storage.js', 'planner/inspector-dom.js', 'planner/onboarding.js', *(f'planner/examples/{name}.js' for name in ('practice', 'decor', 'patterns', 'garage')),
     'planner/help.js', 'planner/help.css', 'planner/help-locales.js', 'planner/language-links.js',
     *(f'planner/locales/{code}.js' for code in LOCALE_CODES),
     'planner/model.js', 'planner/catalog.js', 'planner/furniture.js', 'planner/guide.html', 'planner/guide.css',
@@ -66,6 +67,7 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'docs/images/dry-run-validation.svg', 'docs/data/dry-run-validation.json',
               'scripts/render-validation-chart.py',
               *(f'docs/translations/README.{code}.md' for code in LOCALE_CODES if code != 'en'),
+              'scripts/build-example-modules.py', 'scripts/test-draft-storage.mjs', 'scripts/test-planner-editing.cjs', 'scripts/test-onboarding.mjs', 'scripts/test-onboarding-browser.cjs',
               'scripts/test-i18n.mjs', 'scripts/test-i18n-browser.cjs', 'scripts/test-validation-i18n.mjs',
               'scripts/test-help-i18n.cjs', 'scripts/test-panel-language.cjs', 'scripts/test-viewer-i18n.cjs', 'scripts/test-lock-control.cjs',
               'viewer-i18n.js', 'viewer-locales/index.json',
@@ -76,7 +78,7 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'docs/rc-fuzzing.md', 'docs/release-workflow.md', '.gitignore', '.gitattributes', 'scripts/validate-site.py', '.github/workflows/pages.yml',
               '.github/workflows/package.yml', '.github/workflows/platform-acceptance.yml',
               '.github/actions/upload-acceptance-artifact/action.yml',
-              'docs/architecture.md', 'docs/platform-acceptance.md',
+              'docs/architecture.md', 'docs/first-session.md', 'docs/platform-acceptance.md',
               'docs/quality-and-release.md', 'docs/VERSIONING.md',
               'docs/assets/quality/release-pipeline.svg',
               'docs/assets/quality/browser-coverage.svg',
@@ -214,7 +216,7 @@ def validate(root):
                 raise ValueError(f'Missing anchor: {relative}: {link}')
     for relative in (name for name in SITE_FILES if name.startswith('planner/') and name.endswith('.js')):
         code = (root / relative).read_text(encoding="utf-8")
-        for imported in re.findall(r'from\s+[\'"]([^\'"]+)[\'"]', code):
+        for imported in re.findall(r'(?:from\s+|import\(\s*)[\'"]([^\'"]+)[\'"]', code):
             target = ((root / relative).parent / imported).resolve()
             if not target.is_relative_to(root) or target.relative_to(root).as_posix() not in SITE_FILES:
                 raise ValueError(f'Unpublished import: {relative}: {imported}')

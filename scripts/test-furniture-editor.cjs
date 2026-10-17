@@ -11,7 +11,7 @@ const root = path.resolve(__dirname, '..');
 const catalog = JSON.parse(fs.readFileSync(path.join(root, 'planner/catalog.json')));
 const files = new Map([
   ['planner/', ['planner/index.html', 'text/html']],
-  ...['editor', 'model', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity', 'interaction-render'].map(name => [`planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
+  ...['editor', 'model', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity', 'interaction-render', 'onboarding', 'draft-storage', 'inspector-dom'].map(name => [`planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
   ...fs.readdirSync(path.join(root, 'planner/locales')).filter(name => name.endsWith('.js')).map(name => [`planner/locales/${name}`, [`planner/locales/${name}`, 'text/javascript']]),
   ['planner/editor.css', ['planner/editor.css', 'text/css']],
   ['vendor/three.module.min.js', ['vendor/three.module.min.js', 'text/javascript']],
@@ -56,7 +56,7 @@ function findFiles(folder, name) {
     const project = () => page.evaluate(() => window.planner.getProject());
     const lastItem = async () => (await project()).floors[0].items.at(-1);
     const change = async (label, value) => {
-      const input = page.getByLabel(label, { exact: true });
+      const input = page.locator('#inspector-body').getByLabel(label, { exact: true });
       await input.fill(String(value)); await input.press('Tab');
     };
     const chooseModel = async id => {

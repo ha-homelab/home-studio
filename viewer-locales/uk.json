@@ -127,5 +127,6 @@
   "Open sidebar": "Відкрити бічну панель",
   "Reload saved plan": "Перезавантажити збережений план",
   "Connecting to Home Assistant…": "Підключення до Home Assistant…",
-  "Connected · placements are saved in Home Assistant": "Підключено · розташування зберігаються в Home Assistant"
+  "Connected · placements are saved in Home Assistant": "Підключено · розташування зберігаються в Home Assistant",
+  "3D view could not start. Plan editing and JSON export are still available.": "Не вдалося запустити 3D-вигляд. Редагування плану та експорт JSON залишаються доступними."
 }
