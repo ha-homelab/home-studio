@@ -127,5 +127,6 @@
   "Open sidebar": "Otwórz pasek boczny",
   "Reload saved plan": "Wczytaj ponownie zapisany plan",
   "Connecting to Home Assistant…": "Łączenie z Home Assistant…",
-  "Connected · placements are saved in Home Assistant": "Połączono · rozmieszczenie jest zapisywane w Home Assistant"
+  "Connected · placements are saved in Home Assistant": "Połączono · rozmieszczenie jest zapisywane w Home Assistant",
+  "3D view could not start. Plan editing and JSON export are still available.": "Nie udało się uruchomić widoku 3D. Edycja planu i eksport JSON są nadal dostępne."
 }

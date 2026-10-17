@@ -127,5 +127,6 @@
   "Open sidebar": "Open sidebar",
   "Reload saved plan": "Reload saved plan",
   "Connecting to Home Assistant…": "Connecting to Home Assistant…",
-  "Connected · placements are saved in Home Assistant": "Connected · placements are saved in Home Assistant"
+  "Connected · placements are saved in Home Assistant": "Connected · placements are saved in Home Assistant",
+  "3D view could not start. Plan editing and JSON export are still available.": "3D view could not start. Plan editing and JSON export are still available."
 }

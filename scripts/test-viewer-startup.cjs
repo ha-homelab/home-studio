@@ -99,8 +99,10 @@ const failed = exercise(true, {failRender: true});
 failed.flushFrames();
 assert.deepEqual(failed.errors, ['first draw failed']);
 assert.equal(failed.loadError.style.display, 'block');
-assert.match(failed.loadError.textContent, /first draw failed/);
 assert.equal(failed.c.completed, true, 'A first-draw error must not abort publication');
+failed.c.window.resizeModel();
+failed.c.window.renderModel();
+assert.deepEqual(failed.errors, ['first draw failed'], 'Recovery edits and resize must not retry the failed renderer');
 for (const initialRoom of [null, 'L']) {
   const standalone = exercise(false, {initialRoom});
   assert.deepEqual(standalone.calls.map(call => call.mode), initialRoom ? ['editor', 'editor', 'editor'] : ['editor', 'editor']);

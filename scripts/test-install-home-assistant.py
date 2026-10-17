@@ -496,6 +496,8 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Previous component backup:", result.stdout)
         self.assertIn(str(Path(".home-studio-backups") / "home_floorplan-"), result.stdout)
+        self.assertIn("Core is stopped, start it from your host or console (ha core start on HAOS)", result.stdout)
+        self.assertIn("If Core is running, restart it", result.stdout)
 
     def test_cli_errors_are_concise_and_nonzero(self):
         self.archive.write_bytes(b"invalid")

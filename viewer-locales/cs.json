@@ -127,5 +127,6 @@
   "Open sidebar": "Otevřít postranní panel",
   "Reload saved plan": "Znovu načíst uložený plán",
   "Connecting to Home Assistant…": "Připojování k Home Assistant…",
-  "Connected · placements are saved in Home Assistant": "Připojeno · rozmístění se ukládá do Home Assistant"
+  "Connected · placements are saved in Home Assistant": "Připojeno · rozmístění se ukládá do Home Assistant",
+  "3D view could not start. Plan editing and JSON export are still available.": "3D zobrazení se nepodařilo spustit. Úpravy půdorysu a export JSON jsou stále dostupné."
 }

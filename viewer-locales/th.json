@@ -127,5 +127,6 @@
   "Open sidebar": "เปิดแถบด้านข้าง",
   "Reload saved plan": "โหลดแปลนที่บันทึกไว้อีกครั้ง",
   "Connecting to Home Assistant…": "กำลังเชื่อมต่อ Home Assistant…",
-  "Connected · placements are saved in Home Assistant": "เชื่อมต่อแล้ว · ตำแหน่งจะถูกบันทึกใน Home Assistant"
+  "Connected · placements are saved in Home Assistant": "เชื่อมต่อแล้ว · ตำแหน่งจะถูกบันทึกใน Home Assistant",
+  "3D view could not start. Plan editing and JSON export are still available.": "ไม่สามารถเริ่มมุมมอง 3 มิติได้ คุณยังแก้ไขแปลนและส่งออก JSON ได้"
 }

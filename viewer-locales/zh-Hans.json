@@ -127,5 +127,6 @@
   "Open sidebar": "打开侧边栏",
   "Reload saved plan": "重新加载已保存的平面图",
   "Connecting to Home Assistant…": "正在连接 Home Assistant…",
-  "Connected · placements are saved in Home Assistant": "已连接 · 位置会保存到 Home Assistant"
+  "Connected · placements are saved in Home Assistant": "已连接 · 位置会保存到 Home Assistant",
+  "3D view could not start. Plan editing and JSON export are still available.": "无法启动3D视图。您仍可编辑平面图并导出JSON。"
 }

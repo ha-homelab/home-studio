@@ -127,5 +127,6 @@
   "Open sidebar": "Buka bilah samping",
   "Reload saved plan": "Muat ulang denah tersimpan",
   "Connecting to Home Assistant…": "Menghubungkan ke Home Assistant…",
-  "Connected · placements are saved in Home Assistant": "Terhubung · penempatan disimpan di Home Assistant"
+  "Connected · placements are saved in Home Assistant": "Terhubung · penempatan disimpan di Home Assistant",
+  "3D view could not start. Plan editing and JSON export are still available.": "Tampilan 3D tidak dapat dimulai. Penyuntingan denah dan ekspor JSON tetap tersedia."
 }

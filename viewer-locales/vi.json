@@ -127,5 +127,6 @@
   "Open sidebar": "Mở thanh bên",
   "Reload saved plan": "Tải lại sơ đồ đã lưu",
   "Connecting to Home Assistant…": "Đang kết nối với Home Assistant…",
-  "Connected · placements are saved in Home Assistant": "Đã kết nối · vị trí được lưu trong Home Assistant"
+  "Connected · placements are saved in Home Assistant": "Đã kết nối · vị trí được lưu trong Home Assistant",
+  "3D view could not start. Plan editing and JSON export are still available.": "Không thể khởi động chế độ xem 3D. Bạn vẫn có thể chỉnh sửa sơ đồ và xuất JSON."
 }

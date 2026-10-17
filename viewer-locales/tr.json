@@ -127,5 +127,6 @@
   "Open sidebar": "Kenar çubuğunu aç",
   "Reload saved plan": "Kayıtlı planı yeniden yükle",
   "Connecting to Home Assistant…": "Home Assistant'a bağlanıyor…",
-  "Connected · placements are saved in Home Assistant": "Bağlandı · yerleşimler Home Assistant'a kaydediliyor"
+  "Connected · placements are saved in Home Assistant": "Bağlandı · yerleşimler Home Assistant'a kaydediliyor",
+  "3D view could not start. Plan editing and JSON export are still available.": "3B görünüm başlatılamadı. Plan düzenleme ve JSON dışa aktarma hâlâ kullanılabilir."
 }
