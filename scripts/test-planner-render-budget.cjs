@@ -427,7 +427,8 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     p.snap = value => value;
     if (kind === 'items') {
       p.nextId = model.nextId; p.setTool = value => { p.tool = value; }; p.renderInspector = () => {};
-      vm.runInContext(section('function transact(', 'function replaceProject('), p);
+      p.committingField = null;
+      vm.runInContext(section('function transact(', 'async function replaceProject('), p);
       for (const tool of ['wall', 'room']) {
         p.tool = tool; const collection = tool === 'wall' ? 'walls' : 'rooms';
         const count = p.project.floors[0][collection].length;
