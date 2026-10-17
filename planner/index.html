@@ -14,7 +14,7 @@
     <a class="brand" href="./" aria-label="Home studio" data-i18n-attrs="{&quot;aria-label&quot;:&quot;Home studio&quot;}"><span class="brand-mark" aria-hidden="true">⌂</span><span>Home<span class="brand-light">studio</span><small data-i18n="FLOORPLAN PLANNER">FLOORPLAN PLANNER</small></span></a>
     <div class="project-heading"><label class="sr-only" for="project-title" data-i18n="Project title">Project title</label><input id="project-title" value="Untitled home" maxlength="120" aria-label="Project title" data-i18n-attrs="{&quot;aria-label&quot;:&quot;Project title&quot;}"><span id="save-status" class="save-status" data-i18n="Local draft">Local draft</span></div>
     <nav class="file-actions" aria-label="Project actions" data-i18n-attrs="{&quot;aria-label&quot;:&quot;Project actions&quot;}">
-      <button id="new-project" class="quiet" data-i18n="New project">New project</button><button id="open-project" class="quiet" data-i18n="Open JSON">Open JSON</button><button id="export-project" class="quiet"><span data-i18n="Export JSON">Export JSON</span> <span aria-hidden="true">↗</span></button><button id="build-project" class="primary" data-i18n="Build &amp; install">Build &amp; install</button>
+      <button id="browse-examples" class="quiet" aria-haspopup="dialog" aria-controls="examples-dialog" data-i18n="Examples">Examples</button><button id="new-project" class="quiet" data-i18n="New project">New project</button><button id="open-project" class="quiet" data-i18n="Open JSON">Open JSON</button><button id="export-project" class="quiet"><span data-i18n="Export JSON">Export JSON</span> <span aria-hidden="true">↗</span></button><button id="build-project" class="primary" data-i18n="Build &amp; install">Build &amp; install</button>
     </nav>
     <label class="language-control" for="language-select"><span data-i18n="Language">Language</span><select id="language-select" aria-label="Language" data-i18n-attrs="{&quot;aria-label&quot;:&quot;Language&quot;}"></select></label>
     <input id="file-input" type="file" accept=".json,application/json" hidden>
@@ -27,6 +27,7 @@
       </section>
       <section class="tool-section">
         <div class="section-heading"><h2 data-i18n="Design tools">Design tools</h2><span class="unit-badge" data-i18n="METERS">METERS</span></div>
+        <button id="measured-room" class="measured-room quiet" aria-haspopup="dialog" aria-controls="room-starter" data-i18n="Start with measurements">Start with measurements</button>
         <div class="tools" role="group" aria-label="Drawing tools" data-i18n-attrs="{&quot;aria-label&quot;:&quot;Drawing tools&quot;}">
           <button data-tool="select" aria-pressed="true"><span class="tool-symbol" aria-hidden="true">↖</span><span data-i18n="Select / move">Select / move</span><kbd>V</kbd></button>
           <button data-tool="room" aria-pressed="false"><span class="tool-symbol" aria-hidden="true">▱</span><span data-i18n="Draw room">Draw room</span><kbd>R</kbd></button>
@@ -47,7 +48,7 @@
       <div class="canvas-shell">
         <div id="plan-view" class="view-panel" role="tabpanel" aria-labelledby="plan-tab"><canvas id="plan-canvas" tabindex="0" aria-label="Metric floor plan. Draw with pointer tools or use Add room by dimensions for keyboard input. Select objects from the On this floor list to edit precise coordinates." data-i18n-attrs="{&quot;aria-label&quot;:&quot;Metric floor plan. Draw with pointer tools or use Add room by dimensions for keyboard input. Select objects from the On this floor list to edit precise coordinates.&quot;}"></canvas></div>
         <div id="preview-view" class="view-panel" role="tabpanel" aria-labelledby="preview-tab" hidden><canvas id="preview-canvas" tabindex="0" aria-label="3D preview. Drag to orbit, scroll to zoom. Arrow keys orbit, plus and minus zoom." data-i18n-attrs="{&quot;aria-label&quot;:&quot;3D preview. Drag to orbit, scroll to zoom. Arrow keys orbit, plus and minus zoom.&quot;}"></canvas><div id="preview-error" class="preview-error" hidden></div><label class="all-floors"><input id="all-floors" type="checkbox"> <span data-i18n="Show all floors">Show all floors</span></label><span class="preview-note" data-i18n="Real wall openings · geometry preview">Real wall openings · geometry preview</span></div>
-        <div id="empty-state" class="empty-state"><span class="empty-symbol" aria-hidden="true">⌂</span><p class="eyebrow" data-i18n="A PLACE TO BEGIN">A PLACE TO BEGIN</p><h1 data-i18n="Make room for your home.">Make room for your home.</h1><p data-i18n="Start with a room, add its walls, then bring your devices into the picture.">Start with a room, add its walls, then bring your devices into the picture.</p><button id="start-room" class="primary"><span data-i18n="Draw your first room">Draw your first room</span> <span aria-hidden="true">↗</span></button><button id="load-demo" class="text-button" data-i18n="Explore a fictional demo">Explore a fictional demo</button><small data-i18n="No address, account, or upload required.">No address, account, or upload required.</small></div>
+        <div id="empty-state" class="empty-state"><span class="empty-symbol" aria-hidden="true">⌂</span><p class="eyebrow" data-i18n="A PLACE TO BEGIN">A PLACE TO BEGIN</p><h1 data-i18n="Make room for your home.">Make room for your home.</h1><p data-i18n="Start with a room, add its walls, then bring your devices into the picture.">Start with a room, add its walls, then bring your devices into the picture.</p><button id="start-room" class="primary" aria-haspopup="dialog" aria-controls="room-starter" data-i18n="Start with measurements">Start with measurements</button><button id="start-drawing" class="text-button" data-i18n="Draw your first room">Draw your first room</button><button id="load-demo" class="text-button" aria-haspopup="dialog" aria-controls="examples-dialog" data-i18n="Explore an example">Explore an example</button><small data-i18n="No address, account, or upload required.">No address, account, or upload required.</small></div>
         <div id="tool-hint" class="tool-hint" data-i18n="Select a shape to edit. Space + drag to pan.">Select a shape to edit. Space + drag to pan.</div>
         <div class="canvas-bottom"><div class="canvas-caption"><span class="live-dot"></span><span id="floor-caption">Ground floor</span></div><div class="canvas-controls"><label id="snap-label"><input id="snap" type="checkbox" checked> <span data-i18n="Snap 0.25 m">Snap 0.25 m</span></label><span class="separator"></span><button id="zoom-out" class="icon-button" aria-label="Zoom out" data-i18n-attrs="{&quot;aria-label&quot;:&quot;Zoom out&quot;}">−</button><output id="zoom-value" aria-label="Zoom level" data-i18n-attrs="{&quot;aria-label&quot;:&quot;Zoom level&quot;}">100%</output><button id="zoom-in" class="icon-button" aria-label="Zoom in" data-i18n-attrs="{&quot;aria-label&quot;:&quot;Zoom in&quot;}">+</button></div></div>
       </div>
@@ -55,6 +56,28 @@
     </section>
     <aside class="inspector" aria-label="Selection properties" data-i18n-attrs="{&quot;aria-label&quot;:&quot;Selection properties&quot;}"><div class="inspector-head"><span class="eyebrow" data-i18n="THE DETAILS">THE DETAILS</span><h2 id="inspector-title" data-i18n="Floor settings">Floor settings</h2><p id="inspector-subtitle" data-i18n="A good plan starts with the basics.">A good plan starts with the basics.</p></div><div id="inspector-body"></div></aside>
   </main>
+  <dialog id="room-starter" class="onboarding-dialog" aria-labelledby="starter-title" aria-describedby="starter-note">
+    <button type="button" class="dialog-close icon-button" data-close="room-starter" aria-label="Close" data-i18n-attrs='{"aria-label":"Close"}'>×</button>
+    <h2 id="starter-title" data-i18n="Create a room">Create a room</h2>
+    <form id="room-starter-form" novalidate>
+      <label class="field" for="starter-name"><span data-i18n="Room name">Room name</span><input id="starter-name" maxlength="120" required autocomplete="off" aria-describedby="starter-error"></label>
+      <div class="field-row">
+        <label class="field" for="starter-width"><span data-i18n="Width (m)">Width (m)</span><input id="starter-width" type="number" min="0.25" max="100" step="0.01" value="4" required aria-describedby="starter-error"></label>
+        <label class="field" for="starter-depth"><span data-i18n="Depth (m)">Depth (m)</span><input id="starter-depth" type="number" min="0.25" max="100" step="0.01" value="3" required aria-describedby="starter-error"></label>
+      </div>
+      <label class="starter-walls" for="starter-walls"><input id="starter-walls" type="checkbox" checked aria-describedby="starter-note"><span data-i18n="Include walls">Include walls</span></label>
+      <p id="starter-note" class="field-note" data-i18n="Adds 0.15 m walls. Rooms and walls stay separate when moved.">Adds 0.15 m walls. Rooms and walls stay separate when moved.</p>
+      <p id="starter-error" class="onboarding-status" role="alert"></p>
+      <button type="submit" id="starter-create" class="primary" data-i18n="Create room">Create room</button>
+    </form>
+  </dialog>
+  <dialog id="examples-dialog" class="onboarding-dialog examples-dialog" aria-labelledby="examples-title" aria-describedby="examples-note">
+    <button type="button" class="dialog-close icon-button" data-close="examples-dialog" aria-label="Close" data-i18n-attrs='{"aria-label":"Close"}'>×</button>
+    <h2 id="examples-title" tabindex="-1" data-i18n="Explore an example">Explore an example</h2>
+    <p id="examples-note" data-i18n="Fictional projects. Choose one to open it in 3D.">Fictional projects. Choose one to open it in 3D.</p>
+    <div id="examples-grid" class="examples-grid"></div>
+    <p id="examples-status" class="onboarding-status" role="status" aria-live="polite"></p>
+  </dialog>
   <dialog id="library-dialog" aria-labelledby="library-title" class="library-dialog">
     <button class="dialog-close icon-button" data-close="library-dialog" aria-label="Close item library" data-i18n-attrs="{&quot;aria-label&quot;:&quot;Close item library&quot;}">×</button>
     <p class="eyebrow" data-i18n="MAKE YOURSELF AT HOME">MAKE YOURSELF AT HOME</p><h2 id="library-title" tabindex="-1" data-i18n="Find an item for your room.">Find an item for your room.</h2>

@@ -624,5 +624,24 @@ export default {
   "Unknown furniture pattern.": "Pola perabot tidak dikenal.",
   "Choose a furniture pattern before setting its color.": "Pilih pola perabot sebelum mengatur warnanya.",
   "Furniture pattern color must use #RRGGBB.": "Warna pola perabot harus menggunakan #RRGGBB.",
-  "This furniture model does not support patterns.": "Model perabot ini tidak mendukung pola."
+  "This furniture model does not support patterns.": "Model perabot ini tidak mendukung pola.",
+  // First-session room starter and examples.
+  "Examples": "Contoh",
+  "Explore an example": "Jelajahi contoh",
+  "Fictional projects. Choose one to open it in 3D.": "Proyek fiktif. Pilih satu untuk membukanya dalam 3D.",
+  "Practice home": "Rumah latihan",
+  "Decorated studio": "Studio berhias",
+  "Pattern studio": "Studio pola",
+  "Garage and studio": "Garasi dan studio",
+  "Loading example…": "Memuat contoh…",
+  "Could not open example. Your current plan is unchanged.": "Contoh tidak dapat dibuka. Denah Anda saat ini tidak berubah.",
+  "Start with measurements": "Mulai dengan ukuran",
+  "Create a room": "Buat ruangan",
+  "Include walls": "Sertakan dinding",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "Menambahkan dinding setebal 0,15 m. Ruangan dan dinding dipindahkan secara terpisah.",
+  "Create room": "Buat ruangan",
+  "Room name is required.": "Nama ruangan wajib diisi.",
+  "Width and depth must be between 0.25 and 100 m.": "Lebar dan kedalaman harus antara 0,25 dan 100 m.",
+  "Room ready. Add a door or an item, then preview and export.": "Ruangan siap. Tambahkan pintu atau benda, lalu pratinjau dan ekspor.",
+  "Close": "Tutup"
 };

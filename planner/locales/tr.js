@@ -623,5 +623,24 @@ export default {
   "Unknown furniture pattern.": "Bilinmeyen mobilya deseni.",
   "Choose a furniture pattern before setting its color.": "Rengini ayarlamadan önce bir mobilya deseni seçin.",
   "Furniture pattern color must use #RRGGBB.": "Mobilya deseninin rengi #RRGGBB biçiminde olmalıdır.",
-  "This furniture model does not support patterns.": "Bu mobilya modeli desenleri desteklemiyor."
+  "This furniture model does not support patterns.": "Bu mobilya modeli desenleri desteklemiyor.",
+  // First-session room starter and examples.
+  "Examples": "Örnekler",
+  "Explore an example": "Bir örneği keşfet",
+  "Fictional projects. Choose one to open it in 3D.": "Kurgusal projeler. 3D olarak açmak için birini seçin.",
+  "Practice home": "Alıştırma evi",
+  "Decorated studio": "Dekore edilmiş stüdyo",
+  "Pattern studio": "Desen stüdyosu",
+  "Garage and studio": "Garaj ve stüdyo",
+  "Loading example…": "Örnek yükleniyor…",
+  "Could not open example. Your current plan is unchanged.": "Örnek açılamadı. Mevcut planınız değişmedi.",
+  "Start with measurements": "Ölçülerle başlayın",
+  "Create a room": "Bir oda oluştur",
+  "Include walls": "Duvarları dahil et",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "0,15 m kalınlığında duvarlar ekler. Odalar ve duvarlar ayrı taşınır.",
+  "Create room": "Oda oluştur",
+  "Room name is required.": "Oda adı gereklidir.",
+  "Width and depth must be between 0.25 and 100 m.": "Genişlik ve derinlik 0,25 ile 100 m arasında olmalıdır.",
+  "Room ready. Add a door or an item, then preview and export.": "Oda hazır. Kapı veya eşya ekleyin, ardından önizleyin ve dışa aktarın.",
+  "Close": "Kapat"
 };

@@ -623,5 +623,24 @@ export default {
   "Unknown furniture pattern.": "نقش الأثاث غير معروف.",
   "Choose a furniture pattern before setting its color.": "اختر نقشاً للأثاث قبل تعيين لونه.",
   "Furniture pattern color must use #RRGGBB.": "يجب أن يستخدم لون نقش الأثاث الصيغة #RRGGBB.",
-  "This furniture model does not support patterns.": "نموذج الأثاث هذا لا يدعم النقوش."
+  "This furniture model does not support patterns.": "نموذج الأثاث هذا لا يدعم النقوش.",
+  // First-session room starter and examples.
+  "Examples": "أمثلة",
+  "Explore an example": "استكشاف مثال",
+  "Fictional projects. Choose one to open it in 3D.": "مشاريع خيالية. اختر أحدها لفتحه بشكل ثلاثي الأبعاد.",
+  "Practice home": "منزل للتدريب",
+  "Decorated studio": "استوديو مزين",
+  "Pattern studio": "استوديو الأنماط",
+  "Garage and studio": "مرآب واستوديو",
+  "Loading example…": "جارٍ تحميل المثال…",
+  "Could not open example. Your current plan is unchanged.": "تعذر فتح المثال. لم يتغير مخططك الحالي.",
+  "Start with measurements": "البدء بالأبعاد",
+  "Create a room": "إنشاء غرفة",
+  "Include walls": "تضمين الجدران",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "يضيف جدرانًا بسماكة 0.15 م. تتحرك الغرف والجدران بشكل منفصل.",
+  "Create room": "إنشاء غرفة",
+  "Room name is required.": "اسم الغرفة مطلوب.",
+  "Width and depth must be between 0.25 and 100 m.": "يجب أن يتراوح العرض والعمق بين 0.25 و100 م.",
+  "Room ready. Add a door or an item, then preview and export.": "الغرفة جاهزة. أضف بابًا أو عنصرًا، ثم عاين المشروع وصدّره.",
+  "Close": "إغلاق"
 };

@@ -623,5 +623,24 @@ export default {
   "Unknown furniture pattern.": "Motivo di mobile sconosciuto.",
   "Choose a furniture pattern before setting its color.": "Scegli un motivo del mobile prima di impostarne il colore.",
   "Furniture pattern color must use #RRGGBB.": "Il colore del motivo del mobile deve usare il formato #RRGGBB.",
-  "This furniture model does not support patterns.": "Questo modello di mobile non supporta motivi."
+  "This furniture model does not support patterns.": "Questo modello di mobile non supporta motivi.",
+  // First-session room starter and examples.
+  "Examples": "Esempi",
+  "Explore an example": "Esplora un esempio",
+  "Fictional projects. Choose one to open it in 3D.": "Progetti immaginari. Scegline uno per aprirlo in 3D.",
+  "Practice home": "Casa di esercitazione",
+  "Decorated studio": "Studio arredato",
+  "Pattern studio": "Studio dei motivi",
+  "Garage and studio": "Garage e studio",
+  "Loading example…": "Caricamento dell’esempio…",
+  "Could not open example. Your current plan is unchanged.": "Impossibile aprire l’esempio. La pianta attuale è invariata.",
+  "Start with measurements": "Inizia dalle misure",
+  "Create a room": "Crea una stanza",
+  "Include walls": "Includi pareti",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "Aggiunge pareti di 0,15 m. Stanze e pareti si spostano separatamente.",
+  "Create room": "Crea stanza",
+  "Room name is required.": "Il nome della stanza è obbligatorio.",
+  "Width and depth must be between 0.25 and 100 m.": "Larghezza e profondità devono essere comprese tra 0,25 e 100 m.",
+  "Room ready. Add a door or an item, then preview and export.": "Stanza pronta. Aggiungi una porta o un oggetto, poi visualizza ed esporta.",
+  "Close": "Chiudi"
 };

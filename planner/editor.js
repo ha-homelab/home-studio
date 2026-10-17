@@ -1,10 +1,11 @@
 import './language-links.js';
+import { addMeasuredRoom, installOnboarding } from './onboarding.js';
 import { getRenderCapacity } from './render-capacity.js';
 import { formatValidationError } from './validation.js';
 import { t, LOCALES, initI18n, setLocale, getLocale, onLocaleChange, translateStatic } from './i18n.js';
 
 import * as THREE from '../vendor/three.module.min.js';
-import { LIMITS, ITEM_TYPES, clone, round, distance, signedArea, pointInPolygon, projectOnWall, nextId, newFloor, blankProject, demoProject, outlineRoom, validateProject, wallPieces, floorBounds } from './model.js';
+import { LIMITS, ITEM_TYPES, clone, round, distance, signedArea, pointInPolygon, projectOnWall, nextId, newFloor, blankProject, outlineRoom, validateProject, wallPieces, floorBounds } from './model.js';
 import { CATALOG } from './catalog.js';
 import { getCatalogModel, getCatalogStyle, buildFurnitureAsset, PATTERNS, supportsFurniturePattern } from './furniture.js';
 
@@ -880,7 +881,6 @@ function exportProject() {
 }
 function hasContent() { return project.floors.length > 1 || project.floors.some(f => ['rooms', 'walls', 'openings', 'items'].some(k => f[k].length)); }
 $('new-project').addEventListener('click', () => { if (!hasContent() || confirm(t('Start a new blank project? Export JSON first if you need a separate copy of the current plan. You can undo this.'))) replaceProject(blankProject(), () => t('New blank project created.')); });
-$('load-demo').addEventListener('click', () => { if (!hasContent() || confirm(t('Replace the current plan with a fictional demo? You can undo this.'))) replaceProject(demoProject(), () => t('Fictional demo loaded. All names, geometry, and entities are examples.')); });
 $('open-project').addEventListener('click', () => $('file-input').click());
 $('file-input').addEventListener('change', async e => {
   const file = e.target.files[0]; e.target.value = ''; if (!file) return;
@@ -900,7 +900,6 @@ $('add-floor').addEventListener('click', () => {
   const ok = transact(p => { p.floors.push(next); }, () => t('New floor added. Set its name and elevation in the inspector.'));
   if (ok) { activeFloorId = id; selection = null; previewDirty = true; editorChanged(); renderUI(); fitPlan(); fitPreview(); renderPlan(); } else activeFloorId = previousId;
 });
-$('start-room').addEventListener('click', () => { setTool('room'); planCanvas.focus(); });
 document.querySelectorAll('[data-tool]').forEach(b => { const label = b.querySelector('span:nth-child(2)').textContent; b.setAttribute('aria-label', label); b.title = label; b.addEventListener('click', () => { setTool(b.dataset.tool); }); });
 $('place-type').addEventListener('change', () => { placementModelId = null; updatePlacement(); setTool('item'); renderInspector(); });
 $('browse-items').addEventListener('click', openLibrary);
@@ -1015,6 +1014,18 @@ $('language-select').addEventListener('change', async event => {
   }
 });
 renderLocale();
+installOnboarding({
+  t, getFloor: floor, hasContent, replaceProject, validateProject, status, onLocaleChange,
+  createRoom(options) {
+    const ok = transact((_p, target) => { selection = { kind: 'rooms', id: addMeasuredRoom(target, options) }; },
+      () => options.walls ? t('Room ready. Add a door or an item, then preview and export.') : t('Room added. Choose Build wall outline to create its walls.'), { fit: true });
+    if (ok) { setView('plan'); setTool('select'); }
+    return { ok, error: !ok && lastStatus ? (typeof lastStatus.message === 'function' ? lastStatus.message() : lastStatus.message) : '' };
+  },
+  preview() { setView('preview'); $('preview-tab').focus(); },
+  draw() { setTool('room'); planCanvas.focus(); },
+  focusPlan() { planCanvas.focus(); },
+});
 if (!initialLocale.loaded) status(() => t('Language could not be loaded. English is shown instead.'), true);
 
 

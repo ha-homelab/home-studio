@@ -68,3 +68,11 @@
   .file-actions{justify-content:space-between;gap:3px}.file-actions button{padding:7px 5px;font-size:9px;min-height:36px}
   .workspace{min-height:calc(100% - 142px)}
 }
+
+/* First-session tools remain usable without a pointer or a wide screen. */
+.measured-room{width:100%;min-height:44px;font-size:11px;line-height:1.5;margin-bottom:9px;border:1px solid #cbd8c5;background:#eef3e9}
+.onboarding-dialog{padding:30px;max-width:480px}.onboarding-dialog .field>span{font-size:12px}.onboarding-dialog .field input{min-height:44px;font-size:16px}.onboarding-dialog .field-note{font-size:12px;line-height:1.6}
+.starter-walls{display:flex;align-items:center;gap:9px;min-height:44px;font-size:14px}.starter-walls input{width:18px;height:18px}
+.onboarding-status{font-size:12px;line-height:1.6;min-height:1.6em;overflow-wrap:anywhere}#starter-error{color:#8d432d}
+.examples-dialog{max-width:720px}.examples-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.example-card{padding:0;overflow:hidden;text-align:start;border:1px solid #cfdcca;background:#f2f6ee}.example-card img{display:block;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover}.example-card strong{display:block;padding:12px;font-size:14px}.example-card:disabled{opacity:.65;cursor:wait}
+@media(max-width:520px){.measured-room{font-size:8px;padding:6px 2px;overflow-wrap:anywhere}.onboarding-dialog{padding:26px 18px}.examples-grid{grid-template-columns:1fr}.file-actions{flex-wrap:wrap}.app-header{height:auto;min-height:142px}}

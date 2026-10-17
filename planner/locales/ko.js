@@ -624,5 +624,24 @@ export default {
   "Unknown furniture pattern.": "알 수 없는 가구 무늬입니다.",
   "Choose a furniture pattern before setting its color.": "색상을 설정하기 전에 가구 무늬를 선택하세요.",
   "Furniture pattern color must use #RRGGBB.": "가구 무늬 색상은 #RRGGBB 형식을 사용해야 합니다.",
-  "This furniture model does not support patterns.": "이 가구 모델은 무늬를 지원하지 않습니다."
+  "This furniture model does not support patterns.": "이 가구 모델은 무늬를 지원하지 않습니다.",
+  // First-session room starter and examples.
+  "Examples": "예제",
+  "Explore an example": "예제 살펴보기",
+  "Fictional projects. Choose one to open it in 3D.": "가상 프로젝트입니다. 하나를 선택하면 3D로 열립니다.",
+  "Practice home": "연습용 집",
+  "Decorated studio": "장식된 스튜디오",
+  "Pattern studio": "패턴 스튜디오",
+  "Garage and studio": "차고와 스튜디오",
+  "Loading example…": "예제 불러오는 중…",
+  "Could not open example. Your current plan is unchanged.": "예제를 열 수 없습니다. 현재 평면도는 변경되지 않았습니다.",
+  "Start with measurements": "치수로 시작하기",
+  "Create a room": "방 만들기",
+  "Include walls": "벽 포함",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "두께 0.15 m의 벽을 추가합니다. 방과 벽은 따로 이동합니다.",
+  "Create room": "방 만들기",
+  "Room name is required.": "방 이름을 입력하세요.",
+  "Width and depth must be between 0.25 and 100 m.": "너비와 깊이는 0.25~100 m여야 합니다.",
+  "Room ready. Add a door or an item, then preview and export.": "방이 준비되었습니다. 문이나 물건을 추가한 뒤 미리 보고 내보내세요.",
+  "Close": "닫기"
 };

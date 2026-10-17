@@ -623,5 +623,24 @@ export default {
   "Unknown furniture pattern.": "דוגמת רהיט לא מוכרת.",
   "Choose a furniture pattern before setting its color.": "בחרו דוגמה לרהיט לפני הגדרת הצבע שלה.",
   "Furniture pattern color must use #RRGGBB.": "צבע הדוגמה של הרהיט חייב להיות בתבנית #RRGGBB.",
-  "This furniture model does not support patterns.": "דגם הרהיט הזה אינו תומך בדוגמאות."
+  "This furniture model does not support patterns.": "דגם הרהיט הזה אינו תומך בדוגמאות.",
+  // First-session room starter and examples.
+  "Examples": "דוגמאות",
+  "Explore an example": "עיון בדוגמה",
+  "Fictional projects. Choose one to open it in 3D.": "פרויקטים בדיוניים. בחרו אחד כדי לפתוח אותו בתלת־ממד.",
+  "Practice home": "בית לתרגול",
+  "Decorated studio": "סטודיו מעוצב",
+  "Pattern studio": "סטודיו דוגמאות משטח",
+  "Garage and studio": "מוסך וסטודיו",
+  "Loading example…": "הדוגמה נטענת…",
+  "Could not open example. Your current plan is unchanged.": "לא ניתן לפתוח את הדוגמה. התוכנית הנוכחית לא השתנתה.",
+  "Start with measurements": "התחלה לפי מידות",
+  "Create a room": "יצירת חדר",
+  "Include walls": "הוספת קירות",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "מוסיף קירות בעובי 0.15 מ׳. חדרים וקירות זזים בנפרד.",
+  "Create room": "יצירת חדר",
+  "Room name is required.": "נדרש שם לחדר.",
+  "Width and depth must be between 0.25 and 100 m.": "הרוחב והעומק חייבים להיות בין 0.25 ל־100 מ׳.",
+  "Room ready. Add a door or an item, then preview and export.": "החדר מוכן. הוסיפו דלת או פריט, ואז הציגו תצוגה מקדימה וייצאו.",
+  "Close": "סגירה"
 };

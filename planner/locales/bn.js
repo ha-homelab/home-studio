@@ -623,5 +623,24 @@ export default {
   "Unknown furniture pattern.": "আসবাবের নকশা অজানা।",
   "Choose a furniture pattern before setting its color.": "রং ঠিক করার আগে আসবাবের নকশা বাছুন।",
   "Furniture pattern color must use #RRGGBB.": "আসবাবের নকশার রং #RRGGBB বিন্যাসে দিতে হবে।",
-  "This furniture model does not support patterns.": "আসবাবের এই মডেল নকশা সমর্থন করে না।"
+  "This furniture model does not support patterns.": "আসবাবের এই মডেল নকশা সমর্থন করে না।",
+  // First-session room starter and examples.
+  "Examples": "উদাহরণ",
+  "Explore an example": "একটি উদাহরণ দেখুন",
+  "Fictional projects. Choose one to open it in 3D.": "কাল্পনিক প্রকল্প। 3D-তে খুলতে একটি বেছে নিন।",
+  "Practice home": "অনুশীলনের বাড়ি",
+  "Decorated studio": "সাজানো স্টুডিও",
+  "Pattern studio": "নকশার স্টুডিও",
+  "Garage and studio": "গ্যারেজ ও স্টুডিও",
+  "Loading example…": "উদাহরণ লোড হচ্ছে…",
+  "Could not open example. Your current plan is unchanged.": "উদাহরণ খোলা যায়নি। আপনার বর্তমান নকশা অপরিবর্তিত আছে।",
+  "Start with measurements": "মাপ দিয়ে শুরু করুন",
+  "Create a room": "একটি ঘর তৈরি করুন",
+  "Include walls": "দেয়াল যোগ করুন",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "০.১৫ মিটার পুরু দেয়াল যোগ করে। ঘর ও দেয়াল আলাদাভাবে সরানো হয়।",
+  "Create room": "ঘর তৈরি করুন",
+  "Room name is required.": "ঘরের নাম দিতে হবে।",
+  "Width and depth must be between 0.25 and 100 m.": "প্রস্থ ও গভীরতা ০.২৫ থেকে ১০০ মিটারের মধ্যে হতে হবে।",
+  "Room ready. Add a door or an item, then preview and export.": "ঘর প্রস্তুত। দরজা বা জিনিস যোগ করুন, তারপর পূর্বরূপ দেখে রপ্তানি করুন।",
+  "Close": "বন্ধ করুন"
 };

@@ -624,5 +624,24 @@ export default {
   "Unknown furniture pattern.": "不明な家具の模様です。",
   "Choose a furniture pattern before setting its color.": "色を設定する前に家具の模様を選択してください。",
   "Furniture pattern color must use #RRGGBB.": "家具の模様の色には #RRGGBB 形式を使用してください。",
-  "This furniture model does not support patterns.": "この家具モデルは模様に対応していません。"
+  "This furniture model does not support patterns.": "この家具モデルは模様に対応していません。",
+  // First-session room starter and examples.
+  "Examples": "サンプル",
+  "Explore an example": "サンプルを見る",
+  "Fictional projects. Choose one to open it in 3D.": "架空のプロジェクトです。選択すると3Dで開きます。",
+  "Practice home": "練習用の家",
+  "Decorated studio": "装飾されたスタジオ",
+  "Pattern studio": "模様のスタジオ",
+  "Garage and studio": "ガレージとスタジオ",
+  "Loading example…": "サンプルを読み込み中…",
+  "Could not open example. Your current plan is unchanged.": "サンプルを開けませんでした。現在の間取りは変更されていません。",
+  "Start with measurements": "寸法を指定して始める",
+  "Create a room": "部屋を作成",
+  "Include walls": "壁を含める",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "厚さ0.15 mの壁を追加します。部屋と壁は別々に移動します。",
+  "Create room": "部屋を作成",
+  "Room name is required.": "部屋の名前を入力してください。",
+  "Width and depth must be between 0.25 and 100 m.": "幅と奥行きは0.25〜100 mにしてください。",
+  "Room ready. Add a door or an item, then preview and export.": "部屋ができました。ドアやアイテムを追加し、プレビューして書き出しましょう。",
+  "Close": "閉じる"
 };

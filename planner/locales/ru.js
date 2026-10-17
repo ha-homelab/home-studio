@@ -623,5 +623,24 @@ export default {
   "Unknown furniture pattern.": "Неизвестный узор мебели.",
   "Choose a furniture pattern before setting its color.": "Выберите узор мебели, прежде чем задавать его цвет.",
   "Furniture pattern color must use #RRGGBB.": "Цвет узора мебели должен быть в формате #RRGGBB.",
-  "This furniture model does not support patterns.": "Эта модель мебели не поддерживает узоры."
+  "This furniture model does not support patterns.": "Эта модель мебели не поддерживает узоры.",
+  // First-session room starter and examples.
+  "Examples": "Примеры",
+  "Explore an example": "Посмотреть пример",
+  "Fictional projects. Choose one to open it in 3D.": "Вымышленные проекты. Выберите один, чтобы открыть его в 3D.",
+  "Practice home": "Учебный дом",
+  "Decorated studio": "Студия с декором",
+  "Pattern studio": "Студия узоров",
+  "Garage and studio": "Гараж и студия",
+  "Loading example…": "Загрузка примера…",
+  "Could not open example. Your current plan is unchanged.": "Не удалось открыть пример. Текущий план не изменён.",
+  "Start with measurements": "Начать с размеров",
+  "Create a room": "Создать комнату",
+  "Include walls": "Добавить стены",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "Добавляет стены толщиной 0,15 м. Комнаты и стены перемещаются отдельно.",
+  "Create room": "Создать комнату",
+  "Room name is required.": "Укажите название комнаты.",
+  "Width and depth must be between 0.25 and 100 m.": "Ширина и глубина должны быть от 0,25 до 100 м.",
+  "Room ready. Add a door or an item, then preview and export.": "Комната готова. Добавьте дверь или предмет, затем откройте предпросмотр и экспортируйте.",
+  "Close": "Закрыть"
 };

@@ -623,5 +623,24 @@ export default {
   "Unknown furniture pattern.": "Nieznany wzór mebla.",
   "Choose a furniture pattern before setting its color.": "Wybierz wzór mebla przed ustawieniem jego koloru.",
   "Furniture pattern color must use #RRGGBB.": "Kolor wzoru mebla musi mieć format #RRGGBB.",
-  "This furniture model does not support patterns.": "Ten model mebla nie obsługuje wzorów."
+  "This furniture model does not support patterns.": "Ten model mebla nie obsługuje wzorów.",
+  // First-session room starter and examples.
+  "Examples": "Przykłady",
+  "Explore an example": "Poznaj przykład",
+  "Fictional projects. Choose one to open it in 3D.": "Fikcyjne projekty. Wybierz jeden, aby otworzyć go w 3D.",
+  "Practice home": "Dom ćwiczeniowy",
+  "Decorated studio": "Udekorowane studio",
+  "Pattern studio": "Studio wzorów",
+  "Garage and studio": "Garaż i studio",
+  "Loading example…": "Wczytywanie przykładu…",
+  "Could not open example. Your current plan is unchanged.": "Nie udało się otworzyć przykładu. Bieżący plan nie został zmieniony.",
+  "Start with measurements": "Zacznij od wymiarów",
+  "Create a room": "Utwórz pokój",
+  "Include walls": "Dodaj ściany",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "Dodaje ściany o grubości 0,15 m. Pokoje i ściany przesuwa się osobno.",
+  "Create room": "Utwórz pokój",
+  "Room name is required.": "Nazwa pokoju jest wymagana.",
+  "Width and depth must be between 0.25 and 100 m.": "Szerokość i głębokość muszą wynosić od 0,25 do 100 m.",
+  "Room ready. Add a door or an item, then preview and export.": "Pokój gotowy. Dodaj drzwi lub przedmiot, potem wyświetl podgląd i eksportuj.",
+  "Close": "Zamknij"
 };

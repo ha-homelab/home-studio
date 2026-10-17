@@ -624,5 +624,24 @@ export default {
   "Unknown furniture pattern.": "Họa tiết nội thất không xác định.",
   "Choose a furniture pattern before setting its color.": "Chọn họa tiết nội thất trước khi đặt màu cho họa tiết.",
   "Furniture pattern color must use #RRGGBB.": "Màu họa tiết nội thất phải dùng định dạng #RRGGBB.",
-  "This furniture model does not support patterns.": "Mô hình nội thất này không hỗ trợ họa tiết."
+  "This furniture model does not support patterns.": "Mô hình nội thất này không hỗ trợ họa tiết.",
+  // First-session room starter and examples.
+  "Examples": "Ví dụ",
+  "Explore an example": "Khám phá ví dụ",
+  "Fictional projects. Choose one to open it in 3D.": "Các dự án giả định. Chọn một dự án để mở ở dạng 3D.",
+  "Practice home": "Nhà thực hành",
+  "Decorated studio": "Studio có trang trí",
+  "Pattern studio": "Studio họa tiết",
+  "Garage and studio": "Gara và studio",
+  "Loading example…": "Đang tải ví dụ…",
+  "Could not open example. Your current plan is unchanged.": "Không thể mở ví dụ. Bản vẽ hiện tại của bạn không thay đổi.",
+  "Start with measurements": "Bắt đầu bằng kích thước",
+  "Create a room": "Tạo một phòng",
+  "Include walls": "Thêm tường",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "Thêm tường dày 0,15 m. Phòng và tường di chuyển riêng biệt.",
+  "Create room": "Tạo phòng",
+  "Room name is required.": "Cần nhập tên phòng.",
+  "Width and depth must be between 0.25 and 100 m.": "Chiều rộng và chiều sâu phải từ 0,25 đến 100 m.",
+  "Room ready. Add a door or an item, then preview and export.": "Phòng đã sẵn sàng. Thêm cửa hoặc đồ vật, rồi xem trước và xuất.",
+  "Close": "Đóng"
 };

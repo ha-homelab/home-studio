@@ -624,5 +624,24 @@ export default {
   "Unknown furniture pattern.": "الگوی وسیله ناشناخته است.",
   "Choose a furniture pattern before setting its color.": "پیش از تنظیم رنگ الگو، یک الگو برای وسیله انتخاب کنید.",
   "Furniture pattern color must use #RRGGBB.": "رنگ الگوی وسیله باید با قالب #RRGGBB وارد شود.",
-  "This furniture model does not support patterns.": "این مدل وسیله از الگو پشتیبانی نمی‌کند."
+  "This furniture model does not support patterns.": "این مدل وسیله از الگو پشتیبانی نمی‌کند.",
+  // First-session room starter and examples.
+  "Examples": "نمونه‌ها",
+  "Explore an example": "بررسی یک نمونه",
+  "Fictional projects. Choose one to open it in 3D.": "پروژه‌های خیالی. یکی را برای نمایش سه‌بعدی انتخاب کنید.",
+  "Practice home": "خانهٔ تمرینی",
+  "Decorated studio": "استودیوی تزئین‌شده",
+  "Pattern studio": "استودیوی طرح‌ها",
+  "Garage and studio": "گاراژ و استودیو",
+  "Loading example…": "در حال بارگذاری نمونه…",
+  "Could not open example. Your current plan is unchanged.": "نمونه باز نشد. نقشهٔ فعلی شما تغییری نکرده است.",
+  "Start with measurements": "شروع با اندازه‌ها",
+  "Create a room": "ساخت اتاق",
+  "Include walls": "افزودن دیوارها",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "دیوارهایی به ضخامت ۰٫۱۵ متر اضافه می‌کند. اتاق‌ها و دیوارها جداگانه جابه‌جا می‌شوند.",
+  "Create room": "ساخت اتاق",
+  "Room name is required.": "نام اتاق لازم است.",
+  "Width and depth must be between 0.25 and 100 m.": "عرض و عمق باید بین ۰٫۲۵ و ۱۰۰ متر باشند.",
+  "Room ready. Add a door or an item, then preview and export.": "اتاق آماده است. یک در یا وسیله اضافه کنید، سپس پیش‌نمایش را ببینید و خروجی بگیرید.",
+  "Close": "بستن"
 };

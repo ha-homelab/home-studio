@@ -623,5 +623,24 @@ export default {
   "Unknown furniture pattern.": "Padrão de móvel desconhecido.",
   "Choose a furniture pattern before setting its color.": "Escolha um padrão de móvel antes de definir a sua cor.",
   "Furniture pattern color must use #RRGGBB.": "A cor do padrão do móvel deve usar o formato #RRGGBB.",
-  "This furniture model does not support patterns.": "Este modelo de móvel não suporta padrões."
+  "This furniture model does not support patterns.": "Este modelo de móvel não suporta padrões.",
+  // First-session room starter and examples.
+  "Examples": "Exemplos",
+  "Explore an example": "Explorar um exemplo",
+  "Fictional projects. Choose one to open it in 3D.": "Projetos fictícios. Escolha um para abrir em 3D.",
+  "Practice home": "Casa de prática",
+  "Decorated studio": "Estúdio decorado",
+  "Pattern studio": "Estúdio de padrões",
+  "Garage and studio": "Garagem e estúdio",
+  "Loading example…": "Carregando exemplo…",
+  "Could not open example. Your current plan is unchanged.": "Não foi possível abrir o exemplo. Sua planta atual não foi alterada.",
+  "Start with measurements": "Começar com medidas",
+  "Create a room": "Criar um cômodo",
+  "Include walls": "Incluir paredes",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "Adiciona paredes de 0,15 m. Cômodos e paredes se movem separadamente.",
+  "Create room": "Criar cômodo",
+  "Room name is required.": "O nome do cômodo é obrigatório.",
+  "Width and depth must be between 0.25 and 100 m.": "A largura e a profundidade devem estar entre 0,25 e 100 m.",
+  "Room ready. Add a door or an item, then preview and export.": "Cômodo pronto. Adicione uma porta ou um objeto, depois visualize e exporte.",
+  "Close": "Fechar"
 };

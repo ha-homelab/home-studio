@@ -623,5 +623,24 @@ export default {
   "Unknown furniture pattern.": "Невідомий візерунок меблів.",
   "Choose a furniture pattern before setting its color.": "Виберіть візерунок меблів, перш ніж задавати його колір.",
   "Furniture pattern color must use #RRGGBB.": "Колір візерунка меблів має бути у форматі #RRGGBB.",
-  "This furniture model does not support patterns.": "Ця модель меблів не підтримує візерунки."
+  "This furniture model does not support patterns.": "Ця модель меблів не підтримує візерунки.",
+  // First-session room starter and examples.
+  "Examples": "Приклади",
+  "Explore an example": "Переглянути приклад",
+  "Fictional projects. Choose one to open it in 3D.": "Вигадані проєкти. Виберіть один, щоб відкрити його в 3D.",
+  "Practice home": "Навчальний будинок",
+  "Decorated studio": "Студія з декором",
+  "Pattern studio": "Студія візерунків",
+  "Garage and studio": "Гараж і студія",
+  "Loading example…": "Завантаження прикладу…",
+  "Could not open example. Your current plan is unchanged.": "Не вдалося відкрити приклад. Поточний план не змінено.",
+  "Start with measurements": "Почати з розмірів",
+  "Create a room": "Створити кімнату",
+  "Include walls": "Додати стіни",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "Додає стіни завтовшки 0,15 м. Кімнати та стіни переміщуються окремо.",
+  "Create room": "Створити кімнату",
+  "Room name is required.": "Укажіть назву кімнати.",
+  "Width and depth must be between 0.25 and 100 m.": "Ширина та глибина мають бути від 0,25 до 100 м.",
+  "Room ready. Add a door or an item, then preview and export.": "Кімната готова. Додайте двері або предмет, потім перегляньте й експортуйте.",
+  "Close": "Закрити"
 };

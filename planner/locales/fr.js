@@ -623,5 +623,24 @@ export default {
   "Unknown furniture pattern.": "Motif de meuble inconnu.",
   "Choose a furniture pattern before setting its color.": "Choisissez un motif de meuble avant de définir sa couleur.",
   "Furniture pattern color must use #RRGGBB.": "La couleur du motif du meuble doit utiliser le format #RRGGBB.",
-  "This furniture model does not support patterns.": "Ce modèle de meuble ne prend pas en charge les motifs."
+  "This furniture model does not support patterns.": "Ce modèle de meuble ne prend pas en charge les motifs.",
+  // First-session room starter and examples.
+  "Examples": "Exemples",
+  "Explore an example": "Explorer un exemple",
+  "Fictional projects. Choose one to open it in 3D.": "Projets fictifs. Choisissez-en un pour l’ouvrir en 3D.",
+  "Practice home": "Maison d’entraînement",
+  "Decorated studio": "Studio décoré",
+  "Pattern studio": "Studio de motifs",
+  "Garage and studio": "Garage et studio",
+  "Loading example…": "Chargement de l’exemple…",
+  "Could not open example. Your current plan is unchanged.": "Impossible d’ouvrir l’exemple. Votre plan actuel est inchangé.",
+  "Start with measurements": "Commencer avec des mesures",
+  "Create a room": "Créer une pièce",
+  "Include walls": "Inclure les murs",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "Ajoute des murs de 0,15 m. Les pièces et les murs se déplacent séparément.",
+  "Create room": "Créer la pièce",
+  "Room name is required.": "Le nom de la pièce est obligatoire.",
+  "Width and depth must be between 0.25 and 100 m.": "La largeur et la profondeur doivent être comprises entre 0,25 et 100 m.",
+  "Room ready. Add a door or an item, then preview and export.": "Pièce prête. Ajoutez une porte ou un objet, puis prévisualisez et exportez.",
+  "Close": "Fermer"
 };

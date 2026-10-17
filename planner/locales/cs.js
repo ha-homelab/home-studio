@@ -623,5 +623,24 @@ export default {
   "Unknown furniture pattern.": "Neznámý vzor nábytku.",
   "Choose a furniture pattern before setting its color.": "Před nastavením barvy vzoru vyberte vzor nábytku.",
   "Furniture pattern color must use #RRGGBB.": "Barva vzoru nábytku musí používat formát #RRGGBB.",
-  "This furniture model does not support patterns.": "Tento model nábytku nepodporuje vzory."
+  "This furniture model does not support patterns.": "Tento model nábytku nepodporuje vzory.",
+  // First-session room starter and examples.
+  "Examples": "Příklady",
+  "Explore an example": "Prozkoumat příklad",
+  "Fictional projects. Choose one to open it in 3D.": "Fiktivní projekty. Vyberte jeden a otevřete jej ve 3D.",
+  "Practice home": "Cvičný dům",
+  "Decorated studio": "Vyzdobené studio",
+  "Pattern studio": "Studio vzorů",
+  "Garage and studio": "Garáž a studio",
+  "Loading example…": "Načítání příkladu…",
+  "Could not open example. Your current plan is unchanged.": "Příklad se nepodařilo otevřít. Aktuální plán zůstal beze změny.",
+  "Start with measurements": "Začít s rozměry",
+  "Create a room": "Vytvořit místnost",
+  "Include walls": "Přidat stěny",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "Přidá stěny o tloušťce 0,15 m. Místnosti a stěny se přesouvají samostatně.",
+  "Create room": "Vytvořit místnost",
+  "Room name is required.": "Název místnosti je povinný.",
+  "Width and depth must be between 0.25 and 100 m.": "Šířka a hloubka musí být mezi 0,25 a 100 m.",
+  "Room ready. Add a door or an item, then preview and export.": "Místnost je připravena. Přidejte dveře nebo předmět, pak otevřete náhled a exportujte.",
+  "Close": "Zavřít"
 };

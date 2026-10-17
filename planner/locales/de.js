@@ -623,5 +623,24 @@ export default {
   "Unknown furniture pattern.": "Unbekanntes Möbelmuster.",
   "Choose a furniture pattern before setting its color.": "Wähle ein Möbelmuster, bevor du dessen Farbe festlegst.",
   "Furniture pattern color must use #RRGGBB.": "Die Musterfarbe des Möbels muss das Format #RRGGBB verwenden.",
-  "This furniture model does not support patterns.": "Dieses Möbelmodell unterstützt keine Muster."
+  "This furniture model does not support patterns.": "Dieses Möbelmodell unterstützt keine Muster.",
+  // First-session room starter and examples.
+  "Examples": "Beispiele",
+  "Explore an example": "Ein Beispiel erkunden",
+  "Fictional projects. Choose one to open it in 3D.": "Fiktive Projekte. Wähle eines aus, um es in 3D zu öffnen.",
+  "Practice home": "Übungshaus",
+  "Decorated studio": "Dekoriertes Studio",
+  "Pattern studio": "Musterstudio",
+  "Garage and studio": "Garage und Studio",
+  "Loading example…": "Beispiel wird geladen…",
+  "Could not open example. Your current plan is unchanged.": "Das Beispiel konnte nicht geöffnet werden. Dein aktueller Plan bleibt unverändert.",
+  "Start with measurements": "Mit Maßen beginnen",
+  "Create a room": "Einen Raum erstellen",
+  "Include walls": "Wände hinzufügen",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "Fügt 0,15 m dicke Wände hinzu. Räume und Wände werden getrennt verschoben.",
+  "Create room": "Raum erstellen",
+  "Room name is required.": "Ein Raumname ist erforderlich.",
+  "Width and depth must be between 0.25 and 100 m.": "Breite und Tiefe müssen zwischen 0,25 und 100 m liegen.",
+  "Room ready. Add a door or an item, then preview and export.": "Raum fertig. Füge eine Tür oder einen Gegenstand hinzu, dann öffne die Vorschau und exportiere.",
+  "Close": "Schließen"
 };

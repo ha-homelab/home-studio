@@ -624,5 +624,24 @@ export default {
   "Unknown furniture pattern.": "未知的家具圖案。",
   "Choose a furniture pattern before setting its color.": "設定圖案顏色前，請先選擇家具圖案。",
   "Furniture pattern color must use #RRGGBB.": "家具圖案顏色必須使用 #RRGGBB 格式。",
-  "This furniture model does not support patterns.": "此家具模型不支援圖案。"
+  "This furniture model does not support patterns.": "此家具模型不支援圖案。",
+  // First-session room starter and examples.
+  "Examples": "範例",
+  "Explore an example": "瀏覽範例",
+  "Fictional projects. Choose one to open it in 3D.": "虛構專案。選擇一個以 3D 方式開啟。",
+  "Practice home": "練習住宅",
+  "Decorated studio": "裝飾工作室",
+  "Pattern studio": "圖案工作室",
+  "Garage and studio": "車庫與工作室",
+  "Loading example…": "正在載入範例…",
+  "Could not open example. Your current plan is unchanged.": "無法開啟範例。目前的平面圖未變更。",
+  "Start with measurements": "從尺寸開始",
+  "Create a room": "建立房間",
+  "Include walls": "包含牆體",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "加入 0.15 公尺厚的牆體。房間與牆體分別移動。",
+  "Create room": "建立房間",
+  "Room name is required.": "請輸入房間名稱。",
+  "Width and depth must be between 0.25 and 100 m.": "寬度和深度必須介於 0.25 至 100 公尺之間。",
+  "Room ready. Add a door or an item, then preview and export.": "房間已就緒。加入門或物品，然後預覽並匯出。",
+  "Close": "關閉"
 };

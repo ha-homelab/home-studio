@@ -624,5 +624,24 @@ export default {
   "Unknown furniture pattern.": "फ़र्नीचर का पैटर्न अज्ञात है।",
   "Choose a furniture pattern before setting its color.": "रंग तय करने से पहले फ़र्नीचर का पैटर्न चुनें।",
   "Furniture pattern color must use #RRGGBB.": "फ़र्नीचर के पैटर्न के रंग का प्रारूप #RRGGBB होना चाहिए।",
-  "This furniture model does not support patterns.": "यह फ़र्नीचर मॉडल पैटर्न का समर्थन नहीं करता।"
+  "This furniture model does not support patterns.": "यह फ़र्नीचर मॉडल पैटर्न का समर्थन नहीं करता।",
+  // First-session room starter and examples.
+  "Examples": "उदाहरण",
+  "Explore an example": "एक उदाहरण देखें",
+  "Fictional projects. Choose one to open it in 3D.": "काल्पनिक प्रोजेक्ट। 3D में खोलने के लिए एक चुनें।",
+  "Practice home": "अभ्यास का घर",
+  "Decorated studio": "सजा हुआ स्टूडियो",
+  "Pattern studio": "पैटर्न स्टूडियो",
+  "Garage and studio": "गैरेज और स्टूडियो",
+  "Loading example…": "उदाहरण लोड हो रहा है…",
+  "Could not open example. Your current plan is unchanged.": "उदाहरण नहीं खुल सका। आपका मौजूदा नक्शा नहीं बदला है।",
+  "Start with measurements": "माप से शुरू करें",
+  "Create a room": "एक कमरा बनाएँ",
+  "Include walls": "दीवारें शामिल करें",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "0.15 मीटर मोटी दीवारें जोड़ता है। कमरे और दीवारें अलग-अलग खिसकते हैं।",
+  "Create room": "कमरा बनाएँ",
+  "Room name is required.": "कमरे का नाम ज़रूरी है।",
+  "Width and depth must be between 0.25 and 100 m.": "चौड़ाई और गहराई 0.25 से 100 मीटर के बीच होनी चाहिए।",
+  "Room ready. Add a door or an item, then preview and export.": "कमरा तैयार है। दरवाज़ा या सामान जोड़ें, फिर पूर्वावलोकन करके निर्यात करें।",
+  "Close": "बंद करें"
 };

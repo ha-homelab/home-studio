@@ -624,5 +624,24 @@ export default {
   "Unknown furniture pattern.": "Unknown furniture pattern.",
   "Choose a furniture pattern before setting its color.": "Choose a furniture pattern before setting its color.",
   "Furniture pattern color must use #RRGGBB.": "Furniture pattern color must use #RRGGBB.",
-  "This furniture model does not support patterns.": "This furniture model does not support patterns."
+  "This furniture model does not support patterns.": "This furniture model does not support patterns.",
+  // First-session room starter and examples.
+  "Examples": "Examples",
+  "Explore an example": "Explore an example",
+  "Fictional projects. Choose one to open it in 3D.": "Fictional projects. Choose one to open it in 3D.",
+  "Practice home": "Practice home",
+  "Decorated studio": "Decorated studio",
+  "Pattern studio": "Pattern studio",
+  "Garage and studio": "Garage and studio",
+  "Loading example…": "Loading example…",
+  "Could not open example. Your current plan is unchanged.": "Could not open example. Your current plan is unchanged.",
+  "Start with measurements": "Start with measurements",
+  "Create a room": "Create a room",
+  "Include walls": "Include walls",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "Adds 0.15 m walls. Rooms and walls stay separate when moved.",
+  "Create room": "Create room",
+  "Room name is required.": "Room name is required.",
+  "Width and depth must be between 0.25 and 100 m.": "Width and depth must be between 0.25 and 100 m.",
+  "Room ready. Add a door or an item, then preview and export.": "Room ready. Add a door or an item, then preview and export.",
+  "Close": "Close"
 };

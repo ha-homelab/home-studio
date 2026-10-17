@@ -624,5 +624,24 @@ export default {
   "Unknown furniture pattern.": "ไม่รู้จักลวดลายเฟอร์นิเจอร์",
   "Choose a furniture pattern before setting its color.": "เลือกลวดลายเฟอร์นิเจอร์ก่อนตั้งสี",
   "Furniture pattern color must use #RRGGBB.": "สีลวดลายเฟอร์นิเจอร์ต้องใช้รูปแบบ #RRGGBB",
-  "This furniture model does not support patterns.": "โมเดลเฟอร์นิเจอร์นี้ไม่รองรับลวดลาย"
+  "This furniture model does not support patterns.": "โมเดลเฟอร์นิเจอร์นี้ไม่รองรับลวดลาย",
+  // First-session room starter and examples.
+  "Examples": "ตัวอย่าง",
+  "Explore an example": "สำรวจตัวอย่าง",
+  "Fictional projects. Choose one to open it in 3D.": "โครงการสมมติ เลือกหนึ่งโครงการเพื่อเปิดในแบบ 3D",
+  "Practice home": "บ้านฝึกหัด",
+  "Decorated studio": "สตูดิโอที่ตกแต่งแล้ว",
+  "Pattern studio": "สตูดิโอลวดลาย",
+  "Garage and studio": "โรงรถและสตูดิโอ",
+  "Loading example…": "กำลังโหลดตัวอย่าง…",
+  "Could not open example. Your current plan is unchanged.": "เปิดตัวอย่างไม่ได้ แผนผังปัจจุบันของคุณไม่มีการเปลี่ยนแปลง",
+  "Start with measurements": "เริ่มจากขนาด",
+  "Create a room": "สร้างห้อง",
+  "Include walls": "รวมผนัง",
+  "Adds 0.15 m walls. Rooms and walls stay separate when moved.": "เพิ่มผนังหนา 0.15 ม. ห้องและผนังย้ายแยกกัน",
+  "Create room": "สร้างห้อง",
+  "Room name is required.": "ต้องระบุชื่อห้อง",
+  "Width and depth must be between 0.25 and 100 m.": "ความกว้างและความลึกต้องอยู่ระหว่าง 0.25 ถึง 100 ม.",
+  "Room ready. Add a door or an item, then preview and export.": "ห้องพร้อมแล้ว เพิ่มประตูหรือสิ่งของ จากนั้นดูตัวอย่างและส่งออก",
+  "Close": "ปิด"
 };
