@@ -26,7 +26,7 @@ const server = http.createServer((request, response) => {
   try {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const origin = `http://127.0.0.1:${server.address().port}`, url = `${origin}/home-studio/planner/`;
-    browser = await playwright[engine].launch(browserLaunchOptions(engine, true));
+    browser = await playwright[engine].launch(browserLaunchOptions(engine, process.env.ONBOARDING_HEADED !== '1'));
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-US' });
     await context.addInitScript(() => {
       window.testWebGLContexts = 0;

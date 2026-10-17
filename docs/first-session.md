@@ -41,8 +41,7 @@ When **Draft recovery** appears:
 
 - **Load saved draft** loads the version already stored by the browser. Export
   your current work first if you want to keep both versions.
-- **Restore previous project** offers the one saved checkpoint from the last
-  explicit project replacement. This is not unlimited version history.
+- **Restore previous project** offers one retained earlier project checkpoint. This is not unlimited version history.
 - **Download original data** preserves damaged stored data for investigation.
   An unreadable draft must not be treated as a successfully saved blank project.
 - **Replace saved draft with this version** is an explicit decision to keep the
