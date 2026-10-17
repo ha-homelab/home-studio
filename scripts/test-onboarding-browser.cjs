@@ -14,11 +14,21 @@ const artifacts = path.join(process.env.ONBOARDING_ARTIFACTS || fs.mkdtempSync(p
 fs.mkdirSync(artifacts, { recursive: true });
 const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.jpg': 'image/jpeg', '.json': 'application/json' };
 const server = http.createServer((request, response) => {
-  const route = decodeURIComponent(new URL(request.url, 'http://localhost').pathname).replace(/^\/home-studio\//, '');
-  const file = path.resolve(root, route.endsWith('/') ? route + 'index.html' : route);
-  if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return response.writeHead(404).end();
-  response.writeHead(200, { 'Content-Type': mime[path.extname(file)] || 'application/octet-stream' });
-  response.end(fs.readFileSync(file));
+  let descriptor;
+  try {
+    const route = decodeURIComponent(new URL(request.url, 'http://localhost').pathname).replace(/^\/home-studio\//, '');
+    const file = path.resolve(root, route.endsWith('/') ? route + 'index.html' : route);
+    if (!file.startsWith(root + path.sep)) return response.writeHead(404).end();
+    descriptor = fs.openSync(file, 'r');
+    if (!fs.fstatSync(descriptor).isFile()) return response.writeHead(404).end();
+    const body = fs.readFileSync(descriptor);
+    response.writeHead(200, { 'Content-Type': mime[path.extname(file)] || 'application/octet-stream' });
+    response.end(body);
+  } catch {
+    response.writeHead(404).end();
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
 });
 
 (async () => {
