@@ -748,6 +748,7 @@ function fitPreview() {
   const sphereRadius = Math.hypot(maxX - minX, maxZ - minZ, high - low) / 2;
   orbit.target.set((minX + maxX) / 2, (low + high) / 2, (minZ + maxZ) / 2);
   orbit.radius = Math.max(6, sphereRadius / Math.sin(Math.min(verticalFov, horizontalFov) / 2) * 1.12); orbit.baseRadius = orbit.radius;
+  rebasePreviewGesture();
   if (view === 'preview' && renderer) requestCanvasRender();
 }
 function disposePreviewGeometry() {
@@ -899,6 +900,11 @@ let previewCanvas = $('preview-canvas'), previewEvents;
 function canNavigatePreview() { return view === 'preview' && !previewLost && !previewUnavailable && !canvasSuspended && !document.hidden; }
 function previewRadius(value) { return Math.max(1, Math.min(600, value)); }
 function previewPitch(value) { return Math.max(.1, Math.min(Math.PI / 2 - .001, value)); }
+function previewYaw(value) {
+  if (value >= -Math.PI && value <= Math.PI) return value;
+  const turn = Math.PI * 2;
+  return ((value + Math.PI) % turn + turn) % turn - Math.PI;
+}
 function previewHint() {
   return t(orbit.mode === 'pan' ? 'Drag to pan · scroll to zoom · arrow keys to move' : 'Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom');
 }
@@ -934,7 +940,7 @@ function topPreview() {
 }
 function rotatePreview(angle) {
   if (!canNavigatePreview()) return;
-  releasePreviewPointer(); orbit.yaw += angle; requestCanvasRender();
+  releasePreviewPointer(); orbit.yaw = previewYaw(orbit.yaw + angle); requestCanvasRender();
 }
 function previewPointerCenter() {
   const points = [...orbit.pointers.values()], first = points[0], second = points[1];
@@ -981,11 +987,13 @@ function bindPreviewCanvas() {
   }, options);
   canvas.addEventListener('pointermove', e => {
     const pointer = orbit.pointers.get(e.pointerId);
-    if (!pointer || !canNavigatePreview() || (pointer.x === e.clientX && pointer.y === e.clientY)) return;
+    if (!pointer || !canNavigatePreview()) return;
+    if (!pointer.touch && e.buttons === 0) { releasePreviewPointer(e); return; }
+    if (pointer.x === e.clientX && pointer.y === e.clientY) return;
     e.preventDefault(); pointer.x = e.clientX; pointer.y = e.clientY;
     const center = previewPointerCenter(), start = orbit.gesture, dx = center.x - start.x, dy = center.y - start.y;
     if (start.mode === 'pan') panPreview(dx, dy, start);
-    else { orbit.yaw = start.yaw - dx * .007; orbit.pitch = previewPitch(start.pitch + dy * .007); }
+    else { orbit.yaw = previewYaw(start.yaw - dx * .007); orbit.pitch = previewPitch(start.pitch + dy * .007); }
     if (orbit.pointers.size === 2 && start.distance > 0 && center.distance > 0) orbit.radius = previewRadius(start.radius * start.distance / center.distance);
     requestCanvasRender();
   }, options);
@@ -1012,7 +1020,7 @@ function bindPreviewCanvas() {
     if (key === '-') { zoomPreview(1 / 1.15); return; }
     if (e.shiftKey || orbit.mode === 'pan') panPreview(key === 'arrowleft' ? 30 : key === 'arrowright' ? -30 : 0, key === 'arrowup' ? 30 : key === 'arrowdown' ? -30 : 0);
     else {
-      if (key === 'arrowleft') orbit.yaw -= .12; if (key === 'arrowright') orbit.yaw += .12;
+      if (key === 'arrowleft') orbit.yaw = previewYaw(orbit.yaw - .12); if (key === 'arrowright') orbit.yaw = previewYaw(orbit.yaw + .12);
       if (key === 'arrowup') orbit.pitch = previewPitch(orbit.pitch + .1); if (key === 'arrowdown') orbit.pitch = previewPitch(orbit.pitch - .1);
     }
     requestCanvasRender();
@@ -1199,7 +1207,13 @@ function resizeCanvases(rect) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); planSize = nextSize;
   }
   if (firstResize) { firstResize = false; fitPlan(); } else { map.x += (size.width - old.width) / 2; map.y += (size.height - old.height) / 2; }
-  if (view === 'preview') { const ratio = orbit.baseRadius / orbit.radius; fitPreview(); orbit.radius = orbit.baseRadius / ratio; }
+  if (view === 'preview') {
+    const ratio = orbit.baseRadius / orbit.radius, target = orbit.target.clone();
+    fitPreview(); orbit.radius = orbit.baseRadius / ratio;
+    // Layout changes retain the user's framing. Continue a captured gesture
+    // from this viewport rather than applying its former size and camera pose.
+    orbit.target.set(target.x, target.y, target.z); rebasePreviewGesture();
+  }
   requestCanvasRender();
 }
 const canvasObserver = new ResizeObserver(entries => resizeCanvases(entries[0].contentRect));

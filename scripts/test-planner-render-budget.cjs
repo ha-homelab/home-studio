@@ -88,6 +88,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     renderPlan() { if (!c.document.hidden && !vm.runInContext('canvasSuspended', c)) { c.cancelCanvasRender(); planDraws++; } },
     document: {hidden: false, addEventListener(name, fn) { documentEvents[name] = fn; }, querySelector() { return {getBoundingClientRect: () => rect}; }},
     window: {addEventListener(name, fn) { windowEvents[name] = fn; }},
+    floorNavigator: {destroy() {}},
     ResizeObserver: class { observe() {} disconnect() { disconnects++; } },
   });
   const planBitmap = {width: 300, height: 150}, bitmapAreas = [];

@@ -40,7 +40,8 @@ const project = Object.freeze({title: 'Accepted plan', floors: Object.freeze([])
 const context = vm.createContext({AbortController, THREE: {Vector3: Vector}, $: get,
   view: 'preview', previewLost: false, previewUnavailable: false, previewMetadata: {},
   project, history: Object.freeze([]), future: Object.freeze([]), selection: Object.freeze({kind: 'items', id: 'chair'}),
-  size: {width: 800, height: 600}, spaceHeld: false, renderer: {},
+  size: {width: 800, height: 600}, spaceHeld: false, renderer: {}, devicePixelRatio: 1,
+  planCanvas: surface(), map: {x: 0, y: 0}, ctx: {setTransform() {}}, fitPlan() {},
   fitPreview() { context.getOrbit().target.set(4, 1.5, 3); context.getOrbit().radius = context.getOrbit().baseRadius = 17; },
   t: text => text, renderPreview() { draws++; }, renderPlan() { planDraws++; },
   document: {hidden: false, addEventListener(name, fn) { documentEvents[name] = fn; }},
@@ -51,6 +52,7 @@ const context = vm.createContext({AbortController, THREE: {Vector3: Vector}, $: 
 vm.runInContext(section('let canvasFrame =', 'let startupMessage =') +
   section('const orbit =', 'function createPreviewMaterial(') +
   section('function zoomPreview(', '// Project actions and keyboard navigation.') +
+  section('let firstResize =', 'const canvasObserver =') +
   section("window.addEventListener('blur'", "window.addEventListener('beforeunload'") +
   section("document.addEventListener('visibilitychange'", "window.addEventListener('pagehide'") +
   '\nfunction getOrbit() { return orbit; }', context);
@@ -70,6 +72,9 @@ assert.equal(draws, 0); assert.equal(orbit.yaw, -Math.PI / 3 - .7);
 assert.notEqual(snapshot(), original); up(); stable();
 assert.equal(canvas.captures.size, 0); assert.equal(canvas.dataset.navigating, 'false');
 const afterOrbit = draws; move({clientX: 500}); stable(); assert.equal(draws, afterOrbit, 'Released pointers cannot keep moving the camera');
+down(); const beforeHover = snapshot(); move({clientX: 500, buttons: 0});
+assert.equal(snapshot(), beforeHover, 'Mouse hover after a missed release cannot orbit');
+assert.equal(canvas.captures.size, 0); assert.equal(orbit.pointers.size, 0);
 
 for (const options of [{button: 1}, {button: 2}, {shiftKey: true}, {space: true}, {mode: true}]) {
   reset(); const yaw = orbit.yaw, pitch = orbit.pitch, target = JSON.stringify(orbit.target);
@@ -80,6 +85,18 @@ for (const options of [{button: 1}, {button: 2}, {shiftKey: true}, {space: true}
   assert.notEqual(JSON.stringify(orbit.target), target, 'Pan uses the camera target, never model coordinates');
   context.spaceHeld = false; get('preview-orbit').events.click();
 }
+
+reset(); down({button: 2}); move({clientX: 150, clientY: 125}); stable();
+const beforeResize = JSON.stringify(orbit.target);
+context.resizeCanvases({width: 500, height: 900}); stable();
+assert.equal(JSON.stringify(orbit.target), beforeResize, 'A resize preserves the current pan');
+assert.equal(orbit.pointers.size, 1, 'Resize can continue an active gesture');
+move({clientX: 150, clientY: 125}); assert.equal(JSON.stringify(orbit.target), beforeResize, 'An unchanged pointer after resize does not jump');
+const resizedOrigin = orbit.target.clone(), scale = 2 * orbit.radius * Math.tan(20 * Math.PI / 180) / 900;
+move({clientX: 160, clientY: 125});
+assert(Math.abs(orbit.target.x - (resizedOrigin.x - Math.sin(orbit.yaw) * 10 * scale)) < 1e-10);
+assert(Math.abs(orbit.target.z - (resizedOrigin.z + Math.cos(orbit.yaw) * 10 * scale)) < 1e-10);
+up(); context.resizeCanvases({width: 800, height: 600}); stable();
 
 reset(); const touch = {pointerType: 'touch'};
 down({...touch, pointerId: 10, clientX: 100});
@@ -119,6 +136,9 @@ assert(Number.isFinite(orbit.target.x));
 get('preview-rotate-right').events.click(); stable(); assert.equal(orbit.yaw, -Math.PI / 4);
 get('preview-rotate-left').events.click(); stable(); assert.equal(orbit.yaw, -Math.PI / 2);
 key('Home'); stable(); assert.equal(orbit.yaw, -Math.PI / 3); assert.equal(orbit.pitch, .8); assert.equal(orbit.radius, 17);
+for (let i = 0; i < 800; i++) get('preview-rotate-right').events.click();
+assert(Math.abs(orbit.yaw + Math.PI / 3) < 1e-10, 'Full camera turns preserve heading without accumulating unbounded yaw');
+assert(Math.abs(orbit.yaw) <= Math.PI); stable(); key('Home'); stable();
 const fitted = snapshot();
 for (const options of [{ctrlKey: true}, {metaKey: true}, {altKey: true}]) assert.equal(key('+', options).defaultPrevented, false);
 assert.equal(snapshot(), fitted, 'Browser keyboard combinations are not consumed');

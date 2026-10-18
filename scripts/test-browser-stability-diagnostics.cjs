@@ -772,7 +772,7 @@ function freshPreviewHarness(view = 'preview') {
     fitPreview(){fitCalls++;},fitPlan(){},updateZoom(){},previewFloors:()=>[],
     cancelCanvasRender(){traces.push('cancel');},onSchedule:value=>scheduled.push(JSON.parse(JSON.stringify(value))),
     testMesh:()=>({traverse(callback){callback({geometry:resource('geometry'),material:[resource('material-a'),resource('material-b')]});}}),
-    planCanvas:{},ctx:{setTransform(){}},canvasObserver:{disconnect(){traces.push('disconnect');}},
+    planCanvas:{},ctx:{setTransform(){}},canvasObserver:{disconnect(){traces.push('disconnect');}},floorNavigator:{destroy(){}},
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../planner/render-capacity.js'), 'utf8').replace('export function ', 'function '), context);
   vm.runInContext(`
