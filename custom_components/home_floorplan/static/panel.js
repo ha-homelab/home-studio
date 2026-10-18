@@ -61,6 +61,143 @@ function projectRoomActivity(id, state, attributes, configured = false) {
   return {activity:{evidence}};
 }
 
+const mediaArtworkLimits = Object.freeze({bytes:2097152, pixels:4194304, dimension:4096, output:250000, edge:512, items:16, requests:2, timeout:10000});
+function mediaArtworkSource(entity) {
+  const attributes=entity?.attributes;
+  if (!attributes || attributes.restored || !['on','playing','paused','idle','buffering'].includes(entity.state) ||
+      ![attributes.entity_picture,attributes.entity_picture_local].some(value=>typeof value==='string'&&value.length)) return null;
+  const values=['entity_picture','entity_picture_local','media_content_id','media_title','media_artist','media_album_name'].map(key=>attributes[key]);
+  if (values.some(value=>typeof value==='string'&&value.length>4096)) return null;
+  // These source identifiers stay in the trusted host, including any URL tokens.
+  return JSON.stringify(values.map(value=>typeof value==='string'?value:''));
+}
+function mediaArtworkDimensions(bytes, mime) {
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength), length=bytes.length;
+  const text=(offset,count)=>String.fromCharCode(...bytes.subarray(offset,offset+count));
+  let width=0,height=0;
+  const dimensions=(nextWidth,nextHeight)=>{
+    if (!nextWidth || !nextHeight || nextWidth>mediaArtworkLimits.dimension || nextHeight>mediaArtworkLimits.dimension ||
+        nextWidth*nextHeight>mediaArtworkLimits.pixels || width && (width!==nextWidth || height!==nextHeight))
+      throw Error('Unsupported artwork dimensions');
+    width=nextWidth;height=nextHeight;
+  };
+  if (mime==='image/png' && length>=33 && text(0,8)==='\x89PNG\r\n\x1a\n') {
+    if (view.getUint32(8)!==13 || text(12,4)!=='IHDR') throw Error('Invalid PNG');
+    dimensions(view.getUint32(16),view.getUint32(20));
+    for (let offset=8;offset<length;) {
+      if (offset+12>length) throw Error('Truncated PNG');
+      const size=view.getUint32(offset),type=text(offset+4,4);
+      if (size>length-offset-12 || type==='acTL') throw Error('Invalid or animated PNG');
+      offset+=size+12;
+    }
+  } else if (mime==='image/jpeg' && length>=4 && bytes[0]===255 && bytes[1]===216) {
+    for (let offset=2;offset<length;) {
+      if (bytes[offset++]!==255) throw Error('Invalid JPEG');
+      while (bytes[offset]===255) offset++;
+      const marker=bytes[offset++];
+      if (marker===218 || marker===217) break;
+      if (marker===1 || marker>=208&&marker<=215) continue;
+      if (offset+2>length) throw Error('Truncated JPEG');
+      const size=view.getUint16(offset);
+      if (size<2 || size>length-offset) throw Error('Truncated JPEG');
+      if ([192,193,194].includes(marker)) {
+        if (size<8) throw Error('Invalid JPEG dimensions');
+        dimensions(view.getUint16(offset+5),view.getUint16(offset+3));
+      }
+      offset+=size;
+    }
+  } else if (mime==='image/webp' && length>=20 && text(0,4)==='RIFF' && text(8,4)==='WEBP' && view.getUint32(4,true)===length-8) {
+    for (let offset=12;offset<length;) {
+      if (offset+8>length) throw Error('Truncated WebP');
+      const type=text(offset,4),size=view.getUint32(offset+4,true),start=offset+8;
+      if (size>length-start || ['ANIM','ANMF'].includes(type)) throw Error('Invalid or animated WebP');
+      if (type==='VP8X') {
+        if (size!==10 || bytes[start]&2) throw Error('Invalid or animated WebP');
+        dimensions(1+bytes[start+4]+(bytes[start+5]<<8)+(bytes[start+6]<<16),1+bytes[start+7]+(bytes[start+8]<<8)+(bytes[start+9]<<16));
+      } else if (type==='VP8 ') {
+        if (size<10 || bytes[start]&1 || text(start+3,3)!=='\x9d\x01\x2a') throw Error('Invalid WebP');
+        dimensions(view.getUint16(start+6,true)&16383,view.getUint16(start+8,true)&16383);
+      } else if (type==='VP8L') {
+        if (size<5 || bytes[start]!==47) throw Error('Invalid WebP');
+        dimensions(1+bytes[start+1]+((bytes[start+2]&63)<<8),1+(bytes[start+2]>>6)+(bytes[start+3]<<2)+((bytes[start+4]&15)<<10));
+      }
+      offset=start+size+(size&1);
+    }
+  }
+  if (!width || !height || width>mediaArtworkLimits.dimension || height>mediaArtworkLimits.dimension || width*height>mediaArtworkLimits.pixels)
+    throw Error('Unsupported artwork dimensions');
+  return {width,height};
+}
+async function readMediaArtwork(response, signal) {
+  const mime=response.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
+  const size=response.headers.get('content-length');
+  if (!response.ok || response.redirected || !['image/jpeg','image/png','image/webp'].includes(mime) ||
+      size!==null && (!/^\d+$/.test(size) || Number(size)>mediaArtworkLimits.bytes) || !response.body?.getReader) {
+    await response.body?.cancel?.();throw Error('Unsupported artwork response');
+  }
+  const reader=response.body.getReader(),chunks=[];
+  let total=0,complete=false;
+  const cancel=()=>{reader.cancel().catch(()=>{});};
+  signal.addEventListener('abort',cancel,{once:true});
+  try {
+    while (!signal.aborted) {
+      const {value,done}=await reader.read();
+      if (signal.aborted) break;
+      if (done) {complete=true;break;}
+      total+=value.byteLength;
+      if (total>mediaArtworkLimits.bytes) throw Error('Artwork is too large');
+      chunks.push(value);
+    }
+    if (!complete || !total) throw Error('Artwork cancelled or empty');
+  } finally {
+    signal.removeEventListener('abort',cancel);
+    if (!complete) await reader.cancel().catch(()=>{});
+    reader.releaseLock();
+  }
+  const bytes=new Uint8Array(total);
+  let offset=0;for (const chunk of chunks) {bytes.set(chunk,offset);offset+=chunk.byteLength;}
+  const dimensions=mediaArtworkDimensions(bytes,mime);
+  return {blob:new Blob([bytes],{type:mime}),...dimensions};
+}
+function awaitMediaArtworkResponse(promise, signal) {
+  return new Promise((resolve,reject)=>{
+    const abort=()=>reject(Error('Artwork request timed out or cancelled'));
+    signal.addEventListener('abort',abort,{once:true});
+    Promise.resolve(promise).then(response=>{
+      signal.removeEventListener('abort',abort);
+      if (signal.aborted) {response.body?.cancel?.().catch(()=>{});return;}
+      resolve(response);
+    },error=>{signal.removeEventListener('abort',abort);reject(error);});
+    if (signal.aborted) abort();
+  });
+}
+async function normalizeMediaArtwork(source, signal) {
+  if (signal.aborted) throw Error('Artwork cancelled');
+  const image=new Image(),url=URL.createObjectURL(source.blob);
+  let abort;
+  try {
+    await new Promise((resolve,reject)=>{
+      abort=()=>{image.removeAttribute('src');reject(Error('Artwork cancelled'));};
+      signal.addEventListener('abort',abort,{once:true});
+      image.onload=resolve;image.onerror=()=>reject(Error('Artwork could not be decoded'));image.src=url;
+    });
+    const width=image.naturalWidth,height=image.naturalHeight;
+    if (signal.aborted || !(width===source.width && height===source.height || width===source.height && height===source.width)) throw Error('Invalid artwork dimensions');
+    const canvas=document.createElement('canvas'),scale=Math.min(1,mediaArtworkLimits.edge/width,mediaArtworkLimits.edge/height);
+    canvas.width=Math.max(1,Math.round(width*scale));canvas.height=Math.max(1,Math.round(height*scale));
+    try {
+      const context=canvas.getContext('2d');
+      if (!context) throw Error('Artwork canvas unavailable');
+      context.fillStyle='#11191f';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(image,0,0,canvas.width,canvas.height);
+      const result=canvas.toDataURL('image/jpeg',.8);
+      if (!result.startsWith('data:image/jpeg;base64,') || result.length>mediaArtworkLimits.output) throw Error('Artwork output is too large');
+      return result;
+    } finally {canvas.width=canvas.height=0;}
+  } finally {
+    signal.removeEventListener('abort',abort);image.onload=image.onerror=null;image.removeAttribute('src');URL.revokeObjectURL(url);
+  }
+}
+
 class HomeFloorplanPanel extends HTMLElement {
   constructor() {
     super();
@@ -197,6 +334,7 @@ class HomeFloorplanPanel extends HTMLElement {
     this.tvFrames={};this.cameraEntities={};this.roomActivity=new Set();this.moduleEntities=new Set();this.assumedActivity=null;this.modelConfigured=false;
   }
   set hass(value) {
+    if (this._hass && (this._hass.user?.id!==value?.user?.id || this._hass.connection!==value?.connection)) this.clearMediaArtwork();
     this._hass = value;
     const requestedLanguage=value?.locale?.language || value?.language;
     const language=this.explicitLanguage || (typeof requestedLanguage==='string' && requestedLanguage.trim() ? resolveViewerLanguage(requestedLanguage) || 'en' : null);
@@ -216,6 +354,7 @@ class HomeFloorplanPanel extends HTMLElement {
   disconnectedCallback() {
     globalThis.removeEventListener?.('storage',this.onDryRunStorage);
     this.generation = (this.generation || 0) + 1;
+    this.clearMediaArtwork();
     this.clearViewerLoad();
     this.port?.close(); this.port = null; this.started = false;
     if (this.viewerURL) URL.revokeObjectURL(this.viewerURL);
@@ -262,6 +401,7 @@ class HomeFloorplanPanel extends HTMLElement {
   }
   publishEntityStates() {
     if (!this.port || !this._hass) return;
+    const mediaEntities=new Set(this.savedItems.map(item=>item.entity_id).filter(id=>typeof id==='string'&&/^media_player\.[a-z0-9_]{1,137}$/.test(id)));
     // Preserve recovery controls even while a bound motor is absent from HA.
     const available = {...Object.fromEntries(this.savedItems.filter(i=>i.entity_id?.startsWith('cover.')).map(i=>[i.entity_id,{state:'unavailable',attributes:{}}])),...this._hass.states};
     const states = Object.fromEntries(Object.entries(available).map(([id, entity]) => {
@@ -279,6 +419,10 @@ class HomeFloorplanPanel extends HTMLElement {
         state, name:attributes.friendly_name || id, last_changed, last_updated, restored:attributes.restored,
         unit:attributes.unit_of_measurement || '', device_class:attributes.device_class || '',
         // Forward only display attributes; credentials and unrelated metadata stay in HA.
+        ...(mediaEntities.has(id) ? {media:Object.fromEntries(['title','artist','album'].map(key=>{
+          const value=attributes[{title:'media_title',artist:'media_artist',album:'media_album_name'}[key]];
+          return [key,typeof value==='string'?value.slice(0,200):''];
+        }))} : {}),
         ...projectRoomActivity(id, state, attributes, this.roomActivity?.has(id)),
         ...projectAssumedZoneActivity(id, state, attributes, this.assumedActivity),
         ...(this.moduleEntities?.has(id) ? {modules:{summary:typeof attributes.module_summary==='string'?attributes.module_summary.slice(0,200):'',details:typeof attributes.module_details==='string'?attributes.module_details.slice(0,16000):'',...Object.fromEntries(['expires_at_ms','snapshot_at_ms','fresh_count'].map(key=>[key,Number.isSafeInteger(attributes['module_'+key])&&attributes['module_'+key]>=(key==='fresh_count'?0:1)?attributes['module_'+key]:null]))}} : {}),
@@ -294,6 +438,88 @@ class HomeFloorplanPanel extends HTMLElement {
     this.port.postMessage({type:'states', states, connected:this._hass.connected !== false});
     this.refreshTVFrame();
     this.refreshCameraFrames();
+    this.refreshMediaArtwork();
+  }
+  clearMediaArtwork() {
+    for (const entry of this.mediaArtwork?.values() || []) entry.controller?.abort();
+    this.mediaArtwork?.clear();
+    this.publishMediaArtwork();
+  }
+  publishMediaArtwork() {
+    if (!this.port) {this.mediaArtworkSnapshotKey=null;return;}
+    const artwork=Object.create(null),keys=[];
+    for (const entry of this.mediaArtwork?.values() || []) {
+      if (!entry.image) continue;
+      for (const id of entry.items) {
+        artwork[id]={entity_id:entry.entity_id,identity:entry.identity,image:entry.image};
+        keys.push(id+':'+entry.identity);
+      }
+    }
+    const key=keys.join('|');
+    if (this.mediaArtworkSnapshotKey===key) return;
+    this.mediaArtworkSnapshotKey=key;
+    this.port.postMessage({type:'media_artwork',artwork});
+  }
+  refreshMediaArtwork() {
+    // Do not start before model_config identifies any private TV snapshot bindings.
+    if (!this.modelConfigured) return;
+    this.mediaArtwork ||= new Map();
+    if (!this.port || !this._hass || this.isConnected===false || this._hass.connected===false || document.hidden) {
+      this.clearMediaArtwork();return;
+    }
+    const wanted=new Map();
+    let count=0;
+    for (const item of this.savedItems) {
+      const id=item.entity_id;
+      if (typeof id!=='string' || !/^media_player\.[a-z0-9_]{1,137}$/.test(id) ||
+          typeof item.id!=='string' || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(item.id) ||
+          this.siteFeatures && this.tvFrames[item.id]?.entity_id===id) continue;
+      const source=mediaArtworkSource(this._hass.states[id]);
+      if (source===null) continue;
+      if (++count>mediaArtworkLimits.items) break;
+      if (!wanted.has(id)) wanted.set(id,{source,items:[]});
+      wanted.get(id).items.push(item.id);
+    }
+    for (const [id,entry] of this.mediaArtwork) {
+      if (wanted.get(id)?.source===entry.source) continue;
+      entry.controller?.abort();this.mediaArtwork.delete(id);
+    }
+    for (const [id,value] of wanted) {
+      if (!this.mediaArtwork.has(id)) {
+        this.mediaArtworkSequence=(this.mediaArtworkSequence||0)+1;
+        this.mediaArtwork.set(id,{entity_id:id,source:value.source,identity:'artwork-'+this.mediaArtworkSequence,attempted:false,image:null});
+      }
+      this.mediaArtwork.get(id).items=value.items;
+    }
+    // Clearing the prior identity is synchronous, before starting any decoder.
+    this.publishMediaArtwork();
+    if (typeof this._hass.fetchWithAuth!=='function') return;
+    for (const entry of this.mediaArtwork.values()) {
+      if ((this.mediaArtworkRequests||0)>=mediaArtworkLimits.requests) break;
+      if (!entry.attempted) this.fetchMediaArtwork(entry);
+    }
+  }
+  async fetchMediaArtwork(entry) {
+    const port=this.port,generation=this.generation,controller=entry.controller=new AbortController();
+    entry.attempted=true;this.mediaArtworkRequests=(this.mediaArtworkRequests||0)+1;
+    const timer=setTimeout(()=>controller.abort(),mediaArtworkLimits.timeout);
+    try {
+      // Never use an entity-supplied URL or expose authentication to the sandbox.
+      // HA forwards signal/redirect to fetch and attaches its existing bearer auth.
+      const response=await awaitMediaArtworkResponse(this._hass.fetchWithAuth('/api/media_player_proxy/'+encodeURIComponent(entry.entity_id),
+        {method:'GET',redirect:'error',cache:'no-store',signal:controller.signal,headers:{Accept:'image/jpeg, image/png, image/webp'}}),controller.signal);
+      if (controller.signal.aborted) {await response.body?.cancel?.();return;}
+      const source=await readMediaArtwork(response,controller.signal);
+      const image=await normalizeMediaArtwork(source,controller.signal);
+      if (!controller.signal.aborted && generation===this.generation && port===this.port &&
+          this.mediaArtwork.get(entry.entity_id)===entry && !document.hidden && this._hass.connected!==false) {
+        entry.image=image;this.publishMediaArtwork();
+      }
+    } catch { /* A missing/invalid cover never changes device state or shows an older track. */ }
+    finally {
+      clearTimeout(timer);entry.controller=null;this.mediaArtworkRequests--;
+      this.refreshMediaArtwork();
+    }
   }
   async refreshCameraFrames() {
     const port=this.port,generation=this.generation;
@@ -350,7 +576,9 @@ class HomeFloorplanPanel extends HTMLElement {
   async loadFloor(floor = this.initialFloor) {
     this.notice('Loading private model…');
     this.clearViewerLoad();
+    this.clearMediaArtwork();
     this.port?.close(); this.port = null;
+    this.mediaArtworkSnapshotKey=null;
     clearTimeout(this.cameraTimer);this.cameraTimer=null;
     for(const tv of Object.values(this.tvFrames)){clearTimeout(tv.timer);tv.timer=null;tv.source=null;}
     this.resetModelConfig();
@@ -403,7 +631,7 @@ class HomeFloorplanPanel extends HTMLElement {
         // An opaque sandbox has origin "null"; verify the parent in the viewer.
         iframe.contentWindow.postMessage({type:'home-floorplan:init', items:result.items,preferences:this.viewPreferences}, '*', [channel.port2]);
         this.publishEntityStates(); this.noticeKey('Connected · placements are saved in Home Assistant');
-        this.tvVisibility ||= () => {this.refreshTVFrame();this.refreshCameraFrames();};
+        this.tvVisibility ||= () => {this.refreshTVFrame();this.refreshCameraFrames();this.refreshMediaArtwork();};
         document.addEventListener('visibilitychange',this.tvVisibility);
       };
       // Child startup cancels fallback during cold WebGL initialization.
@@ -474,6 +702,7 @@ class HomeFloorplanPanel extends HTMLElement {
         if (this.failed) throw Error('Saving is paused. Export JSON, then reload and merge your changes.');
         const result = await this._hass.callWS({type:'home_floorplan/save', floor, revision:this.revision, items:message.items});
         this.revision = result.revision; this.savedItems = message.items;
+        this.refreshMediaArtwork();
       }).catch(error => {
         this.failed = true;
         this.notice(`NOT SAVED: ${error.message || error}. Export JSON to keep your changes.`, true);
