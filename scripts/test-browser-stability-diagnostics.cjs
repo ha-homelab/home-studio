@@ -1357,7 +1357,7 @@ test('invalid scenario budgets fail before module loading or application work', 
 
 test('bootstrap crossing its limit at the scenario handoff never starts execute', async () => {
   let executed=0;
-  const {diagnostics,clock}=clockedDiagnostics('handoff-boundary',({clock,fake})=>{
+  const {diagnostics}=clockedDiagnostics('handoff-boundary',({clock,fake})=>{
     fakeInputTrace(fake);
     const sessionFor=fake.context.newCDPSession;
     fake.context.newCDPSession=async()=>{

@@ -648,7 +648,6 @@ def compile_project(project, output=DEFAULT_OUTPUT, ha_package=False, project_pa
         except OSError:
             if backup:
                 os.replace(backup, output)
-                backup = None
             raise
         if backup:
             shutil.rmtree(backup)
