@@ -700,7 +700,7 @@ homeView = (() => {
   });
   for(const event of ['pointerleave','pointerdown','focusout'])$('homeView').addEventListener(event,()=>previewTV(null));
   $('homeView').addEventListener('focusin',e=>{if(tvControl&&e.target.matches(tvControl)){const r=e.target.getBoundingClientRect();previewTV({id:tvId(e.target),x:r.left,y:r.bottom});}});
-  function dismissOverlays(){hideMediaControls();previewTV(null);cancelNativeHover(true);}
+  function dismissOverlays(){hideMediaControls();previewTV(null);cancelNativeHover();}
   document.addEventListener('keydown',e=>{if(e.key==='Escape')dismissOverlays();});
   document.addEventListener('scroll',()=>previewTV(null),true);
   window.addEventListener('resize',()=>previewTV(null));

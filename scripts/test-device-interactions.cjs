@@ -117,7 +117,9 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
    const entered=await card(id).evaluate(()=>window.fixtureHoverAt);
    assert(sent.received_at-entered>=640,'native details waits for the hover delay');
    assert.equal(sent.entity_id,{tv:'media_player.screen',light:'light.fixture',cover:'cover.curtain'}[id]);
-   await page.keyboard.press('Escape');await page.locator('#native').waitFor({state:'hidden'});await page.waitForTimeout(750);
+   await page.keyboard.press('Escape');await page.locator('#native').waitFor({state:'hidden'});
+   // Native HA dialog teardown can re-enter the same marker without a pointer move.
+   await card(id).dispatchEvent('pointerenter',{pointerType:'mouse',buttons:0});await page.waitForTimeout(750);
    assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),before+1,'closing native details on the same anchor does not reopen');
   }
   assert.deepEqual(await page.evaluate(()=>messages.filter(m=>['toggle','curtain_command','tv_power'].includes(m.type))),[],'native hover never toggles, powers or moves a device');
