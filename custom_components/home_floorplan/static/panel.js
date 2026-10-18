@@ -371,6 +371,9 @@ class HomeFloorplanPanel extends HTMLElement {
     const el = this.$('notice');
     el.textContent = text; el.classList.toggle('error', error);
   }
+  notifySaveStatus() {
+    if (typeof CustomEvent==='function') this.dispatchEvent?.(new CustomEvent('home-floorplan-save-status'));
+  }
   exportRecovery() {
     if (!this.recovery) return;
     this.download(new Blob([JSON.stringify(this.recovery.backup, null, 2) + '\n'], {type:'application/json'}), 'home-floorplan-original-inventory.json');
@@ -655,6 +658,7 @@ class HomeFloorplanPanel extends HTMLElement {
         iframe.srcdoc = result.html;
       }, 8000);
     } catch (error) { if (this.isCurrent(generation)) this.notice(`Cannot load plan: ${error.message || error}`, true); }
+    finally { this.notifySaveStatus(); }
   }
   handleViewerMessage(message, generation) {
     if (generation !== this.generation || this.recovery || !message || typeof message !== 'object') return;
@@ -695,12 +699,15 @@ class HomeFloorplanPanel extends HTMLElement {
         this.updateLanguageUI();
       }
     } else if (message.type === 'save') {
-      const floor = this.floor;
+      const floor = this.floor, hass = this._hass, account = hass.user?.id, connection = hass.connection;
+      const current = () => generation===this.generation && this.isConnected!==false && this._hass.user?.id===account;
       this.pending++;
       this.notice('Saving placements…');
       this.queue = this.queue.then(async () => {
         if (this.failed) throw Error('Saving is paused. Export JSON, then reload and merge your changes.');
-        const result = await this._hass.callWS({type:'home_floorplan/save', floor, revision:this.revision, items:message.items});
+        if (!current() || this._hass.connection!==connection) throw Error('The Home Assistant session changed before saving. Export JSON, then reload and merge your changes.');
+        const result = await hass.callWS({type:'home_floorplan/save', floor, revision:this.revision, items:message.items});
+        if (!current()) throw Error('The Home Assistant session changed while saving. Export JSON before reloading.');
         this.revision = result.revision; this.savedItems = message.items;
         this.refreshMediaArtwork();
       }).catch(error => {
@@ -709,6 +716,7 @@ class HomeFloorplanPanel extends HTMLElement {
       }).finally(() => {
         this.pending--;
         if (!this.failed && !this.pending) this.notice('Saved in Home Assistant');
+        this.notifySaveStatus();
       });
     } else if (message.type === 'floor') {
       if (this.pending || this.failed) return this.notice('Save must finish successfully before changing floors. Export JSON if saving failed.', true);

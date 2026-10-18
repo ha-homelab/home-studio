@@ -136,7 +136,71 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><scr
     assert.equal(await page.evaluate(() => calls.at(-1).floor),'missing');
     await page.evaluate(() => missing.remove());
     assert.equal(await page.evaluate(() => subscriptions),0);
+
+    // Same-user reconnects retain the edited viewer until a pending save settles.
+    await page.evaluate(() => { window.protectedCard = makeCard({floor:'main'}); });
+    await page.waitForFunction(() => protectedCard._panel?.port);
+    await page.evaluate(() => {
+      window.protectedPanel = protectedCard._panel;
+      window.saveCalls = [];
+      const originalCall = protectedPanel._hass.callWS;
+      protectedPanel._hass.callWS = message => {
+        if (message.type !== 'home_floorplan/save') return originalCall(message);
+        saveCalls.push(message);return new Promise(resolve => window.finishSave = resolve);
+      };
+      protectedPanel.handleViewerMessage({type:'save',items:[{id:'edited',entity_id:'switch.lamp'}]},protectedPanel.generation);
+    });
+    await page.waitForFunction(() => window.finishSave);
+    await page.evaluate(() => {
+      window.reconnected = {...makeHass(),connection:{subscribeMessage:haConnection.subscribeMessage}};
+      protectedCard.hass = reconnected;
+    });
+    assert.deepEqual(await page.evaluate(() => [protectedCard._panel === protectedPanel,protectedPanel.pending,!!protectedPanel.port]),[true,1,true]);
+    assert.match(await page.locator('#status').textContent(),/Waiting for layout edits/);
+    assert((await page.locator('iframe').boundingBox()).height > 200,'reconnect notice leaves edited viewer usable');
+    await page.evaluate(() => finishSave({revision:1}));
+    await page.waitForFunction(() => protectedCard._panel !== protectedPanel && protectedCard._panel?.port);
+    assert.deepEqual(await page.evaluate(() => [protectedPanel.savedItems[0].id,protectedPanel.port,saveCalls.length]),['edited',null,1]);
+    assert.equal(await page.locator('#status').isVisible(),false);
+
+    // Failed edits remain available for export; a successful explicit reload releases the hold.
+    await page.evaluate(() => {
+      window.protectedPanel = protectedCard._panel;
+      const originalCall = protectedPanel._hass.callWS;
+      protectedPanel._hass.callWS = message => message.type === 'home_floorplan/save' ? Promise.reject(Error('Save failed')) : originalCall(message);
+      protectedPanel.handleViewerMessage({type:'save',items:[{id:'unsaved',entity_id:'switch.lamp'}]},protectedPanel.generation);
+    });
+    await page.waitForFunction(() => protectedPanel.failed && !protectedPanel.pending);
+    await page.evaluate(() => protectedCard.hass = {...makeHass(),connection:{subscribeMessage:haConnection.subscribeMessage}});
+    assert.deepEqual(await page.evaluate(() => [protectedCard._panel === protectedPanel,protectedPanel.failed,!!protectedPanel.port]),[true,true,true]);
+    assert.match(await page.locator('#status').textContent(),/Export inventory JSON/);
+    page.once('dialog',dialog => dialog.accept());
+    await page.locator('#retry').click();
+    await page.waitForFunction(() => protectedCard._panel !== protectedPanel && protectedCard._panel?.port);
+    assert.equal(await page.locator('#status').isVisible(),false);
+
+    // Queued saves cannot dispatch after account replacement or direct card removal.
+    await page.evaluate(() => {
+      window.protectedPanel = protectedCard._panel;window.staleSaveCalls = [];
+      const originalCall = protectedPanel._hass.callWS;
+      protectedPanel._hass.callWS = message => {
+        if (message.type === 'home_floorplan/save') {staleSaveCalls.push(message);return Promise.resolve({revision:2});}
+        return originalCall(message);
+      };
+      protectedPanel.handleViewerMessage({type:'save',items:[]},protectedPanel.generation);
+      protectedCard.hass = makeHass(true,'replacement-admin');
+    });
+    await page.waitForFunction(() => protectedCard._panel?.port && !protectedPanel.pending);
+    assert.deepEqual(await page.evaluate(() => [protectedCard._panel === protectedPanel,protectedPanel.port,staleSaveCalls.length]),[false,null,0]);
+    await page.evaluate(() => {
+      window.protectedPanel = protectedCard._panel;
+      protectedPanel._hass.callWS = message => {staleSaveCalls.push(message);return Promise.resolve({revision:3});};
+      protectedPanel.handleViewerMessage({type:'save',items:[]},protectedPanel.generation);
+      protectedCard.remove();
+    });
+    await page.waitForFunction(() => !protectedPanel.pending);
+    assert.deepEqual(await page.evaluate(() => [protectedPanel.port,staleSaveCalls.length,subscriptions]),[null,0,0]);
     assert.deepEqual(errors,[]);
-    console.log('PASS: dashboard module, validation, sizing, floor selection, opaque sandbox, pinned dry run, live controls, admin gating, state updates and reconnect cleanup.');
+    console.log('PASS: dashboard module, validation, sizing, floor selection, opaque sandbox, pinned dry run, live controls, admin gating, reconnect edit preservation and stale-save rejection.');
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

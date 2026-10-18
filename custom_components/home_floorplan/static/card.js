@@ -7,9 +7,9 @@ class HomeFloorplanCard extends HTMLElement {
     this.attachShadow({mode:'open'});
     this.shadowRoot.innerHTML = `<style>
       :host{display:block;min-width:0}
-      ha-card{display:block;overflow:hidden;height:var(--home-floorplan-card-height,600px)}
-      home-floorplan-panel{height:100%;width:100%}
-      #status{padding:20px;color:var(--primary-text-color);font:14px/1.5 system-ui}
+      ha-card{display:flex;flex-direction:column;overflow:hidden;height:var(--home-floorplan-card-height,600px)}
+      home-floorplan-panel{height:100%;width:100%;min-height:0;flex:1}
+      #status{flex-shrink:0;padding:20px;color:var(--primary-text-color);font:14px/1.5 system-ui}
     </style><ha-card><div id="status" role="status">Connecting to Home Assistant…</div></ha-card>`;
   }
 
@@ -49,6 +49,7 @@ class HomeFloorplanCard extends HTMLElement {
   getGridOptions() { return {columns:12,rows:'auto',min_columns:6}; }
 
   _removePanel() {
+    this._panel?.removeEventListener('home-floorplan-save-status',this._onSaveStatus);
     this._panel?.remove();
     this._panel = null;
   }
@@ -62,12 +63,24 @@ class HomeFloorplanCard extends HTMLElement {
       status.textContent = this._hass?.user ? 'Administrator access is required to view this floorplan.' : 'Connecting to Home Assistant…';
       return;
     }
-    if (this._panel && (this._panelUser !== this._hass.user.id || this._panelConnection !== this._hass.connection))
+    if (this._panel && this._panelUser !== this._hass.user.id) this._removePanel();
+    if (this._panel && this._panelConnection !== this._hass.connection) {
+      if (this._panel.pending || this._panel.failed) {
+        // Keep the edited viewer available; the current connection supports recovery.
+        this._panel.hass = this._hass;
+        status.hidden = false;
+        status.textContent = this._panel.pending ? 'Home Assistant reconnected. Waiting for layout edits to finish saving…' :
+          'Home Assistant reconnected. Layout edits are still here. Export inventory JSON before reloading the saved plan.';
+        return;
+      }
       this._removePanel();
+    }
     if (!this._panel) {
       this._panel = document.createElement('home-floorplan-panel');
       this._panelUser = this._hass.user.id;
       this._panelConnection = this._hass.connection;
+      this._onSaveStatus ||= () => this._render();
+      this._panel.addEventListener('home-floorplan-save-status',this._onSaveStatus);
       this._panel.configureDashboard(this._config);
       this._panel.hass = this._hass;
       this.shadowRoot.querySelector('ha-card').append(this._panel);
