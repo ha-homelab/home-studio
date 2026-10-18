@@ -5,7 +5,7 @@ const http = require('node:http');
 const path = require('node:path');
 const {chromium} = require('playwright');
 const root = path.resolve(__dirname,'..');
-const viewer = `<!doctype html><html><head><meta charset="utf-8"></head><body><button id="toggle">Toggle</button><script>
+const viewer = `<!doctype html><html><head><meta charset="utf-8"></head><body><button id="toggle">Toggle</button><button id="inside">Inside viewer</button><script>
   window.received = [];
   addEventListener('message',event => {
     if (event.source !== parent || event.data?.type !== 'home-floorplan:init') return;
@@ -16,7 +16,7 @@ const viewer = `<!doctype html><html><head><meta charset="utf-8"></head><body><b
     document.querySelector('#toggle').onclick = () => port.postMessage({type:'toggle',entity_id:'switch.lamp',request_id:'toggle'});
   });
 </script></body></html>`;
-const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><script type="module">
+const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><button id="outside">Outside viewer</button><script type="module">
   import '/home-floorplan-static/card.js';
   window.calls = []; window.services = []; window.subscriptions = 0;
   window.haConnection = {subscribeMessage:async () => {subscriptions++; return () => subscriptions--;}};
@@ -53,6 +53,12 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><scr
     page.setDefaultTimeout(10000);
     const errors = [];
     page.on('pageerror',error => errors.push(String(error)));
+    await page.addInitScript(() => {
+      window.parentListeners=new Map(['keydown','pointerdown'].map(type=>[type,new Set()]));
+      const add=document.addEventListener.bind(document),remove=document.removeEventListener.bind(document);
+      document.addEventListener=(type,listener,options)=>{if(options===true)parentListeners.get(type)?.add(listener);add(type,listener,options);};
+      document.removeEventListener=(type,listener,options)=>{if(options===true)parentListeners.get(type)?.delete(listener);remove(type,listener,options);};
+    });
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await page.waitForFunction(() => window.ready);
     assert.deepEqual(await page.evaluate(() => {
@@ -81,6 +87,24 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><scr
     assert.equal(await page.locator('#dry-run').isDisabled(),true);
     assert.equal((await page.locator('ha-card').boundingBox()).height,500);
     assert((await page.locator('iframe').boundingBox()).height > 300,'compact host leaves useful viewer space');
+    // A hovered child cannot receive Escape while keyboard focus remains in HA.
+    await page.locator('#outside').focus();
+    await page.keyboard.press('Escape');
+    await frame.waitForFunction(()=>received.filter(message=>message.type==='dismiss_overlays').length===1);
+    assert.equal(await page.evaluate(()=>document.activeElement.id),'outside','dismissal never steals parent focus');
+    await page.keyboard.press('ArrowRight');
+    await page.locator('#outside').click();
+    await frame.waitForFunction(()=>received.filter(message=>message.type==='dismiss_overlays').length===2);
+    await frame.locator('#inside').click();
+    // Composed paths preserve the actual iframe target through nested card shadow roots.
+    await page.locator('iframe').dispatchEvent('pointerdown',{bubbles:true,composed:true});
+    await page.locator('#notice').click();
+    await frame.waitForFunction(()=>received.filter(message=>message.type==='dismiss_overlays').length>=3);
+    assert.equal(await frame.evaluate(()=>received.filter(message=>message.type==='dismiss_overlays').length),3,
+      'outside and host-header clicks dismiss; child events and iframe targets do not');
+    assert.deepEqual(await page.evaluate(()=>services),[],'dismissal cannot send device commands');
+    assert.deepEqual(await page.evaluate(()=>[parentListeners.get('keydown').has(card._panel.onOverlayEscape),
+      parentListeners.get('pointerdown').has(card._panel.onOverlayPointer)]),[true,true]);
     await frame.locator('#toggle').click();
     await frame.waitForFunction(() => received.some(message => message.type === 'command_result'));
     assert.equal(await frame.evaluate(() => received.find(message => message.type === 'command_result').dry_run),true);
@@ -102,14 +126,25 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><scr
     assert.equal(await page.locator('iframe').count(),0);
     assert.match(await page.locator('#status').textContent(),/Administrator access/);
     assert.deepEqual(await page.evaluate(() => [original.port,original.viewerURL,original.started,subscriptions]),[null,null,false,0]);
+    assert.deepEqual(await page.evaluate(()=>[original.overlayDocument,parentListeners.get('keydown').has(original.onOverlayEscape),
+      parentListeners.get('pointerdown').has(original.onOverlayPointer)]),[null,false,false],
+      'account removal unregisters parent-document dismissal listeners');
     await page.evaluate(() => card.hass = makeHass());
     await page.waitForFunction(() => card._panel?.port);
     assert.equal(await page.evaluate(() => calls.length),2);
     await page.evaluate(() => { window.original = card._panel; card.remove(); });
     assert.deepEqual(await page.evaluate(() => [original.port,original.viewerURL,original.started,subscriptions]),[null,null,false,0]);
+    assert.deepEqual(await page.evaluate(()=>[parentListeners.get('keydown').has(original.onOverlayEscape),
+      parentListeners.get('pointerdown').has(original.onOverlayPointer)]),[false,false]);
     await page.evaluate(() => document.body.append(card));
     await page.waitForFunction(() => card._panel?.port);
     assert.deepEqual(await page.evaluate(() => [card._panel === original,calls.length,subscriptions]),[true,3,1]);
+    frame = page.frames().find(frame => frame.parentFrame());
+    await frame.waitForFunction(()=>window.initial);
+    await page.locator('#outside').focus();await page.keyboard.press('Escape');
+    await frame.waitForFunction(()=>received.some(message=>message.type==='dismiss_overlays'));
+    assert.equal(await frame.evaluate(()=>received.filter(message=>message.type==='dismiss_overlays').length),1,
+      'reattaching the same host restores one dismissal listener');
     await page.evaluate(() => card.hass = makeHass(true,'other-admin'));
     await page.waitForFunction(() => card._panel?.port);
     assert.deepEqual(await page.evaluate(() => [card._panel === original,original.port,original.viewerURL,calls.length,subscriptions]),[false,null,null,4,1]);

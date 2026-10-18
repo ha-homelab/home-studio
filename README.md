@@ -181,6 +181,8 @@ to move between the hosted and local editors; they have separate browser drafts.
 
 The **0.9.0 beta series** also provides a Lovelace dashboard card and media-player
 cover artwork. See [dashboard and artwork setup](docs/dashboard-and-media.md).
+The next device-controls beta adds sensor and thermostat readings, native HA
+controls on hover, and a compact audio remote. See [device controls](docs/device-controls.md).
 These installed features require rebuilding with that beta toolkit; updating
 the hosted planner alone does not update an existing Home Assistant panel.
 

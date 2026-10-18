@@ -140,7 +140,9 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'custom_components/home_floorplan/static/panel.js',
               'custom_components/home_floorplan/static/card.js',
               'scripts/test-dashboard-card.cjs', 'scripts/test-media-artwork-host.cjs',
-              'scripts/test-media-artwork-browser.cjs', 'docs/images/dashboard-media-example.png')
+              'scripts/test-media-artwork-browser.cjs', 'docs/images/dashboard-media-example.png',
+              'scripts/test-media-command-host.cjs', 'scripts/test-media-controls.cjs',
+              'scripts/test-generic-entities.cjs', 'scripts/test-device-interactions.cjs', 'docs/device-controls.md')
 # Supplementary tripwires, not a substitute for reviewing source and image pixels.
 PRIVATE = re.compile(r'\bunit\d{3}\b|/Users/|-----BEGIN .*PRIVATE KEY|'
                      r'\b(?:192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3})\b', re.I)

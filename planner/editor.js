@@ -462,7 +462,7 @@ function buildInspector(parent) {
     }, () => t('Original design size restored to fit this floor.'))));
     field(parent, t('Rotation (degrees)'), object.rotation_deg, v => editObject(o => { o.rotation_deg = v; }), { type: 'number', min: -360, max: 360, step: '15' });
     section(parent, t('Home Assistant'));
-    field(parent, t('Entity ID (optional)'), object.entity_id, v => editObject(o => { o.entity_id = v.trim(); }), { dir: 'ltr', help: t('Example: light.living_room. This planner stores the mapping; it never controls devices.') });
+    field(parent, t('Entity ID (optional)'), object.entity_id, v => editObject(o => { o.entity_id = v.trim(); }), { dir: 'ltr', help: t('Example: light.living_room. Any Home Assistant entity can be linked. In the installed plan, lights, switches and fans have quick toggles; sensors show readings; media players show artwork and controls; Details opens native controls for other entities. This offline planner only stores the mapping and never controls devices.') });
     field(parent, t('Notes'), object.notes, v => editObject(o => { o.notes = v; }), { rows: 3 });
   }
   parent.append(button(t(`Delete ${kind === 'openings' ? 'opening' : kind.slice(0, -1)}`), deleteSelection, 'danger'));

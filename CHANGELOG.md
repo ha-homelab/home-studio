@@ -1,12 +1,23 @@
 # Changelog
 
-## [0.9.0] - Floor navigation, dashboard cards, and media artwork
+## [0.9.0] - Floor navigation, dashboard cards, and device controls
 
 - Add a Home Assistant dashboard card that uses the same authenticated 3D Home
   viewer, with an initial floor, configurable height, and optional pinned dry run.
 - Display media-player cover artwork through Home Assistant's authenticated media
   proxy. Artwork updates follow media changes, with bounded images and no
   background polling. Existing private TV capture keeps its own frame source.
+
+- Open Home Assistant's native TV, light, curtain, thermostat, and other device
+  dialogs from their markers or cards. Deliberate mouse hover opens details;
+  keyboard and touch retain explicit controls. Closing a popup cannot open an
+  unrelated device underneath a stationary pointer.
+- Control audio volume and supported previous/play/pause/stop/next actions from
+  a compact remote. Opening the remote does not change playback, and stereo
+  pairs can share one controlling entity.
+- Show meaningful generic sensor readings and device states. New viewers receive
+  only the live states they use, plus a bounded entity-name catalog for binding
+  search, reducing work in large Home Assistant installations.
 
 - Switch floors from translucent, geometry-aware thumbnails along the left edge
   of the workspace. The active floor stays highlighted; hide the previews when
@@ -22,14 +33,19 @@
 ### Upgrade
 
 Schema 1 drawings remain compatible. Export JSON before replacing the toolkit.
-These controls improve the browser drawing editor; existing installed Home
-Assistant dashboards do not change merely by updating the hosted planner.
+Rebuild and reinstall generated viewers to receive device controls and reduced
+state traffic. Updating the hosted drawing editor alone does not change existing
+installed Home Assistant plans. Native dialogs require the HA frontend; separate
+web wrappers provide their own details UI.
 
 ### Security
 
 Floor previews are generated locally from the current drawing. No thumbnails,
 coordinates, or camera gestures are sent to a service. Existing optional AI
-provider and Home Assistant authorization boundaries are unchanged.
+provider and Home Assistant authorization boundaries are unchanged. Hovering
+never sends a device command. Audio commands are limited to supported actions
+on saved bindings and are revalidated against the current connection, account,
+and device state; Dry run continues to block controls.
 
 ## [0.8.0] - First-session usability
 

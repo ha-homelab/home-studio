@@ -11,7 +11,7 @@ const model=JSON.parse(document.getElementById('modelData').textContent),$=id=>d
 const roomCode=id=>model.room_display_ids?.[id]||id;
 const roomName=id=>model.room_display_names?.[id]||model.rooms.find(r=>r.id===id)?.name||id;
 function viewerStateLabel(state){const labels={on:'On',off:'Off',open:'Open',closed:'Closed',opening:'Opening',closing:'Closing',unavailable:'Unavailable'};return Object.hasOwn(labels,state)?vt(labels[state]):state}
-const embedded=window.__HOME_FLOORPLAN_EMBED__===true;let bridge=null,haStates={},haConnected=false,entityOptions='';
+const embedded=window.__HOME_FLOORPLAN_EMBED__===true;let bridge=null,haStates={},haConnected=false,entityOptions='',entityCatalog=null;
 const planBounds=model.bounds_m, planCenter=planBounds?[(planBounds.min_x+planBounds.max_x)/2,(planBounds.min_z+planBounds.max_z)/2]:model.editor_view?.center_xz||[0,0];
 const planRadius=planBounds?Math.max(8,model.ceiling_height_m*2,Math.hypot(planBounds.max_x-planBounds.min_x,planBounds.max_z-planBounds.min_z)*1.6):model.editor_view?.radius||8;
 if(model.site_features===false){
@@ -443,7 +443,7 @@ $('pins').replaceChildren();$('items').replaceChildren();$('count').textContent=
 if(objectGroup){while(objectGroup.children.length){const o=objectGroup.children[0];o.traverse(child=>{child.geometry?.dispose();child.material?.dispose()});objectGroup.remove(o)}}
 for(const [index,it] of items.entries()){
 const x=xp(it.position_m.x),z=zp(it.position_m.z);const g=svgEl('g',{'data-item-id':it.id});g.append(svgEl('circle',{cx:x,cy:z,r:18,fill:'#b16e31',stroke:'white','stroke-width':3}),svgEl('text',{x,y:z+6,fill:'white','font-size':17,'text-anchor':'middle','font-family':'system-ui'},String(index+1)));g.addEventListener('click',e=>{e.stopPropagation();editInventoryItem(it)});$('pins').append(g);const nodes={pin:g};inventoryNodes.set(it.id,nodes);
-const li=document.createElement('li'),label=document.createElement('span');label.textContent=(index+1)+'. '+it.name;const sub=document.createElement('small');sub.textContent=roomCode(it.room)+(it.entity_id?' · '+it.entity_id:'');label.append(document.createElement('br'),sub);const ed=document.createElement('button');ed.textContent=vt('Edit');nodes.edit=ed;ed.onclick=()=>editInventoryItem(it);const del=document.createElement('button');del.textContent='×';del.setAttribute('aria-label',vt('Remove {name}',{name:it.name}));nodes.remove=del;del.onclick=()=>{items=items.filter(v=>v.id!==it.id);if(editing===it.id)cancelInventoryEdit();persistInventory();rebuildInventoryView()};if(embedded&&it.entity_id){if(it.entity_id.startsWith('cover.')){const control=document.createElement('button');control.textContent=vt('Open controls');nodes.control=control;control.onclick=()=>bridge?.postMessage({type:'more_info',entity_id:it.entity_id});li.append(control)}const live=document.createElement('small');live.dataset.stateFor=it.id;nodes.state=live;label.append(document.createElement('br'),live);if(['light','switch','input_boolean','fan'].includes(it.entity_id.split('.')[0])){const toggle=document.createElement('button');toggle.textContent=vt('Toggle');toggle.dataset.toggleFor=it.id;nodes.toggle=toggle;toggle.setAttribute('aria-label',vt('Toggle {name}',{name:it.name}));toggle.onclick=()=>bridge?.postMessage({type:'toggle',entity_id:it.entity_id});li.append(toggle)}}li.append(label,ed,del);$('items').append(li);
+const li=document.createElement('li'),label=document.createElement('span');label.textContent=(index+1)+'. '+it.name;const sub=document.createElement('small');sub.textContent=roomCode(it.room)+(it.entity_id?' · '+it.entity_id:'');label.append(document.createElement('br'),sub);const ed=document.createElement('button');ed.textContent=vt('Edit');nodes.edit=ed;ed.onclick=()=>editInventoryItem(it);const del=document.createElement('button');del.textContent='×';del.setAttribute('aria-label',vt('Remove {name}',{name:it.name}));nodes.remove=del;del.onclick=()=>{items=items.filter(v=>v.id!==it.id);if(editing===it.id)cancelInventoryEdit();persistInventory();rebuildInventoryView()};if(embedded&&it.entity_id){const control=document.createElement('button');control.textContent=vt('Details');control.dataset.detailsFor=it.id;control.setAttribute('aria-label',vt('Details')+': '+it.name);nodes.control=control;control.onclick=()=>{if(bridge&&haConnected&&haStates[it.entity_id])bridge.postMessage({type:'more_info',entity_id:it.entity_id})};li.append(control);const live=document.createElement('small');live.dataset.stateFor=it.id;nodes.state=live;label.append(document.createElement('br'),live);if(['light','switch','input_boolean','fan'].includes(it.entity_id.split('.')[0])){const toggle=document.createElement('button');toggle.textContent=vt('Toggle');toggle.dataset.toggleFor=it.id;nodes.toggle=toggle;toggle.setAttribute('aria-label',vt('Toggle {name}',{name:it.name}));toggle.onclick=()=>bridge?.postMessage({type:'toggle',entity_id:it.entity_id});li.append(toggle)}}li.append(label,ed,del);$('items').append(li);
 if(objectGroup){
 const size=it.dimensions_m,candidate=model.object_assets?.[it.id],asset=candidate?.model_id&&candidate.model_id!==it.model_id?null:candidate;let o;
 if(asset){
@@ -456,6 +456,17 @@ o.scale.set(size.width,size.height,size.depth);o.position.set(it.position_m.x,it
 o.rotation.y=it.rotation_deg*Math.PI/180;o.userData.id=it.id;objectGroup.add(o);objectsById.set(it.id,o)}
 }homeView?.rebuildControls();refreshEntityPresentation();}
 function persistInventory(){if(embedded){if(bridge)bridge.postMessage({type:'save',items});else setEditorStatus('Not connected. Export JSON to keep your edits.');return}try{localStorage.setItem(KEY,JSON.stringify(items))}catch(e){setEditorStatus('Browser storage unavailable. Export JSON to keep your work.')}}
+function refreshEntityOptions(){
+  const query=$('entity').value.trim().toLowerCase();
+  const options=(entityCatalog||Object.entries(haStates).map(([id,state])=>[id,state.name])).filter(([id,name])=>!query||id.includes(query)||String(name).toLowerCase().includes(query)).slice(0,80);
+  const key=JSON.stringify(options);if(key===entityOptions)return;entityOptions=key;
+  $('haEntities').replaceChildren(...options.map(([id,name])=>{const option=document.createElement('option');option.value=id;option.label=name;return option}));
+}
+$('entity').addEventListener('input',refreshEntityOptions);
+$('entity').addEventListener('focus',refreshEntityOptions);
+const entityGuidance=document.createElement('small');entityGuidance.id='entityGuidance';$('entity').insertAdjacentElement('afterend',entityGuidance);$('entity').setAttribute('aria-describedby','entityGuidance');
+const bindingGuidance='Bind any Home Assistant entity. Lights, switches and fans keep quick toggles; Details opens native controls. Sensors show readings, media players show artwork and controls, and other entities open Details. Offline previews do not control devices.';
+entityGuidance.textContent=vt(bindingGuidance);
 function cancelInventoryEdit(){editing=null;$('addItem').textContent=vt('Add object');$('cancelEdit').style.display='none';$('name').value='';$('entity').value='';$('notes').value=''}$('cancelEdit').onclick=cancelInventoryEdit;
 function editInventoryItem(it){editing=it.id;$('name').value=it.name;$('kind').value=it.type;$('room').value=it.room;for(const k of ['x','y','z'])$(k).value=it.position_m[k];for(const [f,k] of [['w','width'],['d','depth'],['h','height']])$(f).value=it.dimensions_m[k];$('rotation').value=it.rotation_deg;$('entity').value=it.entity_id||'';$('notes').value=it.notes||'';$('addItem').textContent=vt('Save changes');$('cancelEdit').style.display='block';drawCursor();setEditorStatus('Editing {name}',{name:it.name})}
 $('itemForm').onsubmit=e=>{e.preventDefault();const it={...inventoryAppearance(items.find(item=>item.id===editing),$('kind').value),id:editing||('item_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7)),name:$('name').value.trim(),type:$('kind').value,room:$('room').value,position_m:{x:+$('x').value,y:+$('y').value,z:+$('z').value},dimensions_m:{width:+$('w').value,depth:+$('d').value,height:+$('h').value},rotation_deg:+$('rotation').value,entity_id:$('entity').value.trim(),notes:$('notes').value.trim()};try{validateInventoryItems([it])}catch(e){setEditorStatus(e.message);return}if(editing)items=items.map(x=>x.id===editing?it:x);else items.push(it);persistInventory();rebuildInventoryView();cancelInventoryEdit();setEditorStatus(embedded?'Updated {name}. Check the panel header for save status.':'Saved {name}. Export JSON when finished.',{name:it.name})};
@@ -463,8 +474,9 @@ function exportInventoryJson(){const file={schema_version:1,model:model.id,units
 $('import').onclick=()=>$('importFile').click();$('importFile').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>5_000_000)throw Error('File is too large.');const incoming=JSON.parse(await file.text());if(incoming.schema_version!==1||incoming.model!==model.id||incoming.units!=='metres')throw Error('Expected an inventory for '+model.id+' in metres, schema version 1.');const list=validateImportedAppearance(validateInventoryItems(incoming.items));const merged=new Map(items.map(it=>[it.id,it]));list.forEach(it=>merged.set(it.id,it));items=validateInventoryItems([...merged.values()]);persistInventory();cancelInventoryEdit();rebuildInventoryView();setEditorStatus('Imported {count} objects; matching IDs were updated.',{count:list.length})}catch(err){setEditorStatus('Import failed: {error}',{error:err.message})}finally{e.target.value=''}};
 function refreshEntityPresentation(){
 for(const [id,entity] of Object.entries(tvEntities))if(!haConnected||haStates[entity]?.restored||!['on','playing','paused','idle','buffering'].includes(haStates[entity]?.state))applyTVFrame(null,false,id);
-if(embedded)for(const it of items){if(!it.entity_id)continue;const state=haStates[it.entity_id],available=haConnected&&state&&!['unavailable','unknown'].includes(state.state);const entityOn=state?.state==='on'||it.entity_id.startsWith('media_player.')&&['playing','paused','idle','buffering'].includes(state?.state);const color=!available?0x8b9197:entityOn?(it.type==='tv'?0x8eb7d6:0xfff4e2):0x58838b;
-const nodes=inventoryNodes.get(it.id),label=nodes?.state;if(label)label.textContent=!haConnected?vt('Disconnected'):state?viewerStateLabel(state.state)+(state.unit?' '+state.unit:''):vt('Entity not found');
+if(embedded)for(const it of items){if(!it.entity_id)continue;const state=haStates[it.entity_id],available=haConnected&&state&&!state.restored&&!['unavailable','unknown'].includes(state.state);const entityOn=state?.state==='on'||it.entity_id.startsWith('media_player.')&&['playing','paused','idle','buffering'].includes(state?.state);const color=!available?0x8b9197:entityOn?(it.type==='tv'?0x8eb7d6:0xfff4e2):0x58838b;
+const nodes=inventoryNodes.get(it.id),label=nodes?.state;if(label)label.textContent=!haConnected?vt('Disconnected'):state?state.restored?vt('Restored state'):viewerStateLabel(state.state)+(state.unit?' '+state.unit:''):vt('Entity not found');
+if(nodes?.control)nodes.control.disabled=!haConnected||!state;
 const toggle=nodes?.toggle;if(toggle)toggle.disabled=!available||!['on','off'].includes(state.state);
 const appearance=resolveLightAppearance(state),isLight=['chandelier','lamp'].includes(it.type)||it.entity_id.startsWith('light.');
 const object=objectsById.get(it.id);if(object)object.traverse(child=>{if(child.material?.emissive){if(isLight){child.material.emissive.setRGB(...appearance.rgb.map(c=>c/255),THREE.SRGBColorSpace);child.material.emissiveIntensity=available?.3*appearance.brightness:0}else{child.material.emissive.setHex(color);child.material.emissiveIntensity=available&&entityOn?.3:.08}}});
@@ -475,6 +487,7 @@ function updateHeightCaption(){
   $('heightCaption').textContent=$('cutaway').checked?vt('Walls and windows cut at 1.15 m · exports keep full height.'):vt('Full-height walls and windows · ceiling {height} m.',{height:model.ceiling_height_m.toFixed(2)});
 }
 function refreshViewerLanguage(refreshStates=true){
+  entityGuidance.textContent=vt(bindingGuidance);
   $('addItem').textContent=vt(editing?'Save changes':'Add object');
   if(model.site_features===false)document.querySelector('.measure').textContent=vt('Units: metres')+' · '+model.ceiling_height_m.toFixed(2)+' m';
   updateHeightCaption();
@@ -482,7 +495,7 @@ function refreshViewerLanguage(refreshStates=true){
   if(editorStatus)$('status').textContent=vt(editorStatus.text,editorStatus.params);
   for(const it of items){const nodes=inventoryNodes.get(it.id);if(!nodes)continue;
     nodes.edit.textContent=vt('Edit');nodes.remove.setAttribute('aria-label',vt('Remove {name}',{name:it.name}));
-    if(nodes.control)nodes.control.textContent=vt('Open controls');
+    if(nodes.control){nodes.control.textContent=vt('Details');nodes.control.setAttribute('aria-label',vt('Details')+': '+it.name);}
     if(nodes.toggle){nodes.toggle.textContent=vt('Toggle');nodes.toggle.setAttribute('aria-label',vt('Toggle {name}',{name:it.name}));}
   }
   homeView?.refreshLanguage();if(refreshStates)refreshEntityPresentation();
@@ -495,8 +508,35 @@ for(const link of document.querySelectorAll('a[download]'))link.onclick=e=>{e.pr
 function inventorySnapshot(list){return JSON.stringify(list,(_,value)=>value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.entries(value).sort(([a],[b])=>a<b?-1:a>b?1:0)):value)}
 window.addEventListener('message',function init(event){if(event.source!==parent||event.data?.type!=='home-floorplan:init'||!event.ports[0]||bridge)return;
 let inventoryChanged=false;try{const incoming=reconcileStoredAppearance(validateInventoryItems(event.data.items));inventoryChanged=inventorySnapshot(incoming)!==inventorySnapshot(items);if(inventoryChanged)items=incoming}catch(error){setEditorStatus('Cannot load saved inventory: '+error.message);return}
-bridge=event.ports[0];homeView?.applyViewPreferences(event.data.preferences||{});bridge.onmessage=event=>{if(event.data?.type==='view_preferences'){homeView?.applyViewPreferences(event.data);return}if(event.data?.type==='camera_frames'){applyCameraFrames(event.data.frames);return}if(event.data?.type==='media_artwork'){window.applyMediaArtwork?.(event.data.artwork);return}if(event.data?.type==='tv_frame'){applyTVFrame(event.data.image,true,event.data.item_id);return}if(event.data?.type==='command_result'){homeView?.handleCommandResult(event.data);return}if(event.data?.type!=='states')return;haStates=event.data.states;haConnected=event.data.connected;if(!haConnected)applyCameraFrames();const options=Object.entries(haStates).map(([id,state])=>[id,state.name]);const key=JSON.stringify(options);if(key!==entityOptions){entityOptions=key;$('haEntities').replaceChildren(...options.map(([id,name])=>{const option=document.createElement('option');option.value=id;option.label=name;return option}))}refreshEntityPresentation()};
-bridge.postMessage({type:'model_config',model_id:model.id,...Object.fromEntries(['tv_entities','camera_entities','room_activity','receiver_activity','assumed_activity'].map(key=>[key,model[key]]))});
+bridge=event.ports[0];homeView?.applyViewPreferences(event.data.preferences||{});
+bridge.onmessage=event=>{
+  const message=event.data;
+  if(message?.type==='dismiss_overlays'){homeView?.dismissOverlays();return}
+  if(message?.type==='view_preferences'){homeView?.applyViewPreferences(message);return}
+  if(message?.type==='camera_frames'){applyCameraFrames(message.frames);return}
+  if(message?.type==='media_artwork'){window.applyMediaArtwork?.(message.artwork);return}
+  if(message?.type==='tv_frame'){applyTVFrame(message.image,true,message.item_id);return}
+  if(message?.type==='command_result'){window.handleMediaCommandResult?.(message);homeView?.handleCommandResult(message);return}
+  if(message?.type==='entity_catalog'){
+    entityCatalog=(Array.isArray(message.entities)?message.entities:[]).slice(0,20000).filter(row=>Array.isArray(row)&&typeof row[0]==='string'&&/^[a-z_]+\.[a-z0-9_]{1,137}$/.test(row[0])).map(([id,name])=>[id,typeof name==='string'?name.slice(0,200):id]);
+    refreshEntityOptions();return;
+  }
+  if(message?.type!=='states')return;
+  haStates=message.states;haConnected=message.connected;
+  if(!haConnected)applyCameraFrames();
+  if(!entityCatalog)refreshEntityOptions(); // Compatibility with earlier hosts.
+  refreshEntityPresentation();
+};
+// Declare only entity references already present in this model. Hosts use them for
+// telemetry, room activity and guard dependencies beyond the editable bindings.
+const stateEntities=new Set();let scanned=0;
+function collectStateEntities(value,depth=0){
+  if(depth>20||++scanned>100000||stateEntities.size>=2000)return;
+  if(typeof value==='string'&&/^[a-z_]+\.[a-z0-9_]{1,137}$/.test(value))stateEntities.add(value);
+  else if(value&&typeof value==='object')for(const child of Object.values(value))collectStateEntities(child,depth+1);
+}
+for(const key of ['tv_entities','camera_entities','room_activity','receiver_activity','assumed_activity','motion_sources','motion_zones','telemetry','power_labels'])collectStateEntities(model[key]);
+bridge.postMessage({type:'model_config',model_id:model.id,state_entities:[...stateEntities],...Object.fromEntries(['tv_entities','camera_entities','room_activity','receiver_activity','assumed_activity'].map(key=>[key,model[key]]))});
 document.querySelector('aside').inert=false;if(inventoryChanged)rebuildInventoryView();setEditorStatus(appearanceRefreshNotice || 'Connected. Select an entity from the list to bind an object.');window.removeEventListener('message',init);
 });
 }
