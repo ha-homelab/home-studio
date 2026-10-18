@@ -111,6 +111,7 @@ card.setConfig({floor:'main',height:850,dry_run:true});publish();window.ready=tr
     await page.goto(origin);await page.waitForFunction(()=>window.ready&&card._panel?.modelConfigured);
     assert.equal(await page.evaluate(()=>card._panel.inventoryModel),'main','generated viewer sends its inventory model ID');
     const frame=page.frames().find(frame=>frame.parentFrame());
+    assert.equal(await frame.evaluate(()=>typeof window.applyMediaArtwork),'function','compiled viewer exposes its artwork bridge');
     const image=frame.locator('[data-tv-preview="speaker"] img');
     const status=frame.locator('[data-tv-preview="speaker"] .tv-preview-status');
     await frame.waitForFunction(()=>document.querySelector('[data-tv-preview="speaker"] img')?.getAttribute('src')?.startsWith('data:image/jpeg;base64,'));

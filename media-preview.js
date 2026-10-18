@@ -13,7 +13,8 @@ function pruneMediaArtwork(){
     if(!mediaArtworkActive(item)||item.entity_id!==frame.entity_id)discardMediaArtwork(id);
   }
 }
-function applyMediaArtwork(artwork={}){
+// Explicit bridge entry point shared by the compiled viewer fragments.
+window.applyMediaArtwork=function(artwork={}){
   const retained=new Set();
   for(const [id,value] of Object.entries(artwork&&typeof artwork==='object'&&!Array.isArray(artwork)?artwork:{})){
     const item=items.find(item=>item.id===id);
@@ -41,7 +42,7 @@ function applyMediaArtwork(artwork={}){
   }
   for(const id of mediaArtwork.keys())if(!retained.has(id))discardMediaArtwork(id);
   homeView?.refreshTVPreviews?.();window.requestModelRender?.();
-}
+};
 const telemetryPreviews=new Map();
 const powerLabels=new Map();
 function formatTelemetryReading(reading,metric){

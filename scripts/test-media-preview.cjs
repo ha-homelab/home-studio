@@ -26,7 +26,7 @@ function artworkFixture(){
  c.homeView.refreshTVPreviews=()=>update('on',{media});
  update('on',{media});
  return {...fixtureValue,media,card:nodes.get('homeTVs').children[0],
-  send:(identity='artwork-1',image=artworkJPEG)=>c.applyMediaArtwork({[item.id]:{entity_id:item.entity_id,identity,image}})};
+  send:(identity='artwork-1',image=artworkJPEG)=>c.window.applyMediaArtwork({[item.id]:{entity_id:item.entity_id,identity,image}})};
 }
 
 test('saved media players show decoded HA artwork and bounded text without a TV screen',()=>{
@@ -47,14 +47,14 @@ test('artwork switches clear old covers immediately and reject late decodes',()=
  assert.equal(image.src,undefined,'The previous media identity must disappear before the next decode');
  send('artwork-3',artworkJPEG+'Mw==');late();assert.equal(image.src,undefined);
  loads[2].onload();assert.equal(image.src,artworkJPEG+'Mw==');
- c.applyMediaArtwork({});assert.equal(image.src,undefined);
- send('artwork-4');const afterClear=loads[3].onload;c.applyMediaArtwork({});afterClear();assert.equal(image.src,undefined);
+ c.window.applyMediaArtwork({});assert.equal(image.src,undefined);
+ send('artwork-4');const afterClear=loads[3].onload;c.window.applyMediaArtwork({});afterClear();assert.equal(image.src,undefined);
 });
 
 test('same-media transport and decode failures retain a valid cover, while invalid URLs never load',()=>{
  const {card,loads,send,context:c,item}=artworkFixture(),image=card.children[0];
  send();loads[0].onload();
- c.applyMediaArtwork({[item.id]:{entity_id:item.entity_id,identity:'artwork-1'}});assert.equal(image.src,artworkJPEG);
+ c.window.applyMediaArtwork({[item.id]:{entity_id:item.entity_id,identity:'artwork-1'}});assert.equal(image.src,artworkJPEG);
  send('artwork-1',artworkJPEG+'Mg==');loads[1].onerror();assert.equal(image.src,artworkJPEG);
  for(const bad of ['https://example.test/image.jpg','data:image/svg+xml;base64,YQ==','data:image/png;base64,YQ==',artworkJPEG+'!','data:image/jpeg;base64,'+'a'.repeat(250000)])send('artwork-1',bad);
  assert.equal(loads.length,2);assert.equal(image.src,artworkJPEG);
@@ -78,7 +78,7 @@ test('off, unavailable, restored, disconnected, removed and rebound entities rej
 
 test('artwork messages cannot bind unrelated entities or override an existing TV snapshot',()=>{
  const {card,loads,send,context:c,item,update}=artworkFixture(),image=card.children[0];
- c.applyMediaArtwork({other:{entity_id:item.entity_id,identity:'artwork-1',image:artworkJPEG},tv:{entity_id:'media_player.other',identity:'artwork-1',image:artworkJPEG}});
+ c.window.applyMediaArtwork({other:{entity_id:item.entity_id,identity:'artwork-1',image:artworkJPEG},tv:{entity_id:'media_player.other',identity:'artwork-1',image:artworkJPEG}});
  assert.equal(loads.length,0);
  send();loads[0].onload();c.tvFrames.set(item.id,{image:'data:image/jpeg;base64,c25hcHNob3Q='});update('on');
  assert.equal(image.src,'data:image/jpeg;base64,c25hcHNob3Q=');assert.equal(image.alt,'Study TV picture');
