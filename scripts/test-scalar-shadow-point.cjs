@@ -8,7 +8,6 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
   const api=vm.createContext({Float32Array,Int32Array});vm.runInContext(source,api);
   const compact=s=>s.replace(/\s+/g,'');
   function body(text,marker){let start=text.indexOf(marker);assert(start>=0,marker);start=text.indexOf('{',start)+1;let depth=1,end=start;for(;depth;end++){if(text[end]==='{')depth++;if(text[end]==='}')depth--;}return text.slice(start,end-1);}
-  const marker='for ( int i = homeFirstLight; i < homeRunEnd; i ++ )';
   const options={packed:true,pointTexture:true,runTexture:true,geometryTexture:true,signalTexture:true,pointDecayTwo:true,literalLambertPointBody:true,literalLambertDirectional:true,literalLambertShadowPoint:true,maxFragmentUniforms:2048,maxTextureSize:4096,maxTextures:16};
   const camera=new THREE.PerspectiveCamera();camera.position.set(2,7,12);camera.lookAt(1,0,0);camera.updateMatrixWorld(true);
   function fixture(capacity=18,extra={},type='lambert',category='floors',three=THREE){

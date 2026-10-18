@@ -6,7 +6,6 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
   for(const token of ['function bl(t,e,n,i){','function Al(t,e,n,i,r,s,a){'])assert(vendor.includes(token));
   const THREE=await import('data:text/javascript;base64,'+Buffer.from(vendor+'\nexport {bl as TestProgram,Al as TestPrograms};').toString('base64'));
   const api=vm.createContext({Float32Array,Int32Array,Uint16Array,Uint32Array});vm.runInContext(source,api);
-  function body(text,marker){let start=text.indexOf(marker);assert(start>=0,marker);start=text.indexOf('{',start)+1;let depth=1,end=start;for(;depth;end++){if(text[end]==='{')depth++;if(text[end]==='}')depth--;}return text.slice(start,end-1);}
   const options={packed:true,pointTexture:true,runTexture:true,geometryTexture:true,signalTexture:true,pointDecayTwo:true,literalLambertPointBody:true,literalLambertDirectional:true,literalLambertShadowPoint:true,literalLambertIndirect:true,directShadowUniforms:true,maxFragmentUniforms:2048,maxTextureSize:4096,maxTextures:16};
   const camera=new THREE.PerspectiveCamera();camera.position.set(2,7,12);camera.lookAt(1,0,0);camera.updateMatrixWorld(true);
   function fixture(capacity=18,extra={},type='lambert',category='floors',three=THREE,apiUnderTest=api,beforeAttach=null){
