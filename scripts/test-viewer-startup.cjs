@@ -133,16 +133,17 @@ console.log('PASS: deferred initial Home, early state/mode changes, frame orderi
 function exerciseHostInventory(transform = value => value) {
   const bootItems = [{id: 'lamp', name: 'Lamp', type: 'lamp', room: 'A', entity_id: 'light.lamp',
     position_m: {x: 1, y: 2, z: 3}, dimensions_m: {width: .3, depth: .3, height: .2}, rotation_deg: 0}];
-  const calls = {builds: 0, refreshes: 0, preferences: [], sent: [], status: [], removed: 0};
+  const calls = {builds: 0, refreshes: 0, preferences: [], sent: [], status: [], removed: 0, artwork: [], commands: []};
   let handler;
   const aside = {inert: true}, parent = {}, port = {postMessage: message => calls.sent.push(message)};
   const c = vm.createContext({
     items: bootItems, bridge: null, parent, model: {rooms: [{id: 'A'}], inventory: bootItems}, presets: {lamp: {}},
     appearanceRefreshNotice: '', inventoryAppearance() { return {}; },
     window: {addEventListener(type, callback) { assert.equal(type, 'message'); handler = callback; },
+      applyMediaArtwork(value) { calls.artwork.push(value); },
       removeEventListener(type, callback) { assert.equal(callback, handler); calls.removed++; }},
     document: {querySelector: () => aside},
-    homeView: {applyViewPreferences(value) { calls.preferences.push(value); }},
+    homeView: {applyViewPreferences(value) { calls.preferences.push(value); }, handleCommandResult(value) { calls.commands.push(value); }},
     setEditorStatus(value) { calls.status.push(value); },
     refreshEntityPresentation() { calls.refreshes++; },
     rebuildInventoryView() { calls.builds++; c.refreshEntityPresentation(); },
@@ -172,6 +173,17 @@ assert.equal(sameInventory.calls.removed, 1);
 sameInventory.port.onmessage({data: {type: 'states', connected: true, states: {}}});
 assert.equal(sameInventory.calls.refreshes, 1, 'The first live host message refreshes presentation after skipping the unchanged handshake');
 assert.equal(sameInventory.c.haConnected, true);
+const artwork = {media: {entity_id: 'media_player.example', identity: 'artwork-1', image: 'data:image/jpeg;base64,YQ=='}};
+sameInventory.port.onmessage({data: {type: 'media_artwork', artwork}});
+sameInventory.port.onmessage({data: {type: 'media_artwork', artwork: {}}});
+assert.equal(sameInventory.calls.artwork[0], artwork, 'Artwork snapshots use the established host port');
+assert.deepEqual(sameInventory.calls.artwork[1], {}, 'An empty host snapshot clears artwork');
+assert.equal(sameInventory.calls.refreshes, 1, 'Artwork delivery does not masquerade as entity state');
+const command = {type: 'command_result', request_id: 'confirmed', ok: true};
+sameInventory.port.onmessage({data: command});
+assert.equal(sameInventory.calls.commands[0], command, 'An available Home view receives command replies');
+sameInventory.c.homeView = null;
+assert.doesNotThrow(() => sameInventory.port.onmessage({data: command}), 'A missing Home view must not crash the host bridge on command replies');
 const reorderedInventory = exerciseHostInventory(items => items.map(item => Object.fromEntries(Object.entries(item).reverse().map(([key,value])=>[key,value&&typeof value==='object'?Object.fromEntries(Object.entries(value).reverse()):value]))));
 assert.equal(reorderedInventory.calls.builds, 0, 'JSON property order does not discard matching boot resources');
 const changedInventory = exerciseHostInventory(items => { items[0].position_m.x = 7; return items; });

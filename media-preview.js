@@ -1,5 +1,48 @@
-// Reuse decoded TV frames and notification frames; these callouts never poll.
+// Reuse decoded TV frames, HA artwork and notification frames; these callouts never poll.
 const tvPreviews=new Map(),mediaLeaders=new Map();
+const mediaArtwork=new Map();
+const mediaArtworkActive=item=>item?.entity_id?.startsWith('media_player.')&&haConnected&&!haStates[item.entity_id]?.restored&&['on','playing','paused','idle','buffering'].includes(haStates[item.entity_id]?.state);
+function discardMediaArtwork(id){
+  const frame=mediaArtwork.get(id);
+  if(frame?.decoder){frame.decoder.onload=frame.decoder.onerror=null;frame.decoder.removeAttribute('src');}
+  mediaArtwork.delete(id);
+}
+function pruneMediaArtwork(){
+  for(const [id,frame] of mediaArtwork){
+    const item=items.find(item=>item.id===id);
+    if(!mediaArtworkActive(item)||item.entity_id!==frame.entity_id)discardMediaArtwork(id);
+  }
+}
+// Explicit bridge entry point shared by the compiled viewer fragments.
+window.applyMediaArtwork=function(artwork={}){
+  const retained=new Set();
+  for(const [id,value] of Object.entries(artwork&&typeof artwork==='object'&&!Array.isArray(artwork)?artwork:{})){
+    const item=items.find(item=>item.id===id);
+    if(!mediaArtworkActive(item)||value?.entity_id!==item.entity_id||typeof value.identity!=='string'||!value.identity||value.identity.length>128)continue;
+    retained.add(id);
+    let frame=mediaArtwork.get(id);
+    if(frame?.identity!==value.identity||frame.entity_id!==value.entity_id){
+      discardMediaArtwork(id);frame={entity_id:value.entity_id,identity:value.identity,image:null};mediaArtwork.set(id,frame);
+    }
+    if(value.image===null){discardMediaArtwork(id);continue;}
+    // Only the trusted host's bounded JPEG data is decoded; never fetch a URL here.
+    const image=value.image;
+    if(typeof image!=='string'||image.length>250000||!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(image)||frame.image===image||frame.pending===image)continue;
+    if(frame.decoder){frame.decoder.onload=frame.decoder.onerror=null;frame.decoder.removeAttribute('src');}
+    const decoder=new Image();frame.decoder=decoder;frame.pending=image;
+    const finish=()=>{decoder.onload=decoder.onerror=null;if(frame.decoder===decoder){frame.decoder=null;frame.pending=null;}};
+    decoder.onload=()=>{
+      const current=items.find(item=>item.id===id);
+      if(mediaArtwork.get(id)===frame&&frame.decoder===decoder&&current?.entity_id===frame.entity_id&&mediaArtworkActive(current)&&decoder.naturalWidth>0&&decoder.naturalWidth<=512&&decoder.naturalHeight>0&&decoder.naturalHeight<=512){
+        frame.image=image;homeView?.refreshTVPreviews?.();window.requestModelRender?.();
+      }
+      finish();
+    };
+    decoder.onerror=finish;decoder.src=image;
+  }
+  for(const id of mediaArtwork.keys())if(!retained.has(id))discardMediaArtwork(id);
+  homeView?.refreshTVPreviews?.();window.requestModelRender?.();
+};
 const telemetryPreviews=new Map();
 const powerLabels=new Map();
 function formatTelemetryReading(reading,metric){
@@ -66,9 +109,10 @@ function positionPowerLabels(camera,rect,room){
 }
 function removeMediaLeader(id){mediaLeaders.get(id)?.remove();mediaLeaders.delete(id);}
 function updateTVPreviews(entries){
+  pruneMediaArtwork();
   const ids=new Set(entries.map(entry=>entry.item.id));
   for(const [id,entry] of tvPreviews)if(!ids.has(id)){entry.el.remove();tvPreviews.delete(id);removeMediaLeader('tv:'+id);}
-  for(const {item,state,busy,enabled,details,power} of entries){
+  for(const {item,state,busy,enabled,details,power,media} of entries){
     let entry=tvPreviews.get(item.id);
     if(!entry){
       const el=document.createElement('figure'),img=document.createElement('img'),caption=document.createElement('figcaption'),name=document.createElement('button'),button=document.createElement('button'),status=document.createElement('span');
@@ -79,12 +123,15 @@ function updateTVPreviews(entries){
       entry={el,img,name,button,status,item};tvPreviews.set(item.id,entry);
     }
     entry.item=item;entry.state=state;
-    entry.img.alt=item.name+' picture';entry.name.textContent=item.name;
-    entry.name.title=item.name+' · Open Home Assistant TV controls';entry.name.onclick=details;entry.button.onclick=power;
-    const image=state==='on'?tvFrames.get(item.id)?.image:null;
+    const snapshot=state==='on'?tvFrames.get(item.id)?.image:null,artwork=state==='on'?mediaArtwork.get(item.id)?.image:null;
+    const image=snapshot||artwork,cover=!!artwork&&!snapshot,configuredTV=!!model.tv_entities?.[item.id];
+    const label=media&&typeof media==='object'?[media.title,media.artist,media.album].filter(value=>typeof value==='string'&&value.trim()).map(value=>value.trim().slice(0,200)).join(' · '):'';
+    entry.img.alt=item.name+(cover?' cover art':' picture');entry.name.textContent=item.name;
+    entry.name.title=item.name+' · Open Home Assistant media controls';entry.name.onclick=details;entry.button.onclick=power;
+    entry.el.dataset.mediaKind=!snapshot&&(cover||!configuredTV)?'cover':'snapshot';
     if(image){if(entry.img.getAttribute('src')!==image)entry.img.src=image;}else entry.img.removeAttribute('src');
-    entry.img.hidden=!image;entry.status.hidden=!!image;
-    entry.status.textContent=busy?'Waiting for TV…':({off:'TV is off',on:'Waiting for a picture',disconnected:'Disconnected',missing:'Entity not found',unavailable:'TV unavailable',preview:'Offline preview'})[state]||'TV unavailable';
+    entry.img.hidden=!image;entry.status.hidden=!!snapshot;
+    entry.status.textContent=cover?(label||'Cover art'):busy?'Waiting for media player…':({off:configuredTV?'TV is off':'Media player is off',on:configuredTV?'Waiting for a picture':label||'Cover art unavailable',disconnected:'Disconnected',missing:'Entity not found',unavailable:'Media player unavailable',preview:'Offline preview'})[state]||'Media player unavailable';
     entry.el.dataset.state=state;entry.name.disabled=!enabled;
     entry.button.disabled=!enabled||busy||!['on','off'].includes(state);
     entry.button.setAttribute('aria-label',(state==='on'?'Turn off ':'Turn on ')+item.name);

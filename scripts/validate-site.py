@@ -80,7 +80,7 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'docs/rc-fuzzing.md', 'docs/release-workflow.md', '.gitignore', '.gitattributes', 'scripts/validate-site.py', '.github/workflows/pages.yml',
               '.github/workflows/package.yml', '.github/workflows/platform-acceptance.yml',
               '.github/actions/upload-acceptance-artifact/action.yml',
-              'docs/architecture.md', 'docs/first-session.md', 'docs/platform-acceptance.md',
+              'docs/architecture.md', 'docs/first-session.md', 'docs/dashboard-and-media.md', 'docs/platform-acceptance.md',
               'docs/quality-and-release.md', 'docs/VERSIONING.md',
               'docs/assets/quality/release-pipeline.svg',
               'docs/assets/quality/browser-coverage.svg',
@@ -137,7 +137,10 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'custom_components/home_floorplan/validation.py',
               'custom_components/home_floorplan/curtains.py',
               'custom_components/home_floorplan/manifest.json',
-              'custom_components/home_floorplan/static/panel.js')
+              'custom_components/home_floorplan/static/panel.js',
+              'custom_components/home_floorplan/static/card.js',
+              'scripts/test-dashboard-card.cjs', 'scripts/test-media-artwork-host.cjs',
+              'scripts/test-media-artwork-browser.cjs', 'docs/images/dashboard-media-example.png')
 # Supplementary tripwires, not a substitute for reviewing source and image pixels.
 PRIVATE = re.compile(r'\bunit\d{3}\b|/Users/|-----BEGIN .*PRIVATE KEY|'
                      r'\b(?:192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3})\b', re.I)
@@ -177,7 +180,7 @@ def validate(root):
             if path.read_bytes() != BINARY_REPLAY_SEEDS[relative]:
                 raise ValueError(f'Unexpected binary replay seed: {relative}')
             continue
-        if path.suffix == '.jpg':
+        if path.suffix == '.jpg' or relative == 'docs/images/dashboard-media-example.png':
             continue
         text = path.read_text(encoding='utf-8')
         # The validator intentionally contains its own private-pattern tripwires.

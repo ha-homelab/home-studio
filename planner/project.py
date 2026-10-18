@@ -549,7 +549,7 @@ def package_ha(output, manifest):
         # Private adapters are deliberately outside this reviewed source list.
         sources = [component / name for name in (
             "__init__.py", "site.py", "validation.py", "curtains.py",
-            "manifest.json", "static/panel.js",
+            "manifest.json", "static/panel.js", "static/card.js",
         )]
         for source in sources:
             if source.is_symlink():

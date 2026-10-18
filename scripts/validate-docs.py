@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 GUIDES = ('README.md', 'CHANGELOG.md', 'docs/dry-run.md', 'docs/i18n.md', 'docs/architecture.md',
-          'docs/first-session.md', 'docs/process-and-results.md', 'docs/quality-and-release.md', 'docs/quality.md',
+          'docs/first-session.md', 'docs/dashboard-and-media.md', 'docs/process-and-results.md', 'docs/quality-and-release.md', 'docs/quality.md',
           'docs/fuzzing.md', 'docs/browser-compatibility.md', 'docs/release-workflow.md',
           'docs/VERSIONING.md', 'docs/translations/README.md')
 WIKI = ('Home', '_Sidebar', 'Getting-started', 'Dry-run', 'Troubleshooting',
