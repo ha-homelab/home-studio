@@ -51,15 +51,14 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
     const version=texture.version;candidate.update(input,camera);assert.equal(texture.version,version,'No redundant texture invalidation for identical runs');
     return shaders;
   }
-  let shaders;
   for(const shadows of [0,1,2,8])for(const mode of ['on','off','alternating','hidden']){
     points.forEach((p,i)=>{p.light.castShadow=i<shadows;p.light.visible=mode!=='hidden'||i%3!==1;p.light.intensity=mode==='off'?0:mode==='alternating'&&i%2?0:1;});
-    shaders=compare();if(previousCount)assert.deepEqual(rows,previousCount);previousCount=[...rows];
+    compare();if(previousCount)assert.deepEqual(rows,previousCount);previousCount=[...rows];
   }
   points.forEach(p=>p.light.visible=false);compare([]);assert.equal(compile(a.meshes[0]).uniforms.homeLightRunCount.value,0);
   // Fewer runs retain valid old tail records, while scalar counts alone decide use.
   points.forEach((p,i)=>{p.light.visible=true;p.item.room=i%2?'r0':'r1';});compare();
-  const tail=Array.from(texture.image.data);points.forEach(p=>p.item.room='r0');shaders=compare();assert(texture.image.data.some((v,i)=>v===tail[i]&&v!==0));
+  const tail=Array.from(texture.image.data);points.forEach(p=>p.item.room='r0');compare();assert(texture.image.data.some((v,i)=>v===tail[i]&&v!==0));
   // Full/editor cached uniform maps still read the current table and block.
   candidate.update(points);const full=compile(a.meshes[0]);assert(!hasRun(full));candidate.update(points,camera);assert.equal(full.uniforms.homeRunTexture.value,texture);
   candidate.attach(a.statics,false,{staticGeometry:true});const editor=compile(a.meshes[0]);assert(!hasRun(editor));candidate.attach(a.statics,true,{staticGeometry:true});candidate.update(points,camera);assert.equal(editor.uniforms.homeRunTexture.value,texture);assert.equal(editor.uniforms.homeRunBlock.value,rows[0]);

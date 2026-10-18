@@ -52,6 +52,11 @@ Audio controls also have an explicit **Controls** button in the artwork preview.
 Escape or a click outside dismisses the compact audio remote. Full HA dialogs use
 HA's normal close behavior. Quick toggles remain deliberate clicks.
 
+A canvas gesture belongs to the pointer that started it. A second finger cannot
+turn a drag into a device tap, and a gesture involving multiple contacts never
+activates a device. Switching views, losing pointer capture, hiding the page or
+losing the graphics context cancels the gesture. Start a fresh tap afterward.
+
 Native dialogs require the Home Assistant frontend. A separately hosted wrapper
 must handle the `hass-more-info` event itself; authentication alone does not
 load HA's full controls into that page.

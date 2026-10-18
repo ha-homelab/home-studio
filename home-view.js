@@ -1,6 +1,8 @@
 // Embedded offline/HA view; see docs/architecture.md.
 homeView = (() => {
   let active = false, camera, overlayGroup, roomLighting, selected = '', bindings = [], points = [], labels = [];
+  let homeGesture=null;
+  function cancelHomeGesture(){const previous=homeGesture;homeGesture=null;if(previous&&renderer.domElement.hasPointerCapture(previous.id))renderer.domElement.releasePointerCapture(previous.id);}
   let assumedZones, signalZone='', cameraFit;
   const projectedPosition = new THREE.Vector3(), projectedForward = new THREE.Vector3();
   let showLowerFloor=true;
@@ -230,6 +232,7 @@ homeView = (() => {
   }
 
   function setActive(value) {
+    cancelHomeGesture();cancelEditorGesture();
     hideMediaControls();cancelNativeHover(true);
     active = value;previewTV(null);
     if(lowerFloorContext)lowerFloorContext.visible=value&&showLowerFloor&&!selected;
@@ -282,7 +285,8 @@ homeView = (() => {
     const id=target?.dataset.homeItem||target?.dataset.homeDevice||target?.dataset.homeDetails;
     if(id!==nativeHoverId)nativeHoverId=null;
   });
-  window.addEventListener('pagehide',()=>{cancelNativeHover(true);discardMediaControls();});
+  window.addEventListener('pagehide',()=>{cancelHomeGesture();cancelNativeHover(true);discardMediaControls();});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)cancelHomeGesture();});
   function rebuildControls() {
     hideMediaControls();cancelNativeHover(true);
     for(const point of points)for(const cleanup of point.controlCleanup||[])cleanup();
@@ -712,16 +716,22 @@ homeView = (() => {
   document.addEventListener('scroll',()=>previewTV(null),true);
   window.addEventListener('resize',()=>previewTV(null));
   if(renderer) {
-    let start=null;
-    renderer.domElement.addEventListener('pointerdown',e=>{if(active && e.button===0){start={x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY};renderer.domElement.setPointerCapture(e.pointerId);}});
-    renderer.domElement.addEventListener('pointermove',e=>{if(!start || !active || !camera)return;
+    renderer.domElement.addEventListener('pointerdown',e=>{if(!active||e.button!==0||renderLost||renderSuspended||document.hidden)return;
+      // A second contact never owns this gesture, and invalidates its device tap.
+      if(homeGesture){if(homeGesture.id!==e.pointerId)homeGesture.tapAllowed=false;return;}
+      if(e.isPrimary===false)return;
+      homeGesture={id:e.pointerId,x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,tapAllowed:true};renderer.domElement.setPointerCapture(e.pointerId);});
+    renderer.domElement.addEventListener('pointermove',e=>{const start=homeGesture;if(!start||start.id!==e.pointerId||!active||!camera)return;
+      if(e.buttons===0){cancelHomeGesture();return;}
       if(Math.hypot(e.clientX-start.x,e.clientY-start.y)>6)start.moved=true;
       if(start.moved){const rect=renderer.domElement.getBoundingClientRect();panX-=(e.clientX-start.lastX)*(camera.right-camera.left)/rect.width;panY+=(e.clientY-start.lastY)*(camera.top-camera.bottom)/rect.height;window.requestModelRender?.(true);}
       start.lastX=e.clientX;start.lastY=e.clientY;});
-    renderer.domElement.addEventListener('pointercancel',()=>start=null);
+    for(const type of ['pointercancel','lostpointercapture'])renderer.domElement.addEventListener(type,e=>{if(homeGesture?.id===e.pointerId)cancelHomeGesture();});
+    renderer.domElement.addEventListener('webglcontextlost',()=>cancelHomeGesture());
     renderer.domElement.addEventListener('pointerup',e=>{
-      const previous=start;start=null;
-      if(!active || !camera || !previous || previous.moved || Math.hypot(e.clientX-previous.x,e.clientY-previous.y)>6)return;
+      if(homeGesture?.id!==e.pointerId)return;
+      const previous=homeGesture;cancelHomeGesture();
+      if(!active || !camera || !previous.tapAllowed || previous.moved || Math.hypot(e.clientX-previous.x,e.clientY-previous.y)>6)return;
       const rect=renderer.domElement.getBoundingClientRect(),ray=new THREE.Raycaster();
       ray.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,1-(e.clientY-rect.top)/rect.height*2),camera);
       const hit=ray.intersectObjects(objectGroup.children,true)[0];let object=hit?.object;
