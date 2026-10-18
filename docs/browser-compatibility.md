@@ -369,6 +369,15 @@ and labels remain aligned, that frame counts settle while idle, and that no
 shader-link errors or unexpected context losses occur. Use a disconnected mock
 bridge when exercising controls; no physical-device command is needed.
 
+`node scripts/test-pointer-ownership.cjs` exercises the production Home and
+editor input handlers with independent pointer IDs. It checks that another
+finger cannot take over a gesture or trigger a light, and that cancellation,
+capture loss, backgrounding and mode changes require a fresh gesture. Mouse
+orbit, shift/right-button pan and wheel zoom remain covered. Negative controls
+verify that removing ownership or multi-contact suppression fails the checks.
+These deterministic checks supplement real-browser acceptance; they do not
+claim physical touchscreen coverage.
+
 Compare baseline and candidate under the same conditions. Report measured
 startup/interaction durations separately from pass/fail behavior, and avoid
 generalizing a short synthetic run to an all-day stability or hardware power

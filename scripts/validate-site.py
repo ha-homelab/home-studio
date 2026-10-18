@@ -120,7 +120,7 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'scripts/setup-browser-toolchain.py', 'scripts/setup-chrome-for-testing.py',
               'scripts/install-browser-with-retry.py', 'scripts/test-browser-install.py',
               'scripts/test-browser-matrix.py',
-              'scripts/test-render-capacity.cjs', 'scripts/test-interaction-render.cjs', 'scripts/test-render-lifecycle.cjs', 'scripts/test-viewer-geometry-context.cjs', 'scripts/test-viewer-texture-context.cjs', 'docs/browser-compatibility.md',
+              'scripts/test-render-capacity.cjs', 'scripts/test-interaction-render.cjs', 'scripts/test-render-lifecycle.cjs', 'scripts/test-pointer-ownership.cjs', 'scripts/test-viewer-geometry-context.cjs', 'scripts/test-viewer-texture-context.cjs', 'docs/browser-compatibility.md',
               'scripts/test-planner-stability.cjs', 'scripts/test-planner-render-budget.cjs',
               'scripts/test-viewer-startup.cjs', 'scripts/test-module-expiry.cjs', 'scripts/test-floor-context.py', 'scripts/test-floor-context.cjs',
               'planner/project.py', 'planner/package.json', 'planner/catalog.json', 'planner/furniture.py',

@@ -156,6 +156,7 @@ jobs:
           node scripts/test-direct-shadow-uniforms.cjs
           node scripts/test-scalar-lambert-accumulators.cjs
           node scripts/test-render-lifecycle.cjs
+          node scripts/test-pointer-ownership.cjs
           node scripts/test-viewer-geometry-context.cjs
           node scripts/test-viewer-texture-context.cjs
           node scripts/test-interaction-render.cjs
