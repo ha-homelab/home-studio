@@ -379,7 +379,7 @@ homeView = (() => {
 
   function refreshTVPreviews(){
     updateTVPreviews(bindings.filter(isTV).map(item=>({item,state:deviceDisplayState(item),
-      busy:pending.has(item.entity_id),enabled:!!(bridge&&haConnected&&haStates[item.entity_id]),
+      busy:pending.has(item.entity_id),enabled:!!(bridge&&haConnected&&haStates[item.entity_id]),media:haStates[item.entity_id]?.restored?null:haStates[item.entity_id]?.media,
       details:()=>activateDevice(item),power:()=>activateDevice(item,false,true)})));
   }
   function activateDevice(item,quick=true,tvPower=false) {

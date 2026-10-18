@@ -1,20 +1,89 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 function fixture(){
- const nodes=new Map();
+ const nodes=new Map(),loads=[];
  const element=tag=>({tag,hidden:false,style:{},dataset:{},children:[],attributes:{},
   append(...children){this.children.push(...children)},remove(){this.removed=true},
   getAttribute(key){return key==='src'?this.src:this.attributes[key]},setAttribute(key,value){this.attributes[key]=value},removeAttribute(key){delete this[key];delete this.attributes[key]},
   getBoundingClientRect(){return {left:100,top:20,width:200,height:120}},
   querySelectorAll(tag){return this.children.filter(child=>child.tag===tag)},querySelector(tag){return this.querySelectorAll(tag)[0]}});
- const context=vm.createContext({document:{createElement:element,createElementNS:(ns,tag)=>element(tag)},
+ const item={id:'tv',name:'Study TV',entity_id:'media_player.study',room:'study',position_m:{x:0,y:0,z:0},dimensions_m:{height:1}};
+ class Image{constructor(){this.naturalWidth=320;this.naturalHeight=180;loads.push(this)}removeAttribute(key){delete this[key]}}
+ const context=vm.createContext({document:{createElement:element,createElementNS:(ns,tag)=>element(tag)},Image,
   $:id=>{if(!nodes.has(id))nodes.set(id,element('div'));return nodes.get(id)},
-  tvFrames:new Map(),cameraPreviews:new Map(),dismissedCameraEvents:new Map(),items:[],objectsById:new Map(),
-  model:{},xm:x=>x,zm:z=>z,lowerFloorContext:{visible:true},root:{children:[]},objectGroup:{children:[]},THREE:{Vector3:class{constructor(x=0,y=0,z=0){Object.assign(this,{x,y,z})}project(){return this}}}});
+  tvFrames:new Map(),cameraPreviews:new Map(),dismissedCameraEvents:new Map(),items:[item],objectsById:new Map(),
+  haConnected:true,haStates:{'media_player.study':{state:'playing'}},homeView:{},window:{requestModelRender(){}},
+  model:{tv_entities:{tv:item.entity_id}},xm:x=>x,zm:z=>z,lowerFloorContext:{visible:true},root:{children:[]},objectGroup:{children:[]},THREE:{Vector3:class{constructor(x=0,y=0,z=0){Object.assign(this,{x,y,z})}project(){return this}}}});
  vm.runInContext(fs.readFileSync('media-preview.js','utf8'),context);
- const item={id:'tv',name:'Study TV',room:'study',position_m:{x:0,y:0,z:0},dimensions_m:{height:1}};
  const update=(state='off',extra={})=>context.updateTVPreviews([{item,state,busy:false,enabled:true,details(){},power(){},...extra}]);
- return {context,nodes,element,item,update};
+ return {context,nodes,element,item,update,loads};
 }
+
+const artworkJPEG='data:image/jpeg;base64,/9j/YXJ0';
+function artworkFixture(){
+ const fixtureValue=fixture(),{context:c,update,item,nodes}=fixtureValue;
+ delete c.model.tv_entities;
+ const media={title:'A song',artist:'An artist',album:'An album'};
+ c.homeView.refreshTVPreviews=()=>update('on',{media});
+ update('on',{media});
+ return {...fixtureValue,media,card:nodes.get('homeTVs').children[0],
+  send:(identity='artwork-1',image=artworkJPEG)=>c.applyMediaArtwork({[item.id]:{entity_id:item.entity_id,identity,image}})};
+}
+
+test('saved media players show decoded HA artwork and bounded text without a TV screen',()=>{
+ const {card,loads,send,update,media}=artworkFixture(),[image,status]=card.children;
+ send();assert.equal(loads.length,1);assert.equal(image.hidden,true);
+ loads[0].onload();assert.equal(image.src,artworkJPEG);assert.equal(image.alt,'Study TV cover art');
+ assert.equal(card.dataset.mediaKind,'cover');assert.equal(status.textContent,'A song · An artist · An album');assert.equal(status.hidden,false);
+ send();assert.equal(loads.length,1,'Repeated snapshots reuse an already decoded image');
+ update('on',{media:{title:'<img src=x onerror=alert(1)>',artist:'a'.repeat(500)}});
+ assert.equal(status.textContent,'<img src=x onerror=alert(1)> · '+'a'.repeat(200));
+ update('off',{media});assert.equal(image.hidden,true);assert.equal(status.textContent,'Media player is off');
+});
+
+test('artwork switches clear old covers immediately and reject late decodes',()=>{
+ const {card,loads,send,context:c}=artworkFixture(),image=card.children[0];
+ send();loads[0].onload();assert.equal(image.src,artworkJPEG);
+ send('artwork-2',artworkJPEG+'Mg==');const late=loads[1].onload;
+ assert.equal(image.src,undefined,'The previous media identity must disappear before the next decode');
+ send('artwork-3',artworkJPEG+'Mw==');late();assert.equal(image.src,undefined);
+ loads[2].onload();assert.equal(image.src,artworkJPEG+'Mw==');
+ c.applyMediaArtwork({});assert.equal(image.src,undefined);
+ send('artwork-4');const afterClear=loads[3].onload;c.applyMediaArtwork({});afterClear();assert.equal(image.src,undefined);
+});
+
+test('same-media transport and decode failures retain a valid cover, while invalid URLs never load',()=>{
+ const {card,loads,send,context:c,item}=artworkFixture(),image=card.children[0];
+ send();loads[0].onload();
+ c.applyMediaArtwork({[item.id]:{entity_id:item.entity_id,identity:'artwork-1'}});assert.equal(image.src,artworkJPEG);
+ send('artwork-1',artworkJPEG+'Mg==');loads[1].onerror();assert.equal(image.src,artworkJPEG);
+ for(const bad of ['https://example.test/image.jpg','data:image/svg+xml;base64,YQ==','data:image/png;base64,YQ==',artworkJPEG+'!','data:image/jpeg;base64,'+'a'.repeat(250000)])send('artwork-1',bad);
+ assert.equal(loads.length,2);assert.equal(image.src,artworkJPEG);
+ send('artwork-1',artworkJPEG+'Mw==');loads[2].naturalWidth=513;loads[2].onload();assert.equal(image.src,artworkJPEG);
+ send('artwork-2',null);assert.equal(image.src,undefined);
+});
+
+test('off, unavailable, restored, disconnected, removed and rebound entities reject stale artwork',()=>{
+ for(const change of ['off','unavailable','unknown','restored','disconnected','removed','rebound']){
+  const {card,loads,send,context:c,item,update}=artworkFixture(),image=card.children[0];
+  send();const late=loads[0].onload;
+  if(change==='restored')c.haStates[item.entity_id].restored=true;
+  else if(change==='disconnected')c.haConnected=false;
+  else if(change==='removed')c.items=[];
+  else if(change==='rebound')c.items=[{...item,entity_id:'media_player.new'}];
+  else c.haStates[item.entity_id].state=change;
+  update('on');late();assert.equal(image.src,undefined,change);
+  send();assert.equal(loads.length,1,change+' does not decode another stale image');
+ }
+});
+
+test('artwork messages cannot bind unrelated entities or override an existing TV snapshot',()=>{
+ const {card,loads,send,context:c,item,update}=artworkFixture(),image=card.children[0];
+ c.applyMediaArtwork({other:{entity_id:item.entity_id,identity:'artwork-1',image:artworkJPEG},tv:{entity_id:'media_player.other',identity:'artwork-1',image:artworkJPEG}});
+ assert.equal(loads.length,0);
+ send();loads[0].onload();c.tvFrames.set(item.id,{image:'data:image/jpeg;base64,c25hcHNob3Q='});update('on');
+ assert.equal(image.src,'data:image/jpeg;base64,c25hcHNob3Q=');assert.equal(image.alt,'Study TV picture');
+ assert.equal(card.dataset.mediaKind,'snapshot');assert.equal(card.children[1].hidden,true);
+});
 test('TV cards reuse frames, show truthful off/unknown states and disable pending power',()=>{
  const {context:c,nodes,update}=fixture();
  c.tvFrames.set('tv',{image:'data:image/jpeg;base64,frame'});update('on');
