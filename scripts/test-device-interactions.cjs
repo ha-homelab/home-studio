@@ -4,9 +4,18 @@ const http=require('node:http'),{spawnSync}=require('node:child_process'),{chrom
 const {browserLaunchOptions}=require('./browser-stability-diagnostics.cjs');
 const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tmpdir(),'home-device-interactions-'));
 const engine=process.env.DEVICE_INTERACTIONS_ENGINE||'chromium';
+const headless=process.env.DEVICE_INTERACTIONS_HEADED!=='1';
 assert(['chromium','firefox','webkit'].includes(engine));
 (async()=>{
  let browser,server;
+ const errors=[],consoleErrors=[],external=[],pages=[];
+ const errorText=value=>String(value).replace(/data:text\/javascript;base64,[A-Za-z0-9+/=]+/g,'[embedded Three.js]').slice(0,8000);
+ const viewerDiagnostics=()=>Promise.all(pages.flatMap(page=>page.frames()).filter(frame=>frame.parentFrame()).map(async frame=>{
+  try{return await frame.evaluate(()=>{
+   const error=document.querySelector('#loadError');
+   return {errorVisible:!!error&&getComputedStyle(error).display!=='none',errorText:error?.textContent,renderCount:window.floorplan?.renderCount};
+  });}catch{return {unavailable:true};}
+ }));
  try{
   const project=JSON.parse(fs.readFileSync(path.join(root,'planner/example-home.json'),'utf8'));
   const source=project.floors[0].items[0];
@@ -30,14 +39,26 @@ assert(['chromium','firefox','webkit'].includes(engine));
   server=http.createServer((request,response)=>{response.setHeader('Content-Type','text/html');response.end('<!doctype html><style>body{margin:0}iframe{width:100%;height:100vh;border:0}dialog{width:100vw;height:100vh;max-width:none;max-height:none;margin:0;border:0;padding:0}dialog::backdrop{background:#0008}#parentControl{position:fixed;right:0;top:0;z-index:3}</style><button id="parentControl">Parent control</button><dialog id="native"><button onclick="this.parentElement.close()">Close native details</button></dialog>');});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const origin=`http://127.0.0.1:${server.address().port}`;
-  browser=await ({chromium,firefox,webkit}[engine]).launch(browserLaunchOptions(engine,true));
-  const errors=[],external=[];
+  browser=await ({chromium,firefox,webkit}[engine]).launch(browserLaunchOptions(engine,headless));
   async function mount(context){
-   const page=await context.newPage();page.setDefaultTimeout(15000);page.on('pageerror',e=>errors.push(String(e)));
+   const page=await context.newPage();pages.push(page);page.setDefaultTimeout(15000);page.on('pageerror',e=>errors.push(errorText(e)));
+   page.on('console',message=>{
+    if(message.type()!=='error')return;
+    const text=errorText(message.text());consoleErrors.push(text);console.error('Browser console.error ('+engine+'): '+text);
+   });
    await page.route('**/*',route=>{if(route.request().url().startsWith(origin+'/'))return route.continue();external.push(route.request().url());return route.abort();});
    await page.goto(origin);
    await page.evaluate(html=>{const el=document.createElement('iframe');el.sandbox='allow-scripts';el.srcdoc=html;document.body.append(el);},html);
-   const frame=page.frameLocator('iframe');await frame.locator('#homeRoom').waitFor();
+   const frame=page.frameLocator('iframe');await frame.locator('#loadError').waitFor({state:'attached'});
+   const viewer=await (await page.locator('iframe').elementHandle()).contentFrame();
+   await viewer.waitForFunction(()=>{
+    const error=document.querySelector('#loadError');
+    return (error&&getComputedStyle(error).display!=='none')||window.floorplan?.renderCount>0;
+   });
+   assert.equal(await frame.locator('#loadError').isVisible(),false,
+    '3D viewer startup failed ('+engine+', '+(headless?'headless':'headed')+'): '+
+    await frame.locator('#loadError').innerText()+'\n'+[...errors,...consoleErrors].join('\n'));
+   await frame.locator('#homeRoom').waitFor();
    await page.evaluate(items=>{
     const channel=new MessageChannel();window.channel=channel.port1;window.messages=[];
     window.nativeHoverProbes={};
@@ -231,6 +252,17 @@ assert(['chromium','firefox','webkit'].includes(engine));
   await touch.frame.locator('[data-home-details="light"]').tap();await touch.page.locator('#native').waitFor({state:'visible'});
   assert.deepEqual(await touch.page.evaluate(()=>messages.filter(m=>['toggle','curtain_command','tv_power'].includes(m.type))),[]);
   assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
+  const liveViewers=await viewerDiagnostics();
+  assert(liveViewers.length>0,'a live viewer remains after lifecycle checks');
+  for(const viewer of liveViewers){
+   assert.equal(viewer.errorVisible,false,'live viewer has no 3D failure: '+JSON.stringify(viewer));
+   assert(viewer.renderCount>0,'live viewer completed a real 3D frame: '+JSON.stringify(viewer));
+  }
   console.log('PASS ('+engine+'): generated viewer media/native hover, explicit commands, keyboard/touch, 5,500-entity search and dense-model dependencies');
+ }catch(error){
+  const viewers=await viewerDiagnostics();
+  console.error('Device interaction diagnostics: '+JSON.stringify({engine,headless,viewers,pageErrors:errors,consoleErrors}));
+  if(viewers.some(viewer=>viewer.errorVisible))throw Error('3D viewer failed ('+engine+', '+(headless?'headless':'headed')+'); see loadError and browser console diagnostics above.',{cause:error});
+  throw error;
  }finally{await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));fs.rmSync(temporary,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});

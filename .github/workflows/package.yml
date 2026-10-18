@@ -129,7 +129,7 @@ jobs:
         run: |
           node scripts/test-generic-entities.cjs
           for engine in chromium firefox webkit; do
-            DEVICE_INTERACTIONS_ENGINE="$engine" node scripts/test-device-interactions.cjs
+            DEVICE_INTERACTIONS_ENGINE="$engine" DEVICE_INTERACTIONS_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-device-interactions.cjs
           done
       - name: Test muted lower-floor context and independent camera focus
         run: python3 scripts/test-floor-context.py && node --test scripts/test-floor-context.cjs
