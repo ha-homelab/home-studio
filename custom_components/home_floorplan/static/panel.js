@@ -239,6 +239,13 @@ class HomeFloorplanPanel extends HTMLElement {
       this.applyDryRun(this.dryRunPinned || !storageAvailable || event.key === null || event.newValue !== 'false');
       this.noticeKey(this.dryRun ? 'Dry run · device commands are blocked; states stay live.' : 'Live controls enabled.');
     };
+    this.onOverlayEscape = event => {
+      if (event.key === 'Escape') this.dismissViewerOverlays();
+    };
+    this.onOverlayPointer = event => {
+      const iframe=this.$('iframe',false);
+      if (event.target !== iframe && !event.composedPath?.().includes(iframe)) this.dismissViewerOverlays();
+    };
     this.$('dry-run').onclick = () => this.setDryRun(!this.dryRun);
     this.viewPreferences = {sidebarCollapsed:false};
     try { this.viewPreferences.sidebarCollapsed=localStorage.getItem('home-floorplan:sidebar-collapsed')==='true'; } catch {}
@@ -361,12 +368,19 @@ class HomeFloorplanPanel extends HTMLElement {
   }
   connectedCallback() {
     globalThis.addEventListener?.('storage',this.onDryRunStorage);
+    // Hover keeps focus in HA, so parent-document dismissal must cross the sandbox bridge.
+    this.overlayDocument=this.ownerDocument;
+    this.overlayDocument.addEventListener('keydown',this.onOverlayEscape,true);
+    this.overlayDocument.addEventListener('pointerdown',this.onOverlayPointer,true);
     this.checkDryRunStorage();
     if (this._hass && !this.started) { this.started = true; this.loadFloor(); }
   }
   disconnectedCallback() {
     this.suspendedEdits ||= !!this.localEdits && !!(this.pending || this.failed);
     globalThis.removeEventListener?.('storage',this.onDryRunStorage);
+    this.overlayDocument?.removeEventListener('keydown',this.onOverlayEscape,true);
+    this.overlayDocument?.removeEventListener('pointerdown',this.onOverlayPointer,true);
+    this.overlayDocument=null;
     this.generation = (this.generation || 0) + 1;
     this.clearMediaArtwork();
     this.clearViewerLoad();
@@ -379,6 +393,9 @@ class HomeFloorplanPanel extends HTMLElement {
     for(const tv of Object.values(this.tvFrames)){clearTimeout(tv.timer);tv.timer=null;}
     clearTimeout(this.cameraTimer);this.cameraTimer=null;
     document.removeEventListener('visibilitychange', this.tvVisibility);
+  }
+  dismissViewerOverlays() {
+    if (this.isConnected) this.port?.postMessage({type:'dismiss_overlays'});
   }
   $(id, byId = true) { return this.shadowRoot.querySelector(byId ? '#' + id : id); }
   isCurrent(generation) { return generation === this.generation && this.isConnected; }

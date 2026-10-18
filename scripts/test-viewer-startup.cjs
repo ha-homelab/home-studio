@@ -133,7 +133,7 @@ console.log('PASS: deferred initial Home, early state/mode changes, frame orderi
 function exerciseHostInventory(transform = value => value) {
   const bootItems = [{id: 'lamp', name: 'Lamp', type: 'lamp', room: 'A', entity_id: 'light.lamp',
     position_m: {x: 1, y: 2, z: 3}, dimensions_m: {width: .3, depth: .3, height: .2}, rotation_deg: 0}];
-  const calls = {builds: 0, refreshes: 0, preferences: [], sent: [], status: [], removed: 0, artwork: [], commands: []};
+  const calls = {builds: 0, refreshes: 0, preferences: [], sent: [], status: [], removed: 0, artwork: [], commands: [], dismissals: 0};
   let handler;
   const aside = {inert: true}, parent = {}, port = {postMessage: message => calls.sent.push(message)};
   const c = vm.createContext({
@@ -143,11 +143,11 @@ function exerciseHostInventory(transform = value => value) {
       applyMediaArtwork(value) { calls.artwork.push(value); },
       removeEventListener(type, callback) { assert.equal(callback, handler); calls.removed++; }},
     document: {querySelector: () => aside},
-    homeView: {applyViewPreferences(value) { calls.preferences.push(value); }, handleCommandResult(value) { calls.commands.push(value); }},
+    homeView: {applyViewPreferences(value) { calls.preferences.push(value); }, handleCommandResult(value) { calls.commands.push(value); }, dismissOverlays() { calls.dismissals++; }},
     setEditorStatus(value) { calls.status.push(value); },
     refreshEntityPresentation() { calls.refreshes++; },
     rebuildInventoryView() { calls.builds++; c.refreshEntityPresentation(); },
-    haStates: {}, haConnected: false, entityOptions: '[]',
+    haStates: {}, haConnected: false, entityCatalog: null, refreshEntityOptions() {},
   });
   const reconcileStart = source.indexOf('function reconcileStoredAppearance(');
   const validateEnd = source.indexOf('\n', source.indexOf('function validateInventoryItems('));
@@ -182,8 +182,14 @@ assert.equal(sameInventory.calls.refreshes, 1, 'Artwork delivery does not masque
 const command = {type: 'command_result', request_id: 'confirmed', ok: true};
 sameInventory.port.onmessage({data: command});
 assert.equal(sameInventory.calls.commands[0], command, 'An available Home view receives command replies');
+const sentBeforeDismiss=sameInventory.calls.sent.length;
+sameInventory.port.onmessage({data: {type: 'dismiss_overlays'}});
+assert.equal(sameInventory.calls.dismissals, 1, 'Parent dismissal reaches the current Home view');
+assert.equal(sameInventory.calls.sent.length, sentBeforeDismiss, 'Closing overlays sends no device command');
+assert.equal(sameInventory.calls.refreshes, 1, 'Closing overlays does not rebuild live state');
 sameInventory.c.homeView = null;
 assert.doesNotThrow(() => sameInventory.port.onmessage({data: command}), 'A missing Home view must not crash the host bridge on command replies');
+assert.doesNotThrow(() => sameInventory.port.onmessage({data: {type: 'dismiss_overlays'}}), 'A missing Home view safely ignores dismissal');
 const reorderedInventory = exerciseHostInventory(items => items.map(item => Object.fromEntries(Object.entries(item).reverse().map(([key,value])=>[key,value&&typeof value==='object'?Object.fromEntries(Object.entries(value).reverse()):value]))));
 assert.equal(reorderedInventory.calls.builds, 0, 'JSON property order does not discard matching boot resources');
 const changedInventory = exerciseHostInventory(items => { items[0].position_m.x = 7; return items; });

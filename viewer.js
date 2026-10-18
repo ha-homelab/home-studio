@@ -511,6 +511,7 @@ let inventoryChanged=false;try{const incoming=reconcileStoredAppearance(validate
 bridge=event.ports[0];homeView?.applyViewPreferences(event.data.preferences||{});
 bridge.onmessage=event=>{
   const message=event.data;
+  if(message?.type==='dismiss_overlays'){homeView?.dismissOverlays();return}
   if(message?.type==='view_preferences'){homeView?.applyViewPreferences(message);return}
   if(message?.type==='camera_frames'){applyCameraFrames(message.frames);return}
   if(message?.type==='media_artwork'){window.applyMediaArtwork?.(message.artwork);return}
