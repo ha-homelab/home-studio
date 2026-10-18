@@ -6,6 +6,11 @@
 **[Start your own plan](https://ha-homelab.github.io/home-studio/planner/)** ·
 **[Get the latest stable release](https://github.com/ha-homelab/home-studio/releases/latest)**
 
+[![Home Studio editor showing a fictional practice floorplan in perspective](docs/images/home-studio-hero.png)](planner/guide-assets/06-preview.jpg)
+
+The existing illustrated-guide screenshot shows the real editor with the fictional
+practice project, not a private home. Click for the unchanged readable original.
+
 No account or installation is needed to try the editor. Start with room
 measurements and walls, choose from 195 furniture designs, or open an editable
 example and experiment. The editor supports 24 languages. When you are ready,
@@ -331,3 +336,9 @@ mutation campaigns.
 ## Contributing and security
 
 See [contribution and test requirements](CONTRIBUTING.md), [private security reporting](SECURITY.md), [governance](GOVERNANCE.md) and the [roadmap](ROADMAP.md).
+
+## Screenshot artwork
+
+Regenerate the perspective cover with `bash scripts/render-docs-hero.sh`
+(ImageMagick 7). It preserves the original screenshot and only adds a geometric
+projection and shadow. The linked flat image remains the readable reference.
