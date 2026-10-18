@@ -176,6 +176,44 @@ initPreview=function(...args){
   response.writeHead(200,{'Content-Type':{'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json'}[extension]||'application/octet-stream','Cache-Control':'no-store'}).end(content);
 });
 
+function inspectWorldDrag({from,to,touch}) {
+  const canvas=document.getElementById('plan-canvas'),rect=canvas.getBoundingClientRect();
+  const box={x:rect.x,y:rect.y,width:rect.width,height:rect.height};
+  const points=[window.planner.worldToScreen(from),window.planner.worldToScreen(to)];
+  // Canvas bounds can extend beyond the viewport. A metric endpoint must be
+  // visible and unobstructed; a captured pan may cross a floating control, but
+  // its initial pointerdown must actually reach the canvas.
+  const margin=15,visible={left:Math.max(margin,margin-box.x),top:Math.max(margin,margin-box.y),
+    right:Math.min(box.width-margin,innerWidth-box.x-margin),bottom:Math.min(box.height-margin,innerHeight-box.y-margin)};
+  const hit=point=>document.elementFromPoint(box.x+point[0],box.y+point[1]);
+  const inside=point=>point[0]>=visible.left&&point[0]<=visible.right&&point[1]>=visible.top&&point[1]<=visible.bottom;
+  const describe=element=>element?{tag:element.tagName,id:element.id||null}:null;
+  const result={points,box,visible,viewport:[innerWidth,innerHeight],endpointHits:points.map(point=>describe(hit(point)))};
+  const delta=[points[1][0]-points[0][0],points[1][1]-points[0][1]];
+  if(touch&&Math.hypot(...delta)<28)return {...result,action:'zoom'};
+  if(points.every(point=>inside(point)&&hit(point)===canvas))return {...result,action:'ready'};
+  const candidates=(dx,dy)=>{
+    const left=visible.left+Math.max(0,-dx),right=visible.right-Math.max(0,dx);
+    const top=visible.top+Math.max(0,-dy),bottom=visible.bottom-Math.max(0,dy);
+    if(left>right||top>bottom)return [];
+    const out=[],fractions=[.5,.25,.75,0,1];
+    for(const y of fractions)for(const x of fractions)out.push([left+(right-left)*x,top+(bottom-top)*y]);
+    return out;
+  };
+  const destination=candidates(...delta).find(point=>hit(point)===canvas&&hit([point[0]+delta[0],point[1]+delta[1]])===canvas);
+  if(!destination)return {...result,action:'blocked',reason:'No visible, unobstructed position for both metric endpoints'};
+  const width=visible.right-visible.left,height=visible.bottom-visible.top;
+  const shift=[Math.max(-width*.6,Math.min(width*.6,destination[0]-points[0][0])),
+    Math.max(-height*.6,Math.min(height*.6,destination[1]-points[0][1]))];
+  for(const fraction of [1,.75,.5,.25]) {
+    const dx=shift[0]*fraction,dy=shift[1]*fraction;
+    const start=candidates(dx,dy).find(point=>hit(point)===canvas);
+    if(start)return {...result,action:'pan',destination,
+      start:{x:box.x+start[0],y:box.y+start[1]},end:{x:box.x+start[0]+dx,y:box.y+start[1]+dy},startHit:describe(hit(start))};
+  }
+  return {...result,action:'blocked',reason:'No unobstructed canvas start for a bounded pan'};
+}
+
 async function run(engine,origin) {
   const profile = browserProfile(engine, {viewport: {width: 1440, height: 1000}, deviceScaleFactor: 2});
   const inputDiagnostics = viewerInputOptions(engine, profile, {});
@@ -201,23 +239,23 @@ async function run(engine,origin) {
     // at phone zoom, nearby furniture hit areas also overlap for mouse input.
     // Zoom through the real toolbar, then pan through real pointer input to keep
     // both endpoints visible; the fixture and its metric coordinates stay intact.
+    const framing={from,to,attempts:0};
+    record.inputFraming ||= [];
+    record.inputFraming.push(framing);if(record.inputFraming.length>12)record.inputFraming.shift();
     for (let attempt=0; attempt<30; attempt++) {
-      const points=await page.evaluate(({from,to})=>[window.planner.worldToScreen(from),window.planner.worldToScreen(to)],{from,to});
-      const box=await canvas.boundingBox();
-      if (profile.emulated && Math.hypot(points[1][0]-points[0][0],points[1][1]-points[0][1])<28) {
+      const layout=await page.evaluate(inspectWorldDrag,{from,to,touch:profile.emulated});
+      framing.attempts=attempt+1;framing.last=layout;
+      if(layout.action==='ready')return {points:layout.points,box:layout.box};
+      if(layout.action==='zoom') {
         await input.tap(page.locator('#zoom-in')); await frames(); continue;
       }
-      const mid=[(points[0][0]+points[1][0])/2,(points[0][1]+points[1][1])/2];
-      if (points.every(p=>p[0]>=15&&p[0]<=box.width-15&&p[1]>=15&&p[1]<=box.height-15)) return {points,box};
-      const dx=Math.max(-box.width*.6,Math.min(box.width*.6,box.width/2-mid[0]));
-      const dy=Math.max(-box.height*.6,Math.min(box.height*.6,box.height/2-mid[1]));
-      const start={x:box.x+box.width/2-dx/2,y:box.y+box.height/2-dy/2};
+      if(layout.action==='blocked')break;
       await canvas.focus(); await page.keyboard.down('Space');
-      try { await input.drag(start,{x:start.x+dx,y:start.y+dy}); }
+      try { await input.drag(layout.start,layout.end); }
       finally { await page.keyboard.up('Space'); }
       await frames();
     }
-    throw Error('Unable to frame the complete metric drag inside the visible plan canvas');
+    save();throw Error(`Unable to frame the complete metric drag inside the visible plan canvas: ${JSON.stringify(framing)}`);
   }
   async function dragWorld(from,to) {
     const {points,box}=await prepareWorldDrag(from,to);

@@ -1610,3 +1610,54 @@ test('a stalled180s viewer still expires once and cannot gain time from phase pr
   assert.equal(executions,1);assert.equal(record.status,'failed');assert.equal(record.scenarioCompletedMs,null);
   assert.equal(record.timeoutPhase.activePhase.name,'viewer-load');assert.equal(clock.pending().length,0);
 });
+
+test('planner framing chooses visible canvas input without hiding floating controls', () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-planner-stability.cjs'),'utf8');
+  const start=source.indexOf('function inspectWorldDrag('),end=source.indexOf('async function run(',start);
+  assert(start>=0&&end>start);
+  const box={x:64,y:196,width:326,height:490},map={x:-800,y:40,scale:60};
+  const canvas={tagName:'CANVAS',id:'plan-canvas',getBoundingClientRect:()=>box};
+  const toggle={tagName:'BUTTON',id:'floor-navigator-toggle'};
+  const card={tagName:'BUTTON',id:'floor-card'};
+  let covered=false;
+  const document={getElementById:id=>id==='plan-canvas'?canvas:null,elementFromPoint(x,y){
+    if(x<0||x>=390||y<0||y>=844||x<box.x||x>box.x+box.width||y<box.y||y>box.y+box.height)return null;
+    if(covered)return toggle;
+    if(x>=72&&x<=155&&y>=261&&y<=302)return toggle;
+    if(x>=70&&x<=155&&y>=355&&y<=480)return card;
+    return canvas;
+  }};
+  const context={document,innerWidth:390,innerHeight:844,
+    window:{planner:{worldToScreen:point=>[map.x+point[0]*map.scale,map.y+point[1]*map.scale]}}};
+  vm.createContext(context);vm.runInContext(source.slice(start,end),context);
+  const inspect=(from,to,touch=true)=>context.inspectWorldDrag({from,to,touch});
+  let result,attempts=0;
+  for(;attempts<30;attempts++) {
+    result=inspect([1,1],[1.5,1]);
+    if(result.action==='ready')break;
+    assert.equal(result.action,'pan');
+    assert.equal(document.elementFromPoint(result.start.x,result.start.y),canvas,'Only an actual canvas hit may begin a pan');
+    assert(result.end.x>=79&&result.end.x<=375&&result.end.y>=211&&result.end.y<=671);
+    map.x+=result.end.x-result.start.x;map.y+=result.end.y-result.start.y;
+  }
+  assert.equal(result.action,'ready');assert(attempts<10,'Offscreen metric points are reached with bounded real pans');
+  for(const point of result.points)assert.equal(document.elementFromPoint(box.x+point[0],box.y+point[1]),canvas);
+
+  map.x=20-map.scale;map.y=80-map.scale;
+  result=inspect([1,1],[1.5,1]);
+  assert.equal(result.endpointHits[0].id,'floor-navigator-toggle');
+  assert.equal(result.action,'pan','An in-bounds endpoint under a control must be reframed');
+  assert.equal(document.elementFromPoint(result.start.x,result.start.y),canvas);
+
+  box.y=700;map.x=100-map.scale;map.y=200-map.scale;
+  result=inspect([1,1],[1.5,1]);
+  assert.equal(result.action,'pan','A point inside the bitmap but below the viewport is not visible');
+  assert(result.start.y<=829&&result.end.y<=829,'Pan endpoints retain the viewport margin');
+  map.x+=result.end.x-result.start.x;map.y+=result.end.y-result.start.y;
+  assert.equal(inspect([1,1],[1.5,1]).action,'pan','Large offscreen distances can require more than one bounded pan');
+
+  covered=true;result=inspect([1,1],[1.5,1]);
+  assert.equal(result.action,'blocked');assert.match(result.reason,/No visible, unobstructed/);
+  assert.equal(inspect([1,1],[1.01,1]).action,'zoom','The native-touch minimum distance remains 28 pixels');
+  assert.equal(document.getElementById('plan-canvas'),canvas,'Measurement leaves controls and canvas intact');
+});
