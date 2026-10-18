@@ -40,6 +40,11 @@ assert(['chromium','firefox','webkit'].includes(engine));
    const frame=page.frameLocator('iframe');await frame.locator('#homeRoom').waitFor();
    await page.evaluate(items=>{
     const channel=new MessageChannel();window.channel=channel.port1;window.messages=[];
+    window.nativeHoverProbes={};
+    const viewerWindow=document.querySelector('iframe').contentWindow;
+    window.addEventListener('message',event=>{
+     if(event.source===viewerWindow&&event.data?.type==='fixture:hover-probe')nativeHoverProbes[event.data.id]=event.data;
+    });
     // The trusted host listens on its own document; hovering the opaque frame
     // deliberately leaves keyboard focus here until the user chooses a control.
     window.parentDismissals=[];
@@ -70,6 +75,55 @@ assert(['chromium','firefox','webkit'].includes(engine));
    // before testing Escape, without moving the pointer off its viewer marker.
    await page.locator('#native button').focus();await page.keyboard.press('Escape');
    await page.locator('#native').waitFor({state:'hidden'});
+  }
+  let hoverProbeSequence=0;
+  async function checkHoverCancellation(page,frame,cancel){
+   // Hold only the native-hover deadline. Protocol latency cannot let the
+   // deadline win, while actual pointer/keyboard/pagehide handlers still run.
+   await frame.locator('#homeConnection').hover();
+   const id=String(++hoverProbeSequence),viewer=await (await page.locator('iframe').elementHandle()).contentFrame();
+   const before=await page.evaluate(()=>messages.filter(message=>['more_info','media_command','toggle','curtain_command','tv_power'].includes(message.type)).length);
+   await viewer.evaluate(id=>{
+    const originalSet=window.setTimeout,originalClear=window.clearTimeout,held=new Set();
+    let next=-1,armed=0,cleared=0,restored=false;
+    const report=()=>parent.postMessage({type:'fixture:hover-probe',id,armed,cleared,pending:held.size,restored},'*');
+    const restore=()=>{
+     if(restored)return;
+     window.setTimeout=originalSet;window.clearTimeout=originalClear;
+     window.removeEventListener('pagehide',restore);
+     // Cleanup does not count as cancellation by the production handler.
+     restored=true;report();held.clear();delete window.restoreNativeHoverProbe;
+    };
+    window.setTimeout=function(callback,delay,...args){
+     if(delay!==650)return originalSet.call(window,callback,delay,...args);
+     const timer=next--;held.add(timer);armed++;report();return timer;
+    };
+    window.clearTimeout=function(timer){
+     if(held.delete(timer)){cleared++;report();}else originalClear.call(window,timer);
+    };
+    window.restoreNativeHoverProbe=restore;
+    // Registered after the viewer: its real pagehide cancellation must happen
+    // before cleanup reports the final counts to the surviving parent frame.
+    window.addEventListener('pagehide',restore);
+   },id);
+   try{
+    await frame.locator('[data-home-device="light"]').hover();
+    await page.waitForFunction(id=>nativeHoverProbes[id]?.armed>0,id);
+    const armed=await page.evaluate(id=>nativeHoverProbes[id],id);
+    assert.equal(armed.pending,1,'a real pointer hover must arm the held native deadline');
+    await cancel();
+    await page.waitForFunction(id=>{
+     const probe=nativeHoverProbes[id];
+     return probe?.armed>0&&probe.cleared===probe.armed&&probe.pending===0;
+    },id);
+    const result=await page.evaluate(id=>nativeHoverProbes[id],id);
+    assert.equal(result.cleared,result.armed,'the production handler must cancel every armed hover deadline');
+    assert.equal(result.pending,0,'no native deadline may survive cancellation');
+    assert.equal(await page.evaluate(()=>messages.filter(message=>['more_info','media_command','toggle','curtain_command','tv_power'].includes(message.type)).length),before,
+     'canceling hover must not open native details or issue a device command');
+   }finally{
+    if(!viewer.isDetached())await viewer.evaluate(()=>window.restoreNativeHoverProbe?.());
+   }
   }
   {
   const desktop=await browser.newContext({viewport:{width:1440,height:1000}}),{page,frame}=await mount(desktop);
@@ -112,10 +166,10 @@ assert(['chromium','firefox','webkit'].includes(engine));
   assert.equal(await page.evaluate(()=>parentDismissals.at(-1)),'pointer');
   assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='media_command').length),2);
   // Escape also cancels a pending native hover while the pointer stays over it.
-  await card('light').hover();await page.waitForTimeout(350);await page.keyboard.press('Escape');await page.waitForTimeout(400);
+  await checkHoverCancellation(page,frame,()=>page.keyboard.press('Escape'));
   assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),0,'parent dismissal cancels the delayed native dialog');
   // Leave a native target before its delay: no native dialog and no command.
-  await frame.locator('#homeConnection').hover();await card('light').hover();await page.waitForTimeout(350);await frame.locator('#homeConnection').hover();await page.waitForTimeout(400);
+  await checkHoverCancellation(page,frame,()=>frame.locator('#homeConnection').hover());
   assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),0);
   for(const id of ['tv','light','cover']){
    await frame.locator('#homeConnection').hover();
@@ -157,9 +211,12 @@ assert(['chromium','firefox','webkit'].includes(engine));
   await frame.locator('#editLayout').click();await popup.waitFor({state:'hidden'});
   await frame.locator('#openHome').click();await frame.locator('#homeConnection').hover();
   const beforeDetach=await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length);
-  await card('light').hover();await page.waitForTimeout(250);
+  // Removal-time messages lose their source in Firefox/WebKit. Exercise our
+  // lifecycle handler while connected, then separately destroy the context.
+  await checkHoverCancellation(page,frame,()=>frame.locator('#homeView').evaluate(()=>
+   window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:false}))));
   await page.evaluate(()=>document.querySelector('iframe').remove());await page.waitForTimeout(750);
-  assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),beforeDetach,'detaching the viewer cancels pending native hover');
+  assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),beforeDetach,'hidden then detached viewer emits no late native details');
   // Touch must have an explicit route; touch pointer entry itself does not launch native details.
   }
   const touchContext=await browser.newContext({viewport:{width:900,height:1000},hasTouch:true}),touch=await mount(touchContext);
