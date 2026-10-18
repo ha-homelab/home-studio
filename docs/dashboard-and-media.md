@@ -4,6 +4,12 @@ Available in the 0.9.0 beta series after the initial floor-navigation beta.
 Use the release notes to select a beta that includes **dashboard cards and
 media artwork**. Stable 0.8.0 and the first 0.9.0 beta do not include these features.
 
+![A fictional home inside a dashboard card, showing a media cover in free space.](images/dashboard-media-example.png)
+
+The image above uses the real generated viewer with a local simulated HA session
+and fictional media. It is an acceptance fixture, not a private home or live-device
+verification.
+
 ## Upgrade the installed home first
 
 Keep your exported project JSON and project ID, make a Home Assistant backup,
