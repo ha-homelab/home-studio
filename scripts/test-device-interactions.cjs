@@ -1,8 +1,10 @@
 // Integrated generated-viewer interactions with fictional HA state and a mocked parent only.
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
-const http=require('node:http'),{spawnSync}=require('node:child_process'),{chromium}=require('playwright');
+const http=require('node:http'),{spawnSync}=require('node:child_process'),{chromium,firefox,webkit}=require('playwright');
 const {browserLaunchOptions}=require('./browser-stability-diagnostics.cjs');
 const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tmpdir(),'home-device-interactions-'));
+const engine=process.env.DEVICE_INTERACTIONS_ENGINE||'chromium';
+assert(['chromium','firefox','webkit'].includes(engine));
 (async()=>{
  let browser,server;
  try{
@@ -28,7 +30,7 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
   server=http.createServer((request,response)=>{response.setHeader('Content-Type','text/html');response.end('<!doctype html><style>body{margin:0}iframe{width:100%;height:100vh;border:0}dialog{width:100vw;height:100vh;max-width:none;max-height:none;margin:0;border:0;padding:0}dialog::backdrop{background:#0008}#parentControl{position:fixed;right:0;top:0;z-index:3}</style><button id="parentControl">Parent control</button><dialog id="native"><button onclick="this.parentElement.close()">Close native details</button></dialog>');});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const origin=`http://127.0.0.1:${server.address().port}`;
-  browser=await chromium.launch(browserLaunchOptions('chromium',true));
+  browser=await ({chromium,firefox,webkit}[engine]).launch(browserLaunchOptions(engine,true));
   const errors=[],external=[];
   async function mount(context){
    const page=await context.newPage();page.setDefaultTimeout(15000);page.on('pageerror',e=>errors.push(String(e)));
@@ -61,6 +63,13 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
    await page.evaluate(()=>publish());
    await frame.locator('[data-home-device="audio"][data-state="on"]').waitFor();
    return {page,frame};
+  }
+  async function closeNative(page){
+   // This bare HTML fixture has no HA focus manager. In Firefox, an iframe
+   // click can return focus to BODY after showModal; focus the native control
+   // before testing Escape, without moving the pointer off its viewer marker.
+   await page.locator('#native button').focus();await page.keyboard.press('Escape');
+   await page.locator('#native').waitFor({state:'hidden'});
   }
   {
   const desktop=await browser.newContext({viewport:{width:1440,height:1000}}),{page,frame}=await mount(desktop);
@@ -117,7 +126,7 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
    const entered=await card(id).evaluate(()=>window.fixtureHoverAt);
    assert(sent.received_at-entered>=640,'native details waits for the hover delay');
    assert.equal(sent.entity_id,{tv:'media_player.screen',light:'light.fixture',cover:'cover.curtain'}[id]);
-   await page.keyboard.press('Escape');await page.locator('#native').waitFor({state:'hidden'});
+   await closeNative(page);
    // Native HA dialog teardown can re-enter the same marker without a pointer move.
    await card(id).dispatchEvent('pointerenter',{pointerType:'mouse',buttons:0});await page.waitForTimeout(750);
    assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),before+1,'closing native details on the same anchor does not reopen');
@@ -126,11 +135,11 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
   await frame.locator('#homeConnection').hover();
   const beforeClick=await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length);
   await card('tv').click();await page.locator('#native').waitFor({state:'visible'});
-  await page.keyboard.press('Escape');await page.locator('#native').waitFor({state:'hidden'});
+  await closeNative(page);
   await card('tv').dispatchEvent('pointerenter',{pointerType:'mouse',buttons:0});await page.waitForTimeout(750);
   assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),beforeClick+1,'closing explicitly opened native details does not reopen');
   assert.deepEqual(await page.evaluate(()=>messages.filter(m=>['toggle','curtain_command','tv_power'].includes(m.type))),[],'native hover never toggles, powers or moves a device');
-  await frame.locator('[data-home-details="light"]').focus();await frame.locator('[data-home-details="light"]').press('Enter');await page.locator('#native').waitFor({state:'visible'});await page.keyboard.press('Escape');
+  await frame.locator('[data-home-details="light"]').focus();await frame.locator('[data-home-details="light"]').press('Enter');await page.locator('#native').waitFor({state:'visible'});await closeNative(page);
   // Catalogue entries are metadata, not 5,500 live states or thousands of DOM nodes.
   await page.evaluate(()=>channel.postMessage({type:'entity_catalog',entities:Array.from({length:5500},(_,i)=>['sensor.catalog_'+String(i).padStart(4,'0'),'Fixture sensor '+i])}));
   await frame.locator('#editLayout').click();
@@ -143,6 +152,7 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
   await frame.locator('#openHome').click();await card('audio').hover();await popup.waitFor({state:'visible'});
   await frame.locator('#homeRoom').selectOption('living');await popup.waitFor({state:'hidden'});
   await frame.locator('#homeRoom').selectOption('');
+  await frame.locator('#homeConnection').hover();
   await card('audio').hover();await popup.waitFor({state:'visible'});
   await frame.locator('#editLayout').click();await popup.waitFor({state:'hidden'});
   await frame.locator('#openHome').click();await frame.locator('#homeConnection').hover();
@@ -164,6 +174,6 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
   await touch.frame.locator('[data-home-details="light"]').tap();await touch.page.locator('#native').waitFor({state:'visible'});
   assert.deepEqual(await touch.page.evaluate(()=>messages.filter(m=>['toggle','curtain_command','tv_power'].includes(m.type))),[]);
   assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
-  console.log('PASS: generated viewer media/native hover, explicit commands, keyboard/touch, 5,500-entity search and dense-model dependencies');
+  console.log('PASS ('+engine+'): generated viewer media/native hover, explicit commands, keyboard/touch, 5,500-entity search and dense-model dependencies');
  }finally{await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));fs.rmSync(temporary,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});
