@@ -62,6 +62,7 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'scripts/build-panel-locales.py', 'scripts/test-dry-run-browser.cjs',
               'scripts/validate-docs.py', 'scripts/test-docs.py',
               *(f'docs/wiki/{name}.md' for name in ('Home', '_Sidebar', 'Getting-started', 'Dry-run', 'Troubleshooting', 'Languages', 'Development')),
+              'docs/images/home-studio-hero.png', 'scripts/render-docs-hero.sh',
               'docs/images/dry-run-command-flow.svg', 'docs/images/plan-state-lifecycle.svg',
               'docs/process-and-results.md', 'docs/images/dry-run-delivery-process.svg',
               'docs/images/dry-run-validation.svg', 'docs/data/dry-run-validation.json',
