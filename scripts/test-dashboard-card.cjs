@@ -200,7 +200,80 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><scr
     });
     await page.waitForFunction(() => !protectedPanel.pending);
     assert.deepEqual(await page.evaluate(() => [protectedPanel.port,staleSaveCalls.length,subscriptions]),[null,0,0]);
+
+    // A remounted card exports the newest submitted layout without reviving its destroyed iframe.
+    await page.evaluate(() => { window.remountCard=makeCard({floor:'main'}); });
+    await page.waitForFunction(() => remountCard._panel?.port);
+    frame=page.frames().find(frame=>frame.parentFrame());
+    await frame.waitForFunction(() => window.port);
+    await page.evaluate(() => {
+      window.remountPanel=remountCard._panel;window.saveReplies=[];
+      window.viewCountBefore=calls.filter(call=>call.type==='home_floorplan/viewer').length;
+      const originalCall=remountPanel._hass.callWS;
+      remountPanel._hass.callWS=message=>message.type==='home_floorplan/save' ?
+        new Promise((resolve,reject)=>saveReplies.push({resolve,reject})) : originalCall(message);
+      window.latestItems=[{id:'recovered_lamp',name:'Unsaved desk lamp',type:'lamp',room:'study',
+        position_m:{x:1,y:0,z:2},dimensions_m:{width:.3,depth:.3,height:.6},rotation_deg:90,
+        entity_id:'switch.lamp',notes:'Latest edits must survive remount.'}];
+    });
+    await frame.evaluate(() => port.postMessage({type:'save',items:[{id:'earlier'}]}));
+    await page.waitForFunction(() => saveReplies.length===1);
+    await frame.evaluate(items=>port.postMessage({type:'save',items}),await page.evaluate(()=>latestItems));
+    await page.waitForFunction(() => remountPanel.pending===2);
+    await page.evaluate(() => saveReplies[0].resolve({revision:4}));
+    await page.waitForFunction(() => saveReplies.length===2 && remountPanel.pending===1);
+    assert.deepEqual(await page.evaluate(() => JSON.parse(remountPanel.localEdits.json).items),await page.evaluate(()=>latestItems),
+      'an earlier successful save must not clear the latest outstanding submission');
+    await page.evaluate(() => { remountCard.remove();document.body.append(remountCard); });
+    assert.deepEqual(await page.evaluate(() => [remountCard._panel===remountPanel,remountPanel.port,remountPanel.viewerURL,subscriptions,
+      calls.filter(call=>call.type==='home_floorplan/viewer').length===viewCountBefore]),[true,null,null,0,true]);
+    assert.equal(await page.locator('#local-recovery').isVisible(),true);
+    assert.equal(await page.locator('iframe').getAttribute('src'),null);
+    await page.evaluate(() => saveReplies[1].resolve({revision:5}));
+    await page.waitForFunction(() => !remountPanel.pending && remountPanel.failed);
+    assert.equal(await page.evaluate(() => saveReplies.length),2,'remount never resubmits pending edits');
+    assert.deepEqual(await page.evaluate(() => JSON.parse(remountPanel.localEdits.json).items),await page.evaluate(()=>latestItems));
+    const downloading=page.waitForEvent('download');
+    await page.locator('#local-export').click();
+    const download=await downloading,stream=await download.createReadStream(),chunks=[];
+    for await (const chunk of stream) chunks.push(chunk);
+    const recovered=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    assert.equal(recovered.model,'main');assert.equal(recovered.units,'metres');
+    assert.deepEqual(recovered.items,await page.evaluate(()=>latestItems));
+    assert.equal(download.suggestedFilename(),'main-unsaved-inventory.json');
+    page.once('dialog',dialog=>dialog.dismiss());await page.locator('#retry').click();
+    assert.equal(await page.evaluate(()=>!!remountPanel.localEdits),true,'cancelled reload retains the export');
+    page.once('dialog',dialog=>dialog.accept());await page.locator('#retry').click();
+    await page.waitForFunction(()=>remountPanel.port && !remountPanel.failed);
+    assert.equal(await page.evaluate(()=>remountPanel.localEdits),null);
+    assert.equal(await page.locator('#local-recovery').isVisible(),false);
+
+    // Already-failed layouts survive repeated detach, but never transfer to another account.
+    await page.evaluate(() => {
+      remountPanel._hass.callWS=()=>Promise.reject(Error('Save rejected'));
+      remountPanel.handleViewerMessage({type:'save',items:latestItems},remountPanel.generation);
+    });
+    await page.waitForFunction(()=>remountPanel.failed && !remountPanel.pending);
+    await page.evaluate(()=>{remountCard.remove();document.body.append(remountCard);});
+    assert.equal(await page.locator('#local-recovery').isVisible(),true);
+    assert.deepEqual(await page.evaluate(()=>JSON.parse(remountPanel.localEdits.json).items),recovered.items);
+    await page.evaluate(()=>{remountCard.remove();remountCard.hass=makeHass(true,'new-account');document.body.append(remountCard);});
+    await page.waitForFunction(()=>remountCard._panel!==remountPanel && remountCard._panel?.port);
+    assert.equal(await page.evaluate(()=>remountPanel.localEdits),null);
+    assert.equal(await page.locator('#local-recovery').isVisible(),false);
+    await page.evaluate(()=>{
+      window.remountPanel=remountCard._panel;
+      remountPanel._hass.callWS=()=>Promise.reject(Error('Save rejected'));
+      remountPanel.handleViewerMessage({type:'save',items:latestItems},remountPanel.generation);
+    });
+    await page.waitForFunction(()=>remountPanel.failed && !remountPanel.pending);
+    await page.evaluate(()=>{remountCard.remove();remountCard.hass=makeHass(false,'new-account');document.body.append(remountCard);});
+    assert.equal(await page.evaluate(()=>remountPanel.localEdits),null);
+    assert.equal(await page.locator('iframe').count(),0);
+    assert.match(await page.locator('#status').textContent(),/Administrator access/);
+    await page.evaluate(()=>remountCard.remove());
+    assert.equal(await page.evaluate(()=>subscriptions),0);
     assert.deepEqual(errors,[]);
-    console.log('PASS: dashboard module, validation, sizing, floor selection, opaque sandbox, pinned dry run, live controls, admin gating, reconnect edit preservation and stale-save rejection.');
+    console.log('PASS: dashboard module, validation, sizing, floor selection, opaque sandbox, pinned dry run, live controls, admin gating, reconnect/remount edit recovery and stale-save rejection.');
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -202,7 +202,7 @@ class HomeFloorplanPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({mode: 'open'});
-    this.shadowRoot.innerHTML = `<style>:host{display:flex;flex-direction:column;height:100dvh;min-height:0;background:#11191f}header{flex-shrink:0;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;font:14px system-ui;color:#b8c8d0}button{padding:8px 10px;cursor:pointer;background:#202d35;color:#e9eeef;border:1px solid #44515a;border-radius:7px;min-height:40px}#notice{flex:1;min-width:160px;overflow-wrap:anywhere}#dry-run[aria-pressed="true"]{border-color:#e8c56c;color:#ffe6a2}iframe{border:0;flex:1;width:100%;min-height:0}.error{color:#ffd19b}#recovery{padding:20px;color:#e9eeef;font:14px/1.5 system-ui;overflow:auto}#recovery-details{white-space:pre-wrap;overflow-wrap:anywhere}button:disabled{opacity:.5}[hidden]{display:none!important}</style><header><button id="menu" aria-label="Open sidebar">☰</button><span id="notice" role="status">Connecting to Home Assistant…</span><button id="dry-run" type="button" aria-pressed="false">Dry run: Off</button><button id="retry">Reload saved plan</button></header><section id="recovery" hidden><h2>Saved placements need repair</h2><p>Nothing has been overwritten. Export the original inventory, keep it as a backup, and edit a copy using the current floor and room IDs below. Importing the repaired copy replaces all saved floors only after validation.</p><pre id="recovery-details"></pre><button id="recovery-export">Export original inventory</button> <button id="recovery-import">Import repaired inventory</button><input id="recovery-file" type="file" accept="application/json,.json" hidden></section><iframe title="Private home floorplan" sandbox="allow-scripts allow-downloads allow-forms"></iframe>`;
+    this.shadowRoot.innerHTML = `<style>:host{display:flex;flex-direction:column;height:100dvh;min-height:0;background:#11191f}header{flex-shrink:0;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;font:14px system-ui;color:#b8c8d0}button{padding:8px 10px;cursor:pointer;background:#202d35;color:#e9eeef;border:1px solid #44515a;border-radius:7px;min-height:40px}#notice{flex:1;min-width:160px;overflow-wrap:anywhere}#dry-run[aria-pressed="true"]{border-color:#e8c56c;color:#ffe6a2}iframe{border:0;flex:1;width:100%;min-height:0}.error{color:#ffd19b}#recovery,#local-recovery{padding:20px;color:#e9eeef;font:14px/1.5 system-ui;overflow:auto}#recovery-details{white-space:pre-wrap;overflow-wrap:anywhere}button:disabled{opacity:.5}[hidden]{display:none!important}</style><header><button id="menu" aria-label="Open sidebar">☰</button><span id="notice" role="status">Connecting to Home Assistant…</span><button id="dry-run" type="button" aria-pressed="false">Dry run: Off</button><button id="retry">Reload saved plan</button></header><section id="local-recovery" hidden><h2>Unsaved layout edits</h2><p>The latest layout submitted by this card is retained in memory. Export it before reloading the saved plan. Keep this card open until you have saved the file.</p><button id="local-export">Export unsaved inventory JSON</button></section><section id="recovery" hidden><h2>Saved placements need repair</h2><p>Nothing has been overwritten. Export the original inventory, keep it as a backup, and edit a copy using the current floor and room IDs below. Importing the repaired copy replaces all saved floors only after validation.</p><pre id="recovery-details"></pre><button id="recovery-export">Export original inventory</button> <button id="recovery-import">Import repaired inventory</button><input id="recovery-file" type="file" accept="application/json,.json" hidden></section><iframe title="Private home floorplan" sandbox="allow-scripts allow-downloads allow-forms"></iframe>`;
     this.floor = null;
     this.floors = [];
     this.siteFeatures = false;
@@ -242,8 +242,10 @@ class HomeFloorplanPanel extends HTMLElement {
     this.$('retry').onclick = () => {
       if (this.pending) return this.notice('Wait for the current save to finish.', true);
       if (this.failed && !confirm('Unsaved edits will be discarded. Export inventory JSON first. Reload?')) return;
+      this.discardLocalEdits();
       this.loadFloor(this.revision === undefined ? undefined : this.floor);
     };
+    this.$('local-export').onclick = () => this.exportLocalEdits();
     this.$('recovery-export').onclick = () => this.exportRecovery();
     this.$('recovery-import').onclick = () => this.$('recovery-file').click();
     this.$('recovery-file').onchange = event => {
@@ -334,6 +336,7 @@ class HomeFloorplanPanel extends HTMLElement {
     this.tvFrames={};this.cameraEntities={};this.roomActivity=new Set();this.moduleEntities=new Set();this.assumedActivity=null;this.modelConfigured=false;
   }
   set hass(value) {
+    if (this.localEdits && (this.localEdits.account !== value?.user?.id || value?.user?.is_admin === false)) this.discardLocalEdits();
     if (this._hass && (this._hass.user?.id!==value?.user?.id || this._hass.connection!==value?.connection)) this.clearMediaArtwork();
     this._hass = value;
     const requestedLanguage=value?.locale?.language || value?.language;
@@ -352,11 +355,14 @@ class HomeFloorplanPanel extends HTMLElement {
     if (this._hass && !this.started) { this.started = true; this.loadFloor(); }
   }
   disconnectedCallback() {
+    this.suspendedEdits ||= !!this.localEdits && !!(this.pending || this.failed);
     globalThis.removeEventListener?.('storage',this.onDryRunStorage);
     this.generation = (this.generation || 0) + 1;
     this.clearMediaArtwork();
     this.clearViewerLoad();
     this.port?.close(); this.port = null; this.started = false;
+    const iframe=this.$('iframe',false);
+    iframe.onload=null;iframe.removeAttribute('src');iframe.removeAttribute('srcdoc');
     if (this.viewerURL) URL.revokeObjectURL(this.viewerURL);
     this.viewerURL = null;
     this.curtainSubscription?.unsubscribe?.(); this.curtainSubscription = null;
@@ -373,6 +379,20 @@ class HomeFloorplanPanel extends HTMLElement {
   }
   notifySaveStatus() {
     if (typeof CustomEvent==='function') this.dispatchEvent?.(new CustomEvent('home-floorplan-save-status'));
+  }
+  discardLocalEdits() {
+    this.localEdits=null;this.suspendedEdits=false;
+    if (this.shadowRoot) this.$('local-recovery').hidden=true;
+  }
+  exportLocalEdits() {
+    if (!this.localEdits || this.localEdits.account !== this._hass?.user?.id || this._hass?.user?.is_admin === false) return;
+    this.download(new Blob([this.localEdits.json],{type:'application/json'}),this.localEdits.floor+'-unsaved-inventory.json');
+  }
+  showLocalEditRecovery() {
+    this.$('local-recovery').hidden=false;
+    this.$('recovery').hidden=true;
+    this.$('iframe',false).hidden=true;
+    this.notice('Unsaved layout edits are retained in this card. Export JSON before reloading.',true);
   }
   exportRecovery() {
     if (!this.recovery) return;
@@ -577,6 +597,7 @@ class HomeFloorplanPanel extends HTMLElement {
     this.viewerNavigation = null;
   }
   async loadFloor(floor = this.initialFloor) {
+    if (this.suspendedEdits && this.localEdits) {this.showLocalEditRecovery();return;}
     this.notice('Loading private model…');
     this.clearViewerLoad();
     this.clearMediaArtwork();
@@ -701,6 +722,18 @@ class HomeFloorplanPanel extends HTMLElement {
     } else if (message.type === 'save') {
       const floor = this.floor, hass = this._hass, account = hass.user?.id, connection = hass.connection;
       const current = () => generation===this.generation && this.isConnected!==false && this._hass.user?.id===account;
+      // Keep only the newest bounded submission; detached iframe documents cannot be recovered.
+      let snapshot;
+      try {
+        if (!Array.isArray(message.items) || message.items.length>2000) throw Error('Expected at most 2,000 objects.');
+        const json=JSON.stringify({schema_version:1,model:floor,units:'metres',up_axis:'Y',items:message.items});
+        if (new Blob([json]).size>5000000) throw Error('Inventory exceeds the 5 MB JSON import limit.');
+        snapshot=this.localEdits={account,floor,json};
+      } catch (error) {
+        this.failed=true;
+        this.notice(`NOT SAVED: ${error.message || error} Export JSON from the viewer before closing this card.`,true);
+        this.notifySaveStatus();return;
+      }
       this.pending++;
       this.notice('Saving placements…');
       this.queue = this.queue.then(async () => {
@@ -709,6 +742,7 @@ class HomeFloorplanPanel extends HTMLElement {
         const result = await hass.callWS({type:'home_floorplan/save', floor, revision:this.revision, items:message.items});
         if (!current()) throw Error('The Home Assistant session changed while saving. Export JSON before reloading.');
         this.revision = result.revision; this.savedItems = message.items;
+        if (this.localEdits===snapshot) this.discardLocalEdits();
         this.refreshMediaArtwork();
       }).catch(error => {
         this.failed = true;

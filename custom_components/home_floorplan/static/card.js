@@ -50,6 +50,7 @@ class HomeFloorplanCard extends HTMLElement {
 
   _removePanel() {
     this._panel?.removeEventListener('home-floorplan-save-status',this._onSaveStatus);
+    this._panel?.discardLocalEdits();
     this._panel?.remove();
     this._panel = null;
   }

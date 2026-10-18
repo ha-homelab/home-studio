@@ -35,11 +35,13 @@ function fixture({fetch,decode=false,output='data:image/jpeg;base64,AQID',imageW
     AbortController,Blob,Response,Uint8Array,DataView,URL:{createObjectURL(){const url='blob:private-'+urls.length;urls.push({url,revoked:false});return url;},revokeObjectURL(url){urls.find(row=>row.url===url).revoked=true;}},
     document,Image,setTimeout(fn){const id=++nextTimer;timers.set(id,fn);return id;},clearTimeout(id){timers.delete(id);},removeEventListener(){}});
   vm.runInContext(source,context);
+  const iframe={src:'blob:viewer',srcdoc:'viewer',removeAttribute(name){delete this[name];}};
   const panel=Object.assign(Object.create(Panel.prototype),{generation:1,isConnected:true,modelConfigured:true,siteFeatures:false,tvFrames:{},savedItems:[{id:'speaker',entity_id:'media_player.study'}],
+    shadowRoot:{querySelector(){return iframe;}},
     port:{postMessage(message){messages.push(plain(message));},close(){}},
     _hass:{connected:true,states:{'media_player.study':{state:'playing',attributes:{entity_picture:'https://untrusted.invalid/image?token=PRIVATE',media_title:'First track',media_artist:'Artist'}}},
       fetchWithAuth(url,options){calls.push({url,options});return fetch?fetch(url,options):Promise.resolve(response());}}});
-  return {panel,messages,calls,timers,urls,images,canvases,document,context,
+  return {panel,messages,calls,timers,urls,images,canvases,document,context,iframe,
     expire(){for(const [id,fn]of [...timers]){timers.delete(id);fn();}},
     dimensions:(bytes,mime)=>plain(context.mediaArtworkDimensions(bytes,mime)),
     read:(reply,signal=new AbortController().signal)=>context.readMediaArtwork(reply,signal)};
@@ -101,6 +103,7 @@ test('detach and floor generation changes discard old decoded images and release
   f.panel.isConnected=false;f.panel.disconnectedCallback();await flush();
   assert.equal(f.images[0].url,null);assert.ok(f.urls[0].revoked);assert.equal(f.panel.mediaArtworkRequests,0);
   assert.deepEqual(f.messages.at(-1).artwork,{});assert.equal(f.panel.port,null);
+  assert.equal(f.iframe.src,undefined);assert.equal(f.iframe.srcdoc,undefined);
 });
 
 test('account or HA connection changes invalidate both cached art and in-flight old-session responses',async()=>{
