@@ -25,7 +25,7 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
   model.motion_zones={unused_motion:{entity_id:'sensor.motion_zone_probe'}};
   model.camera_entities={unused_camera:'camera.preview_probe'};
   html=html.replace(/(<script id="modelData" type="application\/json">)[\s\S]*?(<\/script>)/,(_,a,b)=>a+JSON.stringify(model).replaceAll('<','\\u003c')+b).replace('<head>','<head><script>window.__HOME_FLOORPLAN_EMBED__=true;</script>');
-  server=http.createServer((request,response)=>{response.setHeader('Content-Type','text/html');response.end('<!doctype html><style>body{margin:0}iframe{width:100%;height:100vh;border:0}dialog{width:100vw;height:100vh;max-width:none;max-height:none;margin:0;border:0;padding:0}dialog::backdrop{background:#0008}</style><dialog id="native"><button onclick="this.parentElement.close()">Close native details</button></dialog>');});
+  server=http.createServer((request,response)=>{response.setHeader('Content-Type','text/html');response.end('<!doctype html><style>body{margin:0}iframe{width:100%;height:100vh;border:0}dialog{width:100vw;height:100vh;max-width:none;max-height:none;margin:0;border:0;padding:0}dialog::backdrop{background:#0008}#parentControl{position:fixed;right:0;top:0;z-index:3}</style><button id="parentControl">Parent control</button><dialog id="native"><button onclick="this.parentElement.close()">Close native details</button></dialog>');});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const origin=`http://127.0.0.1:${server.address().port}`;
   browser=await chromium.launch(browserLaunchOptions('chromium',true));
@@ -38,6 +38,11 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
    const frame=page.frameLocator('iframe');await frame.locator('#homeRoom').waitFor();
    await page.evaluate(items=>{
     const channel=new MessageChannel();window.channel=channel.port1;window.messages=[];
+    // The trusted host listens on its own document; hovering the opaque frame
+    // deliberately leaves keyboard focus here until the user chooses a control.
+    window.parentDismissals=[];
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'){parentDismissals.push('escape');channel.port1.postMessage({type:'dismiss_overlays'});}});
+    document.addEventListener('pointerdown',event=>{if(!event.composedPath().includes(document.querySelector('iframe'))){parentDismissals.push('pointer');channel.port1.postMessage({type:'dismiss_overlays'});}});
     channel.port1.onmessage=event=>{
      const message=event.data;messages.push({...message,received_at:Date.now()});
      if(message.type==='more_info')document.querySelector('#native').showModal();
@@ -85,8 +90,23 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
   assert.equal(await popup.evaluate(el=>document.activeElement===el),true);
   await page.keyboard.press('Escape');await popup.waitFor({state:'hidden'});
   assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='media_command').length),2);
+  // Parent-focused Escape and outside pointerdown cross the bridge without
+  // moving focus into the iframe or dispatching a device action.
+  const parentControl=page.locator('#parentControl');
+  await parentControl.focus();await frame.locator('#homeConnection').hover();await card('audio').hover();await popup.waitFor({state:'visible'});
+  assert.equal(await parentControl.evaluate(el=>document.activeElement===el),true,'hover does not steal parent keyboard focus');
+  await page.keyboard.press('Escape');await popup.waitFor({state:'hidden'});
+  assert.equal(await page.evaluate(()=>parentDismissals.at(-1)),'escape');
+  assert.equal(await parentControl.evaluate(el=>document.activeElement===el),true,'dismissal preserves parent keyboard focus');
+  await frame.locator('#homeConnection').hover();await card('audio').hover();await popup.waitFor({state:'visible'});
+  await parentControl.click();await popup.waitFor({state:'hidden'});
+  assert.equal(await page.evaluate(()=>parentDismissals.at(-1)),'pointer');
+  assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='media_command').length),2);
+  // Escape also cancels a pending native hover while the pointer stays over it.
+  await card('light').hover();await page.waitForTimeout(350);await page.keyboard.press('Escape');await page.waitForTimeout(400);
+  assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),0,'parent dismissal cancels the delayed native dialog');
   // Leave a native target before its delay: no native dialog and no command.
-  await card('light').hover();await page.waitForTimeout(350);await frame.locator('#homeConnection').hover();await page.waitForTimeout(400);
+  await frame.locator('#homeConnection').hover();await card('light').hover();await page.waitForTimeout(350);await frame.locator('#homeConnection').hover();await page.waitForTimeout(400);
   assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),0);
   for(const id of ['tv','light','cover']){
    await frame.locator('#homeConnection').hover();
