@@ -3,7 +3,7 @@
 set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 source_image="$repo_root/planner/guide-assets/06-preview.jpg"
-output_image="$repo_root/docs/images/home-studio-hero.png"
+output_image="$repo_root/docs/images/home-studio-hero.jpg"
 command -v magick >/dev/null 2>&1 || { printf '%s\n' 'ImageMagick 7 is required.' >&2; exit 1; }
 [[ "$(magick identify -format '%wx%h' "$source_image")" == '1280x720' ]] || { printf '%s\n' 'Screenshot dimensions changed; review the perspective before rendering.' >&2; exit 1; }
 render_dir="$(mktemp -d "${TMPDIR:-/tmp}/docs-hero.XXXXXX")"
@@ -16,6 +16,6 @@ magick "$render_dir/panel.png" -fill '#152033' -colorize 100 \
 magick -size 1540x1100 xc:'#f0f1f3' \
   "$render_dir/shadow.png" -geometry +0+22 -compose Over -composite \
   "$render_dir/panel.png" -geometry +0+0 -compose Over -composite \
-  -strip -define png:exclude-chunk=date,time "PNG24:$render_dir/hero.png"
-mv -- "$render_dir/hero.png" "$output_image"
+  -strip -sampling-factor 4:4:4 -quality 94 "$render_dir/hero.jpg"
+mv -- "$render_dir/hero.jpg" "$output_image"
 printf 'Rendered %s\n' "$output_image"

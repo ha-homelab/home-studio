@@ -6,7 +6,7 @@
 **[Start your own plan](https://ha-homelab.github.io/home-studio/planner/)** ·
 **[Get the latest stable release](https://github.com/ha-homelab/home-studio/releases/latest)**
 
-[![Home Studio editor showing a fictional practice floorplan in perspective](docs/images/home-studio-hero.png)](planner/guide-assets/06-preview.jpg)
+[![Home Studio editor showing a fictional practice floorplan in perspective](docs/images/home-studio-hero.jpg)](planner/guide-assets/06-preview.jpg)
 
 The existing illustrated-guide screenshot shows the real editor with the fictional
 practice project, not a private home. Click for the unchanged readable original.
