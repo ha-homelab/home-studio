@@ -175,3 +175,20 @@ test('state projection exposes bounded media captions only for saved media playe
   assert.equal(states['media_player.study'].media.title.length,200);assert.equal(states['media_player.study'].media.album,'');
   assert.equal(states['media_player.unbound'].media,undefined);assert.doesNotMatch(JSON.stringify(states),/PRIVATE|untrusted|entity_picture/);
 });
+
+test('recovery inventory retains a bounded model ID distinct from its floor, with legacy fallback',async()=>{
+  for (const model_id of ['fictional_layout','../layout','a'.repeat(129),'',undefined]) {
+    const {panel}=fixture();
+    panel.resetModelConfig();panel.publishEntityStates=()=>{};panel.notice=()=>{};
+    panel.floor='main';panel.pending=0;panel.queue=Promise.resolve();
+    panel._hass.callWS=async()=>{throw Error('Keep unsaved snapshot');};
+    panel.handleViewerMessage({type:'model_config',model_id},1);
+    panel.handleViewerMessage({type:'model_config',model_id:'late_override'},1);
+    panel.handleViewerMessage({type:'save',items:[]},1);
+    await panel.queue;
+    const expected=model_id==='fictional_layout'?model_id:'main';
+    assert.equal(JSON.parse(panel.localEdits.json).model,expected);
+    assert.equal(panel.localEdits.model,expected);
+    panel.resetModelConfig();assert.equal(panel.inventoryModel,null,'model identity cannot carry into the next floor');
+  }
+});

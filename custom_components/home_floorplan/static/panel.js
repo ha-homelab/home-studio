@@ -333,7 +333,7 @@ class HomeFloorplanPanel extends HTMLElement {
   }
 
   resetModelConfig() {
-    this.tvFrames={};this.cameraEntities={};this.roomActivity=new Set();this.moduleEntities=new Set();this.assumedActivity=null;this.modelConfigured=false;
+    this.tvFrames={};this.cameraEntities={};this.roomActivity=new Set();this.moduleEntities=new Set();this.assumedActivity=null;this.inventoryModel=null;this.modelConfigured=false;
   }
   set hass(value) {
     if (this.localEdits && (this.localEdits.account !== value?.user?.id || value?.user?.is_admin === false)) this.discardLocalEdits();
@@ -386,7 +386,7 @@ class HomeFloorplanPanel extends HTMLElement {
   }
   exportLocalEdits() {
     if (!this.localEdits || this.localEdits.account !== this._hass?.user?.id || this._hass?.user?.is_admin === false) return;
-    this.download(new Blob([this.localEdits.json],{type:'application/json'}),this.localEdits.floor+'-unsaved-inventory.json');
+    this.download(new Blob([this.localEdits.json],{type:'application/json'}),this.localEdits.model+'-unsaved-inventory.json');
   }
   showLocalEditRecovery() {
     this.$('local-recovery').hidden=false;
@@ -691,6 +691,7 @@ class HomeFloorplanPanel extends HTMLElement {
     if (message.type === 'model_config') {
       if(this.modelConfigured)return;
       this.modelConfigured=true;
+      this.inventoryModel=typeof message.model_id==='string' && /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(message.model_id) ? message.model_id : null;
       const sensor=id=>typeof id==='string'&&/^sensor\.[a-z0-9_]+$/.test(id);
       const bindings=(value,domain)=>Object.entries(value||{}).filter(([item,id])=>/^[A-Za-z_][A-Za-z0-9_]*$/.test(item)&&typeof id==='string'&&id.startsWith(domain+'.'));
       this.tvFrames=Object.fromEntries(bindings(message.tv_entities,'media_player').map(([item,id])=>{
@@ -726,9 +727,10 @@ class HomeFloorplanPanel extends HTMLElement {
       let snapshot;
       try {
         if (!Array.isArray(message.items) || message.items.length>2000) throw Error('Expected at most 2,000 objects.');
-        const json=JSON.stringify({schema_version:1,model:floor,units:'metres',up_axis:'Y',items:message.items});
+        const model=this.inventoryModel || floor;
+        const json=JSON.stringify({schema_version:1,model,units:'metres',up_axis:'Y',items:message.items});
         if (new Blob([json]).size>5000000) throw Error('Inventory exceeds the 5 MB JSON import limit.');
-        snapshot=this.localEdits={account,floor,json};
+        snapshot=this.localEdits={account,floor,model,json};
       } catch (error) {
         this.failed=true;
         this.notice(`NOT SAVED: ${error.message || error} Export JSON from the viewer before closing this card.`,true);

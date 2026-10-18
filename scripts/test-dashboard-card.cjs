@@ -12,6 +12,7 @@ const viewer = `<!doctype html><html><head><meta charset="utf-8"></head><body><b
     window.initial = event.data;
     window.port = event.ports[0];
     port.onmessage = event => received.push(event.data);
+    port.postMessage({type:'model_config',model_id:'fictional_layout'});
     document.querySelector('#toggle').onclick = () => port.postMessage({type:'toggle',entity_id:'switch.lamp',request_id:'toggle'});
   });
 </script></body></html>`;
@@ -238,9 +239,9 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><scr
     const download=await downloading,stream=await download.createReadStream(),chunks=[];
     for await (const chunk of stream) chunks.push(chunk);
     const recovered=JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    assert.equal(recovered.model,'main');assert.equal(recovered.units,'metres');
+    assert.equal(recovered.model,'fictional_layout');assert.equal(recovered.units,'metres');
     assert.deepEqual(recovered.items,await page.evaluate(()=>latestItems));
-    assert.equal(download.suggestedFilename(),'main-unsaved-inventory.json');
+    assert.equal(download.suggestedFilename(),'fictional_layout-unsaved-inventory.json');
     page.once('dialog',dialog=>dialog.dismiss());await page.locator('#retry').click();
     assert.equal(await page.evaluate(()=>!!remountPanel.localEdits),true,'cancelled reload retains the export');
     page.once('dialog',dialog=>dialog.accept());await page.locator('#retry').click();

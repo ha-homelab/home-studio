@@ -109,6 +109,7 @@ card.setConfig({floor:'main',height:850,dry_run:true});publish();window.ready=tr
     page.on('pageerror',error=>errors.push(String(error)));
     page.on('request',request=>{if(/^https?:/.test(request.url())&&!request.url().startsWith(origin+'/'))external.push(request.url());});
     await page.goto(origin);await page.waitForFunction(()=>window.ready&&card._panel?.modelConfigured);
+    assert.equal(await page.evaluate(()=>card._panel.inventoryModel),'main','generated viewer sends its inventory model ID');
     const frame=page.frames().find(frame=>frame.parentFrame());
     const image=frame.locator('[data-tv-preview="speaker"] img');
     const status=frame.locator('[data-tv-preview="speaker"] .tv-preview-status');
