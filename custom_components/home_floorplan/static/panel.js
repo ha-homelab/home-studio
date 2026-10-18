@@ -115,6 +115,16 @@ class HomeFloorplanPanel extends HTMLElement {
     };
   }
 
+  configureDashboard({floor, sidebarCollapsed = true, dryRun = false} = {}) {
+    if (this.started) throw Error('Configure the dashboard before connecting its floorplan.');
+    this.initialFloor = floor;
+    this.dashboard = true;
+    this.viewPreferences.sidebarCollapsed = sidebarCollapsed;
+    this.$('menu').hidden = true;
+    this.dryRunPinned ||= dryRun;
+    this.applyDryRun(this.dryRun || this.dryRunPinned);
+  }
+
   t(key, params = {}) {
     const language=this.viewPreferences?.language || 'en';
     const dictionary=panelMessages[language] || panelMessages.en;
@@ -337,7 +347,7 @@ class HomeFloorplanPanel extends HTMLElement {
     removeEventListener('message', this.viewerNavigation);
     this.viewerNavigation = null;
   }
-  async loadFloor(floor) {
+  async loadFloor(floor = this.initialFloor) {
     this.notice('Loading private model…');
     this.clearViewerLoad();
     this.port?.close(); this.port = null;
@@ -441,7 +451,10 @@ class HomeFloorplanPanel extends HTMLElement {
     } else if (message.type === 'view_preferences') {
       if(typeof message.sidebarCollapsed==='boolean') {
         this.viewPreferences.sidebarCollapsed=message.sidebarCollapsed;
-        try {localStorage.setItem('home-floorplan:sidebar-collapsed',String(message.sidebarCollapsed));} catch {}
+        // A compact dashboard does not change the full panel's saved layout.
+        if (!this.dashboard) {
+          try {localStorage.setItem('home-floorplan:sidebar-collapsed',String(message.sidebarCollapsed));} catch {}
+        }
       }
       // Accept only advertised canonical codes from the established MessagePort.
       if(viewerLanguages.includes(message.language)) {
