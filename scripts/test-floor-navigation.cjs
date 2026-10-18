@@ -282,9 +282,10 @@ async function run(engine, origin) {
 
     const phone = await browser.newContext({viewport: {width: 390, height: 844}, deviceScaleFactor: 2,
       hasTouch: true, locale: 'en-US', ...(engine === 'firefox' ? {} : {isMobile: true})});
+    let mobilePage;
     try {
       await phone.addInitScript(instrument);
-      const mobile = await phone.newPage(); const mobileErrors = [];
+      const mobile = mobilePage = await phone.newPage(); const mobileErrors = [];
       mobile.on('pageerror', error => mobileErrors.push(String(error)));
       await open(mobile, origin); await importProject(mobile, fixture(8));
       assert.equal(await mobile.locator(THUMB).count(), 8, 'All eight supported floors are represented on a narrow viewport');
@@ -297,11 +298,39 @@ async function run(engine, origin) {
       if (await mobile.locator('#floor-navigator-toggle').count()) {
         await mobile.locator('#floor-navigator-toggle').tap();
         assert.equal(await mobile.locator('#floor-navigator-toggle').getAttribute('aria-expanded'), 'false');
+        await mobile.locator('#floor-list button').last().tap(); await active(mobile, 'level_7');
         await mobile.locator('#floor-navigator-toggle').tap();
         assert.equal(await mobile.locator('#floor-navigator-toggle').getAttribute('aria-expanded'), 'true');
+        await frames(mobile);
+        const reveal = await thumb(mobile, 'level_7').evaluate(button => {
+          const rail = button.parentElement.getBoundingClientRect(), rect = button.getBoundingClientRect();
+          const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+          return {insideRail: rect.top >= rail.top && rect.bottom <= rail.bottom,
+            receivesInput: hit === button || button.contains(hit)};
+        });
+        assert(reveal.insideRail, 'Reopening the rail reveals the floor selected while thumbnails were hidden');
+        assert(reveal.receivesInput, 'The revealed thumbnail is not covered by the rail toggle or other controls');
+        await thumb(mobile, 'level_7').tap();
       }
       await mobile.screenshot({path: path.join(diagnostics.directory, `${engine}-phone-floors.png`)});
-      assert.deepEqual(mobileErrors, []); record.mobile = {layout, floors: 8, nativeTaps: 2, realMobileOS: false}; save();
+      assert.deepEqual(mobileErrors, []); record.mobile = {layout, floors: 8, nativeTaps: 3, realMobileOS: false}; save();
+    } catch (error) {
+      if (mobilePage) {
+        try {
+          record.mobileFailure = await mobilePage.evaluate(() => {
+            const box = selector => {
+              const element = document.querySelector(selector), rect = element?.getBoundingClientRect();
+              return rect ? {x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+                hit: document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)?.outerHTML.slice(0, 500)} : null;
+            };
+            return {viewport: [innerWidth, innerHeight], rail: box('#floor-navigator'),
+              toggle: box('#floor-navigator-toggle'), firstFloor: box('#floor-navigator button')};
+          });
+          await mobilePage.screenshot({path: path.join(diagnostics.directory, `${engine}-phone-failure.png`), timeout: 5000});
+        } catch (captureError) { record.mobileFailureCaptureError = String(captureError); }
+        save();
+      }
+      throw error;
     } finally { await phone.close(); }
 
     const limited = await browser.newContext({viewport: {width: 1280, height: 900}, locale: 'en-US'});
