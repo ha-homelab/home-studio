@@ -169,7 +169,10 @@ homeView = (() => {
     return label?vt(label)+': '+value:value;
   }
   function openEntityDetails(item){
-    if(isSupportedControl(item)&&bridge&&haConnected&&haStates[item.entity_id])bridge.postMessage({type:'more_info',entity_id:item.entity_id});
+    if(isSupportedControl(item)&&bridge&&haConnected&&haStates[item.entity_id]){
+      cancelNativeHover();nativeHoverId=item.id;
+      bridge.postMessage({type:'more_info',entity_id:item.entity_id});
+    }
   }
   const deviceDisplayState = item => {
     if(!embedded)return 'preview';if(!haConnected)return 'disconnected';
@@ -262,7 +265,7 @@ homeView = (() => {
       if(event.pointerType!=='mouse'||event.buttons||nativeHoverId===item.id)return;
       nativeHoverTimer=setTimeout(()=>{
         if(!active||element.disabled||!element.isConnected||!element.matches(':hover')||!bridge||!haConnected)return;
-        nativeHoverId=item.id;openEntityDetails(item);
+        openEntityDetails(item);
       },650);
     };
     const leave=()=>cancelNativeHover();

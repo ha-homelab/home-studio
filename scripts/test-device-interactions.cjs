@@ -122,6 +122,13 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
    await card(id).dispatchEvent('pointerenter',{pointerType:'mouse',buttons:0});await page.waitForTimeout(750);
    assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),before+1,'closing native details on the same anchor does not reopen');
   }
+  // Explicit clicks must also survive a native modal returning the pointer to its trigger.
+  await frame.locator('#homeConnection').hover();
+  const beforeClick=await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length);
+  await card('tv').click();await page.locator('#native').waitFor({state:'visible'});
+  await page.keyboard.press('Escape');await page.locator('#native').waitFor({state:'hidden'});
+  await card('tv').dispatchEvent('pointerenter',{pointerType:'mouse',buttons:0});await page.waitForTimeout(750);
+  assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),beforeClick+1,'closing explicitly opened native details does not reopen');
   assert.deepEqual(await page.evaluate(()=>messages.filter(m=>['toggle','curtain_command','tv_power'].includes(m.type))),[],'native hover never toggles, powers or moves a device');
   await frame.locator('[data-home-details="light"]').focus();await frame.locator('[data-home-details="light"]').press('Enter');await page.locator('#native').waitFor({state:'visible'});await page.keyboard.press('Escape');
   // Catalogue entries are metadata, not 5,500 live states or thousands of DOM nodes.
