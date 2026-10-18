@@ -163,12 +163,44 @@ assert(['chromium','firefox','webkit'].includes(engine));
   await level.evaluate(el=>el.dispatchEvent(new Event('change',{bubbles:true})));
   await page.waitForFunction(()=>messages.filter(m=>m.type==='media_command').length===1);
   assert.deepEqual(await page.evaluate(()=>messages.filter(m=>m.type==='media_command').map(({action,value})=>({action,value}))),[{action:'volume_set',value:60}]);
-  await popup.locator('[data-media-action="media_pause"]').click();
+  const pause=popup.locator('[data-media-action="media_pause"]');
+  const pausePoint=await pause.evaluate(el=>{const rect=el.getBoundingClientRect();return {x:rect.x+rect.width/2,y:rect.y+rect.height/2};});
+  // Keep a real native target beneath the popup across browser font metrics.
+  // Dismissing the popup must not treat newly exposed content as pointer intent.
+  const coverStyle=await card('cover').evaluate((el,point)=>{
+   const rect=el.getBoundingClientRect(),original=el.getAttribute('style');
+   if(point.x<rect.left+8||point.x>rect.right-8||point.y<rect.top+8||point.y>rect.bottom-8)
+    Object.assign(el.style,{position:'fixed',left:(point.x-60)+'px',top:(point.y-22)+'px',width:'120px',height:'44px',zIndex:'1'});
+   return original;
+  },pausePoint);
+  await pause.evaluate(el=>el.addEventListener('pointerdown',event=>{
+   window.fixturePausePointer={x:event.clientX,y:event.clientY};
+  },{once:true}));
+  await pause.click();
+  const stationaryPointer=await pause.evaluate(()=>window.fixturePausePointer);
   await page.waitForFunction(()=>messages.filter(m=>m.type==='media_command').length===2);
   assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='media_command').at(-1).action),'media_pause');
   assert.equal(await page.evaluate(()=>JSON.stringify(states)),initial,'control UI never fabricates HA state');
   await page.keyboard.press('Escape');await popup.waitFor({state:'hidden'});
-  await page.waitForTimeout(250);assert.equal(await popup.isVisible(),false,'focus restoration does not reopen the remote');
+  assert.equal(await card('cover').evaluate((el,point)=>el.contains(document.elementFromPoint(point.x,point.y)),stationaryPointer),true,
+   'the stationary pointer now rests over the exposed curtain control');
+  // Layout changes can also replay pointermove at the last physical position.
+  // Use recorded event coordinates rather than the rounded element center.
+  for(const type of ['pointerenter','pointermove'])await card('cover').dispatchEvent(type,{
+   pointerType:'mouse',buttons:0,clientX:stationaryPointer.x,clientY:stationaryPointer.y,
+  });
+  await page.waitForTimeout(750);assert.equal(await popup.isVisible(),false,'focus restoration does not reopen the remote');
+  assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),0,
+   'dismissing audio must not open unrelated native details under a stationary pointer');
+  const iframeBox=await page.locator('iframe').boundingBox();
+  await page.mouse.move(iframeBox.x+stationaryPointer.x+4,iframeBox.y+stationaryPointer.y);
+  await page.locator('#native').waitFor({state:'visible'});
+  assert.deepEqual(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').map(m=>m.entity_id)),['cover.curtain'],
+   'deliberate movement over the exposed target still opens its native details');
+  await closeNative(page);
+  await card('cover').evaluate((el,style)=>{if(style===null)el.removeAttribute('style');else el.setAttribute('style',style);},coverStyle);
+  await frame.locator('#homeConnection').hover();
+  const nativeBeforeKeyboard=await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length);
   // Keyboard and click use the same remote without dispatching an action.
   await frame.locator('#homeRoom').focus();await card('audio').focus();await popup.waitFor({state:'visible'});await card('audio').press('Enter');
   assert.equal(await popup.evaluate(el=>document.activeElement===el),true);
@@ -188,10 +220,10 @@ assert(['chromium','firefox','webkit'].includes(engine));
   assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='media_command').length),2);
   // Escape also cancels a pending native hover while the pointer stays over it.
   await checkHoverCancellation(page,frame,()=>page.keyboard.press('Escape'));
-  assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),0,'parent dismissal cancels the delayed native dialog');
+  assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),nativeBeforeKeyboard,'parent dismissal cancels the delayed native dialog');
   // Leave a native target before its delay: no native dialog and no command.
   await checkHoverCancellation(page,frame,()=>frame.locator('#homeConnection').hover());
-  assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),0);
+  assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),nativeBeforeKeyboard);
   for(const id of ['tv','light','cover']){
    await frame.locator('#homeConnection').hover();
    await card(id).evaluate(el=>el.addEventListener('pointerenter',()=>{window.fixtureHoverAt=Date.now();},{once:true}));
@@ -261,7 +293,13 @@ assert(['chromium','firefox','webkit'].includes(engine));
   console.log('PASS ('+engine+'): generated viewer media/native hover, explicit commands, keyboard/touch, 5,500-entity search and dense-model dependencies');
  }catch(error){
   const viewers=await viewerDiagnostics();
-  console.error('Device interaction diagnostics: '+JSON.stringify({engine,headless,viewers,pageErrors:errors,consoleErrors}));
+  const nativeMessages=await Promise.all(pages.map(async(page,index)=>{
+   try{return {page:index,...await page.evaluate(()=>{
+    const requests=Array.isArray(window.messages)?window.messages.filter(message=>message.type==='more_info'):[];
+    return {count:requests.length,recent:requests.slice(-12).map(message=>({entity_id:String(message.entity_id).slice(0,128),received_at:message.received_at}))};
+   })};}catch{return {page:index,unavailable:true};}
+  }));
+  console.error('Device interaction diagnostics: '+JSON.stringify({engine,headless,viewers,pageErrors:errors,consoleErrors,nativeMessages}));
   if(viewers.some(viewer=>viewer.errorVisible))throw Error('3D viewer failed ('+engine+', '+(headless?'headless':'headed')+'); see loadError and browser console diagnostics above.',{cause:error});
   throw error;
  }finally{await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));fs.rmSync(temporary,{recursive:true,force:true});}

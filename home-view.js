@@ -257,23 +257,27 @@ homeView = (() => {
     requestAnimationFrame(()=>{window.resizeModel?.();if(window.floorplan?.renderCount===before)window.requestModelRender?.()});
   }
 
-  let nativeHoverTimer=null,nativeHoverId=null;
+  let nativeHoverTimer=null,nativeHoverId=null,nativePointerX=null,nativePointerY=null;
   function cancelNativeHover(reset=false){clearTimeout(nativeHoverTimer);nativeHoverTimer=null;if(reset)nativeHoverId=null;}
   function bindNativeHover(item,element){
-    const enter=event=>{
-      cancelNativeHover();
-      if(event.pointerType!=='mouse'||event.buttons||nativeHoverId===item.id)return;
+    const move=event=>{
+      if(event.pointerType!=='mouse'||event.buttons){cancelNativeHover();return;}
+      // Closing an overlay can synthesize pointerenter without any mouse movement.
+      if(event.clientX===nativePointerX&&event.clientY===nativePointerY||nativeHoverId===item.id||nativeHoverTimer!==null)return;
       nativeHoverTimer=setTimeout(()=>{
+        nativeHoverTimer=null;
         if(!active||element.disabled||!element.isConnected||!element.matches(':hover')||!bridge||!haConnected)return;
         openEntityDetails(item);
       },650);
     };
     const leave=()=>cancelNativeHover();
-    element.addEventListener('pointerenter',enter);element.addEventListener('pointerleave',leave);element.addEventListener('pointerdown',leave);
-    return ()=>{element.removeEventListener('pointerenter',enter);element.removeEventListener('pointerleave',leave);element.removeEventListener('pointerdown',leave);};
+    element.addEventListener('pointermove',move);element.addEventListener('pointerleave',leave);element.addEventListener('pointerdown',leave);
+    return ()=>{element.removeEventListener('pointermove',move);element.removeEventListener('pointerleave',leave);element.removeEventListener('pointerdown',leave);};
   }
   // A dialog closing over the same marker must not immediately reopen it.
   document.addEventListener('pointermove',event=>{
+    if(event.pointerType!=='mouse'||event.clientX===nativePointerX&&event.clientY===nativePointerY)return;
+    nativePointerX=event.clientX;nativePointerY=event.clientY;
     const target=event.target.closest?.('[data-home-item],[data-home-device],[data-home-details]');
     const id=target?.dataset.homeItem||target?.dataset.homeDevice||target?.dataset.homeDetails;
     if(id!==nativeHoverId)nativeHoverId=null;

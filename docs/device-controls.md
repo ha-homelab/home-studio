@@ -41,6 +41,8 @@ Hovering or focusing the marker does not play, stop or change the volume.
 
 For TVs and other devices, leaving the mouse over a marker for about two-thirds
 of a second opens HA's native details dialog. Briefly crossing a marker does not.
+Closing an overlay does not open another device that happens to be underneath
+the pointer. Move the mouse to the desired marker to start a new hover.
 The dialog is HA's own interface: its contents depend on your integration and
 version of HA. This feature does not install a separate remote-control dashboard
 or promise buttons the device does not support.
@@ -49,6 +51,10 @@ Keyboard and touch users can select the device card or its **Details** button.
 Audio controls also have an explicit **Controls** button in the artwork preview.
 Escape or a click outside dismisses the compact audio remote. Full HA dialogs use
 HA's normal close behavior. Quick toggles remain deliberate clicks.
+
+Native dialogs require the Home Assistant frontend. A separately hosted wrapper
+must handle the `hass-more-info` event itself; authentication alone does not
+load HA's full controls into that page.
 
 ## Stereo pairs and groups
 
