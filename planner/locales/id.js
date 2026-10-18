@@ -659,5 +659,19 @@ export default {
   "No previous project is available.": "Tidak ada proyek sebelumnya yang tersedia.",
   "This browser cannot coordinate draft saves.": "Browser ini tidak dapat mengoordinasikan penyimpanan draf.",
   "No saved draft is available.": "Tidak ada draf tersimpan yang tersedia.",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Simpan otomatis tidak tersedia. Lanjutkan di tab ini tanpa menyimpan? Ekspor JSON sebelum keluar."
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Simpan otomatis tidak tersedia. Lanjutkan di tab ini tanpa menyimpan? Ekspor JSON sebelum keluar.",
+  // Floor navigation and camera controls.
+  "Floor navigator": "Navigasi lantai",
+  "Switch to {floor}": "Beralih ke {floor}",
+  "Empty floor": "Lantai kosong",
+  "Hide floor previews": "Sembunyikan pratinjau lantai",
+  "Show floor previews": "Tampilkan pratinjau lantai",
+  "3D navigation": "Navigasi 3D",
+  "Orbit": "Putar",
+  "Pan": "Geser",
+  "Top view": "Tampak atas",
+  "Rotate left": "Putar ke kiri",
+  "Rotate right": "Putar ke kanan",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "Seret untuk memutar · tombol kanan atau Shift untuk menggeser · gulir untuk memperbesar",
+  "Drag to pan · scroll to zoom · arrow keys to move": "Seret untuk menggeser · gulir untuk memperbesar · tombol panah untuk bergerak"
 };

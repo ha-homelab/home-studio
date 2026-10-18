@@ -659,5 +659,19 @@ export default {
   "No previous project is available.": "پروژهٔ قبلی در دسترس نیست.",
   "This browser cannot coordinate draft saves.": "این مرورگر نمی‌تواند ذخیرهٔ پیش‌نویس‌ها را هماهنگ کند.",
   "No saved draft is available.": "پیش‌نویس ذخیره‌شده‌ای در دسترس نیست.",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "ذخیرهٔ خودکار در دسترس نیست. در این برگه بدون ذخیره‌کردن ادامه می‌دهید؟ پیش از خروج، JSON را صادر کنید."
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "ذخیرهٔ خودکار در دسترس نیست. در این برگه بدون ذخیره‌کردن ادامه می‌دهید؟ پیش از خروج، JSON را صادر کنید.",
+  // Floor navigation and camera controls.
+  "Floor navigator": "پیمایش طبقات",
+  "Switch to {floor}": "رفتن به {floor}",
+  "Empty floor": "طبقه خالی",
+  "Hide floor previews": "پنهان کردن پیش‌نمایش طبقات",
+  "Show floor previews": "نمایش پیش‌نمایش طبقات",
+  "3D navigation": "پیمایش سه‌بعدی",
+  "Orbit": "چرخش",
+  "Pan": "جابه‌جایی",
+  "Top view": "نمای بالا",
+  "Rotate left": "چرخش به چپ",
+  "Rotate right": "چرخش به راست",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "برای چرخش بکشید · دکمه راست یا Shift برای جابه‌جایی · پیمایش برای بزرگ‌نمایی",
+  "Drag to pan · scroll to zoom · arrow keys to move": "برای جابه‌جایی بکشید · پیمایش برای بزرگ‌نمایی · کلیدهای جهت برای حرکت"
 };

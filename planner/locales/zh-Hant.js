@@ -659,5 +659,19 @@ export default {
   "No previous project is available.": "沒有可用的上一個專案。",
   "This browser cannot coordinate draft saves.": "此瀏覽器無法協調分頁之間的草稿儲存。",
   "No saved draft is available.": "沒有可用的已儲存草稿。",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "無法自動儲存。要在此分頁中繼續而不儲存嗎？請在離開前匯出 JSON。"
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "無法自動儲存。要在此分頁中繼續而不儲存嗎？請在離開前匯出 JSON。",
+  // Floor navigation and camera controls.
+  "Floor navigator": "樓層導覽",
+  "Switch to {floor}": "切換到{floor}",
+  "Empty floor": "空樓層",
+  "Hide floor previews": "隱藏樓層預覽",
+  "Show floor previews": "顯示樓層預覽",
+  "3D navigation": "3D導覽",
+  "Orbit": "旋轉",
+  "Pan": "平移",
+  "Top view": "俯視圖",
+  "Rotate left": "向左旋轉",
+  "Rotate right": "向右旋轉",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "拖曳旋轉 · 右鍵或按住Shift拖曳平移 · 滾輪縮放",
+  "Drag to pan · scroll to zoom · arrow keys to move": "拖曳平移 · 滾輪縮放 · 方向鍵移動"
 };

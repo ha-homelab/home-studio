@@ -659,5 +659,19 @@ export default {
   "No previous project is available.": "이전 프로젝트가 없습니다.",
   "This browser cannot coordinate draft saves.": "이 브라우저는 탭 간 초안 저장을 조정할 수 없습니다.",
   "No saved draft is available.": "저장된 초안이 없습니다.",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "자동 저장을 사용할 수 없습니다. 저장하지 않고 이 탭에서 계속할까요? 나가기 전에 JSON을 내보내세요."
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "자동 저장을 사용할 수 없습니다. 저장하지 않고 이 탭에서 계속할까요? 나가기 전에 JSON을 내보내세요.",
+  // Floor navigation and camera controls.
+  "Floor navigator": "층 탐색",
+  "Switch to {floor}": "{floor}(으)로 전환",
+  "Empty floor": "빈 층",
+  "Hide floor previews": "층 미리보기 숨기기",
+  "Show floor previews": "층 미리보기 표시",
+  "3D navigation": "3D 탐색",
+  "Orbit": "회전",
+  "Pan": "이동",
+  "Top view": "위에서 보기",
+  "Rotate left": "왼쪽으로 회전",
+  "Rotate right": "오른쪽으로 회전",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "드래그하여 회전 · 오른쪽 버튼 또는 Shift로 이동 · 스크롤로 확대/축소",
+  "Drag to pan · scroll to zoom · arrow keys to move": "드래그하여 이동 · 스크롤로 확대/축소 · 화살표 키로 이동"
 };

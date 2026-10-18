@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.9.0] - Floor previews and camera navigation
+
+- Switch floors from translucent, geometry-aware thumbnails along the left edge
+  of the workspace. The active floor stays highlighted; hide the previews when
+  you want more drawing room. All supported floors remain reachable by keyboard
+  and in the scrollable rail on small screens.
+- Choose Orbit or Pan in the 3D preview, use right/Shift-drag to pan, or navigate
+  with two-finger gestures. Add a top view, 45-degree turn buttons, and a Fit view
+  reset. Camera navigation never changes floor geometry or creates undo entries.
+- Keep rendering demand-driven: thumbnails use SVG, camera motion reuses the
+  scene and shadows, and no animation runs while idle. Navigation controls and
+  guidance are localized across all 24 supported languages.
+
+### Upgrade
+
+Schema 1 drawings remain compatible. Export JSON before replacing the toolkit.
+These controls improve the browser drawing editor; existing installed Home
+Assistant dashboards do not change merely by updating the hosted planner.
+
+### Security
+
+Floor previews are generated locally from the current drawing. No thumbnails,
+coordinates, or camera gestures are sent to a service. Existing optional AI
+provider and Home Assistant authorization boundaries are unchanged.
+
 ## [0.8.0] - First-session usability
 
 - Open fictional practice, decor, pattern, and garage examples directly from the

@@ -658,5 +658,19 @@ export default {
   "No previous project is available.": "אין פרויקט קודם זמין.",
   "This browser cannot coordinate draft saves.": "הדפדפן הזה אינו יכול לתאם שמירת טיוטות.",
   "No saved draft is available.": "אין טיוטה שמורה זמינה.",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "השמירה האוטומטית אינה זמינה. להמשיך בכרטיסייה זו ללא שמירה? יצאו JSON לפני היציאה."
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "השמירה האוטומטית אינה זמינה. להמשיך בכרטיסייה זו ללא שמירה? יצאו JSON לפני היציאה.",
+  // Floor navigation and camera controls.
+  "Floor navigator": "ניווט בין קומות",
+  "Switch to {floor}": "מעבר אל {floor}",
+  "Empty floor": "קומה ריקה",
+  "Hide floor previews": "הסתרת תצוגות הקומות",
+  "Show floor previews": "הצגת תצוגות הקומות",
+  "3D navigation": "ניווט בתלת־ממד",
+  "Orbit": "סיבוב",
+  "Pan": "הזזה",
+  "Top view": "מבט מלמעלה",
+  "Rotate left": "סיבוב שמאלה",
+  "Rotate right": "סיבוב ימינה",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "גרירה לסיבוב · לחצן ימני או Shift להזזה · גלילה לשינוי גודל",
+  "Drag to pan · scroll to zoom · arrow keys to move": "גרירה להזזה · גלילה לשינוי גודל · מקשי חצים לתנועה"
 };

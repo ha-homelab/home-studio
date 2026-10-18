@@ -659,5 +659,19 @@ export default {
   "No previous project is available.": "Không có dự án trước.",
   "This browser cannot coordinate draft saves.": "Trình duyệt này không thể phối hợp việc lưu bản nháp giữa các thẻ.",
   "No saved draft is available.": "Không có bản nháp đã lưu.",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Không thể tự động lưu. Tiếp tục trong thẻ này mà không lưu? Hãy xuất JSON trước khi rời đi."
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Không thể tự động lưu. Tiếp tục trong thẻ này mà không lưu? Hãy xuất JSON trước khi rời đi.",
+  // Floor navigation and camera controls.
+  "Floor navigator": "Điều hướng tầng",
+  "Switch to {floor}": "Chuyển đến {floor}",
+  "Empty floor": "Tầng trống",
+  "Hide floor previews": "Ẩn hình xem trước các tầng",
+  "Show floor previews": "Hiện hình xem trước các tầng",
+  "3D navigation": "Điều hướng 3D",
+  "Orbit": "Xoay",
+  "Pan": "Di chuyển",
+  "Top view": "Nhìn từ trên",
+  "Rotate left": "Xoay trái",
+  "Rotate right": "Xoay phải",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "Kéo để xoay · chuột phải hoặc Shift để di chuyển · cuộn để thu phóng",
+  "Drag to pan · scroll to zoom · arrow keys to move": "Kéo để di chuyển · cuộn để thu phóng · phím mũi tên để di chuyển"
 };

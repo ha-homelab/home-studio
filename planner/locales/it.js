@@ -658,5 +658,19 @@ export default {
   "No previous project is available.": "Nessun progetto precedente disponibile.",
   "This browser cannot coordinate draft saves.": "Questo browser non può coordinare il salvataggio delle bozze.",
   "No saved draft is available.": "Nessuna bozza salvata disponibile.",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Il salvataggio automatico non è disponibile. Continuare in questa scheda senza salvare? Esporta il JSON prima di uscire."
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Il salvataggio automatico non è disponibile. Continuare in questa scheda senza salvare? Esporta il JSON prima di uscire.",
+  // Floor navigation and camera controls.
+  "Floor navigator": "Navigazione dei piani",
+  "Switch to {floor}": "Passa a {floor}",
+  "Empty floor": "Piano vuoto",
+  "Hide floor previews": "Nascondi anteprime dei piani",
+  "Show floor previews": "Mostra anteprime dei piani",
+  "3D navigation": "Navigazione 3D",
+  "Orbit": "Ruota",
+  "Pan": "Sposta",
+  "Top view": "Vista dall’alto",
+  "Rotate left": "Ruota a sinistra",
+  "Rotate right": "Ruota a destra",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "Trascina per ruotare · tasto destro o Maiusc per spostare · scorri per ingrandire",
+  "Drag to pan · scroll to zoom · arrow keys to move": "Trascina per spostare · scorri per ingrandire · frecce per muovere"
 };
