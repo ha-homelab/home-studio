@@ -119,3 +119,9 @@
 :root[dir="rtl"] #curtainRecovery ol{padding-left:0;padding-inline-start:22px}
 @media(max-width:950px){:root[dir="rtl"] .home-controls{border-inline-start:0;padding:12px 0 0}:root[dir="rtl"] #homeOtherFloor{margin-inline-start:0}:root[dir="rtl"] #homeConnection{margin-left:0;margin-inline-start:auto}}
 @media(max-width:850px){header{flex-wrap:wrap}:root[dir="rtl"] aside{border-inline-start:0}.viewer-language-label select{max-width:130px}}
+
+/* Keep full controls reachable without turning the entire row into a nested button. */
+.home-device-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px;align-items:stretch}
+.home-device-row[hidden]{display:none}
+.home-device-details{font-size:11px;padding:5px;border:1px solid #427386;border-radius:9px;background:#1c303a;color:#d1f1fb}
+.home-device-details:focus-visible{outline:2px solid #5de1ff;outline-offset:2px}

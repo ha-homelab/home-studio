@@ -46,7 +46,7 @@ homeView = (() => {
   function restoreActivityFocus(container){
     if(container.contains(document.activeElement))(activityRooms.get(selected)||$('homeToggleActivity')).focus();
   }
-  function selectHomeRoom(room,zone=''){clearActivityLocation();selected=room;signalZone=zone;$('homeRoom').value=room;refreshControls();resetZoom();}
+  function selectHomeRoom(room,zone=''){hideMediaControls();cancelNativeHover(true);clearActivityLocation();selected=room;signalZone=zone;$('homeRoom').value=room;refreshControls();resetZoom();}
   function locateActivitySource(item){
     if(!item)return;
     selectHomeRoom(item.room);
@@ -117,6 +117,7 @@ homeView = (() => {
   const curtainCommands=new Map();
   const describeCurtain=item=>{const info=curtainStateFor(item);return (info.description||describeDeviceState(deviceDisplayState(item)))+(info.position!==null?` · ${info.remembered?'last known ':'HA reports '}${info.position}% open`:' · position unknown');};
   const isTV=item=>item.entity_id?.startsWith('media_player.');
+  const isAudio=item=>isTV(item)&&item.type!=='tv'&&!model.tv_entities?.[item.id];
   const isLock=item=>item.entity_id?.startsWith('lock.');
   const lockStates=['locked','unlocked','locking','unlocking','jammed','open'];
   const lockIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path data-lock-shackle d="M8 10V6a4 4 0 0 1 8 0v4"/><path d="M12 14v3"/></svg>';
@@ -226,6 +227,7 @@ homeView = (() => {
   }
 
   function setActive(value) {
+    hideMediaControls();cancelNativeHover(true);
     active = value;previewTV(null);
     if(lowerFloorContext)lowerFloorContext.visible=value&&showLowerFloor&&!selected;
     document.body.classList.toggle('home-mode', value); $('homeView').hidden = !value;
@@ -252,7 +254,31 @@ homeView = (() => {
     requestAnimationFrame(()=>{window.resizeModel?.();if(window.floorplan?.renderCount===before)window.requestModelRender?.()});
   }
 
+  let nativeHoverTimer=null,nativeHoverId=null;
+  function cancelNativeHover(reset=false){clearTimeout(nativeHoverTimer);nativeHoverTimer=null;if(reset)nativeHoverId=null;}
+  function bindNativeHover(item,element){
+    const enter=event=>{
+      cancelNativeHover();
+      if(event.pointerType!=='mouse'||event.buttons||nativeHoverId===item.id)return;
+      nativeHoverTimer=setTimeout(()=>{
+        if(!active||element.disabled||!element.isConnected||!element.matches(':hover')||!bridge||!haConnected)return;
+        nativeHoverId=item.id;openEntityDetails(item);
+      },650);
+    };
+    const leave=()=>cancelNativeHover();
+    element.addEventListener('pointerenter',enter);element.addEventListener('pointerleave',leave);element.addEventListener('pointerdown',leave);
+    return ()=>{element.removeEventListener('pointerenter',enter);element.removeEventListener('pointerleave',leave);element.removeEventListener('pointerdown',leave);};
+  }
+  // A dialog closing over the same marker must not immediately reopen it.
+  document.addEventListener('pointermove',event=>{
+    const target=event.target.closest?.('[data-home-item],[data-home-device],[data-home-details]');
+    const id=target?.dataset.homeItem||target?.dataset.homeDevice||target?.dataset.homeDetails;
+    if(id!==nativeHoverId)nativeHoverId=null;
+  });
+  window.addEventListener('pagehide',()=>{cancelNativeHover(true);discardMediaControls();});
   function rebuildControls() {
+    hideMediaControls();cancelNativeHover(true);
+    for(const point of points)for(const cleanup of point.controlCleanup||[])cleanup();
     applyCameraFrames();
     previewTV(null);
     for(const point of points)clearTrail(point);
@@ -278,8 +304,7 @@ homeView = (() => {
       const symbol = document.createElement('span'); symbol.className = 'home-device-icon'; symbol.innerHTML = glyph;
       const text = document.createElement('span'), name = document.createElement('span'), detail = document.createElement('span');
       name.className = 'home-device-name'; name.textContent = item.name; detail.className = 'home-device-detail'; text.append(name,detail); card.append(symbol,text);
-      marker.onclick = () => activateDevice(item);
-      card.onclick = () => activateDevice(item,false);
+      if(!isAudio(item)){marker.onclick = () => activateDevice(item);card.onclick = () => activateDevice(item,false);}
       let details;
       if(isToggle(item)){
         const row=document.createElement('div');row.className='home-device-row';
@@ -289,6 +314,7 @@ homeView = (() => {
       $('homeMarkers').append(marker);
       const position = new THREE.Vector3(item.position_m.x,item.position_m.y + item.dimensions_m.height / 2,item.position_m.z);
       const point = {item,marker,card,detail,details,position,object:objectsById.get(item.id),original:model.inventory.find(i=>i.id===item.id),duplicateControl:isCover(item)&&points.some(p=>p.item.entity_id===item.entity_id)}; points.push(point);
+      point.controlCleanup=[marker,card].map(element=>isAudio(item)?bindMediaControlTrigger(item.id,element):bindNativeHover(item,element));
       const anchor=objectsById.get(model.control_anchors?.[item.id]);
       if(anchor)point.anchor=anchor.localToWorld(new THREE.Vector3(0,.5,.5));
       else if(isMotion(item))point.anchor=position.clone().setY(.12);
@@ -454,10 +480,12 @@ homeView = (() => {
   function refreshTVPreviews(){
     updateTVPreviews(bindings.filter(isTV).map(item=>({item,state:deviceDisplayState(item),
       busy:pending.has(item.entity_id),enabled:!!(bridge&&haConnected&&haStates[item.entity_id]),media:haStates[item.entity_id]?.restored?null:haStates[item.entity_id]?.media,
-      details:()=>activateDevice(item),power:()=>activateDevice(item,false,true)})));
+      command:(action,value,request_id)=>bridge?.postMessage({type:'media_command',entity_id:item.entity_id,action,...(value!==undefined?{value}:{}),request_id}),
+      details:()=>openEntityDetails(item),power:()=>activateDevice(item,false,true)})));
   }
   function activateDevice(item,quick=true,tvPower=false) {
     const state=deviceDisplayState(item);
+    if(!tvPower&&isAudio(item)){const anchor=points.find(point=>point.item.id===item.id)?.marker;if(showMediaControls(item.id,anchor,{focus:true}))return;}
     if(receiverSpec(item)&&bridge&&haConnected){inspectActivitySource(item);return;}
     if(isCover(item)&&bridge&&haConnected){curtainItem=item;curtainDirty=false;curtainCheckCycle=null;curtainError=null;$('curtainChecked').checked=false;$('curtainError').hidden=true;updateCurtainDialog();$('curtainDialog').showModal();const action=curtainStateFor(item).action;if(quick&&action)curtainCommand(action);return;}
     // Locks always use HA's explicit lock/unlock controls, never a toggle.

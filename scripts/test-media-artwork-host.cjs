@@ -171,9 +171,9 @@ test('state projection exposes bounded media captions only for saved media playe
   f.panel._hass.states['media_player.study'].attributes.media_title='x'.repeat(300);
   f.panel._hass.states['media_player.study'].attributes.media_album_name={unsafe:true};
   f.panel._hass.states['media_player.unbound']={state:'playing',attributes:{media_title:'Private unrelated title',entity_picture:'PRIVATE'}};
-  f.panel.publishEntityStates();const states=f.messages.at(-1).states;
+  f.panel.scopedStates=true;f.panel.publishEntityStates();const states=f.messages.at(-1).states;
   assert.equal(states['media_player.study'].media.title.length,200);assert.equal(states['media_player.study'].media.album,'');
-  assert.equal(states['media_player.unbound'].media,undefined);assert.doesNotMatch(JSON.stringify(states),/PRIVATE|untrusted|entity_picture/);
+  assert.equal(states['media_player.unbound'],undefined);assert.doesNotMatch(JSON.stringify(states),/PRIVATE|untrusted|entity_picture/);
 });
 
 test('recovery inventory retains a bounded model ID distinct from its floor, with legacy fallback',async()=>{

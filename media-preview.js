@@ -39,7 +39,7 @@ function scheduleMediaControlDismiss(){
 function bindMediaControlTrigger(id,element){
   const enter=event=>{if(event.pointerType==='mouse'&&!event.buttons)showMediaControls(id,element);};
   const focus=()=>{if(!mediaControls?.restoringFocus)showMediaControls(id,element);};
-  const leave=event=>{if(!mediaControls?.el.contains(event.relatedTarget))scheduleMediaControlDismiss();};
+  const leave=event=>{if(event.pointerType==='mouse'&&!mediaControls?.el.contains(event.relatedTarget))scheduleMediaControlDismiss();};
   const click=event=>{if(showMediaControls(id,element,{focus:true})){event.preventDefault();event.stopPropagation();}};
   element.setAttribute('aria-haspopup','dialog');element.setAttribute('aria-controls','homeMediaControls');element.setAttribute('aria-expanded','false');
   element.addEventListener('pointerenter',enter);element.addEventListener('pointerleave',leave);element.addEventListener('focus',focus);element.addEventListener('click',click);
@@ -70,7 +70,7 @@ function ensureMediaControls(){
   mediaControls.outsideFocus=event=>{if(!el.contains(event.target)&&!mediaControls.anchor?.contains(event.target))hideMediaControls();};
   mediaControls.escape=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();hideMediaControls({restoreFocus:true});}};
   mediaControls.scroll=event=>{if(event?.type==='resize'||!el.contains(event?.target))hideMediaControls();};
-  el.addEventListener('pointerenter',()=>clearTimeout(mediaControlDismissTimer));el.addEventListener('pointerleave',scheduleMediaControlDismiss);
+  el.addEventListener('pointerenter',()=>clearTimeout(mediaControlDismissTimer));el.addEventListener('pointerleave',event=>{if(event.pointerType==='mouse')scheduleMediaControlDismiss();});
   return mediaControls;
 }
 function updateMediaControls(){
@@ -270,7 +270,7 @@ function updateTVPreviews(entries){
         const remote=document.createElement('button');remote.type='button';remote.className='tv-preview-controls';remote.textContent=mediaText('Controls');entry.caption.append(remote);entry.remote=remote;
         entry.removeRemoteTrigger=bindMediaControlTrigger(item.id,remote);
         entry.el.onpointerenter=event=>{if(event.pointerType==='mouse'&&!event.buttons)showMediaControls(item.id,remote);};
-        entry.el.onpointerleave=event=>{if(!mediaControls?.el.contains(event.relatedTarget))scheduleMediaControlDismiss();};
+        entry.el.onpointerleave=event=>{if(event.pointerType==='mouse'&&!mediaControls?.el.contains(event.relatedTarget))scheduleMediaControlDismiss();};
       }
       entry.remote.hidden=false;entry.remote.setAttribute('aria-label',entry.item.name+' · '+mediaText('Media controls'));
       entry.button.hidden=!(mediaControlFlags(entry)&(state==='on'?256:128));

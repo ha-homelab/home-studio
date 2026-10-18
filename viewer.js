@@ -11,7 +11,7 @@ const model=JSON.parse(document.getElementById('modelData').textContent),$=id=>d
 const roomCode=id=>model.room_display_ids?.[id]||id;
 const roomName=id=>model.room_display_names?.[id]||model.rooms.find(r=>r.id===id)?.name||id;
 function viewerStateLabel(state){const labels={on:'On',off:'Off',open:'Open',closed:'Closed',opening:'Opening',closing:'Closing',unavailable:'Unavailable'};return Object.hasOwn(labels,state)?vt(labels[state]):state}
-const embedded=window.__HOME_FLOORPLAN_EMBED__===true;let bridge=null,haStates={},haConnected=false,entityOptions='';
+const embedded=window.__HOME_FLOORPLAN_EMBED__===true;let bridge=null,haStates={},haConnected=false,entityOptions='',entityCatalog=null;
 const planBounds=model.bounds_m, planCenter=planBounds?[(planBounds.min_x+planBounds.max_x)/2,(planBounds.min_z+planBounds.max_z)/2]:model.editor_view?.center_xz||[0,0];
 const planRadius=planBounds?Math.max(8,model.ceiling_height_m*2,Math.hypot(planBounds.max_x-planBounds.min_x,planBounds.max_z-planBounds.min_z)*1.6):model.editor_view?.radius||8;
 if(model.site_features===false){
@@ -456,6 +456,14 @@ o.scale.set(size.width,size.height,size.depth);o.position.set(it.position_m.x,it
 o.rotation.y=it.rotation_deg*Math.PI/180;o.userData.id=it.id;objectGroup.add(o);objectsById.set(it.id,o)}
 }homeView?.rebuildControls();refreshEntityPresentation();}
 function persistInventory(){if(embedded){if(bridge)bridge.postMessage({type:'save',items});else setEditorStatus('Not connected. Export JSON to keep your edits.');return}try{localStorage.setItem(KEY,JSON.stringify(items))}catch(e){setEditorStatus('Browser storage unavailable. Export JSON to keep your work.')}}
+function refreshEntityOptions(){
+  const query=$('entity').value.trim().toLowerCase();
+  const options=(entityCatalog||Object.entries(haStates).map(([id,state])=>[id,state.name])).filter(([id,name])=>!query||id.includes(query)||String(name).toLowerCase().includes(query)).slice(0,80);
+  const key=JSON.stringify(options);if(key===entityOptions)return;entityOptions=key;
+  $('haEntities').replaceChildren(...options.map(([id,name])=>{const option=document.createElement('option');option.value=id;option.label=name;return option}));
+}
+$('entity').addEventListener('input',refreshEntityOptions);
+$('entity').addEventListener('focus',refreshEntityOptions);
 const entityGuidance=document.createElement('small');entityGuidance.id='entityGuidance';$('entity').insertAdjacentElement('afterend',entityGuidance);$('entity').setAttribute('aria-describedby','entityGuidance');
 const bindingGuidance='Bind any Home Assistant entity. Lights, switches and fans keep quick toggles; Details opens native controls. Sensors show readings, media players show artwork and controls, and other entities open Details. Offline previews do not control devices.';
 entityGuidance.textContent=vt(bindingGuidance);
@@ -500,8 +508,34 @@ for(const link of document.querySelectorAll('a[download]'))link.onclick=e=>{e.pr
 function inventorySnapshot(list){return JSON.stringify(list,(_,value)=>value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.entries(value).sort(([a],[b])=>a<b?-1:a>b?1:0)):value)}
 window.addEventListener('message',function init(event){if(event.source!==parent||event.data?.type!=='home-floorplan:init'||!event.ports[0]||bridge)return;
 let inventoryChanged=false;try{const incoming=reconcileStoredAppearance(validateInventoryItems(event.data.items));inventoryChanged=inventorySnapshot(incoming)!==inventorySnapshot(items);if(inventoryChanged)items=incoming}catch(error){setEditorStatus('Cannot load saved inventory: '+error.message);return}
-bridge=event.ports[0];homeView?.applyViewPreferences(event.data.preferences||{});bridge.onmessage=event=>{if(event.data?.type==='view_preferences'){homeView?.applyViewPreferences(event.data);return}if(event.data?.type==='camera_frames'){applyCameraFrames(event.data.frames);return}if(event.data?.type==='media_artwork'){window.applyMediaArtwork?.(event.data.artwork);return}if(event.data?.type==='tv_frame'){applyTVFrame(event.data.image,true,event.data.item_id);return}if(event.data?.type==='command_result'){homeView?.handleCommandResult(event.data);return}if(event.data?.type!=='states')return;haStates=event.data.states;haConnected=event.data.connected;if(!haConnected)applyCameraFrames();const options=Object.entries(haStates).map(([id,state])=>[id,state.name]);const key=JSON.stringify(options);if(key!==entityOptions){entityOptions=key;$('haEntities').replaceChildren(...options.map(([id,name])=>{const option=document.createElement('option');option.value=id;option.label=name;return option}))}refreshEntityPresentation()};
-bridge.postMessage({type:'model_config',model_id:model.id,...Object.fromEntries(['tv_entities','camera_entities','room_activity','receiver_activity','assumed_activity'].map(key=>[key,model[key]]))});
+bridge=event.ports[0];homeView?.applyViewPreferences(event.data.preferences||{});
+bridge.onmessage=event=>{
+  const message=event.data;
+  if(message?.type==='view_preferences'){homeView?.applyViewPreferences(message);return}
+  if(message?.type==='camera_frames'){applyCameraFrames(message.frames);return}
+  if(message?.type==='media_artwork'){window.applyMediaArtwork?.(message.artwork);return}
+  if(message?.type==='tv_frame'){applyTVFrame(message.image,true,message.item_id);return}
+  if(message?.type==='command_result'){window.handleMediaCommandResult?.(message);homeView?.handleCommandResult(message);return}
+  if(message?.type==='entity_catalog'){
+    entityCatalog=(Array.isArray(message.entities)?message.entities:[]).slice(0,20000).filter(row=>Array.isArray(row)&&typeof row[0]==='string'&&/^[a-z_]+\.[a-z0-9_]{1,137}$/.test(row[0])).map(([id,name])=>[id,typeof name==='string'?name.slice(0,200):id]);
+    refreshEntityOptions();return;
+  }
+  if(message?.type!=='states')return;
+  haStates=message.states;haConnected=message.connected;
+  if(!haConnected)applyCameraFrames();
+  if(!entityCatalog)refreshEntityOptions(); // Compatibility with earlier hosts.
+  refreshEntityPresentation();
+};
+// Declare only entity references already present in this model. Hosts use them for
+// telemetry, room activity and guard dependencies beyond the editable bindings.
+const stateEntities=new Set();let scanned=0;
+function collectStateEntities(value,depth=0){
+  if(depth>20||++scanned>100000||stateEntities.size>=2000)return;
+  if(typeof value==='string'&&/^[a-z_]+\.[a-z0-9_]{1,137}$/.test(value))stateEntities.add(value);
+  else if(value&&typeof value==='object')for(const child of Object.values(value))collectStateEntities(child,depth+1);
+}
+for(const key of ['tv_entities','camera_entities','room_activity','receiver_activity','assumed_activity','motion_sources','motion_zones','telemetry','power_labels'])collectStateEntities(model[key]);
+bridge.postMessage({type:'model_config',model_id:model.id,state_entities:[...stateEntities],...Object.fromEntries(['tv_entities','camera_entities','room_activity','receiver_activity','assumed_activity'].map(key=>[key,model[key]]))});
 document.querySelector('aside').inert=false;if(inventoryChanged)rebuildInventoryView();setEditorStatus(appearanceRefreshNotice || 'Connected. Select an entity from the list to bind an object.');window.removeEventListener('message',init);
 });
 }

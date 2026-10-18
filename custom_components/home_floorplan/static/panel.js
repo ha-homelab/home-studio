@@ -61,6 +61,16 @@ function projectRoomActivity(id, state, attributes, configured = false) {
   return {activity:{evidence}};
 }
 
+// HA MediaPlayerEntityFeature bits; service payloads are constructed here, never by the iframe.
+const mediaCommandFeatures=Object.freeze({media_pause:1,volume_set:4,media_previous_track:16,media_next_track:32,media_stop:4096,media_play:16384});
+function mediaCommandAllowed(entity,action,value) {
+  const features=entity?.attributes?.supported_features;
+  return !!entity && !entity.attributes?.restored && ['on','playing','paused','idle','buffering'].includes(entity.state) &&
+    typeof action==='string' && Object.hasOwn(mediaCommandFeatures,action) && Number.isSafeInteger(features) && features>=0 &&
+    !!(features & mediaCommandFeatures[action]) &&
+    (action==='volume_set' ? Number.isInteger(value)&&value>=0&&value<=100 : value===undefined);
+}
+
 const mediaArtworkLimits = Object.freeze({bytes:2097152, pixels:4194304, dimension:4096, output:250000, edge:512, items:16, requests:2, timeout:10000});
 function mediaArtworkSource(entity) {
   const attributes=entity?.attributes;
@@ -333,11 +343,11 @@ class HomeFloorplanPanel extends HTMLElement {
   }
 
   resetModelConfig() {
-    this.tvFrames={};this.cameraEntities={};this.roomActivity=new Set();this.moduleEntities=new Set();this.assumedActivity=null;this.inventoryModel=null;this.modelConfigured=false;
+    this.tvFrames={};this.cameraEntities={};this.roomActivity=new Set();this.moduleEntities=new Set();this.assumedActivity=null;this.inventoryModel=null;this.modelConfigured=false;this.displayEntities=new Set();this.catalogSent=false;this.scopedStates=false;
   }
   set hass(value) {
     if (this.localEdits && (this.localEdits.account !== value?.user?.id || value?.user?.is_admin === false)) this.discardLocalEdits();
-    if (this._hass && (this._hass.user?.id!==value?.user?.id || this._hass.connection!==value?.connection)) this.clearMediaArtwork();
+    if (this._hass && (this._hass.user?.id!==value?.user?.id || this._hass.connection!==value?.connection)) {this.clearMediaArtwork();this.catalogSent=false;}
     this._hass = value;
     const requestedLanguage=value?.locale?.language || value?.language;
     const language=this.explicitLanguage || (typeof requestedLanguage==='string' && requestedLanguage.trim() ? resolveViewerLanguage(requestedLanguage) || 'en' : null);
@@ -425,9 +435,18 @@ class HomeFloorplanPanel extends HTMLElement {
   publishEntityStates() {
     if (!this.port || !this._hass) return;
     const mediaEntities=new Set(this.savedItems.map(item=>item.entity_id).filter(id=>typeof id==='string'&&/^media_player\.[a-z0-9_]{1,137}$/.test(id)));
+    const validId=id=>typeof id==='string'&&/^[a-z_]+\.[a-z0-9_]{1,137}$/.test(id);
+    // The picker needs names, not every device's raw state or unrelated attributes.
+    // Refresh the catalog with the floor/session; live state is limited to this plan.
+    if(this.scopedStates&&!this.catalogSent){
+      this.port.postMessage({type:'entity_catalog',entities:Object.entries(this._hass.states).filter(([id])=>validId(id)).slice(0,20000).map(([id,entity])=>[id,String(entity.attributes?.friendly_name||id).slice(0,200)])});
+      this.catalogSent=true;
+    }
+    const needed=new Set(['sun.sun',...this.savedItems.map(item=>item.entity_id),...(this.displayEntities||[])].filter(validId));
+    for(const id of [...needed]){const guard=this.curtains?.profiles?.[id]?.guard;if(validId(guard))needed.add(guard);}
     // Preserve recovery controls even while a bound motor is absent from HA.
-    const available = {...Object.fromEntries(this.savedItems.filter(i=>i.entity_id?.startsWith('cover.')).map(i=>[i.entity_id,{state:'unavailable',attributes:{}}])),...this._hass.states};
-    const states = Object.fromEntries(Object.entries(available).map(([id, entity]) => {
+    const available=[...(this.scopedStates?needed:new Set([...needed,...Object.keys(this._hass.states)]))].map(id=>[id,this._hass.states[id]||(id.startsWith('cover.')?{state:'unavailable',attributes:{}}:null)]).filter(([,entity])=>entity);
+    const states = Object.fromEntries(available.map(([id, entity]) => {
       const {state, attributes, last_changed, last_updated} = entity;
       const cover = id.startsWith('cover.');
       const guardId = cover ? this.curtains.profiles[id]?.guard : undefined;
@@ -439,13 +458,23 @@ class HomeFloorplanPanel extends HTMLElement {
         if (Number.isFinite(position) && position >= 0 && position <= 100) this.curtains.memory[id] = {position, observed_at:last_updated};
       }
       return [id, {
-        state, name:attributes.friendly_name || id, last_changed, last_updated, restored:attributes.restored,
-        unit:attributes.unit_of_measurement || '', device_class:attributes.device_class || '',
+        state:String(state??'unknown').slice(0,256), name:String(attributes.friendly_name || id).slice(0,200), last_changed, last_updated, restored:!!attributes.restored,
+        unit:String(attributes.unit_of_measurement || '').slice(0,40), device_class:String(attributes.device_class || '').slice(0,40),
         // Forward only display attributes; credentials and unrelated metadata stay in HA.
         ...(mediaEntities.has(id) ? {media:Object.fromEntries(['title','artist','album'].map(key=>{
           const value=attributes[{title:'media_title',artist:'media_artist',album:'media_album_name'}[key]];
           return [key,typeof value==='string'?value.slice(0,200):''];
-        }))} : {}),
+        }).concat([
+          ['state',state],
+          ['supported_features',Number.isSafeInteger(attributes.supported_features)&&attributes.supported_features>=0?attributes.supported_features:0],
+          ['volume_level',Number.isFinite(attributes.volume_level)&&attributes.volume_level>=0&&attributes.volume_level<=1?attributes.volume_level:null],
+          ['is_volume_muted',typeof attributes.is_volume_muted==='boolean'?attributes.is_volume_muted:null],
+        ]))} : {}),
+        ...(id.startsWith('climate.') ? {climate:{
+          ...Object.fromEntries(['current_temperature','temperature','target_temp_low','target_temp_high'].map(key=>[key,Number.isFinite(attributes[key])?attributes[key]:null])),
+          hvac_action:typeof attributes.hvac_action==='string'?attributes.hvac_action.slice(0,40):'',
+          temperature_unit:this._hass.config?.unit_system?.temperature||'',
+        }} : {}),
         ...projectRoomActivity(id, state, attributes, this.roomActivity?.has(id)),
         ...projectAssumedZoneActivity(id, state, attributes, this.assumedActivity),
         ...(this.moduleEntities?.has(id) ? {modules:{summary:typeof attributes.module_summary==='string'?attributes.module_summary.slice(0,200):'',details:typeof attributes.module_details==='string'?attributes.module_details.slice(0,16000):'',...Object.fromEntries(['expires_at_ms','snapshot_at_ms','fresh_count'].map(key=>[key,Number.isSafeInteger(attributes['module_'+key])&&attributes['module_'+key]>=(key==='fresh_count'?0:1)?attributes['module_'+key]:null]))}} : {}),
@@ -682,7 +711,7 @@ class HomeFloorplanPanel extends HTMLElement {
     finally { this.notifySaveStatus(); }
   }
   handleViewerMessage(message, generation) {
-    if (generation !== this.generation || this.recovery || !message || typeof message !== 'object') return;
+    if (generation !== this.generation || this._hass?.user?.is_admin===false || this.recovery || !message || typeof message !== 'object') return;
     // Only non-device messages pass in dry run. This also blocks native HA
     // more-info dialogs, which expose controls outside the sandbox, and future
     // command types until their behavior has been explicitly classified.
@@ -691,6 +720,8 @@ class HomeFloorplanPanel extends HTMLElement {
     if (message.type === 'model_config') {
       if(this.modelConfigured)return;
       this.modelConfigured=true;
+      this.scopedStates=Array.isArray(message.state_entities);
+      this.displayEntities=new Set((Array.isArray(message.state_entities)?message.state_entities:[]).slice(0,2000).filter(id=>typeof id==='string'&&/^[a-z_]+\.[a-z0-9_]{1,137}$/.test(id)));
       this.inventoryModel=typeof message.model_id==='string' && /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(message.model_id) ? message.model_id : null;
       const sensor=id=>typeof id==='string'&&/^sensor\.[a-z0-9_]+$/.test(id);
       const bindings=(value,domain)=>Object.entries(value||{}).filter(([item,id])=>/^[A-Za-z_][A-Za-z0-9_]*$/.test(item)&&typeof id==='string'&&id.startsWith(domain+'.'));
@@ -744,6 +775,7 @@ class HomeFloorplanPanel extends HTMLElement {
         const result = await hass.callWS({type:'home_floorplan/save', floor, revision:this.revision, items:message.items});
         if (!current()) throw Error('The Home Assistant session changed while saving. Export JSON before reloading.');
         this.revision = result.revision; this.savedItems = message.items;
+        this.publishEntityStates();
         if (this.localEdits===snapshot) this.discardLocalEdits();
         this.refreshMediaArtwork();
       }).catch(error => {
@@ -759,8 +791,10 @@ class HomeFloorplanPanel extends HTMLElement {
       if (this.floors.includes(message.floor)) this.loadFloor(message.floor);
     } else if (message.type === 'more_info') {
       const id=message.entity_id;
-      if(typeof id!=='string' || !this.savedItems.some(item=>item.entity_id===id) || !this._hass.states[id])return;
+      if(this.pending||this.failed||this._hass.connected===false||this.isConnected===false||typeof id!=='string' || !this.savedItems.some(item=>item.entity_id===id) || !this._hass.states[id])return;
       this.dispatchEvent(new CustomEvent('hass-more-info',{detail:{entityId:id},bubbles:true,composed:true}));
+    } else if (message.type === 'media_command') {
+      this.handleMediaCommand(message,generation);
     } else if (message.type === 'curtain_command' || message.type === 'toggle' || message.type === 'tv_power') {
       const curtain = message.type === 'curtain_command', tvPower = message.type === 'tv_power';
       const id = message.entity_id;
@@ -794,6 +828,30 @@ class HomeFloorplanPanel extends HTMLElement {
     } else if (message.type === 'export' && ['glb','usdz','obj','mtl','dae'].includes(message.format)) {
       this.downloadModel(message.format).catch(error => this.notice(`Download failed: ${error.message || error}`, true));
     }
+  }
+  async handleMediaCommand(message,generation) {
+    const {entity_id:id,action,value,request_id}=message;
+    const port=this.port,hass=this._hass,account=hass.user?.id,connection=hass.connection;
+    const current=()=>generation===this.generation&&port===this.port&&this.isConnected!==false&&
+      this._hass.user?.id===account&&this._hass.user?.is_admin!==false&&this._hass.connection===connection;
+    const reply=(ok,error)=>{if(current())port?.postMessage({type:'command_result',request_id,entity_id:id,ok,...(error?{error}: {})});};
+    if(typeof request_id!=='string'||!/^media_[a-zA-Z0-9_]{1,80}$/.test(request_id))return;
+    const bound=()=>typeof id==='string'&&/^media_player\.[a-z0-9_]+$/.test(id)&&this.savedItems.some(item=>item.entity_id===id);
+    const ready=()=>bound()&&!this.pending&&!this.failed&&this._hass.connected!==false&&mediaCommandAllowed(this._hass.states[id],action,value);
+    if(!bound())return reply(false,'This device is not linked to the saved plan.');
+    if(!ready())return reply(false,'This media control is unavailable. Check the device and saved placement.');
+    if(this.commands.has(id))return reply(false,'A command for this device is already in progress.');
+    this.commands.add(id);
+    const epoch=this.dryRunEpoch;
+    try {
+      await Promise.resolve();
+      if(!current())return;
+      if(this.blockDeviceCommand(message,epoch!==this.dryRunEpoch))return;
+      if(!ready())return reply(false,'This media control is no longer available.');
+      await this._hass.callService('media_player',action,{entity_id:id,...(action==='volume_set'?{volume_level:value/100}:{})});
+      reply(true);
+    } catch(error) {reply(false,'Media command failed: '+String(error.message||error).slice(0,240));}
+    finally {this.commands.delete(id);}
   }
   async downloadModel(format) {
     const result = await this._hass.callWS({type:'home_floorplan/export', floor:this.floor, format});

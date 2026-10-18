@@ -41,6 +41,45 @@ installation flow.
 
 ## Dashboard embedding and media artwork
 
+### Device state and command boundaries
+
+Every valid saved entity binding remains visible in Home view. Specialized
+light, cover, motion, lock and media behavior takes precedence; other domains
+show bounded state text and open native HA details. Sensor values retain their
+units and sign. Binary-sensor device classes supply human-readable state labels,
+and a small explicit climate projection supplies current/target temperature and
+HVAC activity. Raw attribute dictionaries are never copied to the viewer.
+
+New viewers announce `state_entities` in `model_config`. They collect references
+from the model's named display configuration fields, without walking geometry.
+The trusted host unions those references with saved bindings, `sun.sun` and
+curtain guard dependencies. Successful placement saves publish the new state set
+immediately. A separate bounded `entity_catalog` contains IDs and display names;
+the picker renders at most 80 matching options. Catalog metadata refreshes on a
+new floor/session. Hosts retain the previous state protocol when an older viewer
+does not announce the capability, allowing component and generated-model
+upgrades to happen separately. This is data minimization and performance work,
+not a new permission boundary.
+
+Non-audio markers open native HA details after a 650 ms mouse dwell. Leaving or
+pressing the marker cancels the dwell. A latch prevents a closed native dialog
+from immediately reopening over the same marker. Keyboard/touch users have
+explicit controls; no hover starts a device action. Audio markers instead open
+one small shared DOM popover. Its buttons follow `supported_features`, and the
+volume slider commits on change rather than on every input event. Popovers use
+no additional textures, polling loop or animation loop.
+
+The audio `media_command` gateway accepts six named actions, not arbitrary
+service calls. It validates saved binding, current availability, capability,
+volume range, pending saves, in-flight command and Dry run. Account, connection,
+generation and capability are rechecked before dispatch. Native details use the
+same saved-binding and Dry run boundary, including pending/failed-save blocking.
+The compact remote does not optimistically overwrite HA's reported state.
+
+See [device controls](device-controls.md) for setup and limits. The real compiled
+viewer tests cover hover/touch/keyboard behavior, and host tests cover command
+validation, legacy compatibility, large catalogs and immediate rebinding.
+
 The optional `static/card.js` Lovelace card wraps `home-floorplan-panel`; it
 reuses the same backend commands, saved inventory, authentication, and opaque
 iframe. It does not embed the public drawing editor or create an independent
