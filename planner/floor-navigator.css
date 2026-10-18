@@ -34,8 +34,6 @@
   border-radius: 9px;
   background: #fbfdf6b3;
   box-shadow: 0 2px 9px #344f3610;
-  backdrop-filter: blur(5px);
-  -webkit-backdrop-filter: blur(5px);
   color: #566d4f;
   font: inherit;
   cursor: pointer;

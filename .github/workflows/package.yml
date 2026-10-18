@@ -84,6 +84,13 @@ jobs:
             PLANNER_EDITING_ENGINE="$engine" node scripts/test-planner-editing.cjs
             ONBOARDING_ENGINE="$engine" ONBOARDING_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-onboarding-browser.cjs
           done
+      - name: Test floor previews and camera navigation
+        run: |
+          node scripts/test-planner-navigation.cjs
+          node scripts/test-floor-navigator.cjs
+          for engine in chromium firefox webkit; do
+            PLANNER_NAVIGATION_ENGINES="$engine" PLANNER_NAVIGATION_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-floor-navigation.cjs
+          done
       - name: Test localized help and offline installed viewer
         run: |
           node scripts/test-help-i18n.cjs

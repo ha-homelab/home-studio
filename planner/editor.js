@@ -2,6 +2,7 @@ import './language-links.js';
 import { addMeasuredRoom, installOnboarding } from './onboarding.js';
 import { createDraftStorage, DRAFT_KEY, PREVIOUS_KEY, DAMAGED_KEY } from './draft-storage.js';
 import { reconcileInspector } from './inspector-dom.js';
+import { createFloorNavigator } from './floor-navigator.js';
 import { getRenderCapacity } from './render-capacity.js';
 import { formatValidationError } from './validation.js';
 import { t, LOCALES, initI18n, setLocale, getLocale, onLocaleChange, translateStatic } from './i18n.js';
@@ -61,6 +62,25 @@ else if (restoredDraft.error) {
 }
 activeFloorId = project.floors[0].id;
 const floor = () => project.floors.find(f => f.id === activeFloorId) || project.floors[0];
+const floorNavigator = createFloorNavigator({ container: $('floor-navigator'), onSelect: selectFloor, t });
+function selectFloor(id) {
+  if (!project.floors.some(f => f.id === id)) return;
+  finishPointer(null, true); releasePreviewPointer();
+  activeFloorId = id; selection = null; previewDirty = true;
+  editorChanged(); fitPlan(); fitPreview(); renderUI(); renderPlan();
+}
+function updateFloorNavigator() {
+  floorNavigator.update(project, activeFloorId);
+  const hidden = $('floor-navigator').hidden;
+  $('floor-navigator-toggle').setAttribute('aria-expanded', String(!hidden));
+  const key = hidden ? 'Show floor previews' : 'Hide floor previews';
+  $('floor-navigator-toggle').title = t(key);
+  $('floor-navigator-toggle').dataset.i18nAttrs = JSON.stringify({ title: key });
+}
+$('floor-navigator-toggle').addEventListener('click', () => {
+  $('floor-navigator').hidden = !$('floor-navigator').hidden;
+  updateFloorNavigator();
+});
 const selected = () => selection ? floor()[selection.kind]?.find(o => o.id === selection.id) : null;
 const snap = value => $('snap').checked ? Math.round(value * 4) / 4 : round(value);
 function node(tag, className, text) { const n = document.createElement(tag); if (className) n.className = className; if (text !== undefined) n.textContent = text; return n; }
@@ -267,11 +287,12 @@ function renderUI() {
   $('undo').disabled = history.length === 0; $('redo').disabled = future.length === 0;
   const floorList = node('div');
   project.floors.forEach(f => {
-    const b = button('', () => { activeFloorId = f.id; selection = null; previewDirty = true; editorChanged(); renderUI(); fitPlan(); fitPreview(); renderPlan(); }, 'floor-button');
+    const b = button('', () => selectFloor(f.id), 'floor-button');
     b.dataset.inspectorKey = `floor:${f.id}`;
     b.setAttribute('aria-current', String(f.id === activeFloorId)); b.append(node('span', '', f.name), node('small', '', `${round(f.elevation_m)} m`)); floorList.append(b);
   });
   reconcileInspector($('floor-list'), floorList);
+  updateFloorNavigator();
   const objectList = node('div');
   let count = 0;
   for (const [kind, icon] of [['rooms', '▱'], ['walls', '╱'], ['openings', '⊟'], ['items', '▣']]) for (const object of floor()[kind]) {
@@ -679,6 +700,7 @@ function finishPointer(event, cancel = false) {
     // The movement frame already contains the final geometry, or is still
     // queued. Only a rollback needs another paint to restore the original.
     if (project === current.original && current.moved) renderPlan();
+    updateFloorNavigator();
     return;
   }
   renderPlan();
@@ -1185,7 +1207,7 @@ canvasObserver.observe(document.querySelector('.canvas-shell'));
 document.addEventListener('visibilitychange', () => { if (document.hidden) { spaceHeld = false; releasePreviewPointer(); cancelCanvasRender(); } else { resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); } });
 window.addEventListener('pagehide', event => {
   canvasSuspended = true; releasePreviewPointer(); cancelCanvasRender();
-  if (!event.persisted) { canvasObserver.disconnect(); previewEvents.abort(); releasePreviewPointer(); disposePreviewRenderer(); renderer?.forceContextLoss(); }
+  if (!event.persisted) { canvasObserver.disconnect(); previewEvents.abort(); releasePreviewPointer(); floorNavigator.destroy(); disposePreviewRenderer(); renderer?.forceContextLoss(); }
 });
 window.addEventListener('pageshow', () => { canvasSuspended = false; resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); });
 window.planner = Object.freeze({ getProject: () => clone(project), getPreviewMetadata: () => ({ ...previewMetadata }), getView: () => view, getSelection: () => selection && { ...selection }, worldToScreen: point => toScreen(point), validate: () => validateProject(clone(project), { complete: true }) });
