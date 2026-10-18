@@ -441,11 +441,12 @@ console.log('PASS: per-gesture Apple diffuse adaptive64–250ms pacing, successf
 // Editor can draw directly before its queued resize runs, leaving the cache at
 // the old Home dimensions when Home is selected again.
 const modeStart=homeSource.indexOf('  function attachRoomLighting() {');
-const modeEnd=homeSource.indexOf('\n  function rebuildControls()',modeStart);
+// Keep native-hover listeners outside this renderer fixture; cleanup calls use spies.
+const modeEnd=homeSource.indexOf('\n  let nativeHoverTimer=',modeStart);
 assert(modeStart>=0&&modeEnd>modeStart,'Production Home mode switch is present');
 const modeSource=homeSource.slice(modeStart,modeEnd);
 function modeScheduler(legacy=false,diffuse=false) {
-  const q=motionScheduler(diffuse,diffuse), c=q.c, elements=new Map(), modes=[];
+  const q=motionScheduler(diffuse,diffuse), c=q.c, elements=new Map(), modes=[], cleanups=[];
   let width=800;
   const element=id=>{
     if(!elements.has(id))elements.set(id,{checked:true,hidden:false,prepend(){},
@@ -453,6 +454,8 @@ function modeScheduler(legacy=false,diffuse=false) {
     return elements.get(id);
   };
   Object.assign(c,{active:true,previewTV(){},lowerFloorContext:null,showLowerFloor:false,selected:null,
+    hideMediaControls(){cleanups.push({kind:'media',active:c.active});},
+    cancelNativeHover(reset){cleanups.push({kind:'native',active:c.active,reset});},
     THREE:{Color:class {constructor(value){this.value=value;}}},hemisphere:{},sun:{},ground:{},grid:{},
     clipping:{constant:2.1},editorFloorMaterials:null,roomLighting:null,root:{children:[]},objectGroup:{},overlayGroup:null,points:[],
     clearTrail(){},showMode(){},refreshControls(){},updateFixtureShadows(){},updateHeightCaption(){},$:element});
@@ -470,17 +473,22 @@ function modeScheduler(legacy=false,diffuse=false) {
   vm.runInContext(cutaway.slice(0,cutaway.indexOf(';for(const k'))+';',c);
   c.window.resizeModel();
   assert.equal(modes.at(-1),'home','Initial resize populates the Home size cache');
-  return Object.assign(q,{modes,element,setWidth(value){width=value;},
+  return Object.assign(q,{modes,cleanups,element,setWidth(value){width=value;},
     // A cancelled callback must not execute later in the same browser frame.
     flush(){for(const [id,fn] of [...q.raf])if(q.raf.delete(id))fn();},
     cutaway(value){element('cutaway').checked=value;element('cutaway').onchange();}});
 }
 function rapidModeReturn(q) {
+  const cleanupStart=q.cleanups.length;
   q.c.setActive(false);
   q.cutaway(true);q.cutaway(false);
   assert.equal(q.modes.at(-1),'editor');
   const before=q.c.renderCount;
   q.c.setActive(true);
+  assert.deepEqual(q.cleanups.slice(cleanupStart),[
+    {kind:'media',active:true},{kind:'native',active:true,reset:true},
+    {kind:'media',active:false},{kind:'native',active:false,reset:true},
+  ],'Home and Editor transitions close media controls and reset native hover before changing mode');
   q.flush();q.flush();
   return q.c.renderCount-before;
 }
