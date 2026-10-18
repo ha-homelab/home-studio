@@ -76,6 +76,9 @@ reach the viewer. Raw artwork URLs, media access tokens, and credentials are not
 sent into the iframe. The media integration may itself contact its provider to
 retrieve artwork, just as it does for the native Home Assistant media controls.
 
+Up to 16 saved media-item placements are considered on each floor, with at most
+two concurrent image requests. Images are reduced to at most 512 pixels per
+edge; unsupported formats, oversized images, and animations are rejected.
 Updates follow media changes rather than a background polling loop. Temporary
 failures can keep the last good image for the same media identity. A different
 track, an unavailable or off player, a removed binding, or disconnection clears
@@ -92,7 +95,9 @@ stale artwork. Images remain in memory and are not added to your project JSON.
 - **No artwork:** check the media player's native HA controls and its saved
   binding. Unsupported, oversized, or malformed images are rejected. Off and
   unavailable players do not retain artwork. A busy or small layout may have no
-  free space for a callout; enlarge the card or hide its sidebar.
+  free space for a callout; enlarge the card or hide its sidebar. A failed initial
+  artwork request is not retried continuously. Return to the tab after hiding it,
+  reload the saved plan, or change media to start a fresh request.
 - **Controls do nothing:** inspect the dry-run status and the entity's current
   availability. A card configured with `dry_run: true` cannot turn live controls
   on from inside that card.
