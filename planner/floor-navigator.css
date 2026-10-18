@@ -9,7 +9,7 @@
   flex-direction: column;
   gap: 7px;
   width: 116px;
-  max-height: calc(100% - 136px);
+  max-height: calc(100% - 232px);
   padding: 4px;
   overflow-x: hidden;
   overflow-y: auto;
@@ -74,7 +74,7 @@
 }
 .floor-navigator__empty[hidden] { display: none; }
 @media (max-width: 600px) {
-  .floor-navigator { left: 5px; width: 83px; max-height: calc(100% - 150px); gap: 5px; }
+  .floor-navigator { left: 5px; width: 83px; max-height: calc(100% - 260px); gap: 5px; }
   .floor-navigator__floor { padding: 2px 3px 5px; border-radius: 7px; }
   .floor-navigator__name { font-size: 9px; }
   .floor-navigator__empty { font-size: 7px; }

@@ -328,7 +328,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   // Real pointer handlers: exact endpoint math, one clone per gesture, and undo/cancel.
   for (const kind of ['rooms', 'walls', 'items', 'openings']) {
     const original = model.clone(project), snapshot = JSON.stringify(original), plan = surface();
-    let clones = 0, saves = 0, uiDraws = 0, inspectorDraws = 0, planDraws = 0, inspectorObject, paintedProject, paintedSelection;
+    let clones = 0, saves = 0, uiDraws = 0, inspectorDraws = 0, planDraws = 0, thumbnailUpdates = 0, inspectorObject, paintedProject, paintedSelection;
     const history = [], buttons = ['rooms', 'walls', 'items', 'openings'].map(objectKind => ({
       dataset: {objectKind, objectId: original.floors[0][objectKind][0].id},
       attributes: {}, setAttribute(name, value) { this.attributes[name] = value; },
@@ -343,7 +343,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
       $: id => controls[id], renderUI() { uiDraws++; p.renderInspector(); },
       renderInspector() { inspectorDraws++; inspectorObject = model.clone(p.selected()); },
       renderPlan() { p.cancelCanvasRender(); planDraws++; paintedProject = model.clone(p.project); paintedSelection = model.clone(p.selection); },
-      renderPreview() {}, status() {}, save() { saves++; }, t: x => x,
+      renderPreview() {}, updateFloorNavigator() { thumbnailUpdates++; }, status() {}, save() { saves++; }, t: x => x,
       validateProject: model.validateProject, serializeProject: JSON.stringify, historyPush: value => history.push(value),
       document: {hidden: false}, zoomPlan() {}, history, future: [],
     });
@@ -361,7 +361,9 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     if (kind === 'items') assert.equal(moved.position_m.x, base.position_m.x + 1);
     if (kind === 'openings') assert.equal(moved.offset_m, base.offset_m + 1);
     assert.equal(gestureClock.pending.size, 1);
+    assert.equal(thumbnailUpdates, 0, 'Dragging keeps floor thumbnails cached until commit');
     plan.events.pointerup(event(2, 1)); assert.equal(saves, 1, kind + ' movement commits once'); assert.equal(history[0], original);
+    assert.equal(thumbnailUpdates, 1, 'The committed geometry updates floor thumbnails once');
     assert.equal(uiDraws, 0, 'A move does not rebuild unchanged floor or object lists');
     assert.equal(inspectorDraws, 2); assert.deepEqual(inspectorObject, model.clone(p.selected()), 'The committed coordinates reach the inspector immediately');
     assert.equal(controls.undo.disabled, false); assert.equal(controls.redo.disabled, true);

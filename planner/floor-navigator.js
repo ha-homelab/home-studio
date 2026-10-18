@@ -109,7 +109,7 @@ function revealButton(container, button) {
  */
 export function createFloorNavigator({ container, onSelect, t = (key, params = {}) => key.replace(/\{(\w+)\}/g, (match, name) => params[name] ?? match) }) {
   const document = container.ownerDocument, entries = new Map();
-  let order = [], previousActive, previousBounds = '', destroyed = false;
+  let order = [], previousActive, previousBounds = '', previouslyVisible = false, destroyed = false;
   const originalRole = container.getAttribute('role'), originalLabel = container.getAttribute('aria-label');
   const hadClass = container.classList.contains('floor-navigator');
   container.classList.add('floor-navigator');
@@ -184,11 +184,12 @@ export function createFloorNavigator({ container, onSelect, t = (key, params = {
       const target = container.contains(focused) ? focused : entries.get(activeFloorId)?.button || entries.get(order[Math.min(focusedIndex, order.length - 1)])?.button;
       if (target && document.activeElement !== target) target.focus({ preventScroll: true });
     }
-    if (activeFloorId !== previousActive) {
+    const visible = !container.hidden;
+    if (visible && (activeFloorId !== previousActive || !previouslyVisible)) {
       const activeButton = entries.get(activeFloorId)?.button;
       if (activeButton) revealButton(container, activeButton);
     }
-    previousActive = activeFloorId; previousBounds = boundsKey;
+    previousActive = activeFloorId; previousBounds = boundsKey; previouslyVisible = visible;
   }
 
   function destroy() {
