@@ -16,7 +16,7 @@ const THUMB = '#floor-navigator button[data-floor-id]';
 const diagnostics = createDiagnostics('floor-navigation', 'PLANNER_NAVIGATION', root);
 const editor = fs.readFileSync(path.join(root, 'planner/editor.js'), 'utf8');
 const sourceFiles = Object.fromEntries(['planner/editor.js', 'planner/index.html', 'planner/editor.css',
-  'planner/floor-navigator.js', 'planner/floor-navigator.css'].filter(file => fs.existsSync(path.join(root, file)))
+  'planner/floor-navigator.js', 'planner/floor-navigator.css']
   .map(file => [file, crypto.createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex')]));
 
 function fixture(count = 3) {
@@ -84,10 +84,18 @@ const server = http.createServer((request, response) => {
   if (route === '/planner/') route = '/planner/index.html';
   if (!/^\/(planner|vendor)\/[\w./-]+$/.test(route) || route.includes('..')) { response.writeHead(404).end(); return; }
   const file = path.join(root, route);
-  if (!fs.existsSync(file) || !fs.statSync(file).isFile()) { response.writeHead(404).end(); return; }
-  const content = route === '/planner/editor.js' ? editor + readState : fs.readFileSync(file);
-  response.writeHead(200, {'Content-Type': {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
-    '.json': 'application/json'}[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store'}).end(content);
+  let descriptor;
+  try {
+    descriptor = fs.openSync(file, 'r');
+    if (!fs.fstatSync(descriptor).isFile()) { response.writeHead(404).end(); return; }
+    const content = route === '/planner/editor.js' ? editor + readState : fs.readFileSync(descriptor);
+    response.writeHead(200, {'Content-Type': {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
+      '.json': 'application/json'}[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store'}).end(content);
+  } catch {
+    response.writeHead(404).end();
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
 });
 
 const frames = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
