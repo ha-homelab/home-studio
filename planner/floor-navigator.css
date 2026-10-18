@@ -1,0 +1,86 @@
+/* One shared rail sits above either canvas and leaves the canvas around it free. */
+.floor-navigator {
+  position: absolute;
+  z-index: 3;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 116px;
+  max-height: calc(100% - 232px);
+  padding: 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #8b9e8799 transparent;
+  pointer-events: none;
+}
+.floor-navigator[hidden] { display: none; }
+.floor-navigator__floor {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 3px 4px 7px;
+  overflow: hidden;
+  border: 1px solid #b6c3ad99;
+  border-radius: 9px;
+  background: #fbfdf6b3;
+  box-shadow: 0 2px 9px #344f3610;
+  color: #566d4f;
+  font: inherit;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: pan-y;
+}
+.floor-navigator__floor:hover { background: #f7fbf1e8; border-color: #819d76; }
+.floor-navigator__floor[aria-current=true] {
+  border-color: #4d7d67;
+  background: #f5fbeded;
+  box-shadow: inset 3px 0 0 #4d7d67, 0 2px 9px #344f3614;
+  color: #315b43;
+}
+.floor-navigator__floor:focus-visible { outline: 2px solid #36715a; outline-offset: 2px; }
+.floor-navigator__preview { display: block; width: 100%; height: auto; aspect-ratio: 128 / 84; pointer-events: none; }
+.floor-navigator__name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 3px;
+  font-size: 10px;
+  line-height: 1.3;
+  font-weight: 650;
+  text-align: center;
+  unicode-bidi: plaintext;
+}
+.floor-navigator__empty {
+  position: absolute;
+  top: 48%;
+  left: 5px;
+  right: 5px;
+  font-size: 8px;
+  line-height: 1.2;
+  text-align: center;
+  color: #788b6e;
+  pointer-events: none;
+}
+.floor-navigator__empty[hidden] { display: none; }
+@media (max-width: 600px) {
+  .floor-navigator { left: 5px; width: 83px; max-height: calc(100% - 260px); gap: 5px; }
+  .floor-navigator__floor { padding: 2px 3px 5px; border-radius: 7px; }
+  .floor-navigator__name { font-size: 9px; }
+  .floor-navigator__empty { font-size: 7px; }
+}
+@media (forced-colors: active) {
+  .floor-navigator__floor { border-color: ButtonText; }
+  .floor-navigator__floor[aria-current=true] { border: 2px solid Highlight; }
+  .floor-navigator__floor:focus-visible { outline-color: Highlight; }
+}

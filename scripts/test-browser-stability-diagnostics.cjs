@@ -721,7 +721,7 @@ function freshPreviewHarness(view = 'preview') {
   const error = {hidden:true}, rect = {width:774,height:724};
   let context, activeCanvas, currentFocus, layoutReads = 0, fitCalls = 0, reusedRestores = 0;
   class Canvas extends EventTarget {
-    constructor() { super(); this.id='preview-canvas';this.width=934;this.height=824;this.isConnected=true;this.attributes={tabindex:'0','aria-label':'Preview'};this.captured=new Set();canvases.push(this); }
+    constructor() { super(); this.id='preview-canvas';this.width=934;this.height=824;this.isConnected=true;this.attributes={tabindex:'0','aria-label':'Preview'};this.dataset={};this.style={};this.captured=new Set();canvases.push(this); }
     focus() { currentFocus=this; }
     setPointerCapture(id) { this.captured.add(id); }
     hasPointerCapture(id) { return this.captured.has(id); }
@@ -742,7 +742,7 @@ function freshPreviewHarness(view = 'preview') {
     },
   });
   activeCanvas=new Canvas();
-  const vector = () => ({x:0,y:0,z:0,set(x,y,z){Object.assign(this,{x,y,z});}});
+  const vector = () => ({x:0,y:0,z:0,set(x,y,z){Object.assign(this,{x,y,z});},clone(){return Object.assign(vector(),{x:this.x,y:this.y,z:this.z});}});
   const resource = name => ({dispose(){traces.push(name);}});
   class Group {
     constructor() {this.children=[];}
@@ -768,15 +768,15 @@ function freshPreviewHarness(view = 'preview') {
   context=vm.createContext({AbortController,console,document,window,devicePixelRatio:2,
     THREE:{WebGLRenderer:Renderer,Scene:Group,Group,Vector3:class {constructor(x,y,z){Object.assign(this,vector(),{x,y,z});}},HemisphereLight:Light,DirectionalLight:Light,
       PerspectiveCamera:class {constructor(){this.position=vector();}lookAt(){}updateProjectionMatrix(){} }},
-    $:id=>id==='preview-canvas'?activeCanvas:error,translatedText(){},
+    $:id=>id==='preview-canvas'?activeCanvas:id==='preview-error'?error:null,translatedText(){},
     fitPreview(){fitCalls++;},fitPlan(){},updateZoom(){},previewFloors:()=>[],
     cancelCanvasRender(){traces.push('cancel');},onSchedule:value=>scheduled.push(JSON.parse(JSON.stringify(value))),
     testMesh:()=>({traverse(callback){callback({geometry:resource('geometry'),material:[resource('material-a'),resource('material-b')]});}}),
-    planCanvas:{},ctx:{setTransform(){}},canvasObserver:{disconnect(){traces.push('disconnect');}},
+    planCanvas:{},ctx:{setTransform(){}},canvasObserver:{disconnect(){traces.push('disconnect');}},floorNavigator:{destroy(){}},
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../planner/render-capacity.js'), 'utf8').replace('export function ', 'function '), context);
   vm.runInContext(`
-    let previewDirty=true,canvasSuspended=false,size={width:934,height:824},view=${JSON.stringify(view)};
+    let previewDirty=true,canvasSuspended=false,spaceHeld=false,size={width:934,height:824},view=${JSON.stringify(view)};
     let firstResize=false,planSize='old',map={x:0,y:0};
     const project={floors:[{items:[{position_m:{x:7,z:9}}]}]};
     function requestCanvasRender(){if(!canvasSuspended&&!document.hidden)onSchedule(size);}
@@ -804,10 +804,10 @@ test('fresh preview retires old resources and handlers while preserving orbit, p
   original.focus();original.emit('pointerdown',{button:0,pointerId:9,clientX:10,clientY:20});
   assert(original.hasPointerCapture(9));
   h.evaluate('orbit.yaw=.7;orbit.pitch=.9;orbit.radius=42;orbit.baseRadius=30;orbit.target.set(4,5,6)');
-  const orbit=h.evaluate('JSON.stringify({...orbit,pointer:null})');
+  const orbit=h.evaluate('JSON.stringify({...orbit,pointers:null,gesture:null})');
   assert(h.lose().defaultPrevented);
   assert(!original.hasPointerCapture(9));
-  assert.equal(h.evaluate('orbit.pointer'),null);
+  assert.equal(h.evaluate('orbit.pointers.size'),0);
   assert.deepEqual(h.traces,['cancel','geometry','material-a','material-b','shadow-map','shadow-pass','dispose-1']);
   assert.deepEqual([original.width,original.height],[0,0],'A lost canvas must not restore its former full-size backing buffer');
   h.restore();
@@ -817,7 +817,7 @@ test('fresh preview retires old resources and handlers while preserving orbit, p
   assert.equal(h.renderers.length,1,'No renderer is allocated in the restored event');
   assert(h.renderers[0].lost&&h.renderers[0].disposed);
   assert.equal(h.canvases.filter(canvas=>canvas.isConnected).length,1);
-  assert.equal(h.evaluate('JSON.stringify({...orbit,pointer:null})'),orbit);
+  assert.equal(h.evaluate('JSON.stringify({...orbit,pointers:null,gesture:null})'),orbit);
   assert.equal(h.evaluate('JSON.stringify(project)'),project);
   assert.equal(h.error.hidden,true);
   assert(h.evaluate('document.activeElement === previewCanvas'),'Canvas focus survives replacement');
@@ -827,7 +827,7 @@ test('fresh preview retires old resources and handlers while preserving orbit, p
   assert.deepEqual([original.width,original.height],[0,0],'The detached canvas keeps minimal storage after its replacement renders');
   assert.equal(h.renderers.filter(renderer=>!renderer.lost).length,1);
   assert.equal(h.fitCalls,2,'Replacement initialization must not refit and reset the saved orbit');
-  assert.equal(h.evaluate('JSON.stringify({...orbit,pointer:null})'),orbit);
+  assert.equal(h.evaluate('JSON.stringify({...orbit,pointers:null,gesture:null})'),orbit);
   const before=h.evaluate('orbit.yaw');
   original.emit('pointerdown',{button:0,pointerId:3,clientX:10,clientY:20});
   original.emit('pointermove',{pointerId:3,clientX:40,clientY:30});
@@ -854,17 +854,17 @@ test('replacement preview keeps the active orbit when another pointer presses or
   const canvas=h.canvas;
   canvas.emit('pointerdown',{button:0,pointerId:1,clientX:10,clientY:20});
   canvas.emit('pointerdown',{button:0,pointerId:2,clientX:100,clientY:200});
-  assert.equal(h.evaluate('orbit.pointer.id'),1,'A second pointer cannot replace the active gesture');
+  assert.equal(h.evaluate('orbit.pointers.size === 1 && orbit.pointers.has(1)'),true,'A second pointer cannot replace the active gesture');
   assert(!canvas.hasPointerCapture(2));
   const yaw=h.evaluate('orbit.yaw');
   canvas.emit('pointermove',{pointerId:2,clientX:180,clientY:250});
   assert.equal(h.evaluate('orbit.yaw'),yaw);
   canvas.emit('pointerup',{pointerId:2});canvas.emit('pointercancel',{pointerId:2});
-  assert.equal(h.evaluate('orbit.pointer.id'),1,'Unrelated up/cancel events cannot end the active gesture');
+  assert.equal(h.evaluate('orbit.pointers.size === 1 && orbit.pointers.has(1)'),true,'Unrelated up/cancel events cannot end the active gesture');
   canvas.emit('pointermove',{pointerId:1,clientX:40,clientY:30});
   assert.notEqual(h.evaluate('orbit.yaw'),yaw);
   canvas.emit('pointerup',{pointerId:1});
-  assert.equal(h.evaluate('orbit.pointer'),null);assert(!canvas.hasPointerCapture(1));
+  assert.equal(h.evaluate('orbit.pointers.size'),0);assert(!canvas.hasPointerCapture(1));
 });
 
 test('restoration while in the page cache retires the context and resumes rendering on pageshow', () => {
@@ -1609,4 +1609,55 @@ test('a stalled180s viewer still expires once and cannot gain time from phase pr
   const record=read(diagnostics);
   assert.equal(executions,1);assert.equal(record.status,'failed');assert.equal(record.scenarioCompletedMs,null);
   assert.equal(record.timeoutPhase.activePhase.name,'viewer-load');assert.equal(clock.pending().length,0);
+});
+
+test('planner framing chooses visible canvas input without hiding floating controls', () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-planner-stability.cjs'),'utf8');
+  const start=source.indexOf('function inspectWorldDrag('),end=source.indexOf('async function run(',start);
+  assert(start>=0&&end>start);
+  const box={x:64,y:196,width:326,height:490},map={x:-800,y:40,scale:60};
+  const canvas={tagName:'CANVAS',id:'plan-canvas',getBoundingClientRect:()=>box};
+  const toggle={tagName:'BUTTON',id:'floor-navigator-toggle'};
+  const card={tagName:'BUTTON',id:'floor-card'};
+  let covered=false;
+  const document={getElementById:id=>id==='plan-canvas'?canvas:null,elementFromPoint(x,y){
+    if(x<0||x>=390||y<0||y>=844||x<box.x||x>box.x+box.width||y<box.y||y>box.y+box.height)return null;
+    if(covered)return toggle;
+    if(x>=72&&x<=155&&y>=261&&y<=302)return toggle;
+    if(x>=70&&x<=155&&y>=355&&y<=480)return card;
+    return canvas;
+  }};
+  const context={document,innerWidth:390,innerHeight:844,
+    window:{planner:{worldToScreen:point=>[map.x+point[0]*map.scale,map.y+point[1]*map.scale]}}};
+  vm.createContext(context);vm.runInContext(source.slice(start,end),context);
+  const inspect=(from,to,touch=true)=>context.inspectWorldDrag({from,to,touch});
+  let result,attempts=0;
+  for(;attempts<30;attempts++) {
+    result=inspect([1,1],[1.5,1]);
+    if(result.action==='ready')break;
+    assert.equal(result.action,'pan');
+    assert.equal(document.elementFromPoint(result.start.x,result.start.y),canvas,'Only an actual canvas hit may begin a pan');
+    assert(result.end.x>=79&&result.end.x<=375&&result.end.y>=211&&result.end.y<=671);
+    map.x+=result.end.x-result.start.x;map.y+=result.end.y-result.start.y;
+  }
+  assert.equal(result.action,'ready');assert(attempts<10,'Offscreen metric points are reached with bounded real pans');
+  for(const point of result.points)assert.equal(document.elementFromPoint(box.x+point[0],box.y+point[1]),canvas);
+
+  map.x=20-map.scale;map.y=80-map.scale;
+  result=inspect([1,1],[1.5,1]);
+  assert.equal(result.endpointHits[0].id,'floor-navigator-toggle');
+  assert.equal(result.action,'pan','An in-bounds endpoint under a control must be reframed');
+  assert.equal(document.elementFromPoint(result.start.x,result.start.y),canvas);
+
+  box.y=700;map.x=100-map.scale;map.y=200-map.scale;
+  result=inspect([1,1],[1.5,1]);
+  assert.equal(result.action,'pan','A point inside the bitmap but below the viewport is not visible');
+  assert(result.start.y<=829&&result.end.y<=829,'Pan endpoints retain the viewport margin');
+  map.x+=result.end.x-result.start.x;map.y+=result.end.y-result.start.y;
+  assert.equal(inspect([1,1],[1.5,1]).action,'pan','Large offscreen distances can require more than one bounded pan');
+
+  covered=true;result=inspect([1,1],[1.5,1]);
+  assert.equal(result.action,'blocked');assert.match(result.reason,/No visible, unobstructed/);
+  assert.equal(inspect([1,1],[1.01,1]).action,'zoom','The native-touch minimum distance remains 28 pixels');
+  assert.equal(document.getElementById('plan-canvas'),canvas,'Measurement leaves controls and canvas intact');
 });

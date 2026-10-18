@@ -78,5 +78,7 @@
   "planner/examples/patterns.js",
   "planner/examples/garage.js",
   "planner/draft-storage.js",
-  "planner/inspector-dom.js"
+  "planner/inspector-dom.js",
+  "planner/floor-navigator.js",
+  "planner/floor-navigator.css"
 ]

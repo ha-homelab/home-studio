@@ -659,5 +659,19 @@ export default {
   "No previous project is available.": "ไม่มีโปรเจกต์ก่อนหน้า",
   "This browser cannot coordinate draft saves.": "เบราว์เซอร์นี้ไม่สามารถประสานการบันทึกฉบับร่างระหว่างแท็บได้",
   "No saved draft is available.": "ไม่มีฉบับร่างที่บันทึกไว้",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "ไม่สามารถบันทึกอัตโนมัติได้ ต้องการดำเนินการต่อในแท็บนี้โดยไม่บันทึกหรือไม่? โปรดส่งออก JSON ก่อนออก"
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "ไม่สามารถบันทึกอัตโนมัติได้ ต้องการดำเนินการต่อในแท็บนี้โดยไม่บันทึกหรือไม่? โปรดส่งออก JSON ก่อนออก",
+  // Floor navigation and camera controls.
+  "Floor navigator": "การนำทางชั้น",
+  "Switch to {floor}": "สลับไปยัง {floor}",
+  "Empty floor": "ชั้นว่าง",
+  "Hide floor previews": "ซ่อนภาพตัวอย่างชั้น",
+  "Show floor previews": "แสดงภาพตัวอย่างชั้น",
+  "3D navigation": "การนำทาง 3D",
+  "Orbit": "หมุน",
+  "Pan": "เลื่อน",
+  "Top view": "มุมมองด้านบน",
+  "Rotate left": "หมุนซ้าย",
+  "Rotate right": "หมุนขวา",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "ลากเพื่อหมุน · ปุ่มขวาหรือ Shift เพื่อเลื่อน · เลื่อนล้อเมาส์เพื่อซูม",
+  "Drag to pan · scroll to zoom · arrow keys to move": "ลากเพื่อเลื่อน · เลื่อนล้อเมาส์เพื่อซูม · ปุ่มลูกศรเพื่อขยับ"
 };

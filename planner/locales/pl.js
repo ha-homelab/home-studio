@@ -658,5 +658,19 @@ export default {
   "No previous project is available.": "Brak poprzedniego projektu.",
   "This browser cannot coordinate draft saves.": "Ta przeglądarka nie może koordynować zapisywania szkiców.",
   "No saved draft is available.": "Brak zapisanego szkicu.",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Automatyczny zapis jest niedostępny. Kontynuować w tej karcie bez zapisywania? Przed wyjściem wyeksportuj JSON."
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Automatyczny zapis jest niedostępny. Kontynuować w tej karcie bez zapisywania? Przed wyjściem wyeksportuj JSON.",
+  // Floor navigation and camera controls.
+  "Floor navigator": "Nawigacja po piętrach",
+  "Switch to {floor}": "Przejdź do {floor}",
+  "Empty floor": "Puste piętro",
+  "Hide floor previews": "Ukryj miniatury pięter",
+  "Show floor previews": "Pokaż miniatury pięter",
+  "3D navigation": "Nawigacja 3D",
+  "Orbit": "Obracaj",
+  "Pan": "Przesuwaj",
+  "Top view": "Widok z góry",
+  "Rotate left": "Obróć w lewo",
+  "Rotate right": "Obróć w prawo",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "Przeciągnij, aby obracać · prawy przycisk lub Shift, aby przesuwać · kółko, aby powiększać",
+  "Drag to pan · scroll to zoom · arrow keys to move": "Przeciągnij, aby przesuwać · kółko, aby powiększać · strzałki, aby poruszać"
 };

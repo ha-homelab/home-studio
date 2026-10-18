@@ -133,6 +133,29 @@ lighting setup is guarded, and a failed first draw stops the initial render gate
 The 2D placement/export path remains reachable without retrying a broken 3D draw.
 See [the first-session guide](first-session.md) for the user-facing workflow.
 
+## Floor navigation and camera input
+
+`planner/floor-navigator.js` builds small, local SVG floor previews from the
+validated model. It shares bounds across floors and redraws only when geometric
+content changes. Names, active selection, focus, and visibility are updated
+without building Three.js scenes or requesting WebGL contexts. Removed floors
+release their DOM entries; the rail scrolls within the workspace rather than
+resizing the canvas. Hidden previews remain local, with no image upload endpoint.
+
+The 3D editor keeps input state separate from document transactions. Mouse,
+keyboard, and touch gestures update the camera target, yaw, pitch, or radius and
+request a coalesced frame. Pan and pinch reuse the scene, materials, and shadow
+map. Pointer cancellation, focus loss, visibility changes, and renderer loss
+end the gesture; there is no inertia timer or idle rendering loop. Top view is
+slightly short of the camera up-vector singularity. User-triggered Fit restores
+the initial viewing angle; automatic fitting preserves the angle.
+
+Floor selection uses the same path for sidebar rows and preview cards: clear the
+object selection, cancel unfinished drawing input, select the floor, and reframe.
+This changes view state only. The document, exported JSON, and history remain
+unchanged. The static drawing surface is not rotated, preserving its existing
+metric-coordinate editing behavior.
+
 ## Furniture authoring and export
 
 `planner/catalog.json` is the canonical, versioned library of original low-poly

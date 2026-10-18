@@ -658,5 +658,19 @@ export default {
   "No previous project is available.": "Není k dispozici žádný předchozí projekt.",
   "This browser cannot coordinate draft saves.": "Tento prohlížeč nedokáže koordinovat ukládání konceptů.",
   "No saved draft is available.": "Není k dispozici žádný uložený koncept.",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Automatické ukládání není dostupné. Pokračovat v této kartě bez ukládání? Před odchodem exportujte JSON."
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Automatické ukládání není dostupné. Pokračovat v této kartě bez ukládání? Před odchodem exportujte JSON.",
+  // Floor navigation and camera controls.
+  "Floor navigator": "Navigace podlaží",
+  "Switch to {floor}": "Přejít na {floor}",
+  "Empty floor": "Prázdné podlaží",
+  "Hide floor previews": "Skrýt náhledy podlaží",
+  "Show floor previews": "Zobrazit náhledy podlaží",
+  "3D navigation": "3D navigace",
+  "Orbit": "Otáčet",
+  "Pan": "Posouvat",
+  "Top view": "Pohled shora",
+  "Rotate left": "Otočit doleva",
+  "Rotate right": "Otočit doprava",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "Tažením otáčíte · pravým tlačítkem nebo se Shift posouváte · kolečkem přibližujete",
+  "Drag to pan · scroll to zoom · arrow keys to move": "Tažením posouváte · kolečkem přibližujete · šipkami pohybujete"
 };

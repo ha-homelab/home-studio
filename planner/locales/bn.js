@@ -658,5 +658,19 @@ export default {
   "No previous project is available.": "আগের কোনো প্রকল্প পাওয়া যায়নি।",
   "This browser cannot coordinate draft saves.": "এই ব্রাউজার খসড়া সংরক্ষণের সমন্বয় করতে পারে না।",
   "No saved draft is available.": "কোনো সংরক্ষিত খসড়া পাওয়া যায়নি।",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "স্বয়ংক্রিয় সংরক্ষণ উপলব্ধ নেই। সংরক্ষণ না করেই এই ট্যাবে চালিয়ে যাবেন? চলে যাওয়ার আগে JSON রপ্তানি করুন।"
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "স্বয়ংক্রিয় সংরক্ষণ উপলব্ধ নেই। সংরক্ষণ না করেই এই ট্যাবে চালিয়ে যাবেন? চলে যাওয়ার আগে JSON রপ্তানি করুন।",
+  // Floor navigation and camera controls.
+  "Floor navigator": "তলা নেভিগেশন",
+  "Switch to {floor}": "{floor}-এ যান",
+  "Empty floor": "খালি তলা",
+  "Hide floor previews": "তলার পূর্বরূপ লুকান",
+  "Show floor previews": "তলার পূর্বরূপ দেখান",
+  "3D navigation": "3D নেভিগেশন",
+  "Orbit": "ঘোরান",
+  "Pan": "সরান",
+  "Top view": "উপর থেকে দেখুন",
+  "Rotate left": "বামে ঘোরান",
+  "Rotate right": "ডানে ঘোরান",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "ঘোরাতে টানুন · সরাতে ডান বোতাম বা Shift · জুম করতে স্ক্রল করুন",
+  "Drag to pan · scroll to zoom · arrow keys to move": "সরাতে টানুন · জুম করতে স্ক্রল করুন · চলতে তীর চিহ্নের কী"
 };

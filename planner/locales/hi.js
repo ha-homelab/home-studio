@@ -659,5 +659,19 @@ export default {
   "No previous project is available.": "कोई पिछली परियोजना उपलब्ध नहीं है।",
   "This browser cannot coordinate draft saves.": "यह ब्राउज़र प्रारूप सहेजने का समन्वय नहीं कर सकता।",
   "No saved draft is available.": "कोई सहेजा गया प्रारूप उपलब्ध नहीं है।",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "अपने-आप सहेजना उपलब्ध नहीं है। क्या इस टैब में बिना सहेजे जारी रखें? जाने से पहले JSON निर्यात करें।"
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "अपने-आप सहेजना उपलब्ध नहीं है। क्या इस टैब में बिना सहेजे जारी रखें? जाने से पहले JSON निर्यात करें।",
+  // Floor navigation and camera controls.
+  "Floor navigator": "मंज़िल नेविगेशन",
+  "Switch to {floor}": "{floor} पर जाएँ",
+  "Empty floor": "खाली मंज़िल",
+  "Hide floor previews": "मंज़िल के पूर्वावलोकन छिपाएँ",
+  "Show floor previews": "मंज़िल के पूर्वावलोकन दिखाएँ",
+  "3D navigation": "3D नेविगेशन",
+  "Orbit": "घुमाएँ",
+  "Pan": "खिसकाएँ",
+  "Top view": "ऊपर से देखें",
+  "Rotate left": "बाएँ घुमाएँ",
+  "Rotate right": "दाएँ घुमाएँ",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "घुमाने के लिए खींचें · खिसकाने के लिए दायाँ बटन या Shift · ज़ूम के लिए स्क्रॉल करें",
+  "Drag to pan · scroll to zoom · arrow keys to move": "खिसकाने के लिए खींचें · ज़ूम के लिए स्क्रॉल करें · चलाने के लिए तीर कुंजियाँ"
 };

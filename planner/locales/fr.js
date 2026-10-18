@@ -658,5 +658,19 @@ export default {
   "No previous project is available.": "Aucun projet précédent n’est disponible.",
   "This browser cannot coordinate draft saves.": "Ce navigateur ne peut pas coordonner l’enregistrement des brouillons.",
   "No saved draft is available.": "Aucun brouillon enregistré n’est disponible.",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "L’enregistrement automatique est indisponible. Continuer dans cet onglet sans enregistrer ? Exportez le JSON avant de quitter."
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "L’enregistrement automatique est indisponible. Continuer dans cet onglet sans enregistrer ? Exportez le JSON avant de quitter.",
+  // Floor navigation and camera controls.
+  "Floor navigator": "Navigation des étages",
+  "Switch to {floor}": "Passer à {floor}",
+  "Empty floor": "Étage vide",
+  "Hide floor previews": "Masquer les aperçus des étages",
+  "Show floor previews": "Afficher les aperçus des étages",
+  "3D navigation": "Navigation 3D",
+  "Orbit": "Pivoter",
+  "Pan": "Déplacer",
+  "Top view": "Vue de dessus",
+  "Rotate left": "Tourner à gauche",
+  "Rotate right": "Tourner à droite",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "Glisser pour pivoter · bouton droit ou Maj pour déplacer · défiler pour zoomer",
+  "Drag to pan · scroll to zoom · arrow keys to move": "Glisser pour déplacer · défiler pour zoomer · flèches pour déplacer"
 };

@@ -658,5 +658,19 @@ export default {
   "No previous project is available.": "Kullanılabilir önceki proje yok.",
   "This browser cannot coordinate draft saves.": "Bu tarayıcı sekmeler arasında taslak kayıtlarını koordine edemiyor.",
   "No saved draft is available.": "Kullanılabilir kayıtlı taslak yok.",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Otomatik kayıt kullanılamıyor. Bu sekmede kaydetmeden devam edilsin mi? Ayrılmadan önce JSON dosyasını dışa aktarın."
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Otomatik kayıt kullanılamıyor. Bu sekmede kaydetmeden devam edilsin mi? Ayrılmadan önce JSON dosyasını dışa aktarın.",
+  // Floor navigation and camera controls.
+  "Floor navigator": "Kat gezgini",
+  "Switch to {floor}": "{floor} katına geç",
+  "Empty floor": "Boş kat",
+  "Hide floor previews": "Kat önizlemelerini gizle",
+  "Show floor previews": "Kat önizlemelerini göster",
+  "3D navigation": "3B gezinme",
+  "Orbit": "Döndür",
+  "Pan": "Kaydır",
+  "Top view": "Üstten görünüm",
+  "Rotate left": "Sola döndür",
+  "Rotate right": "Sağa döndür",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "Döndürmek için sürükleyin · kaydırmak için sağ tuş veya Shift · yakınlaştırmak için tekerlek",
+  "Drag to pan · scroll to zoom · arrow keys to move": "Kaydırmak için sürükleyin · yakınlaştırmak için tekerlek · taşımak için ok tuşları"
 };

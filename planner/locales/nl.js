@@ -658,5 +658,19 @@ export default {
   "No previous project is available.": "Er is geen vorig project beschikbaar.",
   "This browser cannot coordinate draft saves.": "Deze browser kan het opslaan van concepten niet coördineren.",
   "No saved draft is available.": "Er is geen opgeslagen concept beschikbaar.",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Automatisch opslaan is niet beschikbaar. Doorgaan op dit tabblad zonder op te slaan? Exporteer JSON voordat je vertrekt."
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Automatisch opslaan is niet beschikbaar. Doorgaan op dit tabblad zonder op te slaan? Exporteer JSON voordat je vertrekt.",
+  // Floor navigation and camera controls.
+  "Floor navigator": "Verdiepingsnavigatie",
+  "Switch to {floor}": "Naar {floor} gaan",
+  "Empty floor": "Lege verdieping",
+  "Hide floor previews": "Verdiepingsvoorbeelden verbergen",
+  "Show floor previews": "Verdiepingsvoorbeelden tonen",
+  "3D navigation": "3D-navigatie",
+  "Orbit": "Draaien",
+  "Pan": "Verschuiven",
+  "Top view": "Bovenaanzicht",
+  "Rotate left": "Linksom draaien",
+  "Rotate right": "Rechtsom draaien",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "Sleep om te draaien · rechts of met Shift slepen om te verschuiven · scroll om te zoomen",
+  "Drag to pan · scroll to zoom · arrow keys to move": "Sleep om te verschuiven · scroll om te zoomen · pijltjestoetsen om te bewegen"
 };

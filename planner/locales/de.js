@@ -658,5 +658,19 @@ export default {
   "No previous project is available.": "Es ist kein vorheriges Projekt verfügbar.",
   "This browser cannot coordinate draft saves.": "Dieser Browser kann das Speichern von Entwürfen nicht koordinieren.",
   "No saved draft is available.": "Es ist kein gespeicherter Entwurf verfügbar.",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Automatisches Speichern ist nicht verfügbar. In diesem Tab ohne Speichern fortfahren? Exportiere JSON, bevor du ihn verlässt."
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Automatisches Speichern ist nicht verfügbar. In diesem Tab ohne Speichern fortfahren? Exportiere JSON, bevor du ihn verlässt.",
+  // Floor navigation and camera controls.
+  "Floor navigator": "Etagen-Navigation",
+  "Switch to {floor}": "Zu {floor} wechseln",
+  "Empty floor": "Leere Etage",
+  "Hide floor previews": "Etagenvorschau ausblenden",
+  "Show floor previews": "Etagenvorschau einblenden",
+  "3D navigation": "3D-Navigation",
+  "Orbit": "Drehen",
+  "Pan": "Verschieben",
+  "Top view": "Draufsicht",
+  "Rotate left": "Nach links drehen",
+  "Rotate right": "Nach rechts drehen",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "Ziehen zum Drehen · rechts oder mit Umschalt ziehen zum Verschieben · scrollen zum Zoomen",
+  "Drag to pan · scroll to zoom · arrow keys to move": "Ziehen zum Verschieben · scrollen zum Zoomen · Pfeiltasten zum Bewegen"
 };

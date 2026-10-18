@@ -658,5 +658,19 @@ export default {
   "No previous project is available.": "Попередній проєкт недоступний.",
   "This browser cannot coordinate draft saves.": "Цей браузер не може узгоджувати збереження чернеток між вкладками.",
   "No saved draft is available.": "Збережена чернетка недоступна.",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Автозбереження недоступне. Продовжити в цій вкладці без збереження? Експортуйте JSON перед виходом."
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Автозбереження недоступне. Продовжити в цій вкладці без збереження? Експортуйте JSON перед виходом.",
+  // Floor navigation and camera controls.
+  "Floor navigator": "Навігація поверхами",
+  "Switch to {floor}": "Перейти на {floor}",
+  "Empty floor": "Порожній поверх",
+  "Hide floor previews": "Сховати мініатюри поверхів",
+  "Show floor previews": "Показати мініатюри поверхів",
+  "3D navigation": "Навігація в 3D",
+  "Orbit": "Обертати",
+  "Pan": "Переміщати",
+  "Top view": "Вигляд згори",
+  "Rotate left": "Повернути ліворуч",
+  "Rotate right": "Повернути праворуч",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "Перетягніть для обертання · права кнопка або Shift — переміщення · коліщатко — масштаб",
+  "Drag to pan · scroll to zoom · arrow keys to move": "Перетягніть для переміщення · коліщатко — масштаб · стрілки — переміщення"
 };

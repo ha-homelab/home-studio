@@ -31,6 +31,31 @@ Follow the [illustrated seven-step lesson](../planner/guide.html) for adjoining
 rooms, doors, windows, furniture, and a saved project. The lesson intentionally
 adds walls after arranging its two rooms.
 
+## Look around without moving furniture
+
+The translucent floor previews sit halfway down the left edge of the drawing.
+Click a preview to switch floors. The highlighted card is the current floor;
+previews use a common scale so you can compare their size and alignment. Use the
+**Your floors** button to hide or restore the cards. With the cards focused,
+use arrow keys or Home/End to choose a card, then Enter or Space to switch.
+
+In **Preview 3D**:
+
+- **Orbit** turns the camera around your home when you drag. Use the turn buttons
+  for a 45-degree step in either direction.
+- **Pan** moves the camera sideways. Right-drag or Shift-drag also pans without
+  changing the selected mode. The objects themselves stay in place.
+- Scroll to zoom. On a touch screen, use one finger for the selected mode and
+  two fingers to pan and pinch to zoom.
+- **Top view** looks down at the current framing. **Fit view** restores the
+  initial angle and fits the visible floor or all visible floors.
+- With the preview focused, arrows navigate, Shift+arrows pan, +/− zoom,
+  T selects top view, O/P select Orbit/Pan, and Home fits the view.
+
+**Plan 2D** remains a precise drawing surface: dragging an object can edit it.
+Hold Space or Shift while dragging to move the 2D view instead. Switching floors
+and moving the 3D camera do not add undo steps or change your saved geometry.
+
 ## 3. Keep your work
 
 **Export JSON** saves your editable source. Keep that file somewhere you back up.

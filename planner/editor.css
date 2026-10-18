@@ -83,3 +83,14 @@
 .draft-state { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: .7rem; }
 .draft-state #draft-recovery { padding: 2px 0; font-size: 10px; text-decoration: underline; color: #386b61; }
 @media(max-width:520px) { .draft-state #draft-recovery { font-size: 8px; } }
+
+/* View controls are overlays: opening them never resizes the drawing surface. */
+.floor-navigator-toggle{position:absolute;left:14px;top:62px;z-index:4;max-width:132px;min-height:36px;padding:7px 10px;border:1px solid #a7c9c7;border-radius:9px;background:#f6fffae0;color:#225952;font-size:10px;line-height:1.3;box-shadow:0 3px 12px #173e3210}
+.floor-navigator-toggle:hover{background:#fff}.floor-navigator-toggle>span[aria-hidden]{font-size:19px;vertical-align:middle;margin-right:4px}
+.preview-navigation{position:absolute;right:16px;bottom:80px;z-index:4;width:188px;padding:6px;border:1px solid #b8d4ce;border-radius:12px;background:#f5fffae6;box-shadow:0 5px 18px #174a3f12;display:grid;gap:5px}
+.navigation-modes,.navigation-views{display:flex;gap:4px}.preview-navigation button{background:transparent;border:1px solid transparent;color:#285c54;min-height:36px;padding:6px 8px;line-height:1.25;font-size:11px;flex:1;min-width:0}
+.preview-navigation button:hover{background:#deefea;border-color:#9cbfb7}.preview-navigation button[aria-pressed=true]{background:#255f57;color:#fff;border-color:#255f57}
+.navigation-views button:first-child,.navigation-views button:last-child{flex:0 0 40px;font-size:23px;padding:2px}.preview-navigation button:disabled{opacity:.45;cursor:not-allowed}
+#preview-canvas[data-navigation-mode=pan]{cursor:grab}#preview-canvas[data-navigating=true]{cursor:grabbing}
+.all-floors{top:62px}.tool-hint{pointer-events:none;max-width:calc(100% - 28px);white-space:normal;text-align:center}
+@media(max-width:520px){.floor-navigator-toggle{left:8px;top:65px;max-width:90px;min-height:36px;font-size:9px;padding:5px 7px}.preview-navigation{right:8px;bottom:74px;width:174px;padding:4px}.preview-navigation button{font-size:10px;min-height:40px;padding:5px}.navigation-views button:first-child,.navigation-views button:last-child{flex-basis:36px}.all-floors{top:67px;right:8px;max-width:calc(100% - 114px);font-size:9px}}

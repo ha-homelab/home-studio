@@ -658,5 +658,19 @@ export default {
   "No previous project is available.": "لا يوجد مشروع سابق متاح.",
   "This browser cannot coordinate draft saves.": "لا يمكن لهذا المتصفح تنسيق حفظ المسودات.",
   "No saved draft is available.": "لا توجد مسودة محفوظة متاحة.",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "الحفظ التلقائي غير متاح. هل تريد المتابعة في علامة التبويب هذه دون حفظ؟ صدّر ملف JSON قبل المغادرة."
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "الحفظ التلقائي غير متاح. هل تريد المتابعة في علامة التبويب هذه دون حفظ؟ صدّر ملف JSON قبل المغادرة.",
+  // Floor navigation and camera controls.
+  "Floor navigator": "التنقل بين الطوابق",
+  "Switch to {floor}": "الانتقال إلى {floor}",
+  "Empty floor": "طابق فارغ",
+  "Hide floor previews": "إخفاء معاينات الطوابق",
+  "Show floor previews": "إظهار معاينات الطوابق",
+  "3D navigation": "التنقل ثلاثي الأبعاد",
+  "Orbit": "تدوير",
+  "Pan": "تحريك",
+  "Top view": "عرض علوي",
+  "Rotate left": "تدوير لليسار",
+  "Rotate right": "تدوير لليمين",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "اسحب للتدوير · الزر الأيمن أو Shift للتحريك · عجلة الفأرة للتكبير",
+  "Drag to pan · scroll to zoom · arrow keys to move": "اسحب للتحريك · عجلة الفأرة للتكبير · مفاتيح الأسهم للتحريك"
 };

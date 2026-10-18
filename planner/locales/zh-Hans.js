@@ -659,5 +659,19 @@ export default {
   "No previous project is available.": "没有可用的上一个项目。",
   "This browser cannot coordinate draft saves.": "此浏览器无法协调标签页之间的草稿保存。",
   "No saved draft is available.": "没有可用的已保存草稿。",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "无法自动保存。要在此标签页中继续而不保存吗？请在离开前导出 JSON。"
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "无法自动保存。要在此标签页中继续而不保存吗？请在离开前导出 JSON。",
+  // Floor navigation and camera controls.
+  "Floor navigator": "楼层导航",
+  "Switch to {floor}": "切换到{floor}",
+  "Empty floor": "空楼层",
+  "Hide floor previews": "隐藏楼层预览",
+  "Show floor previews": "显示楼层预览",
+  "3D navigation": "3D导航",
+  "Orbit": "旋转",
+  "Pan": "平移",
+  "Top view": "俯视图",
+  "Rotate left": "向左旋转",
+  "Rotate right": "向右旋转",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "拖动旋转 · 右键或按住Shift拖动平移 · 滚轮缩放",
+  "Drag to pan · scroll to zoom · arrow keys to move": "拖动平移 · 滚轮缩放 · 方向键移动"
 };

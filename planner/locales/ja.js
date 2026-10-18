@@ -659,5 +659,19 @@ export default {
   "No previous project is available.": "前のプロジェクトはありません。",
   "This browser cannot coordinate draft saves.": "このブラウザーは下書きの保存をタブ間で調整できません。",
   "No saved draft is available.": "保存済みの下書きはありません。",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "自動保存できません。このタブで保存せずに続行しますか？離れる前にJSONを書き出してください。"
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "自動保存できません。このタブで保存せずに続行しますか？離れる前にJSONを書き出してください。",
+  // Floor navigation and camera controls.
+  "Floor navigator": "フロアナビゲーション",
+  "Switch to {floor}": "{floor}に切り替え",
+  "Empty floor": "空のフロア",
+  "Hide floor previews": "フロアのプレビューを非表示",
+  "Show floor previews": "フロアのプレビューを表示",
+  "3D navigation": "3Dナビゲーション",
+  "Orbit": "回転",
+  "Pan": "移動",
+  "Top view": "上から見る",
+  "Rotate left": "左に回転",
+  "Rotate right": "右に回転",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "ドラッグで回転 · 右ボタンまたはShiftで移動 · スクロールでズーム",
+  "Drag to pan · scroll to zoom · arrow keys to move": "ドラッグで移動 · スクロールでズーム · 矢印キーで移動"
 };

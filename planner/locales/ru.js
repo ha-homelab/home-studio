@@ -658,5 +658,19 @@ export default {
   "No previous project is available.": "Предыдущий проект недоступен.",
   "This browser cannot coordinate draft saves.": "Этот браузер не может согласовывать сохранение черновиков между вкладками.",
   "No saved draft is available.": "Сохранённый черновик недоступен.",
-  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Автосохранение недоступно. Продолжить в этой вкладке без сохранения? Экспортируйте JSON перед выходом."
+  "Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.": "Автосохранение недоступно. Продолжить в этой вкладке без сохранения? Экспортируйте JSON перед выходом.",
+  // Floor navigation and camera controls.
+  "Floor navigator": "Навигация по этажам",
+  "Switch to {floor}": "Перейти на {floor}",
+  "Empty floor": "Пустой этаж",
+  "Hide floor previews": "Скрыть миниатюры этажей",
+  "Show floor previews": "Показать миниатюры этажей",
+  "3D navigation": "Навигация в 3D",
+  "Orbit": "Вращать",
+  "Pan": "Перемещать",
+  "Top view": "Вид сверху",
+  "Rotate left": "Повернуть влево",
+  "Rotate right": "Повернуть вправо",
+  "Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom": "Тяните для вращения · правая кнопка или Shift — перемещение · колёсико — масштаб",
+  "Drag to pan · scroll to zoom · arrow keys to move": "Тяните для перемещения · колёсико — масштаб · стрелки — перемещение"
 };
