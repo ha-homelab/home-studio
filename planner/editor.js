@@ -465,11 +465,13 @@ function setTool(next) {
   $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || view !== 'plan';
 }
 function setView(next) {
+  releasePreviewPointer();
   view = next;
   $('plan-tab').setAttribute('aria-selected', String(next === 'plan')); $('preview-tab').setAttribute('aria-selected', String(next === 'preview'));
   $('plan-tab').tabIndex = next === 'plan' ? 0 : -1; $('preview-tab').tabIndex = next === 'preview' ? 0 : -1;
   $('plan-view').hidden = next !== 'plan'; $('preview-view').hidden = next !== 'preview'; $('snap-label').hidden = next !== 'plan';
-  $('tool-hint').textContent = next === 'preview' ? t('Drag to orbit · scroll to zoom · arrow keys to rotate') : toolHint();
+  $('tool-hint').textContent = next === 'preview' ? previewHint() : toolHint();
+  updatePreviewNavigation();
   $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || next !== 'plan';
   if (next === 'preview') renderPreview(); else renderPlan(); updateZoom();
 }
@@ -687,7 +689,7 @@ planCanvas.addEventListener('wheel', e => { e.preventDefault(); zoomPlan(Math.ex
 // On-demand 3D rendering. Opening cuts and solid wall pieces use the same metric project.
 let renderer = null, scene = null, camera = null, worldGroup = null, previewSun = null, previewUnavailable = false, previewMetadata = {};
 let previewLost = false, previewSize = '', previewPixels = 2000000, previewInitialized = false, previewRendererDisposed = false, previewInstancing = false, previewDiffuseLighting = false;
-const orbit = { yaw: -Math.PI / 3, pitch: .8, radius: 17, baseRadius: 17, target: new THREE.Vector3(4, 0, 3), pointer: null };
+const orbit = { yaw: -Math.PI / 3, pitch: .8, radius: 17, baseRadius: 17, target: new THREE.Vector3(4, 0, 3), mode: 'orbit', pointers: new Map(), gesture: null };
 function createPreviewMaterial(options) {
   if (!previewDiffuseLighting) return new THREE.MeshStandardMaterial(options);
   const { roughness, metalness, ...shared } = options;
@@ -714,7 +716,7 @@ function initPreview() {
     const fill = new THREE.DirectionalLight(0xdce9f2, .5); fill.position.set(12, 10, -10); scene.add(fill);
     worldGroup = new THREE.Group(); scene.add(worldGroup);
     if (!previewInitialized) { fitPreview(); previewInitialized = true; }
-  } catch (error) { disposePreviewRenderer(); renderer?.forceContextLoss(); previewUnavailable = true; $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
+  } catch (error) { disposePreviewRenderer(); renderer?.forceContextLoss(); previewUnavailable = true; releasePreviewPointer(); updatePreviewNavigation(); $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
 }
 function previewFloors() { return $('all-floors').checked ? displayedProject().floors : [displayedFloor()]; }
 function fitPreview() {
@@ -860,37 +862,138 @@ function drawPreview() {
     return out;
   });
   previewMetadata.projectedBounds = { minX: Math.min(...corners.map(p => p.x)), maxX: Math.max(...corners.map(p => p.x)), minY: Math.min(...corners.map(p => p.y)), maxY: Math.max(...corners.map(p => p.y)) };
-  previewMetadata.viewport = { width, height }; updateZoom();
+  previewMetadata.viewport = { width, height };
+  previewMetadata.camera = { yaw: orbit.yaw, pitch: orbit.pitch, radius: orbit.radius, target: { x: orbit.target.x, y: orbit.target.y, z: orbit.target.z }, mode: orbit.mode };
+  updateZoom();
 }
 function renderPreview() { if (view !== 'preview' || canvasSuspended || document.hidden || previewLost) return; initPreview(); if (!renderer || previewUnavailable) return; if (previewDirty) rebuildPreview(); drawPreview(); }
-function zoomPreview(factor) { orbit.radius = Math.max(1, Math.min(600, orbit.radius / factor)); requestCanvasRender(); }
+function zoomPreview(factor) {
+  if (!canNavigatePreview() || !Number.isFinite(factor) || factor <= 0) return;
+  const radius = previewRadius(orbit.radius / factor);
+  if (radius === orbit.radius) return;
+  orbit.radius = radius; rebasePreviewGesture(); requestCanvasRender();
+}
 let previewCanvas = $('preview-canvas'), previewEvents;
+function canNavigatePreview() { return view === 'preview' && !previewLost && !previewUnavailable && !canvasSuspended && !document.hidden; }
+function previewRadius(value) { return Math.max(1, Math.min(600, value)); }
+function previewPitch(value) { return Math.max(.1, Math.min(Math.PI / 2 - .001, value)); }
+function previewHint() {
+  return t(orbit.mode === 'pan' ? 'Drag to pan · scroll to zoom · arrow keys to move' : 'Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom');
+}
+function updatePreviewNavigation() {
+  const unavailable = previewLost || previewUnavailable;
+  const navigation = $('preview-navigation');
+  if (navigation) navigation.hidden = view !== 'preview' || unavailable;
+  for (const mode of ['orbit', 'pan']) {
+    const control = $(`preview-${mode}`);
+    if (control) control.setAttribute('aria-pressed', String(orbit.mode === mode));
+  }
+  for (const name of ['orbit', 'pan', 'top', 'rotate-left', 'rotate-right']) {
+    const control = $(`preview-${name}`);
+    if (control) control.disabled = unavailable;
+  }
+  previewCanvas.dataset.navigationMode = orbit.mode;
+  previewCanvas.dataset.navigating = String(orbit.pointers.size > 0);
+  previewCanvas.style.cursor = orbit.pointers.size ? 'grabbing' : 'grab';
+}
+function setPreviewMode(mode) {
+  if (!canNavigatePreview()) return;
+  releasePreviewPointer(); orbit.mode = mode; updatePreviewNavigation();
+  if (previewMetadata.camera) previewMetadata.camera.mode = mode;
+  $('tool-hint').textContent = previewHint();
+}
+function resetPreview() {
+  if (!canNavigatePreview()) return;
+  releasePreviewPointer(); orbit.yaw = -Math.PI / 3; orbit.pitch = .8; fitPreview(); requestCanvasRender();
+}
+function topPreview() {
+  if (!canNavigatePreview()) return;
+  releasePreviewPointer(); orbit.yaw = -Math.PI / 2; orbit.pitch = previewPitch(Math.PI / 2); requestCanvasRender();
+}
+function rotatePreview(angle) {
+  if (!canNavigatePreview()) return;
+  releasePreviewPointer(); orbit.yaw += angle; requestCanvasRender();
+}
+function previewPointerCenter() {
+  const points = [...orbit.pointers.values()], first = points[0], second = points[1];
+  return second ? { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2, distance: Math.hypot(first.x - second.x, first.y - second.y) }
+    : { x: first.x, y: first.y, distance: 0 };
+}
+function rebasePreviewGesture() {
+  if (!orbit.pointers.size) { orbit.gesture = null; return; }
+  orbit.gesture = { ...previewPointerCenter(), yaw: orbit.yaw, pitch: orbit.pitch, radius: orbit.radius, target: orbit.target.clone(),
+    mode: orbit.pointers.size > 1 ? 'pan' : orbit.pointers.values().next().value.mode };
+}
+function panPreview(dx, dy, origin = orbit) {
+  // Screen-plane movement keeps dragging predictable at any zoom or heading,
+  // including the top view. No world geometry or editing coordinates change.
+  const scale = 2 * origin.radius * Math.tan(20 * Math.PI / 180) / Math.max(1, size.height);
+  const sin = Math.sin(origin.yaw), cos = Math.cos(origin.yaw), tilt = Math.sin(origin.pitch);
+  orbit.target.set(origin.target.x + (-sin * dx - cos * tilt * dy) * scale,
+    origin.target.y + Math.cos(origin.pitch) * dy * scale,
+    origin.target.z + (cos * dx - sin * tilt * dy) * scale);
+}
 function releasePreviewPointer(event) {
-  const pointer = orbit.pointer;
-  if (event && pointer && event.pointerId !== pointer.id) return;
-  orbit.pointer = null;
-  if (pointer && previewCanvas.hasPointerCapture(pointer.id)) previewCanvas.releasePointerCapture(pointer.id);
+  const ids = event ? [event.pointerId] : [...orbit.pointers.keys()];
+  for (const id of ids) {
+    // Delete first: releasing capture can synchronously emit lostpointercapture.
+    if (!orbit.pointers.delete(id)) continue;
+    if (previewCanvas.hasPointerCapture(id)) previewCanvas.releasePointerCapture(id);
+  }
+  rebasePreviewGesture(); updatePreviewNavigation();
 }
 function bindPreviewCanvas() {
   previewEvents = new AbortController();
   const canvas = previewCanvas, options = { signal: previewEvents.signal };
+  updatePreviewNavigation();
   canvas.addEventListener('pointerdown', e => {
-    if (e.button !== 0 || orbit.pointer || previewLost || previewUnavailable) return;
-    e.preventDefault(); canvas.focus();
-    orbit.pointer = { id: e.pointerId, x: e.clientX, y: e.clientY, yaw: orbit.yaw, pitch: orbit.pitch };
+    if (!canNavigatePreview() || ![0, 1, 2].includes(e.button) || orbit.pointers.has(e.pointerId)) return;
+    const touch = e.pointerType === 'touch';
+    // At most two touches participate; mixed devices never replace an active drag.
+    if (orbit.pointers.size && (!touch || orbit.pointers.size >= 2 || !orbit.pointers.values().next().value.touch)) return;
+    e.preventDefault(); canvas.focus({ preventScroll: true });
+    const mode = e.button === 1 || e.button === 2 || e.shiftKey || spaceHeld ? 'pan' : orbit.mode;
+    orbit.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, mode, touch });
     canvas.setPointerCapture(e.pointerId);
+    rebasePreviewGesture(); updatePreviewNavigation();
   }, options);
   canvas.addEventListener('pointermove', e => {
-    if (!orbit.pointer || orbit.pointer.id !== e.pointerId) return;
-    orbit.yaw = orbit.pointer.yaw - (e.clientX - orbit.pointer.x) * .007;
-    orbit.pitch = Math.max(.1, Math.min(1.5, orbit.pointer.pitch + (e.clientY - orbit.pointer.y) * .007)); requestCanvasRender();
+    const pointer = orbit.pointers.get(e.pointerId);
+    if (!pointer || !canNavigatePreview() || (pointer.x === e.clientX && pointer.y === e.clientY)) return;
+    e.preventDefault(); pointer.x = e.clientX; pointer.y = e.clientY;
+    const center = previewPointerCenter(), start = orbit.gesture, dx = center.x - start.x, dy = center.y - start.y;
+    if (start.mode === 'pan') panPreview(dx, dy, start);
+    else { orbit.yaw = start.yaw - dx * .007; orbit.pitch = previewPitch(start.pitch + dy * .007); }
+    if (orbit.pointers.size === 2 && start.distance > 0 && center.distance > 0) orbit.radius = previewRadius(start.radius * start.distance / center.distance);
+    requestCanvasRender();
   }, options);
-  for (const event of ['pointerup', 'pointercancel']) canvas.addEventListener(event, releasePreviewPointer, options);
-  canvas.addEventListener('wheel', e => { e.preventDefault(); zoomPreview(Math.exp(-e.deltaY * .0015)); }, { ...options, passive: false });
+  canvas.addEventListener('pointerup', releasePreviewPointer, options);
+  canvas.addEventListener('lostpointercapture', releasePreviewPointer, options);
+  canvas.addEventListener('pointercancel', e => { if (orbit.pointers.has(e.pointerId)) releasePreviewPointer(); }, options);
+  canvas.addEventListener('contextmenu', e => { if (canNavigatePreview()) e.preventDefault(); }, options);
+  canvas.addEventListener('wheel', e => {
+    if (!canNavigatePreview() || e.ctrlKey || e.metaKey || !e.deltaY) return;
+    e.preventDefault();
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? Math.max(1, size.height) : 1;
+    zoomPreview(Math.exp(Math.max(-1, Math.min(1, -e.deltaY * unit * .0015))));
+  }, { ...options, passive: false });
   canvas.addEventListener('keydown', e => {
-    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-'].includes(e.key)) return; e.preventDefault();
-    if (e.key === 'ArrowLeft') orbit.yaw -= .12; if (e.key === 'ArrowRight') orbit.yaw += .12; if (e.key === 'ArrowUp') orbit.pitch = Math.min(1.5, orbit.pitch + .1); if (e.key === 'ArrowDown') orbit.pitch = Math.max(.1, orbit.pitch - .1);
-    if (e.key === '+' || e.key === '=') zoomPreview(1.15); else if (e.key === '-') zoomPreview(1 / 1.15); else requestCanvasRender();
+    if (!canNavigatePreview() || e.ctrlKey || e.metaKey || e.altKey) return;
+    const key = e.key.toLowerCase();
+    if (!['arrowleft', 'arrowright', 'arrowup', 'arrowdown', '+', '=', '-', 'home', 't', 'o', 'p', 'escape'].includes(key)) return;
+    e.preventDefault(); e.stopPropagation(); releasePreviewPointer();
+    if (key === 'home') { resetPreview(); return; }
+    if (key === 't') { topPreview(); return; }
+    if (key === 'o' || key === 'p') { setPreviewMode(key === 'o' ? 'orbit' : 'pan'); return; }
+    if (key === 'escape') return;
+    if (key === '+' || key === '=') { zoomPreview(1.15); return; }
+    if (key === '-') { zoomPreview(1 / 1.15); return; }
+    if (e.shiftKey || orbit.mode === 'pan') panPreview(key === 'arrowleft' ? 30 : key === 'arrowright' ? -30 : 0, key === 'arrowup' ? 30 : key === 'arrowdown' ? -30 : 0);
+    else {
+      if (key === 'arrowleft') orbit.yaw -= .12; if (key === 'arrowright') orbit.yaw += .12;
+      if (key === 'arrowup') orbit.pitch = previewPitch(orbit.pitch + .1); if (key === 'arrowdown') orbit.pitch = previewPitch(orbit.pitch - .1);
+    }
+    requestCanvasRender();
   }, options);
   canvas.addEventListener('webglcontextlost', e => {
     e.preventDefault(); previewLost = true; cancelCanvasRender(); releasePreviewPointer();
@@ -913,6 +1016,7 @@ function bindPreviewCanvas() {
     canvas.replaceWith(replacement); previewCanvas = replacement; bindPreviewCanvas();
     renderer = scene = camera = worldGroup = previewSun = null;
     previewLost = false; previewSize = ''; previewDirty = true;
+    updatePreviewNavigation();
     // Retire the detached context before the next frame creates its replacement.
     // Its loss is intentional cleanup; no app handlers remain on that canvas.
     retired?.forceContextLoss();
@@ -923,6 +1027,10 @@ function bindPreviewCanvas() {
   }, options);
 }
 bindPreviewCanvas();
+for (const mode of ['orbit', 'pan']) $(`preview-${mode}`)?.addEventListener('click', () => setPreviewMode(mode));
+$('preview-top')?.addEventListener('click', topPreview);
+$('preview-rotate-left')?.addEventListener('click', () => rotatePreview(-Math.PI / 4));
+$('preview-rotate-right')?.addEventListener('click', () => rotatePreview(Math.PI / 4));
 
 // Project actions and keyboard navigation.
 function exportProject() {
@@ -1026,7 +1134,7 @@ $('undo').addEventListener('click', () => undo()); $('redo').addEventListener('c
 $('plan-tab').addEventListener('click', () => setView('plan')); $('preview-tab').addEventListener('click', () => setView('preview'));
 for (const tab of [$('plan-tab'), $('preview-tab')]) tab.addEventListener('keydown', e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); setView(view === 'plan' ? 'preview' : 'plan'); (view === 'plan' ? $('plan-tab') : $('preview-tab')).focus(); } });
 $('all-floors').addEventListener('change', () => { previewDirty = true; fitPreview(); renderPreview(); });
-$('fit-view').addEventListener('click', () => { if (view === 'preview') { fitPreview(); renderPreview(); } else { fitPlan(); renderPlan(); } });
+$('fit-view').addEventListener('click', () => { if (view === 'preview') resetPreview(); else { fitPlan(); renderPlan(); } });
 $('zoom-in').addEventListener('click', () => view === 'plan' ? zoomPlan(1.2) : zoomPreview(1.2)); $('zoom-out').addEventListener('click', () => view === 'plan' ? zoomPlan(1 / 1.2) : zoomPreview(1 / 1.2));
 $('help-button').addEventListener('click', () => $('help-dialog').showModal());
 document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => $(b.dataset.close).close()));
@@ -1038,6 +1146,7 @@ $('build-project').addEventListener('click', () => {
 });
 $('copy-command').addEventListener('click', async () => { try { await navigator.clipboard.writeText(BUILD_COMMAND); translatedText('copy-command', 'Copied'); } catch { translatedText('copy-command', 'Select and copy the command above'); } });
 window.addEventListener('keydown', e => {
+  if (e.defaultPrevented) return;
   if (e.target.closest('input, textarea, select') || document.querySelector('dialog[open]')) return;
   if (e.key === 'Escape') { finishPointer(null, true); setSelection(null); setTool('select'); renderUI(); renderPlan(); return; }
   if (e.code === 'Space' && (e.target === planCanvas || e.target === previewCanvas || e.target === document.body)) { e.preventDefault(); spaceHeld = true; if (view === 'plan') planCanvas.style.cursor = 'grab'; }
@@ -1054,7 +1163,7 @@ window.addEventListener('keydown', e => {
   }
 });
 window.addEventListener('keyup', e => { if (e.code === 'Space') { spaceHeld = false; planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair'; } });
-window.addEventListener('blur', () => { spaceHeld = false; orbit.pointer = null; if (drag) finishPointer(null, true); });
+window.addEventListener('blur', () => { spaceHeld = false; releasePreviewPointer(); if (drag) finishPointer(null, true); });
 window.addEventListener('beforeunload', e => { if ((saveFailed || pendingSaves) && hasContent()) { e.preventDefault(); e.returnValue = ''; } });
 let firstResize = true, planSize = '';
 function resizeCanvases(rect) {
@@ -1073,9 +1182,9 @@ function resizeCanvases(rect) {
 }
 const canvasObserver = new ResizeObserver(entries => resizeCanvases(entries[0].contentRect));
 canvasObserver.observe(document.querySelector('.canvas-shell'));
-document.addEventListener('visibilitychange', () => { if (document.hidden) cancelCanvasRender(); else { resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { spaceHeld = false; releasePreviewPointer(); cancelCanvasRender(); } else { resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); } });
 window.addEventListener('pagehide', event => {
-  canvasSuspended = true; cancelCanvasRender();
+  canvasSuspended = true; releasePreviewPointer(); cancelCanvasRender();
   if (!event.persisted) { canvasObserver.disconnect(); previewEvents.abort(); releasePreviewPointer(); disposePreviewRenderer(); renderer?.forceContextLoss(); }
 });
 window.addEventListener('pageshow', () => { canvasSuspended = false; resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); });
@@ -1101,7 +1210,7 @@ function renderLocale() {
       if (input.type === 'checkbox') input.checked = drafts[index].checked;
     }
   });
-  if (view === 'preview') $('tool-hint').textContent = t('Drag to orbit · scroll to zoom · arrow keys to rotate');
+  if (view === 'preview') $('tool-hint').textContent = previewHint();
   if ($('library-dialog').open) renderLibrary();
   if (buildValidationText) $('build-validation').textContent = buildValidationText();
   if ($('recovery-dialog').open) renderRecovery();

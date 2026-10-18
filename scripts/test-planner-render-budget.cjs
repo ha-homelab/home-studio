@@ -12,8 +12,9 @@ function section(start, end) {
   return source.slice(a, b);
 }
 function surface() {
-  return {events: {}, style: {}, hidden: true, checked: false,
+  return {events: {}, style: {}, dataset: {}, hidden: true, checked: false,
     addEventListener(name, fn, options = {}) { this.events[name] = fn; options.signal?.addEventListener('abort', () => { delete this.events[name]; }, {once: true}); },
+    setAttribute() {},
     focus() {}, setPointerCapture() {}, hasPointerCapture() { return false; }};
 }
 function frames(context) {
@@ -79,7 +80,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     forceContextLoss() { losses++; }
   }
   const c = vm.createContext({AbortController, THREE: {...THREE, WebGLRenderer: Renderer}, project, activeFloorId: f.id, floor: () => project.floors[0],
-    view: 'plan', previewDirty: true, size: {...rect}, map: {x: 0, y: 0}, devicePixelRatio: 3,
+    view: 'plan', spaceHeld: false, previewDirty: true, size: {...rect}, map: {x: 0, y: 0}, devicePixelRatio: 3,
     $: get, planCanvas: get('plan-canvas'), ctx: {setTransform() {}},
     floorBounds: model.floorBounds, distance: model.distance, wallPieces: model.wallPieces,
     COLORS: {floor: '#eeeeee', furniture: '#aaaaaa'}, itemAsset: () => null,
