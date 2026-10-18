@@ -41,6 +41,9 @@ class DistributionTests(unittest.TestCase):
             self.assertIs(package.site['site_features'], False)
             self.assertIn('LICENSE', package.files)
             self.assertIn('THREE-LICENSE.txt', package.files)
+            self.assertIn('static/card.js', package.files)
+            self.assertEqual(bytes(package.files['static/card.js']),
+                             (ROOT / 'custom_components/home_floorplan/static/card.js').read_bytes())
             self.assertIn(b'Permission is hereby granted', bytes(package.files['THREE-LICENSE.txt']))
             python_files = {name for name in package.files if name.endswith('.py')}
             self.assertEqual(python_files, {'__init__.py', 'site.py', 'validation.py', 'curtains.py'})

@@ -1,6 +1,12 @@
 # Changelog
 
-## [0.9.0] - Floor previews and camera navigation
+## [0.9.0] - Floor navigation, dashboard cards, and media artwork
+
+- Add a Home Assistant dashboard card that uses the same authenticated 3D Home
+  viewer, with an initial floor, configurable height, and optional pinned dry run.
+- Display media-player cover artwork through Home Assistant's authenticated media
+  proxy. Artwork updates follow media changes, with bounded images and no
+  background polling. Existing private TV capture keeps its own frame source.
 
 - Switch floors from translucent, geometry-aware thumbnails along the left edge
   of the workspace. The active floor stays highlighted; hide the previews when

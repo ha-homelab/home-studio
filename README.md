@@ -179,6 +179,11 @@ to move between the hosted and local editors; they have separate browser drafts.
 
 ## Install in Home Assistant
 
+The **0.9.0 beta series** also provides a Lovelace dashboard card and media-player
+cover artwork. See [dashboard and artwork setup](docs/dashboard-and-media.md).
+These installed features require rebuilding with that beta toolkit; updating
+the hosted planner alone does not update an existing Home Assistant panel.
+
 Use the [complete installation guide](https://ha-homelab.github.io/home-studio/install.html)
 for first-time setup, Home Assistant OS file transfer, and updates.
 

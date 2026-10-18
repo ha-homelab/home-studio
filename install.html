@@ -133,6 +133,12 @@ python3 scripts/install-home-assistant.py dist/my-home/home-floorplan.tar.gz --c
           <p>Keep the printed timestamped backup path under <code>.home-studio-backups</code>. The installer retains the old component and rolls back if the directory swap fails. Check configuration and start Core again. Saved <code>.storage</code> data is preserved; if changed rooms make an old layout incompatible, follow the panel's recovery prompts.</p>
           <p>To restore a retained component, stop Core, move the current component aside, and move the backup folder back to <code>custom_components/home_floorplan</code>. Check configuration before starting. This restores component files, not the whole HA installation or an earlier copy of saved placements.</p>
         </section>
+        <section class="next-section" id="dashboard-card">
+          <h2>A dashboard card and media artwork</h2>
+          <p>The 0.9.0 beta series adds a <code>custom:home-floorplan-card</code> card for your existing Home Assistant dashboard and cover artwork from linked media players. Rebuild and reinstall with a beta whose release notes include these features; stable 0.8.0 and the first 0.9.0 beta do not include them.</p>
+          <p>Register <code>/home-floorplan-static/card.js</code> as a JavaScript module under dashboard Resources, then add the Home Studio card. The card uses your existing Home Assistant session and remains administrator-only. Start with <code>dry_run: true</code> while checking bindings.</p>
+          <p>Follow the <a href="https://github.com/ha-homelab/home-studio/blob/main/docs/dashboard-and-media.md">dashboard and artwork guide</a> for configuration, update steps, and troubleshooting. Artwork is supplied by your media integration; it is not a live TV capture.</p>
+        </section>
         <section class="help-section" id="help">
           <h2>If something goes wrong</h2>
           <details><summary>Python or a script cannot be found</summary><div class="detail-body"><p>Check the Python version and your terminal's current folder. Run the commands from the extracted toolkit folder that contains <code>scripts</code>. On Windows, try <code>py -3 --version</code>. The browser cannot run the Python commands.</p></div></details>

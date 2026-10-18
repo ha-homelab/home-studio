@@ -39,6 +39,33 @@ covers the commands, manual YAML entry, restart, and Home Assistant OS file
 transfer. Installation is a local file operation, not a hosted wizard or HACS
 installation flow.
 
+## Dashboard embedding and media artwork
+
+The optional `static/card.js` Lovelace card wraps `home-floorplan-panel`; it
+reuses the same backend commands, saved inventory, authentication, and opaque
+iframe. It does not embed the public drawing editor or create an independent
+home database. Its initial floor and collapsed sidebar are instance settings;
+forcing dry run keeps the existing host-side command guard pinned on. Removing
+the host closes the viewer channel and releases its active resources. Backend
+administrator checks remain authoritative even though the card also explains
+that requirement before loading private content.
+
+Media artwork is a separate generic display path from private TV screenshots.
+The trusted panel fetches the canonical Home Assistant media-player proxy only
+for saved bindings, using HA's authenticated fetch. It bounds response size,
+image format, dimensions, concurrency, and output size before forwarding JPEG
+pixels. Media URLs and credentials never become iframe state attributes.
+Requests follow changes in the media identity and visibility rather than a
+polling interval. Generation checks reject results from removed bindings,
+replaced viewers, and changed media. A transient failure can retain only a
+same-identity image; explicit lifecycle changes clear it.
+
+The viewer receives complete artwork snapshots over its established MessagePort,
+checks the item/entity binding, and applies versioned image decoding. Callouts
+reuse existing free-space placement and request a coalesced render only when
+updated. Existing TV screenshot bindings retain their capture path. See
+[setup, limits, and troubleshooting](dashboard-and-media.md).
+
 ## Editor language boundary
 
 `planner/i18n.js` loads English and the locale manifest at startup. It selects an
