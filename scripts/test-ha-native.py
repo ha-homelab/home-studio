@@ -60,13 +60,13 @@ def require_admin(handler):
         async def asynchronous(hass, connection, msg):
             if not connection.user.is_admin:
                 connection.send_error(msg["id"], "unauthorized", "Administrator required")
-                return
+                return None
             return await handler(hass, connection, msg)
         return asynchronous
     def synchronous(hass, connection, msg):
         if not connection.user.is_admin:
             connection.send_error(msg["id"], "unauthorized", "Administrator required")
-            return
+            return None
         return handler(hass, connection, msg)
     return synchronous
 
@@ -385,11 +385,11 @@ class PermissionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_nonadmin_cannot_call_authoring_or_export_handlers(self):
         connection = Connection(admin=False)
-        for handler in (integration.ws_project_get, integration.ws_project_save, integration.ws_project_publish,
-                        integration.ws_entity_catalog, integration.ws_save, integration.ws_recover, integration.ws_export):
-            result = handler(self.hass, connection, {"id": 1})
-            if inspect.isawaitable(result):
-                await result
+        for handler in (integration.ws_project_get, integration.ws_entity_catalog):
+            handler(self.hass, connection, {"id": 1})
+        for handler in (integration.ws_project_save, integration.ws_project_publish,
+                        integration.ws_save, integration.ws_recover, integration.ws_export):
+            await handler(self.hass, connection, {"id": 1})
         self.assertEqual(len(connection.errors), 7)
         self.assertTrue(all(code == "unauthorized" for code, message in connection.errors))
         self.assertEqual(connection.results, [])

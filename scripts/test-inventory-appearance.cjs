@@ -11,14 +11,14 @@ const item = () => ({ id: 'chair_1', name: 'Reading chair', type: 'furniture', r
   position_m: { x: 1, y: 0, z: 2 }, dimensions_m: { width: .8, depth: .8, height: .9 },
   rotation_deg: 0, entity_id: '', notes: '', model_id: 'armchair', style_id: 'natural', color: '#4E9C99', pattern_id: 'checks', pattern_color: '#FFEEDD' });
 
-function fixture() {
+function fixture(canEdit = true) {
   const initial = item();
   const values = { name: 'Renamed chair', kind: 'furniture', room: 'study', x: '3', y: '0', z: '4',
     w: '.9', d: '.8', h: '.9', rotation: '45', entity: '', notes: 'Beside the window' };
   const elements = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { value }]));
   elements.itemForm = {};
   const context = vm.createContext({ items: [initial], editing: initial.id, presets: { furniture: [], lamp: [] },
-    model: { rooms: [{ id: 'study' }], inventory: [initial] }, embedded: false, $: id => elements[id],
+    model: { rooms: [{ id: 'study' }], inventory: [initial] }, embedded: false, canEdit, $: id => elements[id],
     persistInventory() {}, rebuildInventoryView() {}, cancelInventoryEdit() {}, setEditorStatus() {} });
   vm.runInContext(functions + saveHandler, context);
   return { context, elements, submit: () => elements.itemForm.onsubmit({ preventDefault() {} }) };
@@ -43,6 +43,13 @@ test('changing semantic type clears an incompatible catalog appearance', () => {
   submit();
   assert.equal(context.items[0].type, 'lamp');
   for (const key of ['model_id', 'style_id', 'color', 'pattern_id', 'pattern_color']) assert(!Object.hasOwn(context.items[0], key));
+});
+
+test('a family view cannot submit placement or appearance changes', () => {
+  const { context, submit } = fixture(false);
+  const before = JSON.stringify(context.items);
+  submit();
+  assert.equal(JSON.stringify(context.items), before);
 });
 
 test('legacy inventory is preserved and malformed appearance is rejected', () => {

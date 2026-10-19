@@ -4,7 +4,6 @@ import asyncio
 import base64
 import copy
 import json
-import logging
 from functools import wraps
 from pathlib import Path
 
@@ -26,7 +25,6 @@ from .permissions import can_read, can_control, floor_entities
 DOMAIN = "home_floorplan"
 ROOT = Path(__file__).parent
 VERSION = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))["version"]
-_LOGGER = logging.getLogger(__name__)
 LOCAL_SITE = None
 try:
     from .private_site_config import SITE as LOCAL_SITE
