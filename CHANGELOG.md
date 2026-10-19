@@ -7,7 +7,8 @@
   saved plants, pets, and vehicles remain static catalog objects.
 - Add optional geometric surroundings to Preview 3D and the installed Home view,
   with three palettes, a separate **Decorative motion** toggle, and bounded
-  scenery traffic and rabbits outside the site. Preserve the existing camera
+  scenery traffic with varied speeds, arrival gaps, and colors, plus rabbits
+  outside the site. Preserve the existing camera
   fit and align surroundings to ground level across floors.
 - Keep surroundings and motion off by default. Static surroundings schedule no
   animation frames; motion pauses when hidden, offscreen, inactive, or reduced

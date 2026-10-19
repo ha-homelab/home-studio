@@ -181,7 +181,8 @@ objects, including pets and cars, remain static.
 
 The **Surroundings** menu in Preview 3D and the installed Home view adds an
 optional landscape around the site, with three palettes. **Decorative motion**
-animates two scenery cars and three rabbits on bounded routes outside the site.
+animates two scenery cars with varied speeds, arrival gaps, and colors, plus
+three rabbits on bounded routes outside the site.
 It is off by default, pauses when hidden or offscreen and for reduced-motion
 preferences, and represents no Home Assistant device or occupancy state.
 These surroundings settings last for the current page; the editable garden and

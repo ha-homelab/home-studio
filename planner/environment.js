@@ -6,14 +6,23 @@ export const ENVIRONMENT_PALETTES = {
   dusk: { label: 'Blue dusk', lawn: '#aabbb8', hedge: '#697e7c', leaf: '#829998', leafLight: '#a0b4af', path: '#d5d9d3', road: '#939f9e', trunk: '#817c79', car: '#d4b8b0' },
 };
 
-export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, requestRender = () => {}, frameInterval = 180, active = true, settings = {}, visibilityElement = null, document: doc = globalThis.document, window: win = globalThis.window } = {}) {
+export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, requestRender = () => {}, frameInterval = 180, active = true, settings = {}, seed = settings.seed, visibilityElement = null, document: doc = globalThis.document, window: win = globalThis.window } = {}) {
   const group = new THREE.Group(); group.name = 'decorative-surroundings'; group.visible = false; scene.add(group);
   const media = win?.matchMedia?.('(prefers-reduced-motion: reduce)');
   const state = { enabled: false, motion: false, palette: 'sage' };
   const geometry = new Map(), materials = new Map(), batches = [], actors = [];
   const dummy = new THREE.Object3D(), local = new THREE.Matrix4(), actorMatrix = new THREE.Matrix4();
+  const trafficSeed = Number.isFinite(seed) ? seed >>> 0 : Math.floor(Math.random() * 0x100000000);
+  let randomState = trafficSeed, trafficColors = [];
   let area, base = elevation, timer = 0, elapsed = 0, disposed = false, suspended = false, inViewport = true, dirty = true;
   const tickMs = Math.max(180, Math.min(2000, Number.isFinite(frameInterval) ? frameInterval : 180)); // Never a permanent RAF loop.
+  function random() {
+    // Seed once per layer; rebuilding a palette replays the same bounded traffic.
+    let value = randomState = (randomState + 0x6D2B79F5) >>> 0;
+    value = Math.imul(value ^ value >>> 15, value | 1);
+    value ^= value + Math.imul(value ^ value >>> 7, value | 61);
+    return ((value ^ value >>> 14) >>> 0) / 0x100000000;
+  }
   function validBounds(value) {
     if (!value || !['minX', 'maxX', 'minZ', 'maxZ'].every(key => Number.isFinite(value[key]))) throw new Error('Surroundings require finite site bounds.');
     if (value.minX > value.maxX || value.minZ > value.maxZ) throw new Error('Surroundings require ordered site bounds.');
@@ -38,14 +47,15 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, re
     geometry.clear(); materials.clear();
   }
   function build() {
-    clear(); dirty = false; elapsed = 0;
+    clear(); dirty = false; elapsed = 0; randomState = trafficSeed;
     const p = ENVIRONMENT_PALETTES[state.palette], entries = new Map();
+    trafficColors = [p.car, '#d8ddd2', '#9caeaa', '#a8a2ae'].map(color => new THREE.Color(color));
     const { minX, maxX, minZ, maxZ } = area, width = maxX - minX, depth = maxZ - minZ, center = (minX + maxX) / 2;
-    function part(shape, color, position, scale, actor = null, rotation = 0) {
-      const key = shape + ':' + color;
+    function part(shape, color, position, scale, actor = null, rotation = 0, tint = false) {
+      const key = shape + ':' + color + (tint ? ':traffic' : '');
       if (!entries.has(key)) entries.set(key, { shape, color, parts: [] });
       dummy.position.set(...position); dummy.scale.set(...scale); dummy.rotation.set(0, rotation, 0); dummy.updateMatrix();
-      entries.get(key).parts.push({ matrix: dummy.matrix.clone(), actor });
+      entries.get(key).parts.push({ matrix: dummy.matrix.clone(), actor, tint });
     }
     // Three disjoint garden strips, with no slab or scenery beneath the house.
     part('box', p.lawn, [minX - 2, -.07, (minZ + maxZ) / 2], [3, .1, depth + 5]);
@@ -70,9 +80,12 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, re
     }
     // Cars have a dedicated lane beyond the site. Their whole envelope remains outside it.
     for (let i = 0; i < 2; i++) {
-      const actor = { kind: 'car', x: center, z: minZ - (i ? 6.65 : 5.35), offset: i * .53, direction: i ? -1 : 1, start: minX - 3, span: width + 6, parts: [] };
+      const speed = .22 + random() * .24, span = width + 6;
+      // Start partway through a pass so static surroundings also show both cars.
+      const startAt = -(span / speed) * (.05 + random() * .7);
+      const actor = { kind: 'car', x: center, z: minZ - (i ? 6.65 : 5.35), direction: i ? -1 : 1, start: minX - 3, span, speed, startAt, endAt: startAt + span / speed, entryDelay: 0, color: Math.floor(random() * trafficColors.length), cycle: 0, visible: true, parts: [] };
       actors.push(actor);
-      part('box', i ? '#d8ddd2' : p.car, [0, .3, 0], [1.55, .32, .65], actor);
+      part('box', '#ffffff', [0, .3, 0], [1.55, .32, .65], actor, 0, true);
       part('box', '#647c83', [-.06, .56, 0], [.78, .22, .57], actor);
       for (const x of [-.48, .48]) for (const z of [-.34, .34]) part('box', '#66706c', [x, .14, z], [.28, .23, .1], actor);
     }
@@ -90,16 +103,35 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, re
       if (!materials.has(entry.color)) materials.set(entry.color, new THREE.MeshBasicMaterial({ color: entry.color, toneMapped: false }));
       const mesh = new THREE.InstancedMesh(geometry.get(entry.shape), materials.get(entry.color), entry.parts.length);
       mesh.name = 'surroundings-' + entry.shape; mesh.frustumCulled = false;
-      entry.parts.forEach((part, index) => { mesh.setMatrixAt(index, part.matrix); if (part.actor) part.actor.parts.push({ mesh, index, matrix: part.matrix }); });
+      entry.parts.forEach((part, index) => {
+        mesh.setMatrixAt(index, part.matrix);
+        // Allocate the shared instance-color buffer at build time, never during motion.
+        if (part.tint) mesh.setColorAt(index, trafficColors[part.actor.color]);
+        if (part.actor) part.actor.parts.push({ mesh, index, matrix: part.matrix, tint: part.tint });
+      });
       group.add(mesh); batches.push({ mesh });
     }
     group.position.y = base; moveActors();
   }
   function moveActors() {
     for (const actor of actors) {
-      let x = actor.x, z = actor.z, angle = 0;
+      let x = actor.x, z = actor.z, angle = 0, scale = 1;
       if (actor.kind === 'car') {
-        const fraction = (actor.offset + elapsed * .32 / actor.span) % 1;
+        if (elapsed >= actor.endAt) {
+          actor.entryDelay = 2 + random() * 7;
+          actor.startAt = actor.endAt + actor.entryDelay;
+          actor.speed = .22 + random() * .24;
+          actor.endAt = actor.startAt + actor.span / actor.speed;
+          actor.color = (actor.color + 1 + Math.floor(random() * (trafficColors.length - 1))) % trafficColors.length;
+          actor.cycle++;
+          for (const part of actor.parts) if (part.tint) {
+            part.mesh.setColorAt(part.index, trafficColors[actor.color]);
+            part.mesh.instanceColor.needsUpdate = true;
+          }
+        }
+        actor.visible = elapsed >= actor.startAt;
+        scale = actor.visible ? 1 : 0;
+        const fraction = Math.max(0, Math.min(1, (elapsed - actor.startAt) * actor.speed / actor.span));
         x = actor.start + actor.span * (actor.direction === 1 ? fraction : 1 - fraction);
         angle = actor.direction === 1 ? 0 : Math.PI;
       } else {
@@ -107,7 +139,7 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, re
         z += .22 * Math.cos(elapsed * .17 + actor.offset);
         angle = .25 * Math.sin(elapsed * .17 + actor.offset);
       }
-      dummy.position.set(x, 0, z); dummy.rotation.set(0, angle, 0); dummy.scale.set(1, 1, 1); dummy.updateMatrix(); actorMatrix.copy(dummy.matrix);
+      dummy.position.set(x, 0, z); dummy.rotation.set(0, angle, 0); dummy.scale.set(scale, scale, scale); dummy.updateMatrix(); actorMatrix.copy(dummy.matrix);
       for (const part of actor.parts) { local.multiplyMatrices(actorMatrix, part.matrix); part.mesh.setMatrixAt(part.index, local); part.mesh.instanceMatrix.needsUpdate = true; }
     }
   }
@@ -139,7 +171,7 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, re
     setSettings, setBounds,
     setActive(value) { active = value === true; schedule(); },
     get settings() { return { ...state }; },
-    get stats() { return { enabled: state.enabled, moving: running(), drawCalls: group.visible ? batches.length : 0, actors: actors.length, timerPending: !!timer, frameInterval: tickMs, elapsed, elevation: base, bounds: { ...area } }; },
+    get stats() { return { enabled: state.enabled, moving: running(), drawCalls: group.visible ? batches.length : 0, actors: actors.length, timerPending: !!timer, frameInterval: tickMs, elapsed, elevation: base, bounds: { ...area }, trafficSeed, traffic: actors.filter(actor => actor.kind === 'car').map(({ speed, entryDelay, color, cycle, visible }) => ({ speed, entryDelay, color, cycle, visible })) }; },
     dispose() { if (disposed) return; disposed = true; stop(); observer?.disconnect(); clear(); scene.remove(group); doc?.removeEventListener('visibilitychange', visibility); media?.removeEventListener('change', visibility); win?.removeEventListener('pagehide', hide); win?.removeEventListener('pageshow', show); },
   };
 }
