@@ -121,7 +121,8 @@ vm.runInContext(source, code);
   // just-mutated light before drawing without waiting for a scheduled full frame.
   const captures=[], rect={width:1200,height:700}; let blocked=false, statusIntensity=0;
   const draw = vm.createContext({THREE,active:true,renderer:{},camera:new THREE.OrthographicCamera(-1,1,1,-1,.1,150),
-    cameraFit:{room:'',landscape:true,width:8,height:4,x:0,y:0}, selected:'',zoom:1,panX:0,panY:0,
+    cameraFit:undefined,selected:'',zoom:1,panX:0,panY:0,homeRotation:0,homeTilt:0,
+    planRadius:10,planBounds:true,xm:x=>x,zm:z=>z,
     model:{rooms,ceiling_height_m:3},points,labels:[],roomLighting:state.lighting,
     projectedPosition:new THREE.Vector3(),projectedForward:new THREE.Vector3(),
     lowerFloorContext:null,showLowerFloor:true,assumedZones:null,signalZone:'',renderCount:0,
@@ -134,6 +135,8 @@ vm.runInContext(source, code);
   draw.drawSignalFrame(true); assert.equal(captures.at(-1),true);
   statusIntensity=0; draw.drawSignalFrame(true); assert.equal(captures.at(-1),false);
   statusIntensity=2; draw.render(); assert.equal(captures.at(-1),true,'Full render samples after the last synchronous status refresh');
+  assert.equal(draw.cameraFit.rotation,0,'The draw-boundary fixture initializes the real Home camera fit');
+  assert.equal(draw.cameraFit.tilt,0);
   blocked=true; statusIntensity=0; draw.render();
   const before=captures.length; draw.active=false; draw.drawSignalFrame(true); assert.equal(captures.length,before);
   draw.active=true; blocked=false; statusIntensity=3; draw.render(); assert.equal(captures.at(-1),true,'Resume/recovery gets current light values');

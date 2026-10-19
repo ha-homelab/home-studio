@@ -93,6 +93,29 @@ still requires Python 3.10 or newer and the local toolkit:
 The website does not install into your home remotely. Do not publish your home
 JSON, photos, credentials, or entity list to get help with installation.
 
+## Rotate the installed Home view
+
+In Home Assistant's **3D Home** panel or dashboard card, **Home view** has its
+own camera controls above the map:
+
+- **Rotate** is selected initially. Drag with the left mouse button or one
+  finger to turn the home and change the viewing angle. Tilt stops before the
+  view flips over.
+- **Move** makes a plain drag move the view sideways, including on a touch
+  screen. Shift-drag or right-drag also moves the view in either mode.
+- Use **−** and **+** to zoom. The percentage button, labelled **Reset view**,
+  restores the initial angle, zoom, and position.
+- With the map focused, arrow keys rotate, Shift+arrows move, and Home resets
+  the view.
+
+The camera stops when you stop dragging; it does not keep spinning. Camera
+navigation does not move saved furniture or send device commands. Click or tap
+a device without dragging to use its normal controls.
+
+If these buttons are missing, rebuild and reinstall the project with the updated
+toolkit, then refresh Home Assistant. Updating the hosted drawing editor does
+not update an already installed Home view.
+
 ## If the 3D view cannot start
 
 The installed viewer shows a recovery message with **Plan & placement** even

@@ -186,6 +186,12 @@ controls on hover, and a compact audio remote. See [device controls](docs/device
 These installed features require rebuilding with that beta toolkit; updating
 the hosted planner alone does not update an existing Home Assistant panel.
 
+In the installed **Home view**, choose **Rotate** to turn the map or **Move** to
+pan it with a mouse or touch drag. Shift-drag and right-drag also pan; the
+percentage button resets the view. See the
+[Home camera controls](docs/first-session.md#rotate-the-installed-home-view)
+for keyboard shortcuts and upgrade guidance.
+
 Use the [complete installation guide](https://ha-homelab.github.io/home-studio/install.html)
 for first-time setup, Home Assistant OS file transfer, and updates.
 

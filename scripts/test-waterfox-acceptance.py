@@ -555,6 +555,10 @@ def viewer(client, origin, project, record, save):
         client.wait(f'window.floorplan.renderCount>{initial["renderCount"]}')
         sample['afterDrag'] = after_drag = snapshot()
         require(after_drag['scene']['camera'] != initial['scene']['camera'], 'Real pointer drag changes the viewer camera')
+        before_world = initial['scene']['camera']['world']
+        after_world = after_drag['scene']['camera']['world']
+        require(any(abs(before_world[index] - after_world[index]) > 1e-7 for index in (0, 1, 2, 4, 5, 6, 8, 9, 10)),
+                'Real Home pointer drag rotates the rendered camera, rather than only panning its projection')
         assert_viewer_interaction(initial, after_drag)
         assert_first_motion_programs(initial, after_drag)
         # Send real bridge state updates, including all-off and partial illumination.

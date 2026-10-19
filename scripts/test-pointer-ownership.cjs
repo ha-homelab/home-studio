@@ -19,30 +19,41 @@ function line(source, prefix) {
 class Target {
   listeners = new Map();
   captures = new Set();
+  dataset = {};
+  attributes = {};
   addEventListener(type, callback) {
     const callbacks = this.listeners.get(type) || [];
     callbacks.push(callback); this.listeners.set(type, callbacks);
   }
   emit(type, event = {}) { for (const callback of this.listeners.get(type) || []) callback(event); }
   setPointerCapture(id) { this.captures.add(id); }
+  setAttribute(name, value) { this.attributes[name] = value; }
+  focus() { this.focused = true; }
   hasPointerCapture(id) { return this.captures.has(id); }
   releasePointerCapture(id) {
     if (this.captures.delete(id)) this.emit('lostpointercapture', {pointerId: id});
   }
   getBoundingClientRect() { return {left: 0, top: 0, width: 800, height: 600}; }
 }
-function fixture(homeMode) {
+function fixture(homeMode, navigationMode = 'rotate') {
   const canvas = new Target(), document = new Target(), window = new Target();
   const actions = [], renders = [];
-  const node = {style: {}, classList: {toggle() {}}, prepend() {}, checked: true};
+  const nodes = new Map();
+  const getNode = id => {
+    if (!nodes.has(id)) nodes.set(id, {style: {}, attributes: {}, classList: {toggle() {}}, prepend() {}, checked: true,
+      setAttribute(name, value) { this.attributes[name] = value; }});
+    return nodes.get(id);
+  };
+  const node = getNode('body');
   document.hidden = false; document.body = node;
   window.floorplan = {renderCount: 1};
   window.requestModelRender = motion => renders.push(motion);
+  window.renderModel = () => renders.push(false);
   const c = vm.createContext({
     active: homeMode, camera: {left: -10, right: 10, top: 10, bottom: -10},
     renderer: {domElement: canvas}, document, window, requestAnimationFrame() {},
     renderLost: false, renderSuspended: false, interactionPointer: null, coalesceMotion: true,
-    panX: 0, panY: 0, radius: 10, planRadius: 10, target: {x: 0, z: 0}, azimuth: .5, polar: .5,
+    panX: 0, panY: 0, zoom: 1, radius: 10, planRadius: 10, target: {x: 0, z: 0}, azimuth: .5, polar: .5,
     requestRender: motion => renders.push(motion),
     THREE: {Color: class {}, Vector2: class {}, Raycaster: class {
       setFromCamera() {}
@@ -50,7 +61,7 @@ function fixture(homeMode) {
     }},
     bindings: [{id: 'lamp', room: 'A'}], selected: 'A', objectGroup: {children: []},
     activateDevice: item => actions.push(item.id),
-    $: () => node, scene: {}, hemisphere: {}, sun: {}, ground: {}, grid: {}, clipping: {},
+    $: getNode, vt: text => text, scene: {}, hemisphere: {}, sun: {}, ground: {}, grid: {}, clipping: {},
     root: {children: []}, points: [], renderProfile: {}, lowerFloorContext: null, overlayGroup: null,
     editorFloorMaterials: null, attachRoomLighting() {}, updateFixtureShadows() {}, refreshControls() {},
     hideMediaControls() {}, cancelNativeHover() {}, discardMediaControls() {}, previewTV() {},
@@ -62,22 +73,30 @@ function fixture(homeMode) {
     between(viewer, 'let drag=null;', "$('resetView').onclick="),
     line(viewer, 'function showMode('),
     line(home, 'let homeGesture='), line(home, 'function cancelHomeGesture('),
+    line(home, 'let navigationMode='),
+    between(home, '  function resetZoom()', '  function applyViewPreferences('),
     between(home, '  function setActive(value) {', '  let nativeHoverTimer='),
     line(home, "window.addEventListener('pagehide',()=>{cancelHomeGesture();"),
     line(home, "document.addEventListener('visibilitychange',()=>{if(document.hidden)cancelHomeGesture();"),
-    between(home, '  if(renderer) {\n    renderer.domElement.addEventListener', '  const signalText='),
+    between(home, '  if(renderer) {\n    renderer.domElement.tabIndex', '  const signalText='),
   ].join('\n');
   vm.runInContext(code, c);
   const pointer = (type, id = 1, x = 100, y = 100, extra = {}) => canvas.emit(type, {
     pointerId: id, pointerType: 'touch', isPrimary: id === 1, button: 0,
     buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y, ...extra,
   });
-  const position = () => [c.panX, c.panY, c.target.x, c.target.z, c.azimuth, c.polar];
-  return {c, canvas, document, window, actions, renders, pointer, position};
+  const rotation = () => Array.from(vm.runInContext('[homeRotation,homeTilt]', c));
+  const position = () => [c.panX, c.panY, c.target.x, c.target.z, c.azimuth, c.polar, ...rotation()];
+  const key = (key, extra = {}) => {
+    const event = {key, prevented: false, preventDefault() { this.prevented = true; }, ...extra};
+    canvas.emit('keydown', event); return event;
+  };
+  if (navigationMode === 'move') getNode('homeMove').onclick();
+  return {c, canvas, document, window, actions, renders, pointer, position, rotation, key, getNode};
 }
 
-for (const homeMode of [true, false]) {
-  const f = fixture(homeMode), before = f.position();
+for (const [homeMode, navigationMode] of [[true, 'rotate'], [true, 'move'], [false, 'rotate']]) {
+  const f = fixture(homeMode, navigationMode), before = f.position();
   f.pointer('pointerdown');
   f.pointer('pointerdown', 2, 300, 300);
   f.pointer('pointermove', 2, 400, 400);
@@ -93,7 +112,7 @@ for (const homeMode of [true, false]) {
   assert.deepEqual(f.actions, [], 'A drag never activates a device');
 
   for (const cancellation of ['pointercancel', 'lostpointercapture', 'visibility', 'pagehide', 'context', 'mode', 'buttons']) {
-    const g = fixture(homeMode), initial = g.position();
+    const g = fixture(homeMode, navigationMode), initial = g.position();
     g.pointer('pointerdown');
     if (cancellation === 'visibility') {
       g.document.hidden = true; g.document.emit('visibilitychange'); g.document.hidden = false;
@@ -116,8 +135,8 @@ for (const homeMode of [true, false]) {
   assert.deepEqual(secondary.actions, []);
 }
 
-for (const order of [[1, 2], [2, 1]]) {
-  const f = fixture(true);
+for (const mode of ['rotate', 'move']) for (const order of [[1, 2], [2, 1]]) {
+  const f = fixture(true, mode);
   f.pointer('pointerdown');f.pointer('pointerdown', 2, 300, 300);
   for (const id of order) f.pointer('pointerup', id, id === 1 ? 100 : 300, id === 1 ? 100 : 300);
   assert.deepEqual(f.actions, [], 'A two-finger tap cannot activate either device');
@@ -147,4 +166,59 @@ assert.equal(mouse.c.radius, 10 * Math.exp(.1), 'Editor wheel zoom is preserved'
 mouse.pointer('pointerdown');mouse.c.showMode(true);mouse.c.showMode(false);
 const beforePlan = mouse.position();mouse.pointer('pointermove', 1, 150, 150);
 assert.deepEqual(mouse.position(), beforePlan, 'Plan mode cancels an editor gesture');
-console.log('PASS: shared Home/editor pointer ownership, multi-touch tap suppression, cancellation, capture cleanup, clean restart, mouse pan/orbit and wheel zoom.');
+
+for (const pointerType of ['mouse', 'touch']) {
+  const orbit = fixture(true);
+  orbit.pointer('pointerdown', 1, 100, 100, {pointerType});
+  orbit.pointer('pointermove', 1, 140, 125, {pointerType});
+  assert.notDeepEqual(orbit.rotation(), [0, 0], 'The default Home drag changes heading and tilt');
+  assert.equal(orbit.c.panX, 0); assert.equal(orbit.c.panY, 0, 'Default rotation does not only shift the projection');
+  assert(orbit.canvas.focused, 'Pointer navigation gives the keyboard a focusable canvas');
+  assert(orbit.renders.length && orbit.renders.every(Boolean), 'Home navigation uses motion scheduling');
+  orbit.pointer('pointermove', 1, 100, 100, {pointerType});
+  orbit.pointer('pointerup', 1, 100, 100, {pointerType});
+  assert.deepEqual(orbit.actions, [], 'Returning a completed drag to its origin cannot activate a device');
+}
+for (const options of [{button: 2, buttons: 2}, {shiftKey: true}, {mode: 'move'}]) {
+  const pan = fixture(true, options.mode);
+  pan.pointer('pointerdown', 1, 100, 100, options);
+  pan.pointer('pointermove', 1, 140, 125, options);
+  assert.deepEqual(pan.rotation(), [0, 0], 'Right/Shift drag and Move mode preserve Home orientation');
+  assert.notDeepEqual([pan.c.panX, pan.c.panY], [0, 0], 'Home pan moves its projection');
+  pan.pointer('pointerup', 1, 140, 125, options);
+  assert.deepEqual(pan.actions, [], 'Panning does not activate a device');
+}
+for (const options of [{button: 2, buttons: 2}, {shiftKey: true}]) {
+  const click = fixture(true);
+  click.pointer('pointerdown', 1, 100, 100, options);click.pointer('pointerup', 1, 100, 100, options);
+  assert.deepEqual(click.actions, [], 'A modified navigation click cannot activate a device');
+}
+const modeSwitch = fixture(true);
+modeSwitch.pointer('pointerdown');modeSwitch.getNode('homeMove').onclick();modeSwitch.pointer('pointerup');
+assert.deepEqual(modeSwitch.actions, [], 'Changing the navigation mode cancels an unfinished device tap');
+assert.equal(modeSwitch.canvas.captures.size, 0);
+assert.equal(modeSwitch.getNode('homeMove').attributes['aria-pressed'], 'true');
+assert.equal(modeSwitch.getNode('homeRotate').attributes['aria-pressed'], 'false');
+const keyboard = fixture(true);
+assert(keyboard.key('ArrowRight').prevented);assert(keyboard.key('ArrowDown').prevented);
+assert.notDeepEqual(keyboard.rotation(), [0, 0], 'Home arrow keys change camera heading and tilt');
+const rotated = keyboard.rotation();
+keyboard.key('ArrowLeft', {shiftKey: true});
+assert.deepEqual(keyboard.rotation(), rotated);assert.notEqual(keyboard.c.panX, 0, 'Shift-arrow pans');
+for (const modifier of ['altKey', 'ctrlKey', 'metaKey']) {
+  const before = keyboard.position();
+  assert.equal(keyboard.key('ArrowRight', {[modifier]: true}).prevented, false);
+  assert.deepEqual(keyboard.position(), before, 'Browser shortcuts preserve the camera');
+}
+for (const key of ['ArrowUp', 'ArrowDown']) {
+  for (let i = 0; i < 100; i++) keyboard.key(key);
+  const limit = keyboard.rotation()[1];
+  keyboard.key(key);assert.equal(keyboard.rotation()[1], limit, 'Home tilt is bounded in both directions');
+  assert(Number.isFinite(limit));
+}
+keyboard.c.zoom = 2;
+assert(keyboard.key('Home').prevented);
+assert.deepEqual(keyboard.rotation(), [0, 0]);assert.equal(keyboard.c.zoom, 1);
+assert.equal(keyboard.c.panX, 0);assert.equal(keyboard.c.panY, 0);
+assert.deepEqual(keyboard.actions, [], 'Keyboard camera navigation and reset do not activate devices');
+console.log('PASS: Home rotation/pan, keyboard/reset, shared pointer ownership, multi-touch tap suppression, cancellation, capture cleanup and editor navigation.');

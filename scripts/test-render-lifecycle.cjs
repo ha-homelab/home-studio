@@ -348,8 +348,12 @@ assert.deepEqual(normal.paths,['direct','direct']);
 assert.equal(normal.c.renderProfile.pixels,2000000);
 assert(source.includes('drag.y=e.clientY;requestRender(true)'), 'Editor pointer movement opts into motion scheduling');
 const homeSource=fs.readFileSync(path.join(__dirname,'../home-view.js'),'utf8');
-assert(homeSource.includes('panY+=(e.clientY-start.lastY)*(camera.top-camera.bottom)/rect.height;window.requestModelRender?.(true)'),
-  'Home pointer movement opts into the same scheduler after updating the camera');
+const navigateStart=homeSource.indexOf('  function navigateHome('),navigateEnd=homeSource.indexOf("  for(const mode of ['rotate','move'])",navigateStart);
+assert(navigateStart>=0&&navigateEnd>navigateStart,'Production Home navigation helper is present');
+assert(homeSource.slice(navigateStart,navigateEnd).includes('window.requestModelRender?.(true)'),
+  'Home rotation and pan opt into motion scheduling after updating the camera');
+assert(homeSource.includes('navigateHome(e.clientX-start.lastX,e.clientY-start.lastY,start.move)'),
+  'Home pointer movement uses the shared navigation scheduler');
 console.log('PASS: first motion RAF, fixed held-drag deadlines, latest camera, full-quality release and lifecycle cancellation');
 
 // Time only successful Apple diffuse motion draws. The clock advances inside
