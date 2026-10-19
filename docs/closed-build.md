@@ -123,7 +123,8 @@ Python package checks and transport-only fixtures cannot replace this evidence.
 
 Stable validation reads an operator-signed acceptance envelope encrypted to
 the CI input recipient. It verifies matching source/plan/payloads and both run
-identities, reads the exact stored candidate ciphertext, and checks its digest
+identities, rechecks the closed build's current successful run and latest attempt,
+reads the exact stored candidate ciphertext, and checks its digest
 and pinned signature without requiring the deployment decryption key. The
 private deployment client retains its own signed acceptance record and can
 install already accepted immutable bytes after Actions evidence expires.

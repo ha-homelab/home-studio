@@ -2,7 +2,6 @@
 """Closed transport, confinement, exact composition and non-disclosure tests."""
 import contextlib
 import copy
-from types import SimpleNamespace
 import io
 import json
 import os
@@ -10,6 +9,7 @@ from pathlib import Path
 import sys
 import tarfile
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -19,6 +19,7 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
 import closed_build as build
 import closed_envelope as envelope
+import release_control
 import closed_synthetic
 
 MARKER = "FICTIONAL_CLOSED_CANARY_NEVER_PUBLIC_93f8"
@@ -92,6 +93,46 @@ class EnvelopeTests(unittest.TestCase):
 
 
 class BoundaryTests(unittest.TestCase):
+    def test_published_stable_preserves_selected_tag_and_promotion_context(self):
+        def zipped(files):
+            stream = io.BytesIO()
+            with zipfile.ZipFile(stream, "w") as result:
+                for name, data in files.items():
+                    result.writestr(name, data)
+            return stream.getvalue()
+        payloads = {"home_floorplan.zip": zipped({"core.py": b"public"}),
+                    "home-studio-1.2.3.zip": zipped({"home-studio/scripts/install-home-assistant.py": b"public"})}
+        plan = {"source_sha": "a" * 40, "tag": "v1.2.3-rc.1", "version": "1.2.3-rc.1",
+                "base_version": "1.2.3", "channel": "rc"}
+        context = {"mode": "published", "repository": build.REPOSITORY, "workflow": build.WORKFLOW,
+                   "source_sha": plan["source_sha"], "release_tag": "v1.2.3", "plan_sha256": "b" * 64,
+                   "promotion": {"release_tag": "v1.2.3", "rc_tag": plan["tag"]},
+                   "payloads": {name: {"sha256": envelope.digest(data), "size": len(data)}
+                                for name, data in payloads.items()}}
+        def download(gh, name, destination, *, producer):
+            (destination / "payloads").mkdir()
+            (destination / "context.json").write_bytes(envelope.canonical(context))
+            (destination / "version-plan.json").write_bytes(envelope.canonical(plan))
+            for name, data in payloads.items():
+                (destination / "payloads" / name).write_bytes(data)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prepared = root / "prepared"
+            (prepared / "dependencies").mkdir(parents=True)
+            args = SimpleNamespace(action="rebuild", public_context_artifact="public-context", release_tag="v1.2.3",
+                                   prepared_root=prepared)
+            with patch.object(build, "download_artifact", side_effect=download), \
+                 patch("version_plan.validate_plan", return_value=plan), \
+                 patch("version_plan.plan_digest", return_value="b" * 64), \
+                 patch("version_receipt.verify_receipts"), \
+                 patch.dict(os.environ, {"GITHUB_REPOSITORY_ID": build.REPOSITORY_ID,
+                                         "GITHUB_REPOSITORY_OWNER_ID": build.OWNER_ID}):
+                result, public = build.public_inputs(args, root)
+            self.assertEqual(result["release_tag"], "v1.2.3")
+            self.assertEqual(result["promotion"], context["promotion"])
+            self.assertEqual(result["channel"], "rc")
+            self.assertEqual((public / "component/core.py").read_bytes(), b"public")
+
     def test_public_artifact_binds_digest_source_producer_and_attempt(self):
         content = io.BytesIO()
         with zipfile.ZipFile(content, "w") as zipped:
@@ -160,27 +201,60 @@ class BoundaryTests(unittest.TestCase):
                                                                  "custom_components/home_floorplan/site.json": b"{}"}))
             (output / "acceptance.json").write_bytes(envelope.canonical({"schema": 1, "passed": True, "checks": ["package", "site-contracts", "geometry"]}))
             log.write_text(MARKER)
-        for fail in (False, True):
+        for failure in (None, "worker", "input-signature", "input-archive", "input-intent",
+                        "package-tamper", "acceptance-failure", "candidate-upload", "diagnostic-upload"):
             stored = {}
+            selected_input = sealed_input
+            if failure == "input-signature":
+                selected_input = envelope.seal(archive(files), ci_encrypt, keys()[0], purpose="input")
+            if failure == "input-archive":
+                selected_input = envelope.seal(MARKER.encode(), ci_encrypt, operator_sign, purpose="input")
+            if failure == "input-intent":
+                changed_manifest = copy.deepcopy(manifest)
+                changed_manifest["target"]["source_sha"] = "f" * 40
+                selected_input = envelope.seal(archive({**files, "closed-build.json": envelope.canonical(changed_manifest)}),
+                                               ci_encrypt, operator_sign, purpose="input")
             def transport(url, *, data=None, suffix=None, create_only=False):
                 if data is None:
-                    return sealed_input
+                    return selected_input
                 self.assertNotIn(MARKER.encode(), data)
+                if failure == "candidate-upload" and suffix.endswith(".candidate.json"):
+                    raise RuntimeError(MARKER)
+                if failure == "diagnostic-upload" and suffix.endswith(".diagnostic.json"):
+                    raise RuntimeError(MARKER)
                 stored[suffix] = data
                 return b""
+            def selected_worker(*args, **kwargs):
+                if failure == "worker":
+                    raise RuntimeError(MARKER)
+                worker(*args, **kwargs)
+                output = args[3]
+                if failure == "package-tamper":
+                    (output / "home-package.tar.gz").write_bytes(archive({
+                        "custom_components/home_floorplan/core.py": MARKER.encode(),
+                        "custom_components/home_floorplan/site.json": b"{}"}))
+                if failure == "acceptance-failure":
+                    (output / "acceptance.json").write_bytes(envelope.canonical({"schema": 1, "passed": False, "checks": [MARKER]}))
             with tempfile.TemporaryDirectory() as directory:
                 prepared = Path(directory)
                 (prepared / "prepared.json").write_bytes(envelope.canonical(build.policy()))
-                action = RuntimeError(MARKER) if fail else worker
-                with patch.dict(os.environ, environment), patch.object(build, "public_inputs", side_effect=public_inputs), patch.object(build, "transport", side_effect=transport), patch.object(build, "run_worker", side_effect=action), contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                with patch.dict(os.environ, environment), patch.object(build, "public_inputs", side_effect=public_inputs), patch.object(build, "transport", side_effect=transport), patch.object(build, "run_worker", side_effect=selected_worker), contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
                     result = build.main(["--action", "build", "--closed-request", "fictional", "--prepared-root", str(prepared)])
-            self.assertNotIn(MARKER, out.getvalue() + err.getvalue())
-            self.assertEqual(result, int(fail))
+            self.assertNotIn(MARKER, out.getvalue() + err.getvalue(), failure)
+            self.assertEqual(result, int(failure is not None), failure)
+            expected_status = ("CLOSED_CANDIDATE_STORED" if failure is None else
+                               "CLOSED_DIAGNOSTIC_UPLOAD_FAILED" if failure == "diagnostic-upload" else
+                               "CLOSED_BUILD_REJECTED")
+            self.assertEqual(out.getvalue(), expected_status + "\n", failure)
+            self.assertEqual(err.getvalue(), "", failure)
             candidates = [wire for name, wire in stored.items() if name.endswith(".candidate.json")]
-            self.assertEqual(len(candidates), 0 if fail else 1)
-            diagnostic = next(wire for name, wire in stored.items() if name.endswith(".diagnostic.json"))
-            self.assertIn(MARKER.encode(), envelope.open_envelope(diagnostic, deploy_decrypt, worker_verify, purpose="diagnostic"))
-            if not fail:
+            self.assertEqual(len(candidates), int(failure in {None, "diagnostic-upload"}), failure)
+            if failure != "diagnostic-upload":
+                diagnostic = next(wire for name, wire in stored.items() if name.endswith(".diagnostic.json"))
+                plain_diagnostic = envelope.open_envelope(diagnostic, deploy_decrypt, worker_verify, purpose="diagnostic")
+                if failure not in {"input-signature", "input-archive", "input-intent"}:
+                    self.assertIn(MARKER.encode(), plain_diagnostic, failure)
+            if candidates:
                 candidate_tar = envelope.open_envelope(candidates[0], deploy_decrypt, worker_verify, purpose="candidate")
                 with tarfile.open(fileobj=io.BytesIO(candidate_tar), mode="r:gz") as content:
                     self.assertEqual(content.extractfile("install-home-assistant.py").read(), b"trusted public installer")
@@ -217,7 +291,8 @@ class BoundaryTests(unittest.TestCase):
         accepted = {"schema": 1, "state": "accepted", "request_id": "test", "acceptance_policy": "ha-home-python-v1",
                     "public": public, "candidate_sha256": "c" * 64, "payload_sha256": "d" * 64,
                     "installer_sha256": "e" * 64, "payload_size": 12, "installer_size": 10,
-                    "build_run_id": "20", "build_run_attempt": "2", "candidate_object": "test/20-2.candidate.json",
+                    "build_run_id": "20", "build_run_attempt": "2", "build_source_sha": "f" * 40,
+                    "candidate_object": "test/20-2.candidate.json",
                     "site_acceptance": {"schema": 1, "state": "site-canary-passed", "payload_sha256": "d" * 64,
                                         "checks": {"actual_ha": True, "browser": True}, "evidence_sha256": "e" * 64, "receipt_sha256": "f" * 64},
                     "qualification": {"status": "published", "conclusion": "success", "release_tag": public["release_tag"], "public": public,
@@ -231,6 +306,21 @@ class BoundaryTests(unittest.TestCase):
         accepted["qualification"]["source_run"]["latest_attempt"] = "2"
         with self.assertRaises(build.Rejected):
             build.validate_acceptance(accepted, public, "test")
+
+    def test_stable_rechecks_latest_closed_build_attempt(self):
+        accepted = {"build_run_id": "20", "build_run_attempt": "2", "build_source_sha": "f" * 40}
+        repository = {"full_name": build.REPOSITORY, "id": int(build.REPOSITORY_ID),
+                      "owner": {"id": int(build.OWNER_ID)}}
+        run = {"id": 20, "run_attempt": 2, "repository": repository, "head_repository": repository,
+               "head_sha": "f" * 40, "path": build.WORKFLOW, "head_branch": "main",
+               "event": "workflow_dispatch", "status": "completed", "conclusion": "success"}
+        with patch.object(release_control.GitHub, "api", return_value=run):
+            build.validate_accepted_build(accepted)
+        for field, value in (("run_attempt", 3), ("head_sha", "e" * 40), ("conclusion", "failure"),
+                             ("status", "in_progress"), ("event", "pull_request"), ("path", "other.yml")):
+            with patch.object(release_control.GitHub, "api", return_value={**run, field: value}):
+                with self.assertRaises((build.Rejected, release_control.ReleaseError)):
+                    build.validate_accepted_build(accepted)
 
     def test_tar_traversal_links_duplicate_and_size_rejected(self):
         for name, kind in (("../escape", None), ("/escape", None),
@@ -282,6 +372,23 @@ class BoundaryTests(unittest.TestCase):
                 build.capture([sys.executable, "-c", "print('x'*10000)"], log, 5)
             with self.assertRaises(build.Rejected):
                 build.capture([sys.executable, "-c", "import time;time.sleep(3)"], log, 0.1)
+
+    def test_capture_caps_aggregate_log_across_commands(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(build, "MAX_LOG", 16):
+            log = Path(temporary) / "log"
+            build.capture([sys.executable, "-c", "print('12345678')"], log, 5)
+            with self.assertRaises(build.Rejected):
+                build.capture([sys.executable, "-c", "print('abcdefgh')"], log, 5)
+            self.assertEqual(log.stat().st_size, 16)
+
+    def test_closed_workflow_has_no_public_output_or_cache_step(self):
+        workflow = (build.ROOT / ".github/workflows/closed-build.yml").read_text()
+        for forbidden in ("upload-artifact", "upload-pages-artifact", "actions/cache", "upload-sarif",
+                          "GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY", "secrets: inherit"):
+            self.assertNotIn(forbidden, workflow)
+        self.assertIn("runs-on: ubuntu-24.04", workflow)
+        self.assertIn("environment: closed-build", workflow)
+        self.assertIn("persist-credentials: false", workflow)
 
     def test_cli_error_canary_is_never_printed(self):
         with patch.object(build, "execute", side_effect=RuntimeError(MARKER)), contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:

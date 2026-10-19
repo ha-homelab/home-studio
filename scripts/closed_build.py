@@ -217,8 +217,10 @@ def public_inputs(args, temporary):
     calculated = {item["name"]: {"sha256": item["sha256"], "size": item["size"]} for item in payloads}
     if context["mode"] == "published":
         require(context["payloads"] == calculated and context["plan_sha256"] == version_plan.plan_digest(plan))
+    # Promoted stable bytes retain the RC plan, while the resolver binds the
+    # actual selected stable publication separately from that immutable plan.
     context.update(plan_sha256=version_plan.plan_digest(plan), payloads=calculated,
-                   release_tag=plan["tag"], version=plan["version"],
+                   release_tag=context.get("release_tag", plan["tag"]), version=plan["version"],
                    base_version=plan["base_version"], channel=plan["channel"],
                    repository_id=os.environ["GITHUB_REPOSITORY_ID"],
                    repository_owner_id=os.environ["GITHUB_REPOSITORY_OWNER_ID"],
@@ -295,9 +297,11 @@ def capture(command, log, timeout, *, env=None):
     environment = env if env is not None else {key: os.environ[key] for key in ("PATH", "HOME", "DOCKER_HOST") if key in os.environ}
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                stdin=subprocess.DEVNULL, env=environment, start_new_session=True)
-    total, deadline = 0, time.monotonic() + timeout
+    deadline = time.monotonic() + timeout
     try:
         with selectors.DefaultSelector() as selector, log.open("ab") as stream:
+            total = stream.tell()
+            require(total <= MAX_LOG)
             selector.register(process.stdout, selectors.EVENT_READ)
             while selector.get_map():
                 require(time.monotonic() < deadline)
@@ -306,9 +310,10 @@ def capture(command, log, timeout, *, env=None):
                     if not chunk:
                         selector.unregister(key.fileobj)
                         continue
+                    remaining = MAX_LOG - total
+                    stream.write(chunk[:remaining])
                     total += len(chunk)
                     require(total <= MAX_LOG)
-                    stream.write(chunk)
             require(process.wait(timeout=max(0.1, deadline - time.monotonic())) == 0)
     finally:
         if process.poll() is None:
@@ -440,6 +445,7 @@ def execute(args, temporary):
         accepted = decode_json(open_envelope(transport(os.environ["CLOSED_ACCEPTANCE_READ_URL"]),
             os.environ["CLOSED_INPUT_DECRYPT_KEY"], os.environ["CLOSED_INPUT_VERIFY_KEY"], purpose="acceptance"))
         validate_acceptance(accepted, context, args.closed_request)
+        validate_accepted_build(accepted)
         encrypted = transport(os.environ["CLOSED_OUTPUT_READ_URL"], suffix=accepted["candidate_object"])
         require(digest(encrypted) == accepted["candidate_sha256"])
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -500,6 +506,9 @@ def validate_acceptance(accepted, context, request_id):
         require(accepted["public"][key] == context[key])
     for key in ("candidate_sha256", "payload_sha256", "installer_sha256"):
         require(SHA.fullmatch(accepted[key]) is not None)
+    require(re.fullmatch(r"[0-9a-f]{40}", accepted["build_source_sha"]) is not None)
+    for key in ("build_run_id", "build_run_attempt"):
+        require(re.fullmatch(r"[1-9][0-9]*", accepted[key]) is not None)
     for key in ("payload_size", "installer_size"):
         require(type(accepted[key]) is int and 0 < accepted[key] <= MAX_FILE)
     site = accepted["site_acceptance"]
@@ -518,6 +527,23 @@ def validate_acceptance(accepted, context, request_id):
         require(run["conclusion"] == "success" and run["id"] == run_id)
         require(run["attempt"] == run["latest_attempt"] == attempt)
     require(accepted["candidate_object"] == accepted["request_id"] + "/" + accepted["build_run_id"] + "-" + accepted["build_run_attempt"] + ".candidate.json")
+
+
+def validate_accepted_build(accepted):
+    """Stable promotion requires the closed build to remain qualified today.
+
+    The retained operator receipt authorizes later installation, but a new
+    promotion must reject a build that has since been rerun or invalidated.
+    Existing-release rebuilds have no Release gate in their own run.
+    """
+    import release_control
+    gh = release_control.GitHub(REPOSITORY)
+    run = gh.api("actions/runs/" + accepted["build_run_id"])
+    require(str(run["id"]) == accepted["build_run_id"])
+    require(str(run["repository"]["id"]) == REPOSITORY_ID
+            and str(run["repository"]["owner"]["id"]) == OWNER_ID)
+    release_control.validate_run(gh, run, {"default_branch": "main"},
+        accepted["build_source_sha"], int(accepted["build_run_attempt"]), completed=True, gate=False)
 
 
 def main(argv=None):
