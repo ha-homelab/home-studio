@@ -8,7 +8,8 @@ from homeassistant.util import dt as dt_util
 
 VALID_STATES = {"open", "closed", "opening", "closing"}
 BOOT_SECONDS = 50
-PROFILES = json.loads(Path(__file__).with_name("curtains.json").read_text())
+_PROFILE_PATH = Path(__file__).with_name("curtains.json")
+PROFILES = json.loads(_PROFILE_PATH.read_text(encoding="utf-8")) if _PROFILE_PATH.is_file() else {}
 
 
 def is_motor_available(state):
