@@ -449,7 +449,7 @@ const modeStart=homeSource.indexOf('  function attachRoomLighting() {');
 const modeEnd=homeSource.indexOf('\n  let nativeHoverTimer=',modeStart);
 assert(modeStart>=0&&modeEnd>modeStart,'Production Home mode switch is present');
 const modeSource=homeSource.slice(modeStart,modeEnd);
-function modeScheduler(legacy=false,diffuse=false) {
+function modeScheduler(legacy=false,diffuse=false,canEdit=true) {
   const q=motionScheduler(diffuse,diffuse), c=q.c, elements=new Map(), modes=[], cleanups=[];
   let width=800;
   const element=id=>{
@@ -457,7 +457,7 @@ function modeScheduler(legacy=false,diffuse=false) {
       getBoundingClientRect:()=>({width,height:600})});
     return elements.get(id);
   };
-  Object.assign(c,{active:true,previewTV(){},lowerFloorContext:null,showLowerFloor:false,selected:null,
+  Object.assign(c,{active:true,canEdit,previewTV(){},lowerFloorContext:null,showLowerFloor:false,selected:null,
     cancelHomeGesture(){},cancelEditorGesture(){},
     hideMediaControls(){cleanups.push({kind:'media',active:c.active});},
     cancelNativeHover(reset){cleanups.push({kind:'native',active:c.active,reset});},
@@ -503,6 +503,14 @@ assert.equal(oldMode.modes.at(-1),'editor');
 const fastMode=modeScheduler();
 assert.equal(rapidModeReturn(fastMode),1,'Rapid Editor cutaway/full then Home paints Home exactly once');
 assert.equal(fastMode.modes.at(-1),'home');assert.equal(fastMode.raf.size,0);
+// Family sessions cannot expose the placement editor, including direct handler calls.
+const familyMode=modeScheduler(false,false,false),familyBefore=familyMode.c.renderCount;
+familyMode.c.setActive(false);familyMode.flush();
+assert.equal(familyMode.c.active,true,'A locked session stays in Home view');
+assert.equal(familyMode.modes.at(-1),'home');
+assert.equal(familyMode.c.renderCount,familyBefore,'A rejected editor transition does not schedule a redraw');
+assert.deepEqual(familyMode.cleanups,[],'A rejected transition leaves current controls intact');
+
 // A mode-key resize, a real size change and an earlier ResizeObserver repaint
 // all satisfy the request without creating a duplicate frame.
 for(const change of ['mode','size','observer','explicit','stable','repeated']) {
