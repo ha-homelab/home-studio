@@ -1,0 +1,3 @@
+# Isolated compatibility tests only; not an integration runtime dependency.
+# Home Assistant 2026.10 requires Python 3.14.2 or newer.
+homeassistant==2026.10.2

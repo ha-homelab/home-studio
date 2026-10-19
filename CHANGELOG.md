@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- Add an optional Home Studio editor inside Home Assistant, using the same
+  drawing tools and portable JSON format as the standalone editor.
+- Link drawing floors and rooms to HA floors and areas; suggest enabled entities
+  without forwarding access tokens or device attributes to the editor.
+- Save private, revisioned drafts and publish validated plans separately. Failed
+  publication retains the previous working view. Native code updates do not
+  replace the saved drawing.
+- Package a plan-free `home_floorplan.zip` for HACS custom-repository or manual
+  installation, alongside the existing portable source toolkit.
+- Allow authorized family accounts to use the published view without editing.
+  Check floor read permissions before serving embedded assets and control
+  permissions before commands. Add an administrator edit lock and optional
+  room-label/device filters for dashboard cards.
+- Keep the standalone workflow available, with reciprocal links and explicit
+  JSON transfer instructions. Existing generated or customized installations
+  are not automatically migrated.
+
 ## [0.9.0] - Floor navigation, dashboard cards, and device controls
 
 - Add a Home Assistant dashboard card that uses the same authenticated 3D Home

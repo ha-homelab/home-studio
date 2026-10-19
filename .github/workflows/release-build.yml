@@ -37,8 +37,9 @@ jobs:
         run: |
           python3 scripts/test_package_release.py
           python3 scripts/package_release.py
+          python3 scripts/build-home-studio.py --output native-release-dist
       - name: Bind source archive and metadata to the release plan
-        run: python3 scripts/stage_release_assets.py --target public-source --pattern 'release-dist/*'
+        run: python3 scripts/stage_release_assets.py --target public-source --pattern 'release-dist/*' --pattern 'native-release-dist/home_floorplan.zip' --pattern 'native-release-dist/home_floorplan.zip.sha256'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: release-assets-public-source

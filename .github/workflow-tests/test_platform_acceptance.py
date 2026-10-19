@@ -127,7 +127,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
 
     def assert_package_setup_budget(self, package):
         jobs = package['jobs']
-        self.assertEqual(set(jobs), {'package', 'platforms'})
+        self.assertEqual(set(jobs), {'package', 'platforms', 'native-core'})
         self.assertEqual(jobs['platforms'], {'uses': './.github/workflows/platform-acceptance.yml'})
         job = jobs['package']
         self.assertEqual(job['timeout-minutes'], '30')
@@ -155,6 +155,25 @@ class PlatformAcceptanceTests(unittest.TestCase):
 
     def test_package_browser_setup_has_separate_bounded_envelope(self):
         self.assert_package_setup_budget(workflow('package.yml'))
+
+    def test_native_core_uses_pinned_runtime_and_required_bounded_job(self):
+        job = workflow('package.yml')['jobs']['native-core']
+        self.assertEqual(job['runs-on'], 'ubuntu-latest')
+        self.assertEqual(job['timeout-minutes'], '12')
+        self.assertNotIn('if', job)
+        self.assertNotIn('continue-on-error', job)
+        steps = job['steps']
+        python_setup = [step for step in steps if step.get('uses', '').startswith('actions/setup-python@')]
+        self.assertEqual(len(python_setup), 1)
+        self.assertEqual(python_setup[0]['with']['python-version'], '3.14')
+        runs = [step['run'] for step in steps if 'run' in step]
+        self.assertEqual(runs, ['python -m pip install -r requirements-ha-test.txt',
+                                'python scripts/test-ha-core.py'])
+        self.assertEqual((ROOT / 'requirements-ha-test.txt').read_text().splitlines()[-1],
+                         'homeassistant==2026.10.2')
+        for step in steps:
+            self.assertNotIn('if', step)
+            self.assertNotIn('continue-on-error', step)
 
     def test_first_session_runs_in_each_installed_engine(self):
         steps = workflow('package.yml')['jobs']['package']['steps']

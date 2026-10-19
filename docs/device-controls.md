@@ -5,9 +5,10 @@ Choose an object in the planner, enter its **Home Assistant entity ID**, then
 build and install the home. You can also bind an existing object in the installed
 plan's **Edit layout** view. Wait for the saved confirmation before controlling it.
 
-These controls require a build containing **device details and audio controls**.
-They are not included in stable 0.8.0 or the first dashboard/artwork beta. Updating
-the hosted drawing editor alone does not upgrade an installed home.
+These controls require an installed build containing **device details and audio controls**.
+Updating the hosted drawing editor alone does not upgrade an installed home.
+In the [native editor](home-assistant-editor.md), choose devices from your HA
+registry, then save and publish. The separate editor and compiler remain available.
 
 ## What to bind
 
@@ -95,8 +96,9 @@ refresh this catalog.
 Older compiled viewers retain their previous state protocol for compatibility.
 Rebuild and reinstall to obtain the reduced state payload. Dependency filtering
 reduces data and work; it is not an authorization boundary. HA authentication,
-the administrator requirement, saved-binding checks and the host command guard
-remain responsible for access control.
+server-issued read/control scopes, saved-binding checks and the host command
+guard enforce device access. Source and layout editing remain administrator
+actions; family accounts use the published view.
 
 **Dry run** blocks native dialogs as well as commands, because native HA dialogs
 can themselves control devices. A pending or failed placement save also blocks

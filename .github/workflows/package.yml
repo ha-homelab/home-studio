@@ -5,6 +5,21 @@ on:
 permissions:
   contents: read
 jobs:
+  native-core:
+    name: Native integration · Home Assistant Core
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.14'
+      - name: Install pinned HA test runtime
+        run: python -m pip install -r requirements-ha-test.txt
+      - name: Verify real storage, registries, permissions and publication
+        run: python scripts/test-ha-core.py
   platforms:
     uses: ./.github/workflows/platform-acceptance.yml
   package:
@@ -24,6 +39,10 @@ jobs:
           python3 scripts/test-download-tls.py
       - name: Check published sources and website
         run: python3 scripts/validate-site.py
+      - name: Test native drafts, publication, package and permissions
+        run: |
+          python3 scripts/test-ha-project-metadata.py
+          python3 scripts/test-ha-native.py
       - name: Test archive validation, installation, backup and rollback
         run: python3 scripts/test-install-home-assistant.py
       - name: Test ephemeral Intel runner preparation without system commands
@@ -64,6 +83,10 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           npx playwright install --with-deps chromium firefox webkit
+      - name: Test native editor bridge and family control boundaries
+        run: |
+          LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-studio.cjs
+          node --test scripts/test-family-view.cjs
       - name: Test drawing, furnishing, export and installation through the editor
         run: npm run test:planner
       - name: Test AI preview, review, undo and real local companion

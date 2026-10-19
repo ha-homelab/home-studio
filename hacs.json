@@ -1,0 +1,7 @@
+{
+  "name": "Home Studio",
+  "homeassistant": "2026.10.0",
+  "filename": "home_floorplan.zip",
+  "zip_release": true,
+  "hide_default_branch": true
+}
