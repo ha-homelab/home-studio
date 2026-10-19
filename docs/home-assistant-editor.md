@@ -53,6 +53,14 @@ Publishing a drawing does not turn on lights, move covers, or operate locks.
 Saving a draft and publishing a dashboard are separate actions. Changing a
 draft does not change the currently published geometry.
 
+**Save draft** also applies the value you are currently typing. Unfinished
+fields count as unsaved work. If a field is invalid, saving and publishing
+stop, and Save draft focuses the field so you can correct it without losing
+your entered text. The tab recovery copy contains accepted drawing changes;
+correct unfinished fields before leaving the editor. **Export JSON** remains
+available for a backup of the last valid drawing and tells you when invalid
+field text is excluded.
+
 ## Work in the external editor when you prefer
 
 The in-HA editor links to the [separate browser editor](https://ha-homelab.github.io/home-studio/planner/).
@@ -107,6 +115,9 @@ its private adapters or prebuilt assets to be preserved. Keep its existing
 deployment route unless you intentionally migrate. For an ordinary portable
 project, retain its source JSON and HA backup, then import the source into a
 fresh native installation. Check bindings in Dry run before using live controls.
+If Home Studio identifies the installation as a generated home, its sidebar
+explains this workflow and keeps the family view and browser editor links
+available. This compatibility state is not a connection error.
 
 ## Troubleshooting
 
@@ -120,6 +131,10 @@ fresh native installation. Check bindings in Dry run before using live controls.
 - **Save succeeds but Publish fails:** saving allows an unfinished drawing;
   publication requires complete, valid geometry. Follow the field named by
   the error. The previous publication is retained.
+- **The drawing tools do not finish loading:** after a short wait, use
+  **Retry connection** to reopen the preserved drawing. Retry does not replace
+  a recovered drawing with the saved HA version. **Export JSON** remains
+  available when the host has a drawing, including after an editor load error.
 - **The external editor opens a different draft:** this is expected. Export
   and open the JSON file when you want to transfer a design.
 

@@ -2,8 +2,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
-const { chromium } = require('playwright');
+const { chromium, firefox, webkit } = require('playwright');
 const { browserLaunchOptions } = require('./browser-stability-diagnostics.cjs');
+const engine = process.env.BROWSER || 'chromium';
+const browserType = { chromium, firefox, webkit }[engine];
+assert(browserType, 'BROWSER must be chromium, firefox, or webkit');
 const root = path.resolve(__dirname, '..');
 const fixture = `<!doctype html><html style="height:100%"><head><meta charset="utf-8"></head><body style="margin:0;height:100%"><home-floorplan-studio-panel></home-floorplan-studio-panel><script src="/custom_components/home_floorplan/static/studio.js"></script><script>
 window.calls=[];window.failSave=false;window.holdSave=false;window.tokens='NEVER_SEND_TOKEN';
@@ -19,14 +22,14 @@ const server = http.createServer((req, res) => {
   const route = url.pathname.replace(/^\/home-floorplan-studio\//, '/');
   const file = path.resolve(root, '.' + route + (route.endsWith('/') ? 'index.html' : ''));
   if (!file.startsWith(root + path.sep)) return res.writeHead(404).end();
-  try { const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.jpg':'image/jpeg'}; res.writeHead(200, {'Content-Type':mime[path.extname(file)]||'application/octet-stream','Access-Control-Allow-Origin':'*'}).end(fs.readFileSync(file)); } catch { res.writeHead(404).end(); }
+  try { const body=fs.readFileSync(file); const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.jpg':'image/jpeg'}; res.writeHead(200, {'Content-Type':mime[path.extname(file)]||'application/octet-stream','Access-Control-Allow-Origin':'*'}).end(body); } catch { res.writeHead(404).end(); }
 });
 (async()=>{
  let browser;
  try {
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const origin=`http://127.0.0.1:${server.address().port}`;
-  browser=await chromium.launch(browserLaunchOptions('chromium',true));
+  browser=await browserType.launch(browserLaunchOptions(engine,true));
   const context=await browser.newContext({viewport:{width:1440,height:1000}});
   const page=await context.newPage(); page.setDefaultTimeout(15000); const errors=[];
   if (process.env.DEBUG_STUDIO) { page.on('console', m=>console.log('browser:',m.text())); page.on('pageerror',e=>console.log('pageerror:',String(e))); }
@@ -102,7 +105,7 @@ const server = http.createServer((req, res) => {
   assert.equal(await page.evaluate(()=>window.host._dirty()),true);
   assert.equal(await page.locator('#publish').isDisabled(),true);
   // A delayed reload must not discard edits made after its confirmation.
-  await page.evaluate(()=>window.holdGet=true);
+  await page.evaluate(()=>{window.holdGet=true;delete window.releaseGet;});
   await page.locator('#reload').click(); await page.waitForFunction(()=>typeof window.releaseGet==='function');
   await frame.locator('#project-title').fill('Edit made while reloading');
   // Leave the field focused: the final snapshot must flush this unfinished edit.
@@ -115,6 +118,55 @@ const server = http.createServer((req, res) => {
   await page.evaluate(()=>window.holdGet=false);
   await page.locator('#reload').click(); await page.waitForFunction(()=>window.host._ready&&!window.host._busy&&!window.host._dirty());
   assert.equal(await page.evaluate(()=>window.host._project.title),'Imported portable drawing');
+  // A still-focused field is unsaved, and one click saves its entered value.
+  frame=page.frames().find(frame=>frame.url().includes('embed='));
+  await page.evaluate(()=>window.holdSave=false);
+  await frame.locator('#project-title').fill('Saved with one click');
+  await page.waitForFunction(()=>window.host._edits.pending);
+  assert.equal(await page.locator('#save').isEnabled(),true);
+  assert.equal(await page.locator('#publish').isDisabled(),true);
+  await page.locator('#save').click();
+  await page.waitForFunction(()=>window.server.project.title==='Saved with one click'&&!window.host._busy);
+  assert.equal(await page.evaluate(()=>window.host._unsaved()),false);
+  const savedCalls=await page.evaluate(()=>calls.filter(call=>call.type.endsWith('project_save')).length);
+  // Invalid title text is retained, described, focused, and never saved.
+  await frame.locator('#project-title').fill('');
+  await page.locator('#save').click(); await page.waitForFunction(()=>!window.host._busy&&window.host._edits.invalid);
+  assert.equal(await frame.locator('#project-title').inputValue(),'');
+  assert.equal(await frame.locator('#project-title').getAttribute('aria-invalid'),'true');
+  assert.equal(await frame.locator('#project-title').getAttribute('aria-describedby'),'status');
+  assert.equal(await frame.locator('#project-title').evaluate(field=>field===document.activeElement),true);
+  assert.match(await page.locator('#status').innerText(),/Correct Project title/);
+  assert.equal(await page.evaluate(()=>calls.filter(call=>call.type.endsWith('project_save')).length),savedCalls);
+  assert.equal(await page.evaluate(()=>window.host._pending.size),0);
+  await frame.locator('#project-title').fill('Saved with one click'); await frame.locator('#project-title').press('Tab');
+  await page.waitForFunction(()=>!window.host._unsaved());
+  await frame.locator('[data-object-kind="rooms"]').first().click();
+  const polygon=frame.getByLabel('x, z coordinates (m)',{exact:true});
+  const validPolygon=await polygon.inputValue();
+  await polygon.fill('invalid polygon'); await page.locator('#save').click();
+  await page.waitForFunction(()=>!window.host._busy&&window.host._edits.invalid);
+  assert.equal(await polygon.inputValue(),'invalid polygon');
+  assert.equal(await polygon.evaluate(field=>field===document.activeElement),true);
+  assert.equal(await page.locator('#publish').isDisabled(),true);
+  const publishedCalls=await page.evaluate(()=>calls.filter(call=>call.type.endsWith('project_publish')).length);
+  // Exercise the snapshot guard as well as the disabled Publish button.
+  await page.evaluate(()=>window.host._publish());
+  assert.equal(await page.evaluate(()=>calls.filter(call=>call.type.endsWith('project_publish')).length),publishedCalls);
+  assert.equal(await page.evaluate(()=>calls.filter(call=>call.type.endsWith('project_save')).length),savedCalls);
+  const validExport=page.waitForEvent('download'); await page.locator('#export').click();
+  assert.deepEqual(JSON.parse(fs.readFileSync(await (await validExport).path(),'utf8')),await page.evaluate(()=>window.server.project));
+  assert.match(await page.locator('#status').innerText(),/Unfinished or invalid field text is not included/);
+  assert.equal(await polygon.inputValue(),'invalid polygon');
+  // Editing rejected text while a reload is in flight must still cancel replacement.
+  await page.evaluate(()=>{window.holdGet=true;delete window.releaseGet;});
+  await page.locator('#reload').click(); await page.waitForFunction(()=>typeof window.releaseGet==='function');
+  await polygon.fill('new invalid text entered during reload');
+  await page.evaluate(()=>window.releaseGet()); await page.waitForFunction(()=>!window.host._busy);
+  assert.equal(await polygon.inputValue(),'new invalid text entered during reload');
+  assert.match(await page.locator('#status').innerText(),/Reload cancelled/);
+  await page.evaluate(()=>window.holdGet=false);
+  await polygon.fill(validPolygon); await polygon.press('Tab'); await page.waitForFunction(()=>!window.host._unsaved());
   // An administrator role change immediately removes private authoring data.
   await page.evaluate(()=>{window.host.hass={...window.host._hass,user:{id:'test-user',is_admin:false}};});
   assert.equal(await page.locator('iframe').count(),0);
@@ -140,8 +192,113 @@ const server = http.createServer((req, res) => {
   assert.equal(await page.evaluate(()=>window.retryCalls),2);
   await page.evaluate(()=>window.retryHost.$('retry').click());
   await page.waitForFunction(()=>window.retryCalls===4);
+  // Script failures have a bounded wait and retry preserves the chosen recovery.
+  const startup=await context.newPage(); startup.on('pageerror',e=>errors.push(String(e)));
+  const recovered={...project,title:'Recovery after loading failure'};
+  await startup.addInitScript(({project,recovered})=>{
+    if (window.parent !== window) return;
+    sessionStorage.setItem('fixture-server',JSON.stringify({project,revision:5,published_revision:5}));
+    sessionStorage.setItem('home-studio.ha-tab-draft.v1:test-user',JSON.stringify({project:recovered,revision:5}));
+  },{project,recovered});
+  await startup.clock.install();
+  await startup.route('**/planner/editor.js',route=>route.abort());
+  await startup.goto(origin+'/fixture'); await startup.locator('#resume').click();
+  await startup.waitForFunction(()=>window.host._frame);
+  await startup.clock.fastForward(15001);
+  await startup.waitForFunction(()=>window.host._startupFailed);
+  assert.equal(await startup.locator('iframe').count(),0);
+  assert.equal(await startup.locator('#retry').isVisible(),true);
+  assert.equal(await startup.locator('#export').isEnabled(),true);
+  assert.equal(await startup.evaluate(()=>window.host._startupTimer),null);
+  assert.equal(await startup.evaluate(()=>window.host._project.title),recovered.title);
+  const recoveryExport=startup.waitForEvent('download'); await startup.locator('#export').click();
+  assert.deepEqual(JSON.parse(fs.readFileSync(await (await recoveryExport).path(),'utf8')),recovered);
+  await startup.unroute('**/planner/editor.js');
+  await startup.locator('#retry').click(); await startup.waitForFunction(()=>window.host._ready);
+  assert.equal(await startup.locator('iframe').count(),1);
+  assert.equal(await startup.evaluate(()=>window.host._project.title),recovered.title);
+  assert.equal(await startup.evaluate(()=>window.host._startupTimer),null);
+  assert.equal(await startup.evaluate(()=>window.calls.filter(call=>call.type.endsWith('project_get')).length),1);
+  await startup.setViewportSize({width:390,height:844});
+  assert.equal(await startup.locator('header').evaluate(header=>header.scrollWidth<=header.clientWidth),true);
+  assert.equal(await startup.locator('#save').evaluate(button=>button.getBoundingClientRect().height>=44),true);
+  // An obsolete timeout cannot remove a ready editor; teardown clears a pending one.
+  await startup.clock.fastForward(16000); assert.equal(await startup.locator('iframe').count(),1);
+  await startup.evaluate(()=>{window.host._openEditor(window.host._project);window.host.remove();});
+  assert.equal(await startup.evaluate(()=>window.host._startupTimer),null);
+  await startup.clock.fastForward(16000); assert.equal(await startup.evaluate(()=>window.host._startupFailed),false);
+  await startup.close();
+  // Initialization errors retain even an unreadable original for portable recovery.
+  const damaged=await context.newPage(); damaged.on('pageerror',e=>errors.push(String(e)));
+  await damaged.addInitScript(()=>{
+    if (window.parent !== window) return;
+    sessionStorage.setItem('fixture-server',JSON.stringify({project:{title:'Unreadable original'},revision:3,published_revision:null}));
+  });
+  await damaged.goto(origin+'/fixture'); await damaged.waitForFunction(()=>window.host._startupFailed);
+  assert.equal(await damaged.locator('iframe').count(),0);
+  const originalExport=damaged.waitForEvent('download'); await damaged.locator('#export').click();
+  assert.deepEqual(JSON.parse(fs.readFileSync(await (await originalExport).path(),'utf8')),{title:'Unreadable original'});
+  await damaged.locator('#retry').click(); await damaged.waitForFunction(()=>window.host._startupFailed);
+  assert.equal(await damaged.locator('iframe').count(),0);
+  assert.equal(await damaged.evaluate(()=>window.host._startupTimer),null);
+  await damaged.close();
+  // A generated installation uses its established source workflow, not connection retry.
+  const legacy=await context.newPage();
+  await legacy.addInitScript(project=>{
+    if (window.parent !== window) return;
+    sessionStorage.setItem('fixture-server',JSON.stringify({project,mode:'legacy',revision:1,published_revision:1}));
+  },project);
+  await legacy.goto(origin+'/fixture'); await legacy.waitForFunction(()=>window.calls.length===2&&!window.host._startupTimer);
+  assert.match(await legacy.locator('#status').innerText(),/original project JSON/);
+  assert.equal(await legacy.locator('#status').evaluate(status=>status.classList.contains('error')),false);
+  assert.equal(await legacy.locator('#retry').isVisible(),false);
+  assert.equal(await legacy.locator('#family').isVisible(),true);
+  assert.equal(await legacy.locator('a.external').isVisible(),true);
+  assert.equal(await legacy.locator('iframe').count(),0);
+  assert.deepEqual(await legacy.evaluate(()=>window.server.project),project);
+  assert.equal(await legacy.evaluate(()=>window.calls.some(call=>/project_(save|publish)$/.test(call.type))),false);
+  await legacy.evaluate(()=>{window.host.hass=window.host._hass;window.host._retryStartup();});
+  assert.equal(await legacy.evaluate(()=>window.calls.length),2);
+  await legacy.close();
+  // A late HA response after the connection deadline cannot mount a stale frame.
+  await page.clock.install();
+  await page.evaluate(project=>{
+    sessionStorage.setItem('home-studio.ha-tab-draft.v1:late-admin',JSON.stringify({project,revision:8}));
+    window.lateHost=document.createElement('home-floorplan-studio-panel');
+    lateHost.hass={user:{id:'late-admin',is_admin:true},callWS:data=>data.type.endsWith('entity_catalog')?Promise.resolve(window.catalog):new Promise(resolve=>window.lateResponse=resolve)};
+    document.body.append(lateHost);
+  },recovered);
+  await page.clock.fastForward(15001);
+  assert.equal(await page.evaluate(()=>window.lateHost._startupFailed),true);
+  assert.equal(await page.evaluate(()=>window.lateHost.$('export').disabled),false);
+  await page.evaluate(project=>window.lateResponse({project,revision:8,can_edit:true}),project);
+  assert.equal(await page.evaluate(()=>window.lateHost.shadowRoot.querySelectorAll('iframe').length),0);
+  const originalRecovery=await page.evaluate(()=>sessionStorage.getItem(window.lateHost._key()));
+  await page.evaluate(project=>{
+    window.newRemote={...project,title:'Newer server drawing'};
+    window.lateHost.hass={user:{id:'late-admin',is_admin:true},callWS:async data=>{
+      if (data.type.endsWith('entity_catalog')) return window.catalog;
+      if (data.type.endsWith('project_save')) throw {code:'conflict'};
+      return {project:window.newRemote,revision:9,published_revision:null,can_edit:true};
+    }};
+    window.lateHost._retryStartup();
+  },project);
+  await page.waitForFunction(()=>!window.lateHost.$('recovery').hidden);
+  assert.equal(await page.evaluate(()=>window.lateHost._revision),9);
+  assert.equal(await page.evaluate(()=>window.lateHost._project.title),recovered.title);
+  await page.evaluate(()=>window.lateHost.remove());
+  assert.equal(await page.evaluate(()=>sessionStorage.getItem(window.lateHost._key())),originalRecovery,'unresolved recovery retains its original revision after detach');
+  await page.evaluate(()=>document.body.append(window.lateHost));
+  await page.waitForFunction(()=>!window.lateHost.$('recovery').hidden);
+  await page.evaluate(()=>window.lateHost.$('resume').click());
+  await page.waitForFunction(()=>window.lateHost._ready);
+  assert.equal(await page.evaluate(()=>window.lateHost._revision),8);
+  await page.evaluate(()=>window.lateHost._save());
+  assert.match(await page.evaluate(()=>window.lateHost.$('status').textContent),/Another session/);
+  assert.equal(await page.evaluate(()=>window.newRemote.title),'Newer server drawing');
+  await page.evaluate(()=>window.lateHost.remove());
   assert.deepEqual(errors,[]);
   await context.close();
-  console.log('Native studio passed: opaque sandbox, area/device onboarding, save/publish, JSON roundtrip, forged messages, local draft isolation, offline recovery, revision conflict, in-flight edits.');
+  console.log(`Native studio passed (${engine}): opaque sandbox, area/device onboarding, save/publish, JSON roundtrip, forged messages, local draft isolation, offline recovery, revision conflict, in-flight edits, pending/invalid fields, loading timeout and recovery retry.`);
  } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

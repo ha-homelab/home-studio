@@ -85,7 +85,9 @@ jobs:
           npx playwright install --with-deps chromium firefox webkit
       - name: Test native editor bridge and family control boundaries
         run: |
-          LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-studio.cjs
+          for engine in chromium firefox webkit; do
+            BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-studio.cjs || exit 1
+          done
           node --test scripts/test-family-view.cjs
       - name: Test drawing, furnishing, export and installation through the editor
         run: npm run test:planner

@@ -17,10 +17,13 @@ const initialLocale = await initI18n();
 const $ = id => document.getElementById(id);
 const haContext = embeddedContext();
 let haCatalog = null;
-if (haContext) { document.body.classList.add('ha-embedded'); document.querySelector('.workspace').inert = true; }
+if (haContext) {
+  document.body.classList.add('ha-embedded');
+  document.querySelector('.workspace').inert = true; document.querySelector('.app-header').inert = true;
+}
 const draftStorage = createDraftStorage({ validate: validateProject, maxBytes: LIMITS.bytes, ...(haContext ? memoryDraftOptions() : {}) });
 let recoverySnapshot = null, recoveryBusy = false, saveSequence = 0, pendingSaves = 0;
-let committingField = null, inspectorScope = '';
+let committingField = null, inspectorScope = '', fieldEditRevision = 0;
 const BUILD_COMMAND = 'python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package';
 const LABELS = { furniture: 'Furniture', lamp: 'Lamp', chandelier: 'Ceiling light', tv: 'TV / display', appliance: 'Appliance', switch: 'Switch', outlet: 'Outlet', sensor: 'Sensor' };
 const COLORS = { floor: '#e7dac2', tile: '#e0e8df', deck: '#d8dfbe', furniture: '#96aca6', lamp: '#d9ae68', chandelier: '#d9ae68', tv: '#677d89', appliance: '#a1abb0', switch: '#b4c39d', outlet: '#b4c39d', sensor: '#c4b09a' };
@@ -260,7 +263,7 @@ function transact(change, message = () => t('Project updated.'), { fit = false }
     if (!selected()) selection = null;
     editorChanged(); renderUI(); if (fit) { fitPlan(); fitPreview(); } renderPlan(); status(message); save();
     return true;
-  } catch (error) { if (committingField) { committingField.inspectorDraft = true; committingField.setAttribute('aria-invalid', 'true'); } selection = priorSelection; $('project-title').value = project.title; status(() => t('Change not applied: {error}', { error: formatValidationError(error, t) }), true); renderInspector(); return false; }
+  } catch (error) { if (committingField) { committingField.inspectorDraft = true; committingField.setAttribute('aria-invalid', 'true'); } selection = priorSelection; status(() => t('Change not applied: {error}', { error: formatValidationError(error, t) }), true); renderInspector(); editorChanged(); return false; }
 }
 async function replaceProject(next, message) {
   validateProject(next); const raw = serializeProject(next), previous = serializeProject(project);
@@ -277,6 +280,7 @@ async function replaceProject(next, message) {
   return true;
 }
 function installRecoveredProject(next) {
+  $('project-title').inspectorDraft = false; $('project-title').removeAttribute('aria-invalid');
   historyPush(project); project = clone(next); activeFloorId = project.floors[0].id;
   selection = null; drag = null; previewDirty = true; inspectorScope = '';
   editorChanged(); setView('plan'); setTool('select'); renderUI(); fitPlan(); fitPreview(); renderPlan();
@@ -287,7 +291,8 @@ function undo(redo = false) {
   selection = null; drag = null; previewDirty = true; editorChanged(); renderUI(); renderPlan(); status(() => redo ? t('Change restored.') : t('Change undone.')); save();
 }
 function renderUI() {
-  $('project-title').value = project.title; $('floor-caption').textContent = floor().name;
+  if (!$('project-title').inspectorDraft) $('project-title').value = project.title;
+  $('floor-caption').textContent = floor().name;
   $('undo').disabled = history.length === 0; $('redo').disabled = future.length === 0;
   const floorList = node('div');
   project.floors.forEach(f => {
@@ -330,7 +335,8 @@ function field(parent, label, value, onChange, { type = 'text', min, max, step =
   if (rows) input.rows = rows; input.value = String(value ?? ''); input.readOnly = readOnly;
   if (dir) input.dir = dir;
   input.setAttribute('aria-label', label); input.dataset.inspectorKey = `input:${label}`; wrap.dataset.inspectorKey = `field:${label}`;
-  input.oninput = event => { event.currentTarget.inspectorDraft = true; };
+  if (onChange) { input.dataset.projectField = 'true'; input.setAttribute('aria-describedby', 'status'); }
+  input.oninput = event => { event.currentTarget.inspectorDraft = true; if (onChange) { fieldEditRevision++; editorChanged(); } };
   input.onchange = event => {
     if (!onChange) return;
     committingField = event.currentTarget;
@@ -1148,7 +1154,14 @@ window.addEventListener('storage', event => {
   if ($('recovery-dialog').open) renderRecovery();
 });
 
-$('project-title').addEventListener('change', e => transact(p => { p.title = e.target.value; }, () => t('Project renamed.')));
+$('project-title').dataset.projectField = 'true';
+$('project-title').setAttribute('aria-describedby', 'status');
+$('project-title').addEventListener('input', e => { e.target.inspectorDraft = true; fieldEditRevision++; editorChanged(); });
+$('project-title').addEventListener('change', e => {
+  committingField = e.target;
+  try { transact(p => { p.title = e.target.value; }, () => t('Project renamed.')); }
+  finally { committingField = null; }
+});
 $('add-floor').addEventListener('click', () => {
   if (project.floors.length >= LIMITS.floors) return status(() => t('A project supports up to {count} floors.', { count: LIMITS.floors }), true);
   let index = 2; while (project.floors.some(f => f.id === `floor_${index}`)) index++;
@@ -1331,14 +1344,32 @@ if (haContext) {
       const next = value || blankProject(); validateProject(next); serializeProject(next);
       haCatalog = catalog && Array.isArray(catalog.areas) && Array.isArray(catalog.entities) ? catalog : { floors: [], areas: [], entities: [] };
       installRecoveredProject(next); history = []; future = [];
-      document.querySelector('.workspace').inert = false; renderUI();
+      document.querySelector('.workspace').inert = false; document.querySelector('.app-header').inert = false; renderUI();
       translatedText('save-status', 'Draft in this tab · save in Home Assistant above');
       $('ha-workflow-note').textContent = 'Draw rooms, link Home Assistant areas, then add devices. Save draft above; publish when ready for the family view.';
       status('Home Assistant drawing ready. Save draft above before leaving.');
     },
     snapshot: () => clone(project),
+    editState() {
+      const fields = [...document.querySelectorAll('[data-project-field]')].filter(field => field.inspectorDraft);
+      const invalid = fields.find(field => field.getAttribute('aria-invalid') === 'true');
+      return { pending: fields.length > 0, invalid: !!invalid, field: invalid?.getAttribute('aria-label') || '', revision: fieldEditRevision };
+    },
     subscribe(listener) { editorListeners.add(listener); return () => editorListeners.delete(listener); },
-    flush() { document.activeElement?.blur(); if (drag) finishPointer(null, true); },
+    flush(allowInvalid) {
+      // Commit directly: blurring an already-unfocused sandbox document can
+      // leave Firefox unable to focus its fields after a host action.
+      if (drag) finishPointer(null, true);
+      for (const field of document.querySelectorAll('[data-project-field]')) {
+        if (field.inspectorDraft) field.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      const invalid = document.querySelector('[data-project-field][aria-invalid="true"]');
+      if (invalid && !allowInvalid) {
+        const message = `Correct ${invalid.getAttribute('aria-label') || 'the highlighted field'} before saving or publishing. Your entered text is still available.`;
+        status(message, true); invalid.focus(); invalid.scrollIntoView({ block: 'center' });
+        throw new Error(message);
+      }
+    },
     failed() { status('Could not open the saved drawing. Your original is still stored in Home Assistant.', true); },
   });
 }

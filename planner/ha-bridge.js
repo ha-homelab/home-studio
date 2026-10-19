@@ -14,13 +14,16 @@ export function memoryDraftOptions() {
     locks: { request: async (_name, operation) => operation() },
   };
 }
-export function connectHost(context, { initialize, snapshot, subscribe, flush, failed }, win = window) {
-  let initialized = false, previous = '', sequence = 0;
+export function connectHost(context, { initialize, snapshot, editState, subscribe, flush, failed }, win = window) {
+  let initialized = false, previous = '', previousState = '', sequence = 0;
   const send = (type, payload = {}) => win.parent.postMessage({ protocol: PROTOCOL, channel: context.channel, type, ...payload }, context.origin);
   const changed = (requestId) => {
     if (!initialized) return;
-    const project = snapshot(), raw = JSON.stringify(project);
-    if (raw !== previous || requestId) { previous = raw; send('snapshot', { project, sequence: ++sequence, requestId }); }
+    const project = snapshot(), raw = JSON.stringify(project), edits = editState(), state = JSON.stringify(edits);
+    if (raw !== previous || state !== previousState || requestId) {
+      previous = raw; previousState = state;
+      send('snapshot', { project, edits, sequence: ++sequence, requestId });
+    }
   };
   const receive = event => {
     const data = event.data;
@@ -29,11 +32,13 @@ export function connectHost(context, { initialize, snapshot, subscribe, flush, f
       try { initialize(data.project, data.catalog); initialized = true; changed(); }
       catch { failed(); send('error', { message: 'The saved drawing could not be opened. Export its JSON from Home Assistant for recovery.' }); }
     } else if (data.type === 'snapshot-request' && initialized && typeof data.requestId === 'string' && data.requestId.length < 80) {
-      flush(); changed(data.requestId);
+      try { flush(data.allowInvalid === true); changed(data.requestId); }
+      catch (error) { changed(); send('snapshot-error', { requestId: data.requestId, message: error.message }); }
     }
   };
   win.addEventListener('message', receive);
-  const unsubscribe = subscribe(() => changed());
+  // Transactions refresh inspector controls before the host reads field state.
+  const unsubscribe = subscribe(() => queueMicrotask(() => changed()));
   send('ready');
   return () => { unsubscribe(); win.removeEventListener('message', receive); };
 }
