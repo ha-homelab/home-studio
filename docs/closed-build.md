@@ -30,8 +30,9 @@ image build or image layer. A signing request cannot select a different image.
 
 The host validates exact run/attempt, producer identity, immutable Actions ZIP
 digest and artifact creation time before extracting public artifacts. It then
-checks the frozen version plan and existing unsigned staging receipts against
-the actual payloads. These receipts are hash bindings, not signatures. A
+checks the frozen version plan, declared version metadata, and existing unsigned
+staging receipts against the exact source-commit policy and actual payloads.
+These receipts are hash bindings, not signatures. A
 published-release resolver runs without closed credentials and supplies the
 same validated public context for rebuild/promotion.
 
