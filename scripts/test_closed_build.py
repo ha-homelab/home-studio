@@ -206,8 +206,10 @@ class BoundaryTests(unittest.TestCase):
                                                                  "custom_components/home_floorplan/site.json": b"{}"}))
             (output / "acceptance.json").write_bytes(envelope.canonical({"schema": 1, "passed": True, "checks": ["package", "site-contracts", "geometry"]}))
             log.write_text(MARKER)
-        for failure in (None, "worker", "input-signature", "input-archive", "input-intent",
-                        "package-tamper", "acceptance-failure", "candidate-upload", "diagnostic-upload"):
+        cases = [(failure, "fictional") for failure in
+                 (None, "worker", "input-signature", "input-archive", "input-intent",
+                  "package-tamper", "acceptance-failure", "candidate-upload", "diagnostic-upload")]
+        for failure, request in [*cases, (None, "")]:
             stored = {}
             selected_input = sealed_input
             if failure == "input-signature":
@@ -244,7 +246,7 @@ class BoundaryTests(unittest.TestCase):
                 prepared = Path(directory)
                 (prepared / "prepared.json").write_bytes(envelope.canonical(build.policy()))
                 with patch.dict(os.environ, environment), patch.object(build, "public_inputs", side_effect=public_inputs), patch.object(build, "transport", side_effect=transport), patch.object(build, "run_worker", side_effect=selected_worker), contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
-                    result = build.main(["--action", "build", "--closed-request", "fictional", "--prepared-root", str(prepared)])
+                    result = build.main(["--action", "build", "--closed-request", request, "--prepared-root", str(prepared)])
             self.assertNotIn(MARKER, out.getvalue() + err.getvalue(), failure)
             self.assertEqual(result, int(failure is not None), failure)
             expected_status = ("CLOSED_CANDIDATE_STORED" if failure is None else
@@ -285,6 +287,8 @@ class BoundaryTests(unittest.TestCase):
                         "files": {path.relative_to(root).as_posix(): envelope.digest(path.read_bytes()) for path in root.rglob("*") if path.is_file()}}
             (root / "closed-build.json").write_bytes(envelope.canonical(manifest))
             build.validate_input(root, context, "test", "image")
+            with self.assertRaises(build.Rejected):
+                build.validate_input(root, context, "different-request", "image")
             for field, value in (("source_sha", "e" * 40), ("base_version", "9.0.0"),
                                  ("channel", "stable"), ("repository_id", "3"), ("dependencies", {})):
                 with self.assertRaises(build.Rejected):
