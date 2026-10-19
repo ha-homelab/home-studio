@@ -131,5 +131,13 @@
   "Reload saved plan": "Перезагрузить сохранённый план",
   "Connecting to Home Assistant…": "Подключение к Home Assistant…",
   "Connected · placements are saved in Home Assistant": "Подключено · расстановка сохраняется в Home Assistant",
-  "3D view could not start. Plan editing and JSON export are still available.": "Не удалось запустить 3D-вид. Редактирование плана и экспорт JSON по-прежнему доступны."
+  "3D view could not start. Plan editing and JSON export are still available.": "Не удалось запустить 3D-вид. Редактирование плана и экспорт JSON по-прежнему доступны.",
+  "Surroundings": "Окружение",
+  "Show garden surroundings": "Показать сад вокруг дома",
+  "Decorative motion": "Декоративное движение",
+  "Garden palette": "Палитра сада",
+  "Sage garden": "Шалфейный сад",
+  "Summer meadow": "Летний луг",
+  "Blue dusk": "Синие сумерки",
+  "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Только декорация. Движение приостанавливается на скрытой странице и при настройке уменьшенного движения."
 }

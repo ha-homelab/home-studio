@@ -131,5 +131,13 @@
   "Reload saved plan": "Recarregar planta salva",
   "Connecting to Home Assistant…": "Conectando ao Home Assistant…",
   "Connected · placements are saved in Home Assistant": "Conectado · as posições são salvas no Home Assistant",
-  "3D view could not start. Plan editing and JSON export are still available.": "Não foi possível iniciar a vista 3D. A edição da planta e a exportação JSON continuam disponíveis."
+  "3D view could not start. Plan editing and JSON export are still available.": "Não foi possível iniciar a vista 3D. A edição da planta e a exportação JSON continuam disponíveis.",
+  "Surroundings": "Surroundings",
+  "Show garden surroundings": "Show garden surroundings",
+  "Decorative motion": "Decorative motion",
+  "Garden palette": "Garden palette",
+  "Sage garden": "Sage garden",
+  "Summer meadow": "Summer meadow",
+  "Blue dusk": "Blue dusk",
+  "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Decorative only. Motion pauses when hidden or reduced motion is preferred."
 }

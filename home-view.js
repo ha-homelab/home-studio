@@ -266,6 +266,7 @@ homeView = (() => {
     cancelHomeGesture();cancelEditorGesture();
     hideMediaControls();cancelNativeHover(true);
     active = value;previewTV(null);
+    environmentLayer?.setActive(!renderLost&&!renderSuspended);
     if(lowerFloorContext)lowerFloorContext.visible=value&&showLowerFloor&&!selected;
     document.body.classList.toggle('home-mode', value); $('homeView').hidden = !value;
     if (renderer) {

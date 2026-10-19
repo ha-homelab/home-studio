@@ -131,5 +131,13 @@
   "Reload saved plan": "إعادة تحميل المخطط المحفوظ",
   "Connecting to Home Assistant…": "جارٍ الاتصال بـ Home Assistant…",
   "Connected · placements are saved in Home Assistant": "متصل · تُحفظ مواضع العناصر في Home Assistant",
-  "3D view could not start. Plan editing and JSON export are still available.": "تعذّر بدء العرض ثلاثي الأبعاد. لا يزال تعديل المخطط وتصديره بصيغة JSON متاحين."
+  "3D view could not start. Plan editing and JSON export are still available.": "تعذّر بدء العرض ثلاثي الأبعاد. لا يزال تعديل المخطط وتصديره بصيغة JSON متاحين.",
+  "Surroundings": "Surroundings",
+  "Show garden surroundings": "Show garden surroundings",
+  "Decorative motion": "Decorative motion",
+  "Garden palette": "Garden palette",
+  "Sage garden": "Sage garden",
+  "Summer meadow": "Summer meadow",
+  "Blue dusk": "Blue dusk",
+  "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Decorative only. Motion pauses when hidden or reduced motion is preferred."
 }

@@ -36,7 +36,7 @@ FUZZ_REPLAY_FILES = (
 
 SITE_FILES = (
     'index.html', 'site.css', 'privacy.html', 'install.html', 'ai-setup.html', '404.html', '.nojekyll',
-    'planner/index.html', 'planner/editor.css', 'planner/editor.js', 'planner/floor-navigator.js', 'planner/floor-navigator.css', 'planner/render-capacity.js', 'planner/interaction-render.js',
+    'planner/index.html', 'planner/editor.css', 'planner/editor.js', 'planner/floor-navigator.js', 'planner/floor-navigator.css', 'planner/render-capacity.js', 'planner/interaction-render.js', 'planner/environment.js',
     'planner/i18n.js', 'planner/validation.js', 'planner/locales/index.js',
     'planner/ha-bridge.js', 'planner/draft-storage.js', 'planner/inspector-dom.js', 'planner/onboarding.js', *(f'planner/examples/{name}.js' for name in ('practice', 'decor', 'patterns', 'garage')),
     'planner/help.js', 'planner/help.css', 'planner/help-locales.js', 'planner/language-links.js',

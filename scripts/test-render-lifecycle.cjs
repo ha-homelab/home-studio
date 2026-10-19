@@ -9,7 +9,7 @@ let serial = 0, draws = 0, invalidations = 0, disposals = 0, losses = 0, disconn
 let box = {width:3840, height:2160};
 const buffers = [];
 const context = vm.createContext({
-  initialViewReady: true, editorFloorMaterials: null, homeView: null, renderCount: 0, camera: {updateProjectionMatrix() {}}, scene: {},
+  environmentLayer: null, initialViewReady: true, editorFloorMaterials: null, homeView: null, renderCount: 0, camera: {updateProjectionMatrix() {}}, scene: {},
   $() {return {getBoundingClientRect: () => box};},
   document: {hidden: false, addEventListener(type, fn) { events[type] = fn; }},
   window: {addEventListener(type, fn) { events[type] = fn; }},
@@ -215,7 +215,7 @@ function motionScheduler(diffuse = true, reduced = diffuse) {
   const raf = new Map(), timers = new Map(), handlers = {}, painted = [], errors = [], paths = [];
   let time = 0, id = 0, width = 800, rejectDraw = false, drawDuration = 0, clockReads = 0, afterDraw = null;
   const c = vm.createContext({
-    editorFloorMaterials:null, initialViewReady:true, renderCount:0, renderProfile:{diffuseLighting:diffuse,pixels:reduced?(diffuse?62500:250000):2000000},
+    environmentLayer:null,editorFloorMaterials:null, initialViewReady:true, renderCount:0, renderProfile:{diffuseLighting:diffuse,pixels:reduced?(diffuse?62500:250000):2000000},
     devicePixelRatio:1, THREE:{}, scene:{}, camera:{position:0,updateProjectionMatrix(){}},
     document:{hidden:false,addEventListener:(type,fn)=>handlers[type]=fn},
     window:{addEventListener:(type,fn)=>handlers[type]=fn},
@@ -462,7 +462,7 @@ function modeScheduler(legacy=false,diffuse=false,canEdit=true) {
     hideMediaControls(){cleanups.push({kind:'media',active:c.active});},
     cancelNativeHover(reset){cleanups.push({kind:'native',active:c.active,reset});},
     THREE:{Color:class {constructor(value){this.value=value;}}},hemisphere:{},sun:{},ground:{},grid:{},
-    clipping:{constant:2.1},editorFloorMaterials:null,roomLighting:null,root:{children:[]},objectGroup:{},overlayGroup:null,points:[],
+    clipping:{constant:2.1},environmentLayer:null,editorFloorMaterials:null,roomLighting:null,root:{children:[]},objectGroup:{},overlayGroup:null,points:[],
     clearTrail(){},showMode(){},refreshControls(){},updateFixtureShadows(){},updateHeightCaption(){},$:element});
   c.document.body={classList:{toggle(){}}};
   c.window.floorplan={get renderCount(){return c.renderCount;}};

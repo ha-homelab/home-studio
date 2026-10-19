@@ -131,5 +131,13 @@
   "Reload saved plan": "Kayıtlı planı yeniden yükle",
   "Connecting to Home Assistant…": "Home Assistant'a bağlanıyor…",
   "Connected · placements are saved in Home Assistant": "Bağlandı · yerleşimler Home Assistant'a kaydediliyor",
-  "3D view could not start. Plan editing and JSON export are still available.": "3B görünüm başlatılamadı. Plan düzenleme ve JSON dışa aktarma hâlâ kullanılabilir."
+  "3D view could not start. Plan editing and JSON export are still available.": "3B görünüm başlatılamadı. Plan düzenleme ve JSON dışa aktarma hâlâ kullanılabilir.",
+  "Surroundings": "Surroundings",
+  "Show garden surroundings": "Show garden surroundings",
+  "Decorative motion": "Decorative motion",
+  "Garden palette": "Garden palette",
+  "Sage garden": "Sage garden",
+  "Summer meadow": "Summer meadow",
+  "Blue dusk": "Blue dusk",
+  "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Decorative only. Motion pauses when hidden or reduced motion is preferred."
 }

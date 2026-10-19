@@ -131,5 +131,13 @@
   "Reload saved plan": "저장된 평면도 새로고침",
   "Connecting to Home Assistant…": "Home Assistant에 연결 중…",
   "Connected · placements are saved in Home Assistant": "연결됨 · 배치가 Home Assistant에 저장됩니다",
-  "3D view could not start. Plan editing and JSON export are still available.": "3D 보기를 시작할 수 없습니다. 평면도 편집과 JSON 내보내기는 계속 사용할 수 있습니다."
+  "3D view could not start. Plan editing and JSON export are still available.": "3D 보기를 시작할 수 없습니다. 평면도 편집과 JSON 내보내기는 계속 사용할 수 있습니다.",
+  "Surroundings": "Surroundings",
+  "Show garden surroundings": "Show garden surroundings",
+  "Decorative motion": "Decorative motion",
+  "Garden palette": "Garden palette",
+  "Sage garden": "Sage garden",
+  "Summer meadow": "Summer meadow",
+  "Blue dusk": "Blue dusk",
+  "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Decorative only. Motion pauses when hidden or reduced motion is preferred."
 }

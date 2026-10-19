@@ -11,6 +11,7 @@
   "planner/editor.js",
   "planner/render-capacity.js",
   "planner/interaction-render.js",
+  "planner/environment.js",
   "planner/i18n.js",
   "planner/validation.js",
   "planner/locales/index.js",

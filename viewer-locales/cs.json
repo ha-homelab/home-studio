@@ -131,5 +131,13 @@
   "Reload saved plan": "Znovu načíst uložený plán",
   "Connecting to Home Assistant…": "Připojování k Home Assistant…",
   "Connected · placements are saved in Home Assistant": "Připojeno · rozmístění se ukládá do Home Assistant",
-  "3D view could not start. Plan editing and JSON export are still available.": "3D zobrazení se nepodařilo spustit. Úpravy půdorysu a export JSON jsou stále dostupné."
+  "3D view could not start. Plan editing and JSON export are still available.": "3D zobrazení se nepodařilo spustit. Úpravy půdorysu a export JSON jsou stále dostupné.",
+  "Surroundings": "Surroundings",
+  "Show garden surroundings": "Show garden surroundings",
+  "Decorative motion": "Decorative motion",
+  "Garden palette": "Garden palette",
+  "Sage garden": "Sage garden",
+  "Summer meadow": "Summer meadow",
+  "Blue dusk": "Blue dusk",
+  "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Decorative only. Motion pauses when hidden or reduced motion is preferred."
 }

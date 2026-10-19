@@ -511,6 +511,7 @@ def render_viewer(data, svg):
         "__HOME_JS__": "\n".join((ROOT / name).read_text(encoding="utf-8") for name in ("curtain-state.js", "motion-state.js", "tv-screen.js", "camera-preview.js", "media-preview.js", "assumed-zone-view.js", "home-view.js")),
         "__LIGHT_STATE_JS__": (ROOT / "light-state.js").read_text(encoding="utf-8"),
         "__RENDER_CAPACITY_JS__": (ROOT / "planner/render-capacity.js").read_text(encoding="utf-8").replace("export function getRenderCapacity", "function getRenderCapacity"),
+        "__ENVIRONMENT_JS__": (ROOT / "planner/environment.js").read_text(encoding="utf-8").replace("export ", ""),
         "__INTERACTION_RENDER_JS__": (ROOT / "planner/interaction-render.js").read_text(encoding="utf-8").replace("export function createInteractionRenderer", "function createInteractionRenderer"),
         "__ROOM_LIGHTING_JS__": (ROOT / "room-lighting.js").read_text(encoding="utf-8"),
         "__THREE_B64__": base64.b64encode((ROOT / "vendor/three.module.min.js").read_bytes()).decode(),
@@ -626,7 +627,11 @@ def compile_project(project, output=DEFAULT_OUTPUT, ha_package=False, project_pa
             next_floor = {"id": following["id"], "title": following["name"], "url": "../" + following["id"] + "/index.html"} if len(project["floors"]) > 1 else None
             data, svg = make_floor(project, floor, next_floor)
             compiled.append((floor, data, svg))
+        site_bounds = dict(minX=min(d["bounds_m"]["min_x"] for _, d, _ in compiled), maxX=max(d["bounds_m"]["max_x"] for _, d, _ in compiled),
+                           minZ=min(d["bounds_m"]["min_z"] for _, d, _ in compiled), maxZ=max(d["bounds_m"]["max_z"] for _, d, _ in compiled))
+        ground_elevation = min(d["elevation_m"] for _, d, _ in compiled)
         for floor, data, svg in compiled:
+            data["environment"] = dict(enabled=False, motion=False, palette="sage", bounds=site_bounds, elevation=ground_elevation - data["elevation_m"])
             below = [other for _, other, _ in compiled if other['elevation_m'] < data['elevation_m']]
             if below:
                 lower = max(below, key=lambda other: other['elevation_m'])

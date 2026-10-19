@@ -22,7 +22,7 @@ RUNTIME_FILES = (
     "viewer.template.html", "viewer.js", "viewer-i18n.js", "home-view.html", "home-view.css", "home-view.js",
     "curtain-state.js", "motion-state.js", "tv-screen.js", "camera-preview.js", "media-preview.js",
     "assumed-zone-view.js", "light-state.js", "planner/render-capacity.js", "planner/interaction-render.js",
-    "room-lighting.js", "vendor/three.module.min.js",
+    "room-lighting.js", "vendor/three.module.min.js", "planner/environment.js",
 )
 AI_EDITOR_FILES = ("ai/bootstrap.js", "ai/panel.js", "ai/panel.css", "ai/photo-worker.js", "ai/draft.js", "ai/json.js")
 
