@@ -124,10 +124,15 @@ class BoundaryTests(unittest.TestCase):
             with patch.object(build, "download_artifact", side_effect=download), \
                  patch("version_plan.validate_plan", return_value=plan), \
                  patch("version_plan.plan_digest", return_value="b" * 64), \
-                 patch("version_receipt.verify_receipts"), \
+                 patch("release_control.source_policy_snapshot", return_value={"data": {"schema": 1}}) as policy, \
+                 patch("version_receipt.verify_receipts") as receipts, \
+                 patch("version_receipt.verify_declared_artifacts") as metadata, \
                  patch.dict(os.environ, {"GITHUB_REPOSITORY_ID": build.REPOSITORY_ID,
                                          "GITHUB_REPOSITORY_OWNER_ID": build.OWNER_ID}):
                 result, public = build.public_inputs(args, root)
+            self.assertEqual(policy.call_args.args[1], plan["source_sha"])
+            self.assertEqual(receipts.call_args.args[3], {"schema": 1})
+            self.assertEqual(metadata.call_args.args[1], {"schema": 1})
             self.assertEqual(result["release_tag"], "v1.2.3")
             self.assertEqual(result["promotion"], context["promotion"])
             self.assertEqual(result["channel"], "rc")
