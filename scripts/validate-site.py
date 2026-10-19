@@ -55,6 +55,10 @@ SITE_FILES = (
     'vendor/three.module.min.js', 'vendor/THREE-LICENSE.txt',
 )
 REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'THIRD_PARTY_NOTICES.md',
+              'docs/closed-build.md', '.closed-build-policy.json', 'requirements-closed-build.txt',
+              '.github/workflows/closed-build.yml', 'docker/closed-worker.Dockerfile',
+              'scripts/closed_build.py', 'scripts/closed_envelope.py', 'scripts/closed_worker.py',
+              'scripts/closed_synthetic.py', 'scripts/test_closed_build.py',
               'scripts/download_tls.py', 'scripts/test-download-tls.py', 'requirements-tls-test.txt',
               'requirements-strict-tls.txt', 'docs/transport-security.md',
               'docs/i18n.md', 'docs/translations/README.md',

@@ -368,6 +368,11 @@ budgets, synthetic data rules and reproduction, and [release instructions](RELEA
 for versioned source ZIPs. Beta builds and ordinary pull requests do not run
 mutation campaigns.
 
+An optional [closed package worker](docs/closed-build.md) can compose approved
+site inputs inside the public release orchestration while keeping its archives
+and diagnostics in closed storage. It verifies exact public release bytes and
+requires separate installation acceptance.
+
 
 ## Contributing and security
 
