@@ -130,8 +130,8 @@ test('host restricts TV power to explicit actions on saved media entities and se
  let Panel;const context=vm.createContext({localStorage:{getItem(){return null;}},HTMLElement:class{},customElements:{get(){},define(name,value){Panel=value}}});
  vm.runInContext(fs.readFileSync('custom_components/home_floorplan/static/panel.js','utf8'),context);
  const messages=[],calls=[];let complete;
- const panel=Object.assign(Object.create(Panel.prototype),{generation:1,savedItems:[{entity_id:'media_player.study'},{entity_id:'light.study'}],commands:new Set(),port:{postMessage:m=>messages.push(m)},notice(){},
-  _hass:{connected:true,states:{'media_player.study':{state:'off'},'light.study':{state:'off'}},callService:(...args)=>{calls.push(args);return new Promise(resolve=>complete=resolve)}}});
+ const panel=Object.assign(Object.create(Panel.prototype),{generation:1,readableEntities:new Set(['media_player.study','light.study']),controllableEntities:new Set(['media_player.study','light.study']),savedItems:[{entity_id:'media_player.study'},{entity_id:'light.study'}],commands:new Set(),port:{postMessage:m=>messages.push(m)},notice(){},
+  _hass:{user:{id:'fixture-admin',is_admin:true},connected:true,states:{'media_player.study':{state:'off'},'light.study':{state:'off'}},callService:(...args)=>{calls.push(args);return new Promise(resolve=>complete=resolve)}}});
  const send=(entity_id,action)=>panel.handleViewerMessage({type:'tv_power',entity_id,action,request_id:'request'},1);
  for(const [id,action] of [['media_player.other','turn_on'],['light.study','turn_on'],['media_player.study','play_media'],['media_player.study','toggle']])send(id,action);
  await Promise.resolve();assert.equal(calls.length,0);assert.equal(messages.length,4);assert.ok(messages.every(message=>message.ok===false));

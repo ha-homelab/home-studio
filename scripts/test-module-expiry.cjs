@@ -34,7 +34,7 @@ function fixture() {
   vm.runInContext(read('custom_components/home_floorplan/static/panel.js'), context);
   vm.runInContext(handlers, context);
   const panel = Object.create(Panel.prototype);
-  Object.assign(panel, { savedItems: [], curtains: {}, moduleEntities: new Set([spec.modules_sensor]),
+  Object.assign(panel, { savedItems: [], curtains: {}, displayEntities:new Set([spec.modules_sensor]),readableEntities:new Set([spec.modules_sensor]), moduleEntities: new Set([spec.modules_sensor]),
     refreshTVFrame() {}, refreshCameraFrames() {}, port: { postMessage(value) {
       context.haStates = value.states; context.haConnected = value.connected; context.updateModuleDialog();
     } } });

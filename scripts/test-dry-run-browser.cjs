@@ -8,7 +8,8 @@ window.panel=document.querySelector('home-floorplan-panel');
 window.calls=[];window.messages=[];panel.generation=1;
 panel.port={postMessage:message=>messages.push(message)};
 panel.savedItems=[{entity_id:'switch.test'}];
-panel._hass={connected:true,states:{'switch.test':{state:'on'}},callService:(...args)=>calls.push(args)};
+panel.readableEntities=new Set(['switch.test']);panel.controllableEntities=new Set(['switch.test']);
+panel._hass={user:{id:'fixture-admin',is_admin:true},connected:true,states:{'switch.test':{state:'on'}},callService:(...args)=>calls.push(args)};
 window.command=()=>panel.handleViewerMessage({type:'toggle',entity_id:'switch.test',request_id:'test'},1);
 </script>`;
 (async()=>{

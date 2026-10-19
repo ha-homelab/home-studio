@@ -33,9 +33,9 @@ Path(sys.argv[1]).write_text(render_viewer(data,svg))`,output],{cwd:root,encodin
       const panel=document.querySelector('home-floorplan-panel');
       window.calls=[];window.inspected=[];
       panel.addEventListener('hass-more-info',event=>inspected.push(event.detail.entityId));
-      window.hass={connected:true,states:{},callWS:async message=>{
+      window.hass={user:{id:'fixture-admin',is_admin:true},connected:true,states:{},callWS:async message=>{
         if(message.type!=='home_floorplan/viewer')calls.push(message);
-        return {html,items,revision:1,floor:'main',floors:['main'],site_features:false};
+        return {html,items,can_edit:true,readable_entities:items.map(item=>item.entity_id),controllable_entities:items.map(item=>item.entity_id),revision:1,floor:'main',floors:['main'],site_features:false};
       },callService:(...args)=>calls.push(args)};
       window.changeLock=(state,connected=true)=>{
         hass.connected=connected;hass.states={'cover.test':{state:'open',attributes:{friendly_name:'Test curtain',supported_features:15,current_position:50}},'light.test':{state:'on',attributes:{friendly_name:'Test light'}},...(state===null?{}:{'lock.front_door':{state,attributes:{friendly_name:'Front door'}}})};
