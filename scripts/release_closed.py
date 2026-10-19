@@ -19,11 +19,12 @@ import re
 import tempfile
 
 if __package__:
-    from . import release_control as rc, release_versioned as lifecycle, version_plan
+    from . import release_control as rc, release_versioned as lifecycle, release_promotion, version_plan
     from .version_receipt import verify_declared_artifacts, verify_receipts
 else:
     import release_control as rc
     import release_versioned as lifecycle
+    import release_promotion
     import version_plan
     from version_receipt import verify_declared_artifacts, verify_receipts
 
@@ -114,6 +115,14 @@ def validate_rebuild(enabled: bool, tag: str, inputs: dict) -> None:
         raise ValueError("Invalid closed rebuild request")
 
 
+def promotion_context(gh: rc.GitHub, info: dict, published: tuple, manifest: dict, raw: bytes) -> dict | None:
+    """Promoted stable copies need qualification beyond the original RC run."""
+    plan = manifest["version_plan"]
+    if published[1]["tag_name"] == f"v{plan['base_version']}" and plan["channel"] == "rc":
+        return release_promotion.verify(gh, info, published, manifest, raw)
+    return None
+
+
 def resolve(gh: rc.GitHub, tag: str, output: Path, current_sha: str, current_run_id: int) -> dict:
     """Verify retained qualification and download exact public bytes atomically."""
     if not TAG.fullmatch(tag) or output.exists() or output.is_symlink():
@@ -144,6 +153,7 @@ def resolve(gh: rc.GitHub, tag: str, output: Path, current_sha: str, current_run
     rc.check_ancestry(gh, source, info["default_branch"])
     lifecycle.verify_scheduled_reuse(gh, info, snapshot, plan, run_id, tag)
     initial = lifecycle.published_plan_snapshot(gh, tag, source, tag != f"v{plan['base_version']}")
+    promotion = promotion_context(gh, info, initial, manifest, raw)
     expected = {entry["name"]: entry for entry in manifest["assets"]}
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="closed-public-", dir=output.parent) as temporary:
@@ -171,6 +181,8 @@ def resolve(gh: rc.GitHub, tag: str, output: Path, current_sha: str, current_run
         rc.require(rc.snapshot_identity(initial) == rc.snapshot_identity(
             lifecycle.published_plan_snapshot(gh, tag, source, tag != f"v{plan['base_version']}")),
             "Public release changed during transfer")
+        rc.require(promotion_context(gh, info, initial, manifest, raw) == promotion,
+                   "Public promotion changed during transfer")
         context = {
             "schema": 1, "repository": gh.repo, "workflow": rc.WORKFLOW,
             "run_id": str(run_id), "run_attempt": str(manifest["run_attempt"]),
@@ -179,15 +191,29 @@ def resolve(gh: rc.GitHub, tag: str, output: Path, current_sha: str, current_run
                          for name, item in expected.items()},
             "mode": "published", "release_tag": tag,
         }
+        if promotion is not None:
+            context["promotion"] = promotion
         (stage / "context.json").write_bytes(rc.json_bytes(context))
         (stage / "version-plan.json").write_bytes(rc.json_bytes(plan))
         stage.rename(output)
     return context
 
 
+def selected_tag(action: str, purpose: str | None, selected: dict, inputs: dict) -> str:
+    """Separate the exact RC promotion input from an existing-release request."""
+    if (purpose == "stable" or action == "record-promotion") and selected["operation"] == "release" and inputs.get("channel") == "stable":
+        tag = inputs.get("rc_tag", "")
+        if not re.fullmatch(r"v" + rc.VERSION_PATTERN + r"-rc\.[1-9]\d*", tag, re.ASCII):
+            raise ValueError("Stable resolution requires an exact RC")
+        return tag
+    if purpose == "rebuild" and selected["operation"] == "closed-rebuild":
+        return selected["release_tag"]
+    raise ValueError("Resolution purpose differs from dispatch")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("request", "resolve"))
+    parser.add_argument("action", choices=("request", "resolve", "record-promotion"))
     parser.add_argument("--purpose", choices=("stable", "rebuild"))
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
@@ -200,17 +226,9 @@ def main() -> int:
                 stream.write("".join(f"{key}={value}\n" for key, value in selected.items()))
             print("CLOSED_REQUEST_ACCEPTED")
             return 0
-        if selected["closed_required"] != "true" or args.output is None:
+        if (selected["closed_required"] != "true" and args.action != "record-promotion") or args.output is None:
             raise ValueError("Closed resolution requires an enabled policy")
-        inputs = event.get("inputs", {})
-        if args.purpose == "stable" and selected["operation"] == "release" and inputs.get("channel") == "stable":
-            tag = inputs.get("rc_tag", "")
-            if not re.fullmatch(r"v" + rc.VERSION_PATTERN + r"-rc\.[1-9]\d*", tag, re.ASCII):
-                raise ValueError("Stable resolution requires an exact RC")
-        elif args.purpose == "rebuild" and selected["operation"] == "closed-rebuild":
-            tag = selected["release_tag"]
-        else:
-            raise ValueError("Resolution purpose differs from dispatch")
+        tag = selected_tag(args.action, args.purpose, selected, event.get("inputs", {}))
         gh = rc.GitHub(policy["repository"])
         info = rc.repository_info(gh)
         run_id = rc.positive(os.environ["GITHUB_RUN_ID"], "run ID")
@@ -218,8 +236,12 @@ def main() -> int:
         rc.require(run.get("id") == run_id, "Resolver run ID mismatch")
         rc.validate_run(gh, run, info, os.environ["GITHUB_SHA"],
                         rc.positive(os.environ["GITHUB_RUN_ATTEMPT"], "run attempt"), False, gate=False)
-        resolve(gh, tag, args.output, os.environ["GITHUB_SHA"], run_id)
-        print("PUBLIC_CONTEXT_VERIFIED")
+        if args.action == "record-promotion":
+            release_promotion.record(gh, info, run, tag, args.output)
+            print("PUBLIC_PROMOTION_RECORDED")
+        else:
+            resolve(gh, tag, args.output, os.environ["GITHUB_SHA"], run_id)
+            print("PUBLIC_CONTEXT_VERIFIED")
         return 0
     except (OSError, ValueError, KeyError, TypeError, rc.ReleaseError):
         # Dispatch values and parser exceptions are never echoed into logs.
