@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [0.10.0] - Draw and publish inside Home Assistant
 
 - Keep pictureless and powered-off media devices as compact launchers. Hover,
   keyboard focus, or tap opens their available controls without an empty image.
@@ -28,6 +28,24 @@
 - Keep the standalone workflow available, with reciprocal links and explicit
   JSON transfer instructions. Existing generated or customized installations
   are not automatically migrated.
+
+### Upgrade
+
+New native installations require Home Assistant 2026.10 or newer. Install the
+`home_floorplan.zip` integration asset, restart HA, then add Home Studio through
+Devices & services. Saved native drawings live outside the integration code.
+Keep HA backups and exported project JSON. Existing generated and customized
+homes should retain their current deployment workflow and private adapters;
+this release does not automatically convert their source into native drafts.
+
+### Security
+
+The drawing editor runs in an opaque local sandbox. HA credentials remain in
+the trusted host; only the drawing and a bounded area/device catalog cross the
+bridge. Saving and publishing require administrator access. Published floor
+assets and device controls respect the connected user's HA permissions. Exported
+JSON can contain private geometry and entity bindings, so keep those files
+private. Opening the separate editor never transfers the drawing or credentials.
 
 ## [0.9.0] - Floor navigation, dashboard cards, and device controls
 
