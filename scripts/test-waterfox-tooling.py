@@ -313,6 +313,49 @@ class ProgramIsolationTests(unittest.TestCase):
 
 
 class ToolingTests(unittest.TestCase):
+    def test_viewer_drag_retains_split_timing_and_snapshot_without_weakening_budget(self):
+        source = inspect.getsource(acceptance.viewer)
+        start = source.index("        sample['dragMs'] =")
+        end = source.index('        require(after_drag', start)
+        block = textwrap.dedent(source[start:end])
+        for total_ms, broken_snapshot in [(14999, False), (15000, False), (16665, False), (16665, True)]:
+            with self.subTest(total_ms=total_ms, broken_snapshot=broken_snapshot):
+                now, sample, calls = [0.0], {}, []
+                client = acceptance.Marionette.__new__(acceptance.Marionette)
+                client.execute = Mock(return_value=[[1, 2], [11, 12]])
+                client.wait = Mock()
+                def call(name, body):
+                    calls.append(name)
+                    now[0] += .2 if name == 'WebDriver:PerformActions' else (total_ms - 200) / 1000
+                client.call = call
+                scene = {'renderCount': 7, 'scene': {'renderPasses': {'scene': 7, 'copy': 3}}}
+                def snapshot():
+                    self.assertEqual(sample['dragDiagnostics']['totalMs'], total_ms)
+                    now[0] += 5  # Snapshot latency must not rewrite the measured gesture.
+                    if broken_snapshot:
+                        raise RuntimeError('snapshot transport failed')
+                    return scene
+                capture = Mock(side_effect=snapshot)
+                env = {'client': client, 'sample': sample, 'snapshot': capture, 'initial': {'renderCount': 3}}
+                with patch.object(acceptance.time, 'monotonic', lambda: now[0]):
+                    if total_ms >= 15000:
+                        with self.assertRaisesRegex(AssertionError, f'drag exceeded 15 seconds: {total_ms} ms'):
+                            exec(block, env)
+                        client.wait.assert_not_called()
+                        if broken_snapshot:
+                            self.assertEqual(sample['dragDiagnostics']['snapshotError'], 'snapshot transport failed')
+                        else:
+                            self.assertEqual(sample['dragDiagnostics']['afterDrag'], scene)
+                    else:
+                        exec(block, env)
+                        self.assertEqual(sample['dragMs'], total_ms)
+                        self.assertEqual(sample['afterDrag'], scene)
+                        self.assertNotIn('afterDrag', sample['dragDiagnostics'])
+                self.assertEqual(calls, ['WebDriver:PerformActions', 'WebDriver:ExecuteAsyncScript'])
+                self.assertEqual(capture.call_count, 1, 'Passing gestures keep only their existing snapshot')
+                self.assertEqual({k:v for k,v in sample['dragDiagnostics'].items() if k not in ['afterDrag', 'snapshotError']},
+                                 {'performActionsMs': 200, 'settleFramesMs': total_ms - 200, 'totalMs': total_ms, 'limitMs': 15000})
+
     def test_drag_budget_includes_queued_animation_frames(self):
         client = acceptance.Marionette.__new__(acceptance.Marionette)
         for draw_seconds in (2.8, 15):
