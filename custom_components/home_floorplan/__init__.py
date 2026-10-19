@@ -71,7 +71,7 @@ async def async_setup(hass, config):
         state.update(store=store, recovery=recovery)
         _apply_active(state, ROOT / "assets", SITE, models, data)
     else:
-        native = NativeProject(hass, Path(hass.config.path(".storage", "home_floorplan", "studio")))
+        native = NativeProject(hass)
         active = await native.load()
         state["native"] = native
         if active:

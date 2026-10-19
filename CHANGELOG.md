@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Keep pictureless and powered-off media devices as compact launchers. Hover,
+  keyboard focus, or tap opens their available controls without an empty image.
+- Require durable writes before acknowledging native draft or publication saves,
+  retaining the previous publication after storage errors. Keep generated native
+  assets separate from existing installation state files.
+
 - Add an optional Home Studio editor inside Home Assistant, using the same
   drawing tools and portable JSON format as the standalone editor.
 - Link drawing floors and rooms to HA floors and areas; suggest enabled entities
