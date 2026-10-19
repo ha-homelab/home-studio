@@ -85,7 +85,17 @@ assert.throws(()=>createInteractionRenderer(THREE,renderer(),0),/pixel budget/);
 const text=fs.readFileSync(path.join(root,'viewer.js'),'utf8');
 const block=text.slice(text.indexOf('if(coalesceMotion){\nrenderer.domElement.addEventListener'),text.indexOf('let drag=null;'));
 function input(enabled){const handlers={};const context={coalesceMotion:enabled,renderLost:false,renderSuspended:false,interactionPointer:null,renderer:{domElement:{addEventListener:(name,fn)=>handlers[name]=fn}},renders:0,requestRender(){context.renders++;}};vm.createContext(context);vm.runInContext(block,context);return {context,handlers};}
-const {context,handlers}=input(true);handlers.pointerdown({button:0,pointerId:1,clientX:20,clientY:20});handlers.pointermove({pointerId:1,clientX:40,clientY:20});assert.equal(context.interactionPointer.moved,true);handlers.pointerup({pointerId:2});assert(context.interactionPointer,'Unrelated pointer release does not end motion');handlers.pointerup({pointerId:1});assert.equal(context.interactionPointer,null);assert.equal(context.renders,1,'Release schedules one direct full-quality frame');handlers.lostpointercapture({pointerId:1});assert.equal(context.renders,1,'Duplicate capture release adds no frame');assert.deepEqual(Object.keys(input(false).handlers),[],'Normal GPUs have no interaction hooks');
+for(const button of [0,2]) {
+  const {context,handlers}=input(true);
+  handlers.pointerdown({button,pointerId:1,clientX:20,clientY:20});
+  handlers.pointermove({pointerId:1,clientX:40,clientY:20});
+  assert.equal(context.interactionPointer.moved,true,'Both left-button orbit and right-button pan use bounded motion rendering');
+  handlers.pointerup({pointerId:2});assert(context.interactionPointer,'Unrelated pointer release does not end motion');
+  handlers.pointerup({pointerId:1});assert.equal(context.interactionPointer,null);
+  assert.equal(context.renders,1,'Release schedules one direct full-quality frame');
+  handlers.lostpointercapture({pointerId:1});assert.equal(context.renders,1,'Duplicate capture release adds no frame');
+}
+assert.deepEqual(Object.keys(input(false).handlers),[],'Normal GPUs have no interaction hooks');
 const lifecycleHandlers={}, lifecycleOrder=[];
 const lifecycle={renderLost:false,renderSuspended:false,interactionPointer:{moved:true},interactionRenderer:{dispose(){lifecycleOrder.push('dispose');}},cancelRender(){lifecycleOrder.push('cancel');},observer:{disconnect(){lifecycleOrder.push('disconnect');}},renderer:{domElement:{addEventListener:(name,fn)=>lifecycleHandlers[name]=fn},dispose(){lifecycleOrder.push('renderer-dispose');},forceContextLoss(){lifecycleOrder.push('force-loss');}},window:{addEventListener:(name,fn)=>lifecycleHandlers[name]=fn}};
 lifecycle.homeView=null;

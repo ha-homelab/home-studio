@@ -120,8 +120,11 @@ async function run(browserName, origin, project, sourceHash) {
           iframe.id = 'viewer';iframe.sandbox = 'allow-scripts allow-downloads allow-forms';
           iframe.style.cssText = `width:100%;height:${height}px;border:0`;
           iframe.onload = () => {
-            const channel = new MessageChannel();window.viewerPort = channel.port1;
-            channel.port1.onmessage = event => { if(event.data.type==='model_config') channel.port1.postMessage({type:'states',connected:true,states}); };
+            const channel = new MessageChannel();window.viewerPort = channel.port1;window.viewerCommands=[];
+            channel.port1.onmessage = event => {
+              if(event.data.type==='model_config') channel.port1.postMessage({type:'states',connected:true,states});
+              if(['toggle','tv_power','curtain_command','media_command','more_info'].includes(event.data.type)) window.viewerCommands.push(event.data);
+            };
             iframe.contentWindow.postMessage({type:'home-floorplan:init',items,preferences:{}},'*',[channel.port2]);
           };
           iframe.srcdoc = html;document.body.append(iframe);
@@ -172,10 +175,25 @@ async function run(browserName, origin, project, sourceHash) {
       assertViewerInteraction(initial, afterHomeDrag);
       sample.homeCameraChanged = Boolean(homeCameraBefore && afterHomeDrag.scene.camera &&
         JSON.stringify(homeCameraBefore) !== JSON.stringify(afterHomeDrag.scene.camera));
+      // Camera translation or an orthographic projection shift alone is only
+      // panning. A Home orbit must change the rendered camera's rotation basis.
+      const rotationIndices = [0,1,2,4,5,6,8,9,10];
+      sample.homeCameraRotated = Boolean(homeCameraBefore?.world && afterHomeDrag.scene.camera?.world &&
+        rotationIndices.some(index => Math.abs(homeCameraBefore.world[index]-afterHomeDrag.scene.camera.world[index])>1e-7));
+      sample.homeDragCommands = await page.evaluate(() => window.viewerCommands);
       save();
       check(afterHomeDrag.errors.length===0, `No rendering errors after Home drag: ${afterHomeDrag.errors.join('; ')}`);
       check(afterHomeDrag.renderCount>idleBefore, 'Dragging Home updates the rendered scene');
       check(sample.homeCameraChanged, 'Dragging Home changes the camera used to draw the scene');
+      check(sample.homeCameraRotated, 'Dragging Home rotates the rendered camera, rather than only panning its projection');
+      check(sample.homeDragCommands.length===0, 'A real Home orbit never issues a device command or opens native details');
+      await page.waitForTimeout(200);
+      const orbitIdle = await snapshot();
+      await page.waitForTimeout(350);
+      const orbitSettled = await snapshot();
+      check(orbitSettled.renderCount===orbitIdle.renderCount, 'A released Home orbit returns to idle without continuous rendering');
+      check(JSON.stringify(orbitSettled.scene.camera)===JSON.stringify(afterHomeDrag.scene.camera),
+        'The orbited Home view remains at its released camera position');
       phases.start('editor-enter', {cycle});
       await input.tap(frame.locator('#editLayout'));
       await child.waitForFunction(() => !window.floorplan.homeMode);

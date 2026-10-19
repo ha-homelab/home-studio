@@ -364,7 +364,7 @@ const root = path.resolve(__dirname, '..');
   const context = vm.createContext({
     THREE: {...THREE, Vector3: TrackedVector}, active: true, renderProfile: {pointShadows:8, pointShadowSize:512}, renderer: {}, camera: undefined, cameraFit: undefined,
     projectedPosition: new THREE.Vector3(), projectedForward: new THREE.Vector3(),
-    selected: '', planRadius: 10, planBounds: true, zoom: 1, panX: 0, panY: 0,
+    selected: '', planRadius: 10, planBounds: true, zoom: 1, panX: 0, panY: 0, homeRotation: 0, homeTilt: 0,
     model: {ceiling_height_m: 3, rooms: [
       {id: 'A', polygon: [[0, 0], [4, 0], [4, 4], [0, 4]]},
       {id: 'B', polygon: [[4, 0], [10, 0], [10, 6], [4, 6]]},
@@ -422,6 +422,27 @@ const root = path.resolve(__dirname, '..');
   context.zoom = 2; context.render();
   assert.equal(context.camera.right - context.camera.left, initialWidth / 2);
   assert.equal(allocations, initialAllocations, 'Pan and zoom reuse room geometry');
+  context.panX = context.panY = 0; context.zoom = 1;
+  const originalRoomGeometry = JSON.stringify(context.model.rooms), originalOrientation = context.camera.quaternion.toArray();
+  const cachedVertices = context.cameraFit.vertices;
+  for (const rotation of [Math.PI / 4, Math.PI / 2, Math.PI, -Math.PI / 2]) for (const tilt of [-.45, 0, .6]) {
+    context.homeRotation = rotation; context.homeTilt = tilt; context.render();
+    assert.notDeepEqual(context.camera.quaternion.toArray(), originalOrientation, 'Home rotation changes the actual rendered camera orientation');
+    fitInsideView();
+    assert.equal(context.cameraFit, firstFit, 'Rotation reuses the room fit cache');
+    assert.equal(context.cameraFit.vertices, cachedVertices, 'Rotation retains the original room vertices');
+    assert.equal(allocations, initialAllocations, 'Rotation does not allocate room or marker vectors');
+    assert(Number.isFinite(parseFloat(label.el.style.left)) && Number.isFinite(parseFloat(label.el.style.top)), 'Labels remain projectable at the tilt limits');
+  }
+  assert.notDeepEqual(label.el.style, initialLabel, 'Labels follow the rotated camera');
+  assert.equal(JSON.stringify(context.model.rooms), originalRoomGeometry, 'Camera rotation never changes the floor plan');
+  const rotatedProjection = context.camera.projectionMatrix.toArray(), rotatedOrientation = context.camera.quaternion.toArray();
+  for (let i = 0; i < 30; i++) context.render();
+  assert.deepEqual(context.camera.projectionMatrix.toArray(), rotatedProjection, 'State/media frames preserve the rotated fit');
+  assert.deepEqual(context.camera.quaternion.toArray(), rotatedOrientation);
+  assert.equal(allocations, initialAllocations, 'Stationary rotated frames reuse all room and marker vectors');
+  context.homeRotation = context.homeTilt = 0; context.render();
+  assert.deepEqual(context.camera.quaternion.toArray(), originalOrientation, 'Resetting camera angles restores the initial orientation');
   context.panX = context.panY = 0; context.zoom = 1; context.selected = 'A'; context.render();
   assert.notEqual(context.cameraFit, firstFit, 'Changing the room refreshes the fit');
   fitInsideView();
@@ -434,5 +455,5 @@ const root = path.resolve(__dirname, '..');
   rect.width = 430; context.render();
   assert.equal(context.cameraFit, portraitFit, 'Resizing within an orientation reuses geometry');
   fitInsideView();
-  console.log('PASS: Point-shadow samplers and atlas memory are bounded; every light retains its room; unlit rooms skip transmission work; Home fit and marker vectors are reused without changing pan, zoom, focus or resize.');
+  console.log('PASS: Point-shadow samplers and atlas memory are bounded; every light retains its room; unlit rooms skip transmission work; Home rotation fits all corners and reuses geometry and marker vectors across idle, pan, zoom, focus and resize.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

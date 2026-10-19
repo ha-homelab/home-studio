@@ -427,7 +427,7 @@ window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();i
 // no extra frame after boot painted; leave any pending live-state request intact.
 window.addEventListener('pageshow',event=>{const resumed=renderSuspended||event.persisted,before=renderCount;renderSuspended=false;resize();if(renderCount===before&&(resumed||renderCount===0))requestRender()});
 if(coalesceMotion){
-renderer.domElement.addEventListener('pointerdown',event=>{if(!renderLost&&!renderSuspended&&event.button===0&&!interactionPointer)interactionPointer={id:event.pointerId,x:event.clientX,y:event.clientY,moved:false}});
+renderer.domElement.addEventListener('pointerdown',event=>{if(!renderLost&&!renderSuspended&&[0,2].includes(event.button)&&!interactionPointer)interactionPointer={id:event.pointerId,x:event.clientX,y:event.clientY,moved:false}});
 renderer.domElement.addEventListener('pointermove',event=>{if(interactionPointer?.id===event.pointerId&&Math.hypot(event.clientX-interactionPointer.x,event.clientY-interactionPointer.y)>6)interactionPointer.moved=true});
 for(const type of ['pointerup','pointercancel','lostpointercapture'])renderer.domElement.addEventListener(type,event=>{if(interactionPointer?.id!==event.pointerId)return;const redraw=interactionPointer.moved;interactionPointer=null;if(redraw)requestRender()});
 }

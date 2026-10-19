@@ -27,6 +27,7 @@ homeView = (() => {
   const commandError=message=>typeof message.error_key==='string' ? {key:message.error_key,params:message.error_params || {}} : message.error || {key:'The command could not be sent.'};
   let countdownTimer, moduleItem;
   let sequence = 0, zoom = 1, panX = 0, panY = 0, controlsCollapsed = false;
+  let navigationMode='rotate', homeRotation=0, homeTilt=0;
   const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6m-5 3h4M8.5 14.5a6 6 0 1 1 7 0L15 16H9z"/></svg>';
   const motionIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="14" cy="4" r="2"/><path d="m10 22 2-7-4-3 3-5 4 5 4 1M5 11l3-4 3-1M5 21l3-6"/></svg>';
   const tvIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>';
@@ -202,6 +203,22 @@ homeView = (() => {
   $('openHome').onclick = () => setActive(true);
 
   function resetZoom(){zoom=1;panX=panY=0;updateZoom();}
+  function resetHomeView(){cancelHomeGesture();homeRotation=homeTilt=0;resetZoom();}
+  function navigateHome(dx,dy,move){
+    if(move){
+      const rect=renderer.domElement.getBoundingClientRect();
+      panX-=dx*(camera.right-camera.left)/rect.width;panY+=dy*(camera.top-camera.bottom)/rect.height;
+    }else{
+      homeRotation=(homeRotation-dx*.006)%(Math.PI*2);
+      homeTilt=Math.max(-.45,Math.min(.6,homeTilt+dy*.006));
+    }
+    window.requestModelRender?.(true);
+  }
+  for(const mode of ['rotate','move'])$('home'+(mode==='rotate'?'Rotate':'Move')).onclick=()=>{
+    cancelHomeGesture();navigationMode=mode;
+    $('homeRotate').setAttribute('aria-pressed',String(mode==='rotate'));
+    $('homeMove').setAttribute('aria-pressed',String(mode==='move'));
+  };
   function updateZoom(){
     previewTV(null);
     $('homeZoomReset').textContent=Math.round(zoom*100)+'%';
@@ -210,7 +227,7 @@ homeView = (() => {
   }
   $('homeZoomIn').onclick=()=>{zoom=Math.min(3,zoom*1.25);updateZoom()};
   $('homeZoomOut').onclick=()=>{zoom=Math.max(.65,zoom/1.25);updateZoom()};
-  $('homeZoomReset').onclick=resetZoom;
+  $('homeZoomReset').onclick=resetHomeView;
   function applyViewPreferences(value){
     viewerI18n.applyPreferences(value);
     if(typeof value.sidebarCollapsed!=='boolean')return;
@@ -634,13 +651,20 @@ homeView = (() => {
       const rooms=selected ? model.rooms.filter(r=>r.id===selected) : model.rooms;
       const vertices=rooms.flatMap(r=>r.polygon.map(([x,z])=>new THREE.Vector3(xm(x),0,zm(z))));
       const box=new THREE.Box3().setFromPoints(vertices), center=box.getCenter(new THREE.Vector3()); center.y=planBounds?model.ceiling_height_m/2:.6;
-      // Opposite-side view: fit landscape sideways and phones lengthwise, with labels upright.
+      // Keep room geometry cached while rotating; live states reuse the last fit.
       const offset=landscape ? new THREE.Vector3(-22,27,-7) : new THREE.Vector3(-6,28,-18);
       if(planBounds)offset.multiplyScalar(Math.max(1,planRadius/32));
-      camera.up.set(0,1,0); camera.position.copy(center).add(offset); camera.lookAt(center); camera.updateMatrixWorld();
-      const bounds=new THREE.Box3().setFromPoints(vertices.flatMap(v=>[v,v.clone().setY(model.ceiling_height_m)]).map(v=>v.applyMatrix4(camera.matrixWorldInverse)));
-      cameraFit={room:selected,landscape,width:bounds.max.x-bounds.min.x,height:bounds.max.y-bounds.min.y,
-        x:(bounds.min.x+bounds.max.x)/2,y:(bounds.min.y+bounds.max.y)/2};
+      cameraFit={room:selected,landscape,center,offset:new THREE.Spherical().setFromVector3(offset),
+        vertices:vertices.flatMap(v=>[v,v.clone().setY(model.ceiling_height_m)])};
+    }
+    if(cameraFit.rotation!==homeRotation||cameraFit.tilt!==homeTilt){
+      const {center,offset,vertices}=cameraFit;
+      camera.position.setFromSphericalCoords(offset.radius,offset.phi+homeTilt,offset.theta+homeRotation).add(center);
+      camera.up.set(0,1,0);camera.lookAt(center);camera.updateMatrixWorld();
+      const bounds=new THREE.Box3();
+      for(const vertex of vertices)bounds.expandByPoint(projectedPosition.copy(vertex).applyMatrix4(camera.matrixWorldInverse));
+      Object.assign(cameraFit,{rotation:homeRotation,tilt:homeTilt,width:bounds.max.x-bounds.min.x,height:bounds.max.y-bounds.min.y,
+        x:(bounds.min.x+bounds.max.x)/2,y:(bounds.min.y+bounds.max.y)/2});
     }
     const aspect=rect.width/rect.height;
     const half=Math.max(cameraFit.height/2,cameraFit.width/aspect/2)*1.15/zoom;
@@ -716,15 +740,27 @@ homeView = (() => {
   document.addEventListener('scroll',()=>previewTV(null),true);
   window.addEventListener('resize',()=>previewTV(null));
   if(renderer) {
-    renderer.domElement.addEventListener('pointerdown',e=>{if(!active||e.button!==0||renderLost||renderSuspended||document.hidden)return;
+    renderer.domElement.tabIndex=0;
+    renderer.domElement.dataset.viewerI18nAttrs=JSON.stringify({'aria-label':'Interactive floor plan'});
+    renderer.domElement.setAttribute('aria-label',vt('Interactive floor plan'));
+    renderer.domElement.title='Arrow keys rotate · Shift+arrows move · Home resets';
+    renderer.domElement.addEventListener('keydown',e=>{
+      if(!active||!camera||renderLost||renderSuspended||document.hidden||e.altKey||e.ctrlKey||e.metaKey)return;
+      if(e.key==='Home'){e.preventDefault();resetHomeView();return;}
+      const delta={ArrowLeft:[-25,0],ArrowRight:[25,0],ArrowUp:[0,-25],ArrowDown:[0,25]}[e.key];
+      if(delta){e.preventDefault();cancelHomeGesture();navigateHome(...delta,e.shiftKey||navigationMode==='move');}
+    });
+    renderer.domElement.addEventListener('pointerdown',e=>{if(!active||![0,2].includes(e.button)||renderLost||renderSuspended||document.hidden)return;
       // A second contact never owns this gesture, and invalidates its device tap.
       if(homeGesture){if(homeGesture.id!==e.pointerId)homeGesture.tapAllowed=false;return;}
       if(e.isPrimary===false)return;
-      homeGesture={id:e.pointerId,x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,tapAllowed:true};renderer.domElement.setPointerCapture(e.pointerId);});
+      const move=e.button===2||e.shiftKey||navigationMode==='move';
+      homeGesture={id:e.pointerId,x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,move,tapAllowed:e.button===0&&!e.shiftKey};
+      renderer.domElement.focus({preventScroll:true});renderer.domElement.setPointerCapture(e.pointerId);});
     renderer.domElement.addEventListener('pointermove',e=>{const start=homeGesture;if(!start||start.id!==e.pointerId||!active||!camera)return;
       if(e.buttons===0){cancelHomeGesture();return;}
       if(Math.hypot(e.clientX-start.x,e.clientY-start.y)>6)start.moved=true;
-      if(start.moved){const rect=renderer.domElement.getBoundingClientRect();panX-=(e.clientX-start.lastX)*(camera.right-camera.left)/rect.width;panY+=(e.clientY-start.lastY)*(camera.top-camera.bottom)/rect.height;window.requestModelRender?.(true);}
+      if(start.moved)navigateHome(e.clientX-start.lastX,e.clientY-start.lastY,start.move);
       start.lastX=e.clientX;start.lastY=e.clientY;});
     for(const type of ['pointercancel','lostpointercapture'])renderer.domElement.addEventListener(type,e=>{if(homeGesture?.id===e.pointerId)cancelHomeGesture();});
     renderer.domElement.addEventListener('webglcontextlost',()=>cancelHomeGesture());

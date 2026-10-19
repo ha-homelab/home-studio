@@ -20,7 +20,9 @@
 /* One compact toolbar leaves the plan the full height of the panel. */
 .home-layout{padding-top:14px;min-height:calc(100dvh - 24px)}
 .home-layout.controls-collapsed{grid-template-columns:minmax(0,1fr)}
-.home-zoom{display:flex;align-items:center;gap:3px}
+.home-zoom,.home-navigation{display:flex;align-items:center;gap:3px}
+#homeView .home-navigation [aria-pressed="true"]{border-color:#64cbdc;background:#244852;color:#e4fbff}
+#homeStage canvas:focus-visible{outline:2px solid #64cbdc;outline-offset:-2px}
 #homeZoomReset{min-width:48px;font-variant-numeric:tabular-nums}
 #homeZoomIn,#homeZoomOut{min-width:28px;font-size:16px;line-height:18px}
 #homeStage canvas{touch-action:none;cursor:grab}
