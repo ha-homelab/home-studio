@@ -7,6 +7,10 @@
 - Require durable writes before acknowledging native draft or publication saves,
   retaining the previous publication after storage errors. Keep generated native
   assets separate from existing installation state files.
+- Save focused field edits in one action and reject invalid visible values before
+  saving or publishing. Preserve recovery revisions across connection retries,
+  show actionable loading errors, and verify the native bridge in Chromium,
+  Firefox and WebKit.
 
 - Add an optional Home Studio editor inside Home Assistant, using the same
   drawing tools and portable JSON format as the standalone editor.
