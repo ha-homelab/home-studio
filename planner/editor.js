@@ -1,4 +1,5 @@
 import './language-links.js';
+import { embeddedContext, memoryDraftOptions, connectHost } from './ha-bridge.js';
 import { addMeasuredRoom, installOnboarding } from './onboarding.js';
 import { createDraftStorage, DRAFT_KEY, PREVIOUS_KEY, DAMAGED_KEY } from './draft-storage.js';
 import { reconcileInspector } from './inspector-dom.js';
@@ -14,7 +15,10 @@ import { getCatalogModel, getCatalogStyle, buildFurnitureAsset, PATTERNS, suppor
 
 const initialLocale = await initI18n();
 const $ = id => document.getElementById(id);
-const draftStorage = createDraftStorage({ validate: validateProject, maxBytes: LIMITS.bytes });
+const haContext = embeddedContext();
+let haCatalog = null;
+if (haContext) { document.body.classList.add('ha-embedded'); document.querySelector('.workspace').inert = true; }
+const draftStorage = createDraftStorage({ validate: validateProject, maxBytes: LIMITS.bytes, ...(haContext ? memoryDraftOptions() : {}) });
 let recoverySnapshot = null, recoveryBusy = false, saveSequence = 0, pendingSaves = 0;
 let committingField = null, inspectorScope = '';
 const BUILD_COMMAND = 'python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package';
@@ -240,7 +244,7 @@ async function save(options) {
   finally { pendingSaves--; }
   if (sequence !== saveSequence || result.status === 'cancelled') return result;
   if (result.status === 'saved') {
-    saveFailed = false; translatedText('save-status', 'Saved in this browser'); $('save-status').classList.remove('problem');
+    saveFailed = false; translatedText('save-status', haContext ? 'Draft in this tab · save in Home Assistant above' : 'Saved in this browser'); $('save-status').classList.remove('problem');
   } else showDraftProblem(result);
   if ($('recovery-dialog').open) renderRecovery();
   return result;
@@ -352,6 +356,7 @@ function buildInspector(parent) {
   const object = selected(), f = floor();
   if (!object) {
     $('inspector-title').textContent = t('Floor settings'); $('inspector-subtitle').textContent = t('A good plan starts with the basics.');
+    if (haCatalog) field(parent, 'Home Assistant floor', f.ha_floor_id || '', v => transact((_p, d) => { if (v) d.ha_floor_id = v; else delete d.ha_floor_id; }), { options: registryOptions(haCatalog.floors, f.ha_floor_id, 'No floor linked'), help: 'Links this drawing floor to your Home Assistant floor. Geometry stays editable.' });
     field(parent, t('Floor name'), f.name, v => transact((_p, d) => { d.name = v; }, () => t('Floor renamed.')));
     const dimensions = row(parent); field(dimensions, t('Elevation (m)'), f.elevation_m, v => transact((_p, d) => { d.elevation_m = v; }), { type: 'number', min: -100, max: 100 });
     field(dimensions, t('Ceiling height (m)'), f.height_m, v => transact((_p, d) => { d.height_m = v; }), { type: 'number', min: .5, max: 20 });
@@ -376,6 +381,10 @@ function buildInspector(parent) {
   $('inspector-subtitle').textContent = ({ rooms: t('Shape the space. Then add its walls.'), walls: t('A physical segment with real thickness.'), openings: t('A true cutout in the selected wall.'), items: t('Give every object a place and a purpose.') })[kind];
   if (kind === 'rooms') {
     const metric = node('div', 'metric-strip'); metric.append(node('strong', '', Math.abs(signedArea(object.polygon)).toFixed(2)), node('span', '', t('m² floor area'))); parent.append(metric);
+    if (haCatalog) {
+      field(parent, 'Home Assistant area', object.ha_area_id || '', v => editObject(o => { if (v) o.ha_area_id = v; else delete o.ha_area_id; }), { options: registryOptions(haCatalog.areas, object.ha_area_id, 'No area linked'), help: 'Choose the existing area for this room to find its devices below.' });
+      renderAreaDevices(parent, object);
+    }
     field(parent, t('Room name'), object.name, v => editObject(o => { o.name = v; }));
     field(parent, t('Floor material'), object.material, v => editObject(o => { o.material = v; }), { options: [{ value: 'floor', label: t('Warm timber') }, { value: 'tile', label: t('Tile / stone') }, { value: 'deck', label: t('Outdoor deck') }] });
     parent.append(button(t('Build wall outline'), () => { let n = 0; const ok = transact((_p, d) => { n = outlineRoom(d, d.rooms.find(r => r.id === object.id)); }, () => t('Wall outline added. Exact shared walls are reused.')); if (ok) status(() => n ? t('{count} wall segments added. Exact shared walls were reused.', { count: n }) : t('This room already has a complete wall outline.')); }, 'primary'));
@@ -462,7 +471,8 @@ function buildInspector(parent) {
     }, () => t('Original design size restored to fit this floor.'))));
     field(parent, t('Rotation (degrees)'), object.rotation_deg, v => editObject(o => { o.rotation_deg = v; }), { type: 'number', min: -360, max: 360, step: '15' });
     section(parent, t('Home Assistant'));
-    field(parent, t('Entity ID (optional)'), object.entity_id, v => editObject(o => { o.entity_id = v.trim(); }), { dir: 'ltr', help: t('Example: light.living_room. Any Home Assistant entity can be linked. In the installed plan, lights, switches and fans have quick toggles; sensors show readings; media players show artwork and controls; Details opens native controls for other entities. This offline planner only stores the mapping and never controls devices.') });
+    if (haCatalog) renderEntityPicker(parent, object, f);
+    field(parent, t('Entity ID (optional)'), object.entity_id, v => editObject(o => { o.entity_id = v.trim(); }), { dir: 'ltr', help: haContext ? 'Bind an entity to this item. Publishing enables its controls in the family view.' : t('Example: light.living_room. Any Home Assistant entity can be linked. In the installed plan, lights, switches and fans have quick toggles; sensors show readings; media players show artwork and controls; Details opens native controls for other entities. This offline planner only stores the mapping and never controls devices.') });
     field(parent, t('Notes'), object.notes, v => editObject(o => { o.notes = v; }), { rows: 3 });
   }
   parent.append(button(t(`Delete ${kind === 'openings' ? 'opening' : kind.slice(0, -1)}`), deleteSelection, 'danger'));
@@ -1120,7 +1130,7 @@ async function recoverDraft(action) {
     else result = await draftStorage.save(serializeProject(project), { replace: snapshot });
     if (result.status === 'saved') {
       if (action !== 'replace') installRecoveredProject(action === 'load' ? result.current : snapshot.previous);
-      saveFailed = false; translatedText('save-status', 'Saved in this browser'); $('save-status').classList.remove('problem');
+      saveFailed = false; translatedText('save-status', haContext ? 'Draft in this tab · save in Home Assistant above' : 'Saved in this browser'); $('save-status').classList.remove('problem');
       status(() => t('Restored your local draft.')); $('recovery-dialog').close();
     } else showDraftProblem(result);
   } catch (error) { showDraftProblem({ status: 'unavailable', error }); }
@@ -1131,6 +1141,7 @@ $('recovery-load').addEventListener('click', () => recoverDraft('load'));
 $('recovery-restore').addEventListener('click', () => recoverDraft('restore'));
 $('recovery-replace').addEventListener('click', () => recoverDraft('replace'));
 window.addEventListener('storage', event => {
+  if (haContext) return;
   if (event.key !== null && ![DRAFT_KEY, PREVIOUS_KEY, DAMAGED_KEY].includes(event.key)) return;
   const problem = draftStorage.changed();
   if (problem) showDraftProblem({ status: problem });
@@ -1310,3 +1321,67 @@ export const editorBridge = Object.freeze({
     return transact(draft => { for (const key of Object.keys(draft)) delete draft[key]; Object.assign(draft, next); }, 'AI draft applied. Undo restores your previous plan.', { fit: true });
   },
 });
+
+
+// HA initialization happens once, after the ordinary editor is ready. Native
+// drafts never touch the standalone localStorage keys or receive HA credentials.
+if (haContext) {
+  connectHost(haContext, {
+    initialize(value, catalog) {
+      const next = value || blankProject(); validateProject(next); serializeProject(next);
+      haCatalog = catalog && Array.isArray(catalog.areas) && Array.isArray(catalog.entities) ? catalog : { floors: [], areas: [], entities: [] };
+      installRecoveredProject(next); history = []; future = [];
+      document.querySelector('.workspace').inert = false; renderUI();
+      translatedText('save-status', 'Draft in this tab · save in Home Assistant above');
+      $('ha-workflow-note').textContent = 'Draw rooms, link Home Assistant areas, then add devices. Save draft above; publish when ready for the family view.';
+      status('Home Assistant drawing ready. Save draft above before leaving.');
+    },
+    snapshot: () => clone(project),
+    subscribe(listener) { editorListeners.add(listener); return () => editorListeners.delete(listener); },
+    flush() { document.activeElement?.blur(); if (drag) finishPointer(null, true); },
+    failed() { status('Could not open the saved drawing. Your original is still stored in Home Assistant.', true); },
+  });
+}
+
+function registryOptions(entries = [], current, empty) {
+  const result = [{ value: '', label: empty }, ...entries.map(entry => ({ value: entry.id, label: entry.name }))];
+  if (current && !entries.some(entry => entry.id === current)) result.push({ value: current, label: `${current} (missing from Home Assistant)` });
+  return result;
+}
+function areaEntities(room) {
+  return haCatalog.entities.filter(entity => !entity.disabled && (!room?.ha_area_id || entity.area_id === room.ha_area_id));
+}
+function renderEntityPicker(parent, object, target) {
+  const room = target.rooms.find(entry => entry.id === object.room);
+  const entries = areaEntities(room);
+  const options = [{ value: '', label: 'Choose an entity…' }, ...entries.map(entity => ({ value: entity.entity_id, label: `${entity.name} · ${entity.entity_id}${entity.available === false ? ' (unavailable)' : ''}` }))];
+  if (object.entity_id && !entries.some(entry => entry.entity_id === object.entity_id)) options.push({ value: object.entity_id, label: `${object.entity_id} (outside this area or missing)` });
+  field(parent, 'Choose Home Assistant entity', object.entity_id, value => editObject(item => { item.entity_id = value; }), { options, help: room?.ha_area_id ? 'Entities in the linked area. You can also enter any entity ID below.' : 'Link this room to an area to narrow the list.' });
+}
+function renderAreaDevices(parent, room) {
+  if (!room.ha_area_id) return;
+  const entities = areaEntities(room);
+  const chooser = field(parent, 'Add device to this room', '', null, { options: [{ value: '', label: 'Choose an entity…' }, ...entities.map(entity => ({ value: entity.entity_id, label: `${entity.name} · ${entity.entity_id}${entity.available === false ? ' (unavailable)' : ''}` }))] });
+  const add = button('Add linked item', () => {
+    const value = [...$('inspector-body').querySelectorAll('select')].find(control => control.dataset.inspectorKey === chooser.dataset.inspectorKey)?.value;
+    const entity = entities.find(entry => entry.entity_id === value);
+    if (!entity) return status('Choose an entity to add to the room.', true);
+    transact((_p, target) => {
+      const source = target.rooms.find(entry => entry.id === room.id);
+      // A triangle fan centroid search also handles rooms whose bounding-box
+      // center falls outside a concave polygon.
+      let center = source.polygon.reduce((sum, p) => [sum[0] + p[0] / source.polygon.length, sum[1] + p[1] / source.polygon.length], [0, 0]);
+      if (!pointInPolygon(center, source.polygon)) {
+        for (let i = 1; i < source.polygon.length - 1; i++) {
+          const trial = [0, 1].map(axis => (source.polygon[0][axis] + source.polygon[i][axis] + source.polygon[i + 1][axis]) / 3);
+          if (pointInPolygon(trial, source.polygon)) { center = trial; break; }
+        }
+      }
+      const type = entity.domain === 'light' ? 'lamp' : entity.domain === 'media_player' ? 'tv' : entity.domain === 'switch' ? 'switch' : 'sensor';
+      const id = nextId(target, 'item');
+      target.items.push({ id, name: entity.name.slice(0, 100), type, room: source.id, entity_id: entity.entity_id, notes: '', position_m: { x: round(center[0]), y: 0, z: round(center[1]) }, dimensions_m: { width: .25, depth: .25, height: .3 }, rotation_deg: 0 });
+      selection = { kind: 'items', id };
+    }, 'Linked item added. Drag it into position, then save your draft.');
+  });
+  add.disabled = entities.length === 0; parent.append(add);
+}

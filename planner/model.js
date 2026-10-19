@@ -114,7 +114,8 @@ export function validateProject(project, { complete = false } = {}) {
   if (!Array.isArray(project.floors) || project.floors.length < 1 || project.floors.length > LIMITS.floors) fail(`Project must have 1–${LIMITS.floors} floors.`, 'Project must have 1–{max} floors.', { max: LIMITS.floors });
   const floorIds = new Set(); let entryCount = 0;
   for (const f of project.floors) {
-    fields(f, ['id', 'name', 'elevation_m', 'height_m', 'rooms', 'walls', 'openings', 'items'], 'Floor'); id(f.id, FLOOR_ID, 'Floor');
+    fields(f, ['id', 'name', 'elevation_m', 'height_m', 'rooms', 'walls', 'openings', 'items'], 'Floor', ['ha_floor_id']);
+    if (f.ha_floor_id !== undefined) string(f.ha_floor_id, 128, 'Home Assistant floor ID'); id(f.id, FLOOR_ID, 'Floor');
     if (floorIds.has(f.id)) fail(`Duplicate floor identifier: ${f.id}.`); floorIds.add(f.id);
     string(f.name, 120, 'Floor name'); number(f.elevation_m, -100, 100, 'Floor elevation', 'Elevation (m)'); number(f.height_m, 0.5, 20, 'Ceiling height', 'Ceiling height (m)');
     const ids = new Set();
@@ -126,7 +127,8 @@ export function validateProject(project, { complete = false } = {}) {
     if (entryCount > 2048) fail('A project can contain at most 2,048 rooms, walls, openings, and items in total.', 'A project can contain at most 2,048 rooms, walls, openings, and items in total.');
     if (complete && !f.rooms.length) fail(`${f.name} needs at least one room before compiling.`, '{floor} needs at least one room before compiling.', { floor: f.name });
     for (const r of f.rooms) {
-      fields(r, ['id', 'name', 'polygon', 'material'], 'Room');
+      fields(r, ['id', 'name', 'polygon', 'material'], 'Room', ['ha_area_id']);
+      if (r.ha_area_id !== undefined) string(r.ha_area_id, 128, 'Home Assistant area ID');
       string(r.name, 120, 'Room name');
       if (!['floor', 'tile', 'deck'].includes(r.material)) fail(`${r.name}: choose floor, tile, or deck material.`, '{room}: choose a valid floor material.', { room: r.name });
       if (!Array.isArray(r.polygon) || r.polygon.length < 3 || r.polygon.length > LIMITS.points) fail(`${r.name}: use 3–${LIMITS.points} polygon points.`, '{room}: use 3–{max} polygon points.', { room: r.name, max: LIMITS.points });
