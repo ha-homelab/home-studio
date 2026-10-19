@@ -45,6 +45,12 @@ def _apply_active(state, assets, site, models, data):
                  rooms={floor: {room["id"] for room in model["rooms"]} for floor, model in models.items()})
 
 
+def _read_open_file(stream):
+    """Finish an asset read and close its pinned file in the executor."""
+    with stream:
+        return stream.read()
+
+
 async def async_setup(hass, config):
     """Load a private native project or an explicitly installed legacy package."""
     if DOMAIN in hass.data:
@@ -83,32 +89,37 @@ async def async_setup(hass, config):
         else:
             _apply_active(state, None, SITE, {}, {})
     hass.data[DOMAIN] = state
-    state["curtains"] = await async_setup_curtains(hass, STORE_KEY + ".curtains")
-    if SITE["site_features"]:
-        await SITE_ADAPTER.async_setup(hass, config)
     return await _finish_setup(hass, state)
 
 
 async def _finish_setup(hass, state):
-    """Retry incomplete registration without duplicating established routes."""
-    if not state.get("static_registered"):
-        await hass.http.async_register_static_paths([
-            StaticPathConfig("/home-floorplan-static", str(ROOT / "static"), cache_headers=False)
-        ])
-        state["static_registered"] = True
-    asset_files = await hass.async_add_executor_job(studio_asset_files, ROOT)
-    if asset_files and not state.get("editor_registered"):
-        hass.http.register_view(StudioAssetsView(asset_files))
-        state["editor_registered"] = True
-    if not state.get("ws_registered"):
-        for handler in (ws_status, ws_viewer, ws_save, ws_recover, ws_export, ws_curtains, ws_curtain_command,
-                        ws_project_get, ws_project_save, ws_project_publish, ws_entity_catalog):
-            websocket_api.async_register_command(hass, handler)
-        state["ws_registered"] = True
-    await _register_panels(hass, bool(asset_files))
-    state["has_editor"] = bool(asset_files)
-    state["initialized"] = True
-    return True
+    """Retry every incomplete stage without duplicating successful setup."""
+    async with state.setdefault("setup_lock", asyncio.Lock()):
+        if state.get("initialized"):
+            return True
+        if "curtains" not in state:
+            state["curtains"] = await async_setup_curtains(hass, STORE_KEY + ".curtains")
+        if SITE["site_features"] and not state.get("site_registered"):
+            await SITE_ADAPTER.async_setup(hass, state["config"])
+            state["site_registered"] = True
+        if not state.get("static_registered"):
+            await hass.http.async_register_static_paths([
+                StaticPathConfig("/home-floorplan-static", str(ROOT / "static"), cache_headers=False)
+            ])
+            state["static_registered"] = True
+        asset_files = await hass.async_add_executor_job(studio_asset_files, ROOT)
+        if asset_files and not state.get("editor_registered"):
+            hass.http.register_view(StudioAssetsView(asset_files))
+            state["editor_registered"] = True
+        if not state.get("ws_registered"):
+            for handler in (ws_status, ws_viewer, ws_save, ws_recover, ws_export, ws_curtains, ws_curtain_command,
+                            ws_project_get, ws_project_save, ws_project_publish, ws_entity_catalog):
+                websocket_api.async_register_command(hass, handler)
+            state["ws_registered"] = True
+        await _register_panels(hass, bool(asset_files))
+        state["has_editor"] = bool(asset_files)
+        state["initialized"] = True
+        return True
 
 
 async def _register_panels(hass, has_editor):
@@ -302,33 +313,37 @@ def ws_entity_catalog(hass, connection, msg):
 async def ws_viewer(hass, connection, msg):
     """Send private assets only to an authenticated user who can read their entities."""
     state = hass.data[DOMAIN]
-    result = _status(state, connection)
-    if not state["site"]["floors"]:
-        connection.send_result(msg["id"], {**result, "html": None, "items": [], "floor": None, "site_features": False})
-        return
-    if not (floor := _floor(state, msg, connection)):
-        return
-    references = floor_entities(state, floor, PROFILES)
-    if any(not can_read(connection, entity_id) for entity_id in references):
-        connection.send_error(msg["id"], "unauthorized", "You do not have permission to view all entities in this floor.")
-        return
-    if recovery := state.get("recovery"):
-        if not result["can_edit"]:
-            connection.send_error(msg["id"], "recovery_required", "An administrator must repair the saved project.")
+    async with state["lock"]:
+        result = _status(state, connection)
+        if not state["site"]["floors"]:
+            connection.send_result(msg["id"], {**result, "html": None, "items": [], "floor": None, "site_features": False})
             return
-        connection.send_result(msg["id"], {**result, "floor": floor, "site_features": False, "recovery": recovery})
-        return
-    # Capture a consistent generation and inventory before leaving the event loop.
-    path = state["assets"] / floor / "index.html"
-    inventory = copy.deepcopy(state["data"][floor])
-    capabilities = _capabilities(state, connection, floor)
-    content = await hass.async_add_executor_job(lambda: path.read_text(encoding="utf-8"))
+        if not (floor := _floor(state, msg, connection)):
+            return
+        references = floor_entities(state, floor, PROFILES)
+        if any(not can_read(connection, entity_id) for entity_id in references):
+            connection.send_error(msg["id"], "unauthorized", "You do not have permission to view all entities in this floor.")
+            return
+        if recovery := state.get("recovery"):
+            if not result["can_edit"]:
+                connection.send_error(msg["id"], "recovery_required", "An administrator must repair the saved project.")
+                return
+            connection.send_result(msg["id"], {**result, "floor": floor, "site_features": False, "recovery": recovery})
+            return
+        # Open under the publication lock to pin this generation's file. The
+        # descriptor remains readable after later cleanup unlinks its path.
+        path = state["assets"] / floor / "index.html"
+        inventory = copy.deepcopy(state["data"][floor])
+        capabilities = _capabilities(state, connection, floor)
+        site_features = state["site"]["site_features"]
+        stream = await hass.async_add_executor_job(path.open, "r", -1, "utf-8")
+    content = await hass.async_add_executor_job(_read_open_file, stream)
     if state.get("panels_unloaded") or any(not can_read(connection, entity_id) for entity_id in references):
         connection.send_error(msg["id"], "unauthorized", "Your access to this floor changed. Reload the view.")
         return
     content = content.replace("<head>", "<head><script>window.__HOME_FLOORPLAN_EMBED__=true;</script>", 1)
     connection.send_result(msg["id"], {**result, **inventory, **capabilities, "html": content, "floor": floor,
-                                     "site_features": state["site"]["site_features"]})
+                                     "site_features": site_features})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "home_floorplan/save", vol.Required("floor"): str,
@@ -396,12 +411,14 @@ async def ws_recover(hass, connection, msg):
 @websocket_api.async_response
 async def ws_export(hass, connection, msg):
     state = hass.data[DOMAIN]
-    if not (floor := _floor(state, msg, connection)):
-        return
-    filename = f"{state['site']['floors'][floor]['stem']}.{msg['format']}"
-    path = state["assets"] / floor / filename
     try:
-        content = await hass.async_add_executor_job(path.read_bytes)
+        async with state["lock"]:
+            if not (floor := _floor(state, msg, connection)):
+                return
+            filename = f"{state['site']['floors'][floor]['stem']}.{msg['format']}"
+            path = state["assets"] / floor / filename
+            stream = await hass.async_add_executor_job(path.open, "rb")
+        content = await hass.async_add_executor_job(_read_open_file, stream)
     except FileNotFoundError:
         connection.send_error(msg["id"], "not_available", "This export format was not included in the build.")
         return

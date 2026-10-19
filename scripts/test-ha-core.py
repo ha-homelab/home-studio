@@ -8,6 +8,7 @@ No listening socket, discovery integration or physical service is started.
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
 import errno
 import importlib.util
@@ -15,8 +16,9 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, DEFAULT, patch
 
 from homeassistant import auth
 from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_USER
@@ -207,6 +209,7 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
         legacy.write_text('{"legacy": "keep this inventory"}')
         original = legacy.read_bytes()
         native = self.integration.NativeProject(self.hass)
+        self.assertEqual(self.hass.data['home_floorplan']['native'].root, native.root)
         project = json.loads((ROOT / 'planner/example-home.json').read_text())
         await native.save(0, project)
         assets, *_ = await native.publish(1)
@@ -228,6 +231,80 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((previous_assets / 'main/index.html').is_file())
         reopened = self.integration.NativeProject(self.hass)
         self.assertEqual((await reopened.load())[0], assets)
+
+    async def test_inflight_assets_survive_multiple_publications_without_blocking_them(self):
+        project = json.loads((ROOT / 'planner/example-home.json').read_text())
+        await self.request('project_save', revision=0, project=project)
+        await self.request('project_publish', revision=1)
+        assets = self.hass.data['home_floorplan']['assets']
+        expected_viewer = await self.request('viewer')
+        expected_export = (assets / 'main/main.glb').read_bytes()
+        original = self.hass.async_add_executor_job
+        started, release = asyncio.Event(), asyncio.Event()
+        streams = []
+
+        async def delayed_read(function, *args):
+            if function is self.integration._read_open_file:
+                streams.append(args[0])
+                if len(streams) == 2:
+                    started.set()
+                await release.wait()
+            return await original(function, *args)
+
+        with patch.object(self.hass, 'async_add_executor_job', side_effect=delayed_read):
+            viewer = asyncio.create_task(self.request('viewer'))
+            export = asyncio.create_task(self.request('export', floor='main', format='glb'))
+            try:
+                await asyncio.wait_for(started.wait(), 5)
+                await asyncio.wait_for(self.request('project_publish', revision=1), 5)
+                await asyncio.wait_for(self.request('project_publish', revision=1), 5)
+                self.assertFalse(assets.exists())
+            finally:
+                release.set()
+            actual_viewer, actual_export = await asyncio.gather(viewer, export)
+        self.assertEqual(actual_viewer, expected_viewer)
+        self.assertEqual(base64.b64decode(actual_export['base64']), expected_export)
+        self.assertTrue(all(stream.closed for stream in streams))
+
+    async def test_setup_retries_required_stages_without_duplicating_completed_setup(self):
+        integration = self.integration
+        for stage in ('curtains', 'adapter'):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as directory:
+                retry_hass = HomeAssistant(directory)
+                retry_hass.http = HTTPRecorder()
+                curtains = AsyncMock(wraps=integration.async_setup_curtains)
+                adapter = SimpleNamespace(async_prepare=AsyncMock(), async_setup=AsyncMock(return_value=None))
+                failed = curtains if stage == 'curtains' else adapter.async_setup
+                failed.side_effect = [OSError('temporary setup failure'), DEFAULT]
+                site = {**integration.SITE, 'site_features': stage == 'adapter'}
+                config = {'home_floorplan': {'test_setting': 'retained'}}
+                try:
+                    with patch.object(integration, 'async_setup_curtains', curtains), \
+                         patch.object(integration, 'SITE_ADAPTER', adapter, create=True), \
+                         patch.object(integration, 'SITE', site):
+                        with self.assertRaisesRegex(OSError, 'temporary setup failure'):
+                            await integration.async_setup(retry_hass, config)
+                        state = retry_hass.data['home_floorplan']
+                        self.assertFalse(state['initialized'])
+                        self.assertNotIn('websocket_api', retry_hass.data)
+                        self.assertEqual(await asyncio.gather(
+                            integration.async_setup_entry(retry_hass, None),
+                            integration.async_setup_entry(retry_hass, None)), [True, True])
+                        self.assertTrue(state['initialized'])
+                        self.assertIn('curtains', state)
+                        self.assertEqual(curtains.await_count, 2 if stage == 'curtains' else 1)
+                        self.assertEqual(adapter.async_setup.await_count, 2 if stage == 'adapter' else 0)
+                        if stage == 'adapter':
+                            adapter.async_setup.assert_awaited_with(retry_hass, config)
+                            self.assertEqual(adapter.async_prepare.await_count, 1)
+                        self.assertEqual(len(retry_hass.http.paths), 1)
+                        self.assertEqual(len(retry_hass.http.views), 1)
+                        connection = Connection(self.admin)
+                        integration.ws_curtains(retry_hass, connection, {'id': 1})
+                        await asyncio.wait_for(connection.result, 1)
+                        connection.subscriptions[1]()
+                finally:
+                    await retry_hass.async_stop(force=True)
 
     async def test_navigation_reload_keeps_storage_and_registration(self):
         state = self.hass.data['home_floorplan']
