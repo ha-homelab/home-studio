@@ -11,7 +11,7 @@ const saved=JSON.parse(sessionStorage.getItem('fixture-server')||'null')||{proje
 window.server=saved;
 window.catalog={floors:[{id:'ground',name:'Ground floor'}],areas:[{id:'living',name:'Living room',floor_id:'ground'}],entities:[{entity_id:'light.ceiling',name:'Ceiling light',domain:'light',area_id:'living',available:true,attributes:{secret:'PRIVATE_ATTRIBUTE'}},{entity_id:'sensor.temperature',name:'Temperature',domain:'sensor',area_id:'living',available:true},{entity_id:'switch.disabled',name:'Disabled',domain:'switch',area_id:'living',disabled:true}],secrets:'PRIVATE_CATALOG'};
 window.host=document.querySelector('home-floorplan-studio-panel');
-window.host.hass={user:{id:'test-user',is_admin:true},auth:{accessToken:window.tokens},callWS:async data=>{window.calls.push(structuredClone(data));if(data.type.endsWith('entity_catalog'))return window.catalog;if(data.type.endsWith('project_save')){if(window.failSave)throw {code:'connection_error',message:'Offline'};if(data.revision!==saved.revision)throw {code:'conflict'};if(window.holdSave)await new Promise(resolve=>window.releaseSave=resolve);saved.project=data.project;saved.revision++;sessionStorage.setItem('fixture-server',JSON.stringify(saved));}if(data.type.endsWith('project_publish')){if(data.revision!==saved.revision)throw {code:'conflict'};saved.published_revision=saved.revision;sessionStorage.setItem('fixture-server',JSON.stringify(saved));}return {...structuredClone(saved),can_edit:true,editor_url:'/home-floorplan-studio/planner/index.html',capabilities:{authoring:true}};}};
+window.host.hass={user:{id:'test-user',is_admin:true},auth:{accessToken:window.tokens},callWS:async data=>{window.calls.push(structuredClone(data));if(data.type.endsWith('entity_catalog'))return window.catalog;if(data.type.endsWith('project_get')&&window.holdGet)await new Promise(resolve=>window.releaseGet=resolve);if(data.type.endsWith('project_save')){if(window.failSave)throw {code:'connection_error',message:'Offline'};if(data.revision!==saved.revision)throw {code:'conflict'};if(window.holdSave)await new Promise(resolve=>window.releaseSave=resolve);saved.project=data.project;saved.revision++;sessionStorage.setItem('fixture-server',JSON.stringify(saved));}if(data.type.endsWith('project_publish')){if(data.revision!==saved.revision)throw {code:'conflict'};saved.published_revision=saved.revision;sessionStorage.setItem('fixture-server',JSON.stringify(saved));}return {...structuredClone(saved),can_edit:true,editor_url:'/home-floorplan-studio/planner/index.html',capabilities:{authoring:true}};}};
 </script></body></html>`;
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -101,6 +101,20 @@ const server = http.createServer((req, res) => {
   assert.equal(await page.evaluate(()=>window.server.project.title),'Imported portable drawing');
   assert.equal(await page.evaluate(()=>window.host._dirty()),true);
   assert.equal(await page.locator('#publish').isDisabled(),true);
+  // A delayed reload must not discard edits made after its confirmation.
+  await page.evaluate(()=>window.holdGet=true);
+  await page.locator('#reload').click(); await page.waitForFunction(()=>typeof window.releaseGet==='function');
+  await frame.locator('#project-title').fill('Edit made while reloading');
+  // Leave the field focused: the final snapshot must flush this unfinished edit.
+  await page.evaluate(()=>window.releaseGet()); await page.waitForFunction(()=>!window.host._busy);
+  assert.equal(await frame.evaluate(()=>window.planner.getProject().title),'Edit made while reloading');
+  assert.equal(await page.evaluate(()=>window.host._project.title),'Edit made while reloading');
+  assert.equal(await page.evaluate(()=>JSON.parse(sessionStorage.getItem(window.host._key())).project.title),'Edit made while reloading');
+  assert.match(await page.locator('#status').innerText(),/Reload cancelled/);
+  // The next deliberate reload still succeeds when no intervening edit occurs.
+  await page.evaluate(()=>window.holdGet=false);
+  await page.locator('#reload').click(); await page.waitForFunction(()=>window.host._ready&&!window.host._busy&&!window.host._dirty());
+  assert.equal(await page.evaluate(()=>window.host._project.title),'Imported portable drawing');
   // An administrator role change immediately removes private authoring data.
   await page.evaluate(()=>{window.host.hass={...window.host._hass,user:{id:'test-user',is_admin:false}};});
   assert.equal(await page.locator('iframe').count(),0);

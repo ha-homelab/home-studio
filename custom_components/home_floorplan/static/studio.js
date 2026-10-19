@@ -207,8 +207,18 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     try {
       await this._snapshot(); if (generation !== this._generation) return;
       if (this._dirty() && !window.confirm('Replace this tab’s edits with the current saved draft? Export JSON first to keep a separate copy.')) return;
+      const sequence = this._sequence;
       const saved = await this._hass.callWS({ type: 'home_floorplan/project_get' });
       if (generation !== this._generation) return;
+      // Flush the editor after the network wait as well: an edit's message can
+      // still be crossing the sandbox boundary when the HA response arrives.
+      await this._snapshot(); if (generation !== this._generation) return;
+      // The requested snapshot advances the sequence once even without changes.
+      if (this._sequence !== sequence + 1) {
+        this._persist();
+        this._status('Reload cancelled because you edited the drawing while it was loading. Your edits are kept in this tab. Save or export them, then load the saved draft again.');
+        return;
+      }
       this._revision = saved.revision; this._publishedRevision = saved.published_revision; this._savedRaw = saved.project ? projectBytes(saved.project) : null;
       this._saved = saved; this._openEditor(saved.project); this._persist();
     } catch (error) { if (generation !== this._generation) return; this._status(`Could not load the saved draft: ${error.message || 'check the connection'}`, true); }
