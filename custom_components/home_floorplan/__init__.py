@@ -114,8 +114,8 @@ async def _finish_setup(hass, state):
 
 
 async def _register_panels(hass, has_editor):
-    frontend.async_remove_panel(hass, "home-floorplan")
-    frontend.async_remove_panel(hass, "home-studio")
+    frontend.async_remove_panel(hass, "home-floorplan", warn_if_unknown=False)
+    frontend.async_remove_panel(hass, "home-studio", warn_if_unknown=False)
     await panel_custom.async_register_panel(
         hass, "home-floorplan", "home-floorplan-panel",
         sidebar_title="3D Home", sidebar_icon="mdi:floor-plan",
@@ -139,9 +139,9 @@ async def async_unload_entry(hass, entry):
     """Remove navigation; preserve private state and shared YAML registrations."""
     if DOMAIN not in hass.data or DOMAIN in hass.data[DOMAIN]["config"]:
         return True
-    frontend.async_remove_panel(hass, "home-floorplan")
+    frontend.async_remove_panel(hass, "home-floorplan", warn_if_unknown=False)
     if hass.data[DOMAIN]["has_editor"]:
-        frontend.async_remove_panel(hass, "home-studio")
+        frontend.async_remove_panel(hass, "home-studio", warn_if_unknown=False)
     hass.data[DOMAIN]["panels_unloaded"] = True
     return True
 

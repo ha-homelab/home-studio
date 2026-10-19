@@ -86,7 +86,7 @@ module("homeassistant.auth")
 module("homeassistant.auth.permissions")
 module("homeassistant.auth.permissions.const", POLICY_READ="read", POLICY_CONTROL="control")
 module("homeassistant.components")
-module("homeassistant.components.frontend", async_remove_panel=lambda *args: None)
+module("homeassistant.components.frontend", async_remove_panel=lambda *args, **kwargs: None)
 module("homeassistant.components.panel_custom")
 module("homeassistant.components.websocket_api", websocket_command=lambda *a: identity,
        require_admin=require_admin, async_response=identity, async_register_command=lambda *a: None)
