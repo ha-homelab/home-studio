@@ -40,6 +40,19 @@ player advertises those capabilities. Unsupported actions are hidden. Volume is
 sent when you finish changing the slider, rather than on every pointer movement.
 Hovering or focusing the marker does not play, stop or change the volume.
 
+Media callouts without an available picture collapse to a small round TV or
+speaker button. This includes powered-off devices, missing artwork and unavailable
+players. Hover, keyboard-focus or tap this button to open its controls and current
+status. Power remains a separate, deliberate action; opening the controls never
+turns a device on. A TV offers power and access to Home Assistant's full remote;
+an audio player also offers the playback and volume actions it supports.
+
+An available TV frame or album cover restores the picture card. The round button
+stays in place while its controls are open, so opening the remote does not resize
+or move the plan. Escape, clicking outside, or leaving the button and remote
+dismisses it. On touch screens, tap the button and use the close button or tap
+outside.
+
 For TVs and other devices, leaving the mouse over a marker for about two-thirds
 of a second opens HA's native details dialog. Briefly crossing a marker does not.
 Closing an overlay does not open another device that happens to be underneath
