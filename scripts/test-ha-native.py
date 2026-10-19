@@ -177,6 +177,38 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(connection.results[0]["floors"], [])
         self.assertIsNotNone(state["native"])
 
+    async def test_unload_keeps_routes_inert_and_reload_reuses_registration(self):
+        panels = []
+        async def register_panel(*args, **kwargs):
+            panels.append(args[1])
+        with patch.object(integration.panel_custom, "async_register_panel", register_panel, create=True):
+            await integration.async_setup(self.hass, {})
+            state = self.hass.data[integration.DOMAIN]
+            self.assertTrue(state["initialized"])
+            await integration.async_unload_entry(self.hass, None)
+            connection = Connection()
+            integration.ws_status(self.hass, connection, {"id": 1})
+            self.assertEqual(connection.errors[0][0], "not_loaded")
+            await integration.async_setup_entry(self.hass, None)
+            integration.ws_status(self.hass, connection, {"id": 2})
+            self.assertEqual(len(connection.results), 1)
+            self.assertEqual(panels, ["home-floorplan", "home-floorplan"])
+            self.assertTrue(state["static_registered"])
+            self.assertTrue(state["ws_registered"])
+
+    async def test_incomplete_registration_is_retried_and_not_marked_ready(self):
+        with patch.object(integration.panel_custom, "async_register_panel", self.hass._async_noop, create=True):
+            with patch.object(self.hass.http, "async_register_static_paths", side_effect=OSError("unavailable")):
+                with self.assertRaises(OSError):
+                    await integration.async_setup(self.hass, {})
+            state = self.hass.data[integration.DOMAIN]
+            self.assertFalse(state["initialized"])
+            connection = Connection()
+            integration.ws_status(self.hass, connection, {"id": 1})
+            self.assertEqual(connection.errors[0][0], "not_loaded")
+            await integration.async_setup(self.hass, {})
+            self.assertTrue(state["initialized"])
+
     async def test_save_restart_publish_and_no_import_path_mutation(self):
         document = sample()
         paths = list(sys.path)
