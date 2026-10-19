@@ -191,7 +191,12 @@ class NativeProject:
         except Exception as error:
             _LOGGER.exception("Home Studio compilation failed; the previous plan remains active")
             raise NativeError("build_failed", "The project could not be built. The previous published plan is still active.") from error
-        inventory = {floor: {"revision": self.document["inventory"].get(floor, {}).get("revision", 0) + 1,
+        # Every publication has at least one floor. Carry the highest prior
+        # revision onto every new floor so removal and recreation cannot reuse
+        # a token held by an old viewer, including after repeated publication.
+        inventory_revision = max(revision, max(
+            (value["revision"] for value in self.document["inventory"].values()), default=0) + 1)
+        inventory = {floor: {"revision": inventory_revision,
                              "items": copy.deepcopy(model.get("inventory", []))}
                      for floor, model in models.items()}
         updated = {**self.document, "generation": generation, "published_revision": revision, "inventory": inventory}

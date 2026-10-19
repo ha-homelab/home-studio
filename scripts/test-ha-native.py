@@ -295,6 +295,60 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
             await self.project.save_inventory(inventory)
         self.assertEqual(error.exception.code, "conflict")
 
+    async def test_recreated_floor_rejects_stale_viewers_after_republication_and_restart(self):
+        original = sample()
+        upstairs = copy.deepcopy(original["floors"][0])
+        upstairs.update(id="upstairs", elevation_m=3)
+        original["floors"].append(upstairs)
+        await self.project.save(0, original)
+        stale = []
+        for _ in range(4):
+            assets, site, models, inventory = await self.project.publish(1)
+            stale.append(copy.deepcopy(inventory["main"]))
+        self.assertGreater(stale[-1]["revision"], self.project.document["revision"])
+
+        state = {"native": self.project, "lock": asyncio.Lock(), "recovery": None,
+                 "curtains": {"capture": lambda: None}}
+        integration._apply_active(state, assets, site, models, inventory)
+        self.hass.data[integration.DOMAIN] = state
+        placements = copy.deepcopy(inventory["main"]["items"])
+        placements[0]["name"] = "Placement saved before removal"
+        connection = Connection()
+        await integration.ws_save(self.hass, connection, {
+            "id": 1, "floor": "main", "revision": inventory["main"]["revision"], "items": placements})
+        self.assertFalse(connection.errors)
+        stale.append(copy.deepcopy(state["data"]["main"]))
+        self.assertGreater(stale[-1]["revision"], state["data"]["upstairs"]["revision"])
+
+        replacement = sample()
+        replacement["floors"][0]["id"] = "replacement"
+        await self.project.save(2, replacement)
+        _, _, _, replaced_inventory = await self.project.publish(3)
+        self.assertNotIn("main", replaced_inventory)
+        self.assertGreater(replaced_inventory["replacement"]["revision"], stale[-1]["revision"])
+
+        restarted = native.NativeProject(self.hass, self.project.root)
+        await restarted.load()
+        recreated = sample()
+        recreated["floors"][0]["items"][0]["name"] = "Newly recreated furniture"
+        await restarted.save(3, recreated)
+        assets, site, models, inventory = await restarted.publish(4)
+        self.assertGreater(inventory["main"]["revision"], replaced_inventory["replacement"]["revision"])
+
+        state = {"native": restarted, "lock": asyncio.Lock(), "recovery": None,
+                 "curtains": {"capture": lambda: None}}
+        integration._apply_active(state, assets, site, models, inventory)
+        self.hass.data[integration.DOMAIN] = state
+        expected = copy.deepcopy(restarted.document)
+        for previous in stale:
+            connection = Connection()
+            await integration.ws_save(self.hass, connection, {
+                "id": 1, "floor": "main", "revision": previous["revision"], "items": previous["items"]})
+            self.assertEqual(connection.errors[0][0], "conflict")
+            self.assertEqual(connection.results, [])
+            self.assertEqual(restarted.document, expected)
+            self.assertEqual(self.hass.saved[restarted.store.key], expected)
+
     async def test_opaque_generation_and_complete_storage_validation(self):
         for generation in ("../outside", "x" * 32, "/tmp", None):
             with self.assertRaises(native.NativeError):
