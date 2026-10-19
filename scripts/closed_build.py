@@ -210,10 +210,13 @@ def public_inputs(args, temporary):
     plan = version_plan.validate_plan(decode_json(regular(plan_path, 2_000_000)))
     require(context["repository"] == REPOSITORY and context["workflow"] == WORKFLOW
             and context["source_sha"] == plan["source_sha"])
+    source_policy = release_control.source_policy_snapshot(gh, plan["source_sha"])["data"]
+    version_plan.validate_plan(plan, policy=source_policy, source_sha=context["source_sha"])
     payloads = [{"name": path.name, "size": len(regular(path)), "sha256": digest(regular(path))}
                 for path in sorted(assets.iterdir())]
     # Receipts are unsigned: the exact producer checks above establish origin.
-    version_receipt.verify_receipts(assets, plan, payloads)
+    version_receipt.verify_receipts(assets, plan, payloads, source_policy)
+    version_receipt.verify_declared_artifacts(assets, source_policy, plan)
     calculated = {item["name"]: {"sha256": item["sha256"], "size": item["size"]} for item in payloads}
     if context["mode"] == "published":
         require(context["payloads"] == calculated and context["plan_sha256"] == version_plan.plan_digest(plan))
