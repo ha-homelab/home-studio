@@ -72,6 +72,10 @@ has cover artwork available in that entity's normal Home Assistant controls.
 Return to **Home view**. The media callout displays available cover artwork and
 track information when there is free space beside the plan.
 
+When the player is off or has no image, its callout becomes a small round button.
+Hover, focus or tap it to see the current status and available controls. Power is
+a separate action inside those controls; hovering never turns a device on.
+
 This is the album cover or other artwork supplied by the media integration.
 It is not a screenshot of the TV, a video stream, or an automatic camera feed.
 An existing private TV-capture adapter keeps priority for its configured screens.

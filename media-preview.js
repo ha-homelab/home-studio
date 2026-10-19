@@ -6,10 +6,23 @@ const mediaControlFeatures={media_previous_track:16,media_play:16384,media_pause
 const mediaControlPending=new Map(),mediaControlErrors=new Map();
 let mediaControls=null,mediaControlSequence=0,mediaControlDismissTimer;
 const mediaText=(key,params)=>typeof vt==='function'?vt(key,params):key;
-function hasMediaControls(entry){return !!entry&&entry.item.type!=='tv'&&typeof entry.command==='function'&&!model.tv_entities?.[entry.item.id];}
-function mediaControlFlags(entry){const flags=entry?.media?.supported_features;return Number.isSafeInteger(flags)&&flags>=0?flags:0;}
+function isTVMediaEntry(entry){return !!entry&&(entry.item.type==='tv'||!!model.tv_entities?.[entry.item.id]);}
+function hasAudioMediaControls(entry){return !!entry&&!isTVMediaEntry(entry)&&typeof entry.command==='function';}
+function hasMediaControls(entry){return hasAudioMediaControls(entry)||!!entry&&(typeof entry.power==='function'||typeof entry.details==='function');}
+function mediaControlFlags(entry){const flags=entry?.media?.supported_features;return !isTVMediaEntry(entry)&&Number.isSafeInteger(flags)&&flags>=0?flags:0;}
+function mediaControlState(entry){return entry?.state&&entry.state!=='on'?entry.state:entry?.media?.state||entry?.state;}
 function mediaControlsReady(entry){
-  return !!entry?.enabled&&haConnected&&!entry.busy&&!mediaControlPending.has(entry.item.entity_id)&&!entry.media?.restored&&!haStates[entry.item.entity_id]?.restored&&['on','playing','paused','idle','buffering'].includes(entry.media?.state);
+  return !!entry?.enabled&&haConnected&&!entry.busy&&!mediaControlPending.has(entry.item.entity_id)&&!entry.media?.restored&&!haStates[entry.item.entity_id]?.restored&&entry.state==='on'&&['on','playing','paused','idle','buffering'].includes(entry.media?.state);
+}
+function hasMediaPower(entry){
+  return typeof entry?.power==='function'&&(isTVMediaEntry(entry)||!!(mediaControlFlags(entry)&(entry.state==='on'?256:entry.state==='off'?128:128|256)));
+}
+function mediaPowerReady(entry){
+  return hasMediaPower(entry)&&!!entry.enabled&&haConnected&&!entry.busy&&!mediaControlPending.has(entry.item.entity_id)&&!entry.media?.restored&&!haStates[entry.item.entity_id]?.restored&&['on','off'].includes(entry.state)&&!['unknown','unavailable'].includes(entry.media?.state);
+}
+function sendMediaPower(){
+  const entry=tvPreviews.get(mediaControls?.id);
+  if(mediaPowerReady(entry))entry.power();
 }
 function hideMediaControls({restoreFocus=false}={}){
   if(!mediaControls)return;
@@ -51,10 +64,11 @@ function bindMediaControlTrigger(id,element){
 }
 function ensureMediaControls(){
   if(mediaControls)return mediaControls;
-  const el=document.createElement('section'),header=document.createElement('div'),title=document.createElement('strong'),close=document.createElement('button'),track=document.createElement('p'),status=document.createElement('p'),actions=document.createElement('div'),volume=document.createElement('label'),volumeTitle=document.createElement('span'),level=document.createElement('input'),output=document.createElement('output'),details=document.createElement('button');
+  const el=document.createElement('section'),header=document.createElement('div'),title=document.createElement('strong'),close=document.createElement('button'),track=document.createElement('p'),status=document.createElement('p'),power=document.createElement('button'),actions=document.createElement('div'),volume=document.createElement('label'),volumeTitle=document.createElement('span'),level=document.createElement('input'),output=document.createElement('output'),details=document.createElement('button');
   el.id='homeMediaControls';el.className='media-controls';el.hidden=true;el.tabIndex=-1;el.setAttribute('role','dialog');
   header.className='media-controls-header';close.type='button';close.textContent='×';close.setAttribute('aria-label',mediaText('Close media controls'));close.onclick=()=>hideMediaControls({restoreFocus:true});header.append(title,close);
   track.className='media-controls-track';status.className='media-controls-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');
+  power.type='button';power.className='media-controls-power';power.onclick=sendMediaPower;
   actions.className='media-controls-actions';actions.setAttribute('role','group');actions.setAttribute('aria-label',mediaText('Playback'));
   const buttons=new Map();
   for(const [action,label,symbol] of [['media_previous_track','Previous track','⏮'],['media_play','Play','▶'],['media_pause','Pause','Ⅱ'],['media_stop','Stop','■'],['media_next_track','Next track','⏭']]){
@@ -64,8 +78,8 @@ function ensureMediaControls(){
   level.oninput=()=>{mediaControls.volumeEditing=true;output.textContent=level.value+'%';level.setAttribute('aria-valuetext',output.textContent);};
   level.onchange=()=>{mediaControls.volumeEditing=false;sendMediaControl('volume_set',Number(level.value));};volume.append(volumeTitle,output,level);
   details.type='button';details.className='media-controls-details';details.textContent=mediaText('Open Home Assistant controls');details.onclick=()=>{const entry=tvPreviews.get(mediaControls.id);hideMediaControls();entry?.details?.();};
-  el.append(header,track,actions,volume,status,details);$('homeView').append(el);
-  mediaControls={el,title,track,status,buttons,volume,level,output,details,id:null,anchor:null,volumeEditing:false};
+  el.append(header,track,power,actions,volume,status,details);$('homeView').append(el);
+  mediaControls={el,title,track,status,power,actions,buttons,volume,level,output,details,id:null,anchor:null,volumeEditing:false};
   mediaControls.outside=event=>{if(!el.contains(event.target)&&!mediaControls.anchor?.contains(event.target))hideMediaControls();};
   mediaControls.outsideFocus=event=>{if(!el.contains(event.target)&&!mediaControls.anchor?.contains(event.target))hideMediaControls();};
   mediaControls.escape=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();hideMediaControls({restoreFocus:true});}};
@@ -77,19 +91,23 @@ function updateMediaControls(){
   if(!mediaControls?.id)return;
   const ui=mediaControls,entry=tvPreviews.get(ui.id);
   if(!hasMediaControls(entry)){hideMediaControls();return;}
-  const flags=mediaControlFlags(entry),ready=mediaControlsReady(entry),pending=mediaControlPending.has(entry.item.entity_id),state=entry.media?.state;
+  const flags=mediaControlFlags(entry),ready=mediaControlsReady(entry),pending=mediaControlPending.has(entry.item.entity_id),state=mediaControlState(entry),restored=entry.media?.restored||haStates[entry.item.entity_id]?.restored;
   ui.title.textContent=entry.item.name;ui.el.setAttribute('aria-label',entry.item.name+' · '+mediaText('Media controls'));ui.el.setAttribute('aria-busy',String(pending||!!entry.busy));
-  ui.track.textContent=[entry.media?.title,entry.media?.artist,entry.media?.album].filter(value=>typeof value==='string'&&value.trim()).map(value=>value.trim().slice(0,200)).join(' · ');
+  ui.track.textContent=entry.enabled&&haConnected&&!restored&&['on','playing','paused','idle','buffering'].includes(state)?[entry.media?.title,entry.media?.artist,entry.media?.album].filter(value=>typeof value==='string'&&value.trim()).map(value=>value.trim().slice(0,200)).join(' · '):'';
   ui.track.hidden=!ui.track.textContent;
+  ui.power.hidden=!hasMediaPower(entry);ui.power.disabled=!mediaPowerReady(entry);
+  ui.power.textContent=mediaText(entry.state==='on'?'Power off':entry.state==='off'?'Power on':'Power');
+  ui.power.title=ui.power.textContent;ui.power.setAttribute('aria-label',(entry.state==='on'?mediaText('Turn off'):entry.state==='off'?mediaText('Turn on'):mediaText('Power'))+' '+entry.item.name);ui.power.setAttribute('aria-busy',String(pending||!!entry.busy));
   for(const [action,button] of ui.buttons){button.hidden=!(flags&mediaControlFeatures[action]);button.disabled=!ready;}
+  ui.actions.hidden=![...ui.buttons.values()].some(button=>!button.hidden);
   ui.volume.hidden=!(flags&mediaControlFeatures.volume_set);ui.level.disabled=!ready;
   if(!ui.volumeEditing&&!pending){
     const value=entry.media?.volume_level,valid=typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=1;
     ui.level.value=valid?String(Math.round(value*100)):'0';ui.output.textContent=valid?ui.level.value+'%':'—';ui.level.setAttribute('aria-valuetext',valid?ui.output.textContent:mediaText('Volume unavailable'));
   }
   const error=mediaControlErrors.get(entry.item.entity_id);
-  ui.status.textContent=error||(pending||entry.busy?mediaText('Sending media command…'):!entry.enabled||!haConnected?mediaText('Home Assistant disconnected'):entry.media?.restored||haStates[entry.item.entity_id]?.restored||!['on','playing','paused','idle','buffering'].includes(state)?mediaText('Media player unavailable'):!(flags&Object.values(mediaControlFeatures).reduce((all,flag)=>all|flag,0))?mediaText('No supported playback controls'):mediaText(({playing:'Playing',paused:'Paused',buffering:'Buffering',idle:'Idle',on:'On'})[state]||'Media player unavailable'));
-  ui.status.dataset.error=String(!!error);ui.details.disabled=!entry.enabled||!haConnected;
+  ui.status.textContent=error||(pending||entry.busy?mediaText('Sending media command…'):!haConnected||state==='disconnected'?mediaText('Home Assistant disconnected'):!entry.enabled||restored||!['on','off','playing','paused','idle','buffering'].includes(state)?mediaText('Media player unavailable'):state==='off'?mediaText('Off'):hasAudioMediaControls(entry)&&!(flags&Object.values(mediaControlFeatures).reduce((all,flag)=>all|flag,0))?mediaText('No supported playback controls'):mediaText(({playing:'Playing',paused:'Paused',buffering:'Buffering',idle:'Idle',on:'On'})[state]||'Media player unavailable'));
+  ui.status.dataset.error=String(!!error);ui.details.disabled=!entry.enabled||!haConnected||typeof entry.details!=='function';
 }
 function showMediaControls(id,anchor,{focus=false}={}){
   const entry=tvPreviews.get(id);
@@ -238,41 +256,52 @@ function updateTVPreviews(entries){
   const entities=new Set(entries.map(entry=>entry.item.entity_id));
   for(const [entity,pending] of mediaControlPending)if(!entities.has(entity)){clearTimeout(pending.timer);mediaControlPending.delete(entity);}
   for(const entity of mediaControlErrors.keys())if(!entities.has(entity))mediaControlErrors.delete(entity);
-  for(const [id,entry] of tvPreviews)if(!ids.has(id)){entry.removeRemoteTrigger?.();entry.el.remove();tvPreviews.delete(id);removeMediaLeader('tv:'+id);}
+  for(const [id,entry] of tvPreviews)if(!ids.has(id)){entry.removeLauncherTrigger?.();entry.removeRemoteTrigger?.();entry.el.remove();tvPreviews.delete(id);removeMediaLeader('tv:'+id);}
   for(const {item,state,busy,enabled,details,power,media,command} of entries){
     let entry=tvPreviews.get(item.id);
     if(!entry){
-      const el=document.createElement('figure'),img=document.createElement('img'),caption=document.createElement('figcaption'),name=document.createElement('button'),button=document.createElement('button'),status=document.createElement('span');
+      const el=document.createElement('figure'),img=document.createElement('img'),caption=document.createElement('figcaption'),name=document.createElement('button'),button=document.createElement('button'),status=document.createElement('span'),launcher=document.createElement('button');
       el.className='tv-preview';el.dataset.tvPreview=item.id;img.width=320;img.height=180;
       name.className='tv-preview-details';
       button.className='tv-preview-power';button.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9m-5-7a8 8 0 1 0 10 0"/></svg>';
-      status.className='tv-preview-status';caption.append(name,button);el.append(img,status,caption);$('homeTVs').append(el);
-      entry={el,img,name,button,status,caption,item};tvPreviews.set(item.id,entry);
+      launcher.type='button';launcher.className='tv-preview-launcher';
+      status.className='tv-preview-status';caption.append(name,button);el.append(img,status,caption,launcher);$('homeTVs').append(el);
+      entry={el,img,name,button,status,caption,launcher,item};tvPreviews.set(item.id,entry);
+      entry.removeLauncherTrigger=bindMediaControlTrigger(item.id,launcher);
     }
     if(entry.item.entity_id!==item.entity_id&&mediaControls?.id===item.id)hideMediaControls();
-    Object.assign(entry,{item,state,busy,enabled,details,media,command});
+    Object.assign(entry,{item,state,busy,enabled,details,power,media,command});
     const snapshot=state==='on'?tvFrames.get(item.id)?.image:null,artwork=state==='on'?mediaArtwork.get(item.id)?.image:null;
-    const image=snapshot||artwork,cover=!!artwork&&!snapshot,configuredTV=!!model.tv_entities?.[item.id];
+    const image=snapshot||artwork,cover=!!artwork&&!snapshot,configuredTV=isTVMediaEntry(entry);
     const label=media&&typeof media==='object'?[media.title,media.artist,media.album].filter(value=>typeof value==='string'&&value.trim()).map(value=>value.trim().slice(0,200)).join(' · '):'';
     entry.img.alt=item.name+(cover?' cover art':' picture');entry.name.textContent=item.name;
     entry.name.title=item.name+' · Open Home Assistant media controls';entry.name.onclick=()=>{hideMediaControls();details?.();};entry.button.onclick=power;
     entry.el.dataset.mediaKind=!snapshot&&(cover||!configuredTV)?'cover':'snapshot';
+    if(mediaControls?.id===item.id&&(image&&mediaControls.anchor===entry.launcher||!image&&entry.caption.contains(mediaControls.anchor)))hideMediaControls();
+    entry.el.dataset.compact=String(!image);entry.launcher.hidden=!!image;
+    const icon=configuredTV?'tv':'audio';
+    if(entry.launcher.dataset.icon!==icon){
+      entry.launcher.dataset.icon=icon;
+      entry.launcher.innerHTML=configuredTV?'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l11-2v13M9 9l11-2"/><ellipse cx="6" cy="18" rx="3" ry="3"/><ellipse cx="17" cy="16" rx="3" ry="3"/></svg>';
+    }
+    entry.launcher.setAttribute('aria-label',item.name+' · '+mediaText('Media controls'));
     if(image){if(entry.img.getAttribute('src')!==image)entry.img.src=image;}else entry.img.removeAttribute('src');
     entry.img.hidden=!image;entry.status.hidden=!!snapshot;
     entry.status.textContent=cover?(label||'Cover art'):busy?'Waiting for media player…':({off:configuredTV?'TV is off':'Media player is off',on:configuredTV?'Waiting for a picture':label||'Cover art unavailable',disconnected:'Disconnected',missing:'Entity not found',unavailable:'Media player unavailable',preview:'Offline preview'})[state]||'Media player unavailable';
+    entry.launcher.title=item.name+' · '+entry.status.textContent;
     entry.el.dataset.state=state;entry.name.disabled=!enabled;
     entry.button.disabled=!enabled||busy||!['on','off'].includes(state);
     entry.button.setAttribute('aria-label',(state==='on'?'Turn off ':'Turn on ')+item.name);
     entry.button.setAttribute('aria-busy',String(busy));
     entry.button.title=state==='on'?'Power off':'Power on';
-    if(hasMediaControls(entry)){
+    if(hasAudioMediaControls(entry)){
       if(!entry.remote){
         const remote=document.createElement('button');remote.type='button';remote.className='tv-preview-controls';remote.textContent=mediaText('Controls');entry.caption.append(remote);entry.remote=remote;
         entry.removeRemoteTrigger=bindMediaControlTrigger(item.id,remote);
-        entry.el.onpointerenter=event=>{if(event.pointerType==='mouse'&&!event.buttons)showMediaControls(item.id,remote);};
+        entry.el.onpointerenter=event=>{if(entry.launcher.hidden&&event.pointerType==='mouse'&&!event.buttons)showMediaControls(item.id,remote);};
         entry.el.onpointerleave=event=>{if(event.pointerType==='mouse'&&!mediaControls?.el.contains(event.relatedTarget))scheduleMediaControlDismiss();};
       }
-      entry.remote.hidden=false;entry.remote.setAttribute('aria-label',entry.item.name+' · '+mediaText('Media controls'));
+      entry.remote.hidden=!image;entry.remote.setAttribute('aria-label',entry.item.name+' · '+mediaText('Media controls'));
       entry.button.hidden=!(mediaControlFlags(entry)&(state==='on'?256:128));
     }else{
       entry.button.hidden=false;
@@ -371,4 +400,6 @@ function positionMediaPreviews(camera,rect,room){
     const dot=group.querySelector('circle');dot.setAttribute('cx',point.x);dot.setAttribute('cy',point.y);visible.add(id);
   }
   for(const id of mediaLeaders.keys())if(!visible.has(id))removeMediaLeader(id);
+  const controlled=tvPreviews.get(mediaControls?.id);
+  if(controlled?.el.hidden&&controlled.el.contains(mediaControls.anchor))hideMediaControls();
 }

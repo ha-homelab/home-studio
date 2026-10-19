@@ -633,7 +633,12 @@ short connections. Conservative bounds may omit a card even when a small visible
 gap exists; they never deliberately cover a room to display media.
 
 TV cards reuse the last decoded frame from `tv-screen.js`, including its existing
-failure-retention rules. An explicitly off TV shows a compact power control.
+failure-retention rules. Without a frame or cover image, a media card becomes a
+round launcher; the shared fixed-position controls do not expand its placement
+bounds. Hover, focus and touch open controls without sending commands. TV
+launchers expose power and native HA details; audio launchers also expose their
+advertised playback and volume controls. Hidden or removed anchors dismiss the
+popup. An image arriving replaces the launcher with the normal picture card.
 Unavailable, disconnected and missing states are not presented as off. The card
 title opens the full Home Assistant entity controls. Power sends an explicit
 `tv_power` request with `turn_on` or `turn_off`: the host accepts only saved
