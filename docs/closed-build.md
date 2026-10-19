@@ -115,6 +115,12 @@ and `qualification.closed_build_run` objects (`id`, `attempt`, `latest_attempt`,
 A later stable promotion run is a distinct proof. An unpublished/superseded
 plan or a generic green workflow cannot satisfy this contract.
 
+The accepted record also requires `site_acceptance`, binding the package digest
+to a separately signed `site-canary-passed` receipt with `checks.actual_ha` and
+`checks.browser` both true, plus the evidence and original receipt digests.
+The operator's acceptance client verifies that receipt before retaining it.
+Python package checks and transport-only fixtures cannot replace this evidence.
+
 Stable validation reads an operator-signed acceptance envelope encrypted to
 the CI input recipient. It verifies matching source/plan/payloads and both run
 identities, reads the exact stored candidate ciphertext, and checks its digest

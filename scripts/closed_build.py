@@ -502,6 +502,12 @@ def validate_acceptance(accepted, context, request_id):
         require(SHA.fullmatch(accepted[key]) is not None)
     for key in ("payload_size", "installer_size"):
         require(type(accepted[key]) is int and 0 < accepted[key] <= MAX_FILE)
+    site = accepted["site_acceptance"]
+    require(site["schema"] == 1 and site["state"] == "site-canary-passed")
+    require(site["payload_sha256"] == accepted["payload_sha256"])
+    require(site["checks"]["actual_ha"] is True and site["checks"]["browser"] is True)
+    require(SHA.fullmatch(site["evidence_sha256"]) is not None
+            and SHA.fullmatch(site["receipt_sha256"]) is not None)
     qualification = accepted["qualification"]
     require(qualification["status"] == "published" and qualification["conclusion"] == "success")
     require(qualification["public"] == accepted["public"])

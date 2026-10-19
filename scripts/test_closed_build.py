@@ -218,10 +218,16 @@ class BoundaryTests(unittest.TestCase):
                     "public": public, "candidate_sha256": "c" * 64, "payload_sha256": "d" * 64,
                     "installer_sha256": "e" * 64, "payload_size": 12, "installer_size": 10,
                     "build_run_id": "20", "build_run_attempt": "2", "candidate_object": "test/20-2.candidate.json",
+                    "site_acceptance": {"schema": 1, "state": "site-canary-passed", "payload_sha256": "d" * 64,
+                                        "checks": {"actual_ha": True, "browser": True}, "evidence_sha256": "e" * 64, "receipt_sha256": "f" * 64},
                     "qualification": {"status": "published", "conclusion": "success", "release_tag": public["release_tag"], "public": public,
                                       "source_run": {"id": "10", "attempt": "1", "latest_attempt": "1", "conclusion": "success"},
                                       "closed_build_run": {"id": "20", "attempt": "2", "latest_attempt": "2", "conclusion": "success"}}}
         build.validate_acceptance(accepted, public, "test")
+        accepted["site_acceptance"]["checks"]["browser"] = False
+        with self.assertRaises(build.Rejected):
+            build.validate_acceptance(accepted, public, "test")
+        accepted["site_acceptance"]["checks"]["browser"] = True
         accepted["qualification"]["source_run"]["latest_attempt"] = "2"
         with self.assertRaises(build.Rejected):
             build.validate_acceptance(accepted, public, "test")
