@@ -61,6 +61,8 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'scripts/closed_synthetic.py', 'scripts/test_closed_build.py',
               'scripts/download_tls.py', 'scripts/test-download-tls.py', 'requirements-tls-test.txt',
               'requirements-strict-tls.txt', 'docs/transport-security.md',
+              'docs/environment.md', 'docs/images/garden-surroundings.png',
+              'scripts/test-environment.mjs', 'scripts/test-environment-browser.cjs',
               'docs/i18n.md', 'docs/translations/README.md',
               'docs/dry-run.md', 'scripts/test-dry-run.cjs',
               'scripts/build-panel-locales.py', 'scripts/test-dry-run-browser.cjs',
@@ -196,7 +198,7 @@ def validate(root):
             if path.read_bytes() != BINARY_REPLAY_SEEDS[relative]:
                 raise ValueError(f'Unexpected binary replay seed: {relative}')
             continue
-        if path.suffix == '.jpg' or relative in ('docs/images/dashboard-media-example.png', 'docs/images/native-editor.png'):
+        if path.suffix == '.jpg' or relative in ('docs/images/dashboard-media-example.png', 'docs/images/native-editor.png', 'docs/images/garden-surroundings.png'):
             continue
         text = path.read_text(encoding='utf-8')
         # The validator intentionally contains its own private-pattern tripwires.

@@ -112,6 +112,10 @@ jobs:
           node --test scripts/test-family-view.cjs
       - name: Test drawing, furnishing, export and installation through the editor
         run: npm run test:planner
+      - name: Test optional garden surroundings and bounded decorative motion
+        run: |
+          node scripts/test-environment.mjs
+          node scripts/test-environment-browser.cjs
       - name: Test AI preview, review, undo and real local companion
         env:
           AI_PLANNER_ENGINES: chromium,firefox

@@ -6,6 +6,13 @@ The planner and compiled Home view have a **Surroundings** dropdown. **Show gard
 
 For an editable garden, use **Add garden area** in Floor settings. It uses the entered origin and dimensions to create an ordinary outdoor area and a resizable lawn object. Search the Item library for lawn, meadow, path, hedge, cypress, tree, dog, cat, rabbit, fox, or bird. These are ordinary saved items: move, rotate, resize, recolor, undo, export, and place indoors or outdoors. The floor's existing ceiling-height constraint still applies to tree height.
 
+![Fictional Garden Studio in the planner, with an editable garden and optional surroundings](images/garden-surroundings.png)
+
+This screenshot uses the synthetic Garden Studio project from the browser test.
+The small garden beside the house contains saved catalog objects. The outer
+planting strips and road are optional surroundings; enabling their motion does
+not animate the placed dog, cat, or other catalog objects.
+
 ## Shared renderer API
 
 `planner/environment.js` has no runtime imports or network dependencies. The compiler replaces `__ENVIRONMENT_JS__` in `viewer.js` with this module's text after removing `export ` prefixes. Include the same replacement when a legacy builder consumes the shared viewer. The runtime bundle and static-site inventory include the module.
@@ -46,6 +53,11 @@ Without `enabled: true`, the layer allocates no geometry or materials and has no
 The layer uses shared `InstancedMesh` batches, flat unlit materials, no textures, no dynamic lighting and no shadow rendering. All five actors are allocated once on first enable. Palette changes replace and dispose that small resource set; animation updates only instance transforms and requests a motion frame through the existing renderer, preserving adaptive gesture throttling. The enclosing scene still incurs its normal rendering cost while motion is enabled, so static is the default.
 
 ## Verification
+
+The **Validate complete package** workflow runs both environment tests once in
+its package job, after the existing browser-tool installation. The surrounding
+platform matrix continues to cover general rendering and navigation without
+repeating this dedicated Chromium scenario in every lane.
 
 - `node scripts/test-environment.mjs`: no allocation while off, bounded shared draw batches, full scenery envelopes outside the site during 108 seconds of simulated motion, visibility/reduced-motion/lifecycle pause, palette replacement and disposal.
 - `node scripts/test-environment-browser.cjs`: real garden placement, indoor/outdoor catalog items, unchanged camera fit, static idle rendering, reduced-motion pause, compiler metadata and Home controls. Set `ENVIRONMENT_SCREENSHOT_DIR` to save fictional-example screenshots.
