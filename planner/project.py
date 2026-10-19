@@ -21,9 +21,15 @@ import struct
 import tarfile
 import tempfile
 
-from geometry import MATERIALS, create_geometry, floor_context
-from exporters import export_models
-from planner.furniture import build_furniture_asset, validate_furniture_appearance
+if __package__ and "." in __package__:
+    # The HA distribution nests these same sources in its private runtime
+    # package. Relative imports avoid changing the host interpreter's sys.path.
+    from ..geometry import MATERIALS, create_geometry, floor_context
+    from ..exporters import export_models
+else:
+    from geometry import MATERIALS, create_geometry, floor_context
+    from exporters import export_models
+from .furniture import build_furniture_asset, validate_furniture_appearance
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "dist" / "planner-project"
@@ -174,7 +180,7 @@ def rooms_overlap(a, b):
     return False
 
 
-def validate_project(project):
+def validate_project(project, *, complete=True):
     """Validate completely and return a detached copy; never write partial output."""
     fields(project, {"schema_version", "title", "floors"}, "project", {"id"})
     if type(project["schema_version"]) is not int or project["schema_version"] != 1:
@@ -186,17 +192,19 @@ def validate_project(project):
     floor_ids, count = set(), 0
     for fi, floor in enumerate(project["floors"]):
         path = f"project.floors[{fi}]"
-        fields(floor, {"id", "name", "elevation_m", "height_m", "rooms", "walls", "openings", "items"}, path)
+        fields(floor, {"id", "name", "elevation_m", "height_m", "rooms", "walls", "openings", "items"}, path, {"ha_floor_id"})
         fid = identifier(floor["id"], path + ".id", floor=True)
         if fid in floor_ids:
             fail(path + ".id", "duplicate floor ID " + fid)
         floor_ids.add(fid)
         text(floor["name"], path + ".name")
+        if "ha_floor_id" in floor:
+            text(floor["ha_floor_id"], path + ".ha_floor_id", 128)
         number(floor["elevation_m"], path + ".elevation_m", -100, 100)
         height = number(floor["height_m"], path + ".height_m", .5, 20)
         used = set()
         for collection in ("rooms", "walls", "openings", "items"):
-            sequence(floor[collection], path + "." + collection, 1 if collection == "rooms" else 0, 64 if collection == "rooms" else 256)
+            sequence(floor[collection], path + "." + collection, 1 if complete and collection == "rooms" else 0, 64 if collection == "rooms" else 256)
             count += len(floor[collection])
             for index, entry in enumerate(floor[collection]):
                 ep = f"{path}.{collection}[{index}]"
@@ -210,8 +218,10 @@ def validate_project(project):
             fail("project.floors", "at most 2,048 rooms, walls, openings and objects are supported in total")
         for ri, room in enumerate(floor["rooms"]):
             rp = f"{path}.rooms[{ri}]"
-            fields(room, {"id", "name", "polygon", "material"}, rp)
+            fields(room, {"id", "name", "polygon", "material"}, rp, {"ha_area_id"})
             text(room["name"], rp + ".name")
+            if "ha_area_id" in room:
+                text(room["ha_area_id"], rp + ".ha_area_id", 128)
             if room["material"] not in ("floor", "tile", "deck"):
                 fail(rp + ".material", "choose floor, tile or deck")
             validate_polygon(room["polygon"], rp + ".polygon")
