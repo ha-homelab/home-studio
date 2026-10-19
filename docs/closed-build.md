@@ -160,6 +160,12 @@ public image and an available Docker daemon, set `CLOSED_DOCKER_TEST=1` for
 the real synthetic container success/failure and isolation checks. The public
 package workflow runs both; all fixtures are fictional and use temporary keys.
 
+For local Colima checks on macOS, select the intended daemon with an explicit
+`DOCKER_HOST` socket and set `TMPDIR` to a directory under its shared `/Users`
+tree. The macOS default `/var/folders` temporary directory may not be available
+for container bind mounts. Create the shared temporary directory before running
+the checks; no container isolation settings need to change.
+
 For a real hosted storage trial, `scripts/closed_synthetic.py` takes the public
 resolver's context plus local key and canary files and creates a fictional
 encrypted input. Its success, failure, two-second timeout, and invalid-signature
