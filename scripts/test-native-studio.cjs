@@ -5,7 +5,7 @@ const path = require('node:path');
 const { chromium } = require('playwright');
 const { browserLaunchOptions } = require('./browser-stability-diagnostics.cjs');
 const root = path.resolve(__dirname, '..');
-const fixture = `<!doctype html><html><body style="margin:0"><home-floorplan-studio-panel></home-floorplan-studio-panel><script src="/custom_components/home_floorplan/static/studio.js"></script><script>
+const fixture = `<!doctype html><html style="height:100%"><head><meta charset="utf-8"></head><body style="margin:0;height:100%"><home-floorplan-studio-panel></home-floorplan-studio-panel><script src="/custom_components/home_floorplan/static/studio.js"></script><script>
 window.calls=[];window.failSave=false;window.holdSave=false;window.tokens='NEVER_SEND_TOKEN';
 const saved=JSON.parse(sessionStorage.getItem('fixture-server')||'null')||{project:null,revision:0,published_revision:null};
 window.server=saved;
@@ -40,6 +40,7 @@ const server = http.createServer((req, res) => {
   assert.equal(await frame.evaluate(()=>{try{return parent.document.body.innerHTML;}catch{return 'isolated';}}),'isolated');
   assert.equal(await frame.evaluate(()=>{try{return localStorage.length;}catch{return 'isolated';}}),'isolated');
   await page.evaluate(()=>localStorage.setItem('home-studio.project.v1','standalone draft sentinel'));
+  await frame.getByLabel('Home Assistant floor',{exact:true}).selectOption('ground');
   await frame.locator('#start-room').click();
   await frame.locator('#starter-name').fill('Living room');
   await frame.locator('#starter-width').fill('5'); await frame.locator('#starter-depth').fill('4');
@@ -48,6 +49,7 @@ const server = http.createServer((req, res) => {
   await frame.getByLabel('Add device to this room',{exact:true}).selectOption('light.ceiling');
   await frame.getByRole('button',{name:'Add linked item',exact:true}).click();
   let project=await frame.evaluate(()=>window.planner.getProject());
+  assert.equal(project.floors[0].ha_floor_id,'ground');
   assert.equal(project.floors[0].rooms[0].ha_area_id,'living');
   assert.equal(project.floors[0].items[0].entity_id,'light.ceiling');
   assert.equal(project.floors[0].walls.length,4);
@@ -58,6 +60,7 @@ const server = http.createServer((req, res) => {
   await page.waitForFunction(()=>window.server.revision===1 && !window.host._busy);
   assert.deepEqual(await page.evaluate(()=>window.server.project),project);
   await page.locator('#publish').click(); await page.waitForFunction(()=>window.server.published_revision===1);
+  if (process.env.STUDIO_SCREENSHOT) await page.screenshot({path:process.env.STUDIO_SCREENSHOT,fullPage:true});
   // Metadata and device mapping survive JSON export.
   const downloadEvent=page.waitForEvent('download'); await page.locator('#export').click();
   const downloaded=await downloadEvent;
@@ -98,7 +101,6 @@ const server = http.createServer((req, res) => {
   assert.equal(await page.evaluate(()=>window.server.project.title),'Imported portable drawing');
   assert.equal(await page.evaluate(()=>window.host._dirty()),true);
   assert.equal(await page.locator('#publish').isDisabled(),true);
-  if (process.env.STUDIO_SCREENSHOT) await page.screenshot({path:process.env.STUDIO_SCREENSHOT,fullPage:true});
   // An administrator role change immediately removes private authoring data.
   await page.evaluate(()=>{window.host.hass={...window.host._hass,user:{id:'test-user',is_admin:false}};});
   assert.equal(await page.locator('iframe').count(),0);
