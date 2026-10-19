@@ -766,6 +766,9 @@ function freshPreviewHarness(view = 'preview') {
   const document = {hidden:false,get activeElement(){return currentFocus;},querySelector:()=>({getBoundingClientRect:()=>{layoutReads++;return rect;}})};
   const window = new EventTarget();
   context=vm.createContext({AbortController,console,document,window,devicePixelRatio:2,
+    // This renderer-lifecycle fixture has no scenery; preserve its optional layer contract.
+    createEnvironmentControls:()=>({refresh(){}}),createEnvironmentLayer:()=>({setActive(){},dispose(){}}),
+    t:value=>value,floorBounds:()=>({minX:0,maxX:8,minZ:0,maxZ:10}),
     THREE:{WebGLRenderer:Renderer,Scene:Group,Group,Vector3:class {constructor(x,y,z){Object.assign(this,vector(),{x,y,z});}},HemisphereLight:Light,DirectionalLight:Light,
       PerspectiveCamera:class {constructor(){this.position=vector();}lookAt(){}updateProjectionMatrix(){} }},
     $:id=>id==='preview-canvas'?activeCanvas:id==='preview-error'?error:null,translatedText(){},
@@ -778,7 +781,8 @@ function freshPreviewHarness(view = 'preview') {
   vm.runInContext(`
     let previewDirty=true,canvasSuspended=false,spaceHeld=false,size={width:934,height:824},view=${JSON.stringify(view)};
     let firstResize=false,planSize='old',map={x:0,y:0};
-    const project={floors:[{items:[{position_m:{x:7,z:9}}]}]};
+    const project={floors:[{elevation_m:0,walls:[],items:[{position_m:{x:7,z:9}}]}]};
+    function displayedProject(){return project;}
     function requestCanvasRender(){if(!canvasSuspended&&!document.hidden)onSchedule(size);}
     ${section('function canvasPixelRatio(', 'let startupMessage')}
     ${section('let renderer =', 'function previewFloors()')}
