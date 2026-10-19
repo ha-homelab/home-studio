@@ -33,6 +33,7 @@ class MemoryStore:
     def __init__(self, hass, version, key, **options):
         self.hass, self.key = hass, key
         self.options = options
+        self._read_only = False
 
     async def async_load(self):
         return copy.deepcopy(self.hass.saved.get(self.key))
@@ -82,6 +83,7 @@ module("aiohttp")
 module("aiohttp.web", FileResponse=Response, HTTPNotFound=HTTPNotFound)
 module("homeassistant")
 module("homeassistant.core", callback=identity, Context=lambda **kwargs: kwargs)
+module("homeassistant.exceptions", HomeAssistantError=type("HomeAssistantError", (Exception,), {}))
 module("homeassistant.auth")
 module("homeassistant.auth.permissions")
 module("homeassistant.auth.permissions.const", POLICY_READ="read", POLICY_CONTROL="control")
@@ -118,6 +120,7 @@ from planner import project as compiler
 class Hass:
     def __init__(self, path):
         self.saved, self.data, self.fail_save = {}, {}, False
+        self.is_stopping = False
         self.executor_calls = []
         self.config = types.SimpleNamespace(path=lambda *parts: str(path.joinpath(*parts)))
         self.states = types.SimpleNamespace(get=lambda entity_id: None, async_all=lambda: [])
@@ -176,6 +179,18 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(connection.results[0]["html"])
         self.assertEqual(connection.results[0]["floors"], [])
         self.assertIsNotNone(state["native"])
+
+    async def test_unwritable_store_does_not_acknowledge_a_draft(self):
+        await self.project.save(0, sample())
+        previous = copy.deepcopy(self.project.document)
+        for stopping, read_only in ((True, False), (False, True)):
+            self.hass.is_stopping = stopping
+            self.project.store._read_only = read_only
+            with self.assertRaises(native.NativeError) as error:
+                await self.project.save(1, sample())
+            self.assertEqual(error.exception.code, "save_failed")
+            self.assertEqual(self.project.document, previous)
+            self.assertEqual(self.hass.saved[self.project.store.key], previous)
 
     async def test_unload_keeps_routes_inert_and_reload_reuses_registration(self):
         panels = []

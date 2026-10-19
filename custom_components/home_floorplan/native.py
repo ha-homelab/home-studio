@@ -13,6 +13,7 @@ import uuid
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,6 +31,27 @@ class NativeError(ValueError):
     def __init__(self, code, message):
         super().__init__(message)
         self.code = code
+
+
+class NativeStore(Store):
+    """Require a completed write before acknowledging a project transaction."""
+
+    async def async_save(self, data):
+        # Store normally defers saves during shutdown and silently accepts
+        # read-only saves. Neither outcome is a committed editor transaction.
+        if self.hass.is_stopping or self._read_only:
+            raise NativeError("save_failed", "Home Studio storage is not writable. Your previous saved project remains available.")
+        await super().async_save(data)
+
+    async def _async_write_data(self, data):
+        # Store._async_handle_write_data logs and swallows WriteError and
+        # SerializationError. Translate at its write hook so callers can keep
+        # their previous document and generation, while retaining HA's atomic
+        # writer, locking, cache invalidation, and storage envelope.
+        try:
+            await super()._async_write_data(data)
+        except (HomeAssistantError, OSError) as error:
+            raise NativeError("save_failed", "The project could not be saved. Your previous saved project remains available.") from error
 
 
 def compiler():
@@ -125,10 +147,14 @@ def load_generation(root, generation):
 class NativeProject:
     """Commit source and active generation together using HA's atomic private Store."""
 
-    def __init__(self, hass, root):
+    def __init__(self, hass, root=None):
         self.hass = hass
-        self.root = root
-        self.store = Store(hass, 1, "home_floorplan.studio", private=True, atomic_writes=True)
+        self.root = Path(root) if root is not None else Path(hass.config.path(".storage", "home_floorplan_studio_assets"))
+        # Earlier native builds nested assets under home_floorplan, but that
+        # name is also a regular Store file in older installations. New writes
+        # use a distinct directory; existing native generations remain readable.
+        self.legacy_root = Path(hass.config.path(".storage", "home_floorplan", "studio")) if root is None else None
+        self.store = NativeStore(hass, 1, "home_floorplan.studio", private=True, atomic_writes=True)
         self.document = {"revision": 0, "project": None, "published_revision": None,
                          "generation": None, "inventory": {}}
 
@@ -149,8 +175,16 @@ class NativeProject:
                 raise NativeError("invalid_storage", "Stored publication is missing its source project.")
             self.document = saved
         if self.document["generation"] is not None:
-            return await self.hass.async_add_executor_job(load_generation, self.root, self.document["generation"])
+            return await self.hass.async_add_executor_job(self._load_generation)
         return None
+
+    def _load_generation(self):
+        generation = self.document["generation"]
+        if (isinstance(generation, str) and GENERATION.fullmatch(generation)
+                and not (self.root / generation).exists() and self.legacy_root is not None
+                and (self.legacy_root / generation).is_dir()):
+            return load_generation(self.legacy_root, generation)
+        return load_generation(self.root, generation)
 
     def check_revision(self, revision):
         if type(revision) is not int or revision != self.document["revision"]:

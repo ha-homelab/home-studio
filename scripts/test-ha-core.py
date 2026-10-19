@@ -8,18 +8,22 @@ No listening socket, discovery integration or physical service is started.
 from __future__ import annotations
 
 import asyncio
+import copy
+import errno
 import importlib.util
 import json
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from homeassistant import auth
 from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_USER
 from homeassistant.components import frontend
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry, device_registry, entity_registry, floor_registry
+from homeassistant.util.file import WriteError
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -132,7 +136,7 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(view['can_edit'])
         with self.assertRaisesRegex(ValueError, 'conflict'):
             await self.request('project_save', revision=0, project=project)
-        native = self.integration.NativeProject(self.hass, Path(self.temp.name) / '.storage/home_floorplan/studio')
+        native = self.integration.NativeProject(self.hass)
         active = await native.load()
         self.assertEqual(native.document['project'], project)
         self.assertEqual(native.document['published_revision'], 1)
@@ -146,6 +150,84 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
             await self.request('project_publish', revision=2)
         after = await self.request('viewer', user=self.family)
         self.assertEqual(after['html'], view['html'])
+
+    async def test_disk_full_never_acknowledges_a_save_or_removes_the_active_generation(self):
+        project = json.loads((ROOT / 'planner/example-home.json').read_text())
+        await self.request('project_save', revision=0, project=project)
+        await self.request('project_publish', revision=1)
+        state = self.hass.data['home_floorplan']
+        native = state['native']
+        store_path = Path(native.store.path)
+        previous = copy.deepcopy(native.document)
+        previous_bytes = store_path.read_bytes()
+        assets = state['assets']
+        inventory = copy.deepcopy(state['data'])
+        changed = copy.deepcopy(project)
+        changed['title'] = 'A draft that must not be lost'
+        failure = WriteError(OSError(errno.ENOSPC, 'No space left on device'))
+
+        with patch.object(native.store, '_write_prepared_data', side_effect=failure):
+            for _ in range(2):
+                with self.assertRaisesRegex(ValueError, 'save_failed'):
+                    await self.request('project_save', revision=1, project=changed)
+            items = copy.deepcopy(inventory['main']['items'])
+            items[0]['name'] = 'A placement that was not saved'
+            with self.assertRaisesRegex(ValueError, 'save_failed'):
+                await self.request('save', floor='main', revision=inventory['main']['revision'], items=items)
+        self.assertEqual(native.document, previous)
+        self.assertEqual(state['data'], inventory)
+        self.assertEqual(store_path.read_bytes(), previous_bytes)
+
+        await self.request('project_save', revision=1, project=changed)
+        previous = copy.deepcopy(native.document)
+        previous_bytes = store_path.read_bytes()
+        with patch.object(native.store, '_write_prepared_data', side_effect=failure):
+            for _ in range(2):
+                with self.assertRaisesRegex(ValueError, 'save_failed'):
+                    await self.request('project_publish', revision=2)
+                self.assertEqual(native.document, previous)
+                self.assertEqual(state['data'], inventory)
+                self.assertEqual(state['assets'], assets)
+                self.assertEqual(store_path.read_bytes(), previous_bytes)
+                self.assertTrue((assets / 'main/index.html').is_file())
+                self.assertEqual(set(native.root.iterdir()), {assets})
+        reopened = self.integration.NativeProject(self.hass)
+        active = await reopened.load()
+        self.assertEqual(reopened.document, previous)
+        self.assertEqual(active[0], assets)
+        published = await self.request('project_publish', revision=2)
+        self.assertEqual(published['published_revision'], 2)
+        self.assertNotEqual(state['assets'], assets)
+        self.assertTrue((assets / 'main/index.html').is_file())
+
+    async def test_default_assets_do_not_collide_with_legacy_store_file(self):
+        storage = Path(self.temp.name) / '.storage'
+        storage.mkdir(exist_ok=True)
+        legacy = storage / 'home_floorplan'
+        legacy.write_text('{"legacy": "keep this inventory"}')
+        original = legacy.read_bytes()
+        native = self.integration.NativeProject(self.hass)
+        project = json.loads((ROOT / 'planner/example-home.json').read_text())
+        await native.save(0, project)
+        assets, *_ = await native.publish(1)
+        self.assertEqual(assets.parent, storage / 'home_floorplan_studio_assets')
+        self.assertEqual(legacy.read_bytes(), original)
+        reopened = self.integration.NativeProject(self.hass)
+        self.assertEqual((await reopened.load())[0], assets)
+
+    async def test_previous_native_assets_remain_readable_during_upgrade(self):
+        old_root = Path(self.temp.name) / '.storage/home_floorplan/studio'
+        old = self.integration.NativeProject(self.hass, old_root)
+        project = json.loads((ROOT / 'planner/example-home.json').read_text())
+        await old.save(0, project)
+        previous_assets, *_ = await old.publish(1)
+        native = self.integration.NativeProject(self.hass)
+        self.assertEqual((await native.load())[0], previous_assets)
+        assets, *_ = await native.publish(1)
+        self.assertEqual(assets.parent.name, 'home_floorplan_studio_assets')
+        self.assertTrue((previous_assets / 'main/index.html').is_file())
+        reopened = self.integration.NativeProject(self.hass)
+        self.assertEqual((await reopened.load())[0], assets)
 
     async def test_navigation_reload_keeps_storage_and_registration(self):
         state = self.hass.data['home_floorplan']
