@@ -38,7 +38,7 @@ SITE_FILES = (
     'index.html', 'site.css', 'privacy.html', 'install.html', 'ai-setup.html', '404.html', '.nojekyll',
     'planner/index.html', 'planner/editor.css', 'planner/editor.js', 'planner/floor-navigator.js', 'planner/floor-navigator.css', 'planner/render-capacity.js', 'planner/interaction-render.js',
     'planner/i18n.js', 'planner/validation.js', 'planner/locales/index.js',
-    'planner/draft-storage.js', 'planner/inspector-dom.js', 'planner/onboarding.js', *(f'planner/examples/{name}.js' for name in ('practice', 'decor', 'patterns', 'garage')),
+    'planner/ha-bridge.js', 'planner/draft-storage.js', 'planner/inspector-dom.js', 'planner/onboarding.js', *(f'planner/examples/{name}.js' for name in ('practice', 'decor', 'patterns', 'garage')),
     'planner/help.js', 'planner/help.css', 'planner/help-locales.js', 'planner/language-links.js',
     *(f'planner/locales/{code}.js' for code in LOCALE_CODES),
     'planner/model.js', 'planner/catalog.js', 'planner/furniture.js', 'planner/guide.html', 'planner/guide.css',
@@ -62,7 +62,7 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'scripts/build-panel-locales.py', 'scripts/test-dry-run-browser.cjs',
               'scripts/validate-docs.py', 'scripts/test-docs.py',
               *(f'docs/wiki/{name}.md' for name in ('Home', '_Sidebar', 'Getting-started', 'Dry-run', 'Troubleshooting', 'Languages', 'Development')),
-              'docs/images/home-studio-hero.jpg', 'scripts/render-docs-hero.sh',
+              'docs/images/home-studio-hero.jpg', 'docs/images/native-editor.png', 'scripts/render-docs-hero.sh',
               'docs/images/dry-run-command-flow.svg', 'docs/images/plan-state-lifecycle.svg',
               'docs/process-and-results.md', 'docs/images/dry-run-delivery-process.svg',
               'docs/images/dry-run-validation.svg', 'docs/data/dry-run-validation.json',
@@ -80,7 +80,7 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'docs/rc-fuzzing.md', 'docs/release-workflow.md', '.gitignore', '.gitattributes', 'scripts/validate-site.py', '.github/workflows/pages.yml',
               '.github/workflows/package.yml', '.github/workflows/platform-acceptance.yml',
               '.github/actions/upload-acceptance-artifact/action.yml',
-              'docs/architecture.md', 'docs/first-session.md', 'docs/dashboard-and-media.md', 'docs/platform-acceptance.md',
+              'docs/architecture.md', 'docs/first-session.md', 'docs/home-assistant-editor.md', 'docs/dashboard-and-media.md', 'docs/platform-acceptance.md',
               'docs/quality-and-release.md', 'docs/VERSIONING.md',
               'docs/assets/quality/release-pipeline.svg',
               'docs/assets/quality/browser-coverage.svg',
@@ -134,6 +134,16 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'assumed-zone-view.js', 'home-view.js', 'light-state.js', 'room-lighting.js',
               'custom_components/home_floorplan/__init__.py',
               'custom_components/home_floorplan/site.py',
+              'custom_components/home_floorplan/native.py',
+              'custom_components/home_floorplan/permissions.py',
+              'custom_components/home_floorplan/config_flow.py',
+              'custom_components/home_floorplan/strings.json',
+              'custom_components/home_floorplan/translations/en.json',
+              'custom_components/home_floorplan/static/studio.js',
+              'hacs.json', 'requirements-ha-test.txt',
+              'scripts/build-home-studio.py', 'scripts/test-ha-native.py',
+              'scripts/test-ha-project-metadata.py', 'scripts/test-ha-core.py',
+              'scripts/test-native-studio.cjs', 'scripts/test-family-view.cjs',
               'custom_components/home_floorplan/validation.py',
               'custom_components/home_floorplan/curtains.py',
               'custom_components/home_floorplan/manifest.json',
@@ -182,7 +192,7 @@ def validate(root):
             if path.read_bytes() != BINARY_REPLAY_SEEDS[relative]:
                 raise ValueError(f'Unexpected binary replay seed: {relative}')
             continue
-        if path.suffix == '.jpg' or relative == 'docs/images/dashboard-media-example.png':
+        if path.suffix == '.jpg' or relative in ('docs/images/dashboard-media-example.png', 'docs/images/native-editor.png'):
             continue
         text = path.read_text(encoding='utf-8')
         # The validator intentionally contains its own private-pattern tripwires.

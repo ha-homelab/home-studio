@@ -212,7 +212,11 @@ class HomeFloorplanPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({mode: 'open'});
-    this.shadowRoot.innerHTML = `<style>:host{display:flex;flex-direction:column;height:100dvh;min-height:0;background:#11191f}header{flex-shrink:0;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;font:14px system-ui;color:#b8c8d0}button{padding:8px 10px;cursor:pointer;background:#202d35;color:#e9eeef;border:1px solid #44515a;border-radius:7px;min-height:40px}#notice{flex:1;min-width:160px;overflow-wrap:anywhere}#dry-run[aria-pressed="true"]{border-color:#e8c56c;color:#ffe6a2}iframe{border:0;flex:1;width:100%;min-height:0}.error{color:#ffd19b}#recovery,#local-recovery{padding:20px;color:#e9eeef;font:14px/1.5 system-ui;overflow:auto}#recovery-details{white-space:pre-wrap;overflow-wrap:anywhere}button:disabled{opacity:.5}[hidden]{display:none!important}</style><header><button id="menu" aria-label="Open sidebar">☰</button><span id="notice" role="status">Connecting to Home Assistant…</span><button id="dry-run" type="button" aria-pressed="false">Dry run: Off</button><button id="retry">Reload saved plan</button></header><section id="local-recovery" hidden><h2>Unsaved layout edits</h2><p>The latest layout submitted by this card is retained in memory. Export it before reloading the saved plan. Keep this card open until you have saved the file.</p><button id="local-export">Export unsaved inventory JSON</button></section><section id="recovery" hidden><h2>Saved placements need repair</h2><p>Nothing has been overwritten. Export the original inventory, keep it as a backup, and edit a copy using the current floor and room IDs below. Importing the repaired copy replaces all saved floors only after validation.</p><pre id="recovery-details"></pre><button id="recovery-export">Export original inventory</button> <button id="recovery-import">Import repaired inventory</button><input id="recovery-file" type="file" accept="application/json,.json" hidden></section><iframe title="Private home floorplan" sandbox="allow-scripts allow-downloads allow-forms"></iframe>`;
+    this.shadowRoot.innerHTML = `<style>:host{display:flex;flex-direction:column;height:100dvh;min-height:0;background:#11191f}header{flex-shrink:0;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;font:14px system-ui;color:#b8c8d0}button{padding:8px 10px;cursor:pointer;background:#202d35;color:#e9eeef;border:1px solid #44515a;border-radius:7px;min-height:40px}#notice{flex:1;min-width:160px;overflow-wrap:anywhere}#dry-run[aria-pressed="true"]{border-color:#e8c56c;color:#ffe6a2}iframe{border:0;flex:1;width:100%;min-height:0}.error{color:#ffd19b}#recovery,#local-recovery{padding:20px;color:#e9eeef;font:14px/1.5 system-ui;overflow:auto}#recovery-details{white-space:pre-wrap;overflow-wrap:anywhere}button:disabled{opacity:.5}#studio{color:#a9e0ee;padding:8px;text-decoration:none}[hidden]{display:none!important}</style><header><button id="menu" aria-label="Open sidebar">☰</button><span id="notice" role="status">Connecting to Home Assistant…</span><button id="dry-run" type="button" aria-pressed="false">Dry run: Off</button><button id="retry">Reload saved plan</button><a id="studio" href="/home-studio" hidden>Open Home Studio</a></header><section id="local-recovery" hidden><h2>Unsaved layout edits</h2><p>The latest layout submitted by this card is retained in memory. Export it before reloading the saved plan. Keep this card open until you have saved the file.</p><button id="local-export">Export unsaved inventory JSON</button></section><section id="recovery" hidden><h2>Saved placements need repair</h2><p>Nothing has been overwritten. Export the original inventory, keep it as a backup, and edit a copy using the current floor and room IDs below. Importing the repaired copy replaces all saved floors only after validation.</p><pre id="recovery-details"></pre><button id="recovery-export">Export original inventory</button> <button id="recovery-import">Import repaired inventory</button><input id="recovery-file" type="file" accept="application/json,.json" hidden></section><iframe title="Private home floorplan" sandbox="allow-scripts allow-downloads allow-forms"></iframe>`;
+    this.serverCanEdit = false;
+    this.editLocked = false;
+    this.readableEntities = new Set();
+    this.controllableEntities = new Set();
     this.floor = null;
     this.floors = [];
     this.siteFeatures = false;
@@ -271,14 +275,26 @@ class HomeFloorplanPanel extends HTMLElement {
     };
   }
 
-  configureDashboard({floor, sidebarCollapsed = true, dryRun = false} = {}) {
+  configureDashboard({floor, sidebarCollapsed = true, dryRun = false, editLocked = false, deviceFilter = 'all', roomLabels = false} = {}) {
     if (this.started) throw Error('Configure the dashboard before connecting its floorplan.');
     this.initialFloor = floor;
     this.dashboard = true;
+    this.editLocked = editLocked;
+    this.viewPreferences.deviceFilter = deviceFilter;
+    this.viewPreferences.roomLabels = roomLabels;
     this.viewPreferences.sidebarCollapsed = sidebarCollapsed;
     this.$('menu').hidden = true;
     this.dryRunPinned ||= dryRun;
     this.applyDryRun(this.dryRun || this.dryRunPinned);
+  }
+
+  get canEdit() { return this.serverCanEdit === true && this._hass?.user?.is_admin === true && !this.editLocked; }
+  canControl(id) {
+    return this._hass?.user?.id && this.readableEntities?.has(id) && this.controllableEntities?.has(id) && this.savedItems.some(item => item.entity_id === id);
+  }
+  updateAccessUI() {
+    this.$('studio').hidden = !this.canEdit || this.runtimeMode !== 'native' || this.hasEditor !== true;
+    this.$('iframe',false).setAttribute?.('sandbox',this.canEdit ? 'allow-scripts allow-downloads allow-forms' : 'allow-scripts');
   }
 
   t(key, params = {}) {
@@ -355,7 +371,15 @@ class HomeFloorplanPanel extends HTMLElement {
   set hass(value) {
     if (this.localEdits && (this.localEdits.account !== value?.user?.id || value?.user?.is_admin === false)) this.discardLocalEdits();
     if (this._hass && (this._hass.user?.id!==value?.user?.id || this._hass.connection!==value?.connection)) {this.clearMediaArtwork();this.catalogSent=false;}
+    const changedAccount = this._hass && (this._hass.user?.id !== value?.user?.id || this._hass.user?.is_admin !== value?.user?.is_admin);
+    if (changedAccount) {
+      this.discardLocalEdits();this.serverCanEdit=false;this.recovery=null;this.savedItems=[];
+      this.readableEntities=new Set();this.controllableEntities=new Set();
+      this.disconnectedCallback();this.$('recovery').hidden=true;
+    }
     this._hass = value;
+    this.updateAccessUI();
+    if (changedAccount && this.isConnected) this.connectedCallback();
     const requestedLanguage=value?.locale?.language || value?.language;
     const language=this.explicitLanguage || (typeof requestedLanguage==='string' && requestedLanguage.trim() ? resolveViewerLanguage(requestedLanguage) || 'en' : null);
     if (language && language!==this.viewPreferences.language) {
@@ -363,7 +387,7 @@ class HomeFloorplanPanel extends HTMLElement {
       this.updateLanguageUI();
       this.port?.postMessage({type:'view_preferences',language});
     }
-    if (!this.started && this.isConnected) { this.started = true; this.loadFloor(); }
+    if (value?.user?.id && !this.started && this.isConnected) { this.started = true; this.loadFloor(); }
     this.publishEntityStates();
   }
   connectedCallback() {
@@ -373,7 +397,7 @@ class HomeFloorplanPanel extends HTMLElement {
     this.overlayDocument.addEventListener('keydown',this.onOverlayEscape,true);
     this.overlayDocument.addEventListener('pointerdown',this.onOverlayPointer,true);
     this.checkDryRunStorage();
-    if (this._hass && !this.started) { this.started = true; this.loadFloor(); }
+    if (this._hass?.user?.id && !this.started) { this.started = true; this.loadFloor(); }
   }
   disconnectedCallback() {
     this.suspendedEdits ||= !!this.localEdits && !!(this.pending || this.failed);
@@ -412,7 +436,7 @@ class HomeFloorplanPanel extends HTMLElement {
     if (this.shadowRoot) this.$('local-recovery').hidden=true;
   }
   exportLocalEdits() {
-    if (!this.localEdits || this.localEdits.account !== this._hass?.user?.id || this._hass?.user?.is_admin === false) return;
+    if (!this.canEdit || !this.localEdits || this.localEdits.account !== this._hass?.user?.id) return;
     this.download(new Blob([this.localEdits.json],{type:'application/json'}),this.localEdits.model+'-unsaved-inventory.json');
   }
   showLocalEditRecovery() {
@@ -422,23 +446,26 @@ class HomeFloorplanPanel extends HTMLElement {
     this.notice('Unsaved layout edits are retained in this card. Export JSON before reloading.',true);
   }
   exportRecovery() {
-    if (!this.recovery) return;
+    if (!this.canEdit || !this.recovery) return;
     this.download(new Blob([JSON.stringify(this.recovery.backup, null, 2) + '\n'], {type:'application/json'}), 'home-floorplan-original-inventory.json');
   }
   async importRecovery(file) {
     const recovery = this.recovery, generation = this.generation;
-    if (!recovery || this.pending) return;
+    if (!this.canEdit || !recovery || this.pending) return;
     let applied = false;
     try {
       if (file.size > Math.max(5000000, new Blob([JSON.stringify(recovery.backup)]).size * 2)) throw Error('Recovery file is too large.');
       const value = JSON.parse(await file.text());
-      if (generation !== this.generation || recovery !== this.recovery || !this.isConnected) return;
+      if (!this.canEdit || generation !== this.generation || recovery !== this.recovery || !this.isConnected) return;
       if (value?.schema_version !== 1 || value.site_id !== recovery.backup.site_id || value.recovery_token !== recovery.token)
         throw Error('Use a repaired copy of the current original export. Reload and export again if the build changed.');
       if (!confirm('Replace all saved floor inventories with this repaired file? Removed floors and omitted objects will be removed. Keep the original export as a backup.')) return;
       this.pending++;
       this.$('recovery-import').disabled = true;
-      const operation = this.queue.then(() => this._hass.callWS({type:'home_floorplan/recover', token:value.recovery_token, site_id:value.site_id, floors:value.floors}));
+      const operation = this.queue.then(() => {
+        if (!this.canEdit || generation !== this.generation || recovery !== this.recovery || !this.isConnected) throw Error('The Home Assistant session changed before recovery.');
+        return this._hass.callWS({type:'home_floorplan/recover', token:value.recovery_token, site_id:value.site_id, floors:value.floors});
+      });
       this.queue = operation.catch(() => {});
       try { await operation; applied = true; }
       finally { this.pending--; }
@@ -455,14 +482,16 @@ class HomeFloorplanPanel extends HTMLElement {
     const validId=id=>typeof id==='string'&&/^[a-z_]+\.[a-z0-9_]{1,137}$/.test(id);
     // The picker needs names, not every device's raw state or unrelated attributes.
     // Refresh the catalog with the floor/session; live state is limited to this plan.
-    if(this.scopedStates&&!this.catalogSent){
+    if(this.canEdit&&this.scopedStates&&!this.catalogSent){
       this.port.postMessage({type:'entity_catalog',entities:Object.entries(this._hass.states).filter(([id])=>validId(id)).slice(0,20000).map(([id,entity])=>[id,String(entity.attributes?.friendly_name||id).slice(0,200)])});
       this.catalogSent=true;
     }
     const needed=new Set(['sun.sun',...this.savedItems.map(item=>item.entity_id),...(this.displayEntities||[])].filter(validId));
     for(const id of [...needed]){const guard=this.curtains?.profiles?.[id]?.guard;if(validId(guard))needed.add(guard);}
+    // The host uses server-issued scope; a child cannot request unrelated states.
+    const permitted = new Set([...needed].filter(id => this.readableEntities?.has(id)));
     // Preserve recovery controls even while a bound motor is absent from HA.
-    const available=[...(this.scopedStates?needed:new Set([...needed,...Object.keys(this._hass.states)]))].map(id=>[id,this._hass.states[id]||(id.startsWith('cover.')?{state:'unavailable',attributes:{}}:null)]).filter(([,entity])=>entity);
+    const available=[...(this.canEdit&&!this.scopedStates ? new Set([...permitted,...Object.keys(this._hass.states)]) : permitted)].map(id=>[id,this._hass.states[id]||(id.startsWith('cover.')?{state:'unavailable',attributes:{}}:null)]).filter(([,entity])=>entity);
     const states = Object.fromEntries(available.map(([id, entity]) => {
       const {state, attributes, last_changed, last_updated} = entity;
       const cover = id.startsWith('cover.');
@@ -475,7 +504,7 @@ class HomeFloorplanPanel extends HTMLElement {
         if (Number.isFinite(position) && position >= 0 && position <= 100) this.curtains.memory[id] = {position, observed_at:last_updated};
       }
       return [id, {
-        state:String(state??'unknown').slice(0,256), name:String(attributes.friendly_name || id).slice(0,200), last_changed, last_updated, restored:!!attributes.restored,
+        can_control:!!this.canControl(id), state:String(state??'unknown').slice(0,256), name:String(attributes.friendly_name || id).slice(0,200), last_changed, last_updated, restored:!!attributes.restored,
         unit:String(attributes.unit_of_measurement || '').slice(0,40), device_class:String(attributes.device_class || '').slice(0,40),
         // Forward only display attributes; credentials and unrelated metadata stay in HA.
         ...(mediaEntities.has(id) ? {media:Object.fromEntries(['title','artist','album'].map(key=>{
@@ -643,6 +672,7 @@ class HomeFloorplanPanel extends HTMLElement {
     this.viewerNavigation = null;
   }
   async loadFloor(floor = this.initialFloor) {
+    if (!this._hass?.user?.id) return;
     if (this.suspendedEdits && this.localEdits) {this.showLocalEditRecovery();return;}
     this.notice('Loading private model…');
     this.clearViewerLoad();
@@ -652,6 +682,7 @@ class HomeFloorplanPanel extends HTMLElement {
     clearTimeout(this.cameraTimer);this.cameraTimer=null;
     for(const tv of Object.values(this.tvFrames)){clearTimeout(tv.timer);tv.timer=null;tv.source=null;}
     this.resetModelConfig();
+    this.serverCanEdit=false;this.readableEntities=new Set();this.controllableEntities=new Set();this.updateAccessUI();
     const generation = this.generation = (this.generation || 0) + 1;
     try {
       if (!this.curtainSubscription && this._hass.connection?.subscribeMessage) {
@@ -673,11 +704,17 @@ class HomeFloorplanPanel extends HTMLElement {
       this.failed=false;
       const result = await this._hass.callWS({type:'home_floorplan/viewer', ...(floor ? {floor} : {})});
       if (!this.isCurrent(generation)) return;
+      this.serverCanEdit = result.can_edit === true;
+      this.runtimeMode = result.mode;this.hasEditor = result.has_editor === true;
+      this.updateAccessUI();
+      const bound = (result.items || []).map(item => item.entity_id).filter(id => typeof id === 'string');
+      this.readableEntities = new Set(Array.isArray(result.readable_entities) ? result.readable_entities : bound);
+      this.controllableEntities = new Set(Array.isArray(result.controllable_entities) ? result.controllable_entities : this._hass.user.is_admin === true ? bound : []);
       this.floor = result.floor || floor || result.floors?.[0] || null;
       this.floors = result.floors || (this.floor ? [this.floor] : []);
       this.siteFeatures = result.site_features !== false;
       const iframe = this.$('iframe',false);
-      this.recovery = result.recovery || null;
+      this.recovery = this.canEdit ? result.recovery || null : null;
       this.$('recovery').hidden = !this.recovery;
       iframe.hidden = !!this.recovery;
       if (this.recovery) {
@@ -687,6 +724,13 @@ class HomeFloorplanPanel extends HTMLElement {
         this.viewerURL = null;
         this.$('recovery-details').textContent = [...this.recovery.issues, '', 'Current floors and room IDs:', ...Object.entries(this.recovery.backup.rooms).map(([id, rooms]) => `${id}: ${rooms.join(', ')}`)].join('\n');
         this.notice('Saved inventory does not match this build. Export and repair it below.', true);
+        return;
+      }
+      if (!result.html) {
+        iframe.onload=null;iframe.removeAttribute('src');iframe.removeAttribute('srcdoc');iframe.hidden=true;
+        if (this.viewerURL) URL.revokeObjectURL(this.viewerURL);this.viewerURL=null;
+        this.savedItems=[];
+        this.notice(this.canEdit ? 'Create and publish your first plan in Home Studio.' : 'No published home plan is available. Ask an administrator to publish one.');
         return;
       }
       this.revision = result.revision; this.savedItems = result.items;
@@ -699,8 +743,8 @@ class HomeFloorplanPanel extends HTMLElement {
         this.port = channel.port1;
         this.port.onmessage = event => this.handleViewerMessage(event.data, generation);
         // An opaque sandbox has origin "null"; verify the parent in the viewer.
-        iframe.contentWindow.postMessage({type:'home-floorplan:init', items:result.items,preferences:this.viewPreferences}, '*', [channel.port2]);
-        this.publishEntityStates(); this.noticeKey('Connected · placements are saved in Home Assistant');
+        iframe.contentWindow.postMessage({type:'home-floorplan:init', items:result.items,can_edit:this.canEdit,preferences:this.viewPreferences}, '*', [channel.port2]);
+        this.publishEntityStates(); this.canEdit ? this.noticeKey('Connected · placements are saved in Home Assistant') : this.notice('Home controls · layout locked');
         this.tvVisibility ||= () => {this.refreshTVFrame();this.refreshCameraFrames();this.refreshMediaArtwork();};
         document.addEventListener('visibilitychange',this.tvVisibility);
       };
@@ -728,7 +772,8 @@ class HomeFloorplanPanel extends HTMLElement {
     finally { this.notifySaveStatus(); }
   }
   handleViewerMessage(message, generation) {
-    if (generation !== this.generation || this._hass?.user?.is_admin===false || this.recovery || !message || typeof message !== 'object') return;
+    if (generation !== this.generation || !this._hass?.user?.id || this.isConnected === false || this.recovery || !message || typeof message !== 'object') return;
+    if (['save','export'].includes(message.type) && !this.canEdit) return;
     // Only non-device messages pass in dry run. This also blocks native HA
     // more-info dialogs, which expose controls outside the sandbox, and future
     // command types until their behavior has been explicitly classified.
@@ -737,11 +782,11 @@ class HomeFloorplanPanel extends HTMLElement {
     if (message.type === 'model_config') {
       if(this.modelConfigured)return;
       this.modelConfigured=true;
-      this.scopedStates=Array.isArray(message.state_entities);
-      this.displayEntities=new Set((Array.isArray(message.state_entities)?message.state_entities:[]).slice(0,2000).filter(id=>typeof id==='string'&&/^[a-z_]+\.[a-z0-9_]{1,137}$/.test(id)));
+      this.scopedStates=!this.canEdit || Array.isArray(message.state_entities);
+      this.displayEntities=new Set((Array.isArray(message.state_entities)?message.state_entities:[]).slice(0,2000).filter(id=>typeof id==='string'&&/^[a-z_]+\.[a-z0-9_]{1,137}$/.test(id)&&this.readableEntities.has(id)));
       this.inventoryModel=typeof message.model_id==='string' && /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(message.model_id) ? message.model_id : null;
-      const sensor=id=>typeof id==='string'&&/^sensor\.[a-z0-9_]+$/.test(id);
-      const bindings=(value,domain)=>Object.entries(value||{}).filter(([item,id])=>/^[A-Za-z_][A-Za-z0-9_]*$/.test(item)&&typeof id==='string'&&id.startsWith(domain+'.'));
+      const sensor=id=>typeof id==='string'&&/^sensor\.[a-z0-9_]+$/.test(id)&&this.readableEntities.has(id);
+      const bindings=(value,domain)=>Object.entries(value||{}).filter(([item,id])=>/^[A-Za-z_][A-Za-z0-9_]*$/.test(item)&&typeof id==='string'&&id.startsWith(domain+'.')&&this.readableEntities.has(id));
       this.tvFrames=Object.fromEntries(bindings(message.tv_entities,'media_player').map(([item,id])=>{
         return [item,this.tvFrameCache[item+':'+id]??={entity_id:id,source:null}];
       }));
@@ -758,6 +803,8 @@ class HomeFloorplanPanel extends HTMLElement {
           try {localStorage.setItem('home-floorplan:sidebar-collapsed',String(message.sidebarCollapsed));} catch {}
         }
       }
+      if (['all','controls'].includes(message.deviceFilter)) this.viewPreferences.deviceFilter=message.deviceFilter;
+      if (typeof message.roomLabels==='boolean') this.viewPreferences.roomLabels=message.roomLabels;
       // Accept only advertised canonical codes from the established MessagePort.
       if(viewerLanguages.includes(message.language)) {
         this.viewPreferences.language=this.explicitLanguage=message.language;
@@ -770,7 +817,7 @@ class HomeFloorplanPanel extends HTMLElement {
       }
     } else if (message.type === 'save') {
       const floor = this.floor, hass = this._hass, account = hass.user?.id, connection = hass.connection;
-      const current = () => generation===this.generation && this.isConnected!==false && this._hass.user?.id===account;
+      const current = () => this.canEdit && generation===this.generation && this.isConnected!==false && this._hass.user?.id===account;
       // Keep only the newest bounded submission; detached iframe documents cannot be recovered.
       let snapshot;
       try {
@@ -792,6 +839,8 @@ class HomeFloorplanPanel extends HTMLElement {
         const result = await hass.callWS({type:'home_floorplan/save', floor, revision:this.revision, items:message.items});
         if (!current()) throw Error('The Home Assistant session changed while saving. Export JSON before reloading.');
         this.revision = result.revision; this.savedItems = message.items;
+        if (Array.isArray(result.readable_entities)) this.readableEntities = new Set(result.readable_entities);
+        if (Array.isArray(result.controllable_entities)) this.controllableEntities = new Set(result.controllable_entities);
         this.publishEntityStates();
         if (this.localEdits===snapshot) this.discardLocalEdits();
         this.refreshMediaArtwork();
@@ -816,7 +865,7 @@ class HomeFloorplanPanel extends HTMLElement {
       const curtain = message.type === 'curtain_command', tvPower = message.type === 'tv_power';
       const id = message.entity_id;
       // Reply only to the originating floor's channel.
-      const port = this.port;
+      const port = this.port, account=this._hass.user.id, connection=this._hass.connection;
       const result = (ok, error_key, error_params = {}) => {
         if (generation !== this.generation || port !== this.port) return;
         const error=error_key ? this.t(error_key,error_params) : undefined;
@@ -825,7 +874,7 @@ class HomeFloorplanPanel extends HTMLElement {
         else if (ok && !this.dryRun && !this.pending && !this.failed) this.noticeKey('Command sent · device state updates live');
       };
       if (this.pending || this.failed) return result(false, 'Wait for placements to save successfully before controlling devices.');
-      if (!this.savedItems.some(item => item.entity_id === id)) return result(false, 'This device is not linked to the saved plan.');
+      if (!this.canControl(id)) return result(false, 'You do not have permission to control this device.');
       const domain = typeof id === 'string' ? id.split('.')[0] : '';
       if (this._hass.connected === false || (curtain ? domain !== 'cover' : tvPower ? domain !== 'media_player' || !['turn_on','turn_off'].includes(message.action) || !['on','off','playing','paused','idle','buffering'].includes(this._hass.states[id]?.state) :
         !['light','switch','input_boolean','fan'].includes(domain) || !['on','off'].includes(this._hass.states[id]?.state))) return result(false, 'This device is unavailable or Home Assistant is disconnected.');
@@ -833,7 +882,7 @@ class HomeFloorplanPanel extends HTMLElement {
       this.commands.add(id);
       const dryRunEpoch=this.dryRunEpoch;
       Promise.resolve().then(async () => {
-        if (generation !== this.generation || port !== this.port) return;
+        if (generation !== this.generation || port !== this.port || account!==this._hass.user?.id || connection!==this._hass.connection || !this.canControl(id) || this._hass.connected===false) return;
         // The user may enable dry run after clicking but before dispatch.
         if (this.blockDeviceCommand(message,dryRunEpoch!==this.dryRunEpoch)) return;
         if (curtain) await this._hass.callWS({type:'home_floorplan/curtain_command',entity_id:id,action:message.action,...(message.action==='set_cover_position'?{position:message.position}:{})});
@@ -850,11 +899,11 @@ class HomeFloorplanPanel extends HTMLElement {
     const {entity_id:id,action,value,request_id}=message;
     const port=this.port,hass=this._hass,account=hass.user?.id,connection=hass.connection;
     const current=()=>generation===this.generation&&port===this.port&&this.isConnected!==false&&
-      this._hass.user?.id===account&&this._hass.user?.is_admin!==false&&this._hass.connection===connection;
+      this._hass.user?.id===account&&this._hass.connection===connection;
     const reply=(ok,error)=>{if(current())port?.postMessage({type:'command_result',request_id,entity_id:id,ok,...(error?{error}: {})});};
     if(typeof request_id!=='string'||!/^media_[a-zA-Z0-9_]{1,80}$/.test(request_id))return;
     const bound=()=>typeof id==='string'&&/^media_player\.[a-z0-9_]+$/.test(id)&&this.savedItems.some(item=>item.entity_id===id);
-    const ready=()=>bound()&&!this.pending&&!this.failed&&this._hass.connected!==false&&mediaCommandAllowed(this._hass.states[id],action,value);
+    const ready=()=>bound()&&this.canControl(id)&&!this.pending&&!this.failed&&this._hass.connected!==false&&mediaCommandAllowed(this._hass.states[id],action,value);
     if(!bound())return reply(false,'This device is not linked to the saved plan.');
     if(!ready())return reply(false,'This media control is unavailable. Check the device and saved placement.');
     if(this.commands.has(id))return reply(false,'A command for this device is already in progress.');
@@ -871,7 +920,10 @@ class HomeFloorplanPanel extends HTMLElement {
     finally {this.commands.delete(id);}
   }
   async downloadModel(format) {
+    if (!this.canEdit) return;
+    const account=this._hass.user.id,generation=this.generation;
     const result = await this._hass.callWS({type:'home_floorplan/export', floor:this.floor, format});
+    if (!this.canEdit || this._hass.user.id!==account || this.generation!==generation) return;
     const bytes = Uint8Array.from(atob(result.base64), char => char.charCodeAt(0));
     this.download(new Blob([bytes], {type:'application/octet-stream'}), result.filename);
   }

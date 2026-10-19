@@ -5,12 +5,14 @@ import json
 import re
 
 
-def load_site(root, fallback=None):
+def load_site(root, fallback=None, *, allow_empty=False):
     """Require generated metadata unless the host supplies trusted local config."""
     path = root / "site.json"
     if not path.exists():
         if fallback is None:
-            raise ValueError("Missing site.json; install a complete generated Home studio package")
+            if allow_empty:
+                return {"schema_version": 1, "site_id": None, "default_floor": None, "floors": {}, "site_features": False}
+            raise ValueError("Missing site.json; install a complete generated Home Studio package")
         return copy.deepcopy(fallback)
     if path.stat().st_size > 65536:
         raise ValueError("Site manifest exceeds 64 KiB")

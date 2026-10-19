@@ -36,7 +36,7 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   await frame.locator('#homeRoom').waitFor();
   await page.evaluate(items=>{
    const channel=new MessageChannel();window.messages=[];window.channel=channel.port1;channel.port1.onmessage=event=>messages.push(event.data);
-   document.querySelector('iframe').contentWindow.postMessage({type:'home-floorplan:init',items},'*',[channel.port2]);
+   document.querySelector('iframe').contentWindow.postMessage({type:'home-floorplan:init',can_edit:true,items},'*',[channel.port2]);
    window.states={
     'sensor.cold':{state:'-12.5',unit:'°C',device_class:'temperature'},
     'binary_sensor.entry':{state:'on',device_class:'door'},'binary_sensor.motion':{state:'off',device_class:'motion'},

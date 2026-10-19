@@ -24,7 +24,8 @@ function fixture({storage=new Map(),search='',storageFails=false}={}){
   panel.generation=1;panel.port={postMessage:message=>sent.push(plain(message))};
   const ids=['light.lamp','switch.relay','input_boolean.helper','fan.room','cover.curtain','media_player.tv','lock.door'];
   panel.savedItems=ids.map(entity_id=>({entity_id}));
-  panel._hass={connected:true,states:Object.fromEntries(ids.map(id=>[id,{state:id==='lock.door'?'locked':'on'}])),
+  panel.controllableEntities=new Set(ids);panel.readableEntities=new Set(ids);
+  panel._hass={user:{id:'admin',is_admin:true},connected:true,states:Object.fromEntries(ids.map(id=>[id,{state:id==='lock.door'?'locked':'on'}])),
     callService:async(...args)=>calls.push(['service',...args]),callWS:async message=>calls.push(['ws',plain(message)])};
   const send=message=>panel.handleViewerMessage(message,panel.generation);
   return {panel,send,sent,calls,events,storage};

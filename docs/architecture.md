@@ -7,7 +7,47 @@ bindings, deployment details, and specialized adapters outside the public repo.
 See the [illustrated quality and release guide](quality-and-release.md) for how
 we test both browser paths, recover graphics resources, and qualify a release.
 
-## From drawing to installed panel
+## Two hosts, one project and compiler
+
+The [native editor guide](home-assistant-editor.md) describes the user workflow.
+Both hosts use the same `planner` modules and metric project schema; the native
+release packages reviewed source files without maintaining a second editor.
+Optional `ha_floor_id` and `ha_area_id` fields preserve registry associations
+without replacing stable drawing IDs. Area membership helps select entities;
+it never infers measured geometry.
+
+### Inside Home Assistant
+
+`static/studio.js` runs in the authenticated HA frontend and owns the WebSocket
+connection. It hosts the editor in an opaque sandbox, validates its message
+source and session, and passes only project data and a bounded registry catalog.
+`planner/ha-bridge.js` gives the shared editor an explicit native mode. No HA
+token enters the sandbox, public website, exported project or generated viewer.
+
+`native.py` stores the editable source with revisions using HA private storage.
+Saving permits unfinished floors; publishing requires the compiler's full
+validation. Compilation runs in an executor and creates an independent generation.
+Only a successful build and persisted revision replace the active publication.
+A validation/build/storage failure retains the last working plan. Revision
+checks reject stale saves and publication attempts from other tabs.
+
+The source and active-generation pointer share the private
+`home_floorplan.studio` Store. Generated files use the separate
+`.storage/home_floorplan_studio_assets` directory; the legacy
+`.storage/home_floorplan` placement file remains untouched. Native writes must
+complete before the server acknowledges them. The Store adapter propagates
+write errors rather than accepting Home Assistant's logged-only failure path;
+real-Core tests cover failed draft, placement and repeated publication writes.
+Existing generations remain readable across updates, and in-flight viewer and
+export reads retain their opened file while later publications clean up paths.
+
+A config flow registers the integration without a generated home or YAML.
+Saved native source and generated assets live outside integration code, so an
+update can replace code without deleting the drawing. `scripts/build-home-studio.py` constructs
+the native release ZIP from explicit shared-source allowlists. It contains no
+household source, state, credentials or runtime-generated assets.
+
+### Separate browser and portable installation
 
 The [AI-assisted authoring workflow](ai-planning.md) adds an optional loopback
 companion for personal provider sessions, photo processing and validated drafts.
@@ -16,7 +56,7 @@ installed viewer. See [AI architecture](ai-planner-architecture.md) for the impl
 request, privacy, geometry and transactional preview boundaries.
 
 1. **Browser editor:** `planner/index.html`, `editor.js`, and `model.js` edit a
-   versioned metric project. The draft stays in browser storage. Exporting JSON
+   versioned metric project. In this mode, the draft stays in browser storage. Exporting JSON
    makes a portable source file; the browser does not contact Home Assistant.
 2. **Local compiler:** `scripts/build-planner-project.py` calls
    `planner/project.py`. It validates the source, generates floor geometry and
@@ -31,13 +71,30 @@ request, privacy, geometry and transactional preview boundaries.
    an HA endpoint, copy a token, or start or stop a running service.
 4. **Home Assistant integration:** the installed backend loads the project's
    `site.json` and floor assets. The generic `static/panel.js` uses Home
-   Assistant's authenticated connection to display **3D Home** to administrators.
+   Assistant's authenticated connection to display **3D Home** to authorized users.
    Private floor assets are delivered through authenticated backend commands.
 
 The [installation guide](https://ha-homelab.github.io/home-studio/install.html)
 covers the commands, manual YAML entry, restart, and Home Assistant OS file
-transfer. Installation is a local file operation, not a hosted wizard or HACS
-installation flow.
+transfer. This portable route remains a local file operation. The native release is a
+separate integration installation route; it does not automatically migrate
+customized generated homes.
+
+## Permissions and editing roles
+
+The server limits source editing, registry authoring, layout saving and
+publication to administrators. A viewer receives explicit read/control scope
+lists and an edit capability; editing defaults to disabled until granted.
+Before sending a generated HTML model, the server checks read permission for
+all entity references used by that floor. A restricted floor is rejected in
+full rather than leaking identifiers through embedded JavaScript. Curtain
+subscriptions and commands enforce their own entity permissions as well.
+
+The dashboard card may additionally lock editing for administrators. Client
+controls honor the server scope, but UI hiding never replaces server checks.
+A role/account change tears down the old viewer and capabilities. An unpublished
+native source draft cannot be silently overwritten by a placement save from
+an older published viewer.
 
 ## Dashboard embedding and media artwork
 
@@ -633,7 +690,12 @@ short connections. Conservative bounds may omit a card even when a small visible
 gap exists; they never deliberately cover a room to display media.
 
 TV cards reuse the last decoded frame from `tv-screen.js`, including its existing
-failure-retention rules. An explicitly off TV shows a compact power control.
+failure-retention rules. Without a frame or cover image, a media card becomes a
+round launcher; the shared fixed-position controls do not expand its placement
+bounds. Hover, focus and touch open controls without sending commands. TV
+launchers expose power and native HA details; audio launchers also expose their
+advertised playback and volume controls. Hidden or removed anchors dismiss the
+popup. An image arriving replaces the launcher with the normal picture card.
 Unavailable, disconnected and missing states are not presented as off. The card
 title opens the full Home Assistant entity controls. Power sends an explicit
 `tv_power` request with `turn_on` or `turn_off`: the host accepts only saved

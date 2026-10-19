@@ -1,8 +1,8 @@
 # Put your home on a dashboard, with media artwork
 
-Available in the 0.9.0 beta series after the initial floor-navigation beta.
-Use the release notes to select a beta that includes **dashboard cards and
-media artwork**. Stable 0.8.0 and the first 0.9.0 beta do not include these features.
+Dashboard cards and media artwork are included from 0.9.0. The current
+integration also supports family accounts, with editing reserved for
+administrators and device access checked against Home Assistant permissions.
 
 ![A fictional home inside a dashboard card, showing a media cover in free space.](images/dashboard-media-example.png)
 
@@ -13,20 +13,24 @@ verification.
 ## Upgrade the installed home first
 
 Keep your exported project JSON and project ID, make a Home Assistant backup,
-and rebuild with the new beta toolkit. Follow the
+and rebuild with the current toolkit if you use the portable installation. Follow the
 [update instructions](https://ha-homelab.github.io/home-studio/install.html#updates)
 and, for Home Assistant OS, the
 [Samba transfer steps](https://ha-homelab.github.io/home-studio/install.html#haos).
 Stop Core before replacing the component; check the configuration and start Core
 afterward. Refresh the browser once the replacement is complete.
 
+For a native installation, update the integration package and restart HA;
+its saved drawing and published home are stored separately from code. See the
+[native editor guide](home-assistant-editor.md).
+
 Updating the hosted drawing editor does not change a previously generated home.
 The ordinary **3D Home** sidebar panel remains available after this upgrade.
 
 ## Add a dashboard card
 
-1. Sign into Home Assistant as an administrator. The card has the same
-   administrator requirement as the full sidebar panel.
+1. Sign into Home Assistant as an administrator to configure the dashboard.
+   Family accounts can use the published card without editing permission.
 2. Open **Settings → Dashboards → Resources**. Enable Advanced mode in your
    profile if Resources is not visible. Add a **JavaScript module** resource:
 
@@ -41,12 +45,20 @@ The ordinary **3D Home** sidebar panel remains available after this upgrade.
    height: 600
    sidebar_collapsed: true
    dry_run: true
+   edit_locked: true
+   room_labels: false
+   device_filter: all
    ```
 
 4. Verify the home and its bindings. `dry_run: true` keeps real device commands
    blocked for this card. Remove it or set it to `false` when you intend to use
    live controls. The existing remembered dry-run preference can still keep
    commands blocked; the card's status tells you which mode is active.
+
+`edit_locked: true` hides layout-editing tools even for administrators.
+`room_labels` toggles room names; `device_filter: controls` hides passive sensor
+markers while `all` includes them. These display choices do not change device
+states, bindings, or account permissions.
 
 The optional `floor` field selects the initial floor by its **ID**, for example
 `floor: main`. Use the ID from your project JSON, not the display name. Omit it
@@ -72,6 +84,10 @@ has cover artwork available in that entity's normal Home Assistant controls.
 Return to **Home view**. The media callout displays available cover artwork and
 track information when there is free space beside the plan.
 
+When the player is off or has no image, its callout becomes a small round button.
+Hover, focus or tap it to see the current status and available controls. Power is
+a separate action inside those controls; hovering never turns a device on.
+
 This is the album cover or other artwork supplied by the media integration.
 It is not a screenshot of the TV, a video stream, or an automatic camera feed.
 An existing private TV-capture adapter keeps priority for its configured screens.
@@ -92,11 +108,11 @@ stale artwork. Images remain in memory and are not added to your project JSON.
 
 ## Troubleshooting
 
-- **Custom element does not exist:** rebuild and reinstall with a beta containing
-  this feature, check that `/home-floorplan-static/card.js` loads, and register it
+- **Custom element does not exist:** update or rebuild the installed integration, check that `/home-floorplan-static/card.js` loads, and register it
   as a JavaScript module. Then refresh the dashboard.
-- **Access is restricted:** the generic viewer is administrator-only. Adding a
-  card does not bypass the backend permission check.
+- **Access is restricted:** the user must be allowed to read every entity referenced by
+  that floor. Adding a card does not bypass backend permissions; only
+  administrators can edit its layout.
 - **Wrong initial floor:** use the exact floor ID from your own project JSON.
 - **No artwork:** check the media player's native HA controls and its saved
   binding. Unsupported, oversized, or malformed images are rejected. Off and

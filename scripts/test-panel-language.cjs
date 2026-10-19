@@ -16,7 +16,7 @@ function fixture({ denied = false } = {}) {
   });
   vm.runInContext(fs.readFileSync(path.join(root, 'custom_components/home_floorplan/static/panel.js'), 'utf8'), context);
   const panel = Object.assign(Object.create(Panel.prototype), {
-    generation: 1, started: true, viewPreferences: { sidebarCollapsed: false },
+    generation: 1, started: true, _hass:{user:{id:'fixture-admin',is_admin:true}}, updateAccessUI(){}, viewPreferences: { sidebarCollapsed: false },
     port: { postMessage(message) { sent.push(JSON.parse(JSON.stringify(message))); } },
     publishEntityStates() {}, loadFloor() { calls.push('load'); },
   });
@@ -36,13 +36,13 @@ test('host languages match the embedded viewer and normalize HA regional tags', 
 
 test('HA language follows updates until an explicit viewer choice wins', () => {
   const { panel, sent, stored, calls } = fixture();
-  panel.hass = { locale: { language: 'ru-RU' } };
-  panel.hass = { locale: { language: 'ru-RU' } };
+  panel.hass = { user:{id:'fixture-admin',is_admin:true}, locale: { language: 'ru-RU' } };
+  panel.hass = { user:{id:'fixture-admin',is_admin:true}, locale: { language: 'ru-RU' } };
   assert.deepEqual(sent, [{ type: 'view_preferences', language: 'ru' }]);
-  panel.hass = { language: 'de' };
+  panel.hass = { user:{id:'fixture-admin',is_admin:true}, language: 'de' };
   assert.equal(sent.at(-1).language, 'de');
   panel.handleViewerMessage({ type: 'view_preferences', language: 'ar' }, 1);
-  panel.hass = { locale: { language: 'fr' } };
+  panel.hass = { user:{id:'fixture-admin',is_admin:true}, locale: { language: 'fr' } };
   assert.equal(panel.viewPreferences.language, 'ar');
   assert.equal(stored.get('home-studio.language.v1'), 'ar');
   assert.equal(sent.length, 2, 'no HA update can overwrite the explicit choice');
@@ -68,20 +68,20 @@ test('language and sidebar preference updates are independent and validated', ()
 
 test('unsupported HA profile languages fall back to English, including after an update', () => {
   const { panel, sent } = fixture();
-  panel.hass = { locale: { language: 'sv' } };
+  panel.hass = { user:{id:'fixture-admin',is_admin:true}, locale: { language: 'sv' } };
   assert.equal(panel.viewPreferences.language, 'en');
-  panel.hass = { locale: { language: 'ru' } };
-  panel.hass = { locale: { language: 'sv' } };
+  panel.hass = { user:{id:'fixture-admin',is_admin:true}, locale: { language: 'ru' } };
+  panel.hass = { user:{id:'fixture-admin',is_admin:true}, locale: { language: 'sv' } };
   assert.deepEqual(sent.map(message => message.language), ['en', 'ru', 'en']);
   panel.handleViewerMessage({ type: 'view_preferences', language: 'de' }, 1);
-  panel.hass = { locale: { language: 'sv' } };
+  panel.hass = { user:{id:'fixture-admin',is_admin:true}, locale: { language: 'sv' } };
   assert.equal(panel.viewPreferences.language, 'de', 'explicit choices still win');
 });
 
 test('denied storage still permits the current-session language preference', () => {
   const { panel, stored } = fixture({ denied: true });
   assert.doesNotThrow(() => panel.handleViewerMessage({ type: 'view_preferences', language: 'fa' }, 1));
-  panel.hass = { language: 'en' };
+  panel.hass = { user:{id:'fixture-admin',is_admin:true}, language: 'en' };
   assert.equal(panel.viewPreferences.language, 'fa');
   assert.equal(panel.explicitLanguage, 'fa');
   assert.equal(stored.size, 0);

@@ -13,7 +13,9 @@
     "python3 scripts/validate-site.py",
     "python3 scripts/test-install-home-assistant.py",
     "python3 scripts/test-public-package.py",
-    "python3 scripts/test_package_release.py"
+    "python3 scripts/test_package_release.py",
+    "python3 scripts/test-ha-project-metadata.py",
+    "python3 scripts/test-ha-native.py"
   ],
   "notes": [
     "Release ZIPs contain only the reviewed public website/compiler inventory and fictional examples. Personal project.json, generated homes and credentials are excluded.",
@@ -46,6 +48,13 @@
       {
         "path": "home-studio.version.json",
         "format": "json",
+        "field": "version",
+        "value": "package"
+      },
+      {
+        "path": "home_floorplan.zip",
+        "format": "zip-json",
+        "member": "manifest.json",
         "field": "version",
         "value": "package"
       }

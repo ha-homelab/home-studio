@@ -69,7 +69,7 @@ window.media={state:'playing',attributes:{friendly_name:'Study speaker',entity_p
   media_content_id:'a',media_title:'Golden hour',media_artist:'Example ensemble',media_album_name:'Fictional sessions'}};
 window.makeHass=()=>({user:{id:'local-fixture-admin',is_admin:true},connected:true,locale:{language:'en'},connection:haConnection,
   states:{'media_player.study':media,'media_player.private_tv':{state:'playing',attributes:{source:'Fixture',entity_picture:'https://untrusted.invalid/private?token=PRIVATE_TV_TOKEN',media_title:'Private source'}}},
-  callWS:async message=>{calls.push(message);if(message.type==='home_floorplan/viewer')return {html:${js(viewer)},floor:'main',floors:['main'],site_features:true,revision:0,items:${js(model.inventory)}};
+  callWS:async message=>{calls.push(message);if(message.type==='home_floorplan/viewer')return {html:${js(viewer)},can_edit:true,readable_entities:['media_player.study','media_player.private_tv'],controllable_entities:['media_player.study','media_player.private_tv'],floor:'main',floors:['main'],site_features:true,revision:0,items:${js(model.inventory)}};
     if(message.type==='home_floorplan/tv_frame')return {image:null};throw Error('Unexpected fixture command: '+message.type);},
   fetchWithAuth:async(url,options)=>{
     const entry={url,options,track,held:holdNext};holdNext=false;artRequests.push(entry);

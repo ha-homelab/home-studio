@@ -1,0 +1,14 @@
+{
+  "title": "Home Studio",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Home Studio",
+        "description": "Create and publish your floorplan privately in Home Assistant. Open Home Studio in the sidebar after setup."
+      }
+    },
+    "abort": {
+      "already_configured": "Home Studio is already configured."
+    }
+  }
+}

@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.10.0] - Draw and publish inside Home Assistant
+
+- Keep pictureless and powered-off media devices as compact launchers. Hover,
+  keyboard focus, or tap opens their available controls without an empty image.
+- Require durable writes before acknowledging native draft or publication saves,
+  retaining the previous publication after storage errors. Keep generated native
+  assets separate from existing installation state files.
+- Save focused field edits in one action and reject invalid visible values before
+  saving or publishing. Preserve recovery revisions across connection retries,
+  show actionable loading errors, and verify the native bridge in Chromium,
+  Firefox and WebKit.
+
+- Add an optional Home Studio editor inside Home Assistant, using the same
+  drawing tools and portable JSON format as the standalone editor.
+- Link drawing floors and rooms to HA floors and areas; suggest enabled entities
+  without forwarding access tokens or device attributes to the editor.
+- Save private, revisioned drafts and publish validated plans separately. Failed
+  publication retains the previous working view. Native code updates do not
+  replace the saved drawing.
+- Package a plan-free `home_floorplan.zip` for HACS custom-repository or manual
+  installation, alongside the existing portable source toolkit.
+- Allow authorized family accounts to use the published view without editing.
+  Check floor read permissions before serving embedded assets and control
+  permissions before commands. Add an administrator edit lock and optional
+  room-label/device filters for dashboard cards.
+- Keep the standalone workflow available, with reciprocal links and explicit
+  JSON transfer instructions. Existing generated or customized installations
+  are not automatically migrated.
+
+### Upgrade
+
+New native installations require Home Assistant 2026.10 or newer. Install the
+`home_floorplan.zip` integration asset, restart HA, then add Home Studio through
+Devices & services. Saved native drawings live outside the integration code.
+Keep HA backups and exported project JSON. Existing generated and customized
+homes should retain their current deployment workflow and private adapters;
+this release does not automatically convert their source into native drafts.
+
+### Security
+
+The drawing editor runs in an opaque local sandbox. HA credentials remain in
+the trusted host; only the drawing and a bounded area/device catalog cross the
+bridge. Saving and publishing require administrator access. Published floor
+assets and device controls respect the connected user's HA permissions. Exported
+JSON can contain private geometry and entity bindings, so keep those files
+private. Opening the separate editor never transfers the drawing or credentials.
+
 ## [0.9.0] - Floor navigation, dashboard cards, and device controls
 
 - Add a Home Assistant dashboard card that uses the same authenticated 3D Home

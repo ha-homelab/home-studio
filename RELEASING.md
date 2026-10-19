@@ -151,3 +151,19 @@ the runbook. The README links here rather than duplicating the release procedure
 ## Release-candidate fuzzing
 
 Every RC must pass bounded, network-isolated fuzz campaigns against the exact candidate source. The release inventory includes the report and its version-plan receipt. PRs, betas, nightlies and stable builds do not run these campaigns; stable qualification verifies the accepted RC evidence. See [the shared fuzzing contract](docs/rc-fuzzing.md) and this project's `.github/fuzz.json` for targets and budgets.
+
+## Native integration asset
+
+The release build also produces `home_floorplan.zip` and its SHA-256 checksum.
+This is the plan-free HACS/manual integration, with the shared editor and
+compiler bundled from the same source revision. It is distinct from
+`home-studio-VERSION.zip`, the portable source toolkit. The native ZIP's
+`manifest.json` is checked against the frozen release version before staging.
+Both assets must be carried through beta, RC and stable promotion together.
+Never include a generated household plan, `.storage`, local configuration or
+private adapters in either public asset.
+
+The package gate runs native draft/publication tests and real Home Assistant
+Core compatibility tests. The latter use a temporary configuration and no
+listening server or physical devices; they do not replace testing installation
+and use on a supported Home Assistant instance.

@@ -77,10 +77,19 @@ winner. Finish in one tab and deliberately resolve the saved version. If storage
 is unavailable or full, keep working with exported JSON copies; do not rely on
 an autosave success message that has not appeared.
 
-## 4. Bring it into Home Assistant
+## 4. Choose where to publish
 
-Drawing and previewing run in the browser. Building the installable integration
-still requires Python 3.10 or newer and the local toolkit:
+The same editor is available inside Home Assistant in releases that include
+**home_floorplan.zip**. Follow the [native installation guide](home-assistant-editor.md),
+open your source with **Open JSON**, then **Save draft** and **Publish**. You can
+also start drawing directly inside HA and select its room areas and devices.
+The in-HA editor links back to the separate browser editor when you prefer it;
+neither transfers your home to the other automatically.
+
+### Keep using the separate toolkit
+
+Drawing and previewing run in the browser. Building a portable installable
+package on your own computer uses Python 3.10 or newer and the local toolkit:
 
 1. Get the [latest stable release](https://github.com/ha-homelab/home-studio/releases/latest).
 2. Under **Assets**, download **home-studio-VERSION.zip**, not GitHub's automatic

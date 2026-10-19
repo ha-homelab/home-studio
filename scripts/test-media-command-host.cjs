@@ -10,7 +10,7 @@ function fixture(){
     location:{search:''},localStorage:{getItem(){return null;}},URLSearchParams};
   vm.runInNewContext(source,context);
   const panel=Object.assign(Object.create(Panel.prototype),{generation:1,isConnected:true,dryRun:false,dryRunEpoch:0,
-    pending:0,failed:false,commands:new Set(),savedItems:[{id:'speaker',entity_id:'media_player.speaker'}],
+    pending:0,failed:false,serverCanEdit:true,readableEntities:new Set(['media_player.speaker']),controllableEntities:new Set(['media_player.speaker']),commands:new Set(),savedItems:[{id:'speaker',entity_id:'media_player.speaker'}],
     port:{postMessage(message){sent.push(plain(message));}},
     _hass:{user:{id:'admin',is_admin:true},connection:{},connected:true,states:{'media_player.speaker':{state:'playing',attributes:{supported_features:1|4|16|32|4096|16384}}},
       async callService(...args){calls.push(plain(args));}}});
@@ -66,7 +66,7 @@ test('large HA catalog does not forward unrelated raw states; explicit display d
   p._hass.states['climate.room']=entity('heat',{current_temperature:18,temperature:21,hvac_action:'heating',unsafe:'SECRET'});
   p._hass.config={unit_system:{temperature:'°C'}};
   p.savedItems.push({entity_id:'sensor.temperature'},{entity_id:'cover.shade'},{entity_id:'climate.room'});
-  p.displayEntities=new Set(['sensor.zone']);p.publishEntityStates();
+  p.displayEntities=new Set(['sensor.zone']);p.readableEntities=new Set(Object.keys(p._hass.states));p.publishEntityStates();
   const catalog=f.sent.find(m=>m.type==='entity_catalog'),snapshot=f.sent.at(-1);
   assert.equal(catalog.entities.length,5507);assert.equal(Object.keys(snapshot.states).length,7);
   assert.doesNotMatch(JSON.stringify(f.sent),/SECRET|unsafe/);
@@ -82,15 +82,15 @@ function stateFixture(){
   let Panel;const sent=[],writes=[];
   vm.runInNewContext(source,{Blob,HTMLElement:class{},customElements:{get(){},define(name,type){Panel=type;}},localStorage:{getItem(){return null;}}});
   const panel=Object.assign(Object.create(Panel.prototype),{generation:1,isConnected:true,started:true,dryRun:false,dryRunEpoch:0,
-    pending:0,failed:false,queue:Promise.resolve(),commands:new Set(),floor:'main',revision:1,tvFrameCache:{},viewPreferences:{language:'en'},
+    pending:0,failed:false,serverCanEdit:true,readableEntities:new Set(['media_player.speaker','light.unbound','sensor.room_activity']),controllableEntities:new Set(['media_player.speaker','light.unbound']),queue:Promise.resolve(),commands:new Set(),floor:'main',revision:1,tvFrameCache:{},viewPreferences:{language:'en'},
     savedItems:[{id:'speaker',entity_id:'media_player.speaker'}],curtains:{profiles:{},power:{},memory:{}},
-    port:{postMessage(message){sent.push(plain(message));}},notice(){},noticeKey(){},notifySaveStatus(){},
+    port:{postMessage(message){sent.push(plain(message));}},notice(){},noticeKey(){},notifySaveStatus(){},updateAccessUI(){},
     refreshTVFrame(){},refreshCameraFrames(){},refreshMediaArtwork(){},clearMediaArtwork(){},
     _hass:{user:{id:'fictional_admin',is_admin:true},connection:{},connected:true,states:{
       'media_player.speaker':{state:'playing',attributes:{friendly_name:'Fictional speaker',supported_features:16384}},
       'light.unbound':{state:'off',attributes:{friendly_name:'Unbound fictional lamp'}},
       'sensor.room_activity':{state:'motion',attributes:{evidence:{sample:'motion'}}},
-    },async callWS(message){writes.push(plain(message));return {revision:2};}}});
+    },async callWS(message){writes.push(plain(message));return {revision:2,readable_entities:Object.keys(this.states),controllable_entities:Object.keys(this.states)};}}});
   panel.resetModelConfig();
   return {panel,sent,writes,configure(extra={}){panel.handleViewerMessage({type:'model_config',...extra},panel.generation);},
     snapshot(){return sent.filter(message=>message.type==='states').at(-1);},catalogs(){return sent.filter(message=>message.type==='entity_catalog');}};
@@ -122,7 +122,7 @@ test('the actual viewer collector retains all display dependencies even after a 
   const context={model};vm.runInNewContext(viewer.slice(start,end)+'\nglobalThis.result=[...stateEntities];',context);
   const expected=['media_player.television','binary_sensor.camera_motion','sensor.room_activity','binary_sensor.receiver','sensor.receiver_activity','sensor.receiver_modules','sensor.signal_activity','binary_sensor.person','binary_sensor.motion','sensor.motion_room','sensor.temperature','sensor.power'].sort();
   assert.deepEqual(plain(context.result).sort(),expected,'geometry and unrelated text cannot exhaust or expand the dependency list');
-  const f=stateFixture();for(const id of expected)f.panel._hass.states[id]={state:'on',attributes:{}};
+  const f=stateFixture();for(const id of expected){f.panel._hass.states[id]={state:'on',attributes:{}};f.panel.readableEntities.add(id);}
   f.configure({state_entities:[...context.result,'invalid reference',null]});
   assert.equal(f.panel.scopedStates,true);assert.equal(f.catalogs().length,1);
   assert.deepEqual(Object.keys(f.snapshot().states).sort(),[...expected,'media_player.speaker'].sort());
@@ -138,7 +138,7 @@ test('a successful saved binding immediately republishes its state without waiti
   const items=[{id:'thermometer',entity_id:'sensor.new_binding'}];
   p.handleViewerMessage({type:'save',items},p.generation);await flush();
   assert.equal(p.pending,1);assert.equal(f.snapshot().states['sensor.new_binding'],undefined,'an unconfirmed binding does not expand live state');
-  complete({revision:2});await p.queue;
+  complete({revision:2,readable_entities:['sensor.new_binding'],controllable_entities:[]});await p.queue;
   assert.equal(p.pending,0);assert.equal(p.failed,false);assert.equal(p.revision,2);
   assert.equal(f.snapshot().states['sensor.new_binding'].state,'21.5');assert.equal(f.snapshot().states['sensor.new_binding'].unit,'°C');
   assert.equal(f.snapshot().states['media_player.speaker'],undefined,'the removed binding is withdrawn in the same snapshot');
@@ -146,14 +146,47 @@ test('a successful saved binding immediately republishes its state without waiti
   assert.equal(f.catalogs().length,1,'saving does not resend the full picker catalog');
 });
 
-test('catalogs refresh for a replacement connection, account, and floor while routine state updates stay compact',()=>{
+test('catalogs refresh for a replacement connection and floor while routine state updates stay compact',()=>{
   const f=stateFixture(),p=f.panel;f.configure({state_entities:[]});assert.equal(f.catalogs().length,1);
   p.hass={...p._hass,states:{...p._hass.states,'sensor.new_choice':{state:'17',attributes:{friendly_name:'New fictional choice'}}}};
   assert.equal(f.catalogs().length,1);
   p.hass={...p._hass,connection:{}};assert.equal(f.catalogs().length,2);
   assert.ok(f.catalogs()[1].entities.some(([id])=>id==='sensor.new_choice'));
-  p.hass={...p._hass,user:{id:'another_fictional_admin',is_admin:true},states:{'media_player.speaker':{state:'paused',attributes:{friendly_name:'Current account speaker'}}}};
-  assert.equal(f.catalogs().length,3);assert.deepEqual(f.catalogs()[2].entities,[['media_player.speaker','Current account speaker']]);
-  assert.equal(f.snapshot().states['media_player.speaker'].state,'paused');
-  p.resetModelConfig();f.configure({state_entities:[]});assert.equal(f.catalogs().length,4,'the next floor negotiates and publishes a fresh catalog');
+  p.resetModelConfig();f.configure({state_entities:[]});assert.equal(f.catalogs().length,3,'the next floor negotiates and publishes a fresh catalog');
+});
+
+
+test('family viewers get only server-permitted states and cannot widen scope or edit',async()=>{
+  const f=stateFixture(),p=f.panel;
+  p._hass.user={id:'family',is_admin:false};p.serverCanEdit=false;
+  p.readableEntities=new Set(['media_player.speaker']);
+  p.controllableEntities=new Set(['media_player.speaker']);
+  f.configure({state_entities:['light.unbound','sensor.room_activity'],room_activity:{studio:'sensor.room_activity'}});
+  assert.deepEqual(Object.keys(f.snapshot().states),['media_player.speaker']);
+  assert.deepEqual(f.snapshot().states['media_player.speaker'].can_control,true);
+  assert.equal(f.catalogs().length,0);
+  p.handleViewerMessage({type:'view_preferences',can_edit:true,editLocked:false},p.generation);
+  p.handleViewerMessage({type:'save',items:[]},p.generation);
+  p.handleViewerMessage({type:'export',format:'glb'},p.generation);
+  await p.downloadModel('glb');await p.queue;
+  assert.equal(p.canEdit,false);assert.deepEqual(f.writes,[]);assert.equal(p.pending,0);
+});
+
+test('a server edit grant never elevates a family account and a card lock overrides an administrator',async()=>{
+  for(const family of [true,false]){
+    const f=stateFixture(),p=f.panel;
+    p._hass.user.is_admin=!family;p.serverCanEdit=true;p.editLocked=!family;
+    p.handleViewerMessage({type:'save',items:[]},p.generation);
+    p.handleViewerMessage({type:'export',format:'obj'},p.generation);
+    await p.queue;assert.equal(p.canEdit,false);assert.deepEqual(f.writes,[]);
+  }
+});
+
+test('family media controls require the server control capability and retain exact action validation',async()=>{
+  const f=fixture(),p=f.panel;p._hass.user={id:'family',is_admin:false};p.serverCanEdit=false;
+  f.send();await flush();assert.equal(f.calls.length,1);
+  p.controllableEntities.clear();f.send();await flush();assert.equal(f.calls.length,1);
+  assert.equal(f.sent.at(-1).ok,false);
+  p.controllableEntities.add('media_player.speaker');
+  f.send();p.controllableEntities.clear();await flush();assert.equal(f.calls.length,1,'queued capability revocation blocks dispatch');
 });

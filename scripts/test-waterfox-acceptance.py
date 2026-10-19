@@ -537,11 +537,11 @@ def viewer(client, origin, project, record, save):
             iframe.style.cssText='width:100%;height:740px;border:0';
             iframe.onload=()=>{window.nativeViewer=iframe.contentWindow;const channel=new MessageChannel();window.viewerPort=channel.port1;
               channel.port1.onmessage=e=>{if(e.data.type==='model_config')channel.port1.postMessage({type:'states',connected:true,states});};
-              iframe.contentWindow.postMessage({type:'home-floorplan:init',items,preferences:{}},'*',[channel.port2]);window.fixtureLoaded=true;};
+              iframe.contentWindow.postMessage({type:'home-floorplan:init',items,preferences:{},can_edit:true},'*',[channel.port2]);window.fixtureLoaded=true;};
             iframe.srcdoc=html;document.body.append(iframe);}); return true;''', items, states, NATIVE_VIEWER_PROGRAM_DIAGNOSTICS + NATIVE_GL_DIAGNOSTICS, NATIVE_VIEWER_FRAME_DIAGNOSTICS))
                 load.wait('window.fixtureLoaded')
                 load.run(lambda: client.call('WebDriver:SwitchToFrame', {'id': 0}))
-                load.wait(f"window.floorplan?.renderCount>0 && document.querySelector('#homeConnection')?.dataset.connected==='true' && window.__nativeRenderedLights==={len(items)}")
+                load.wait(f"window.floorplan?.renderCount>0 && window.floorplan.canEdit===true && document.querySelector('#homeConnection')?.dataset.connected==='true' && window.__nativeRenderedLights==={len(items)}")
                 load.complete()
         finally:
             save()

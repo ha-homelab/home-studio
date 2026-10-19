@@ -83,7 +83,7 @@ assert(['chromium','firefox','webkit'].includes(engine));
      'cover.curtain':{state:'open',cover:{current_position:50,supported_features:15}},
     };
     window.publish=()=>channel.port1.postMessage({type:'states',states,connected:true});
-    document.querySelector('iframe').contentWindow.postMessage({type:'home-floorplan:init',items},'*',[channel.port2]);
+    document.querySelector('iframe').contentWindow.postMessage({type:'home-floorplan:init',can_edit:true,items},'*',[channel.port2]);
    },project.floors[0].items);
    await page.waitForFunction(()=>messages.some(m=>m.type==='model_config'));
    await page.evaluate(()=>publish());

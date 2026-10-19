@@ -50,7 +50,7 @@ function fixture(homeMode, navigationMode = 'rotate') {
   window.requestModelRender = motion => renders.push(motion);
   window.renderModel = () => renders.push(false);
   const c = vm.createContext({
-    active: homeMode, camera: {left: -10, right: 10, top: 10, bottom: -10},
+    active: homeMode, canEdit: true, camera: {left: -10, right: 10, top: 10, bottom: -10},
     renderer: {domElement: canvas}, document, window, requestAnimationFrame() {},
     renderLost: false, renderSuspended: false, interactionPointer: null, coalesceMotion: true,
     panX: 0, panY: 0, zoom: 1, radius: 10, planRadius: 10, target: {x: 0, z: 0}, azimuth: .5, polar: .5,

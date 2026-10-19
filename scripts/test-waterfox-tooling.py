@@ -605,7 +605,10 @@ class ToolingTests(unittest.TestCase):
         condition = client.wait.call_args_list[1].args[0]
         self.assertIn("dataset.connected==='true'", condition)
         self.assertIn('window.floorplan?.renderCount>0', condition)
+        self.assertIn('window.floorplan.canEdit===true', condition)
         self.assertIn('window.__nativeRenderedLights===2', condition)
+        bootstrap = client.execute.call_args_list[1].args[0]
+        self.assertIn('can_edit:true', bootstrap)
 
     def test_viewer_state_waits_for_the_new_frame(self):
         client = Mock()

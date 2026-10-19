@@ -11,7 +11,7 @@ const root = path.resolve(__dirname, '..');
 const catalog = JSON.parse(fs.readFileSync(path.join(root, 'planner/catalog.json')));
 const files = new Map([
   ['planner/', ['planner/index.html', 'text/html']],
-  ...['editor', 'model', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity', 'interaction-render', 'onboarding', 'draft-storage', 'inspector-dom', 'floor-navigator'].map(name => [`planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
+  ...['editor', 'model', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity', 'interaction-render', 'onboarding', 'draft-storage', 'inspector-dom', 'floor-navigator', 'ha-bridge'].map(name => [`planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
   ...fs.readdirSync(path.join(root, 'planner/locales')).filter(name => name.endsWith('.js')).map(name => [`planner/locales/${name}`, [`planner/locales/${name}`, 'text/javascript']]),
   ['planner/editor.css', ['planner/editor.css', 'text/css']],
   ['planner/floor-navigator.css', ['planner/floor-navigator.css', 'text/css']],

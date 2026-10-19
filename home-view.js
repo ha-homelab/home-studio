@@ -1,7 +1,7 @@
 // Embedded offline/HA view; see docs/architecture.md.
 homeView = (() => {
   let active = false, camera, overlayGroup, roomLighting, selected = '', bindings = [], points = [], labels = [];
-  let homeGesture=null;
+  let homeGesture=null, roomLabels=false, deviceFilter='all';
   function cancelHomeGesture(){const previous=homeGesture;homeGesture=null;if(previous&&renderer.domElement.hasPointerCapture(previous.id))renderer.domElement.releasePointerCapture(previous.id);}
   let assumedZones, signalZone='', cameraFit;
   const projectedPosition = new THREE.Vector3(), projectedForward = new THREE.Vector3();
@@ -230,6 +230,11 @@ homeView = (() => {
   $('homeZoomReset').onclick=resetHomeView;
   function applyViewPreferences(value){
     viewerI18n.applyPreferences(value);
+    if(typeof value.roomLabels==='boolean')roomLabels=value.roomLabels;
+    if(['all','controls'].includes(value.deviceFilter))deviceFilter=value.deviceFilter;
+    $('homeRoomLabels').setAttribute('aria-pressed',String(roomLabels));
+    $('homeDeviceFilter').value=deviceFilter;
+    refreshControls();
     if(typeof value.sidebarCollapsed!=='boolean')return;
     controlsCollapsed=value.sidebarCollapsed;
     $('homeControls').hidden=controlsCollapsed;
@@ -238,6 +243,14 @@ homeView = (() => {
     $('homeToggleControls').setAttribute('aria-expanded',String(!controlsCollapsed));
     requestAnimationFrame(()=>window.resizeModel?.());
   }
+  $('homeRoomLabels').onclick=()=>{
+    applyViewPreferences({roomLabels:!roomLabels});
+    bridge?.postMessage({type:'view_preferences',roomLabels});
+  };
+  $('homeDeviceFilter').onchange=()=>{
+    applyViewPreferences({deviceFilter:$('homeDeviceFilter').value});
+    bridge?.postMessage({type:'view_preferences',deviceFilter});
+  };
   $('homeToggleControls').onclick=()=>{
     applyViewPreferences({sidebarCollapsed:!controlsCollapsed});
     bridge?.postMessage({type:'view_preferences',sidebarCollapsed:controlsCollapsed});
@@ -249,6 +262,7 @@ homeView = (() => {
   }
 
   function setActive(value) {
+    if(!value&&!canEdit)return;
     cancelHomeGesture();cancelEditorGesture();
     hideMediaControls();cancelNativeHover(true);
     active = value;previewTV(null);
@@ -410,6 +424,7 @@ homeView = (() => {
     const connected = embedded && haConnected;
     $('homeConnection').textContent = !embedded ? vt('Offline preview') : '● '+vt(connected ? 'Live' : 'Disconnected');
     $('homeConnection').dataset.connected = String(connected);
+    if(!canEdit)$('homeEmpty').textContent=deviceFilter==='controls'?'No controls in this view. Choose All devices to see sensors.':'No devices are linked in this view.';
     let on=0, motion=0, unavailable=0, total=0; const counted=new Set();
     for (const point of points) {
       const {item,marker,card,detail} = point, sensing=receiverSpec(item)?receiverState(item):null;
@@ -420,9 +435,11 @@ homeView = (() => {
         for(const el of [marker,card])el.dataset.kind=kind;
         if(isMotion(item)&&!point.anchor)point.anchor=point.position.clone().setY(.12);
       }
-      const visible=!selected || selected===item.room;
+      const passive=['sensor','binary_sensor','sun','weather','device_tracker','person','zone','event'].includes(item.entity_id?.split('.')[0]);
+      const visible=(!selected || selected===item.room) && (deviceFilter==='all'||!passive);
       card.hidden = marker.hidden = !visible || point.duplicateControl;
       if(point.details)point.details.parentElement.hidden=card.hidden;
+      marker.dataset.label=item.name;
       if(isMotion(item) && !selected && state!=='on')marker.hidden=true;
       const enabled=isGeneric(item)?!unavailableStates.includes(state):isLock(item)?lockStates.includes(state):['on','off','open','closed','opening','closing'].includes(state);
       if (waiting && state !== waiting.before && enabled) { clearTimeout(waiting.timer); pending.delete(item.entity_id); }
@@ -446,7 +463,7 @@ homeView = (() => {
         button.style.setProperty('--light-level',String(appearance.brightness));
         button.style.setProperty('--light-fill-rgb',appearance.indicatorRGB.join(','));
         button.style.setProperty('--light-text',appearance.text);
-        button.dataset.state=state; button.disabled=(isGeneric(item)||isTV(item)||isMotion(item)||isCover(item)||isLock(item)?!haConnected||(!receiverSpec(item)&&!haStates[item.entity_id]):!enabled) || busy || !bridge;
+        button.dataset.state=state; button.disabled=(isToggle(item)&&haStates[item.entity_id]?.can_control===false)||(isGeneric(item)||isTV(item)||isMotion(item)||isCover(item)||isLock(item)?!haConnected||(!receiverSpec(item)&&!haStates[item.entity_id]):!enabled) || busy || !bridge;
         if(isLock(item)||isGeneric(item))button.removeAttribute('aria-pressed');
         else button.setAttribute('aria-pressed',String(state==='on'));
         button.setAttribute('aria-busy',String(busy));
@@ -489,7 +506,7 @@ homeView = (() => {
     refreshActivity();
     for (const label of labels) {
       label.power=roomPowerText(label.room,selected);
-      label.el.hidden=!!selected&&(label.room!==selected||!label.power);
+      label.el.hidden=(!roomLabels&&!selected)||!!selected&&(label.room!==selected||!label.power);
       const value=activityState(model.room_activity?.[label.room]);
       label.el.dataset.activity=value||'unknown';
       label.el.title=roomName(label.room)+(label.power?' · '+label.power:'')+' · '+(activityText[value]||activityText.unknown);
@@ -507,8 +524,8 @@ homeView = (() => {
 
   function refreshTVPreviews(){
     updateTVPreviews(bindings.filter(isTV).map(item=>({item,state:deviceDisplayState(item),
-      busy:pending.has(item.entity_id),enabled:!!(bridge&&haConnected&&haStates[item.entity_id]),media:haStates[item.entity_id]?.restored?null:haStates[item.entity_id]?.media,
-      command:(action,value,request_id)=>bridge?.postMessage({type:'media_command',entity_id:item.entity_id,action,...(value!==undefined?{value}:{}),request_id}),
+      busy:pending.has(item.entity_id),enabled:!!(bridge&&haConnected&&haStates[item.entity_id]&&haStates[item.entity_id].can_control!==false),media:haStates[item.entity_id]?.restored?null:haStates[item.entity_id]?.media,
+      command:(action,value,request_id)=>haStates[item.entity_id]?.can_control!==false&&bridge?.postMessage({type:'media_command',entity_id:item.entity_id,action,...(value!==undefined?{value}:{}),request_id}),
       details:()=>openEntityDetails(item),power:()=>activateDevice(item,false,true)})));
   }
   function activateDevice(item,quick=true,tvPower=false) {
@@ -519,6 +536,7 @@ homeView = (() => {
     // Locks always use HA's explicit lock/unlock controls, never a toggle.
     if(bridge && haConnected && haStates[item.entity_id] && !tvPower && (isGeneric(item)||isTV(item)||isMotion(item)||isLock(item))){openEntityDetails(item);return;}
     if ((!tvPower&&!isToggle(item)) || !bridge || !haConnected || !['on','off'].includes(state) || pending.has(item.entity_id)) return;
+    if(haStates[item.entity_id]?.can_control===false)return;
     errors.delete(item.entity_id);
     const request_id='home_'+(++sequence);
     const timer=setTimeout(() => {
@@ -547,7 +565,7 @@ homeView = (() => {
     $('curtainError').hidden=!curtainError;
     $('curtainError').textContent=errorText(curtainError);
     const info=curtainStateFor(curtainItem),entity=haStates[curtainItem.entity_id],features=entity?.cover?.supported_features||0;
-    const ready=info.ready&&haConnected&&!curtainCommands.has(curtainItem.entity_id);
+    const ready=info.ready&&entity?.can_control!==false&&haConnected&&!curtainCommands.has(curtainItem.entity_id);
     $('curtainTitle').textContent=curtainItem.name;
     $('curtainStatus').textContent=haConnected?describeCurtain(curtainItem):'Disconnected · controls unavailable';
     $('curtainAccuracy').textContent=info.accuracy+(info.checkedAt?' · '+new Date(info.checkedAt).toLocaleString():'');
@@ -557,13 +575,14 @@ homeView = (() => {
     const guard=entity?.cover?.guard;
     $('curtainPower').hidden=!guard||haStates[guard]?.state==='on';
     $('curtainPower').textContent=`Power on · ${haStates[guard]?.name||guard} · ${info.seconds?info.seconds+'s':info.canPowerOn?'wait 50s':'unavailable'}`;
-    $('curtainPower').disabled=!haConnected||!info.canPowerOn||curtainCommands.has(curtainItem.entity_id);
+    $('curtainPower').disabled=entity?.can_control===false||!haConnected||!info.canPowerOn||curtainCommands.has(curtainItem.entity_id);
     for(const [id,feature] of [['curtainOpen',1],['curtainClose',2],['curtainStop',8],['curtainPosition',4],['curtainApply',4]])$(id).disabled=!ready||!(features&feature);
     if(!curtainDirty){$('curtainPosition').value=info.position??50;$('curtainPercent').textContent=info.position===null?'Unknown':info.position+'%';}
   }
   function curtainCommand(action){
     if(!curtainItem||!bridge||!haConnected)return;
     const entity_id=curtainItem.entity_id,info=curtainStateFor(curtainItem);
+    if(haStates[entity_id]?.can_control===false)return;
     if(curtainCommands.has(entity_id)||(action==='power_on'?!info.canPowerOn:!info.ready))return;
     const feature={open_cover:1,close_cover:2,stop_cover:8,set_cover_position:4}[action];
     if(feature&&!(haStates[entity_id]?.cover?.supported_features&feature))return;

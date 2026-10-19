@@ -1,8 +1,10 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 function fixture(){
  const nodes=new Map(),loads=[];
- const element=tag=>({tag,hidden:false,style:{},dataset:{},children:[],attributes:{},
+ const element=tag=>({tag,hidden:false,isConnected:true,style:{},dataset:{},children:[],attributes:{},listeners:new Map(),
   append(...children){this.children.push(...children)},remove(){this.removed=true},
+  addEventListener(type,listener){if(!this.listeners.has(type))this.listeners.set(type,new Set());this.listeners.get(type).add(listener)},
+  removeEventListener(type,listener){this.listeners.get(type)?.delete(listener)},
   getAttribute(key){return key==='src'?this.src:this.attributes[key]},setAttribute(key,value){this.attributes[key]=value},removeAttribute(key){delete this[key];delete this.attributes[key]},
   getBoundingClientRect(){return {left:100,top:20,width:200,height:120}},
   querySelectorAll(tag){return this.children.filter(child=>child.tag===tag)},querySelector(tag){return this.querySelectorAll(tag)[0]}});
@@ -31,13 +33,13 @@ function artworkFixture(){
 
 test('saved media players show decoded HA artwork and bounded text without a TV screen',()=>{
  const {card,loads,send,update,media}=artworkFixture(),[image,status]=card.children;
- send();assert.equal(loads.length,1);assert.equal(image.hidden,true);
+ send();assert.equal(loads.length,1);assert.equal(image.hidden,true);assert.equal(card.dataset.compact,'true');
  loads[0].onload();assert.equal(image.src,artworkJPEG);assert.equal(image.alt,'Study TV cover art');
- assert.equal(card.dataset.mediaKind,'cover');assert.equal(status.textContent,'A song · An artist · An album');assert.equal(status.hidden,false);
+ assert.equal(card.dataset.mediaKind,'cover');assert.equal(card.dataset.compact,'false');assert.equal(status.textContent,'A song · An artist · An album');assert.equal(status.hidden,false);
  send();assert.equal(loads.length,1,'Repeated snapshots reuse an already decoded image');
  update('on',{media:{title:'<img src=x onerror=alert(1)>',artist:'a'.repeat(500)}});
  assert.equal(status.textContent,'<img src=x onerror=alert(1)> · '+'a'.repeat(200));
- update('off',{media});assert.equal(image.hidden,true);assert.equal(status.textContent,'Media player is off');
+ update('off',{media});assert.equal(image.hidden,true);assert.equal(card.dataset.compact,'true');assert.equal(status.textContent,'Media player is off');
 });
 
 test('artwork switches clear old covers immediately and reject late decodes',()=>{
@@ -96,6 +98,27 @@ test('TV cards reuse frames, show truthful off/unknown states and disable pendin
  c.positionMediaPreviews({matrixWorld:{elements:[]},projectionMatrix:{elements:[]}}, {width:1200,height:700}, '');assert.equal(nodes.get('homeMediaLinks').children.length,1);
  c.updateTVPreviews([]);assert.equal(card.removed,true);assert.equal(nodes.get('homeMediaLinks').children[0].removed,true);
 });
+test('off and pictureless media reuse a compact accessible launcher, and real images restore the card',()=>{
+ for(const kind of ['tv','player']){
+  const {context:c,nodes,update,item}=fixture();if(kind==='player')delete c.model.tv_entities;
+  let commands=0;const command=()=>commands++,power=()=>commands++;
+  update('off',{command,power,media:{state:'off',supported_features:128}});
+  const card=nodes.get('homeTVs').children[0],launcher=card.children.find(child=>child.className==='tv-preview-launcher');
+  assert.ok(launcher,kind);assert.equal(card.dataset.compact,'true',kind);assert.equal(launcher.hidden,false);
+  assert.equal(launcher.getAttribute('aria-label'),'Study TV · Media controls');
+  assert.equal(launcher.getAttribute('aria-haspopup'),'dialog');assert.equal(launcher.getAttribute('aria-expanded'),'false');
+  const listenerCount=()=>[...launcher.listeners.values()].reduce((count,listeners)=>count+listeners.size,0),initialListeners=listenerCount();
+  assert.ok(initialListeners>0);
+  for(let index=0;index<20;index++)update(index%2?'off':'on',{command,power,media:{state:index%2?'off':'playing',supported_features:128|256}});
+  assert.equal(nodes.get('homeTVs').children.length,1);assert.equal(card.children.filter(child=>child.className==='tv-preview-launcher').length,1);
+  assert.equal(listenerCount(),initialListeners);assert.equal(commands,0,'Refresh and mode changes never send commands');
+  c.tvFrames.set(item.id,{image:'data:image/jpeg;base64,c25hcHNob3Q='});update('on',{command,power});
+  assert.equal(card.dataset.compact,'false');assert.equal(launcher.hidden,true);assert.equal(card.children[0].hidden,false);
+  assert.equal(card.children[0].src,'data:image/jpeg;base64,c25hcHNob3Q=');
+  c.tvFrames.delete(item.id);update('on',{command,power});
+  assert.equal(card.dataset.compact,'true');assert.equal(launcher.hidden,false);assert.equal(card.children[0].src,undefined);
+ }
+});
 test('room filtering hides callouts and removes their leaders',()=>{
  const {context:c,nodes,update}=fixture();update();const camera={matrixWorld:{elements:[]},projectionMatrix:{elements:[]}};
  c.positionMediaPreviews(camera,{width:1200,height:700},'');const line=nodes.get('homeMediaLinks').children[0];assert.match(line.children[0].attributes.d,/^M /);
@@ -130,8 +153,8 @@ test('host restricts TV power to explicit actions on saved media entities and se
  let Panel;const context=vm.createContext({localStorage:{getItem(){return null;}},HTMLElement:class{},customElements:{get(){},define(name,value){Panel=value}}});
  vm.runInContext(fs.readFileSync('custom_components/home_floorplan/static/panel.js','utf8'),context);
  const messages=[],calls=[];let complete;
- const panel=Object.assign(Object.create(Panel.prototype),{generation:1,savedItems:[{entity_id:'media_player.study'},{entity_id:'light.study'}],commands:new Set(),port:{postMessage:m=>messages.push(m)},notice(){},
-  _hass:{connected:true,states:{'media_player.study':{state:'off'},'light.study':{state:'off'}},callService:(...args)=>{calls.push(args);return new Promise(resolve=>complete=resolve)}}});
+ const panel=Object.assign(Object.create(Panel.prototype),{generation:1,readableEntities:new Set(['media_player.study','light.study']),controllableEntities:new Set(['media_player.study','light.study']),savedItems:[{entity_id:'media_player.study'},{entity_id:'light.study'}],commands:new Set(),port:{postMessage:m=>messages.push(m)},notice(){},
+  _hass:{user:{id:'fixture-admin',is_admin:true},connected:true,states:{'media_player.study':{state:'off'},'light.study':{state:'off'}},callService:(...args)=>{calls.push(args);return new Promise(resolve=>complete=resolve)}}});
  const send=(entity_id,action)=>panel.handleViewerMessage({type:'tv_power',entity_id,action,request_id:'request'},1);
  for(const [id,action] of [['media_player.other','turn_on'],['light.study','turn_on'],['media_player.study','play_media'],['media_player.study','toggle']])send(id,action);
  await Promise.resolve();assert.equal(calls.length,0);assert.equal(messages.length,4);assert.ok(messages.every(message=>message.ok===false));

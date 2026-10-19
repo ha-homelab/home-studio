@@ -5,9 +5,10 @@ Choose an object in the planner, enter its **Home Assistant entity ID**, then
 build and install the home. You can also bind an existing object in the installed
 plan's **Edit layout** view. Wait for the saved confirmation before controlling it.
 
-These controls require a build containing **device details and audio controls**.
-They are not included in stable 0.8.0 or the first dashboard/artwork beta. Updating
-the hosted drawing editor alone does not upgrade an installed home.
+These controls require an installed build containing **device details and audio controls**.
+Updating the hosted drawing editor alone does not upgrade an installed home.
+In the [native editor](home-assistant-editor.md), choose devices from your HA
+registry, then save and publish. The separate editor and compiler remain available.
 
 ## What to bind
 
@@ -38,6 +39,19 @@ An audio remote has volume, previous/next track, play, pause and stop when the
 player advertises those capabilities. Unsupported actions are hidden. Volume is
 sent when you finish changing the slider, rather than on every pointer movement.
 Hovering or focusing the marker does not play, stop or change the volume.
+
+Media callouts without an available picture collapse to a small round TV or
+speaker button. This includes powered-off devices, missing artwork and unavailable
+players. Hover, keyboard-focus or tap this button to open its controls and current
+status. Power remains a separate, deliberate action; opening the controls never
+turns a device on. A TV offers power and access to Home Assistant's full remote;
+an audio player also offers the playback and volume actions it supports.
+
+An available TV frame or album cover restores the picture card. The round button
+stays in place while its controls are open, so opening the remote does not resize
+or move the plan. Escape, clicking outside, or leaving the button and remote
+dismisses it. On touch screens, tap the button and use the close button or tap
+outside.
 
 For TVs and other devices, leaving the mouse over a marker for about two-thirds
 of a second opens HA's native details dialog. Briefly crossing a marker does not.
@@ -95,8 +109,9 @@ refresh this catalog.
 Older compiled viewers retain their previous state protocol for compatibility.
 Rebuild and reinstall to obtain the reduced state payload. Dependency filtering
 reduces data and work; it is not an authorization boundary. HA authentication,
-the administrator requirement, saved-binding checks and the host command guard
-remain responsible for access control.
+server-issued read/control scopes, saved-binding checks and the host command
+guard enforce device access. Source and layout editing remain administrator
+actions; family accounts use the published view.
 
 **Dry run** blocks native dialogs as well as commands, because native HA dialogs
 can themselves control devices. A pending or failed placement save also blocks

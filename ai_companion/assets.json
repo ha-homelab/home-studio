@@ -80,5 +80,6 @@
   "planner/draft-storage.js",
   "planner/inspector-dom.js",
   "planner/floor-navigator.js",
-  "planner/floor-navigator.css"
+  "planner/floor-navigator.css",
+  "planner/ha-bridge.js"
 ]

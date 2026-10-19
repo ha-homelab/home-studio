@@ -36,10 +36,10 @@ function fixture({fetch,decode=false,output='data:image/jpeg;base64,AQID',imageW
     document,Image,setTimeout(fn){const id=++nextTimer;timers.set(id,fn);return id;},clearTimeout(id){timers.delete(id);},removeEventListener(){}});
   vm.runInContext(source,context);
   const iframe={src:'blob:viewer',srcdoc:'viewer',removeAttribute(name){delete this[name];}};
-  const panel=Object.assign(Object.create(Panel.prototype),{generation:1,isConnected:true,modelConfigured:true,siteFeatures:false,tvFrames:{},savedItems:[{id:'speaker',entity_id:'media_player.study'}],
+  const panel=Object.assign(Object.create(Panel.prototype),{generation:1,isConnected:true,modelConfigured:true,serverCanEdit:true,readableEntities:new Set(['media_player.study']),controllableEntities:new Set(['media_player.study']),siteFeatures:false,tvFrames:{},savedItems:[{id:'speaker',entity_id:'media_player.study'}],
     shadowRoot:{querySelector(){return iframe;}},
     port:{postMessage(message){messages.push(plain(message));},close(){}},
-    _hass:{connected:true,states:{'media_player.study':{state:'playing',attributes:{entity_picture:'https://untrusted.invalid/image?token=PRIVATE',media_title:'First track',media_artist:'Artist'}}},
+    _hass:{user:{id:'fixture-admin',is_admin:true},connected:true,states:{'media_player.study':{state:'playing',attributes:{entity_picture:'https://untrusted.invalid/image?token=PRIVATE',media_title:'First track',media_artist:'Artist'}}},
       fetchWithAuth(url,options){calls.push({url,options});return fetch?fetch(url,options):Promise.resolve(response());}}});
   return {panel,messages,calls,timers,urls,images,canvases,document,context,iframe,
     expire(){for(const [id,fn]of [...timers]){timers.delete(id);fn();}},
@@ -106,18 +106,29 @@ test('detach and floor generation changes discard old decoded images and release
   assert.equal(f.iframe.src,undefined);assert.equal(f.iframe.srcdoc,undefined);
 });
 
-test('account or HA connection changes invalidate both cached art and in-flight old-session responses',async()=>{
-  for(const change of [hass=>({...hass,user:{id:'account-b'}}),hass=>({...hass,connection:{}})]){
-    const pending=[],f=fixture({fetch(){const request=deferred();pending.push(request);return request.promise;}});
-    f.panel._hass.user={id:'account-a'};f.panel._hass.connection={};f.panel.started=true;f.panel.viewPreferences={};
-    f.panel.publishEntityStates=()=>f.panel.refreshMediaArtwork();
-    f.panel.refreshMediaArtwork();pending[0].resolve(response());await flush();
-    const old=f.messages.at(-1).artwork.speaker.identity;
-    f.panel.hass=change(f.panel._hass);assert.deepEqual(f.messages.at(-1).artwork,{});await flush();
-    f.panel.hass={...f.panel._hass,user:{id:'account-c'},connection:{}};await flush();
-    pending[1].resolve(response());await flush();assert.deepEqual(f.messages.at(-1).artwork,{});
-    pending[2].resolve(response());await flush();assert.notEqual(f.messages.at(-1).artwork.speaker.identity,old);
-  }
+test('HA connection changes invalidate cached art and in-flight old-session responses',async()=>{
+  const pending=[],f=fixture({fetch(){const request=deferred();pending.push(request);return request.promise;}});
+  f.panel._hass.connection={};f.panel.started=true;f.panel.viewPreferences={};
+  f.panel.publishEntityStates=()=>f.panel.refreshMediaArtwork();
+  f.panel.refreshMediaArtwork();pending[0].resolve(response());await flush();
+  const old=f.messages.at(-1).artwork.speaker.identity;
+  f.panel.hass={...f.panel._hass,connection:{}};assert.deepEqual(f.messages.at(-1).artwork,{});await flush();
+  f.panel.hass={...f.panel._hass,connection:{}};await flush();
+  pending[1].resolve(response());await flush();assert.deepEqual(f.messages.at(-1).artwork,{});
+  pending[2].resolve(response());await flush();assert.notEqual(f.messages.at(-1).artwork.speaker.identity,old);
+});
+
+test('account replacement tears down the old viewer and cannot republish late artwork',async()=>{
+  const pending=deferred(),f=fixture({fetch(){return pending.promise;}});
+  f.panel.started=true;f.panel.viewPreferences={};
+  // This unit fixture is not attached to a real document; browser tests cover remounting.
+  f.panel.connectedCallback=()=>{};f.panel.loadFloor=()=>{};f.panel.publishEntityStates=()=>f.panel.refreshMediaArtwork();
+  f.panel.refreshMediaArtwork();
+  f.panel.hass={...f.panel._hass,user:{id:'other-account',is_admin:true}};
+  assert.equal(f.panel.port,null);assert.equal(f.panel.savedItems.length,0);
+  assert.equal(f.iframe.src,undefined);assert.equal(f.iframe.srcdoc,undefined);
+  pending.resolve(response());await flush();
+  assert.deepEqual(f.messages.at(-1).artwork,{});assert.equal(f.panel.mediaArtworkRequests,0);
 });
 
 test('bounded queue caps concurrent fetches and saved artwork entries without polling or retry storms',async()=>{

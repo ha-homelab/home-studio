@@ -4,6 +4,7 @@
 
 **[Try a furnished example](https://ha-homelab.github.io/home-studio/planner/?example=practice)** ·
 **[Start your own plan](https://ha-homelab.github.io/home-studio/planner/)** ·
+**[Draw inside Home Assistant](docs/home-assistant-editor.md)** ·
 **[Get the latest stable release](https://github.com/ha-homelab/home-studio/releases/latest)**
 
 [![Home Studio editor showing a fictional practice floorplan in perspective](docs/images/home-studio-hero.jpg)](planner/guide-assets/06-preview.jpg)
@@ -13,8 +14,28 @@ practice project, not a private home. Click for the unchanged readable original.
 
 No account or installation is needed to try the editor. Start with room
 measurements and walls, choose from 195 furniture designs, or open an editable
-example and experiment. The editor supports 24 languages. When you are ready,
-the local compiler and installer bring your plan into Home Assistant.
+example and experiment. The editor supports 24 languages. Choose the workflow
+that suits you: draw inside Home Assistant, or keep using the separate browser
+editor and portable local toolkit.
+
+## Two ways to create the same home
+
+**Inside Home Assistant:** releases containing **home_floorplan.zip** include
+the complete integration and editor. Install it through HACS as a custom
+integration repository, restart HA, then add **Home Studio** under
+**Settings → Devices & services**. Open **Home Studio** to draw, link rooms to
+HA areas, save a draft, and publish your **3D Home** view. Ordinary edits and
+publishing do not require a terminal or HA restart. See the
+[native editor guide](docs/home-assistant-editor.md), including the supported
+installation and update paths. Older releases without that asset use the
+portable toolkit below.
+
+**Separate browser editor:** the [hosted editor](https://ha-homelab.github.io/home-studio/planner/)
+still works without an account or HA connection. Export JSON to keep your
+source. Import that file into the editor inside HA, or use the existing
+[compiler and local installer](install.html#export). The same drawing format
+works in both editors. Opening the external editor never uploads your home
+automatically; transfer a project only by exporting and opening its JSON file.
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15584/badge)](https://www.bestpractices.dev/projects/15584)
 
@@ -36,7 +57,7 @@ Assistant integration, and its local installer. The compiler and installer need
 **Python 3.10 or newer**, with no extra Python packages. Home Assistant supplies
 the integration's runtime dependencies.
 
-The hosted editor stores a draft in your browser and does not connect to Home
+The separate hosted editor stores a draft in your browser and does not connect to Home
 Assistant. **Export JSON** saves your editable project; **Open JSON** restores it.
 The local compiler turns that project into a separate viewer, 3D exports, and an
 installable Home Assistant package. Examples and guide screenshots are fictional.
@@ -179,12 +200,14 @@ to move between the hosted and local editors; they have separate browser drafts.
 
 ## Install in Home Assistant
 
-The **0.9.0 beta series** also provides a Lovelace dashboard card and media-player
-cover artwork. See [dashboard and artwork setup](docs/dashboard-and-media.md).
-The next device-controls beta adds sensor and thermostat readings, native HA
-controls on hover, and a compact audio remote. See [device controls](docs/device-controls.md).
-These installed features require rebuilding with that beta toolkit; updating
-the hosted planner alone does not update an existing Home Assistant panel.
+Home Studio provides a Lovelace dashboard card, media-player artwork, sensor
+and thermostat readings, native HA controls on hover, and a compact audio remote.
+See [dashboard and artwork setup](docs/dashboard-and-media.md) and
+[device controls](docs/device-controls.md). Updating the hosted planner alone
+does not update an existing Home Assistant installation.
+
+For in-HA drawing and publishing, follow the [native editor guide](docs/home-assistant-editor.md).
+The commands below remain available for the separate editor and portable toolkit.
 
 In the installed **Home view**, choose **Rotate** to turn the map or **Move** to
 pan it with a mouse or touch drag. Shift-drag and right-drag also pan; the
