@@ -13,7 +13,7 @@
       ]
     },
     {
-      "toolkit_revision": "43995ff0d52c55135c5d7ab0c36b4f5a46585d8e",
+      "toolkit_revision": "15a55b1befad199fe280bf7c1b4403a0da2c6b73",
       "pull_request": 229,
       "description": "Apply the canonical closed workflow extension to the existing workflow AST; preserve existing public jobs and CLI bootstrap.",
       "base_consumer_commit": "f38d064c9f0cda4ae33c5f95318ca691a5e9ab28",
