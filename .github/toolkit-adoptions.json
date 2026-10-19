@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "toolkit_repository": "victron-venus/venus-os-ci-toolkit",
+  "baseline_toolkit_revision": "5e413f80a4353d328b4529eae57992ac3987e2dd",
+  "adoptions": [
+    {
+      "toolkit_revision": "ed8ee2829a693920128c77a2d6c19836d65302ea",
+      "pull_request": 228,
+      "description": "Apply only the paginated GitHub jobs request-size change and its contract tests; retain unrelated release-engine implementation.",
+      "files": [
+        "scripts/release_control.py",
+        ".github/release-tests/test_release_control.py"
+      ]
+    },
+    {
+      "toolkit_revision": "81766b921e727dcf17799c87b53631c2f31227c9",
+      "pull_request": 229,
+      "description": "Apply the canonical closed workflow extension to the existing workflow AST; preserve existing public jobs and CLI bootstrap.",
+      "base_consumer_commit": "f38d064c9f0cda4ae33c5f95318ca691a5e9ab28",
+      "base_workflow_sha256": "419d47867c1725a2e2fca7a5ff6ce2cd6ba188db26630577c1a897d5ce651f4e",
+      "workflow_reproduction": [
+        "Load the base consumer release-pipeline.yml with yaml.safe_load.",
+        "Load the current .release-policy.json.",
+        "Call release_closed_workflow.validate_adapter(consumer_root, policy).",
+        "Call release_closed_workflow.apply(workflow, policy, install_release.ACTION_REFS).",
+        "Serialize with install_release.dump(workflow). Do not invoke unrelated full-workflow migrations."
+      ],
+      "test_file": {
+        "source": "tests/test_release_closed.py",
+        "destination": ".github/release-tests/test_release_closed.py",
+        "replacement": {
+          "old": "Path(__file__).resolve().parents[1]",
+          "new": "Path(__file__).resolve().parents[2]"
+        }
+      },
+      "rendered_files": [
+        "scripts/release_closed.py",
+        "docs/closed-builds.md",
+        ".github/release-tests/test_release_closed.py"
+      ],
+      "rendering_note": "Runtime and test files include the standard canonical vendored header; test paths use the canonical consumer-root substitution."
+    }
+  ]
+}
