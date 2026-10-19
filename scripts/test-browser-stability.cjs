@@ -125,7 +125,7 @@ async function run(browserName, origin, project, sourceHash) {
               if(event.data.type==='model_config') channel.port1.postMessage({type:'states',connected:true,states});
               if(['toggle','tv_power','curtain_command','media_command','more_info'].includes(event.data.type)) window.viewerCommands.push(event.data);
             };
-            iframe.contentWindow.postMessage({type:'home-floorplan:init',items,preferences:{}},'*',[channel.port2]);
+            iframe.contentWindow.postMessage({type:'home-floorplan:init',can_edit:true,items,preferences:{}},'*',[channel.port2]);
           };
           iframe.srcdoc = html;document.body.append(iframe);
         }, {items:project.floors[0].items,states,height:profile.emulated?profile.context.viewport.height-60:740}));

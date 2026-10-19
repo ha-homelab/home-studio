@@ -142,7 +142,7 @@ function exerciseHostInventory(transform = value => value) {
     window: {addEventListener(type, callback) { assert.equal(type, 'message'); handler = callback; },
       applyMediaArtwork(value) { calls.artwork.push(value); },
       removeEventListener(type, callback) { assert.equal(callback, handler); calls.removed++; }},
-    document: {querySelector: () => aside},
+    document: {body:{classList:{toggle(){}}},querySelector: () => aside}, $:()=>({}),
     homeView: {applyViewPreferences(value) { calls.preferences.push(value); }, handleCommandResult(value) { calls.commands.push(value); }, dismissOverlays() { calls.dismissals++; }},
     setEditorStatus(value) { calls.status.push(value); },
     refreshEntityPresentation() { calls.refreshes++; },
@@ -158,7 +158,7 @@ function exerciseHostInventory(transform = value => value) {
   assert(initStart >= 0 && initEnd > initStart, 'Actual host initialization handler exists');
   vm.runInContext(source.slice(initStart, initEnd + 4), c);
   const incoming = transform(JSON.parse(JSON.stringify(bootItems)));
-  handler({source: parent, data: {type: 'home-floorplan:init', items: incoming, preferences: {sidebarCollapsed: true}}, ports: [port]});
+  handler({source: parent, data: {type: 'home-floorplan:init', can_edit:true, items: incoming, preferences: {sidebarCollapsed: true}}, ports: [port]});
   return {c, calls, bootItems, aside, port};
 }
 const sameInventory = exerciseHostInventory();

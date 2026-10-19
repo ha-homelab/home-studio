@@ -27,8 +27,9 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><but
       calls.push(message);
       if (message.type !== 'home_floorplan/viewer') throw Error('Unexpected request');
       if (message.floor === 'missing') throw Error('Unknown floor');
-      return {html:${JSON.stringify(viewer).replaceAll('<','\\u003c')},floor:message.floor || 'main',floors:['main','upper'],
-        site_features:false,revision:0,items:[{id:'lamp',entity_id:'switch.lamp'}]};
+      if (message.floor === 'empty') return {html:null,items:[],can_edit:admin,mode:'native',has_editor:true,floors:[]};
+      return {mode:message.floor==='legacy'?'legacy':'native',has_editor:message.floor!=='legacy',html:${JSON.stringify(viewer).replaceAll('<','\\u003c')},floor:message.floor || 'main',floors:['main','upper'],
+        site_features:false,can_edit:admin,readable_entities:['switch.lamp'],controllable_entities:['switch.lamp'],revision:0,items:[{id:'lamp',entity_id:'switch.lamp'}]};
     },callService:async (...args) => services.push(args)});
   window.makeCard = config => {
     const card = document.createElement('home-floorplan-card');
@@ -67,7 +68,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><but
     }),[12,{columns:12,rows:'auto',min_columns:6},1]);
     await page.evaluate(() => {
       const invalid = [null,[],{floor:'../main'},{floor:'A'},{floor:'a'.repeat(49)},{height:'600px'},
-        {height:239},{height:1601},{height:NaN},{sidebar_collapsed:'true'},{dry_run:1}];
+        {height:239},{height:1601},{height:NaN},{sidebar_collapsed:'true'},{dry_run:1},{edit_locked:'yes'},{room_labels:1},{device_filter:'invalid'}];
       for (const config of invalid) {
         const card = document.createElement('home-floorplan-card');
         let rejected = false;
@@ -121,10 +122,10 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><but
     await page.waitForFunction(() => card._panel.viewPreferences.sidebarCollapsed === false);
     assert.equal(await page.evaluate(() => localStorage.getItem('home-floorplan:sidebar-collapsed')),null);
 
-    // Demotion removes private content immediately and closes the same host resources.
-    await page.evaluate(() => card.hass = makeHass(false));
+    // Signing out removes private content immediately and closes the same host resources.
+    await page.evaluate(() => card.hass = {...makeHass(false),user:null});
     assert.equal(await page.locator('iframe').count(),0);
-    assert.match(await page.locator('#status').textContent(),/Administrator access/);
+    assert.match(await page.locator('#status').textContent(),/Connecting to Home Assistant/);
     assert.deepEqual(await page.evaluate(() => [original.port,original.viewerURL,original.started,subscriptions]),[null,null,false,0]);
     assert.deepEqual(await page.evaluate(()=>[original.overlayDocument,parentListeners.get('keydown').has(original.onOverlayEscape),
       parentListeners.get('pointerdown').has(original.onOverlayPointer)]),[null,false,false],
@@ -149,13 +150,28 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><but
     await page.waitForFunction(() => card._panel?.port);
     assert.deepEqual(await page.evaluate(() => [card._panel === original,original.port,original.viewerURL,calls.length,subscriptions]),[false,null,null,4,1]);
 
-    // A non-admin cannot bootstrap any floor or obtain an active subscription.
+    // Ordinary users get control-only access and cannot forge editing capabilities.
     await page.evaluate(() => {
       card.remove(); calls.length = 0;
       window.denied = document.createElement('home-floorplan-card');
       denied.setConfig({}); denied.hass = makeHass(false); document.body.append(denied);
     });
-    assert.deepEqual(await page.evaluate(() => [calls.length,subscriptions]),[0,0]);
+    await page.waitForFunction(() => denied._panel?.port);
+    frame = page.frames().find(frame => frame.parentFrame());
+    await frame.waitForFunction(() => window.initial);
+    assert.equal(await frame.evaluate(() => initial.can_edit),false);
+    assert.equal(await page.locator('iframe').getAttribute('sandbox'),'allow-scripts');
+    assert.equal(await page.locator('#studio').isVisible(),false);
+    assert.deepEqual(await page.evaluate(() => [calls.length,subscriptions]),[1,1]);
+    await frame.evaluate(() => {
+      port.postMessage({type:'view_preferences',can_edit:true,editLocked:false});
+      port.postMessage({type:'save',items:[]});port.postMessage({type:'export',format:'glb'});
+    });
+    await page.evaluate(() => new Promise(resolve => setTimeout(resolve,50)));
+    assert.deepEqual(await page.evaluate(() => [denied._panel.canEdit,calls.length,denied._panel.pending]),[false,1,0]);
+    await frame.locator('#toggle').click();
+    await page.waitForFunction(() => services.length===1);
+    await page.evaluate(() => services.length=0);
     await page.evaluate(() => { denied.remove(); window.live = makeCard({floor:'main',sidebar_collapsed:false}); });
     await page.waitForFunction(() => live._panel?.port);
     frame = page.frames().find(frame => frame.parentFrame());
@@ -305,10 +321,34 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><but
     await page.waitForFunction(()=>remountPanel.failed && !remountPanel.pending);
     await page.evaluate(()=>{remountCard.remove();remountCard.hass=makeHass(false,'new-account');document.body.append(remountCard);});
     assert.equal(await page.evaluate(()=>remountPanel.localEdits),null);
-    assert.equal(await page.locator('iframe').count(),0);
-    assert.match(await page.locator('#status').textContent(),/Administrator access/);
+    await page.waitForFunction(()=>remountCard._panel?.port);
+    assert.equal(await page.locator('iframe').getAttribute('sandbox'),'allow-scripts');
+    assert.equal(await page.evaluate(()=>remountCard._panel.canEdit),false);
     await page.evaluate(()=>remountCard.remove());
     assert.equal(await page.evaluate(()=>subscriptions),0);
+    // Card edit locks also apply to administrators; live control remains available.
+    await page.evaluate(()=>{window.locked=makeCard({edit_locked:true});});
+    await page.waitForFunction(()=>locked._panel?.port);
+    frame=page.frames().find(frame=>frame.parentFrame());await frame.waitForFunction(()=>window.initial);
+    assert.equal(await frame.evaluate(()=>initial.can_edit),false);
+    assert.equal(await page.locator('#studio').isVisible(),false);
+    assert.equal(await page.locator('iframe').getAttribute('sandbox'),'allow-scripts');
+    await frame.evaluate(()=>port.postMessage({type:'save',items:[]}));
+    assert.equal(await page.evaluate(()=>locked._panel.pending),0);
+    await page.evaluate(()=>{locked.remove();window.empty=makeCard({floor:'empty'});});
+    await page.waitForFunction(()=>empty._panel?.$('notice').textContent.includes('Create and publish'));
+    assert.equal(await page.locator('#studio').isVisible(),true);
+    assert.equal(await page.locator('#studio').getAttribute('href'),'/home-studio');
+    assert.equal(await page.locator('iframe').isVisible(),false);
+    assert.equal(await page.evaluate(()=>empty._panel.port),null);
+    await page.evaluate(()=>{empty.hass=makeHass(false,'family');});
+    await page.waitForFunction(()=>empty._panel?.$('notice').textContent.includes('Ask an administrator'));
+    assert.equal(await page.locator('#studio').isVisible(),false);
+    await page.evaluate(()=>{empty.remove();window.legacy=makeCard({floor:'legacy'});});
+    await page.waitForFunction(()=>legacy._panel?.port);
+    assert.equal(await page.evaluate(()=>legacy._panel.canEdit),true);
+    assert.equal(await page.locator('#studio').isVisible(),false,'portable builds do not link to an unavailable native editor');
+    await page.evaluate(()=>legacy.remove());
     assert.deepEqual(errors,[]);
     console.log('PASS: dashboard module, validation, sizing, floor selection, opaque sandbox, pinned dry run, live controls, admin gating, reconnect/remount edit recovery and stale-save rejection.');
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
