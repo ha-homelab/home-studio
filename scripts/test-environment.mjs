@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { createEnvironmentLayer } from '../planner/environment.js';
 const THREE = await import('data:text/javascript;base64,' + readFileSync(new URL('../vendor/three.module.min.js', import.meta.url)).toString('base64'));
 class Events {
@@ -52,6 +53,18 @@ layer.setActive(false); assert.equal(timers.size, 0); layer.setActive(true); ass
 intersection([{isIntersecting:false}]); assert.equal(timers.size, 0); intersection([{isIntersecting:true}]); assert.equal(timers.size, 1);
 win.emit('pagehide'); assert.equal(timers.size, 0); win.emit('pageshow'); assert.equal(timers.size, 1);
 for (const palette of ['meadow', 'dusk', 'sage']) { layer.setSettings({ palette }); checkSiteClear(); assert.equal(layer.stats.actors, 5); }
+// Exercise the real viewer failure path with a running layer, not a timer stub.
+const reportError = readFileSync(new URL('../viewer.js', import.meta.url), 'utf8').split('\n').find(line => line.startsWith('function report3DError('));
+assert(reportError);
+runInNewContext(reportError + '; report3DError(new Error("Synthetic render failure"));', {
+  environmentLayer: layer, failed3D: false, initialViewReady: true,
+  cancelRender() {}, $: () => ({ style: {} }), console: { error() {} },
+});
+assert.equal(timers.size, 0, 'A fatal viewer error stops decorative work as well as rendering');
+assert.equal(layer.stats.actors, 0, 'A fatal viewer error releases its decorative resources');
+const failedElapsed = layer.stats.elapsed;
+win.emit('pageshow'); layer.setActive(true); advance();
+assert.equal(timers.size, 0); assert.equal(layer.stats.elapsed, failedElapsed, 'A failed viewer does not resume decorative work');
 layer.setSettings({ motion: false }); assert.equal(timers.size, 0); const stoppedRenders = renders; advance(); assert.equal(renders, stoppedRenders);
 layer.dispose(); assert.equal(scene.children.length, 0); assert.equal(intersection,null); assert.equal(timers.size, 0);
 assert([...doc.listeners.values(), ...win.listeners.values(), ...media.listeners.values()].every(set => set.size === 0));
