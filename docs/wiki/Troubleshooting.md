@@ -3,6 +3,21 @@
 Keep Dry run on while investigating. Start with what the host header reports;
 a button press alone cannot tell you whether a device is reachable.
 
+## Home Studio is missing or its drawing will not load
+
+Use Home Assistant 2026.10 or newer. Check that HACS installed the integration
+from a release containing **home_floorplan.zip**, restart HA, then add
+**Home Studio** under **Settings → Devices & services → Add integration**.
+The Home Studio sidebar requires an administrator account; family accounts use
+**3D Home** after publication.
+
+For a loading error, use **Retry connection**. Preserve unsaved work with
+**Export JSON** before reloading or switching editors. If setup remains blocked,
+the [separate editor](https://ha-homelab.github.io/home-studio/planner/) is an
+optional way to keep drawing. It has a separate draft and no HA connection;
+transfer source deliberately with Export JSON and Open JSON. See the
+[native guide](../home-assistant-editor.md) for recovery and generated-home compatibility.
+
 ## The plan opens but readings are missing
 
 Check the Home Assistant connection, the display's network, and the entity's
@@ -40,8 +55,10 @@ authorized Home Assistant session separately when live control is intended.
 
 Choose a language in the plan. Without an explicit selection, the installed
 viewer follows the Home Assistant profile language. The hosted editor has its
-own browser preference. A cached old package may need a rebuilt/reinstalled
-viewer and a reload. User-authored room names, device names, identifiers, and
+own browser preference. Update the native integration and republish the saved
+drawing for new viewer changes, then reload. For a portable installation,
+rebuild and reinstall the generated package. User-authored room names, device
+names, identifiers, and
 technical error details are not automatically translated. See
 [the language guide](Languages.md) for the documented scope.
 

@@ -123,7 +123,6 @@ function render({ loaded = true } = {}) {
   control.append(select); bar.append(control); root.append(bar);
   const title = element('h2', t(topic === 'draw' ? 'Draw your first home.' : topic === 'install' ? 'Export, build, and install your plan.' : 'Saving, sharing and next steps ↗'));
   title.id = 'quick-title'; root.append(title);
-  document.title = `${copy.quick} · ${title.textContent} · Home studio`;
   root.append(helpText('scope'));
   if (!loaded) { const warning = paragraph('Language could not be loaded. English is shown instead.'); warning.role = 'status'; root.append(warning); }
   const navigation = element('nav', '', 'quick-links'); navigation.setAttribute('aria-label', copy.quick);

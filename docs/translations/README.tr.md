@@ -1,11 +1,35 @@
 # Home Studio — Hızlı başlangıç
 
-[Home Studio](https://ha-homelab.github.io/home-studio/planner/?lang=tr) · [Languages](README.md)
+[Home Studio — Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=tr#native-studio) · [Languages](README.md)
+
+## Home Assistant içinde başlayın
+
+Yeni bir ev için Home Studio’yu Home Assistant içinde kullanın. Ayrı bir Python kurulumu, YAML veya erişim belirteci gerekmez.
+
+Önceden oluşturulmuş veya özelleştirilmiş bir bileşen kullanıyorsanız önce ayrıntılı kılavuzdaki **Existing generated homes** bölümünü okuyun; otomatik dönüştürme yapılmaz.
+
+1. Home Assistant 2026.10 veya daha yeni bir sürüm kullanın ve yedek alın.
+2. HACS içinde `https://github.com/ha-homelab/home-studio` adresini **Integration** kategorisinde özel depo olarak ekleyin. **home_floorplan.zip** içeren kararlı Home Studio sürümünü kurun ve Home Assistant’ı yeniden başlatın.
+3. **Settings → Devices & services → Add integration → Home Studio** yolunu açın.
+4. Yönetici hesabıyla kenar çubuğundaki **Home Studio**’yu açın. Bir oda çizin ve nesneleri gerçek HA cihazlarına bağlayın.
+5. **Save draft**, ardından **Publish family view** düğmesine basın. **3D Home**’u açın ve cihazları kontrol etmeden önce bağlantıları **Dry run** ile denetleyin.
+
+[Home Assistant guide — English](../home-assistant-editor.md) · [Install — English](https://ha-homelab.github.io/home-studio/install.html#native-studio)
+
+## İsteğe bağlı: HA kurulurken çizim yapma
+
+HA’yı hazırlarken ayrı tarayıcı düzenleyicisini kullanabilirsiniz. Bu düzenleyicinin HA ile canlı bağlantısı yoktur. JSON dışa aktarın, ardından HA içindeki Home Studio’da **Open JSON** ile açın, cihazları denetleyin, kaydedin ve yayımlayın.
+
+[Browser editor](https://ha-homelab.github.io/home-studio/planner/?lang=tr)
 
 Evinizi tarayıcıda çizin. Hesap gerekmez. Dili düzenleyicinin üst kısmından seçin.
 
-1. Odalar, duvarlar, kapılar ve pencereler ekleyin. Kütüphanede 195 model bulunur. Bir renk paleti ve desteklenen nesneler için yüzey deseni seçin.
+1. Odalar, duvarlar, kapılar ve pencereler ekleyin. Kütüphanede 206 model bulunur. Bir renk paleti ve desteklenen nesneler için yüzey deseni seçin.
 2. Düzenlenebilir bir kopya saklamak için JSON dışa aktarın. Taslaklar yalnızca bu tarayıcıda kalır. Dil değiştirmek planınızı değiştirmez.
+
+### İsteğe bağlı: Taşınabilir araçlar ve Python derleyicisi
+
+Bu yol, ayrı derlemeler ve daha önce oluşturulmuş kurulumlar içindir; yeni bir yerel kurulumda bu adımları atlayın.
 
 Araçların tamamını indirip arşivi açın. Python 3.10 veya üzerini kurun. Araç klasöründe şu komutu çalıştırın:
 

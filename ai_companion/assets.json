@@ -82,5 +82,6 @@
   "planner/inspector-dom.js",
   "planner/floor-navigator.js",
   "planner/floor-navigator.css",
-  "planner/ha-bridge.js"
+  "planner/ha-bridge.js",
+  "docs/images/native-editor.png"
 ]

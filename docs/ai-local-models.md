@@ -1,5 +1,9 @@
 # Local AI models for room-planning drafts
 
+This is optional setup for the [local AI companion](ai-planning.md). The
+recommended [Home Assistant workflow](home-assistant-editor.md) installs, draws,
+and publishes without a local model, Python setup, or inference service.
+
 **Implemented local profiles; runtime/model setup remains your choice.** Official
 sources checked 2026-10-16. Home Studio supports Ollama's native Chat API and the
 OpenAI-compatible Chat Completions APIs of LM Studio, llama.cpp, vLLM and LocalAI.
@@ -14,7 +18,7 @@ and LAN addresses are intentionally rejected; use `127.0.0.1` or `[::1]` with an
 explicit port. The profile supplies the inference path. See the [workflow](ai-planning.md),
 [cloud providers](ai-provider-setup.md), and [architecture](ai-planner-architecture.md).
 
-A runtime does not connect to the ordinary hosted editor automatically. Its offline
+A runtime does not connect to the native HA editor or ordinary hosted editor automatically. Its offline
 network policy remains unchanged. The companion serves UI and API on one local
 origin, avoiding browser-to-runtime CORS and mixed-content workarounds. Furnish a
 measured room or create a measured rectangle, then review before applying. Photos

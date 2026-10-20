@@ -159,7 +159,8 @@ Artifacts have a retention period, and downloading them may require GitHub sign-
 
 For a published candidate, compare the package with its checksum and
 `release-manifest.json`. Before updating, export your project JSON and back up
-Home Assistant; rebuild and reinstall generated viewers to receive their changes.
+Home Assistant. Update the native integration and republish its saved drawing
+to receive viewer changes; rebuild and reinstall for a portable deployment.
 If a problem persists, include the browser version, graphics backend and
 acceleration setting, the failing action and a fictional reproduction. Do not
 publish household plans, entity identifiers, credentials or private screenshots.

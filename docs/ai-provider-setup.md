@@ -1,5 +1,9 @@
 # AI provider setup
 
+This guide is only for the optional [local AI companion](ai-planning.md).
+Installing Home Studio, drawing, and publishing in [Home Assistant](home-assistant-editor.md)
+require no provider account, API key, or AI setup.
+
 **Implemented adapters; live model compatibility requires a user smoke test.**
 Official documentation checked **2026-10-16**. Automated tests use synthetic payloads
 and mock servers, not provider accounts, private photos or paid requests. Console

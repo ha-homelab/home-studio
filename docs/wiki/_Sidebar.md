@@ -2,7 +2,7 @@
 
 [Documentation home](Home.md)
 
-- [Start and install](Getting-started.md)
+- [Install and draw in HA](Getting-started.md)
 - [Dry run](Dry-run.md)
 - [Troubleshooting](Troubleshooting.md)
 - [Languages](Languages.md)

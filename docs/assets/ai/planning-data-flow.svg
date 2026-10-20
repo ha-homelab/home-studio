@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1120" height="650" viewBox="0 0 1120 650" role="img" aria-labelledby="title desc">
   <title id="title">Optional AI planning data flow</title>
-  <desc id="desc">The user selects photos and instructions in a browser. A local companion holds a temporary key and routes requests either to a local model or an explicitly selected cloud provider. Suggestions are validated and reviewed before they become editable plan objects. There is no Home Studio-operated relay. The optional companion is separate from the installed Home Assistant viewer.</desc>
+  <desc id="desc">The user selects photos and instructions in a browser. A local companion holds a temporary key and routes requests either to a local model or an explicitly selected cloud provider. Suggestions are validated and reviewed before they become editable plan objects. There is no Home Studio-operated relay. The optional companion is separate from the native Home Assistant editor and viewer. Export reviewed geometry as JSON, open it in Home Studio inside HA, then save the draft and publish the family view.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10Z" fill="#6ce1ed"/></marker>
   </defs>
@@ -43,7 +43,7 @@
     <text x="796" y="424" font-size="15" fill="#b6c9dd">Requests and responses travel</text>
     <text x="796" y="449" font-size="15" fill="#b6c9dd">through the local companion.</text>
     <rect x="48" y="512" width="664" height="60" rx="12" fill="#164334" stroke="#51ab85"/>
-    <text x="68" y="549" font-size="18" font-weight="600">Apply → editable objects → undo / export → existing HA installer</text>
+    <text x="68" y="549" font-size="18" font-weight="600">Apply → export JSON → open in HA → save draft → publish</text>
     <text x="32" y="625" font-size="16" fill="#b6c9dd">No AI key, photo, or conversation in project exports · accepted geometry remains private home data</text>
   </g>
 </svg>

@@ -1,8 +1,10 @@
 # Transport security profiles
 
-The floor-plan editor/compiler can process local fictional or private project
-files without contacting Home Assistant. Browser/HA account security remains
-owned by the browser and Home Assistant. Do not publish private project exports.
+The optional standalone floor-plan editor/compiler can process local fictional
+or private project files without contacting Home Assistant. The recommended
+[native workflow](home-assistant-editor.md) uses your authenticated HA session;
+the strict transport profile below is for developer tools and the AI companion.
+Browser/HA account security remains owned by the browser and Home Assistant. Do not publish private project exports.
 
 The owned native Firefox/Waterfox and Chrome-for-Testing download helpers, and
 the optional AI companion's cloud transport, support `HOME_STUDIO_STRICT_TLS=1`.

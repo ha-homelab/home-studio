@@ -12,9 +12,12 @@ keys, and generated private APKs belong outside this repository.
   interaction and bundled translations.
 - `custom_components/home_floorplan/static/panel.js`: authenticated host,
   MessagePort validation, preferences, and device-command guard.
+- `custom_components/home_floorplan/static/studio.js`, `native.py`, and
+  `config_flow.py`: native drawing host, draft/publication storage, and UI setup.
 - `custom_components/home_floorplan/`: backend validation and service handling.
 - `scripts/build-planner-project.py` and `scripts/install-home-assistant.py`:
-  deterministic local build and archive installation.
+  optional portable build and archive installation. New native installations
+  use HACS or `home_floorplan.zip`, then the Home Assistant UI.
 - `docs/`: detailed references, translated quick starts, source SVG diagrams,
   and this repository-local wiki.
 

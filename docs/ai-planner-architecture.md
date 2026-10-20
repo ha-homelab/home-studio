@@ -3,7 +3,10 @@
 The optional companion adds an inference boundary to the authoring tool. It does
 not add AI code to the installed Home Assistant viewer or weaken the hosted
 editor's `connect-src 'none'` policy. Both AI modes produce the existing project
-schema and use the existing compiler/installer.
+schema. After review, a user can export JSON and open it in the native HA editor
+to save and publish. Existing portable workflows can use the local compiler and
+installer. The companion is optional; native installation and manual drawing do
+not depend on it.
 
 ## Modules and ownership
 

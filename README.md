@@ -1,72 +1,70 @@
-# Home studio
+# Home Studio
 
-**Draw your home, explore it in 3D, and make it your Home Assistant dashboard.**
+**Draw, furnish, and publish an interactive 3D home directly in Home Assistant.**
 
-**[Try a furnished example](https://ha-homelab.github.io/home-studio/planner/?example=practice)** ·
-**[Start your own plan](https://ha-homelab.github.io/home-studio/planner/)** ·
-**[Draw inside Home Assistant](docs/home-assistant-editor.md)** ·
-**[Get the latest stable release](https://github.com/ha-homelab/home-studio/releases/latest)**
+**[Get started in Home Assistant](https://ha-homelab.github.io/home-studio/install.html#native-studio)** ·
+**[Illustrated drawing guide](https://ha-homelab.github.io/home-studio/planner/guide.html)** ·
+**[Latest stable release](https://github.com/ha-homelab/home-studio/releases/latest)**
 
-[![Home Studio editor showing a fictional practice floorplan in perspective](docs/images/home-studio-hero.jpg)](planner/guide-assets/06-preview.jpg)
+## Get started — install in Home Assistant
 
-The existing illustrated-guide screenshot shows the real editor with the fictional
-practice project, not a private home. Click for the unchanged readable original.
+Use **Home Assistant 2026.10 or newer** and an administrator account. The
+recommended route keeps your drawing, devices, saved drafts, and published
+**3D Home** dashboard together in HA.
 
-No account or installation is needed to try the editor. Start with room
-measurements and walls, choose from 206 furniture and garden designs, or open an editable
-example and experiment. The editor supports 24 languages. Choose the workflow
-that suits you: draw inside Home Assistant, or keep using the separate browser
-editor and portable local toolkit.
+1. **Back up Home Assistant.** Already using a generated or customized
+   `home_floorplan` component? Read [migration guidance](docs/home-assistant-editor.md#existing-generated-homes)
+   before replacing it.
+2. **Install with HACS.** Open HACS → menu → **Custom repositories**, add
+   `https://github.com/ha-homelab/home-studio`, and select **Integration**.
+   Find **Home Studio** and download the latest stable version.
+3. **Restart Home Assistant**, then open **Settings → Devices & services →
+   Add integration** and choose **Home Studio**.
+4. **Open Home Studio in the HA sidebar.** Draw your first room, add walls,
+   doors, windows, and furniture, then associate rooms with HA areas and choose
+   your devices.
+5. **Save draft → Publish family view.** Open **3D Home** to use the published
+   plan. Later drawing changes use the same save-and-publish steps; they do not
+   require another install or HA restart.
 
-## Two ways to create the same home
+Without HACS, download **home_floorplan.zip** from the
+[stable release](https://github.com/ha-homelab/home-studio/releases/latest),
+extract its contents into `config/custom_components/home_floorplan`, and continue
+from step 3. This is the integration ZIP, not the separate toolkit or GitHub's
+Source code ZIP. A new native installation needs **no Python setup, terminal
+build, YAML entry, or pasted access token**.
 
-**Inside Home Assistant:** releases containing **home_floorplan.zip** include
-the complete integration and editor. Install it through HACS as a custom
-integration repository, restart HA, then add **Home Studio** under
-**Settings → Devices & services**. Open **Home Studio** to draw, link rooms to
-HA areas, save a draft, and publish your **3D Home** view. Ordinary edits and
-publishing do not require a terminal or HA restart. See the
-[native editor guide](docs/home-assistant-editor.md), including the supported
-installation and update paths. Older releases without that asset use the
-portable toolkit below.
+[Full setup, updates, and troubleshooting](docs/home-assistant-editor.md) ·
+[Check device bindings with Dry run](docs/dry-run.md)
 
-**Separate browser editor:** the [hosted editor](https://ha-homelab.github.io/home-studio/planner/)
-still works without an account or HA connection. Export JSON to keep your
-source. Import that file into the editor inside HA, or use the existing
-[compiler and local installer](install.html#export). The same drawing format
-works in both editors. Opening the external editor never uploads your home
-automatically; transfer a project only by exporting and opening its JSON file.
+[![Home Studio inside Home Assistant, with drawing tools, Save draft and Publish family view](docs/images/native-editor.png)](docs/home-assistant-editor.md)
+
+The screenshot uses the actual editor and host with a simulated HA connection
+and fictional devices. It contains no private home or credentials.
+
+## Make it your home
+
+Draw measured rooms, add doors and windows, furnish them from **206 designs**,
+and preview in 3D. The editor supports **24 languages**. A desktop browser with
+a mouse or trackpad works best for drawing; the published plan is your everyday
+view for lights, media, covers, and other linked devices.
+
+Saved drafts and the published view are separate. An unfinished drawing or a
+failed publication leaves the last successful view available. Export JSON for
+an additional editable backup. The [separate editor](#optional-help-while-setting-up-home-assistant)
+is available further below if you need to keep drawing while resolving HA setup.
+
+The installed viewer gives walls a soft, rounded profile with a transparent
+teal finish, cyan upper edges and blue lower edges. Door and window openings
+stay clear. Subtle color drift reuses existing desktop frames; mobile devices
+and an idle plan stay still. See [wall rendering and resource limits](docs/rounded-walls.md).
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15584/badge)](https://www.bestpractices.dev/projects/15584)
 
 [![Fuzzing: RC only](https://img.shields.io/badge/Fuzzing-RC%20only-blue)](docs/fuzzing.md)
 
-**[How we test and release Home Studio](docs/quality-and-release.md)** — illustrated
-browser coverage, recovery checks, and verified release results.
-
-**[Illustrated drawing guide](https://ha-homelab.github.io/home-studio/planner/guide.html)** ·
-**[Install in Home Assistant](https://ha-homelab.github.io/home-studio/install.html)** ·
-**[Saving and recovery](docs/first-session.md)**
-
-Draw rooms, add walls, doors and windows, place furniture, and explore your
-design in 3D. The browser editor needs no account or installation. Use a desktop
-browser and a mouse or trackpad; the illustrated guide also reads on a phone.
-
-The complete download includes the editor, a local project compiler, a Home
-Assistant integration, and its local installer. The compiler and installer need
-**Python 3.10 or newer**, with no extra Python packages. Home Assistant supplies
-the integration's runtime dependencies.
-
-The separate hosted editor stores a draft in your browser and does not connect to Home
-Assistant. **Export JSON** saves your editable project; **Open JSON** restores it.
-The local compiler turns that project into a separate viewer, 3D exports, and an
-installable Home Assistant package. Examples and guide screenshots are fictional.
-
-The compiled Home Assistant viewer gives walls a soft, rounded profile with a
-transparent teal finish, cyan upper edges and blue lower edges. It keeps door
-and window openings clear. Subtle color drift reuses existing desktop frames;
-mobile devices and an idle plan stay still. See [wall rendering and resource
-limits](docs/rounded-walls.md). Your measured drawing and exported geometry are unchanged.
+[How we test and release Home Studio](docs/quality-and-release.md) ·
+[Saving and recovery](docs/first-session.md)
 
 ## Choose your language
 
@@ -166,10 +164,11 @@ approximate silhouette, not a manufacturer-supplied model or exact dimensions.
 Object libraries provide geometry; adding a server or car does not automatically
 connect its telemetry to Home Assistant.
 
-Furniture designs, palettes, and patterns are authored in the planner. After changing them,
-rebuild and reinstall the project. The installed panel can move, resize, rename,
-and bind existing furniture to entities; its inventory import is for placements,
-not a way to download or replace furniture models.
+Edit furniture designs, palettes, and patterns in **Home Studio**, then **Save
+draft** and **Publish family view**. The separate **3D Home** placement editor
+can move, resize, rename, and bind existing objects; its inventory import does
+not replace furniture models. Only the optional portable workflow requires
+rebuilding and reinstalling after source geometry or appearance changes.
 
 ## Add a garden
 
@@ -190,7 +189,25 @@ placed objects are saved in your project. See the [garden guide](docs/environmen
 
 ![Fictional Garden Studio showing editable planting, pets, and optional geometric surroundings](docs/images/garden-surroundings.png)
 
-## Draw, build, and preview
+## Optional help while setting up Home Assistant
+
+If installation is not working yet, start with the
+[HA troubleshooting guide](docs/home-assistant-editor.md#troubleshooting).
+You can keep drawing in the [separate hosted editor](https://ha-homelab.github.io/home-studio/planner/)
+or try a [fictional practice home](https://ha-homelab.github.io/home-studio/planner/?example=practice)
+while you resolve setup. It requires no account, stores a draft in that browser,
+and does not connect to or control HA.
+
+Choose **Export JSON** to keep your drawing. Once Home Studio is installed in
+HA, choose **Open JSON**, check your devices, **Save draft**, and **Publish
+family view**. Opening either editor does not transfer a project automatically.
+
+### Optional portable toolkit: draw, build, and preview
+
+Use this route only if you want a local compiler and file-based deployment, or
+already maintain a generated home. These Python commands are not part of the
+recommended HA setup above. The toolkit requires Python 3.10 or newer, with no
+extra Python packages.
 
 1. Follow the [drawing guide](https://ha-homelab.github.io/home-studio/planner/guide.html)
    and choose **Export JSON** in the editor. Keep that file as your source.
@@ -217,7 +234,7 @@ To draw in a downloaded copy, run the server without `--directory dist/my-home`
 and open [the local editor](http://127.0.0.1:8099/planner/). Export and reopen JSON
 to move between the hosted and local editors; they have separate browser drafts.
 
-## Install in Home Assistant
+### Optional portable toolkit: install the compiled package
 
 Home Studio provides a Lovelace dashboard card, media-player artwork, sensor
 and thermostat readings, native HA controls on hover, and a compact audio remote.
@@ -240,7 +257,7 @@ percentage button resets the view. See the
 for keyboard shortcuts and upgrade guidance.
 
 Use the [complete installation guide](https://ha-homelab.github.io/home-studio/install.html)
-for first-time setup, Home Assistant OS file transfer, and updates.
+for portable-package setup, Home Assistant OS file transfer, and updates.
 
 For a **local, writable Home Assistant config directory**, replace the config
 path below with the directory containing your `configuration.yaml`:
@@ -289,8 +306,9 @@ python3 scripts/serve-ai-planner.py
 On Windows: `py -3 scripts/serve-ai-planner.py`. Choose **Plan from photos** in the
 local editor, connect your provider or local vision model, and add photos,
 instructions and measured dimensions. Furnish an existing room or create a measured
-rectangular room, preview the suggestions, then apply one undoable edit. The normal
-editor, JSON export and Home Assistant installation workflow remain the same.
+rectangular room, preview the suggestions, then apply one undoable edit. Export JSON from the companion and use **Open JSON** in Home Studio inside HA,
+then **Save draft** and **Publish family view**. Existing portable deployments
+can instead rebuild through the optional toolkit.
 
 Credentials stay in temporary companion memory and out of project/browser storage.
 Cloud generation sends the chosen data and authentication key to your provider;

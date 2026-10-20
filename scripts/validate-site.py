@@ -35,7 +35,7 @@ FUZZ_REPLAY_FILES = (
 )
 
 SITE_FILES = (
-    'index.html', 'site.css', 'privacy.html', 'install.html', 'ai-setup.html', '404.html', '.nojekyll',
+    'index.html', 'site.css', 'docs/images/native-editor.png', 'privacy.html', 'install.html', 'ai-setup.html', '404.html', '.nojekyll',
     'planner/index.html', 'planner/editor.css', 'planner/editor.js', 'planner/floor-navigator.js', 'planner/floor-navigator.css', 'planner/render-capacity.js', 'planner/interaction-render.js', 'planner/environment.js',
     'planner/i18n.js', 'planner/validation.js', 'planner/locales/index.js',
     'planner/ha-bridge.js', 'planner/draft-storage.js', 'planner/inspector-dom.js', 'planner/onboarding.js', *(f'planner/examples/{name}.js' for name in ('practice', 'decor', 'patterns', 'garage')),
@@ -69,7 +69,7 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'scripts/build-panel-locales.py', 'scripts/test-dry-run-browser.cjs',
               'scripts/validate-docs.py', 'scripts/test-docs.py',
               *(f'docs/wiki/{name}.md' for name in ('Home', '_Sidebar', 'Getting-started', 'Dry-run', 'Troubleshooting', 'Languages', 'Development')),
-              'docs/images/home-studio-hero.jpg', 'docs/images/native-editor.png', 'scripts/render-docs-hero.sh',
+              'docs/images/home-studio-hero.jpg', 'scripts/render-docs-hero.sh',
               'docs/images/dry-run-command-flow.svg', 'docs/images/plan-state-lifecycle.svg',
               'docs/process-and-results.md', 'docs/images/dry-run-delivery-process.svg',
               'docs/images/dry-run-validation.svg', 'docs/data/dry-run-validation.json',

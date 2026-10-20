@@ -3,17 +3,24 @@
 You do not need a 3D modeling background. Start with a room you recognize, make
 one change, and save a copy before building the rest of your home.
 
-## 1. Try a finished example
+## 1. Install Home Studio in Home Assistant
 
-Open [the practice home](https://ha-homelab.github.io/home-studio/planner/?example=practice).
-The example opens in **Preview 3D**. Choose **Plan 2D**, select the table, change
-its color, then return to **Preview 3D** to look around.
-The persistent **Examples** button also offers a decor studio, a pattern studio,
-and a garage. These are fictional local examples with no real device bindings.
+The recommended path is to install first, then draw, save, and publish inside
+Home Assistant. Use Home Assistant 2026.10 or newer and a release containing
+**home_floorplan.zip**.
 
-An example never needs a provider account, an AI token, or a Home Assistant
-connection. Opening one when a drawing already exists asks before replacing it.
-Use **Export JSON** to keep a portable copy of anything you want to retain.
+1. Back up Home Assistant. If you already have a generated or customized
+   `home_floorplan` installation, read [Existing generated homes](home-assistant-editor.md#existing-generated-homes)
+   before replacing it; there is no automatic migration.
+2. In HACS, add `https://github.com/ha-homelab/home-studio` as a custom repository
+   with the **Integration** category, then download Home Studio.
+3. Restart Home Assistant. Open **Settings → Devices & services → Add integration**
+   and choose **Home Studio**.
+4. Open **Home Studio** in the sidebar using an administrator account.
+
+A new native installation needs no terminal, Python, API token, or YAML entry.
+For manual ZIP installation and troubleshooting, see the
+[native installation guide](home-assistant-editor.md).
 
 ## 2. Start with one measured room
 
@@ -56,46 +63,69 @@ In **Preview 3D**:
 Hold Space or Shift while dragging to move the 2D view instead. Switching floors
 and moving the 3D camera do not add undo steps or change your saved geometry.
 
-## 3. Keep your work
+## 3. Save the draft and publish the family view
 
-**Export JSON** saves your editable source. Keep that file somewhere you back up.
-An autosaved browser draft is useful between visits, but it is not cloud storage
-and does not travel between devices, browsers, or website addresses.
+Choose **Save draft** in the Home Studio header. Wait for confirmation that your
+editable drawing is saved in Home Assistant. Saving also applies the field you
+are currently typing; correct any invalid field before continuing.
 
-When **Draft recovery** appears:
+When the rooms and items look right, choose **Publish family view**, then open
+**3D Home** in the sidebar. Publication validates and builds the saved drawing;
+each floor needs at least one valid room. An unfinished draft can be saved
+without replacing the currently published home. A failed publication keeps the
+last successful home available.
 
-- **Load saved draft** loads the version already stored by the browser. Export
-  your current work first if you want to keep both versions.
-- **Restore previous project** offers one retained earlier project checkpoint. This is not unlimited version history.
-- **Download original data** preserves damaged stored data for investigation.
-  An unreadable draft must not be treated as a successfully saved blank project.
-- **Replace saved draft with this version** is an explicit decision to keep the
-  version on screen. Do not use it until you have checked which copy you want.
+To connect a device, associate its room with a Home Assistant area and select
+its entity from the suggested devices. Areas help you find entities; they do
+not measure rooms or place objects for you. Use **Dry run** in 3D Home to check
+bindings before choosing to enable live device controls.
 
-If two tabs edit the same draft, autosave pauses rather than silently choosing a
-winner. Finish in one tab and deliberately resolve the saved version. If storage
-is unavailable or full, keep working with exported JSON copies; do not rely on
-an autosave success message that has not appeared.
+**Export JSON** keeps an additional portable backup of the last valid drawing.
+Keep exported versions and Home Assistant backups before large changes. If an
+unsaved drawing is recovered from the current tab, inspect it before choosing
+**Resume recovered drawing** or **Use saved drawing**. Export a copy when you
+need to retain both versions. Tab recovery is not a replacement for Save draft.
 
-## 4. Choose where to publish
+If another editor tab changes the saved project, save/publication revision
+checks reject the stale change. Export the version you want to keep before
+reloading. A disconnected editor cannot confirm a save in Home Assistant.
 
-The same editor is available inside Home Assistant in releases that include
-**home_floorplan.zip**. Follow the [native installation guide](home-assistant-editor.md),
-open your source with **Open JSON**, then **Save draft** and **Publish**. You can
-also start drawing directly inside HA and select its room areas and devices.
-The in-HA editor links back to the separate browser editor when you prefer it;
-neither transfers your home to the other automatically.
+## Optional: try a fictional example
 
-### Keep using the separate toolkit
+Use **Examples** in Home Studio to open the practice home, decor studio, pattern
+studio, or garage. Keep your current drawing with **Save draft** and **Export
+JSON** before replacing it. These examples have no real device bindings.
 
-Drawing and previewing run in the browser. Building a portable installable
-package on your own computer uses Python 3.10 or newer and the local toolkit:
+In the practice home, choose **Plan 2D**, select the table, change its color, and
+return to **Preview 3D** to look around. An example needs no provider account or
+AI token. The [illustrated seven-step lesson](../planner/guide.html) explains the
+same drawing tools used inside Home Assistant.
+
+## Optional fallback: the separate editor and portable toolkit
+
+If Home Assistant setup is blocked, the
+[hosted editor](https://ha-homelab.github.io/home-studio/planner/) lets you keep
+drawing while you resolve it. For offline work, use a local copy from the
+toolkit. The hosted editor has no HA connection; its draft belongs to that
+browser and website address. **Export JSON** keeps your source. Later, use
+**Open JSON** inside Home Studio in HA, inspect the drawing, then **Save draft**
+and **Publish family view**. Opening either editor never transfers a project
+automatically.
+
+The standalone editor's **Draft recovery** controls can load its saved version,
+restore one previous-project checkpoint, download damaged original data, or
+explicitly replace the saved draft. If two tabs conflict, finish in one tab and
+choose which version to keep. If browser storage is unavailable or full, keep
+exporting JSON copies; do not treat an unconfirmed autosave as successful.
+
+For an existing portable deployment, or when you deliberately need the local
+compiler and installer:
 
 1. Get the [latest stable release](https://github.com/ha-homelab/home-studio/releases/latest).
 2. Under **Assets**, download **home-studio-VERSION.zip**, not GitHub's automatic
    **Source code (zip)**. Extract it; its top-level folder is **home-studio**.
-3. Export your project JSON and follow the [installation guide](../install.html).
-   It covers the build command and the different Home Assistant installation types.
+3. Export your project JSON and follow the [portable installation reference](../install.html#export).
+   This route uses Python 3.10 or newer and a local Home Assistant config path.
 4. Back up Home Assistant and your project before replacing an existing install.
    Verify device bindings in **Dry run** before allowing real commands.
 
@@ -121,9 +151,10 @@ The camera stops when you stop dragging; it does not keep spinning. Camera
 navigation does not move saved furniture or send device commands. Click or tap
 a device without dragging to use its normal controls.
 
-If these buttons are missing, rebuild and reinstall the project with the updated
-toolkit, then refresh Home Assistant. Updating the hosted drawing editor does
-not update an already installed Home view.
+If these buttons are missing, update the native integration through HACS, restart
+Home Assistant, and publish the saved drawing again to regenerate its viewer.
+For a portable installation, rebuild and reinstall with the updated toolkit.
+Updating the hosted drawing editor does not update an installed Home view.
 
 ## If the 3D view cannot start
 
