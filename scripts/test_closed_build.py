@@ -95,7 +95,6 @@ class EnvelopeTests(unittest.TestCase):
 
 class BoundaryTests(unittest.TestCase):
     def test_prospective_rc_matches_published_complete_inventory(self):
-        import release_control
         import version_plan
         import version_receipt
         policy = json.loads((build.ROOT / ".release-policy.json").read_text())
