@@ -14,6 +14,24 @@
 - Update the optional closed-build session gateway pin so rejected requests
   cannot stall responses by leaving their request bodies unfinished.
 
+### Upgrade
+
+Back up Home Assistant and export your drawing JSON before updating the
+integration. Restart Home Assistant after installing the integration update,
+then reload the editor and viewer to load the new code. Existing drawings and
+entity bindings remain compatible. Generated or customized installations must
+rebuild and reinstall their viewers through their existing deployment workflow;
+updating the hosted editor alone does not update an installed plan.
+
+### Security
+
+Viewer responses now recheck the connected account's permissions after loading
+assets, so a role or entity-permission change cannot retain outdated controls
+in a newly loaded view. Existing server-side command checks remain in place.
+Private geometry, entity bindings, and credentials stay outside public release
+assets. The optional session gateway also rejects unfinished request bodies
+without waiting indefinitely for the sender.
+
 ## [0.10.0] - Draw and publish inside Home Assistant
 
 - Bound pointer-motion rendering on all detected software graphics paths while
