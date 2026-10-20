@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { createEnvironmentLayer } from '../planner/environment.js';
+import { createEnvironmentLayer, ENVIRONMENT_PALETTES } from '../planner/environment.js';
 const THREE = await import('data:text/javascript;base64,' + readFileSync(new URL('../vendor/three.module.min.js', import.meta.url)).toString('base64'));
 class Events {
   listeners = new Map();
@@ -69,12 +69,14 @@ layer.setSettings({ motion: false }); assert.equal(timers.size, 0); const stoppe
 layer.dispose(); assert.equal(scene.children.length, 0); assert.equal(intersection,null); assert.equal(timers.size, 0);
 assert([...doc.listeners.values(), ...win.listeners.values(), ...media.listeners.values()].every(set => set.size === 0));
 
-function simulateTraffic(seed, site = bounds, useMetadata = false) {
+function simulateTraffic(seed, site = bounds, useMetadata = false, roadSide = 'minZ') {
   const target = new THREE.Scene();
   const options = { scene: target, bounds: site, frameInterval: 2000, document: doc, window: win, settings: { enabled: true, motion: true } };
-  if (useMetadata) options.settings.seed = seed; else options.seed = seed;
+  if (useMetadata) Object.assign(options.settings, { seed, road_side: roadSide });
+  else Object.assign(options, { seed, roadSide });
   const trafficLayer = createEnvironmentLayer(THREE, options);
   assert.equal(trafficLayer.stats.trafficSeed, seed);
+  assert.equal(trafficLayer.stats.roadSide, roadSide);
   const meshes = [...target.children[0].children];
   const resources = meshes.map(mesh => [mesh.geometry, mesh.material, mesh.instanceMatrix, mesh.instanceMatrix.array, mesh.instanceColor, mesh.instanceColor?.array]);
   const bodies = meshes.filter(mesh => mesh.instanceColor);
@@ -82,6 +84,7 @@ function simulateTraffic(seed, site = bounds, useMetadata = false) {
   assert.equal(bodies[0].count, 2, 'Traffic always consists of exactly two car instances');
   const positions = new Float64Array(2), previousColors = new Float32Array(6), matrix = new THREE.Matrix4();
   const changes = [[], []], seenColors = [new Set(), new Set()], waiting = [0, 0];
+  const roadEdge = roadSide === 'maxZ' ? site.maxZ : site.minZ, roadDirection = roadSide === 'maxZ' ? 1 : -1;
   let previous = trafficLayer.stats;
   function recordPositions() {
     for (let index = 0; index < 2; index++) { bodies[0].getMatrixAt(index, matrix); positions[index] = matrix.elements[12]; }
@@ -99,6 +102,8 @@ function simulateTraffic(seed, site = bounds, useMetadata = false) {
       assert(car.cycle === 0 ? car.entryDelay === 0 : car.entryDelay >= 2 && car.entryDelay < 9, 'Arrival gaps stay bounded');
       seenColors[index].add(car.color);
       bodies[0].getMatrixAt(index, matrix);
+      assert(Math.abs(matrix.elements[14] - (roadEdge + roadDirection * 6 + (index ? -.65 : .65))) < .00001,
+        'Cars stay on the configured side throughout waiting and repeated passes');
       assert.equal(matrix.elements[0] === 0, !car.visible, 'The waiting car is hidden by its instance transform');
       if (!car.visible) waiting[index]++;
       if (car.cycle !== before.cycle) {
@@ -112,6 +117,9 @@ function simulateTraffic(seed, site = bounds, useMetadata = false) {
         assert(Math.abs(distance - car.speed * 2) < .00001, 'Rendered car travel follows its individual speed and fixed lane direction');
       }
     }
+    bodies[0].getMatrixAt(0, matrix); const positiveLaneZ = matrix.elements[14];
+    bodies[0].getMatrixAt(1, matrix);
+    assert(positiveLaneZ > matrix.elements[14], 'The +X car stays on the +Z lane on either side of the site');
     if (tick === 100) {
       const paused = trafficLayer.stats;
       doc.hidden = true; doc.emit('visibilitychange'); advance();
@@ -136,5 +144,50 @@ const seedZero = simulateTraffic(0), seedOne = simulateTraffic(1), seed42 = simu
 simulateTraffic(0xffffffff, { minX: 0, maxX: .5, minZ: 0, maxZ: .5 });
 assert.deepEqual(simulateTraffic(42, bounds, true), seed42, 'The same direct or model-metadata seed reproduces every pass');
 assert.notDeepEqual(seedZero, seedOne, 'Different seeds produce different traffic');
+for (const seed of [0, 1, 42, 0xffffffff]) {
+  const site = seed === 0xffffffff ? { minX: -3, maxX: -2.5, minZ: 4, maxZ: 4.5 } : bounds;
+  const expected = seed === 0 ? seedZero : seed === 1 ? seedOne : seed === 42 ? seed42 : simulateTraffic(seed, site);
+  assert.deepEqual(simulateTraffic(seed, site, true, 'maxZ'), expected,
+    'Changing the road side preserves traffic timing, X direction, reuse and seeded variation');
+}
+
+// Non-origin bounds catch incorrect mirroring around world zero. Check the real
+// world matrices after palette/settings and site changes, not just the metadata.
+const configuredScene = new THREE.Scene(), configuredSite = { minX: -4, maxX: 9, minZ: -7, maxZ: 17 };
+const configured = createEnvironmentLayer(THREE, { scene: configuredScene, bounds: configuredSite, elevation: -2,
+  settings: { enabled: true, road_side: 'maxZ' }, document: doc, window: win });
+function checkApproach(site, palette) {
+  assert.equal(configured.stats.roadSide, 'maxZ');
+  checkSiteClear(configuredScene, site);
+  const meshes = configuredScene.children[0].children, matrix = new THREE.Matrix4();
+  for (const [kind, distance, index] of [['road', 6, 0], ['path', 4.1, 0], ['lawn', 2, 2]]) {
+    const color = new THREE.Color(ENVIRONMENT_PALETTES[palette][kind]);
+    const mesh = meshes.find(mesh => mesh.material.color.equals(color));
+    assert(mesh, kind + ' has a shared rendered batch');
+    mesh.getMatrixAt(index, matrix); matrix.premultiply(mesh.matrixWorld);
+    assert(Math.abs(matrix.elements[14] - site.maxZ - distance) < .00001, kind + ' follows the selected site edge');
+  }
+  assert.equal(configured.stats.actors, 5); assert.equal(configured.stats.drawCalls, 14);
+  assert.equal(timers.size, 0, 'Road configuration never starts an animation timer');
+}
+checkApproach(configuredSite, 'sage');
+const defaultScene = new THREE.Scene();
+const defaultLayer = createEnvironmentLayer(THREE, { scene: defaultScene, bounds: configuredSite,
+  settings: { enabled: true }, document: doc, window: win });
+assert.equal(defaultLayer.stats.roadSide, 'minZ');
+assert.equal(configured.stats.drawCalls, defaultLayer.stats.drawCalls, 'Changing sides creates no extra batches');
+const plantingColors = ['hedge', 'leaf', 'leafLight', 'trunk'].map(key => new THREE.Color(ENVIRONMENT_PALETTES.sage[key]));
+for (const mesh of defaultScene.children[0].children.filter(mesh => plantingColors.some(color => mesh.material.color.equals(color)))) {
+  const other = configuredScene.children[0].children.find(candidate => candidate.material.color.equals(mesh.material.color));
+  assert.deepEqual(other.instanceMatrix.array, mesh.instanceMatrix.array, 'Side planting stays in place');
+}
+assert.deepEqual(configuredScene.children[0].children[0].instanceMatrix.array.slice(0, 32),
+  defaultScene.children[0].children[0].instanceMatrix.array.slice(0, 32), 'Both long lawn strips stay in place');
+defaultLayer.dispose();
+configured.setSettings({ enabled: false }); configured.setSettings({ enabled: true, motion: false, palette: 'dusk' });
+checkApproach(configuredSite, 'dusk');
+const expandedSite = { ...configuredSite, maxX: 14, maxZ: 24 };
+configured.setBounds(expandedSite); checkApproach(expandedSite, 'dusk');
+configured.dispose(); assert.equal(configuredScene.children.length, 0);
 assert([...doc.listeners.values(), ...win.listeners.values(), ...media.listeners.values()].every(set => set.size === 0));
-console.log('Environment: lazy batching, obstacle-free seeded traffic over repeated 30-minute runs, fixed actor/buffer counts, individual speeds/arrival gaps/colors, visibility/reduced-motion/lifecycle pause and disposal passed.');
+console.log('Environment: lazy batching, obstacle-free seeded traffic on both road sides over repeated 30-minute runs, fixed actor/buffer counts, individual speeds/arrival gaps/colors, settings and bounds rebuilds, visibility/reduced-motion/lifecycle pause and disposal passed.');

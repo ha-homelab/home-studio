@@ -6,13 +6,15 @@ export const ENVIRONMENT_PALETTES = {
   dusk: { label: 'Blue dusk', lawn: '#aabbb8', hedge: '#697e7c', leaf: '#829998', leafLight: '#a0b4af', path: '#d5d9d3', road: '#939f9e', trunk: '#817c79', car: '#d4b8b0' },
 };
 
-export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, requestRender = () => {}, frameInterval = 180, active = true, settings = {}, seed = settings.seed, visibilityElement = null, document: doc = globalThis.document, window: win = globalThis.window } = {}) {
+export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, requestRender = () => {}, frameInterval = 180, active = true, settings = {}, seed = settings.seed, roadSide = settings.road_side, visibilityElement = null, document: doc = globalThis.document, window: win = globalThis.window } = {}) {
   const group = new THREE.Group(); group.name = 'decorative-surroundings'; group.visible = false; scene.add(group);
   const media = win?.matchMedia?.('(prefers-reduced-motion: reduce)');
   const state = { enabled: false, motion: false, palette: 'sage' };
   const geometry = new Map(), materials = new Map(), batches = [], actors = [];
   const dummy = new THREE.Object3D(), local = new THREE.Matrix4(), actorMatrix = new THREE.Matrix4();
   const trafficSeed = Number.isFinite(seed) ? seed >>> 0 : Math.floor(Math.random() * 0x100000000);
+  // Site configuration is fixed for this layer, independent of UI preferences.
+  const roadDirection = roadSide === 'maxZ' ? 1 : -1;
   let randomState = trafficSeed, trafficColors = [];
   let area, base = elevation, timer = 0, elapsed = 0, disposed = false, suspended = false, inViewport = true, dirty = true;
   const tickMs = Math.max(180, Math.min(2000, Number.isFinite(frameInterval) ? frameInterval : 180)); // Never a permanent RAF loop.
@@ -51,6 +53,7 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, re
     const p = ENVIRONMENT_PALETTES[state.palette], entries = new Map();
     trafficColors = [p.car, '#d8ddd2', '#9caeaa', '#a8a2ae'].map(color => new THREE.Color(color));
     const { minX, maxX, minZ, maxZ } = area, width = maxX - minX, depth = maxZ - minZ, center = (minX + maxX) / 2;
+    const roadEdge = roadDirection === 1 ? maxZ : minZ;
     function part(shape, color, position, scale, actor = null, rotation = 0, tint = false) {
       const key = shape + ':' + color + (tint ? ':traffic' : '');
       if (!entries.has(key)) entries.set(key, { shape, color, parts: [] });
@@ -65,11 +68,11 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, re
       for (const side of [-1, 1]) part('box', p.hedge, [x + side * 1.44, -.005, (minZ + maxZ) / 2], [.05, .035, depth + 4.9]);
       for (const z of [minZ - 2.44, maxZ + 2.44]) part('box', p.hedge, [x, -.005, z], [2.9, .035, .05]);
     }
-    part('box', p.lawn, [center, -.07, minZ - 2], [width + 1, .1, 3]);
-    part('box', p.path, [center, -.005, minZ - 4.1], [width + 9, .06, .7]);
-    part('box', p.road, [center, -.025, minZ - 6], [width + 9, .06, 2.8]);
+    part('box', p.lawn, [center, -.07, roadEdge + roadDirection * 2], [width + 1, .1, 3]);
+    part('box', p.path, [center, -.005, roadEdge + roadDirection * 4.1], [width + 9, .06, .7]);
+    part('box', p.road, [center, -.025, roadEdge + roadDirection * 6], [width + 9, .06, 2.8]);
     const dashCount = Math.min(16, Math.max(3, Math.floor((width + 8) / 2)));
-    for (let i = 0; i < dashCount; i++) part('box', '#d8ddd5', [minX - 3 + i * (width + 6) / Math.max(1, dashCount - 1), .015, minZ - 6], [.7, .015, .045]);
+    for (let i = 0; i < dashCount; i++) part('box', '#d8ddd5', [minX - 3 + i * (width + 6) / Math.max(1, dashCount - 1), .015, roadEdge + roadDirection * 6], [.7, .015, .045]);
     for (const x of [minX - 3.2, maxX + 3.2]) {
       part('box', p.hedge, [x, .28, (minZ + maxZ) / 2], [.38, .56, depth + 3.4]);
       for (let i = 0; i < 3; i++) {
@@ -83,7 +86,8 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, re
       const speed = .22 + random() * .24, span = width + 6;
       // Start partway through a pass so static surroundings also show both cars.
       const startAt = -(span / speed) * (.05 + random() * .7);
-      const actor = { kind: 'car', x: center, z: minZ - (i ? 6.65 : 5.35), direction: i ? -1 : 1, start: minX - 3, span, speed, startAt, endAt: startAt + span / speed, entryDelay: 0, color: Math.floor(random() * trafficColors.length), cycle: 0, visible: true, parts: [] };
+      // Keep the +X car on the +Z lane on either side of the site.
+      const actor = { kind: 'car', x: center, z: roadEdge + roadDirection * 6 + (i ? -.65 : .65), direction: i ? -1 : 1, start: minX - 3, span, speed, startAt, endAt: startAt + span / speed, entryDelay: 0, color: Math.floor(random() * trafficColors.length), cycle: 0, visible: true, parts: [] };
       actors.push(actor);
       part('box', '#ffffff', [0, .3, 0], [1.55, .32, .65], actor, 0, true);
       part('box', '#647c83', [-.06, .56, 0], [.78, .22, .57], actor);
@@ -171,7 +175,7 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, re
     setSettings, setBounds,
     setActive(value) { active = value === true; schedule(); },
     get settings() { return { ...state }; },
-    get stats() { return { enabled: state.enabled, moving: running(), drawCalls: group.visible ? batches.length : 0, actors: actors.length, timerPending: !!timer, frameInterval: tickMs, elapsed, elevation: base, bounds: { ...area }, trafficSeed, traffic: actors.filter(actor => actor.kind === 'car').map(({ speed, entryDelay, color, cycle, visible }) => ({ speed, entryDelay, color, cycle, visible })) }; },
+    get stats() { return { enabled: state.enabled, moving: running(), drawCalls: group.visible ? batches.length : 0, actors: actors.length, timerPending: !!timer, frameInterval: tickMs, elapsed, elevation: base, bounds: { ...area }, roadSide: roadDirection === 1 ? 'maxZ' : 'minZ', trafficSeed, traffic: actors.filter(actor => actor.kind === 'car').map(({ speed, entryDelay, color, cycle, visible }) => ({ speed, entryDelay, color, cycle, visible })) }; },
     dispose() { if (disposed) return; disposed = true; stop(); observer?.disconnect(); clear(); scene.remove(group); doc?.removeEventListener('visibilitychange', visibility); media?.removeEventListener('change', visibility); win?.removeEventListener('pagehide', hide); win?.removeEventListener('pageshow', show); },
   };
 }

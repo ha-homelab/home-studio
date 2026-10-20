@@ -83,6 +83,7 @@ const root = path.resolve(__dirname, '..');
     const upper=JSON.parse(fs.readFileSync(path.join(temp,'build/upper/model-data.json')));assert.equal(upper.environment.elevation,-3);
     await page.goto(origin+'/compiled/build/main/'); await page.waitForFunction(() => window.floorplan);
     assert.equal((await page.evaluate(() => window.floorplan.surroundings)).drawCalls,0);
+    assert.equal((await page.evaluate(() => window.floorplan.surroundings)).roadSide,'minZ');
     const viewerControls=page.locator('.toolbar .environment-controls');await viewerControls.locator('summary').click();await viewerControls.getByLabel('Show garden surroundings',{exact:true}).check();
     await page.waitForFunction(()=>window.floorplan.surroundings.enabled && window.floorplan.renderCount>1);await page.waitForTimeout(400);const viewerCount=await page.evaluate(() => window.floorplan.renderCount);await page.waitForTimeout(500);assert.equal(await page.evaluate(() => window.floorplan.renderCount),viewerCount);
     await viewerControls.getByLabel('Decorative motion',{exact:true}).check();await page.waitForFunction(count=>window.floorplan.renderCount>count+1,viewerCount);
@@ -91,6 +92,27 @@ const root = path.resolve(__dirname, '..');
     const homeControls=page.locator('.home-map-tools .environment-controls');await homeControls.locator('summary').click();await homeControls.getByLabel('Decorative motion',{exact:true}).uncheck();
     if(shots){await page.locator('#homeZoomOut').click();await page.locator('#homeZoomOut').click();await page.waitForTimeout(400);await page.screenshot({path:path.join(shots,'garden-home-view.png')});}
     await page.setViewportSize({width:480,height:800});await page.waitForTimeout(200);const menuBox=await homeControls.locator('.environment-options').boundingBox();assert(menuBox.x>=0 && menuBox.x+menuBox.width<=480,'Home surroundings menu stays reachable on narrow screens');
-    assert.deepEqual(errors,[]);console.log('Environment browser: editable garden and indoor/outdoor animals, camera stability, zero idle redraws, reduced-motion pause, compiled Home controls, and upper-floor ground alignment passed.');
+    // Legacy builders provide model metadata directly. Exercise that same entry
+    // point without changing the public compiler's default scenery configuration.
+    const compiledPath=path.join(temp,'build/main/index.html');
+    const modelSlot=/(<script\b[^>]*\bid="modelData"[^>]*>)([\s\S]*?)(<\/script>)/;
+    const html=fs.readFileSync(compiledPath,'utf8');assert(modelSlot.test(html));
+    fs.writeFileSync(compiledPath,html.replace(modelSlot,(_,open,json,close)=>{
+      const model=JSON.parse(json);model.environment.road_side='maxZ';
+      return open+JSON.stringify(model).replaceAll('<','\\u003c')+close;
+    }));
+    await page.reload();await page.waitForFunction(()=>window.floorplan);
+    assert.equal((await page.evaluate(()=>floorplan.surroundings)).roadSide,'maxZ');
+    await page.locator('#openHome').click();
+    const configuredControls=page.locator('.home-map-tools .environment-controls');await configuredControls.locator('summary').click();
+    await configuredControls.getByLabel('Show garden surroundings',{exact:true}).check();
+    await configuredControls.locator('[data-environment="palette"]').selectOption('dusk');
+    await configuredControls.getByLabel('Decorative motion',{exact:true}).check();
+    await page.waitForFunction(()=>floorplan.surroundings.elapsed>0);
+    await configuredControls.getByLabel('Decorative motion',{exact:true}).uncheck();
+    const configuredStats=await page.evaluate(()=>floorplan.surroundings);
+    assert.equal(configuredStats.roadSide,'maxZ','Home preference updates retain the builder-selected road side');
+    assert.equal(configuredStats.actors,5);assert.equal(configuredStats.drawCalls,14);assert.equal(configuredStats.timerPending,false);
+    assert.deepEqual(errors,[]);console.log('Environment browser: editable garden and indoor/outdoor animals, camera stability, zero idle redraws, reduced-motion pause, compiled Home controls, both road-side metadata paths, and upper-floor ground alignment passed.');
   } finally { await browser?.close();await new Promise(resolve=>server.close(resolve));fs.rmSync(temp,{recursive:true,force:true}); }
 })().catch(e=>{console.error(e);process.exitCode=1;});

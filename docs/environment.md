@@ -26,6 +26,7 @@ const layer = createEnvironmentLayer(THREE, {
   requestRender,
   frameInterval: 1000, // Optional slower pacing for a large scene.
   seed: 42, // Optional repeatable traffic; otherwise chosen once for this layer.
+  roadSide: 'maxZ', // Optional entry side: 'minZ' (default) or 'maxZ'.
   settings: { enabled: true, motion: false, palette: 'sage' },
 });
 layer.setSettings({ motion: true });
@@ -36,6 +37,14 @@ layer.dispose();
 
 The caller supplies bounds covering **all existing rooms, walls, yard structures, equipment and planted items**, not only the building outline. Scenery begins at least 0.5 m outside those bounds. The default viewer derives a full geometry bound; explicit bounds are preferred for legacy sites. `setBounds` rebuilds only when the site or ground level changes. `setActive(true)` resumes only when the other visibility and motion conditions permit it. `dispose()` releases shared materials, geometries, instance buffers, timer and observers.
 
+`roadSide` selects the negative or positive Z edge of those bounds. It moves the
+road, path, adjoining lawn strip and both car lanes together; side planting and
+rabbits remain in place. Traffic keeps the same X direction and timing; the +X
+car stays on the +Z lane on either side. This is
+fixed site configuration for the layer, so UI preference changes do not reset it.
+Unspecified or unrecognized values use `minZ`. Changing site bounds keeps the
+selected side and moves the approach outside the new edge.
+
 For the compiled viewer, set optional model metadata:
 
 ```js
@@ -45,6 +54,7 @@ model.environment = {
   palette: 'sage',
   frame_interval_ms: 1000, // Optional; clamped to 180–2000 ms.
   seed: 42, // Optional unsigned 32-bit traffic seed.
+  road_side: 'maxZ', // Optional; choose the side containing the front entry.
   bounds: { minX: -2, maxX: 18, minZ: -3, maxZ: 16 },
   elevation: -3,
 };
@@ -61,6 +71,6 @@ its package job, after the existing browser-tool installation. The surrounding
 platform matrix continues to cover general rendering and navigation without
 repeating this dedicated Chromium scenario in every lane.
 
-- `node scripts/test-environment.mjs`: no allocation while off, bounded shared draw batches, full scenery envelopes outside the site, repeatable traffic across four seeds and repeated 30-minute simulations, varied speeds/gaps/rendered colors, unchanged actor and GPU buffer counts, visibility/reduced-motion/lifecycle pause, palette replacement and disposal.
+- `node scripts/test-environment.mjs`: no allocation while off, bounded shared draw batches, full scenery envelopes outside both site edges, repeatable traffic across four seeds and repeated 30-minute simulations, varied speeds/gaps/rendered colors, unchanged actor and GPU buffer counts, preserved road side through settings and bounds rebuilds, visibility/reduced-motion/lifecycle pause, palette replacement and disposal.
 - `node scripts/test-environment-browser.cjs`: real garden placement, indoor/outdoor catalog items, unchanged camera fit, static idle rendering, reduced-motion pause, compiler metadata and Home controls. Set `ENVIRONMENT_SCREENSHOT_DIR` to save fictional-example screenshots.
 - Existing furniture JS/Python, planner rendering budget and viewer lifecycle checks cover compatibility with catalog generation and on-demand rendering.

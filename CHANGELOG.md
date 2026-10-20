@@ -12,6 +12,8 @@
   scenery traffic with varied speeds, arrival gaps, and colors, plus rabbits
   outside the site. Preserve the existing camera
   fit and align surroundings to ground level across floors.
+- Allow a site's scenery metadata to place the road and approach on either Z
+  edge, preserving the default side, traffic bounds, and camera framing.
 - Keep surroundings and motion off by default. Static surroundings schedule no
   animation frames; motion pauses when hidden, offscreen, inactive, or reduced
   motion is requested. Slower render profiles use slower animation intervals.
