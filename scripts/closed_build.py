@@ -356,6 +356,7 @@ def run_worker(image, source, public, output, context, log, *, timeout=900):
                                stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=30,
                                env={key: os.environ[key] for key in ("PATH", "HOME", "DOCKER_HOST") if key in os.environ}, check=False)
             except (OSError, subprocess.TimeoutExpired):
+                # Best-effort cleanup must not replace the original bounded diagnostic.
                 pass
 
 
@@ -579,6 +580,7 @@ def main(argv=None):
                     remaining = max(0, MAX_LOG - log.tell())
                     log.write(traceback.format_exc().encode()[:remaining])
             except OSError:
+                # A failed local diagnostic write must never expose the exception publicly.
                 pass
         finally:
             try:

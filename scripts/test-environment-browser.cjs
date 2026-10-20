@@ -14,8 +14,19 @@ const root = path.resolve(__dirname, '..');
     const route = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
     const base = route.startsWith('/compiled/') ? temp : root;
     const name = path.resolve(base, route.replace(/^\/(?:compiled\/)?/, '') + (route.endsWith('/') ? 'index.html' : ''));
-    if (!name.startsWith(base + path.sep) || !fs.existsSync(name) || !fs.statSync(name).isFile()) { res.writeHead(404).end(); return; }
-    res.writeHead(200, { 'Content-Type': ({'.js':'text/javascript','.css':'text/css','.html':'text/html','.json':'application/json'})[path.extname(name)] || 'application/octet-stream' }); res.end(fs.readFileSync(name));
+    if (!name.startsWith(base + path.sep)) { res.writeHead(404).end(); return; }
+    let descriptor;
+    try {
+      descriptor = fs.openSync(name, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      if (!fs.fstatSync(descriptor).isFile()) { res.writeHead(404).end(); return; }
+      const content = fs.readFileSync(descriptor);
+      res.writeHead(200, { 'Content-Type': ({'.js':'text/javascript','.css':'text/css','.html':'text/html','.json':'application/json'})[path.extname(name)] || 'application/octet-stream' });
+      res.end(content);
+    } catch {
+      res.writeHead(404).end();
+    } finally {
+      if (descriptor !== undefined) fs.closeSync(descriptor);
+    }
   });
   let browser;
   try {
@@ -37,7 +48,6 @@ const root = path.resolve(__dirname, '..');
     await page.getByRole('button', { name:'Add garden area', exact:true }).click();
     let project = await page.evaluate(() => window.planner.getProject());
     assert.equal(project.floors[0].rooms.at(-1).material, 'deck'); assert.equal(project.floors[0].items.at(-1).model_id, 'lawn_patch');
-    const gardenId = project.floors[0].rooms.at(-1).id;
     for (const id of ['round_canopy_tree','columnar_tree','clipped_hedge','stepping_stone_path','garden_rabbit','small_dog','sitting_cat']) {
       await page.locator('#browse-items').click(); await page.locator('#library-clear').click(); await page.locator('#library-search').fill(id.replaceAll('_',' '));
       await page.locator(`.library-card[data-model-id="${id}"]`).click();

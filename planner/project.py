@@ -511,7 +511,7 @@ def render_viewer(data, svg):
         "__HOME_JS__": "\n".join((ROOT / name).read_text(encoding="utf-8") for name in ("curtain-state.js", "motion-state.js", "tv-screen.js", "camera-preview.js", "media-preview.js", "assumed-zone-view.js", "home-view.js")),
         "__LIGHT_STATE_JS__": (ROOT / "light-state.js").read_text(encoding="utf-8"),
         "__RENDER_CAPACITY_JS__": (ROOT / "planner/render-capacity.js").read_text(encoding="utf-8").replace("export function getRenderCapacity", "function getRenderCapacity"),
-        "__ENVIRONMENT_JS__": (ROOT / "planner/environment.js").read_text(encoding="utf-8").replace("export ", ""),
+        "/*__ENVIRONMENT_JS__*/": (ROOT / "planner/environment.js").read_text(encoding="utf-8").replace("export ", ""),
         "__INTERACTION_RENDER_JS__": (ROOT / "planner/interaction-render.js").read_text(encoding="utf-8").replace("export function createInteractionRenderer", "function createInteractionRenderer"),
         "__ROOM_LIGHTING_JS__": (ROOT / "room-lighting.js").read_text(encoding="utf-8"),
         "__THREE_B64__": base64.b64encode((ROOT / "vendor/three.module.min.js").read_bytes()).decode(),

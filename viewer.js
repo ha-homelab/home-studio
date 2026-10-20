@@ -3,7 +3,7 @@ __LIGHT_STATE_JS__
 __ROOM_LIGHTING_JS__
 __RENDER_CAPACITY_JS__
 __INTERACTION_RENDER_JS__
-__ENVIRONMENT_JS__
+/*__ENVIRONMENT_JS__*/
 __VIEWER_I18N_JS__
 const viewerI18n=createViewerI18n(__VIEWER_I18N_DATA__),vt=(key,params)=>viewerI18n.t(key,params);
 viewerI18n.init();

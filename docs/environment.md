@@ -15,7 +15,7 @@ not animate the placed dog, cat, or other catalog objects.
 
 ## Shared renderer API
 
-`planner/environment.js` has no runtime imports or network dependencies. The compiler replaces `__ENVIRONMENT_JS__` in `viewer.js` with this module's text after removing `export ` prefixes. Include the same replacement when a legacy builder consumes the shared viewer. The runtime bundle and static-site inventory include the module.
+`planner/environment.js` has no runtime imports or network dependencies. The compiler replaces the complete `/*__ENVIRONMENT_JS__*/` comment in `viewer.js` with this module's text after removing `export ` prefixes. Include the same replacement when a legacy builder consumes the shared viewer. The runtime bundle and static-site inventory include the module.
 
 ```js
 const layer = createEnvironmentLayer(THREE, {
