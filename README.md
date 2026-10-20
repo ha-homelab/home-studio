@@ -13,7 +13,7 @@ The existing illustrated-guide screenshot shows the real editor with the fiction
 practice project, not a private home. Click for the unchanged readable original.
 
 No account or installation is needed to try the editor. Start with room
-measurements and walls, choose from 195 furniture designs, or open an editable
+measurements and walls, choose from 206 furniture and garden designs, or open an editable
 example and experiment. The editor supports 24 languages. Choose the workflow
 that suits you: draw inside Home Assistant, or keep using the separate browser
 editor and portable local toolkit.
@@ -106,7 +106,7 @@ acceptance.
 
 ## Furnish your rooms
 
-Open **Item library** to browse **195 designs in 22 categories**: furniture and
+Open **Item library** to browse **206 designs in 22 categories**: furniture and
 lighting, cushions and throws, curtains and blinds, rugs and tapestries, mirrors,
 plants and life-size display bears, tabletop and bathroom accessories, pet furniture,
 servers and electronics, toys, musical instruments and workshop tools,
@@ -170,6 +170,25 @@ Furniture designs, palettes, and patterns are authored in the planner. After cha
 rebuild and reinstall the project. The installed panel can move, resize, rename,
 and bind existing furniture to entities; its inventory import is for placements,
 not a way to download or replace furniture models.
+
+## Add a garden
+
+Use **Add garden area** in Floor settings to make an editable outdoor area and
+lawn. The Item library includes lawn patches, meadow borders, stepping stones,
+hedges, trees, dogs, cats, rabbits, foxes, and birds. Place them inside or outside,
+then move, resize, rotate, or recolor them like other furnishings. Saved catalog
+objects, including pets and cars, remain static.
+
+The **Surroundings** menu in Preview 3D and the installed Home view adds an
+optional landscape around the site, with three palettes. **Decorative motion**
+animates two scenery cars with varied speeds, arrival gaps, and colors, plus
+three rabbits on bounded routes outside the site.
+It is off by default, pauses when hidden or offscreen and for reduced-motion
+preferences, and represents no Home Assistant device or occupancy state.
+These surroundings settings last for the current page; the editable garden and
+placed objects are saved in your project. See the [garden guide](docs/environment.md).
+
+![Fictional Garden Studio showing editable planting, pets, and optional geometric surroundings](docs/images/garden-surroundings.png)
 
 ## Draw, build, and preview
 
@@ -367,6 +386,11 @@ validation and geometry. See the [fuzzing guide](docs/fuzzing.md) for targets,
 budgets, synthetic data rules and reproduction, and [release instructions](RELEASING.md)
 for versioned source ZIPs. Beta builds and ordinary pull requests do not run
 mutation campaigns.
+
+An optional [closed package worker](docs/closed-build.md) can compose approved
+site inputs inside the public release orchestration while keeping its archives
+and diagnostics in closed storage. It verifies exact public release bytes and
+requires separate installation acceptance.
 
 
 ## Contributing and security

@@ -31,7 +31,7 @@ const root=path.resolve(__dirname,'..');
   const tvEntities={a:'media_player.a',alias:'media_player.a',unloaded:'media_player.b'},objectsById=new Map([['a',item],['alias',item],['unloaded',new THREE.Group()]]),frame={version:7};
   const image=texture.image,source=texture.source,refs=[point.shadow.map,sun.shadow.map,sun.shadow.mapPass],counts=new Map([...targets,texture,untouched].map(x=>[x,0]));
   for(const object of counts.keys())object.addEventListener('dispose',()=>counts.set(object,counts.get(object)+1));
-  const listeners={};const c=vm.createContext({scene,tvEntities,objectsById,tvFrames:new Map([['a',frame],['alias',frame]]),Set,Object,renderLost:false,cancelRender(){},releaseViewerGeometryGPU(){},releaseWallOutlineMaterials(){},interactionPointer:null,interactionRenderer:null,releaseStaticGlassPasses(){},editorFloorMaterials:null,homeView:null,renderer:{domElement:{addEventListener:(name,fn)=>listeners[name]=fn}}});
+  const listeners={};const c=vm.createContext({scene,tvEntities,objectsById,tvFrames:new Map([['a',frame],['alias',frame]]),Set,Object,environmentLayer:null,renderLost:false,cancelRender(){},releaseViewerGeometryGPU(){},releaseWallOutlineMaterials(){},interactionPointer:null,interactionRenderer:null,releaseStaticGlassPasses(){},editorFloorMaterials:null,homeView:null,renderer:{domElement:{addEventListener:(name,fn)=>listeners[name]=fn}}});
   vm.runInContext(helper,c);vm.runInContext(fixed?handler:handler.replace('releaseViewerTextureGPU();',''),c);
   function upload(){for(const target of targets)manager.setupRenderTarget(target);manager.setTexture2D(texture,0);}
   function loss(){lost=true;listeners.webglcontextlost({preventDefault(){}});}

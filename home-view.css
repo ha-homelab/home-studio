@@ -143,3 +143,15 @@ body.control-only>header,body.control-only>main,body.control-only #editLayout,bo
 #homeView .home-marker[data-label]:is(:hover,:focus-visible)::after{content:attr(data-label);position:absolute;top:calc(100% + 5px);left:50%;transform:translateX(-50%);padding:4px 7px;border-radius:5px;background:#14232e;color:#eef6fb;font:12px system-ui;white-space:nowrap;pointer-events:none;z-index:12}
 #homeRoomLabels[aria-pressed="true"]{border-color:#64cbdc;background:#244852}
 #homeDeviceFilter{max-width:125px}
+
+/* Surroundings are an optional visual preference, separate from home controls. */
+.environment-controls{position:relative;z-index:8;margin:0;font-size:11px;color:#334e46;line-height:1.4}
+.environment-controls summary{cursor:pointer;list-style:revert;padding:9px 11px;border:1px solid #bac9bc;border-radius:6px;background:#f4f7eff2;white-space:nowrap}
+.environment-options{position:absolute;right:0;top:100%;width:min(275px,70vw);padding:15px;display:grid;gap:13px;background:#f9fbf4;border:1px solid #bac9bc;border-radius:6px;box-shadow:0 6px 20px #15251b20}
+.environment-options label{display:flex;align-items:center;gap:8px!important;margin:0!important;font-size:12px!important;color:#334e46!important}
+.environment-options input[type=checkbox]{width:16px!important;height:16px;flex:none;accent-color:#52745c}
+.environment-options select{width:140px;padding:6px;background:white;color:#334e46;border:1px solid #bac9bc;border-radius:4px}
+.environment-options small{display:block;color:#5f7165;font-size:11px;line-height:1.5}
+.home-map-tools .environment-controls summary{color:#e0e8e7;background:#24363d;border-color:#425961;font-weight:500}
+.home-map-tools .environment-controls summary:hover{background:#304951}
+.home-map-tools .environment-options select{color:#334e46;background:#fff;border-color:#bac9bc}

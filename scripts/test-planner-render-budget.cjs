@@ -50,6 +50,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   assert.notEqual(paths.planShapePath({points: shape.points}, 80, 30), outline, 'A new appearance owns a separate outline');
   const THREE = await import('data:text/javascript;base64,' + fs.readFileSync(path.join(root, 'vendor/three.module.min.js')).toString('base64'));
   const model = await import('../planner/model.js');
+  const { createEnvironmentLayer } = await import('../planner/environment.js');
   const project = model.blankProject(), f = project.floors[0];
   f.rooms.push({id: 'room', name: 'Room', polygon: [[0, 0], [8, 0], [8, 6], [0, 6]], material: 'floor'});
   f.walls.push({id: 'wall', start: [0, 0], end: [8, 0], thickness_m: .15});
@@ -79,7 +80,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     dispose() { disposals++; }
     forceContextLoss() { losses++; }
   }
-  const c = vm.createContext({AbortController, THREE: {...THREE, WebGLRenderer: Renderer}, project, activeFloorId: f.id, floor: () => project.floors[0],
+  const c = vm.createContext({createEnvironmentLayer: (T, options) => createEnvironmentLayer(T, {...options, document:null, window:null}), createEnvironmentControls: () => ({refresh() {}}), t: value => value, AbortController, THREE: {...THREE, WebGLRenderer: Renderer}, project, activeFloorId: f.id, floor: () => project.floors[0],
     view: 'plan', spaceHeld: false, previewDirty: true, size: {...rect}, map: {x: 0, y: 0}, devicePixelRatio: 3,
     $: get, planCanvas: get('plan-canvas'), ctx: {setTransform() {}},
     floorBounds: model.floorBounds, distance: model.distance, wallPieces: model.wallPieces,
@@ -199,7 +200,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   }));
   catalogFloor.items[1].dimensions_m.width *= 1.5;
   const sharedWorld = new THREE.Group();
-  const shared = vm.createContext({THREE, worldGroup: sharedWorld, previewSun: new THREE.DirectionalLight(),
+  const shared = vm.createContext({previewEnvironment: null, environmentSite: () => ({}), THREE, worldGroup: sharedWorld, previewSun: new THREE.DirectionalLight(),
     previewMetadata: {}, previewDirty: true, previewInstancing: false, previewDiffuseLighting: false, previewFloors: () => catalogProject.floors,
     assetCache: new Map(), APPEARANCE_CACHE_LIMIT: 100, buildFurnitureAsset: furniture.buildFurnitureAsset,
     distance: model.distance, wallPieces: model.wallPieces, floorBounds: model.floorBounds,
@@ -334,7 +335,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
       attributes: {}, setAttribute(name, value) { this.attributes[name] = value; },
     }));
     const controls = {'object-list': {children: buttons}, undo: {disabled: true}, redo: {disabled: true}, 'pointer-position': {textContent: ''}};
-    const p = vm.createContext({project: original, activeFloorId: f.id, selection: null, tool: 'select', view: 'plan', drag: null,
+    const p = vm.createContext({previewEnvironment: null, project: original, activeFloorId: f.id, selection: null, tool: 'select', view: 'plan', drag: null,
       planCanvas: plan, spaceHeld: false, previewDirty: false, map: {x: 0, y: 0},
       clone(value) { clones++; return model.clone(value); }, round: model.round, distance: model.distance,
       snap: value => value, localPoint: e => [e.clientX, e.clientY], toWorld: point => point,

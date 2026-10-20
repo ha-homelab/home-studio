@@ -127,7 +127,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
 
     def assert_package_setup_budget(self, package):
         jobs = package['jobs']
-        self.assertEqual(set(jobs), {'package', 'platforms', 'native-core'})
+        self.assertEqual(set(jobs), {'package', 'platforms', 'native-core', 'closed-contracts'})
         self.assertEqual(jobs['platforms'], {'uses': './.github/workflows/platform-acceptance.yml'})
         job = jobs['package']
         self.assertEqual(job['timeout-minutes'], '30')

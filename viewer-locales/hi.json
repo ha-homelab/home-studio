@@ -131,5 +131,13 @@
   "Reload saved plan": "सहेजा गया नक्शा फिर लोड करें",
   "Connecting to Home Assistant…": "Home Assistant से जुड़ रहा है…",
   "Connected · placements are saved in Home Assistant": "जुड़ा हुआ · स्थान Home Assistant में सहेजे जाते हैं",
-  "3D view could not start. Plan editing and JSON export are still available.": "3D दृश्य शुरू नहीं हो सका। नक्शे में बदलाव और JSON निर्यात अभी भी उपलब्ध हैं।"
+  "3D view could not start. Plan editing and JSON export are still available.": "3D दृश्य शुरू नहीं हो सका। नक्शे में बदलाव और JSON निर्यात अभी भी उपलब्ध हैं।",
+  "Surroundings": "Surroundings",
+  "Show garden surroundings": "Show garden surroundings",
+  "Decorative motion": "Decorative motion",
+  "Garden palette": "Garden palette",
+  "Sage garden": "Sage garden",
+  "Summer meadow": "Summer meadow",
+  "Blue dusk": "Blue dusk",
+  "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Decorative only. Motion pauses when hidden or reduced motion is preferred."
 }

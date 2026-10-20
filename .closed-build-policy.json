@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "worker_image": "ghcr.io/home-assistant/home-assistant@sha256:33afb0659d786213264c2211f8d91c5fe87461c56eba6a3a546eb05fc71e89f4",
+  "dependencies": {
+    "tv_capture": {"repository": "https://github.com/ha-homelab/ha-lg-tv-capture.git", "commit": "c1c8f3164a27da33d0fdb0a56858700927f17ecc"},
+    "onvif_room_direction": {"repository": "https://github.com/ha-homelab/ha-onvif-room-direction.git", "commit": "8c5aa149ececab788229299d1ed8727d3e547816"},
+    "access_session": {"repository": "https://github.com/ha-homelab/ha-access-session.git", "commit": "1894be0db4cdcffc1cf831f4a66d7ccaf9e1333c"},
+    "sensing_evidence": {"repository": "https://github.com/ha-homelab/sensing-evidence-kit.git", "commit": "a82465dfcaa453fe3cf8a9a59e46044f6c18839e"}
+  }
+}

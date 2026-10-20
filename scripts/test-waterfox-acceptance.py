@@ -317,30 +317,42 @@ class Marionette:
             time.sleep(.05)
         raise TimeoutError('Browser did not satisfy: ' + expression)
 
-    def drag(self, start, end):
+    def drag(self, start, end, *, diagnostics=None, snapshot=None):
         actions = [{'type': 'pointerMove', 'duration': 0, 'x': round(start[0]), 'y': round(start[1]), 'origin': 'viewport'}, {'type': 'pointerDown', 'button': 0}]
         for step in range(1, 13):
             actions.append({'type': 'pointerMove', 'duration': 16, 'x': round(start[0] + (end[0] - start[0]) * step / 12), 'y': round(start[1] + (end[1] - start[1]) * step / 12), 'origin': 'viewport'})
         actions.append({'type': 'pointerUp', 'button': 0})
         started = time.monotonic()
         self.call('WebDriver:PerformActions', {'actions': [{'type': 'pointer', 'id': 'mouse', 'parameters': {'pointerType': 'mouse'}, 'actions': actions}]})
+        actions_finished = time.monotonic()
         # A driver can acknowledge pointer actions before the requested scene
         # draw. Match the Playwright path: include two animation frames in the
         # interaction budget instead of reporting only input-delivery latency.
         self.call('WebDriver:ExecuteAsyncScript', {
             'script': 'const done=arguments[arguments.length-1];requestAnimationFrame(()=>requestAnimationFrame(()=>done(true)));',
             'args': [], 'newSandbox': False, 'sandbox': None})
-        elapsed = round((time.monotonic() - started) * 1000)
+        settled = time.monotonic()
+        elapsed = round((settled - started) * 1000)
+        if diagnostics is not None:
+            diagnostics.update(performActionsMs=round((actions_finished - started) * 1000),
+                               settleFramesMs=round((settled - actions_finished) * 1000), totalMs=elapsed, limitMs=15000)
+            # Preserve the failed gesture before the assertion skips the caller's
+            # ordinary afterDrag snapshot. Diagnostic work is outside its budget.
+            if elapsed >= 15000 and snapshot is not None:
+                try:
+                    diagnostics['afterDrag'] = snapshot()
+                except Exception as error:
+                    diagnostics['snapshotError'] = str(error)
         require(elapsed < 15000, f'Real pointer drag exceeded 15 seconds: {elapsed} ms')
         return elapsed
 
-    def canvas_drag(self, selector):
+    def canvas_drag(self, selector, *, diagnostics=None, snapshot=None):
         points = self.execute('''const canvas=document.querySelector(arguments[0]),r=canvas.getBoundingClientRect();
           for(const y of [.18,.35,.6,.8])for(const x of [.12,.25,.5,.7]) {
             if(document.elementFromPoint(r.x+r.width*x,r.y+r.height*y)===canvas)
               return [[r.x+r.width*x,r.y+r.height*y],[r.x+r.width*(x+.15),r.y+r.height*(y+.1)]];
           } throw Error('No exposed canvas pixel for real pointer drag');''', selector)
-        return self.drag(*points)
+        return self.drag(*points, diagnostics=diagnostics, snapshot=snapshot)
 
     def screenshot(self, destination):
         result = self.call('WebDriver:TakeScreenshot', {'id': None, 'highlights': [], 'full': False})
@@ -459,11 +471,12 @@ def assert_viewer_interaction(before, after):
     renderer = after['gpu'].get('unmaskedRenderer') or after['gpu']['renderer']
     probe = scene.get('rasterProbe') or {}
     diffuse = bool(re.fullmatch('Apple Software Renderer', renderer, re.I)) or (renderer == 'Apple M1, or similar' and probe.get('status') == 'measured' and probe.get('bestMs', 0) >= 15)
-    if diffuse:
-        require(passes['copy'] > before['scene']['renderPasses']['copy'], 'The real diffuse-viewer gesture must execute a copy pass')
+    reduced = diffuse or bool(re.search(r'swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe', renderer, re.I))
+    if reduced:
+        require(passes['copy'] > before['scene']['renderPasses']['copy'], 'The real software-viewer gesture must execute a copy pass')
         require(passes['motionDrawCalls'] == passes['motionSceneDrawCalls'] + 1, 'The copy draw must remain in actual renderer draw-call counts')
         motion = passes.get('motionSceneViewport')
-        require(isinstance(motion, list) and len(motion) == 4 and motion[:2] == [0, 0] and motion[2] > 0 and motion[3] > 0 and motion[2] * motion[3] <= 62500, 'Motion scene pixels must respect the bounded copy budget')
+        require(isinstance(motion, list) and len(motion) == 4 and motion[:2] == [0, 0] and motion[2] > 0 and motion[3] > 0 and motion[2] * motion[3] <= (31250 if diffuse else 62500), 'Motion scene pixels must respect the bounded copy budget')
         require(passes.get('copyViewport') == [0, 0, *passes['motionBuffer']], 'The copy pass must cover its unchanged full drawing buffer')
         require(motion[2] <= passes['motionBuffer'][0] and motion[3] <= passes['motionBuffer'][1], 'The scene copy cannot read outside its framebuffer')
     else:
@@ -500,7 +513,8 @@ def assert_first_motion_programs(before, after):
     renderer = after['gpu'].get('unmaskedRenderer') or after['gpu']['renderer']
     probe = after['scene'].get('rasterProbe') or {}
     diffuse = bool(re.fullmatch('Apple Software Renderer', renderer, re.I)) or (renderer == 'Apple M1, or similar' and probe.get('status') == 'measured' and probe.get('bestMs', 0) >= 15)
-    require(diffuse and passes_after['copy'] > passes_before['copy'] and not any(link.get('copyDraws', 0) > 0 for link in old if link.get('epoch') == new_context['epoch']), 'Only the first real diffuse copy gesture may initialize its program')
+    reduced = diffuse or bool(re.search(r'swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe', renderer, re.I))
+    require(reduced and passes_after['copy'] > passes_before['copy'] and not any(link.get('copyDraws', 0) > 0 for link in old if link.get('epoch') == new_context['epoch']), 'Only the first real software copy gesture may initialize its program')
     require(copy.get('epoch') == new_context['epoch'] and copy.get('program') not in {link['program'] for link in old}, 'Deferred copy must be one new current-context program, not a relink')
     require(copy.get('exactCopy') is True and copy.get('sources') == COPY_SOURCES, 'Only the exact pinned copy shader pair may initialize during first motion')
     require(copy.get('copyDraws', 0) > 0 and copy.get('outsideCopyDraw') is False, 'Deferred copy program must actually draw only in the copy pass')
@@ -551,7 +565,7 @@ def viewer(client, origin, project, record, save):
         assert_graphics(initial)
         require(initial['scene']['pointLights'] == len(items), 'Every fixture light retains a shader slot')
         require(initial['scene']['activePointLights'] == len(items), 'Every on-state fixture light contributes illumination')
-        sample['dragMs'] = client.canvas_drag('#homeStage canvas')
+        sample['dragMs'] = client.canvas_drag('#homeStage canvas', diagnostics=sample.setdefault('dragDiagnostics', {}), snapshot=snapshot)
         client.wait(f'window.floorplan.renderCount>{initial["renderCount"]}')
         sample['afterDrag'] = after_drag = snapshot()
         require(after_drag['scene']['camera'] != initial['scene']['camera'], 'Real pointer drag changes the viewer camera')
@@ -587,7 +601,7 @@ def viewer(client, origin, project, record, save):
             client.wait(f'window.floorplan.renderCount>{before}')
             sample['recovery'] = snapshot()
             assert_recovered_graphics(sample['recovery'])
-            sample['recoveryDragMs'] = client.canvas_drag('#homeStage canvas')
+            sample['recoveryDragMs'] = client.canvas_drag('#homeStage canvas', diagnostics=sample.setdefault('recoveryDragDiagnostics', {}), snapshot=snapshot)
             client.wait(f'window.floorplan.renderCount>{sample["recovery"]["renderCount"]}')
             sample['afterRecoveryDrag'] = after = snapshot()
             assert_viewer_interaction(sample['recovery'], after)

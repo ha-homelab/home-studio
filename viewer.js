@@ -3,6 +3,7 @@ __LIGHT_STATE_JS__
 __ROOM_LIGHTING_JS__
 __RENDER_CAPACITY_JS__
 __INTERACTION_RENDER_JS__
+/*__ENVIRONMENT_JS__*/
 __VIEWER_I18N_JS__
 const viewerI18n=createViewerI18n(__VIEWER_I18N_DATA__),vt=(key,params)=>viewerI18n.t(key,params);
 viewerI18n.init();
@@ -86,6 +87,8 @@ function reconcileStoredAppearance(list) {
 function validateInventoryItems(list){if(!Array.isArray(list)||list.length>2000)throw Error('Inventory must contain an items array with at most 2,000 objects.');const ids=new Set();return list.map(it=>{if(!it||typeof it.id!=='string'||!/^[A-Za-z_][A-Za-z0-9_]*$/.test(it.id)||ids.has(it.id))throw Error('Every object needs a unique string ID.');ids.add(it.id);if(typeof it.name!=='string'||!it.name.trim()||!Object.hasOwn(presets,it.type)||!model.rooms.some(r=>r.id===it.room))throw Error('Object name, type or room is invalid.');for(const k of ['x','y','z'])if(!Number.isFinite(it.position_m?.[k]))throw Error('Coordinates must be finite numbers.');for(const k of ['width','depth','height'])if(!Number.isFinite(it.dimensions_m?.[k])||it.dimensions_m[k]<=0)throw Error('Dimensions must be positive finite numbers.');if(!Number.isFinite(it.rotation_deg))throw Error('Rotation must be a finite number.');inventoryAppearance(it);return it})}
 try{items=reconcileStoredAppearance(validateInventoryItems(items))}catch(e){items=[];setEditorStatus('Stored inventory could not be read. Import a valid backup JSON.')}
 const inventoryNodes=new Map(),objectsById=new Map();
+let environmentLayer = null;
+const environmentControls = [];
 let renderer,scene,camera,objectGroup,root,hemisphere,sun,ground,grid,homeView=null,radius=planRadius,azimuth=.57,polar=.48,target=new THREE.Vector3(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]),clipping=new THREE.Plane(new THREE.Vector3(0,-1,0),20),renderCount=0;
 // Defer embedded drawing to the next frame.
 let initialViewReady=!embedded,failed3D=false;
@@ -178,11 +181,11 @@ let cancelEditorGesture=()=>{};
 let editorFloorMaterials=null;
 function cancelRender(){if(renderRequest)cancelAnimationFrame(renderRequest);if(renderDelay)clearTimeout(renderDelay);renderRequest=renderDelay=0}
 // Paint the first moved-pointer frame immediately. Subsequent software frames
-// share a fixed deadline; further input never postpones it. Apple diffuse
-// motion uses its last successful draw time, bounded to 64–250 ms, per gesture.
-// Other software keeps 64 ms. Non-motion updates
+// share a fixed deadline; further input never postpones it. Software motion
+// uses its last successful draw time, bounded to 64–250 ms, per gesture.
+// Non-motion updates
 // and pointer release bypass this delay and still use the ordinary next frame.
-function requestRender(motion=false){if(renderSuspended||renderLost||document.hidden)return;if(!motion&&renderDelay){clearTimeout(renderDelay);renderDelay=0}if(renderRequest||renderDelay)return;if(motion&&coalesceMotion&&interactionPointer?.moved&&interactionPointer.painted){renderDelay=setTimeout(()=>{renderDelay=0;requestRender()},renderProfile.diffuseLighting?interactionPointer.frameDelay??64:64);return}renderRequest=requestAnimationFrame(()=>{renderRequest=0;try{window.renderModel?.()}catch(error){report3DError(error)}})}
+function requestRender(motion=false){if(renderSuspended||renderLost||document.hidden)return;if(!motion&&renderDelay){clearTimeout(renderDelay);renderDelay=0}if(renderRequest||renderDelay)return;if(motion&&coalesceMotion&&interactionPointer?.moved&&interactionPointer.painted){renderDelay=setTimeout(()=>{renderDelay=0;requestRender()},interactionPointer.frameDelay??64);return}renderRequest=requestAnimationFrame(()=>{renderRequest=0;try{window.renderModel?.()}catch(error){report3DError(error)}})}
 function renderPixelRatio(width,height){return Math.min(Number.isFinite(devicePixelRatio)&&devicePixelRatio>0?devicePixelRatio:1,2,Math.sqrt(renderProfile.pixels/Math.max(1,width*height)))}
 function invalidateShadows(){scene?.traverse(o=>{if(o.shadow){o.shadow.autoUpdate=false;o.shadow.needsUpdate=true}})}
 // Accept only complete rectangular prisms, including the compiler's rotated walls.
@@ -382,17 +385,17 @@ function updateWallOutlines(){
   root.add(wallOutlines);
 }
 const wallSheenMotion=createWallSheenMotion();
-function drawScene(camera){if(renderSuspended||renderLost||document.hidden)return;wallSheenMotion.beforeRender();try{const pointer=interactionPointer,started=renderProfile.diffuseLighting&&pointer?.moved?performance.now():null;if(renderProfile.diffuseLighting){interactionRenderer??=createInteractionRenderer(THREE,renderer,31250);interactionRenderer.draw(scene,camera,pointer?.moved===true)}else renderer.render(scene,camera);if(pointer?.moved&&interactionPointer===pointer){pointer.painted=true;if(started!==null){const elapsed=performance.now()-started;pointer.frameDelay=Number.isFinite(elapsed)?Math.min(250,Math.max(64,elapsed)):64}}}finally{wallSheenMotion.afterRender()}}
+function drawScene(camera){if(renderSuspended||renderLost||document.hidden)return;wallSheenMotion.beforeRender();try{const pointer=interactionPointer,started=coalesceMotion&&pointer?.moved?performance.now():null;if(coalesceMotion){interactionRenderer??=createInteractionRenderer(THREE,renderer,renderProfile.diffuseLighting?31250:62500);interactionRenderer.draw(scene,camera,pointer?.moved===true)}else renderer.render(scene,camera);if(pointer?.moved&&interactionPointer===pointer){pointer.painted=true;if(started!==null){const elapsed=performance.now()-started;pointer.frameDelay=Number.isFinite(elapsed)?Math.min(250,Math.max(64,elapsed)):64}}}finally{wallSheenMotion.afterRender()}}
 // Keep the recovery controls outside both view modes. A failed renderer stays
 // paused until reload; editing or saving the 2D plan must not retry that draw.
-function report3DError(e){failed3D=true;initialViewReady=false;cancelRender();$('loadError').style.display='block';$('mode3d').disabled=true;$('openHome').disabled=true;console.error(e)}
+function report3DError(e){failed3D=true;initialViewReady=false;environmentLayer?.dispose();cancelRender();$('loadError').style.display='block';$('mode3d').disabled=true;$('openHome').disabled=true;console.error(e)}
 $('recoverPlan').onclick=()=>{if(!canEdit)return;homeView?.setActive(false);showMode(true);$('loadError').style.display='none';setEditorStatus('3D view could not start. Plan editing and JSON export are still available.');$('modePlan').focus();};
 try{
 scene=new THREE.Scene();scene.background=new THREE.Color('#e7e8df');camera=new THREE.PerspectiveCamera(42,1,.1,Math.max(150,planRadius*5));
 renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.localClippingEnabled=true;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.95;$('view3d').prepend(renderer.domElement);
 renderProfile=selectRenderProfile(renderer.getContext());if(renderProfile.diffuseLighting)renderer.shadowMap.type=THREE.BasicShadowMap;
 // Capacity is cached for this context. Motion scheduling is independent of
-// material quality: software PBR still draws directly at its full resolution.
+// material quality: software PBR keeps its materials and resting resolution.
 coalesceMotion=getRenderCapacity(renderer.getContext()).reduced;
 hemisphere=new THREE.HemisphereLight(0xffffff,0xa6aaa1,1.8);scene.add(hemisphere);sun=new THREE.DirectionalLight(0xfff9ee,2.3);sun.position.set(-7,22,12);sun.castShadow=true;sun.shadow.mapSize.set(renderProfile.sunShadowSize,renderProfile.sunShadowSize);Object.assign(sun.shadow.camera,{left:-16,right:16,top:22,bottom:-22,near:1,far:65});sun.shadow.normalBias=.035;sun.target.position.set(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]);scene.add(sun,sun.target);
 if(planBounds){const scale=Math.max(1,planRadius/32);sun.position.copy(sun.target.position).add(new THREE.Vector3(-7,22,12).multiplyScalar(scale));Object.assign(sun.shadow.camera,{left:-planRadius,right:planRadius,top:planRadius,bottom:-planRadius,far:Math.max(65,planRadius*4)});sun.shadow.camera.updateProjectionMatrix();}
@@ -415,14 +418,17 @@ if(shape){
 const glassPasses=createStaticGlassPasses(THREE,mesh,renderProfile.diffuseLighting);root.add(mesh);if(glassPasses)root.add(glassPasses.front)}
 // Apply the same backdrop policy before a standalone Editor's first render.
 ground=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(60,planRadius*2),Math.max(65,planRadius*2)),createSceneMaterial({color:'#dfe3d8',roughness:1}));ground.rotation.x=-Math.PI/2;ground.position.set(planCenter[0],-1.97,planCenter[1]);ground.receiveShadow=true;ground.visible=!renderProfile.diffuseLighting;scene.add(ground);grid=new THREE.GridHelper(44,44,0xc0cabe,0xd0d7cb);grid.position.set(planCenter[0],-1.96,planCenter[1]);scene.add(grid);
+const environmentConfig=model.environment||{},environmentBox=environmentConfig.bounds?null:new THREE.Box3().setFromObject(root);
+environmentLayer=createEnvironmentLayer(THREE,{scene,visibilityElement:renderer.domElement,frameInterval:environmentConfig.frame_interval_ms??(renderProfile.diffuseLighting?750:renderProfile.pixels<=250000?500:180),bounds:environmentConfig.bounds||{minX:environmentBox.min.x,maxX:environmentBox.max.x,minZ:environmentBox.min.z,maxZ:environmentBox.max.z},elevation:environmentConfig.elevation??-(model.elevation_m||0),settings:environmentConfig,requestRender});
+for(const container of [document.querySelector('.toolbar'),document.querySelector('.home-map-tools')])if(container)environmentControls.push(createEnvironmentControls(container,{getLayer:()=>environmentLayer,t:vt,onChange:()=>environmentControls.forEach(control=>control.refresh())}));
 editorFloorMaterials=createEditorFloorMaterials(THREE,root,ground,renderProfile);editorFloorMaterials.setHomeActive(embedded);
-renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;cancelRender();releaseViewerGeometryGPU();releaseViewerTextureGPU();releaseWallOutlineMaterials();editorFloorMaterials?.releaseGPU();interactionPointer=null;interactionRenderer?.dispose();interactionRenderer=null;releaseStaticGlassPasses();homeView?.releaseGPU?.();});
-renderer.domElement.addEventListener('webglcontextrestored',()=>{renderLost=false;invalidateShadows();const before=renderCount;window.resizeModel?.();if(renderCount===before)requestRender()});
+renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;environmentLayer?.setActive(false);cancelRender();releaseViewerGeometryGPU();releaseViewerTextureGPU();releaseWallOutlineMaterials();editorFloorMaterials?.releaseGPU();interactionPointer=null;interactionRenderer?.dispose();interactionRenderer=null;releaseStaticGlassPasses();homeView?.releaseGPU?.();});
+renderer.domElement.addEventListener('webglcontextrestored',()=>{renderLost=false;environmentLayer?.setActive(homeView?.active||$('view3d').style.display!=='none');invalidateShadows();const before=renderCount;window.resizeModel?.();if(renderCount===before)requestRender()});
 function updateEditorCamera(){camera.position.set(target.x+radius*Math.sin(polar)*Math.sin(azimuth),target.y+radius*Math.cos(polar),target.z+radius*Math.sin(polar)*Math.cos(azimuth));camera.lookAt(target)}
 function render(){if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;const before=renderCount;updateWallOutlines();if(homeView?.active)homeView.render();else{updateEditorCamera();drawScene(camera);renderCount++}if(renderCount>before)cancelRender()}window.renderModel=render;window.requestModelRender=requestRender;
 let viewSize='';const resize=()=>{if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;if(renderDelay)requestRender();const b=$(homeView?.active?'homeStage':'view3d').getBoundingClientRect(),ratio=renderPixelRatio(b.width,b.height),size=[homeView?.active,b.width,b.height,ratio].join();if(b.width&&b.height&&size!==viewSize){viewSize=size;renderer.setDrawingBufferSize(b.width,b.height,ratio);camera.aspect=b.width/b.height;camera.updateProjectionMatrix();render()}};window.resizeModel=resize;const observer=new ResizeObserver(resize);observer.observe($('view3d'));observer.observe($('homeStage'));
 document.addEventListener('visibilitychange',()=>{if(document.hidden){interactionPointer=null;cancelRender()}else{const before=renderCount;resize();if(renderCount===before)requestRender()}});
-window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();interactionPointer=null;if(!event.persisted){observer.disconnect();interactionRenderer?.dispose();interactionRenderer=null;homeView?.dispose?.();disposeStaticGlassPasses();releaseWallOutlineMaterials(true);editorFloorMaterials?.dispose();renderer.dispose();renderer.forceContextLoss();}});
+window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();interactionPointer=null;if(!event.persisted){environmentLayer?.dispose();observer.disconnect();interactionRenderer?.dispose();interactionRenderer=null;homeView?.dispose?.();disposeStaticGlassPasses();releaseWallOutlineMaterials(true);editorFloorMaterials?.dispose();renderer.dispose();renderer.forceContextLoss();}});
 // A resize can already paint the resumed state. Initial pageshow also needs
 // no extra frame after boot painted; leave any pending live-state request intact.
 window.addEventListener('pageshow',event=>{const resumed=renderSuspended||event.persisted,before=renderCount;renderSuspended=false;resize();if(renderCount===before&&(resumed||renderCount===0))requestRender()});
@@ -444,7 +450,7 @@ renderer.domElement.addEventListener('wheel',e=>{if(homeView?.active)return;e.pr
 $('resetView').onclick=()=>{$('focusRoom').value='';target.set(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]);radius=planRadius;azimuth=.57;polar=.48;render()};$('topView').onclick=()=>{if($('focusRoom').value)focusRoom($('focusRoom').value);else{target.set(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]);radius=planRadius*.91}polar=.001;azimuth=0;render()};$('zoomIn').onclick=()=>{radius=Math.max(3,radius/1.15);render()};$('zoomOut').onclick=()=>{radius=Math.min(Math.max(65,planRadius*2),radius*1.15);render()};
 $('cutaway').onchange=()=>{const cutaway=$('cutaway').checked;clipping.constant=cutaway?1.15:20;updateHeightCaption();render()};for(const k of ['fixtures','stairs'])$(k).onchange=()=>{root.children.filter(m=>m.userData.category===k).forEach(m=>m.visible=$(k).checked);invalidateShadows();render()};resize();
 }catch(e){report3DError(e)}
-function showMode(plan){if(!canEdit)return;cancelEditorGesture();$('view3d').style.display=plan?'none':'block';$('planPane').style.display=plan?'block':'none';$('modePlan').classList.toggle('active',plan);$('mode3d').classList.toggle('active',!plan)}$('mode3d').onclick=()=>showMode(false);$('modePlan').onclick=()=>showMode(true);
+function showMode(plan){if(!canEdit)return;environmentLayer?.setActive(!plan&&!renderLost&&!renderSuspended);cancelEditorGesture();$('view3d').style.display=plan?'none':'block';$('planPane').style.display=plan?'block':'none';$('modePlan').classList.toggle('active',plan);$('mode3d').classList.toggle('active',!plan)}$('mode3d').onclick=()=>showMode(false);$('modePlan').onclick=()=>showMode(true);
 function focusRoom(id){const room=model.rooms.find(room=>room.id===id);if(!room){$('resetView').click();return}$('room').value=id;$('focusRoom').value=id;if(failed3D){showMode(true);return}const view=model.room_views?.[id]||{};const points=room.polygon.map(([x,z])=>[xm(x),zm(z)]),xs=points.map(p=>p[0]),zs=points.map(p=>p[1]);target.set((Math.min(...xs)+Math.max(...xs))/2,planBounds?model.ceiling_height_m/2:.45,(Math.min(...zs)+Math.max(...zs))/2);radius=Math.max(5,planBounds?model.ceiling_height_m*2:0,Math.hypot(Math.max(...xs)-Math.min(...xs),Math.max(...zs)-Math.min(...zs))*1.45);azimuth=view.azimuth_rad??-.16;polar=view.polar_rad??.74;showMode(false);window.renderModel?.()}
 $('focusRoom').onchange=()=>focusRoom($('focusRoom').value);
 function rebuildInventoryView(){
@@ -508,7 +514,7 @@ function refreshViewerLanguage(refreshStates=true){
     if(nodes.control){nodes.control.textContent=vt('Details');nodes.control.setAttribute('aria-label',vt('Details')+': '+it.name);}
     if(nodes.toggle){nodes.toggle.textContent=vt('Toggle');nodes.toggle.setAttribute('aria-label',vt('Toggle {name}',{name:it.name}));}
   }
-  homeView?.refreshLanguage();if(refreshStates)refreshEntityPresentation();
+  homeView?.refreshLanguage();environmentControls.forEach(control=>control.refresh());if(refreshStates)refreshEntityPresentation();
 }
 viewerI18n.onChange(({locale,source})=>{refreshViewerLanguage();if(source==='user')bridge?.postMessage({type:'view_preferences',language:locale});});
 __HOME_JS__
@@ -553,4 +559,4 @@ document.querySelector('aside').inert=!canEdit;if(inventoryChanged)rebuildInvent
 });
 }
 refreshViewerLanguage(false);
-rebuildInventoryView();if(embedded){homeView?.setActive(true);requestAnimationFrame(()=>{initialViewReady=!failed3D;try{window.resizeModel?.();}catch(e){report3DError(e);}});}else if(model.initial_room)focusRoom(model.initial_room);window.floorplan={model,get canEdit(){return canEdit},get locale(){return viewerI18n.locale},get homeMode(){return homeView?.active??false},get illuminated(){return homeView?.illuminated??[]},get items(){return items},get renderCount(){return renderCount},get meshCount(){return root?.children.length||0},get objectCount(){return objectGroup?.children.length||0},get translucentObjectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh&&o.material.transparent&&o.material.opacity<1&&!o.material.depthWrite)n++});return n},get objectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh)n++});return n}};
+rebuildInventoryView();if(embedded){homeView?.setActive(true);requestAnimationFrame(()=>{initialViewReady=!failed3D;try{window.resizeModel?.();}catch(e){report3DError(e);}});}else if(model.initial_room)focusRoom(model.initial_room);window.floorplan={model,get surroundings(){return environmentLayer?.stats},get canEdit(){return canEdit},get locale(){return viewerI18n.locale},get homeMode(){return homeView?.active??false},get illuminated(){return homeView?.illuminated??[]},get items(){return items},get renderCount(){return renderCount},get meshCount(){return root?.children.length||0},get objectCount(){return objectGroup?.children.length||0},get translucentObjectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh&&o.material.transparent&&o.material.opacity<1&&!o.material.depthWrite)n++});return n},get objectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh)n++});return n}};

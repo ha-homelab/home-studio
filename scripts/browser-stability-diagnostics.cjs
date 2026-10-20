@@ -719,11 +719,12 @@ function assertViewerInteraction(before, after) {
   assert.deepEqual(passes.sceneViewport, [0,0,...scene.drawingBuffer], 'Pointer release must restore the original drawing-buffer resolution');
   const renderer = after.gpu.unmaskedRenderer || after.gpu.renderer;
   const diffuse = /^Apple Software Renderer$/i.test(renderer) || (renderer === 'Apple M1, or similar' && scene.rasterProbe?.status === 'measured' && scene.rasterProbe.bestMs >= 15);
-  if (diffuse) {
-    assert(passes.copy > before.scene.renderPasses.copy, 'The real diffuse-viewer gesture must execute a copy pass');
+  const reduced = diffuse || /swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe/i.test(renderer);
+  if (reduced) {
+    assert(passes.copy > before.scene.renderPasses.copy, 'The real software-viewer gesture must execute a copy pass');
     assert.equal(passes.motionDrawCalls, passes.motionSceneDrawCalls+1, 'The copy draw must remain in actual renderer draw-call counts');
     const motion = passes.motionSceneViewport;
-    assert(Array.isArray(motion) && motion.length===4 && motion[0]===0 && motion[1]===0 && motion[2]>0 && motion[3]>0 && motion[2]*motion[3]<=62500, 'Motion scene pixels must respect the bounded copy budget');
+    assert(Array.isArray(motion) && motion.length===4 && motion[0]===0 && motion[1]===0 && motion[2]>0 && motion[3]>0 && motion[2]*motion[3]<=(diffuse?31250:62500), 'Motion scene pixels must respect the bounded copy budget');
     assert.deepEqual(passes.copyViewport, [0,0,...passes.motionBuffer], 'The copy pass must cover its unchanged full drawing buffer');
     assert(motion[2]<=passes.motionBuffer[0] && motion[3]<=passes.motionBuffer[1], 'The scene copy cannot read outside its framebuffer');
   } else assert.equal(passes.copy, 0, 'Other graphics profiles must retain direct rendering');

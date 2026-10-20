@@ -62,7 +62,7 @@ function fixture(homeMode, navigationMode = 'rotate') {
     bindings: [{id: 'lamp', room: 'A'}], selected: 'A', objectGroup: {children: []},
     activateDevice: item => actions.push(item.id),
     $: getNode, vt: text => text, scene: {}, hemisphere: {}, sun: {}, ground: {}, grid: {}, clipping: {},
-    root: {children: []}, points: [], renderProfile: {}, lowerFloorContext: null, overlayGroup: null,
+    root: {children: []}, points: [], renderProfile: {}, lowerFloorContext: null, overlayGroup: null, environmentLayer: null,
     editorFloorMaterials: null, attachRoomLighting() {}, updateFixtureShadows() {}, refreshControls() {},
     hideMediaControls() {}, cancelNativeHover() {}, discardMediaControls() {}, previewTV() {},
   });

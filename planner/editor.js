@@ -1,4 +1,5 @@
 import './language-links.js';
+import { createEnvironmentLayer, createEnvironmentControls } from './environment.js';
 import { embeddedContext, memoryDraftOptions, connectHost } from './ha-bridge.js';
 import { addMeasuredRoom, installOnboarding } from './onboarding.js';
 import { createDraftStorage, DRAFT_KEY, PREVIOUS_KEY, DAMAGED_KEY } from './draft-storage.js';
@@ -377,6 +378,15 @@ function buildInspector(parent) {
       if (w < .05 || d < .05) return status(() => t('Room width and depth must be at least 0.05 m.'), true);
       transact((_p, target) => { const id = nextId(target, 'room'); target.rooms.push({ id, name: `Room ${target.rooms.length + 1}`, polygon: [[sx, sz], [round(sx + w), sz], [round(sx + w), round(sz + d)], [sx, round(sz + d)]], material: 'floor' }); selection = { kind: 'rooms', id }; }, () => t('Room added. Choose Build wall outline to create its walls.'), { fit: true });
     }, 'primary'));
+    parent.append(button(t('Add garden area'), () => {
+      const sx = Number(inspectorValue(x)), sz = Number(inspectorValue(z)), w = Number(inspectorValue(width)), d = Number(inspectorValue(depth));
+      transact((_p, target) => {
+        const id = nextId(target, 'garden');
+        target.rooms.push({ id, name: 'Garden', polygon: [[sx, sz], [round(sx + w), sz], [round(sx + w), round(sz + d)], [sx, round(sz + d)]], material: 'deck' });
+        target.items.push({ id: nextId(target, 'lawn'), name: 'Lawn', type: 'furniture', room: id, model_id: 'lawn_patch', style_id: 'sage_linen', position_m: { x: round(sx + w / 2), y: 0, z: round(sz + d / 2) }, dimensions_m: { width: w, depth: d, height: .025 }, rotation_deg: 0, entity_id: '', notes: '' });
+        selection = { kind: 'rooms', id };
+      }, () => t('Garden added. Place trees, paths or animals from the Item library.'), { fit: true });
+    }));
     parent.append(node('p', 'callout', t('Rooms are floor areas. Draw walls yourself, or select a room and build its wall outline. Moving a room will not move its walls.')));
     parent.append(button(t('Clear this floor'), () => { if (confirm(t('Clear every room, wall, opening, and item on {floor}? You can undo this.', { floor: f.name }))) transact((_p, target) => { for (const key of ['rooms', 'walls', 'openings', 'items']) target[key] = []; selection = null; }, () => t('Floor cleared.')); }, 'danger'));
     if (project.floors.length > 1) parent.append(button(t('Delete this floor'), () => { if (confirm(t('Delete {floor} and everything on it? You can undo this.', { floor: f.name }))) transact(p => { p.floors = p.floors.filter(item => item.id !== activeFloorId); selection = null; }, () => t('Floor deleted.'), { fit: true }); }, 'danger'));
@@ -504,6 +514,7 @@ function setTool(next) {
 function setView(next) {
   releasePreviewPointer();
   view = next;
+  previewEnvironment?.setActive(next === 'preview' && !previewLost && !canvasSuspended);
   $('plan-tab').setAttribute('aria-selected', String(next === 'plan')); $('preview-tab').setAttribute('aria-selected', String(next === 'preview'));
   $('plan-tab').tabIndex = next === 'plan' ? 0 : -1; $('preview-tab').tabIndex = next === 'preview' ? 0 : -1;
   $('plan-view').hidden = next !== 'plan'; $('preview-view').hidden = next !== 'preview'; $('snap-label').hidden = next !== 'plan';
@@ -726,6 +737,15 @@ planCanvas.addEventListener('wheel', e => { e.preventDefault(); zoomPlan(Math.ex
 
 // On-demand 3D rendering. Opening cuts and solid wall pieces use the same metric project.
 let renderer = null, scene = null, camera = null, worldGroup = null, previewSun = null, previewUnavailable = false, previewMetadata = {};
+let previewEnvironment = null, previewEnvironmentSettings = { enabled: false, motion: false, palette: 'sage' };
+const previewEnvironmentControls = createEnvironmentControls($('preview-view'), { getLayer: () => previewEnvironment, t, onChange: settings => { previewEnvironmentSettings = settings; } });
+function environmentSite() {
+  const floors = displayedProject().floors, boxes = floors.map(f => {
+    const box = floorBounds(f), margin = Math.max(0, ...f.walls.map(wall => wall.thickness_m / 2));
+    return { minX: box.minX - margin, maxX: box.maxX + margin, minZ: box.minZ - margin, maxZ: box.maxZ + margin };
+  });
+  return { bounds: { minX: Math.min(...boxes.map(b => b.minX)), maxX: Math.max(...boxes.map(b => b.maxX)), minZ: Math.min(...boxes.map(b => b.minZ)), maxZ: Math.max(...boxes.map(b => b.maxZ)) }, elevation: Math.min(...floors.map(f => f.elevation_m)) };
+}
 let previewLost = false, previewSize = '', previewPixels = 2000000, previewInitialized = false, previewRendererDisposed = false, previewInstancing = false, previewDiffuseLighting = false;
 const orbit = { yaw: -Math.PI / 3, pitch: .8, radius: 17, baseRadius: 17, target: new THREE.Vector3(4, 0, 3), mode: 'orbit', pointers: new Map(), gesture: null };
 function createPreviewMaterial(options) {
@@ -753,6 +773,8 @@ function initPreview() {
     previewSun.shadow.autoUpdate = false; previewSun.shadow.needsUpdate = true;
     const fill = new THREE.DirectionalLight(0xdce9f2, .5); fill.position.set(12, 10, -10); scene.add(fill);
     worldGroup = new THREE.Group(); scene.add(worldGroup);
+    previewEnvironment = createEnvironmentLayer(THREE, { scene, ...environmentSite(), visibilityElement: previewCanvas, frameInterval: previewDiffuseLighting ? 750 : previewPixels <= 250000 ? 500 : 180, requestRender: requestCanvasRender, active: view === 'preview', settings: previewEnvironmentSettings });
+    previewEnvironmentControls.refresh();
     if (!previewInitialized) { fitPreview(); previewInitialized = true; }
   } catch (error) { disposePreviewRenderer(); renderer?.forceContextLoss(); previewUnavailable = true; releasePreviewPointer(); updatePreviewNavigation(); $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
 }
@@ -777,6 +799,7 @@ function disposePreviewGeometry() {
   }
 }
 function disposePreviewRenderer() {
+  previewEnvironment?.dispose(); previewEnvironment = null;
   if (!renderer || previewRendererDisposed) return;
   disposePreviewGeometry();
   if (previewSun) { previewSun.shadow.dispose(); previewSun.shadow.map = null; previewSun.shadow.mapPass = null; }
@@ -825,6 +848,7 @@ function instancePreviewCatalog(groups) {
 }
 function rebuildPreview() {
   disposePreviewGeometry();
+  const surroundings = environmentSite(); previewEnvironment?.setBounds(surroundings.bounds, surroundings.elevation);
   // Cached asset parts are immutable. Share their geometry only within this
   // rebuild; every mesh keeps its own material, transform and rendering order.
   const catalogGeometries = new Map(), catalogGroups = [];
@@ -1042,7 +1066,7 @@ function bindPreviewCanvas() {
     requestCanvasRender();
   }, options);
   canvas.addEventListener('webglcontextlost', e => {
-    e.preventDefault(); previewLost = true; cancelCanvasRender(); releasePreviewPointer();
+    e.preventDefault(); previewLost = true; previewEnvironment?.setActive(false); cancelCanvasRender(); releasePreviewPointer();
     // Release old scene callbacks and Three's context listeners while GL is
     // lost. Nothing from this renderer may run against a restored context.
     disposePreviewRenderer(); previewDirty = true;
@@ -1248,7 +1272,7 @@ window.addEventListener('pagehide', event => {
   if (!event.persisted) { canvasObserver.disconnect(); previewEvents.abort(); releasePreviewPointer(); floorNavigator.destroy(); disposePreviewRenderer(); renderer?.forceContextLoss(); }
 });
 window.addEventListener('pageshow', () => { canvasSuspended = false; resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); });
-window.planner = Object.freeze({ getProject: () => clone(project), getPreviewMetadata: () => ({ ...previewMetadata }), getView: () => view, getSelection: () => selection && { ...selection }, worldToScreen: point => toScreen(point), validate: () => validateProject(clone(project), { complete: true }) });
+window.planner = Object.freeze({ getProject: () => clone(project), getPreviewMetadata: () => ({ ...previewMetadata, surroundings: previewEnvironment?.stats }), getView: () => view, getSelection: () => selection && { ...selection }, worldToScreen: point => toScreen(point), validate: () => validateProject(clone(project), { complete: true }) });
 updatePlacement(); renderUI(); fitPlan(); renderPlan();
 if (startupMessage) status(startupMessage, saveFailed);
 if (saveFailed) { translatedText('save-status', 'Draft restore unavailable · export a backup'); $('save-status').classList.add('problem'); } else translatedText('save-status', startupMessage ? 'Restored from this browser' : 'Local draft · export to keep a copy');
@@ -1281,6 +1305,7 @@ for (const locale of LOCALES) {
   $('language-select').append(option);
 }
 onLocaleChange(({ loaded }) => {
+  previewEnvironmentControls.refresh();
   renderLocale();
   if (!loaded) status(() => t('Language could not be loaded. English is shown instead.'), true);
 });

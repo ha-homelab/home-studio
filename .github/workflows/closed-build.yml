@@ -1,0 +1,67 @@
+name: Closed package worker
+on:
+  workflow_call:
+    inputs:
+      action:
+        type: string
+        required: true
+      closed_request:
+        type: string
+        default: ''
+      release_plan_artifact:
+        type: string
+        default: ''
+      public_context_artifact:
+        type: string
+        default: ''
+      release_tag:
+        type: string
+        default: ''
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package:
+    if: >-
+      github.repository == 'ha-homelab/home-studio' &&
+      github.ref == 'refs/heads/main' &&
+      github.workflow_ref == 'ha-homelab/home-studio/.github/workflows/release-pipeline.yml@refs/heads/main' &&
+      contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: closed-build
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install locked public transport dependencies
+        run: 'python3 -m pip install --require-hashes --only-binary=:all: -r requirements-closed-build.txt'
+      - name: Preload public tools without closed credentials
+        run: python3 scripts/closed_build.py --action prepare --prepared-root "$RUNNER_TEMP/closed-public"
+      - name: Process closed package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOSED_ACTION: ${{ inputs.action }}
+          CLOSED_REQUEST: ${{ inputs.closed_request }}
+          PUBLIC_PLAN: ${{ inputs.release_plan_artifact }}
+          PUBLIC_CONTEXT: ${{ inputs.public_context_artifact }}
+          PUBLIC_TAG: ${{ inputs.release_tag }}
+          CLOSED_INPUT_READ_URL: ${{ secrets.CLOSED_INPUT_READ_URL }}
+          CLOSED_OUTPUT_WRITE_URL: ${{ secrets.CLOSED_OUTPUT_WRITE_URL }}
+          CLOSED_OUTPUT_READ_URL: ${{ secrets.CLOSED_OUTPUT_READ_URL }}
+          CLOSED_ACCEPTANCE_READ_URL: ${{ secrets.CLOSED_ACCEPTANCE_READ_URL }}
+          CLOSED_INPUT_DECRYPT_KEY: ${{ secrets.CLOSED_INPUT_DECRYPT_KEY }}
+          CLOSED_INPUT_VERIFY_KEY: ${{ secrets.CLOSED_INPUT_VERIFY_KEY }}
+          CLOSED_OUTPUT_ENCRYPT_KEY: ${{ secrets.CLOSED_OUTPUT_ENCRYPT_KEY }}
+          CLOSED_OUTPUT_SIGN_KEY: ${{ secrets.CLOSED_OUTPUT_SIGN_KEY }}
+        run: >-
+          python3 scripts/closed_build.py
+          --action "$CLOSED_ACTION"
+          --closed-request "$CLOSED_REQUEST"
+          --release-plan-artifact "$PUBLIC_PLAN"
+          --public-context-artifact "$PUBLIC_CONTEXT"
+          --release-tag "$PUBLIC_TAG"
+          --prepared-root "$RUNNER_TEMP/closed-public"

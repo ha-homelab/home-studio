@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+- Bound pointer-motion rendering on all detected software graphics paths while
+  retaining full resting resolution, lighting, and the final release frame.
+- Add 11 garden and animal designs, bringing the local Item library to 206
+  designs. Create an editable outdoor area and lawn with **Add garden area**;
+  saved plants, pets, and vehicles remain static catalog objects.
+- Add optional geometric surroundings to Preview 3D and the installed Home view,
+  with three palettes, a separate **Decorative motion** toggle, and bounded
+  scenery traffic with varied speeds, arrival gaps, and colors, plus rabbits
+  outside the site. Preserve the existing camera
+  fit and align surroundings to ground level across floors.
+- Allow a site's scenery metadata to place the road and approach on either Z
+  edge, preserving the default side, traffic bounds, and camera framing.
+- Keep surroundings and motion off by default. Static surroundings schedule no
+  animation frames; motion pauses when hidden, offscreen, inactive, or reduced
+  motion is requested. Slower render profiles use slower animation intervals.
+  Surroundings are temporary view preferences, not device or occupancy readings.
+
 ## [0.10.0] - Draw and publish inside Home Assistant
 
 - Keep pictureless and powered-off media devices as compact launchers. Hover,

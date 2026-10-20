@@ -36,7 +36,7 @@ FUZZ_REPLAY_FILES = (
 
 SITE_FILES = (
     'index.html', 'site.css', 'privacy.html', 'install.html', 'ai-setup.html', '404.html', '.nojekyll',
-    'planner/index.html', 'planner/editor.css', 'planner/editor.js', 'planner/floor-navigator.js', 'planner/floor-navigator.css', 'planner/render-capacity.js', 'planner/interaction-render.js',
+    'planner/index.html', 'planner/editor.css', 'planner/editor.js', 'planner/floor-navigator.js', 'planner/floor-navigator.css', 'planner/render-capacity.js', 'planner/interaction-render.js', 'planner/environment.js',
     'planner/i18n.js', 'planner/validation.js', 'planner/locales/index.js',
     'planner/ha-bridge.js', 'planner/draft-storage.js', 'planner/inspector-dom.js', 'planner/onboarding.js', *(f'planner/examples/{name}.js' for name in ('practice', 'decor', 'patterns', 'garage')),
     'planner/help.js', 'planner/help.css', 'planner/help-locales.js', 'planner/language-links.js',
@@ -55,8 +55,14 @@ SITE_FILES = (
     'vendor/three.module.min.js', 'vendor/THREE-LICENSE.txt',
 )
 REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'THIRD_PARTY_NOTICES.md',
+              'docs/closed-build.md', '.closed-build-policy.json', 'requirements-closed-build.txt',
+              '.github/workflows/closed-build.yml', 'docker/closed-worker.Dockerfile',
+              'scripts/closed_build.py', 'scripts/closed_envelope.py', 'scripts/closed_worker.py',
+              'scripts/closed_synthetic.py', 'scripts/test_closed_build.py',
               'scripts/download_tls.py', 'scripts/test-download-tls.py', 'requirements-tls-test.txt',
               'requirements-strict-tls.txt', 'docs/transport-security.md',
+              'docs/environment.md', 'docs/images/garden-surroundings.png',
+              'scripts/test-environment.mjs', 'scripts/test-environment-browser.cjs',
               'docs/i18n.md', 'docs/translations/README.md',
               'docs/dry-run.md', 'scripts/test-dry-run.cjs',
               'scripts/build-panel-locales.py', 'scripts/test-dry-run-browser.cjs',
@@ -192,7 +198,7 @@ def validate(root):
             if path.read_bytes() != BINARY_REPLAY_SEEDS[relative]:
                 raise ValueError(f'Unexpected binary replay seed: {relative}')
             continue
-        if path.suffix == '.jpg' or relative in ('docs/images/dashboard-media-example.png', 'docs/images/native-editor.png'):
+        if path.suffix == '.jpg' or relative in ('docs/images/dashboard-media-example.png', 'docs/images/native-editor.png', 'docs/images/garden-surroundings.png'):
             continue
         text = path.read_text(encoding='utf-8')
         # The validator intentionally contains its own private-pattern tripwires.

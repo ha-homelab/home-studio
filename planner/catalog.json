@@ -4548,6 +4548,987 @@
         {"shape": "cylinder", "center": [0.2134831461, 0.6770833333, 0.0561797753], "size": [0.14485995, 0.4972016392, 0.1348314607], "material": "accent", "rotation_deg": [0, 0, 9]},
         {"shape": "ring", "center": [0.1348314607, 0.9441964286, 0.0561797753], "size": [0.1685393258, 0.0449438202, 0.1116071429], "material": "wood", "rotation_deg": [90, 0, 0], "inner_ratio": 0.52}
       ]
+    },
+{
+  "id": "lawn_patch",
+  "label": "Soft lawn patch",
+  "category": "outdoors",
+  "type": "furniture",
+  "dimensions_m": {
+    "width": 4,
+    "depth": 3,
+    "height": 0.025
+  },
+  "elevation_m": 0,
+  "default_style": "sage_linen",
+  "parts": [
+    {
+      "shape": "box",
+      "center": [
+        0.0,
+        0.5,
+        0.0
+      ],
+      "size": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "material": "body"
     }
+  ],
+  "tags": [
+    "garden",
+    "grass",
+    "ground",
+    "landscape",
+    "outdoor"
+  ]
+},
+{
+  "id": "meadow_border",
+  "label": "Meadow grass border",
+  "category": "outdoors",
+  "type": "furniture",
+  "dimensions_m": {
+    "width": 2,
+    "depth": 0.5,
+    "height": 0.32
+  },
+  "elevation_m": 0,
+  "default_style": "sage_linen",
+  "parts": [
+    {
+      "shape": "box",
+      "center": [
+        0.0,
+        0.0386740331,
+        0.0
+      ],
+      "size": [
+        1.0,
+        0.0773480663,
+        1.0
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "cone",
+      "center": [
+        -0.4,
+        0.4419889503,
+        0.0
+      ],
+      "size": [
+        0.12,
+        0.8839779006,
+        0.3
+      ],
+      "material": "#7c966b"
+    },
+    {
+      "shape": "cone",
+      "center": [
+        -0.2,
+        0.4419889503,
+        -0.14
+      ],
+      "size": [
+        0.12,
+        0.8839779006,
+        0.3
+      ],
+      "material": "#7c966b"
+    },
+    {
+      "shape": "cone",
+      "center": [
+        0.0,
+        0.4419889503,
+        0.12
+      ],
+      "size": [
+        0.12,
+        0.8839779006,
+        0.3
+      ],
+      "material": "#7c966b"
+    },
+    {
+      "shape": "cone",
+      "center": [
+        0.2,
+        0.4419889503,
+        -0.1
+      ],
+      "size": [
+        0.12,
+        0.8839779006,
+        0.3
+      ],
+      "material": "#7c966b"
+    },
+    {
+      "shape": "cone",
+      "center": [
+        0.4,
+        0.4419889503,
+        0.1
+      ],
+      "size": [
+        0.12,
+        0.8839779006,
+        0.3
+      ],
+      "material": "#7c966b"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        -0.3,
+        0.9060773481,
+        0.15
+      ],
+      "size": [
+        0.07,
+        0.1878453039,
+        0.16
+      ],
+      "material": "#ded2a6"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        0.08,
+        0.9060773481,
+        -0.1
+      ],
+      "size": [
+        0.07,
+        0.1878453039,
+        0.16
+      ],
+      "material": "#ded2a6"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        0.35,
+        0.9060773481,
+        -0.15
+      ],
+      "size": [
+        0.07,
+        0.1878453039,
+        0.16
+      ],
+      "material": "#ded2a6"
+    }
+  ],
+  "tags": [
+    "garden",
+    "grass",
+    "flowers",
+    "landscape"
+  ]
+},
+{
+  "id": "stepping_stone_path",
+  "label": "Linear stepping stone path",
+  "category": "outdoors",
+  "type": "furniture",
+  "dimensions_m": {
+    "width": 3,
+    "depth": 0.7,
+    "height": 0.045
+  },
+  "elevation_m": 0,
+  "default_style": "scandinavian",
+  "parts": [
+    {
+      "shape": "box",
+      "center": [
+        -0.4081632653,
+        0.5,
+        0.0
+      ],
+      "size": [
+        0.1836734694,
+        1.0,
+        1.0
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "box",
+      "center": [
+        -0.2040816327,
+        0.5,
+        0.0
+      ],
+      "size": [
+        0.1836734694,
+        1.0,
+        1.0
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "box",
+      "center": [
+        0.0,
+        0.5,
+        0.0
+      ],
+      "size": [
+        0.1836734694,
+        1.0,
+        1.0
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "box",
+      "center": [
+        0.2040816327,
+        0.5,
+        0.0
+      ],
+      "size": [
+        0.1836734694,
+        1.0,
+        1.0
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "box",
+      "center": [
+        0.4081632653,
+        0.5,
+        0.0
+      ],
+      "size": [
+        0.1836734694,
+        1.0,
+        1.0
+      ],
+      "material": "body"
+    }
+  ],
+  "tags": [
+    "garden",
+    "path",
+    "paving",
+    "landscape"
+  ]
+},
+{
+  "id": "clipped_hedge",
+  "label": "Clipped garden hedge",
+  "category": "plants",
+  "type": "furniture",
+  "dimensions_m": {
+    "width": 2.4,
+    "depth": 0.55,
+    "height": 0.85
+  },
+  "elevation_m": 0,
+  "default_style": "sage_linen",
+  "parts": [
+    {
+      "shape": "box",
+      "center": [
+        0.0,
+        0.54,
+        0.0
+      ],
+      "size": [
+        1.0,
+        0.92,
+        1.0
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "box",
+      "center": [
+        0.0,
+        0.04,
+        0.0
+      ],
+      "size": [
+        0.9,
+        0.08,
+        0.6
+      ],
+      "material": "#887c68"
+    }
+  ],
+  "tags": [
+    "garden",
+    "boundary",
+    "hedge",
+    "outdoor",
+    "landscape"
+  ]
+},
+{
+  "id": "round_canopy_tree",
+  "label": "Round canopy garden tree",
+  "category": "plants",
+  "type": "furniture",
+  "dimensions_m": {
+    "width": 1.3,
+    "depth": 1.3,
+    "height": 2.5
+  },
+  "elevation_m": 0,
+  "default_style": "sage_linen",
+  "parts": [
+    {
+      "shape": "cylinder",
+      "center": [
+        0.0,
+        0.3,
+        0.0
+      ],
+      "size": [
+        0.075,
+        0.6,
+        0.075
+      ],
+      "material": "wood"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        0.0,
+        0.7,
+        0.0
+      ],
+      "size": [
+        1.0,
+        0.6,
+        1.0
+      ],
+      "material": "body"
+    }
+  ],
+  "tags": [
+    "garden",
+    "tree",
+    "outdoor",
+    "landscape"
+  ]
+},
+{
+  "id": "columnar_tree",
+  "label": "Slender cypress tree",
+  "category": "plants",
+  "type": "furniture",
+  "dimensions_m": {
+    "width": 0.6,
+    "depth": 0.6,
+    "height": 2.6
+  },
+  "elevation_m": 0,
+  "default_style": "sage_linen",
+  "parts": [
+    {
+      "shape": "cylinder",
+      "center": [
+        0.0,
+        0.13,
+        0.0
+      ],
+      "size": [
+        0.14,
+        0.26,
+        0.14
+      ],
+      "material": "wood"
+    },
+    {
+      "shape": "cone",
+      "center": [
+        0.0,
+        0.6,
+        0.0
+      ],
+      "size": [
+        1.0,
+        0.8,
+        1.0
+      ],
+      "material": "body"
+    }
+  ],
+  "tags": [
+    "garden",
+    "tree",
+    "cypress",
+    "outdoor",
+    "landscape"
+  ]
+},
+{
+  "id": "small_dog",
+  "label": "Small companion dog",
+  "category": "pet_furniture",
+  "type": "furniture",
+  "dimensions_m": {
+    "width": 0.75,
+    "depth": 0.3,
+    "height": 0.5
+  },
+  "elevation_m": 0,
+  "default_style": "warm_wood",
+  "parts": [
+    {
+      "shape": "sphere",
+      "center": [
+        -0.0561497326,
+        0.4945054945,
+        0.0
+      ],
+      "size": [
+        0.6951871658,
+        0.4615384615,
+        0.9285714286
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        0.2860962567,
+        0.8021978022,
+        0.0
+      ],
+      "size": [
+        0.320855615,
+        0.3956043956,
+        0.8095238095
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        0.4037433155,
+        0.7252747253,
+        0.0
+      ],
+      "size": [
+        0.192513369,
+        0.2087912088,
+        0.4761904762
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        0.2219251337,
+        0.7912087912,
+        -0.380952381
+      ],
+      "size": [
+        0.1390374332,
+        0.3626373626,
+        0.2380952381
+      ],
+      "material": "#8d7768"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        0.2219251337,
+        0.7912087912,
+        0.380952381
+      ],
+      "size": [
+        0.1390374332,
+        0.3626373626,
+        0.2380952381
+      ],
+      "material": "#8d7768"
+    },
+    {
+      "shape": "cone",
+      "center": [
+        -0.4304812834,
+        0.6703296703,
+        0.0
+      ],
+      "size": [
+        0.1390374332,
+        0.4945054945,
+        0.1904761905
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "box",
+      "center": [
+        -0.2700534759,
+        0.1648351648,
+        -0.2857142857
+      ],
+      "size": [
+        0.0962566845,
+        0.3296703297,
+        0.2023809524
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "box",
+      "center": [
+        -0.2700534759,
+        0.1648351648,
+        0.2857142857
+      ],
+      "size": [
+        0.0962566845,
+        0.3296703297,
+        0.2023809524
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "box",
+      "center": [
+        0.2326203209,
+        0.1648351648,
+        -0.2857142857
+      ],
+      "size": [
+        0.0962566845,
+        0.3296703297,
+        0.2023809524
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "box",
+      "center": [
+        0.2326203209,
+        0.1648351648,
+        0.2857142857
+      ],
+      "size": [
+        0.0962566845,
+        0.3296703297,
+        0.2023809524
+      ],
+      "material": "body"
+    }
+  ],
+  "tags": [
+    "pet",
+    "animal",
+    "dog",
+    "puppy",
+    "indoor",
+    "garden"
+  ]
+},
+{
+  "id": "sitting_cat",
+  "label": "Sitting house cat",
+  "category": "pet_furniture",
+  "type": "furniture",
+  "dimensions_m": {
+    "width": 0.4,
+    "depth": 0.35,
+    "height": 0.5
+  },
+  "elevation_m": 0,
+  "default_style": "scandinavian",
+  "parts": [
+    {
+      "shape": "sphere",
+      "center": [
+        -0.0962732919,
+        0.3299492386,
+        -0.0031055901
+      ],
+      "size": [
+        0.8074534161,
+        0.6598984772,
+        0.9937888199
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        -0.0590062112,
+        0.7766497462,
+        -0.0031055901
+      ],
+      "size": [
+        0.7826086957,
+        0.3045685279,
+        0.8695652174
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "cone",
+      "center": [
+        -0.3074534161,
+        0.9187817259,
+        -0.0031055901
+      ],
+      "size": [
+        0.2236024845,
+        0.1624365482,
+        0.3105590062
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "cone",
+      "center": [
+        0.1770186335,
+        0.9187817259,
+        -0.0031055901
+      ],
+      "size": [
+        0.2236024845,
+        0.1624365482,
+        0.3105590062
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        0.2639751553,
+        0.1065989848,
+        0.1583850932
+      ],
+      "size": [
+        0.4720496894,
+        0.2030456853,
+        0.6832298137
+      ],
+      "material": "#8d7768"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        0.0652173913,
+        0.7766497462,
+        0.4068322981
+      ],
+      "size": [
+        0.0869565217,
+        0.0609137056,
+        0.0621118012
+      ],
+      "material": "dark"
+    }
+  ],
+  "tags": [
+    "pet",
+    "animal",
+    "cat",
+    "kitten",
+    "indoor",
+    "garden"
+  ]
+},
+{
+  "id": "garden_rabbit",
+  "label": "Garden rabbit",
+  "category": "pet_furniture",
+  "type": "furniture",
+  "dimensions_m": {
+    "width": 0.45,
+    "depth": 0.25,
+    "height": 0.45
+  },
+  "elevation_m": 0,
+  "default_style": "scandinavian",
+  "parts": [
+    {
+      "shape": "sphere",
+      "center": [
+        -0.0368421053,
+        0.2631578947,
+        0.0
+      ],
+      "size": [
+        0.7157894737,
+        0.5263157895,
+        1.0
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        0.3105263158,
+        0.4842105263,
+        0.0
+      ],
+      "size": [
+        0.3789473684,
+        0.3473684211,
+        0.7441860465
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        0.3210526316,
+        0.7789473684,
+        -0.2093023256
+      ],
+      "size": [
+        0.1473684211,
+        0.4421052632,
+        0.1860465116
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        0.3210526316,
+        0.7789473684,
+        0.2093023256
+      ],
+      "size": [
+        0.1473684211,
+        0.4421052632,
+        0.1860465116
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        -0.3947368421,
+        0.3157894737,
+        0.0
+      ],
+      "size": [
+        0.2105263158,
+        0.2105263158,
+        0.3488372093
+      ],
+      "material": "#efeadf"
+    }
+  ],
+  "tags": [
+    "pet",
+    "animal",
+    "rabbit",
+    "bunny",
+    "garden"
+  ]
+},
+{
+  "id": "garden_fox",
+  "label": "Resting garden fox",
+  "category": "pet_furniture",
+  "type": "furniture",
+  "dimensions_m": {
+    "width": 0.8,
+    "depth": 0.35,
+    "height": 0.4
+  },
+  "elevation_m": 0,
+  "default_style": "warm_wood",
+  "parts": [
+    {
+      "shape": "sphere",
+      "center": [
+        -0.0326633166,
+        0.247311828,
+        -0.0277777778
+      ],
+      "size": [
+        0.6532663317,
+        0.4301075269,
+        0.9444444444
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        0.2788944724,
+        0.5376344086,
+        -0.0277777778
+      ],
+      "size": [
+        0.3015075377,
+        0.4301075269,
+        0.7777777778
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "cone",
+      "center": [
+        0.2085427136,
+        0.8387096774,
+        -0.2166666667
+      ],
+      "size": [
+        0.1407035176,
+        0.3225806452,
+        0.2777777778
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "cone",
+      "center": [
+        0.3391959799,
+        0.8387096774,
+        0.1611111111
+      ],
+      "size": [
+        0.1407035176,
+        0.3225806452,
+        0.2777777778
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        -0.324120603,
+        0.1290322581,
+        0.1944444444
+      ],
+      "size": [
+        0.351758794,
+        0.2580645161,
+        0.6111111111
+      ],
+      "material": "#d9c2a0"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        0.3994974874,
+        0.4408602151,
+        -0.0277777778
+      ],
+      "size": [
+        0.2010050251,
+        0.1505376344,
+        0.3888888889
+      ],
+      "material": "#dfcfb1"
+    }
+  ],
+  "tags": [
+    "animal",
+    "fox",
+    "garden",
+    "wildlife"
+  ]
+},
+{
+  "id": "garden_bird",
+  "label": "Small garden bird",
+  "category": "pet_furniture",
+  "type": "furniture",
+  "dimensions_m": {
+    "width": 0.24,
+    "depth": 0.13,
+    "height": 0.2
+  },
+  "elevation_m": 0,
+  "default_style": "ocean_blue",
+  "parts": [
+    {
+      "shape": "sphere",
+      "center": [
+        -0.1184971098,
+        0.4699453552,
+        0.0
+      ],
+      "size": [
+        0.7630057803,
+        0.6010928962,
+        1.0
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "sphere",
+      "center": [
+        0.1820809249,
+        0.7868852459,
+        0.0
+      ],
+      "size": [
+        0.4624277457,
+        0.4262295082,
+        0.85
+      ],
+      "material": "body"
+    },
+    {
+      "shape": "cone",
+      "center": [
+        0.401734104,
+        0.7650273224,
+        0.0
+      ],
+      "size": [
+        0.1965317919,
+        0.218579235,
+        0.25
+      ],
+      "material": "#bfa16e"
+    },
+    {
+      "shape": "cone",
+      "center": [
+        -0.3959537572,
+        0.3387978142,
+        0.0
+      ],
+      "size": [
+        0.1965317919,
+        0.2732240437,
+        0.3125
+      ],
+      "material": "#687f83"
+    },
+    {
+      "shape": "box",
+      "center": [
+        -0.0606936416,
+        0.1420765027,
+        0.0
+      ],
+      "size": [
+        0.0578034682,
+        0.2841530055,
+        0.5
+      ],
+      "material": "#7f7667"
+    }
+  ],
+  "tags": [
+    "animal",
+    "bird",
+    "garden",
+    "wildlife"
+  ]
+}
   ]
 }

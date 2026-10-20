@@ -131,5 +131,13 @@
   "Reload saved plan": "Muat ulang denah tersimpan",
   "Connecting to Home Assistant…": "Menghubungkan ke Home Assistant…",
   "Connected · placements are saved in Home Assistant": "Terhubung · penempatan disimpan di Home Assistant",
-  "3D view could not start. Plan editing and JSON export are still available.": "Tampilan 3D tidak dapat dimulai. Penyuntingan denah dan ekspor JSON tetap tersedia."
+  "3D view could not start. Plan editing and JSON export are still available.": "Tampilan 3D tidak dapat dimulai. Penyuntingan denah dan ekspor JSON tetap tersedia.",
+  "Surroundings": "Surroundings",
+  "Show garden surroundings": "Show garden surroundings",
+  "Decorative motion": "Decorative motion",
+  "Garden palette": "Garden palette",
+  "Sage garden": "Sage garden",
+  "Summer meadow": "Summer meadow",
+  "Blue dusk": "Blue dusk",
+  "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Decorative only. Motion pauses when hidden or reduced motion is preferred."
 }
