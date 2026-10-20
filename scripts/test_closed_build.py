@@ -162,10 +162,12 @@ class BoundaryTests(unittest.TestCase):
                     patch.object(release_control, "source_policy_snapshot", return_value={"data": policy}), \
                     patch.object(build, "download_artifact", side_effect=download):
                 prospective, _ = build.public_inputs(args, root / "prospective")
+                args.action = "rebuild"
                 args.public_context_artifact = "resolved"
                 resolved, _ = build.public_inputs(args, root / "resolved")
                 self.assertEqual(prospective["payloads"], expected)
                 self.assertEqual(prospective["payloads"], resolved["payloads"])
+                args.action = "build"
                 args.public_context_artifact = ""
                 (source / "fuzz-report.json").write_text("collision")
                 with self.assertRaises(build.Rejected):
@@ -220,6 +222,75 @@ class BoundaryTests(unittest.TestCase):
             self.assertEqual(result["promotion"], context["promotion"])
             self.assertEqual(result["channel"], "rc")
             self.assertEqual((public / "component/core.py").read_bytes(), b"public")
+
+    def test_published_context_selects_action_resolver_with_skipped_peer(self):
+        def zipped(files):
+            stream = io.BytesIO()
+            with zipfile.ZipFile(stream, "w") as result:
+                for name, data in files.items():
+                    result.writestr(name, data)
+            return stream.getvalue()
+        payloads = {"home_floorplan.zip": zipped({"core.py": b"public"}),
+                    "home-studio-1.2.3.zip": zipped({"home-studio/scripts/install-home-assistant.py": b"public"})}
+        plan = {"source_sha": "a" * 40, "tag": "v1.2.3-rc.1", "version": "1.2.3-rc.1",
+                "base_version": "1.2.3", "channel": "rc"}
+        context = {"mode": "published", "repository": build.REPOSITORY, "workflow": build.WORKFLOW,
+                   "source_sha": plan["source_sha"], "release_tag": plan["tag"], "plan_sha256": "b" * 64,
+                   "payloads": {name: {"sha256": envelope.digest(data), "size": len(data)}
+                                for name, data in payloads.items()}}
+        data = zipped({"context.json": envelope.canonical(context), "version-plan.json": envelope.canonical(plan),
+                       **{"payloads/" + name: contents for name, contents in payloads.items()}})
+        run = {"run_attempt": 2, "head_sha": "c" * 40, "path": build.WORKFLOW, "head_branch": "main"}
+        # GitHub includes both resolver names in a closed-rebuild job inventory,
+        # including the skipped peer's completed status and zero-length window.
+        successful = {"name": "closed_existing_resolve", "status": "completed", "conclusion": "success",
+                      "started_at": "2026-10-20T01:51:40Z", "completed_at": "2026-10-20T01:52:50Z"}
+        skipped = {"name": "closed_stable_resolve", "status": "completed", "conclusion": "skipped",
+                   "started_at": "2026-10-20T01:51:38Z", "completed_at": "2026-10-20T01:51:38Z"}
+        artifact = {"id": 3, "name": "public-context", "expired": False,
+                    "workflow_run": {"id": 10, "head_sha": run["head_sha"]},
+                    "created_at": "2026-10-20T01:52:40Z", "size_in_bytes": len(data),
+                    "digest": "sha256:" + envelope.digest(data)}
+        class GitHub:
+            def api(self, path): return run
+            def pages(self, path, field): return self.jobs if field == "jobs" else [artifact]
+            def binary(self, path): return data
+        environment = {"GITHUB_RUN_ID": "10", "GITHUB_RUN_ATTEMPT": "2", "GITHUB_SHA": run["head_sha"],
+                       "GITHUB_REPOSITORY_ID": build.REPOSITORY_ID, "GITHUB_REPOSITORY_OWNER_ID": build.OWNER_ID}
+        for action in ("rebuild", "validate"):
+            selected, peer = copy.deepcopy((successful, skipped))
+            if action == "validate":
+                selected["name"], peer["name"] = peer["name"], selected["name"]
+            cases = {"valid": [selected, peer],
+                     "wrong-only": [{**selected, "name": peer["name"]}],
+                     "skipped-selected": [{**selected, "conclusion": "skipped"}, {**peer, "conclusion": "success"}],
+                     "failed-selected": [{**selected, "conclusion": "failure"}, {**peer, "conclusion": "success"}],
+                     "duplicate-selected": [selected, copy.deepcopy(selected), peer],
+                     "duplicate-skipped-selected": [selected, {**selected, "conclusion": "skipped"}, peer],
+                     "renamed-selected": [{**selected, "name": "Resolve closed public release"}, peer],
+                     "wrong-action": [selected, peer]}
+            for case, jobs in cases.items():
+                with self.subTest(action=action, case=case), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    (root / "prepared/dependencies").mkdir(parents=True)
+                    args = SimpleNamespace(action="build" if case == "wrong-action" else action,
+                                           public_context_artifact="public-context", release_tag=plan["tag"],
+                                           prepared_root=root / "prepared")
+                    gh = GitHub()
+                    gh.jobs = jobs
+                    with patch.object(release_control, "GitHub", return_value=gh), \
+                         patch("version_plan.validate_plan", return_value=plan), \
+                         patch("version_plan.plan_digest", return_value="b" * 64), \
+                         patch("release_control.source_policy_snapshot", return_value={"data": {}}), \
+                         patch("version_receipt.verify_receipts"), patch("version_receipt.verify_declared_artifacts"), \
+                         patch.dict(os.environ, environment):
+                        if case != "valid":
+                            with self.assertRaises(build.Rejected):
+                                build.public_inputs(args, root)
+                        else:
+                            result, public = build.public_inputs(args, root)
+                            self.assertEqual(result["payloads"], context["payloads"])
+                            self.assertEqual((public / "component/core.py").read_bytes(), b"public")
 
     def test_public_artifact_binds_digest_source_producer_and_attempt(self):
         content = io.BytesIO()
