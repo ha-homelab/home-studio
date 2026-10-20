@@ -18,7 +18,7 @@ COMPONENT_FILES = (
     "static/panel.js", "static/card.js", "static/studio.js",
 )
 RUNTIME_FILES = (
-    "geometry.py", "exporters.py", "planner/project.py", "planner/furniture.py", "planner/catalog.json",
+    "geometry.py", "exporters.py", "viewer_locales.py", "planner/project.py", "planner/furniture.py", "planner/catalog.json",
     "viewer.template.html", "viewer.js", "viewer-i18n.js", "home-view.html", "home-view.css", "home-view.js",
     "curtain-state.js", "motion-state.js", "appliance-state.js", "presence-view.js", "tv-screen.js", "camera-preview.js", "media-preview.js",
     "assumed-zone-view.js", "light-state.js", "planner/render-capacity.js", "planner/interaction-render.js",

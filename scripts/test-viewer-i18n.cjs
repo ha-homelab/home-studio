@@ -31,6 +31,59 @@ for (const { code } of locales) {
 const context = vm.createContext({ URLSearchParams, URL });
 vm.runInContext(read('viewer-i18n.js'), context);
 function core(environment = {}, value = data) { return context.createViewerI18n(value, environment); }
+function compactCatalog(directory) {
+  const loaded = spawnSync(process.env.PYTHON || 'python3', ['-c',
+    'import json,sys\nfrom pathlib import Path\nfrom viewer_locales import load_viewer_i18n\njson.dump(load_viewer_i18n(Path(sys.argv[1])),sys.stdout,ensure_ascii=False)',
+    directory], { cwd: root, encoding: 'utf8' });
+  assert.equal(loaded.status, 0, loaded.stderr || loaded.stdout);
+  return JSON.parse(loaded.stdout);
+}
+function assertCatalogParity(original, compact) {
+  assert.deepEqual(compact.locales, original.locales);
+  assert.deepEqual(compact.dictionaries.en, original.dictionaries.en);
+  const full = core({}, original), sparse = core({}, compact);
+  const keys = new Set(['unknown technical detail', ...Object.values(original.dictionaries).flatMap(Object.keys)]);
+  for (const { code } of original.locales) {
+    assert.equal(full.setLocale(code), true);
+    assert.equal(sparse.setLocale(code), true);
+    for (const key of keys) {
+      const tokens = placeholders(full.t(key));
+      const params = Object.fromEntries(tokens.map(name => [name, `<${name}> {untouched}`]));
+      assert.equal(sparse.t(key), full.t(key), `${code}: ${key}`);
+      assert.equal(sparse.t(key, params), full.t(key, params), `${code}: ${key} with parameters`);
+    }
+  }
+}
+const compactData = compactCatalog(root);
+assertCatalogParity(data, compactData);
+assert.ok(JSON.stringify(compactData).length < JSON.stringify(data).length, 'fallback copies are omitted from generated payloads');
+for (const { code } of locales) {
+  for (const [key, value] of Object.entries(dictionaries[code])) {
+    assert.equal(Object.hasOwn(compactData.dictionaries[code], key), code === 'en' || value !== english[key], `${code}: ${key} compactness`);
+  }
+}
+const catalogFixture = fs.mkdtempSync(path.join(os.tmpdir(), 'home-viewer-locales-'));
+try {
+  const fixture = {
+    locales: [{ code: 'en', name: 'English' }, { code: 'de', name: 'Deutsch' }],
+    dictionaries: {
+      en: { same: 'Same', translated: 'English', blank: 'Not empty', bothBlank: '', template: 'Hello {name} {count}', missing: 'Fallback', invalid: 'Fallback', case: 'Case' },
+      de: { same: 'Same', translated: 'Deutsch', blank: '', bothBlank: '', template: 'Hello {name} {count}', invalid: null, case: 'CASE', localOnly: 'Local {name}' },
+    },
+  };
+  const directory = path.join(catalogFixture, 'viewer-locales');
+  fs.mkdirSync(directory);
+  fs.writeFileSync(path.join(directory, 'index.json'), JSON.stringify(fixture.locales));
+  for (const [code, dictionary] of Object.entries(fixture.dictionaries)) fs.writeFileSync(path.join(directory, `${code}.json`), JSON.stringify(dictionary));
+  const compact = compactCatalog(catalogFixture);
+  assertCatalogParity(fixture, compact);
+  assert.deepEqual(compact.dictionaries.de, { translated: 'Deutsch', blank: '', invalid: null, case: 'CASE', localOnly: 'Local {name}' });
+  for (const [code, dictionary] of Object.entries(fixture.dictionaries)) {
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(directory, `${code}.json`), 'utf8')), dictionary, 'source catalogs are never rewritten');
+  }
+} finally {
+  fs.rmSync(catalogFixture, { recursive: true, force: true });
+}
 const stored = new Map(), environment = { location: { search: '?lang=zh-TW' }, navigator: { languages: ['de-DE'] }, localStorage: { getItem: key => stored.get(key), setItem: (key, value) => stored.set(key, value) } };
 stored.set('home-studio.language.v1', 'ru');
 let instance = core(environment); instance.init();
@@ -76,6 +129,7 @@ assert.equal(context.viewerStateLabel('on'), 'On');
     assert.ok(html.includes("connect-src 'none'"));
     assert.ok(!html.includes('planner/locales/'), 'editor translations are not embedded');
     assert.ok(!html.includes('__VIEWER_I18N_JS__'));
+    assert.deepEqual(JSON.parse(html.match(/^const viewerI18n=createViewerI18n\((.+)\),vt=/m)[1]), compactData, 'the compiler embeds the compact payload');
     assert.ok(html.includes('User &lt;room&gt; __VIEWER_I18N_DATA__ /*__ENVIRONMENT_JS__*/'), 'user tokens are not expanded');
     browser = await browserTypes[engine].launch({ headless: true, ...(engine === 'chromium' ? {
       executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,

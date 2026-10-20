@@ -697,6 +697,7 @@ class PackagingTests(unittest.TestCase):
                 names = set(zipped.namelist())
                 self.assertIn("config_flow.py", names)
                 self.assertIn("runtime/planner/project.py", names)
+                self.assertIn("runtime/viewer_locales.py", names)
                 self.assertIn("static/studio.js", names)
                 self.assertNotIn("site.json", names)
                 self.assertNotIn("project.json", names)
