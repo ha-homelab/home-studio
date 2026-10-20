@@ -62,7 +62,7 @@ const server = http.createServer(async (request, response) => {
     if (!fs.fstatSync(descriptor).isFile()) return response.writeHead(404).end();
     body = fs.readFileSync(descriptor);
   } catch (error) {
-    if (['ENOENT', 'ENOTDIR'].includes(error.code)) return response.writeHead(404).end();
+    if (['ENOENT', 'ENOTDIR', 'EISDIR'].includes(error.code)) return response.writeHead(404).end();
     throw error;
   } finally {
     if (descriptor !== undefined) fs.closeSync(descriptor);

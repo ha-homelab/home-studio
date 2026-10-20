@@ -160,7 +160,7 @@ const server=http.createServer((request,response)=>{
     if(!fs.fstatSync(descriptor).isFile()){response.writeHead(404).end();return;}
     content=route==='/planner/editor.js'?editor:fs.readFileSync(descriptor);
   } catch(error) {
-    if(['ENOENT','ENOTDIR'].includes(error.code)){response.writeHead(404).end();return;}
+    if(['ENOENT','ENOTDIR','EISDIR'].includes(error.code)){response.writeHead(404).end();return;}
     throw error;
   } finally {
     if(descriptor!==undefined)fs.closeSync(descriptor);
