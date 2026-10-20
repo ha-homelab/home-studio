@@ -218,6 +218,38 @@ test('same connection reconnects once even when hosts mutate one hass object', a
   assert.equal(c.released.length, 1);
 });
 
+test('disconnect disables the visible viewer before retiring its channel', async () => {
+  for (const source of ['hass', 'event', 'replacement']) {
+    const f=fixture(), c=connection({eventOnly:source==='hass'}), hass=f.hass(c);
+    f.panel.hass=hass;
+    await flush();
+    const generation=f.panel.generation, events=[], messages=[];
+    f.panel.port={
+      postMessage(message) {events.push('message'); messages.push(message);},
+      close() {events.push('close');}
+    };
+    if (source==='hass') {
+      hass.connected=false; f.panel.hass=hass;
+    } else if (source==='event') {
+      c.value.emit('disconnected');
+      assert.equal(hass.connected, true, 'connection events can precede the next hass update');
+    } else {
+      const replacement=connection();
+      replacement.value.connected=false;
+      f.panel.hass=f.hass(replacement, {connected:false});
+      assert.equal(replacement.reads.length, 0);
+    }
+    assert.deepEqual(events, ['message', 'close']);
+    assert.equal(messages[0].type, 'states');
+    assert.equal(messages[0].connected, false);
+    assert.equal(Object.keys(messages[0].states).length, 0);
+    assert.equal(f.panel.generation, generation+1, 'queued messages from the old viewer remain invalid');
+    assert.equal(f.panel.port, null);
+    assert.equal(f.panel.started, false);
+    assert.equal(c.reads.length, 1, 'disconnect must not queue another viewer read');
+  }
+});
+
 test('connection events recover without hass replacement and duplicate ready events do not reload', async () => {
   const f=fixture(), c=connection();
   f.panel.hass=f.hass(c);

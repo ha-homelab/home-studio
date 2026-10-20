@@ -435,6 +435,9 @@ class HomeFloorplanPanel extends HTMLElement {
     state?.connection?.removeEventListener?.('ready', state.readyListener);
   }
   resetConnectionLoad() {
+    // Disable the visible viewer before closing its channel, including when
+    // a replacement connection arrives before hass.connected changes.
+    this.port?.postMessage({type:'states', states:{}, connected:false});
     this.suspendedEdits ||= !!this.localEdits;
     this.invalidateViewerLoad();
     this.clearCurtainSubscription();
