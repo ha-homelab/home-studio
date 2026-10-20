@@ -20,17 +20,16 @@ function renderer(){
  };return r;
 }
 const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera();
-// The viewer's diffuse-only override keeps the generic helper default unchanged.
-// Compare actual texture and viewport allocation at resting and motion budgets.
-for (const [width,height] of [[292,213],[329,189],[100,80]]) {
+// Compare both software profiles at their actual resting and motion budgets.
+for (const budget of [31250,62500]) for (const [width,height] of [[292,213],[329,189],[604,413],[100,80]]) {
  const limited=renderer();limited.state.size.set(width,height);limited.state.viewport.set(0,0,width/.5,height/.5);
- const helper=createInteractionRenderer(THREE,limited,31250);
+ const helper=createInteractionRenderer(THREE,limited,budget);
  helper.draw(scene,camera,false);assert.equal(limited.textures.length,0,'Resting frames remain direct');
  helper.draw(scene,camera,true);
- const scale=Math.min(1,Math.sqrt(31250/(width*height))),texture=limited.textures[0];
+ const scale=Math.min(1,Math.sqrt(budget/(width*height))),texture=limited.textures[0];
  assert.equal(texture.image.width,Math.max(1,Math.floor(width*scale)));
  assert.equal(texture.image.height,Math.max(1,Math.floor(height*scale)));
- assert(texture.image.width*texture.image.height<=31250);
+ assert(texture.image.width*texture.image.height<=budget);
  const draws=limited.log.filter(value=>value[0]==='render');
  assert.deepEqual(draws.at(-2)[3],[0,0,(texture.image.width+.25)/.5,(texture.image.height+.25)/.5]);
  assert.deepEqual(draws.at(-1)[3],[0,0,(width+.25)/.5,(height+.25)/.5],'Copy covers the entire resting buffer');
@@ -111,16 +110,17 @@ for(const prefix of ["renderer.domElement.addEventListener('webglcontextlost'","
 lifecycleHandlers.webglcontextlost({preventDefault(){lifecycleOrder.push('prevent');}});assert.equal(lifecycle.renderLost,true);assert.equal(lifecycle.interactionPointer,null);assert.equal(lifecycle.interactionRenderer,null);assert.deepEqual(lifecycleOrder,['prevent','cancel','geometry-release','texture-release','dispose','glass-release']);
 lifecycleOrder.length=0;lifecycle.interactionRenderer={dispose(){lifecycleOrder.push('dispose');}};lifecycle.interactionPointer={moved:true};lifecycleHandlers.pagehide({persisted:true});assert.equal(lifecycle.renderSuspended,true);assert.equal(lifecycle.interactionPointer,null);assert(lifecycle.interactionRenderer,'BFCache retains bounded resources');assert.deepEqual(lifecycleOrder,['cancel']);
 lifecycleOrder.length=0;lifecycleHandlers.pagehide({persisted:false});assert.equal(lifecycle.interactionRenderer,null);assert.deepEqual(lifecycleOrder,['cancel','disconnect','dispose','glass-dispose','renderer-dispose','force-loss'],'Copy resources are released before native context retirement');
-// Re-enter the actual draw path after context restoration and page-cache resume.
+// Re-enter both software draw paths after context restoration and page-cache resume.
+for (const diffuse of [false,true]) {
 const hooks={}, history=[];
 let created=0;
-const c={editorFloorMaterials:null,homeView:null,environmentLayer:null,renderProfile:{diffuseLighting:true},renderSuspended:false,renderLost:false,renderCount:0,
+const c={editorFloorMaterials:null,homeView:null,environmentLayer:null,coalesceMotion:true,renderProfile:{diffuseLighting:diffuse},renderSuspended:false,renderLost:false,renderCount:0,
  interactionRenderer:null,interactionPointer:{moved:true},scene:{},THREE:{},document:{hidden:false},performance:{now:()=>0},
  wallSheenMotion:{beforeRender(){},afterRender(){}},cancelRender(){},invalidateShadows(){},
  requestRender(){history.push('request');},resize(){},observer:{disconnect(){}},releaseStaticGlassPasses(){},disposeStaticGlassPasses(){},releaseViewerGeometryGPU(){},releaseViewerTextureGPU(){},releaseWallOutlineMaterials(){},
  renderer:{domElement:{addEventListener:(key,fn)=>hooks[key]=fn},dispose(){},forceContextLoss(){}},
  window:{resizeModel(){},addEventListener:(key,fn)=>hooks[key]=fn},
- createInteractionRenderer(three,renderer,pixels){assert.equal(three,c.THREE);assert.equal(renderer,c.renderer);assert.equal(pixels,31250,'Diffuse viewer forwards its motion budget after creation and restoration');const id=++created;return {draw(scene,camera,moving){history.push({id,moving});},dispose(){history.push({disposed:id});}}},
+ createInteractionRenderer(three,renderer,pixels){assert.equal(three,c.THREE);assert.equal(renderer,c.renderer);assert.equal(pixels,diffuse?31250:62500,'Each software profile forwards its motion budget after creation and restoration');const id=++created;return {draw(scene,camera,moving){history.push({id,moving});},dispose(){history.push({disposed:id});}}},
 };
 vm.createContext(c);
 for(const prefix of ['function drawScene(',"renderer.domElement.addEventListener('webglcontextlost'", "renderer.domElement.addEventListener('webglcontextrestored'", "window.addEventListener('pagehide'", "window.addEventListener('pageshow'"])
@@ -131,5 +131,6 @@ hooks.webglcontextrestored();c.drawScene({});assert.equal(created,2);assert.deep
 c.interactionPointer={moved:true};hooks.pagehide({persisted:true});c.drawScene({});assert.equal(created,2);
 hooks.pageshow({persisted:true});c.drawScene({});assert.equal(created,2,'Page cache resumes its one bounded helper');assert.deepEqual(history.at(-1),{id:2,moving:false},'Page-cache resume cannot retain a low-resolution gesture');
 hooks.pagehide({persisted:false});assert.equal(history.filter(v=>v.disposed===2).length,1);assert.equal(c.interactionRenderer,null);
+}
 console.log('Interaction-copy: allocation, copy/color contract, frame counts, bounds, cleanup and release tests passed');
 })().catch(e=>{console.error(e);process.exitCode=1});

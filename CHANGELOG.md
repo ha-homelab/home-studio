@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Bound pointer-motion rendering on all detected software graphics paths while
+  retaining full resting resolution, lighting, and the final release frame.
 - Add 11 garden and animal designs, bringing the local Item library to 206
   designs. Create an editable outdoor area and lawn with **Add garden area**;
   saved plants, pets, and vehicles remain static catalog objects.

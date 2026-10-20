@@ -110,7 +110,7 @@ assert.equal((home.match(/drawScene\(camera\)/g) || []).length, 2);
 const calls = [];
 const context = vm.createContext({
   scene: {},
-  renderProfile: {diffuseLighting: false},
+  renderProfile: {diffuseLighting: false}, coalesceMotion: false,
   interactionRenderer: null, interactionPointer: {moved: true}, THREE: {}, performance: {now: () => 0},
   createInteractionRenderer: () => ({draw: () => {calls.push('copy draw'); throw Error('GPU copy unavailable');}}),
   renderSuspended: false, renderLost: false, document: {hidden: false},
@@ -122,6 +122,7 @@ assert.throws(() => context.drawScene({}), /GPU context unavailable/);
 assert.deepEqual(calls, ['before', 'draw', 'after'], 'Timing finishes even when drawing fails');
 calls.length = 0;
 context.renderProfile.diffuseLighting = true;
+context.coalesceMotion = true;
 assert.throws(() => context.drawScene({}), /GPU copy unavailable/);
 assert.deepEqual(calls, ['before', 'copy draw', 'after'], 'Timing also finishes when the bounded motion draw fails');
 console.log('PASS: Wall drift adds zero scheduled frames, bounds active time, and freezes for device, preference and slow-render fallbacks.');

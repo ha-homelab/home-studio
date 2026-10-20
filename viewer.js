@@ -181,11 +181,11 @@ let cancelEditorGesture=()=>{};
 let editorFloorMaterials=null;
 function cancelRender(){if(renderRequest)cancelAnimationFrame(renderRequest);if(renderDelay)clearTimeout(renderDelay);renderRequest=renderDelay=0}
 // Paint the first moved-pointer frame immediately. Subsequent software frames
-// share a fixed deadline; further input never postpones it. Apple diffuse
-// motion uses its last successful draw time, bounded to 64–250 ms, per gesture.
-// Other software keeps 64 ms. Non-motion updates
+// share a fixed deadline; further input never postpones it. Software motion
+// uses its last successful draw time, bounded to 64–250 ms, per gesture.
+// Non-motion updates
 // and pointer release bypass this delay and still use the ordinary next frame.
-function requestRender(motion=false){if(renderSuspended||renderLost||document.hidden)return;if(!motion&&renderDelay){clearTimeout(renderDelay);renderDelay=0}if(renderRequest||renderDelay)return;if(motion&&coalesceMotion&&interactionPointer?.moved&&interactionPointer.painted){renderDelay=setTimeout(()=>{renderDelay=0;requestRender()},renderProfile.diffuseLighting?interactionPointer.frameDelay??64:64);return}renderRequest=requestAnimationFrame(()=>{renderRequest=0;try{window.renderModel?.()}catch(error){report3DError(error)}})}
+function requestRender(motion=false){if(renderSuspended||renderLost||document.hidden)return;if(!motion&&renderDelay){clearTimeout(renderDelay);renderDelay=0}if(renderRequest||renderDelay)return;if(motion&&coalesceMotion&&interactionPointer?.moved&&interactionPointer.painted){renderDelay=setTimeout(()=>{renderDelay=0;requestRender()},interactionPointer.frameDelay??64);return}renderRequest=requestAnimationFrame(()=>{renderRequest=0;try{window.renderModel?.()}catch(error){report3DError(error)}})}
 function renderPixelRatio(width,height){return Math.min(Number.isFinite(devicePixelRatio)&&devicePixelRatio>0?devicePixelRatio:1,2,Math.sqrt(renderProfile.pixels/Math.max(1,width*height)))}
 function invalidateShadows(){scene?.traverse(o=>{if(o.shadow){o.shadow.autoUpdate=false;o.shadow.needsUpdate=true}})}
 // Accept only complete rectangular prisms, including the compiler's rotated walls.
@@ -385,7 +385,7 @@ function updateWallOutlines(){
   root.add(wallOutlines);
 }
 const wallSheenMotion=createWallSheenMotion();
-function drawScene(camera){if(renderSuspended||renderLost||document.hidden)return;wallSheenMotion.beforeRender();try{const pointer=interactionPointer,started=renderProfile.diffuseLighting&&pointer?.moved?performance.now():null;if(renderProfile.diffuseLighting){interactionRenderer??=createInteractionRenderer(THREE,renderer,31250);interactionRenderer.draw(scene,camera,pointer?.moved===true)}else renderer.render(scene,camera);if(pointer?.moved&&interactionPointer===pointer){pointer.painted=true;if(started!==null){const elapsed=performance.now()-started;pointer.frameDelay=Number.isFinite(elapsed)?Math.min(250,Math.max(64,elapsed)):64}}}finally{wallSheenMotion.afterRender()}}
+function drawScene(camera){if(renderSuspended||renderLost||document.hidden)return;wallSheenMotion.beforeRender();try{const pointer=interactionPointer,started=coalesceMotion&&pointer?.moved?performance.now():null;if(coalesceMotion){interactionRenderer??=createInteractionRenderer(THREE,renderer,renderProfile.diffuseLighting?31250:62500);interactionRenderer.draw(scene,camera,pointer?.moved===true)}else renderer.render(scene,camera);if(pointer?.moved&&interactionPointer===pointer){pointer.painted=true;if(started!==null){const elapsed=performance.now()-started;pointer.frameDelay=Number.isFinite(elapsed)?Math.min(250,Math.max(64,elapsed)):64}}}finally{wallSheenMotion.afterRender()}}
 // Keep the recovery controls outside both view modes. A failed renderer stays
 // paused until reload; editing or saving the 2D plan must not retry that draw.
 function report3DError(e){failed3D=true;initialViewReady=false;environmentLayer?.dispose();cancelRender();$('loadError').style.display='block';$('mode3d').disabled=true;$('openHome').disabled=true;console.error(e)}
@@ -395,7 +395,7 @@ scene=new THREE.Scene();scene.background=new THREE.Color('#e7e8df');camera=new T
 renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.localClippingEnabled=true;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.95;$('view3d').prepend(renderer.domElement);
 renderProfile=selectRenderProfile(renderer.getContext());if(renderProfile.diffuseLighting)renderer.shadowMap.type=THREE.BasicShadowMap;
 // Capacity is cached for this context. Motion scheduling is independent of
-// material quality: software PBR still draws directly at its full resolution.
+// material quality: software PBR keeps its materials and resting resolution.
 coalesceMotion=getRenderCapacity(renderer.getContext()).reduced;
 hemisphere=new THREE.HemisphereLight(0xffffff,0xa6aaa1,1.8);scene.add(hemisphere);sun=new THREE.DirectionalLight(0xfff9ee,2.3);sun.position.set(-7,22,12);sun.castShadow=true;sun.shadow.mapSize.set(renderProfile.sunShadowSize,renderProfile.sunShadowSize);Object.assign(sun.shadow.camera,{left:-16,right:16,top:22,bottom:-22,near:1,far:65});sun.shadow.normalBias=.035;sun.target.position.set(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]);scene.add(sun,sun.target);
 if(planBounds){const scale=Math.max(1,planRadius/32);sun.position.copy(sun.target.position).add(new THREE.Vector3(-7,22,12).multiplyScalar(scale));Object.assign(sun.shadow.camera,{left:-planRadius,right:planRadius,top:planRadius,bottom:-planRadius,far:Math.max(65,planRadius*4)});sun.shadow.camera.updateProjectionMatrix();}

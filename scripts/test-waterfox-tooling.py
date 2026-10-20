@@ -236,6 +236,8 @@ class ProgramIsolationTests(unittest.TestCase):
         before, after = program_stats(), program_stats(7, True)
         acceptance.assert_first_motion_programs(before, after)
         acceptance.assert_state_programs(after, copy.deepcopy(after))
+        before['gpu']['renderer'] = after['gpu']['renderer'] = 'SwiftShader'
+        acceptance.assert_first_motion_programs(before, after)
         self.assertEqual(before['linkedPrograms'], 6)
         self.assertEqual(after['linkedPrograms'], 7)
 
@@ -719,7 +721,7 @@ captured.then(srcdoc=>{
         before = {'scene': {'renderPasses': {'copy': 0}}}
         after = {'gpu': {'unmaskedRenderer': 'Apple Software Renderer'}, 'scene': {
             'drawingBuffer': [632, 394], 'renderPasses': {'copy': 1, 'motionDrawCalls': 91, 'motionSceneDrawCalls': 90, 'last': 'scene',
-            'sceneViewport': [0, 0, 632, 394], 'motionSceneViewport': [0, 0, 316, 197],
+            'sceneViewport': [0, 0, 632, 394], 'motionSceneViewport': [0, 0, 223, 139],
             'copyViewport': [0, 0, 632, 394], 'motionBuffer': [632, 394]}}}
         acceptance.assert_viewer_interaction(before, after)
         for patch_value in ({'copy': 0}, {'motionDrawCalls': 90}, {'motionSceneViewport': [0, 0, 632, 394]},
@@ -728,6 +730,14 @@ captured.then(srcdoc=>{
             changed['scene']['renderPasses'].update(patch_value)
             with self.assertRaises(AssertionError):
                 acceptance.assert_viewer_interaction(before, changed)
+        for renderer in ['SwiftShader', 'llvmpipe', 'Microsoft Basic Render Driver']:
+            software = copy.deepcopy(after)
+            software['gpu']['unmaskedRenderer'] = renderer
+            software['scene']['renderPasses']['motionSceneViewport'] = [0, 0, 316, 197]
+            acceptance.assert_viewer_interaction(before, software)
+            software['scene']['renderPasses']['motionSceneViewport'] = [0, 0, 317, 198]
+            with self.assertRaisesRegex(AssertionError, 'bounded copy budget'):
+                acceptance.assert_viewer_interaction(before, software)
         after['gpu']['unmaskedRenderer'] = 'Apple M5 Pro'
         with self.assertRaisesRegex(AssertionError, 'direct rendering'):
             acceptance.assert_viewer_interaction(before, after)

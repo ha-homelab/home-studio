@@ -13,7 +13,7 @@ function exercise(embedded, {hidden = false, initialRoom = null, failRender = fa
     embedded, window: {}, homeView: null, environmentLayer: null, renderCount: 0, scene: {},
     viewerI18n: {locale: 'en'}, items: [], root: null, objectGroup: null,
     document: {hidden: false}, renderSuspended: false, renderLost: false, devicePixelRatio: 1, renderProfile: {pixels: 2000000},
-    requestRender() {}, renderRequest: 0, renderDelay: 0, interactionPointer: null, cancelAnimationFrame() {}, clearTimeout() {},
+    requestRender() {}, renderRequest: 0, renderDelay: 0, interactionPointer: null, coalesceMotion: false, cancelAnimationFrame() {}, clearTimeout() {},
     model: {initial_room: initialRoom}, camera: {updateProjectionMatrix() {}},
     console: {error(error) { errors.push(error.message); }},
     requestAnimationFrame(callback) { frames.push(callback); },

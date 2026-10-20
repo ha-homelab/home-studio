@@ -238,27 +238,27 @@ for lit surfaces is enabled only within a conservative uniform budget; otherwise
 the original geometry shader is used. Other identified software renderers retain
 physically based materials.
 
-While dragging this diffuse viewer, the scene uses at most 31,250 pixels inside
-its unchanged drawing buffer. A cached texture copies those pixels to the full
+While dragging a viewer on detected software graphics, the scene uses at most
+31,250 pixels for the diffuse profile or 62,500 pixels for other software
+profiles, inside its unchanged drawing buffer. A cached texture copies those pixels to the full
 canvas; releasing or cancelling the pointer draws the original full-resolution
 scene. Lights, shadows, geometry and camera calculations are retained. This
 motion-only reduction does not affect HTML controls, resting frames, the planner,
-or other graphics profiles. The copy pass adds one real draw, included in the
+or hardware graphics. Physically based materials remain physically based during
+motion. The copy pass adds one real draw, included in the
 acceptance counters and interaction time. Its resources are disposed on context
 loss and final page teardown; page-cache suspension retains the bounded texture.
 
 On identified software paths, the first moved-pointer frame is scheduled normally.
-Later camera-motion events share one deadline: 64 ms on other software paths,
-and the last successful motion draw duration clamped to 64–250 ms on Apple
-diffuse rendering. Each event updates the camera without restarting the timer.
+Later camera-motion events share one deadline: the last successful motion draw
+duration clamped to 64–250 ms. Each event updates the camera without restarting the timer.
 The duration is local to the gesture and requires no GL query or synchronization.
 It measures synchronous submission and driver blocking, not asynchronous GPU
 completion. This coalesces intermediate positions and can add up to 250 ms
 between motion frames; it does not promise a particular frame rate.
 Pointer release, cancellation, resize and live-state updates bypass the delay. Hidden pages and
-lost contexts cancel it. Software paths using physically based materials still
-draw directly at their full resolution, with the same antialiasing, materials
-and shadows; only the diffuse path uses the motion copy described above.
+lost contexts cancel it. Software paths keep the same antialiasing, materials
+and shadows; motion changes only the scene raster size before the copy.
 Hardware graphics retain their original frame scheduling.
 
 Gecko can report both hardware and software as `Apple M1, or similar`. For that

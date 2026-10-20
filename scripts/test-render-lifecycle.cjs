@@ -230,7 +230,7 @@ function motionScheduler(diffuse = true, reduced = diffuse) {
     updateWallOutlines(){},updateEditorCamera(){},invalidateShadows(){},
     report3DError(error){errors.push(error.message);},
     getRenderCapacity(){return {reduced,diffuseLighting:diffuse};},
-    createInteractionRenderer(){assert(diffuse,'PBR must never allocate the reduced-resolution copy renderer');return {draw(scene,camera,moving){
+    createInteractionRenderer(three,renderer,pixels){assert(reduced,'Hardware must never allocate the motion copy renderer');assert.equal(pixels,diffuse?31250:62500);return {draw(scene,camera,moving){
       if(rejectDraw){rejectDraw=false;throw Error('injected draw failure');}
       paths.push('copy');
       painted.push({time,position:camera.position,moving});
@@ -262,15 +262,15 @@ function motionScheduler(diffuse = true, reduced = diffuse) {
     duration(ms){drawDuration=ms;},clockReads:()=>clockReads,now:()=>time,afterNextDraw(callback){afterDraw=callback;},
   };
 }
-// Both software profiles share scheduling. Only the existing diffuse profile
-// may use the copy renderer; reduced=true/diffuse=false keeps direct PBR draws.
+// Both software profiles share scheduling and bounded motion rendering.
+// Their resting resolution and material choice remain independent.
 for(const diffuse of [true,false]) {
 const scheduled=motionScheduler(diffuse,true);
 scheduled.start();scheduled.move(20);
 assert.equal(scheduled.raf.size,1,'The first moved-pointer frame retains ordinary RAF latency');
 assert.equal(scheduled.timers.size,0);
 scheduled.flush();assert.equal(scheduled.read('interactionPointer.painted'),true);
-assert.deepEqual(scheduled.painted,[{time:0,position:20,moving:diffuse}]);
+assert.deepEqual(scheduled.painted,[{time:0,position:20,moving:true}]);
 scheduled.advance(10);scheduled.move(30);
 const [timer]=scheduled.timers.values();assert.equal(timer.due,74);
 scheduled.advance(20);scheduled.move(40);scheduled.move(50);
@@ -278,7 +278,7 @@ assert.equal(scheduled.timers.size,1);assert.equal([...scheduled.timers.values()
   'Later input shares the original deadline rather than debouncing it');
 scheduled.advance(43);assert.equal(scheduled.raf.size,0);
 scheduled.advance(1);assert.equal(scheduled.raf.size,1);scheduled.flush();
-assert.deepEqual(scheduled.painted.at(-1),{time:74,position:50,moving:diffuse},
+assert.deepEqual(scheduled.painted.at(-1),{time:74,position:50,moving:true},
   'A held drag paints the latest camera before pointerup');
 assert(scheduled.read('interactionPointer'),'The held-pointer frame does not end the gesture');
 assert.equal(scheduled.timers.size,0);assert.equal(scheduled.raf.size,0,'No self-sustaining motion loop');
@@ -288,9 +288,9 @@ assert.equal(scheduled.timers.size,0);assert.equal(scheduled.raf.size,1);
 scheduled.flush();assert.deepEqual(scheduled.painted.at(-1),{time:74,position:60,moving:false},
   'Release cancels the deadline and paints the latest camera at full quality');
 scheduled.advance(1000);assert.equal(scheduled.raf.size,0);assert.equal(scheduled.timers.size,0);
-assert(scheduled.paths.every(path=>path===(diffuse?'copy':'direct')));
+assert(scheduled.paths.every(path=>path==='copy'));
 assert.equal(scheduled.c.renderProfile.pixels,diffuse?62500:250000,'Motion preserves the selected resting pixel budget');
-if(!diffuse)assert.equal(scheduled.read('interactionRenderer'),null,'Software PBR never creates a copy target');
+assert(scheduled.read('interactionRenderer'),'Both software profiles reuse the motion helper');
 
 for(const release of ['pointerup','pointercancel','lostpointercapture']) {
   const q=motionScheduler(diffuse,true);q.start();q.move(20);q.flush();q.move(30);
@@ -356,10 +356,10 @@ assert(homeSource.includes('navigateHome(e.clientX-start.lastX,e.clientY-start.l
   'Home pointer movement uses the shared navigation scheduler');
 console.log('PASS: first motion RAF, fixed held-drag deadlines, latest camera, full-quality release and lifecycle cancellation');
 
-// Time only successful Apple diffuse motion draws. The clock advances inside
+// Time only successful motion draws in both software profiles. The clock advances inside
 // the real draw helper, while timers and RAF remain independently controlled.
-for(const [duration,expected] of [[0,64],[1,64],[63,64],[64,64],[125.5,125.5],[250,250],[1600,250]]) {
-  const q=motionScheduler();q.duration(duration);q.start();q.move(20);
+for(const diffuse of [false,true]) for(const [duration,expected] of [[0,64],[1,64],[63,64],[64,64],[125.5,125.5],[250,250],[1600,250]]) {
+  const q=motionScheduler(diffuse,true);q.duration(duration);q.start();q.move(20);
   assert.equal(q.timers.size,0,'First motion remains immediate even on a slow renderer');q.flush();
   assert.equal(q.read('interactionPointer.frameDelay'),expected);
   assert.equal(q.clockReads(),2,'Motion timing reads only the monotonic clock');
@@ -428,17 +428,16 @@ const stale=motionScheduler();stale.duration(1600);stale.start();stale.move(20);
 stale.afterNextDraw(()=>{stale.handlers.pointerup({pointerId:1});stale.start();});stale.flush();
 assert.equal(stale.read('interactionPointer.frameDelay'),undefined,'A replaced pointer cannot receive the old draw duration');
 assert.notEqual(stale.read('interactionPointer.painted'),true);
-for(const [diffuse,reduced] of [[false,true],[false,false]]) {
-  const q=motionScheduler(diffuse,reduced);q.duration(1600);q.start();q.move(20);q.flush();q.move(30);
-  assert.equal(q.clockReads(),0,'Other renderer profiles do not sample motion duration');
-  if(reduced)assert.equal([...q.timers.values()][0].due,q.now()+64,'Other software keeps its fixed64ms behavior');
-  else {assert.equal(q.timers.size,0);assert.equal(q.raf.size,1);}
+{
+  const q=motionScheduler(false,false);q.duration(1600);q.start();q.move(20);q.flush();q.move(30);
+  assert.equal(q.clockReads(),0,'Hardware does not sample motion duration');
+  assert.equal(q.timers.size,0);assert.equal(q.raf.size,1);
 }
 for(const elapsed of [NaN,Infinity,-10]) {
   const q=motionScheduler();let calls=0;q.c.performance.now=()=>calls++?elapsed:0;
   q.start();q.move(20);q.flush();assert.equal(q.read('interactionPointer.frameDelay'),64,'Invalid/backward clocks cannot create unbounded delays');
 }
-console.log('PASS: per-gesture Apple diffuse adaptive64–250ms pacing, successful-draw timing, fixed deadlines and unchanged bypasses');
+console.log('PASS: per-gesture software adaptive64–250ms pacing, successful-draw timing, fixed deadlines and unchanged bypasses');
 
 
 // Execute the actual mode switch, resize cache, cutaway handler and scheduler.

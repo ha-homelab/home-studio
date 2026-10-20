@@ -471,11 +471,12 @@ def assert_viewer_interaction(before, after):
     renderer = after['gpu'].get('unmaskedRenderer') or after['gpu']['renderer']
     probe = scene.get('rasterProbe') or {}
     diffuse = bool(re.fullmatch('Apple Software Renderer', renderer, re.I)) or (renderer == 'Apple M1, or similar' and probe.get('status') == 'measured' and probe.get('bestMs', 0) >= 15)
-    if diffuse:
-        require(passes['copy'] > before['scene']['renderPasses']['copy'], 'The real diffuse-viewer gesture must execute a copy pass')
+    reduced = diffuse or bool(re.search(r'swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe', renderer, re.I))
+    if reduced:
+        require(passes['copy'] > before['scene']['renderPasses']['copy'], 'The real software-viewer gesture must execute a copy pass')
         require(passes['motionDrawCalls'] == passes['motionSceneDrawCalls'] + 1, 'The copy draw must remain in actual renderer draw-call counts')
         motion = passes.get('motionSceneViewport')
-        require(isinstance(motion, list) and len(motion) == 4 and motion[:2] == [0, 0] and motion[2] > 0 and motion[3] > 0 and motion[2] * motion[3] <= 62500, 'Motion scene pixels must respect the bounded copy budget')
+        require(isinstance(motion, list) and len(motion) == 4 and motion[:2] == [0, 0] and motion[2] > 0 and motion[3] > 0 and motion[2] * motion[3] <= (31250 if diffuse else 62500), 'Motion scene pixels must respect the bounded copy budget')
         require(passes.get('copyViewport') == [0, 0, *passes['motionBuffer']], 'The copy pass must cover its unchanged full drawing buffer')
         require(motion[2] <= passes['motionBuffer'][0] and motion[3] <= passes['motionBuffer'][1], 'The scene copy cannot read outside its framebuffer')
     else:
@@ -512,7 +513,8 @@ def assert_first_motion_programs(before, after):
     renderer = after['gpu'].get('unmaskedRenderer') or after['gpu']['renderer']
     probe = after['scene'].get('rasterProbe') or {}
     diffuse = bool(re.fullmatch('Apple Software Renderer', renderer, re.I)) or (renderer == 'Apple M1, or similar' and probe.get('status') == 'measured' and probe.get('bestMs', 0) >= 15)
-    require(diffuse and passes_after['copy'] > passes_before['copy'] and not any(link.get('copyDraws', 0) > 0 for link in old if link.get('epoch') == new_context['epoch']), 'Only the first real diffuse copy gesture may initialize its program')
+    reduced = diffuse or bool(re.search(r'swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render|lavapipe', renderer, re.I))
+    require(reduced and passes_after['copy'] > passes_before['copy'] and not any(link.get('copyDraws', 0) > 0 for link in old if link.get('epoch') == new_context['epoch']), 'Only the first real software copy gesture may initialize its program')
     require(copy.get('epoch') == new_context['epoch'] and copy.get('program') not in {link['program'] for link in old}, 'Deferred copy must be one new current-context program, not a relink')
     require(copy.get('exactCopy') is True and copy.get('sources') == COPY_SOURCES, 'Only the exact pinned copy shader pair may initialize during first motion')
     require(copy.get('copyDraws', 0) > 0 and copy.get('outsideCopyDraw') is False, 'Deferred copy program must actually draw only in the copy pass')
