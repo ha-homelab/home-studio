@@ -10,7 +10,7 @@ function exercise(embedded, {hidden = false, initialRoom = null, failRender = fa
   const loadError = {style: {}};
   const box = {width: hidden ? 0 : 800, height: hidden ? 0 : 600};
   const c = vm.createContext({
-    embedded, window: {}, homeView: null, renderCount: 0, scene: {},
+    embedded, window: {}, homeView: null, environmentLayer: null, renderCount: 0, scene: {},
     viewerI18n: {locale: 'en'}, items: [], root: null, objectGroup: null,
     document: {hidden: false}, renderSuspended: false, renderLost: false, devicePixelRatio: 1, renderProfile: {pixels: 2000000},
     requestRender() {}, renderRequest: 0, renderDelay: 0, interactionPointer: null, cancelAnimationFrame() {}, clearTimeout() {},

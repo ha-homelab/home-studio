@@ -99,6 +99,7 @@ assert.deepEqual(Object.keys(input(false).handlers),[],'Normal GPUs have no inte
 const lifecycleHandlers={}, lifecycleOrder=[];
 const lifecycle={renderLost:false,renderSuspended:false,interactionPointer:{moved:true},interactionRenderer:{dispose(){lifecycleOrder.push('dispose');}},cancelRender(){lifecycleOrder.push('cancel');},observer:{disconnect(){lifecycleOrder.push('disconnect');}},renderer:{domElement:{addEventListener:(name,fn)=>lifecycleHandlers[name]=fn},dispose(){lifecycleOrder.push('renderer-dispose');},forceContextLoss(){lifecycleOrder.push('force-loss');}},window:{addEventListener:(name,fn)=>lifecycleHandlers[name]=fn}};
 lifecycle.homeView=null;
+lifecycle.environmentLayer=null;
 lifecycle.releaseViewerGeometryGPU=()=>lifecycleOrder.push('geometry-release');
 lifecycle.editorFloorMaterials=null;
 lifecycle.releaseViewerTextureGPU=()=>lifecycleOrder.push('texture-release');
@@ -113,7 +114,7 @@ lifecycleOrder.length=0;lifecycleHandlers.pagehide({persisted:false});assert.equ
 // Re-enter the actual draw path after context restoration and page-cache resume.
 const hooks={}, history=[];
 let created=0;
-const c={editorFloorMaterials:null,homeView:null,renderProfile:{diffuseLighting:true},renderSuspended:false,renderLost:false,renderCount:0,
+const c={editorFloorMaterials:null,homeView:null,environmentLayer:null,renderProfile:{diffuseLighting:true},renderSuspended:false,renderLost:false,renderCount:0,
  interactionRenderer:null,interactionPointer:{moved:true},scene:{},THREE:{},document:{hidden:false},performance:{now:()=>0},
  wallSheenMotion:{beforeRender(){},afterRender(){}},cancelRender(){},invalidateShadows(){},
  requestRender(){history.push('request');},resize(){},observer:{disconnect(){}},releaseStaticGlassPasses(){},disposeStaticGlassPasses(){},releaseViewerGeometryGPU(){},releaseViewerTextureGPU(){},releaseWallOutlineMaterials(){},
