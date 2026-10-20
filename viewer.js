@@ -21,7 +21,7 @@ if(model.site_features===false){
   document.querySelector('aside .note').textContent='Geometry follows your project. Verify measurements, openings and device bindings on site.';
   $('heightCaption').textContent=vt('Full-height walls and windows · ceiling {height} m.',{height:model.ceiling_height_m.toFixed(2)});
   for(const link of document.querySelectorAll('a.download'))if(link.getAttribute('href')?.endsWith('.usdz'))link.hidden=true;
-    if(!Object.keys(model.room_activity||{}).length)$('homeToggleActivity').hidden=true;
+    if(!Object.keys(model.room_activity||{}).length&&!Object.keys(model.presence_sources||{}).length)$('homeToggleActivity').hidden=true;
 }
 
 if(!model.next_floor){$('otherFloor').hidden=true;$('homeOtherFloor').hidden=true;}

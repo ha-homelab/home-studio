@@ -81,7 +81,7 @@ homeView = (() => {
     const id=model.room_activity?.[selected],entity=haConnected?haStates[id]:null;
     const configured=id||Object.keys(presenceForRoom(selected)).length;
     let sources=0;
-    const evidence={...(entity&&!entity.restored&&['motion','presence','quiet','experimental','unknown'].includes(entity.state)?entity.activity?.evidence:{}),...presenceForRoom(selected)};
+    const evidence={...(entity&&!entity.restored&&['motion','presence','quiet','experimental','unknown'].includes(entity.state)?entity.activity?.evidence:{}),...(haConnected?presenceForRoom(selected):{})};
     for(const [itemId,value] of Object.entries(evidence)){
       const item=items.find(i=>i.id===itemId);
       if(!item||!Object.hasOwn(activityText,value))continue;

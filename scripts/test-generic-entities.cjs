@@ -131,11 +131,17 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   await page.evaluate(()=>{states['climate.zone'].climate={current_temperature:'20',temperature:100000,temperature_unit:'<img>',hvac_action:'<svg>'};publish();});
   await card('thermostat').filter({hasText:/Heat mode$/}).waitFor();
   assert.doesNotMatch(await card('thermostat').textContent(),/Current:|Target:|<svg>|<img>/);
+  await frame.locator('#homeToggleActivity').click();
+  await frame.locator('#homeRoom').selectOption(template.room);
+  assert.deepEqual(await frame.locator('#homeActivitySources [data-activity-source]:visible').evaluateAll(nodes=>nodes.map(node=>node.dataset.activitySource)),['presence'],'only the configured direct source is shown');
   await page.evaluate(()=>publish(false));await card('cold').filter({hasText:'Disconnected'}).waitFor();
+  assert.equal(await frame.locator('#homeActivitySources button:visible').count(),0,'disconnection withholds all source rows');
   assert.equal(await card('cold').isDisabled(),true);assert.equal(await frame.locator('[data-home-details="light"]').isDisabled(),true);
   assert.equal(await frame.locator('.oven-glow').isVisible(),false);assert.equal(await frame.locator('.cooktop-flames').isVisible(),false);
   assert.equal(await frame.locator('.home-presence-indicator').getAttribute('data-state'),'unknown');
   await page.evaluate(()=>publish());await card('cold').filter({hasText:'Restored state'}).waitFor();
+  await frame.locator('#homeToggleActivity').click();
+  await frame.locator('#homeRoom').selectOption('');
   await frame.locator('#editLayout').click();
   assert.equal(await frame.locator('[data-details-for]').count(),Object.keys(bindings).length,'inventory also exposes Details for every binding');
   await frame.locator('[data-details-for="vacuum"]').click();
