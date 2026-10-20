@@ -179,6 +179,28 @@ def download_artifact(gh, name, destination, *, producer):
     extract_zip(archive, destination)
 
 
+def complete_staged_inventory(gh, assets, temporary, plan, source_policy):
+    """Match the publisher's complete release-assets* inventory, fail on additions."""
+    import release_fuzz
+    required = {"release-assets-public-source"}
+    if plan["channel"] == "rc" and release_fuzz.configuration(source_policy):
+        required.add("release-assets-fuzz")
+    artifacts = gh.pages(f"actions/runs/{os.environ['GITHUB_RUN_ID']}/artifacts", "artifacts")
+    staged = [item["name"] for item in artifacts
+              if item["name"].startswith("release-assets") and not item["expired"]]
+    require(len(staged) == len(required) and set(staged) == required)
+    require(source_policy.get("artifact_pattern", "release-assets*") == "release-assets*")
+    if "release-assets-fuzz" in required:
+        fuzz = temporary / "fuzz"
+        download_artifact(gh, "release-assets-fuzz", fuzz,
+                          producer=lambda name: name == release_fuzz.JOB)
+        require({path.name for path in fuzz.iterdir()} == {"fuzz-report.json", "release-inputs-fuzz.json"})
+        for path in fuzz.iterdir():
+            regular(path)
+            require(not (assets / path.name).exists())
+            path.rename(assets / path.name)
+
+
 def public_inputs(args, temporary):
     import release_control
     import version_plan
@@ -212,6 +234,8 @@ def public_inputs(args, temporary):
             and context["source_sha"] == plan["source_sha"])
     source_policy = release_control.source_policy_snapshot(gh, plan["source_sha"])["data"]
     version_plan.validate_plan(plan, policy=source_policy, source_sha=context["source_sha"])
+    if context["mode"] == "prospective":
+        complete_staged_inventory(gh, assets, temporary, plan, source_policy)
     payloads = [{"name": path.name, "size": len(regular(path)), "sha256": digest(regular(path))}
                 for path in sorted(assets.iterdir())]
     # Receipts are unsigned: the exact producer checks above establish origin.
@@ -573,8 +597,9 @@ def main(argv=None):
         try:
             status = prepare(args, temporary) if args.action == "prepare" else execute(args, temporary)
             code = 0
-        except BaseException:
-            # Deliberately never stringify exceptions, even network/Docker failures.
+        except (Exception, KeyboardInterrupt, SystemExit):
+            # Interrupts and explicit exits also stay behind the fixed public status boundary.
+            # Exception details, including network/Docker failures, stay in the closed log.
             try:
                 with (temporary / "private.log").open("ab") as log:
                     remaining = max(0, MAX_LOG - log.tell())
@@ -591,7 +616,8 @@ def main(argv=None):
                                      os.environ["CLOSED_OUTPUT_SIGN_KEY"], purpose="diagnostic")
                     name = args.closed_request + "/" + os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"] + ".diagnostic.json"
                     transport(os.environ["CLOSED_OUTPUT_WRITE_URL"], data=encrypted, suffix=name)
-            except BaseException:
+            except (Exception, KeyboardInterrupt, SystemExit):
+                # An interrupted diagnostic upload must not emit a private traceback.
                 status, code = "CLOSED_DIAGNOSTIC_UPLOAD_FAILED", 1
     print(status)
     return code

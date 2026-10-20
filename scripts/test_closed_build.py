@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 import tarfile
 import tempfile
@@ -93,6 +94,88 @@ class EnvelopeTests(unittest.TestCase):
 
 
 class BoundaryTests(unittest.TestCase):
+    def test_prospective_rc_matches_published_complete_inventory(self):
+        import release_control
+        import version_plan
+        import version_receipt
+        policy = json.loads((build.ROOT / ".release-policy.json").read_text())
+        source_sha = "a" * 40
+        plan = version_plan.create_plan("1.2.3", "rc", 1, source_sha, policy)
+        environment = {"GITHUB_RUN_ID": "10", "GITHUB_RUN_ATTEMPT": "1", "GITHUB_SHA": source_sha,
+                       "GITHUB_REPOSITORY_ID": build.REPOSITORY_ID, "GITHUB_REPOSITORY_OWNER_ID": build.OWNER_ID}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "custom_components/home_floorplan").mkdir(parents=True)
+            metadata = root / "custom_components/home_floorplan/manifest.json"
+            metadata.write_text('{"version":"1.2.3"}')
+            evidence = version_plan.sync_versions(root, policy, plan)
+            (root / "version-plan.json").write_bytes(envelope.canonical(plan))
+            (root / "inputs.json").write_bytes(envelope.canonical({
+                "plan_sha256": version_plan.plan_digest(plan), "source_sha": source_sha,
+                "files": evidence, "effective_inputs_sha256": version_plan.effective_inputs_digest(evidence)}))
+            source, fuzz, published = [root / name for name in ("source", "fuzz", "published")]
+            for folder in (source, fuzz, published / "payloads", root / "prepared/dependencies",
+                           root / "prospective", root / "resolved", root / "invalid-0", root / "invalid-1",
+                           root / "collision"):
+                folder.mkdir(parents=True)
+            for name, member in (("home_floorplan.zip", "manifest.json"),
+                                 ("home-studio-1.2.3-rc.1.zip", "home-studio/custom_components/home_floorplan/manifest.json")):
+                with zipfile.ZipFile(source / name, "w") as zipped:
+                    zipped.writestr(member, metadata.read_bytes())
+            (source / "home-studio.version.json").write_bytes(metadata.read_bytes())
+            (fuzz / "fuzz-report.json").write_text('{"synthetic":true}')
+            for folder, target in ((source, "public-source"), (fuzz, "fuzz")):
+                version_receipt.create_receipt(root / "version-plan.json", root / "inputs.json", folder,
+                                               folder / f"release-inputs-{target}.json")
+                for path in folder.iterdir():
+                    shutil.copyfile(path, published / "payloads" / path.name)
+            expected = {path.name: {"sha256": envelope.digest(path.read_bytes()), "size": path.stat().st_size}
+                        for path in (published / "payloads").iterdir()}
+            context = {"schema": 1, "repository": build.REPOSITORY, "workflow": build.WORKFLOW,
+                       "run_id": "10", "run_attempt": "1", "source_sha": source_sha,
+                       "mode": "published", "release_tag": plan["tag"], "payloads": expected,
+                       "plan_sha256": version_plan.plan_digest(plan)}
+            (published / "context.json").write_bytes(envelope.canonical(context))
+            shutil.copyfile(root / "version-plan.json", published / "version-plan.json")
+            class GitHub:
+                artifact_names = ["release-assets-public-source", "release-assets-fuzz"]
+                def pages(self, path, field):
+                    if field == "jobs":
+                        return [{"name": "Release gate", "conclusion": "success"}]
+                    return [{"name": name, "expired": False} for name in self.artifact_names]
+            gh = GitHub()
+            def download(unused, name, destination, *, producer):
+                folders = {"plan": root, "release-assets-public-source": source,
+                           "release-assets-fuzz": fuzz, "resolved": published}
+                producers = {"plan": "prepare", "release-assets-public-source": "build / package",
+                             "release-assets-fuzz": "fuzz / RC fuzzing", "resolved": "closed_existing_resolve"}
+                self.assertTrue(producer(producers[name]))
+                self.assertFalse(producer("untrusted producer"))
+                if name == "plan":
+                    destination.mkdir(parents=True)
+                    shutil.copyfile(root / "version-plan.json", destination / "version-plan.json")
+                else:
+                    shutil.copytree(folders[name], destination, dirs_exist_ok=True)
+            args = SimpleNamespace(action="build", public_context_artifact="", release_plan_artifact="plan",
+                                   release_tag=plan["tag"], prepared_root=root / "prepared")
+            with patch.dict(os.environ, environment), patch.object(release_control, "GitHub", return_value=gh), \
+                    patch.object(release_control, "source_policy_snapshot", return_value={"data": policy}), \
+                    patch.object(build, "download_artifact", side_effect=download):
+                prospective, _ = build.public_inputs(args, root / "prospective")
+                args.public_context_artifact = "resolved"
+                resolved, _ = build.public_inputs(args, root / "resolved")
+                self.assertEqual(prospective["payloads"], expected)
+                self.assertEqual(prospective["payloads"], resolved["payloads"])
+                args.public_context_artifact = ""
+                (source / "fuzz-report.json").write_text("collision")
+                with self.assertRaises(build.Rejected):
+                    build.public_inputs(args, root / "collision")
+                (source / "fuzz-report.json").unlink()
+                for number, names in enumerate((["release-assets-public-source"], gh.artifact_names + ["release-assets-other"])):
+                    gh.artifact_names = names
+                    with self.assertRaises(build.Rejected):
+                        build.public_inputs(args, root / f"invalid-{number}")
+
     def test_published_stable_preserves_selected_tag_and_promotion_context(self):
         def zipped(files):
             stream = io.BytesIO()
@@ -400,11 +483,12 @@ class BoundaryTests(unittest.TestCase):
         self.assertIn("persist-credentials: false", workflow)
 
     def test_cli_error_canary_is_never_printed(self):
-        with patch.object(build, "execute", side_effect=RuntimeError(MARKER)), contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
-            result = build.main(["--action", "build", "--prepared-root", "/unused"])
-        self.assertEqual(result, 1)
-        self.assertEqual(out.getvalue(), "CLOSED_BUILD_REJECTED\n")
-        self.assertEqual(err.getvalue(), "")
+        for exception in (RuntimeError, KeyboardInterrupt, SystemExit):
+            with self.subTest(exception=exception), patch.object(build, "execute", side_effect=exception(MARKER)), contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                result = build.main(["--action", "build", "--prepared-root", "/unused"])
+            self.assertEqual(result, 1)
+            self.assertEqual(out.getvalue(), "CLOSED_BUILD_REJECTED\n")
+            self.assertEqual(err.getvalue(), "")
         with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
             result = build.main(["--action", MARKER, "--prepared-root", "/unused"])
         self.assertEqual(result, 1)
