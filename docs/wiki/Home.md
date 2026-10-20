@@ -4,8 +4,9 @@ This is the maintained, repository-local wiki. The pages below travel with the
 source download and can be reviewed together with code changes. They are not a
 claim that a separate GitHub Wiki has been published.
 
-- [Start drawing and install](Getting-started.md): choose the editor, local
-  preview, or Home Assistant route.
+- [Install and draw in Home Assistant](Getting-started.md): the recommended
+  path from installation to a saved draft and published family view, plus the
+  optional separate editor and portable tools.
 - [Use Dry run](Dry-run.md): try device buttons while showing real readings.
 - [Troubleshoot a display](Troubleshooting.md): connection, storage, language,
   controls, and safe evidence collection.

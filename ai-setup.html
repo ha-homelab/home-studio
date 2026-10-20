@@ -10,12 +10,12 @@
 </head>
 <body>
   <a class="skip-link" href="#setup">Skip to setup</a>
-  <header class="site-header"><a class="wordmark" href="./">Home<span>studio</span><small>ROOM TO IMAGINE</small></a><a class="button button-small" href="./planner/">Draw by hand →</a></header>
+  <header class="site-header"><a class="wordmark" href="./">Home<span>studio</span><small>ROOM TO IMAGINE</small></a><a class="button button-small" href="./install.html#native-studio">Get started in HA →</a></header>
   <main class="prose" id="setup">
     <p class="eyebrow">YOUR PHOTOS · YOUR MODEL · YOUR EDITABLE PLAN</p>
     <h1>Start with a room.<br>Let AI sketch.</h1>
     <p class="lead">Give Home studio room photos, a few instructions and measurements. Your chosen AI model suggests furniture and openings. You review the draft in the editor before applying it.</p>
-    <p>This optional feature runs through a small companion on your computer. It needs Python 3.10 or newer and either your own provider API key or a running local vision model. The ordinary online drawing editor still works without either.</p>
+    <p>This optional feature runs through a small companion on your computer. It needs Python 3.10 or newer and either your own provider API key or a running local vision model. Install and draw directly in Home Assistant without either; the companion is an optional way to prepare a draft for import.</p>
     <figure class="ai-guide-preview"><img src="./planner/guide-assets/12-ai-review.jpg" width="1500" height="1000" alt="Local Home Studio editor showing a detached room draft in 3D and the candidate review panel before Apply."><figcaption>A synthetic test example: the draft is visible in 3D while the saved plan stays unchanged. This verifies the editor workflow; it is not a demonstration of a live model's accuracy.</figcaption></figure>
     <h2>1. Open your local studio</h2>
     <p>Open the <a href="https://github.com/ha-homelab/home-studio/releases/latest">latest stable release</a>, download <code>home-studio-VERSION.zip</code> under <strong>Assets</strong>, and extract it. Open a terminal in the extracted <code>home-studio</code> folder. On macOS or Linux, run:</p>
@@ -32,7 +32,7 @@
     <p>For example: “The room is 4 m wide and 3 m deep. Keep the desk near the window. Put a two-seat sofa against the opposite wall. Leave the door clear.” Photos help identify objects; they do not establish accurate scale. Convert HEIC photos to JPEG first.</p>
     <h2>4. Review, apply, adjust</h2>
     <p>Generate a draft, check its assumptions and select the proposed items you want to keep. Preview it in 2D or 3D. Your saved project changes only when you choose <strong>Apply</strong>; the change can be undone. Unsupported objects, invalid dimensions and placements outside the room are rejected instead of silently imported.</p>
-    <p>Furnishing mode adds objects; it preserves existing furniture and walls. Move, resize or remove existing objects with the usual drawing tools. Repeat room by room. AI does not connect devices or run Home Assistant actions. When ready, <a href="./install.html">build and install your plan in Home Assistant</a> using the same project export as a hand-drawn plan.</p>
+    <p>Furnishing mode adds objects; it preserves existing furniture and walls. Move, resize or remove existing objects with the usual drawing tools. Repeat room by room. AI does not connect devices or run Home Assistant actions. When ready, choose <strong>Export JSON</strong>, then <strong>Open JSON</strong> in <a href="./install.html#native-studio">Home Studio inside Home Assistant</a>. Check your devices, <strong>Save draft</strong>, and <strong>Publish family view</strong>.</p>
     <h2>If something does not work</h2>
     <ul>
       <li><strong>No AI button?</strong> Use the address printed by the companion, not this hosted editor or a generic file server.</li>

@@ -1,7 +1,7 @@
 .preview-section, .start-cards, .closing-note, .site-footer { max-width: 1320px; margin: auto; padding: 3rem; }
 .preview-section { padding-top: 0; }
 .preview-heading { max-width: 720px; }
-.preview-section img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 20px 60px #233c3410; }
+.preview-section img, .example-links img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 20px 60px #233c3410; }
 .hero-facts { display: flex; flex-wrap: wrap; gap: .5rem 1.2rem; padding: 0; margin: 1.5rem 0; list-style: none; font-size: .8rem; color: #52614e; }
 .hero-facts li { border-inline-start: 2px solid #5c8c78; padding-inline-start: .6rem; }
 .example-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; margin-top: 1.5rem; }

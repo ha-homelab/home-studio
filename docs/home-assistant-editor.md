@@ -1,9 +1,10 @@
-# Draw inside Home Assistant or in the separate editor
+# Install, draw, and publish inside Home Assistant
 
-Home Studio offers two ways to edit the same project format. Choose Home
-Assistant when you want your draft, room mapping, and published dashboard in
-one place. Choose the separate browser editor when you want to draw offline,
-try a fictional example, or keep using the local compiler and installer.
+Start with the native Home Studio integration. This is the recommended path:
+install it in Home Assistant, draw your rooms, link devices, save the draft, and
+publish the family view in one place. No terminal or local compiler is needed
+for a new native installation. The separate editor remains an optional fallback
+when HA setup is blocked, or for offline work and existing portable deployments.
 
 The native workflow requires Home Assistant 2026.10 or newer and a release with **home_floorplan.zip**. A release
 that only contains **home-studio-VERSION.zip** provides the portable toolkit.
@@ -20,12 +21,12 @@ connection and fictional devices. No personal home or credentials are shown.
 1. Back up Home Assistant. If you already use a generated or customized
    `home_floorplan` component, read **Existing generated homes** below first.
 2. In HACS, add `https://github.com/ha-homelab/home-studio` as a custom repository
-   with the **Integration** category. Download a release with the native
-   integration asset. Inclusion in the default HACS catalog is not required.
+   with the **Integration** category. Download Home Studio from a release containing
+   **home_floorplan.zip**. Inclusion in the default HACS catalog is not required.
 3. Restart Home Assistant once after installing the integration code.
 4. Open **Settings → Devices & services → Add integration** and choose
-   **Home Studio**. You do not need an API token or a YAML entry for a new native
-   installation.
+   **Home Studio**. A new native installation needs no terminal, Python, API token,
+   or YAML entry.
 5. Open **Home Studio** in the sidebar using an administrator account.
 
 For manual installation, extract the contents of **home_floorplan.zip** into
@@ -61,22 +62,6 @@ correct unfinished fields before leaving the editor. **Export JSON** remains
 available for a backup of the last valid drawing and tells you when invalid
 field text is excluded.
 
-## Work in the external editor when you prefer
-
-The in-HA editor links to the [separate browser editor](https://ha-homelab.github.io/home-studio/planner/).
-The separate editor links back to the native installation instructions. It
-does not know your private HA address, connect to HA, or receive your project
-just because you follow that link.
-
-To move a design deliberately, use **Export JSON**, then **Open JSON** in the
-other editor. Check the imported drawing, save it, and publish when ready.
-The external editor keeps its own browser draft; the native editor stores its
-saved source in HA. Neither silently overwrites the other.
-
-Optional AI photo drafting remains available through the
-[local AI companion](ai-planning.md). The native integration does not proxy
-provider credentials or automatically send room photos to a provider.
-
 ## Everyday controls without editing access
 
 Use the **3D Home** panel or the [dashboard card](dashboard-and-media.md) for
@@ -102,10 +87,31 @@ published generation active.
 - Save and publish use revisions. If another tab changes the same project,
   export the version you want to retain before reloading. A conflict does not
   silently choose one user's drawing over another.
+- Integration updates replace code. Publish the saved drawing again when you
+  need newly compiled viewer changes; updating the hosted website does not
+  update your installed home.
 - If publication fails, correct the reported field and publish again. The
   last successful dashboard stays available.
 - If the connection drops, do not treat an unsent draft as saved. Keep an
   exported JSON copy before closing the editor.
+
+## Optional fallback: the separate editor
+
+If setup is blocked, or you want to work offline, use the separate editor.
+The in-HA editor links to the [hosted browser editor](https://ha-homelab.github.io/home-studio/planner/);
+a local copy is available in the portable toolkit.
+The separate editor links back to the native installation instructions. It
+does not know your private HA address, connect to HA, or receive your project
+just because you follow that link.
+
+To move a design deliberately, use **Export JSON**, then **Open JSON** in the
+other editor. Check the imported drawing, save it, and publish when ready.
+The external editor keeps its own browser draft; the native editor stores its
+saved source in HA. Neither silently overwrites the other.
+
+Optional AI photo drafting remains available through the
+[local AI companion](ai-planning.md). The native integration does not proxy
+provider credentials or automatically send room photos to a provider.
 
 ## Existing generated homes
 

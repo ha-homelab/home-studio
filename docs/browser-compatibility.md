@@ -3,11 +3,11 @@
 For a visual overview and dated results, start with the
 [illustrated quality and release guide](quality-and-release.md).
 
-Home Studio has two separate browser rendering paths. The hosted drawing tool
-at `/planner/` runs `planner/editor.js`, with a 2D canvas and its own 3D preview.
-The compiler creates a separate viewer from `viewer.js` and the Home view
-modules, for local preview or installation in Home Assistant. Testing or fixing
-one path does not establish that the other works.
+Home Studio has two separate browser rendering paths. The drawing editor in
+Home Assistant and the optional standalone `/planner/` editor share
+`planner/editor.js`, with a 2D canvas and its own 3D preview. Native publication
+and the optional portable compiler create a separate viewer from `viewer.js`
+and the Home view modules. Testing or fixing one path does not establish that the other works.
 
 Both 3D paths use the vendored Three.js r169 renderer and require WebGL 2.
 A browser name or user-agent string is not a capability test:

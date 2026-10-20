@@ -12,17 +12,20 @@ verification.
 
 ## Upgrade the installed home first
 
-Keep your exported project JSON and project ID, make a Home Assistant backup,
-and rebuild with the current toolkit if you use the portable installation. Follow the
+For the recommended native installation, keep Home Assistant backups and
+exported JSON copies, update the integration through HACS, and restart HA. Its
+saved drawing and published assets live outside the code. Publish the saved
+drawing again to regenerate it with viewer changes. New users should start
+with the [native editor guide](home-assistant-editor.md).
+
+For an existing portable installation, keep your exported project JSON and
+project ID, make a Home Assistant backup, and rebuild with the current toolkit.
+Follow the
 [update instructions](https://ha-homelab.github.io/home-studio/install.html#updates)
 and, for Home Assistant OS, the
 [Samba transfer steps](https://ha-homelab.github.io/home-studio/install.html#haos).
 Stop Core before replacing the component; check the configuration and start Core
 afterward. Refresh the browser once the replacement is complete.
-
-For a native installation, update the integration package and restart HA;
-its saved drawing and published home are stored separately from code. See the
-[native editor guide](home-assistant-editor.md).
 
 Updating the hosted drawing editor does not change a previously generated home.
 The ordinary **3D Home** sidebar panel remains available after this upgrade.
@@ -129,8 +132,9 @@ stale artwork. Images remain in memory and are not added to your project JSON.
   availability. A card configured with `dry_run: true` cannot turn live controls
   on from inside that card.
 - **Existing installation looks unchanged:** a new source download or hosted
-  planner update is not an installed-viewer update. Rebuild and replace the
-  generated package, then restart Core.
+  planner update is not an installed-viewer update. Update the native integration
+  and publish the saved drawing again. For a portable installation, rebuild and
+  replace the generated package, then restart Core.
 
 Report the Home Studio version, browser, whether this is the sidebar panel or
 dashboard card, and a small fictional reproduction. Do not attach your private

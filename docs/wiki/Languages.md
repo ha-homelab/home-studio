@@ -6,7 +6,8 @@ Indonesian, Italian, Japanese, Korean, Dutch, Polish, Portuguese, Russian, Thai,
 Turkish, Ukrainian, Vietnamese, Simplified Chinese, and Traditional Chinese.
 
 [Open a README in your language](../translations/README.md). Each quick start
-explains the local drawing/build/install workflow and guarded device controls.
+starts with installation, drawing, and publication inside Home Assistant, then
+covers the optional portable workflow and guarded device controls.
 Detailed engineering guides and SVG diagrams are maintained in English.
 
 The installed plan follows the Home Assistant profile language until a language

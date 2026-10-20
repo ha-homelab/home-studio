@@ -1,7 +1,7 @@
 # Shared code and private homes
 
-Home studio has a public drawing and installation pipeline. A private household
-project can use the same code while keeping its measurements, photos, device
+Home Studio recommends installing, drawing, and publishing inside Home Assistant.
+A private household project can use the same code while keeping its measurements, photos, device
 bindings, deployment details, and specialized adapters outside the public repo.
 
 See the [illustrated quality and release guide](quality-and-release.md) for how
@@ -9,14 +9,17 @@ we test both browser paths, recover graphics resources, and qualify a release.
 
 ## Two hosts, one project and compiler
 
-The [native editor guide](home-assistant-editor.md) describes the user workflow.
+The [native editor guide](home-assistant-editor.md) describes the primary workflow:
+install the integration, draw in the Home Studio sidebar, Save draft, and Publish
+family view. The separate editor is an optional fallback for HA setup problems,
+offline work, and existing portable deployments.
 Both hosts use the same `planner` modules and metric project schema; the native
 release packages reviewed source files without maintaining a second editor.
 Optional `ha_floor_id` and `ha_area_id` fields preserve registry associations
 without replacing stable drawing IDs. Area membership helps select entities;
 it never infers measured geometry.
 
-### Inside Home Assistant
+### Primary path: inside Home Assistant
 
 `static/studio.js` runs in the authenticated HA frontend and owns the WebSocket
 connection. It hosts the editor in an opaque sandbox, validates its message
@@ -47,7 +50,7 @@ update can replace code without deleting the drawing. `scripts/build-home-studio
 the native release ZIP from explicit shared-source allowlists. It contains no
 household source, state, credentials or runtime-generated assets.
 
-### Separate browser and portable installation
+### Optional fallback: separate browser and portable installation
 
 The [AI-assisted authoring workflow](ai-planning.md) adds an optional loopback
 companion for personal provider sessions, photo processing and validated drafts.
@@ -74,11 +77,11 @@ request, privacy, geometry and transactional preview boundaries.
    Assistant's authenticated connection to display **3D Home** to authorized users.
    Private floor assets are delivered through authenticated backend commands.
 
-The [installation guide](https://ha-homelab.github.io/home-studio/install.html)
-covers the commands, manual YAML entry, restart, and Home Assistant OS file
-transfer. This portable route remains a local file operation. The native release is a
-separate integration installation route; it does not automatically migrate
-customized generated homes.
+The [portable installation reference](https://ha-homelab.github.io/home-studio/install.html#export)
+covers this route's commands, manual YAML entry, restart, and Home Assistant OS
+file transfer. These are optional portable steps, not requirements for a new
+native installation. Installing the native release does not automatically
+migrate customized generated homes.
 
 ## Permissions and editing roles
 
@@ -240,7 +243,8 @@ and viewer sources together when consuming this package in a private builder.
 
 ## First-session authoring and recovery
 
-The landing page links directly to four fixed fictional examples. The planner's
+The primary first session starts in the HA sidebar after integration setup.
+Both editor hosts offer four fixed fictional examples. The planner's
 `onboarding.js` accepts only their allowlisted IDs; it lazily imports local
 `planner/examples/*.js` modules. No arbitrary URL is fetched, and the hosted
 editor keeps `connect-src 'none'`. Example modules contain the same source data
@@ -255,8 +259,8 @@ history transaction. It uses the existing geometry model and does not infer a
 new wall topology. Rooms, walls, openings, and furnishings remain separate
 objects. This small entry point reduces setup work without changing schema 1.
 
-`draft-storage.js` owns persistent draft arbitration and recovery. A stored
-revision comparison detects competing changes, with Web Locks serializing
+In the standalone editor, `draft-storage.js` owns persistent draft arbitration
+and recovery. A stored revision comparison detects competing changes, with Web Locks serializing
 cooperating tabs where available. An older tab running a previous release does
 not participate in that lock protocol; byte comparisons detect many such changes
 but cannot make an older client's writes atomic. Recovery decisions are explicit: load the
@@ -264,6 +268,8 @@ saved version, export the current version, or deliberately replace the stored
 copy. One validated previous-project checkpoint is retained for project
 replacement. Damaged raw data has its own download path. Browser storage is a
 convenience cache, not a backup; JSON export remains the portable source.
+Native draft saves and revisions belong to the HA backend; the native host also
+keeps tab recovery for accepted unsaved drawing changes.
 
 `inspector-dom.js` preserves editing continuity when inspector controls are
 refreshed. Invalid values remain visible for correction, and normal Tab or
@@ -449,7 +455,8 @@ deleted item leaves no ghost behind.
 HA placement validation preserves bounded appearance metadata without importing
 the authoring catalog. The installed editor retains it when moving, renaming,
 resizing, or binding an item, and clears it when changing semantic type. Changing
-designs, palettes, or patterns requires rebuilding the project; inventory imports reject
+designs, palettes, or patterns requires publishing again from the native editor
+or rebuilding a portable project; inventory imports reject
 changed appearance metadata instead of silently displaying an old baked color.
 When a rebuilt project loads a previously saved layout, its compiled appearances
 replace stale appearance metadata while positions, sizes, names, and entity
@@ -460,18 +467,19 @@ edits. Keep the planner JSON as the design source.
 
 The complete package includes the source catalog and both geometry builders;
 Pages publishes only browser modules and the illustrated guide. CI exercises
-all 195 designs, legacy projects, real export formats, a maximum-single-floor
+all 206 current designs, legacy projects, real export formats, a maximum-single-floor
 256-plant build/install case, a mixed full-catalog installation, browser editing/history/import, and installation of
 the browser's actual exported file. Installer file and total-size limits remain
 unchanged: 32 MiB per file and 96 MiB in total. The 256-item count ceiling is not
 a guarantee that every combination fits: hundreds of detailed bicycles or plush
 toys can exceed archive limits. Use fewer detailed objects or basic shapes for
-distant/repeated items, and run the installer dry run before deployment. The
-full mixed 195-design regression stays below these limits. Palettes and custom
-body colors do not add geometry. Patterns do: dense floors containing many
+distant/repeated items. For a portable deployment, run the installer dry run
+before deployment. The mixed-catalog regression checks these limits. Palettes
+and custom body colors do not add geometry. Patterns do: dense floors containing many
 detailed or patterned items can reach those same archive limits. Start with a
-small representative room, use None on distant objects, and check the installer
-dry run. Entities and telemetry remain separate from the visual catalog.
+small representative room and use None on distant objects. For a portable
+deployment, check the installer dry run. Entities and telemetry remain separate
+from the visual catalog.
 
 ## Public integration core
 
@@ -545,9 +553,14 @@ update private adapters.
 
 ## Storage and rebuilds
 
-The browser draft and HA placements are separate stores. Exported project JSON
-is the editable geometry source; generated output folders are replaceable build
-artifacts. Keep source files outside those output folders.
+The primary native source is the confirmed draft in HA private storage; the
+published generation is separate. Keep HA backups and exported JSON copies.
+Publication recompiles the saved source without reinstalling the integration.
+
+In the optional portable workflow, the standalone browser draft and HA placements
+are separate stores. Exported project JSON is the editable geometry source;
+generated output folders are replaceable build artifacts. Keep source files
+outside those output folders.
 
 In Home Assistant, generic placements use a site-specific key under `.storage`.
 Keep the project ID stable to retain that association; give a different home a
@@ -555,8 +568,8 @@ different ID. Each floor's revision protects saved placements against stale
 writes. Saved layouts that no longer match rebuilt rooms require explicit
 recovery instead of silently activating incompatible bindings.
 
-The installer never rewrites `.storage`. Its retained component backup contains
-the prior integration code and generated assets, not a complete snapshot of HA
+The portable installer never rewrites `.storage`. Its retained component backup
+contains the prior integration code and generated assets, not a complete snapshot of HA
 or all saved placements. Back up Home Assistant before an update, stop Core
 before replacing an existing component, and retain the printed backup path.
 Directory replacement uses staged files and atomic renames with rollback on
@@ -565,8 +578,9 @@ the installation directory.
 
 ## Repository versus hosted website
 
-The public GitHub repository and its complete ZIP contain the compiler,
-integration, installer, tests, and website. GitHub Pages receives a smaller,
+The native `home_floorplan.zip` release contains the integration and shared editor
+needed for in-HA drawing and publication. The public GitHub repository and its
+complete toolkit ZIP contain the compiler, integration, installer, tests, and website. GitHub Pages receives a smaller,
 explicit allowlist containing only the editor, tutorial, and installation pages.
 Python code is run locally after download; it is not executed by the website.
 

@@ -3,8 +3,10 @@
 Home Studio includes an optional local AI companion. It can furnish an existing
 measured room or create a measured rectangular room with proposed doors, windows,
 and furniture. The result is ordinary editable Home Studio geometry, not a picture.
-The hosted editor remains a manual, offline drawing tool. AI controls appear only
-when the companion serves the editor.
+The recommended [native Home Assistant workflow](home-assistant-editor.md)
+needs no AI setup. This companion is an optional separate authoring tool; AI
+controls appear only when it serves the editor. The native editor and hosted
+editor do not proxy AI requests.
 
 Provider adapters are implemented and tested with synthetic requests and mock
 responses. This is **not** a claim that every provider/model combination has passed
@@ -30,8 +32,10 @@ is needed to start it. The command opens the local editor. Keep the terminal ope
 Ctrl+C stops the companion. Use `--no-browser` to print the address without opening
 it, or `--port 8100` when the default port is already occupied.
 
-If you started on the public website, Export JSON there and Open JSON in the local
-editor. Their browser storage is separate. Do not serve the AI files with a generic
+If you started in Home Assistant, use **Save draft** and **Export JSON** there,
+then **Open JSON** in the local editor. The same export/import steps apply to a
+drawing from the optional hosted editor. These editors have separate drafts and
+do not transfer source automatically. Do not serve the AI files with a generic
 static server: only the companion creates authenticated sessions and exposes the
 restricted API.
 
@@ -63,8 +67,11 @@ restricted API.
    Cancel or discard leaves the accepted plan unchanged. If the plan or selection
    changes while the model is working, the old result cannot be applied.
 7. Adjust the result with the normal editor. Repeat for another room, then Export
-   JSON and follow the [installation guide](../install.html). The installed viewer
-   contains neither the companion nor AI credentials or source photographs.
+   JSON. In Home Studio inside Home Assistant, use **Open JSON**, check the
+   drawing, then **Save draft** and **Publish family view**. Existing portable
+   deployments can use the [portable installation reference](../install.html#export).
+   The installed viewer contains neither the companion nor AI credentials or
+   source photographs.
 
 Example instruction:
 

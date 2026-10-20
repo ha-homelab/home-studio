@@ -4,18 +4,18 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your design and your data · Home studio</title><link rel="stylesheet" href="./planner/guide.css"><link rel="stylesheet" href="./site.css"></head>
 <body>
-  <header class="site-header"><a class="wordmark" href="./">Home<span>studio</span><small>YOUR DESIGN, YOUR COPY</small></a><a class="button button-small" href="./planner/">Open the editor →</a></header>
+  <header class="site-header"><a class="wordmark" href="./">Home<span>studio</span><small>YOUR DESIGN, YOUR COPY</small></a><a class="button button-small" href="./install.html#native-studio">Get started in HA →</a></header>
   <main class="prose">
     <h1>Your design<br>and your data.</h1>
-    <p class="lead">The separate Home Studio editor needs no account and has no project upload service. The in-Home-Assistant editor saves to your own HA instance through its authenticated connection. Optional AI drafting has a separate, explicit data flow.</p>
-    <h2>The separate browser editor</h2>
-    <p>Your rooms, measurements, notes and optional device IDs are saved in this browser's local storage. Opening a JSON file reads it locally. Exporting downloads a file to your computer; it does not publish your home.</p>
-    <p>Use <strong>Export JSON</strong> before clearing browser data, switching browsers or using a private browsing window. Autosave is a convenience, not a backup. Someone using the same browser profile can see its saved draft.</p>
-    <p>Draft recovery can also retain one earlier project checkpoint and a copy of damaged saved data in the same browser storage. Replacing the current drawing does not erase these recovery copies. Clear this site's browser data to remove them all, after exporting anything you want to keep.</p>
+    <p class="lead">Home Studio saves your drawing and published view to your own Home Assistant through its authenticated connection. The optional separate editor needs no account and has no project upload service. Optional AI drafting has a separate, explicit data flow.</p>
     <h2>The editor inside Home Assistant</h2>
     <p>The <a href="./install.html#native-studio">native integration</a> stores saved projects and published plans in your Home Assistant configuration data. These files can contain your layout, room and area identifiers, and device bindings. They belong in your private HA backups. They are not uploaded to the public website.</p>
     <p>The trusted HA host sends a bounded device catalog and your drawing to a sandboxed editor. The editor never receives your HA access token. Save and Publish are administrator actions; the server checks permissions again. A per-tab recovery draft uses session storage in the HA host, separate from the public editor's local storage. Close the tab and remove site data when clearing shared computers.</p>
     <p>Following a link between the native and separate editors transfers no project automatically. Export JSON and open it in the other editor when you intentionally want to move a design. Family accounts can view authorized floors and control permitted entities without permission to edit the project.</p>
+    <h2>The separate browser editor</h2>
+    <p>Your rooms, measurements, notes and optional device IDs are saved in this browser's local storage. Opening a JSON file reads it locally. Exporting downloads a file to your computer; it does not publish your home.</p>
+    <p>Use <strong>Export JSON</strong> before clearing browser data, switching browsers or using a private browsing window. Autosave is a convenience, not a backup. Someone using the same browser profile can see its saved draft.</p>
+    <p>Draft recovery can also retain one earlier project checkpoint and a copy of damaged saved data in the same browser storage. Replacing the current drawing does not erase these recovery copies. Clear this site's browser data to remove them all, after exporting anything you want to keep.</p>
     <h2>What the hosting service receives</h2>
     <p>GitHub Pages serves the website and its static files. Like other web hosts, GitHub receives requests for those files and logs visitor IP addresses for security. See <a href="https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages#data-collection">GitHub's Pages data collection notice</a>. The editor adds no analytics, advertising scripts, tracking pixels or cloud project synchronization.</p>
     <h2>Browser storage has boundaries</h2>

@@ -30,8 +30,10 @@ Indicator captions currently use English fallback labels in all language packs.
 Both metadata fields participate in the viewer's bounded display-state
 declaration. The host still intersects every requested entity with the
 server-issued read scope; metadata cannot grant permissions. Keep installation
-bindings in private model generation. The portable planner does not currently
-provide a form for authoring these fields.
+bindings in private model generation. Neither the native nor standalone drawing
+editor currently provides a form for authoring these advanced fields. Ordinary
+device bindings use the [native editor workflow](home-assistant-editor.md); the
+metadata below is an optional private-builder extension.
 
 Overlays follow the existing camera renders. Hidden pages, inactive Home views,
 and hidden rooms suppress appliance animation. Reduced-motion preferences

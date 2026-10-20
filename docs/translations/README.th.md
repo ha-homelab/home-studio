@@ -1,11 +1,35 @@
 # Home Studio — เริ่มต้นอย่างรวดเร็ว
 
-[Home Studio](https://ha-homelab.github.io/home-studio/planner/?lang=th) · [Languages](README.md)
+[Home Studio — Home Assistant](https://ha-homelab.github.io/home-studio/install.html?lang=th#native-studio) · [Languages](README.md)
+
+## เริ่มต้นใน Home Assistant
+
+สำหรับบ้านใหม่ ให้ใช้ Home Studio ภายใน Home Assistant โดยไม่ต้องติดตั้ง Python แยก เขียน YAML หรือสร้างโทเค็นเข้าถึง
+
+หากใช้คอมโพเนนต์ที่สร้างไว้หรือปรับแต่งไว้แล้ว ให้อ่าน **Existing generated homes** ในคู่มือฉบับเต็มก่อน เพราะไม่มีการแปลงให้อัตโนมัติ
+
+1. ใช้ Home Assistant 2026.10 หรือใหม่กว่า และสำรองข้อมูลก่อน
+2. ใน HACS ให้เพิ่ม `https://github.com/ha-homelab/home-studio` เป็นที่เก็บแบบกำหนดเองในหมวด **Integration** ติดตั้ง Home Studio รุ่นเสถียรที่มี **home_floorplan.zip** แล้วเริ่ม Home Assistant ใหม่
+3. เปิด **Settings → Devices & services → Add integration → Home Studio**
+4. ใช้บัญชีผู้ดูแลระบบเปิด **Home Studio** ในแถบด้านข้าง วาดห้องและเชื่อมโยงวัตถุกับอุปกรณ์จริงของ HA
+5. กด **Save draft** แล้วกด **Publish family view** เปิด **3D Home** และตรวจสอบการเชื่อมโยงด้วย **Dry run** ก่อนควบคุมอุปกรณ์
+
+[Home Assistant guide — English](../home-assistant-editor.md) · [Install — English](https://ha-homelab.github.io/home-studio/install.html#native-studio)
+
+## ทางเลือก: วาดแปลนระหว่างตั้งค่า HA
+
+ใช้ตัวแก้ไขในเบราว์เซอร์ที่แยกต่างหากได้ระหว่างเตรียม HA ตัวแก้ไขนี้ไม่มีการเชื่อมต่อแบบสดกับ HA ส่งออก JSON แล้วเปิดด้วย **Open JSON** ใน Home Studio ภายใน HA จากนั้นตรวจสอบอุปกรณ์ บันทึก และเผยแพร่
+
+[Browser editor](https://ha-homelab.github.io/home-studio/planner/?lang=th)
 
 วาดแปลนบ้านในเบราว์เซอร์โดยไม่ต้องมีบัญชี เลือกภาษาที่ด้านบนของตัวแก้ไข
 
-1. เพิ่มห้อง ผนัง ประตู และหน้าต่าง คลังมีโมเดล 195 แบบ เลือกชุดสีและลวดลายพื้นผิวสำหรับวัตถุที่รองรับ
+1. เพิ่มห้อง ผนัง ประตู และหน้าต่าง คลังมีโมเดล 206 แบบ เลือกชุดสีและลวดลายพื้นผิวสำหรับวัตถุที่รองรับ
 2. ส่งออก JSON เพื่อเก็บสำเนาที่แก้ไขได้ แบบร่างจะอยู่ในเบราว์เซอร์นี้เท่านั้น การเปลี่ยนภาษาไม่เปลี่ยนแปลนของคุณ
+
+### ทางเลือก: ชุดเครื่องมือแบบพกพาและคอมไพเลอร์ Python
+
+ขั้นตอนนี้ใช้สำหรับการสร้างแยกและการติดตั้งที่สร้างไว้ก่อนหน้านี้ ให้ข้ามขั้นตอนนี้สำหรับการติดตั้งแบบเนทีฟใหม่
 
 ดาวน์โหลดและแตกไฟล์ชุดเครื่องมือทั้งหมด ติดตั้ง Python 3.10 หรือใหม่กว่า จากโฟลเดอร์ชุดเครื่องมือ ให้รัน:
 

@@ -12,6 +12,10 @@ Consult that pull request and the [release guide](../RELEASING.md) for current
 review, CI, and publication status. The results below describe the local
 verification recorded on **15 October 2026**; they do not certify later changes.
 
+For current setup, [install Home Studio, draw, and publish inside Home Assistant](home-assistant-editor.md).
+The process and diagrams below record delivery of the Dry run feature, not the
+steps required to install or publish a home.
+
 ## The delivery process
 
 ![Six steps connect the host guard and translation catalogs to fake-service tests, real-browser checks, packaged documentation, signed review and the release gate](images/dry-run-delivery-process.svg)

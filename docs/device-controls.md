@@ -1,14 +1,17 @@
 # Make the plan useful for your devices
 
 A drawing becomes useful when the objects in it match the devices you use.
-Choose an object in the planner, enter its **Home Assistant entity ID**, then
-build and install the home. You can also bind an existing object in the installed
-plan's **Edit layout** view. Wait for the saved confirmation before controlling it.
+In **Home Studio** inside Home Assistant, associate the room with its HA area
+and choose an object's entity from the suggested devices. Choose **Save draft**,
+then **Publish family view**. You can also bind an existing object in the
+published plan's **Edit layout** view. Wait for the saved confirmation before
+controlling it, and check new bindings in **Dry run**.
 
 These controls require an installed build containing **device details and audio controls**.
 Updating the hosted drawing editor alone does not upgrade an installed home.
-In the [native editor](home-assistant-editor.md), choose devices from your HA
-registry, then save and publish. The separate editor and compiler remain available.
+Start with the [native editor](home-assistant-editor.md). If you use the optional
+separate editor, enter entity IDs explicitly and import its JSON into HA to save
+and publish. Existing portable deployments can rebuild and reinstall instead.
 
 ## What to bind
 
@@ -107,8 +110,9 @@ narrow the list. Reload the saved plan after adding or renaming HA entities to
 refresh this catalog.
 
 Older compiled viewers retain their previous state protocol for compatibility.
-Rebuild and reinstall to obtain the reduced state payload. Dependency filtering
-reduces data and work; it is not an authorization boundary. HA authentication,
+Update the native integration and republish the saved drawing to obtain the
+reduced state payload. For portable installations, rebuild and reinstall.
+Dependency filtering reduces data and work; it is not an authorization boundary. HA authentication,
 server-issued read/control scopes, saved-binding checks and the host command
 guard enforce device access. Source and layout editing remain administrator
 actions; family accounts use the published view.
