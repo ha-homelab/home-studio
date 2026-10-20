@@ -457,7 +457,7 @@ homeView = (() => {
       card.hidden = marker.hidden = !visible || point.duplicateControl;
       if(point.details)point.details.parentElement.hidden=card.hidden;
       marker.dataset.label=item.name;
-      if(isMotion(item) && !selected && state!=='on')marker.hidden=true;
+      if((isMotion(item)||presenceSpec(item)) && !selected && state!=='on')marker.hidden=true;
       const enabled=isGeneric(item)?!unavailableStates.includes(state):isLock(item)?lockStates.includes(state):['on','off','open','closed','opening','closing'].includes(state);
       if (waiting && state !== waiting.before && enabled) { clearTimeout(waiting.timer); pending.delete(item.entity_id); }
       const busy=pending.has(item.entity_id)||curtainCommands.has(item.entity_id);

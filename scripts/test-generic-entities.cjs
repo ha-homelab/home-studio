@@ -71,9 +71,11 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   await card('range').filter({hasText:'Cooktop off · Oven off'}).waitFor();
   assert.match(await card('alarm').textContent(),/OK · 0%/);
   assert.equal(await card('presence').getAttribute('data-kind'),'presence');
+  assert.equal(await frame.locator('[data-home-item="presence"]').isVisible(),false,'quiet presence does not cover whole-floor controls');
   await page.evaluate(()=>{states['binary_sensor.cooktop'].state='on';states['binary_sensor.smoke'].state='on';states['binary_sensor.presence'].state='on';publish();});
   await card('range').filter({hasText:'Individual burners are not reported'}).waitFor();
   await card('alarm').filter({hasText:'SMOKE ALARM'}).waitFor();
+  assert.equal(await frame.locator('[data-home-item="presence"]').isVisible(),true,'active presence remains inspectable');
   assert.equal(await frame.locator('.cooktop-flames').isVisible(),true);
   assert.equal(await frame.locator('.oven-glow').isVisible(),false);
   assert.equal(await frame.locator('[data-motion-trail="presence"]').count(),0,'held presence never creates footsteps');
