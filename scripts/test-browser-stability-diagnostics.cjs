@@ -784,7 +784,7 @@ function freshPreviewHarness(view = 'preview') {
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../planner/render-capacity.js'), 'utf8').replace('export function ', 'function '), context);
   vm.runInContext(`
-    let previewDirty=true,canvasSuspended=false,spaceHeld=false,size={width:934,height:824},view=${JSON.stringify(view)};
+    let drag=null,previewDirty=true,canvasSuspended=false,spaceHeld=false,size={width:934,height:824},view=${JSON.stringify(view)};
     let firstResize=false,planSize='old',map={x:0,y:0};
     const project={floors:[{elevation_m:0,walls:[],items:[{position_m:{x:7,z:9}}]}]};
     function displayedProject(){return project;}

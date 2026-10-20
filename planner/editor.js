@@ -255,6 +255,7 @@ async function save(options) {
 }
 function historyPush(previous) { history.push(previous); if (history.length > 60) history.shift(); future = []; }
 function transact(change, message = () => t('Project updated.'), { fit = false } = {}) {
+  if (drag) finishPointer(null, true);
   const draft = clone(project), priorSelection = selection && { ...selection };
   try {
     change(draft, draft.floors.find(f => f.id === activeFloorId) || draft.floors[0]); validateProject(draft); serializeProject(draft);
@@ -287,6 +288,7 @@ function installRecoveredProject(next) {
   editorChanged(); setView('plan'); setTool('select'); renderUI(); fitPlan(); fitPreview(); renderPlan();
 }
 function undo(redo = false) {
+  if (drag) finishPointer(null, true);
   const source = redo ? future : history, destination = redo ? history : future; if (!source.length) return;
   destination.push(project); project = source.pop(); if (!project.floors.some(f => f.id === activeFloorId)) activeFloorId = project.floors[0].id;
   selection = null; drag = null; previewDirty = true; editorChanged(); renderUI(); renderPlan(); status(() => redo ? t('Change restored.') : t('Change undone.')); save();
@@ -505,6 +507,7 @@ function deleteSelection() {
   }, () => kind === 'walls' ? t('Wall and its openings deleted. Undo is available.') : kind === 'rooms' ? t('Room and its assigned items deleted. Walls remain. Undo is available.') : t('Object deleted. Undo is available.'));
 }
 function setTool(next) {
+  if (drag) finishPointer(null, true);
   tool = next; document.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === tool)));
   if (view === 'plan') $('tool-hint').textContent = toolHint();
   planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
@@ -512,6 +515,7 @@ function setTool(next) {
   $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || view !== 'plan';
 }
 function setView(next) {
+  if (drag) finishPointer(null, true);
   releasePreviewPointer();
   view = next;
   previewEnvironment?.setActive(next === 'preview' && !previewLost && !canvasSuspended);
@@ -667,21 +671,24 @@ function hitTest(point) {
   return null;
 }
 planCanvas.addEventListener('pointerdown', event => {
-  if (event.button !== 0 && event.button !== 1) return;
+  // One pointer owns both the working copy and its immutable undo snapshot.
+  if (drag || view !== 'plan' || canvasSuspended || document.hidden || event.isPrimary === false || event.button !== 0 && event.button !== 1) return;
   event.preventDefault(); planCanvas.focus(); const screen = localPoint(event), world = toWorld(screen); planCanvas.setPointerCapture(event.pointerId);
-  if (spaceHeld || event.shiftKey || event.button === 1) { drag = { kind: 'pan', screen, map: { ...map } }; planCanvas.style.cursor = 'grabbing'; return; }
-  if (tool === 'room' || tool === 'wall') { const p = world.map(snap); drag = { kind: 'draw', startWorld: p, endWorld: p, screen }; return; }
+  if (spaceHeld || event.shiftKey || event.button === 1) { drag = { kind: 'pan', pointerId: event.pointerId, screen, map: { ...map } }; planCanvas.style.cursor = 'grabbing'; return; }
+  if (tool === 'room' || tool === 'wall') { const p = world.map(snap); drag = { kind: 'draw', pointerId: event.pointerId, startWorld: p, endWorld: p, screen }; return; }
   if (tool === 'door' || tool === 'window') { const near = wallAt(world); if (near) addOpening(near.wall, near.hit.offset, tool); else status(() => t('Click directly on an existing wall to add an opening.'), true); return; }
   if (tool === 'item') { addItem(world); return; }
   setSelection(hitTest(world));
   if (selection) {
     // Keep one immutable undo snapshot; only the selected object changes while dragging.
-    drag = { kind: 'move', startWorld: world, original: project, selection: { ...selection }, moved: false, offset: [0, 0] };
+    drag = { kind: 'move', pointerId: event.pointerId, startWorld: world, original: project, selection: { ...selection }, moved: false, offset: [0, 0] };
     project = clone(project);
   }
-  else drag = { kind: 'pan', screen, map: { ...map } };
+  else drag = { kind: 'pan', pointerId: event.pointerId, screen, map: { ...map } };
 });
 planCanvas.addEventListener('pointermove', event => {
+  if (drag && drag.pointerId !== event.pointerId) return;
+  if (drag && event.buttons === 0) { finishPointer(event, true); return; }
   const screen = localPoint(event), world = toWorld(screen); $('pointer-position').textContent = `x ${world[0].toFixed(2)} · z ${world[1].toFixed(2)} m`;
   if (!drag) { if (tool === 'select') planCanvas.style.cursor = hitTest(world) ? 'grab' : 'default'; return; }
   if (drag.kind === 'pan') { map.x = drag.map.x + screen[0] - drag.screen[0]; map.y = drag.map.y + screen[1] - drag.screen[1]; }
@@ -703,8 +710,9 @@ planCanvas.addEventListener('pointermove', event => {
   requestCanvasRender();
 });
 function finishPointer(event, cancel = false) {
-  if (!drag) return; const current = drag; drag = null; planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
-  if (event && planCanvas.hasPointerCapture(event.pointerId)) planCanvas.releasePointerCapture(event.pointerId);
+  if (!drag || event && event.pointerId !== drag.pointerId) return;
+  const current = drag; drag = null; planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
+  if (planCanvas.hasPointerCapture(current.pointerId)) planCanvas.releasePointerCapture(current.pointerId);
   if (current.kind === 'draw' && !cancel) {
     const [a, b] = [current.startWorld, current.endWorld];
     if (distance(a, b) < .05) { status(() => t('Drag across the plan to draw a shape.')); renderPlan(); return; }
@@ -733,6 +741,7 @@ function finishPointer(event, cancel = false) {
   renderPlan();
 }
 planCanvas.addEventListener('pointerup', e => finishPointer(e)); planCanvas.addEventListener('pointercancel', e => finishPointer(e, true));
+planCanvas.addEventListener('lostpointercapture', e => finishPointer(e, true));
 planCanvas.addEventListener('wheel', e => { e.preventDefault(); zoomPlan(Math.exp(-e.deltaY * .0015), localPoint(e)); }, { passive: false });
 
 // On-demand 3D rendering. Opening cuts and solid wall pieces use the same metric project.
@@ -1266,9 +1275,9 @@ function resizeCanvases(rect) {
 }
 const canvasObserver = new ResizeObserver(entries => resizeCanvases(entries[0].contentRect));
 canvasObserver.observe(document.querySelector('.canvas-shell'));
-document.addEventListener('visibilitychange', () => { if (document.hidden) { spaceHeld = false; releasePreviewPointer(); cancelCanvasRender(); } else { resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { spaceHeld = false; if (drag) finishPointer(null, true); releasePreviewPointer(); cancelCanvasRender(); } else { resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); } });
 window.addEventListener('pagehide', event => {
-  canvasSuspended = true; releasePreviewPointer(); cancelCanvasRender();
+  canvasSuspended = true; if (drag) finishPointer(null, true); releasePreviewPointer(); cancelCanvasRender();
   if (!event.persisted) { canvasObserver.disconnect(); previewEvents.abort(); releasePreviewPointer(); floorNavigator.destroy(); disposePreviewRenderer(); renderer?.forceContextLoss(); }
 });
 window.addEventListener('pageshow', () => { canvasSuspended = false; resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); });
