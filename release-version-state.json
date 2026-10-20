@@ -1,5 +1,5 @@
 {
-  "counter": 36,
+  "counter": 37,
   "plans": {
     "38486610565": {
       "parent": null,
@@ -539,6 +539,21 @@
         "source_sha": "a32804b15fb79b87917f5439f0698d8565f462ee",
         "tag": "v0.10.0-beta.3",
         "version": "0.10.0-beta.3"
+      }
+    },
+    "39373976321": {
+      "parent": null,
+      "plan": {
+        "base_version": "0.10.0",
+        "build_number": 37,
+        "channel": "rc",
+        "policy_sha256": "3a79edd6c4a4c7de9b5a8f393094d682fee08403ba9b4637b5a6d462aa5b03e2",
+        "promotion": "promote-bytes",
+        "schema_version": 1,
+        "sequence": 2,
+        "source_sha": "a32804b15fb79b87917f5439f0698d8565f462ee",
+        "tag": "v0.10.0-rc.2",
+        "version": "0.10.0-rc.2"
       }
     }
   },
