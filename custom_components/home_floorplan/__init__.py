@@ -156,20 +156,37 @@ async def async_unload_entry(hass, entry):
     return True
 
 
-def _status(state, connection):
+def _status_snapshot(state):
+    """Pin publication facts without retaining any user's permission decisions."""
     native = state["native"]
+    snapshot = {"mode": "native" if native else "legacy",
+                "has_editor": bool(state.get("has_editor")),
+                "default_floor": state["site"]["default_floor"],
+                "references": {floor: frozenset(floor_entities(state, floor, PROFILES))
+                               for floor in state["site"]["floors"]}}
+    if native:
+        snapshot.update(revision=native.document["revision"], published_revision=native.document["published_revision"])
+    return snapshot
+
+
+def _status_from_snapshot(snapshot, connection):
+    """Filter pinned publication facts using the connection's current permissions."""
     admin = bool(connection.user and connection.user.is_admin)
-    floors = [floor for floor in state["site"]["floors"]
-              if all(can_read(connection, entity_id) for entity_id in floor_entities(state, floor, PROFILES))]
-    default_floor = state["site"]["default_floor"]
+    floors = [floor for floor, references in snapshot["references"].items()
+              if all(can_read(connection, entity_id) for entity_id in references)]
+    default_floor = snapshot["default_floor"]
     if default_floor not in floors:
         default_floor = floors[0] if floors else None
-    result = {"mode": "native" if native else "legacy", "can_edit": admin,
-              "has_editor": bool(state.get("has_editor")), "has_published": bool(floors),
+    result = {"mode": snapshot["mode"], "can_edit": admin,
+              "has_editor": snapshot["has_editor"], "has_published": bool(floors),
               "floors": floors, "default_floor": default_floor}
-    if native and admin:
-        result.update(revision=native.document["revision"], published_revision=native.document["published_revision"])
+    if snapshot["mode"] == "native" and admin:
+        result.update(revision=snapshot["revision"], published_revision=snapshot["published_revision"])
     return result
+
+
+def _status(state, connection):
+    return _status_from_snapshot(_status_snapshot(state), connection)
 
 
 def _project_result(state, connection):
@@ -180,8 +197,7 @@ def _project_result(state, connection):
             "editor_url": EDITOR_URL, "capabilities": {"authoring": bool(native)}}
 
 
-def _capabilities(state, connection, floor):
-    references = floor_entities(state, floor, PROFILES)
+def _capabilities(connection, references):
     readable = {entity_id for entity_id in references if can_read(connection, entity_id)}
     if can_read(connection, "sun.sun"):
         readable.add("sun.sun")
@@ -315,13 +331,14 @@ async def ws_viewer(hass, connection, msg):
     """Send private assets only to an authenticated user who can read their entities."""
     state = hass.data[DOMAIN]
     async with state["lock"]:
-        result = _status(state, connection)
+        snapshot = _status_snapshot(state)
+        result = _status_from_snapshot(snapshot, connection)
         if not state["site"]["floors"]:
             connection.send_result(msg["id"], {**result, "html": None, "items": [], "floor": None, "site_features": False})
             return
         if not (floor := _floor(state, msg, connection)):
             return
-        references = floor_entities(state, floor, PROFILES)
+        references = snapshot["references"][floor]
         if any(not can_read(connection, entity_id) for entity_id in references):
             connection.send_error(msg["id"], "unauthorized", "You do not have permission to view all entities in this floor.")
             return
@@ -335,13 +352,16 @@ async def ws_viewer(hass, connection, msg):
         # descriptor remains readable after later cleanup unlinks its path.
         path = state["assets"] / floor / "index.html"
         inventory = copy.deepcopy(state["data"][floor])
-        capabilities = _capabilities(state, connection, floor)
         site_features = state["site"]["site_features"]
         stream = await hass.async_add_executor_job(path.open, "r", -1, "utf-8")
     content = await hass.async_add_executor_job(_read_open_file, stream)
     if state.get("panels_unloaded") or any(not can_read(connection, entity_id) for entity_id in references):
         connection.send_error(msg["id"], "unauthorized", "Your access to this floor changed. Reload the view.")
         return
+    # The file and inventory belong to the pinned publication, but permission
+    # decisions may have changed during either executor await.
+    result = _status_from_snapshot(snapshot, connection)
+    capabilities = _capabilities(connection, references)
     content = content.replace("<head>", "<head><script>window.__HOME_FLOORPLAN_EMBED__=true;</script>", 1)
     connection.send_result(msg["id"], {**result, **inventory, **capabilities, "html": content, "floor": floor,
                                      "site_features": site_features})
@@ -373,7 +393,8 @@ async def ws_save(hass, connection, msg):
             await _persist_inventory(state, updated)
             if refresh := state.get("activity_refresh"):
                 refresh()
-            connection.send_result(msg["id"], {"revision": updated[floor]["revision"], **_capabilities(state, connection, floor)})
+            connection.send_result(msg["id"], {"revision": updated[floor]["revision"],
+                                              **_capabilities(connection, floor_entities(state, floor, PROFILES))})
     except NativeError as error:
         connection.send_error(msg["id"], error.code, str(error))
     except ValueError as error:

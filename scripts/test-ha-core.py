@@ -22,7 +22,7 @@ import unittest
 from unittest.mock import AsyncMock, DEFAULT, patch
 
 from homeassistant import auth
-from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_USER
+from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_READ_ONLY, GROUP_ID_USER
 from homeassistant.components import frontend
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry, device_registry, entity_registry, floor_registry
@@ -153,6 +153,50 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
             await self.request('project_publish', revision=2)
         after = await self.request('viewer', user=self.family)
         self.assertEqual(after['html'], view['html'])
+
+    async def test_viewer_refreshes_real_user_permissions_after_asset_read(self):
+        project = json.loads((ROOT / 'planner/example-home.json').read_text())
+        project['floors'][0]['items'][-1]['entity_id'] = 'light.permission_fixture'
+        await self.request('project_save', revision=0, project=project)
+        await self.request('project_publish', revision=1)
+        user = await self.hass.auth.async_create_user('Permission fixture', group_ids=[GROUP_ID_ADMIN])
+        self.assertFalse(user.is_owner)
+        original = self.hass.async_add_executor_job
+
+        for before, after, can_edit in ((GROUP_ID_ADMIN, GROUP_ID_READ_ONLY, False),
+                                       (GROUP_ID_READ_ONLY, GROUP_ID_ADMIN, True)):
+            with self.subTest(before=before, after=after):
+                await self.hass.auth.async_update_user(user, group_ids=[before])
+                # Populate HA's cached properties before changing the role.
+                self.assertEqual(user.is_admin, before == GROUP_ID_ADMIN)
+                self.assertEqual(user.permissions.check_entity('light.permission_fixture', 'control'),
+                                 before == GROUP_ID_ADMIN)
+                entered, resume = asyncio.Event(), asyncio.Event()
+
+                async def pause_asset_read(function, *args):
+                    value = await original(function, *args)
+                    if function is self.integration._read_open_file:
+                        entered.set()
+                        await resume.wait()
+                    return value
+
+                with patch.object(self.hass, 'async_add_executor_job', side_effect=pause_asset_read):
+                    pending = asyncio.create_task(self.request('viewer', user=user))
+                    try:
+                        await asyncio.wait_for(entered.wait(), 5)
+                        await self.hass.auth.async_update_user(user, group_ids=[after])
+                    finally:
+                        resume.set()
+                    result = await pending
+
+                self.assertEqual(result['can_edit'], can_edit)
+                self.assertIn('light.permission_fixture', result['readable_entities'])
+                self.assertEqual('light.permission_fixture' in result['controllable_entities'], can_edit)
+                self.assertEqual('published_revision' in result, can_edit)
+                # A different connection retains its own authorization.
+                admin_result = await self.request('viewer')
+                self.assertTrue(admin_result['can_edit'])
+                self.assertIn('light.permission_fixture', admin_result['controllable_entities'])
 
     async def test_disk_full_never_acknowledges_a_save_or_removes_the_active_generation(self):
         project = json.loads((ROOT / 'planner/example-home.json').read_text())
