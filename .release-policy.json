@@ -59,9 +59,9 @@
         "value": "package"
       }
     ],
-    "toolkit_revision": "90186798805b1a289a222fd36698b03b2e6d7fca"
+    "toolkit_revision": "d5f62f4c50362c4489df834e5df56924ebdee593"
   },
-  "toolkit_revision": "90186798805b1a289a222fd36698b03b2e6d7fca",
+  "toolkit_revision": "d5f62f4c50362c4489df834e5df56924ebdee593",
   "closed_build": {
     "workflow": "closed-build.yml",
     "environment": "closed-build",
