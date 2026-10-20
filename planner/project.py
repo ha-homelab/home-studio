@@ -508,7 +508,7 @@ def render_viewer(data, svg):
         "__VIEWER_JS__": (ROOT / "viewer.js").read_text(encoding="utf-8"),
         "__HOME_HTML__": (ROOT / "home-view.html").read_text(encoding="utf-8"),
         "__HOME_CSS__": (ROOT / "home-view.css").read_text(encoding="utf-8"),
-        "__HOME_JS__": "\n".join((ROOT / name).read_text(encoding="utf-8") for name in ("curtain-state.js", "motion-state.js", "tv-screen.js", "camera-preview.js", "media-preview.js", "assumed-zone-view.js", "home-view.js")),
+        "__HOME_JS__": "\n".join((ROOT / name).read_text(encoding="utf-8") for name in ("curtain-state.js", "motion-state.js", "appliance-state.js", "presence-view.js", "tv-screen.js", "camera-preview.js", "media-preview.js", "assumed-zone-view.js", "home-view.js")),
         "__LIGHT_STATE_JS__": (ROOT / "light-state.js").read_text(encoding="utf-8"),
         "__RENDER_CAPACITY_JS__": (ROOT / "planner/render-capacity.js").read_text(encoding="utf-8").replace("export function getRenderCapacity", "function getRenderCapacity"),
         "/*__ENVIRONMENT_JS__*/": (ROOT / "planner/environment.js").read_text(encoding="utf-8").replace("export ", ""),

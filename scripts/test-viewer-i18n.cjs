@@ -19,7 +19,7 @@ const data = { locales, dictionaries }, english = dictionaries.en;
 const screenshotDir = process.env.VIEWER_I18N_QA_DIR || process.env.PLANNER_SCREENSHOT_DIR;
 const placeholders = value => [...value.matchAll(/\{([A-Za-z][A-Za-z0-9_]*)\}/g)].map(match => match[1]).sort();
 assert.equal(locales.length, 24);
-assert.ok(Object.keys(english).length <= 143, 'the viewer catalog stays scoped, including eight surroundings labels');
+assert.ok(Object.keys(english).length <= 153, 'the viewer catalog stays scoped, including eight surroundings and ten indicator labels');
 for (const { code } of locales) {
   assert.deepEqual(Object.keys(dictionaries[code]).sort(), Object.keys(english).sort(), code);
   for (const key of Object.keys(english)) {

@@ -118,14 +118,18 @@ test('the actual viewer collector retains all display dependencies even after a 
     assumed_activity:{sensor:'sensor.signal_activity'},motion_sources:{'binary_sensor.camera_motion':['binary_sensor.person','binary_sensor.motion']},
     motion_zones:{camera:{entity_id:'sensor.motion_room',paths:{studio:[[0,0],[1,1]]}}},
     telemetry:[{metrics:[{entity_id:'sensor.temperature'}]}],power_labels:[{entity_id:'sensor.power'}],
+    appliance_status:{range:{entity_id:'binary_sensor.cooktop',oven_entity_id:'sensor.oven'},smoke:{entity_id:'binary_sensor.smoke',battery_entity_id:'sensor.smoke_battery'}},
+    presence_sources:{presence:{entity_id:'binary_sensor.presence'}},
     notes:'sensor.unrelated_note'};
   const context={model};vm.runInNewContext(viewer.slice(start,end)+'\nglobalThis.result=[...stateEntities];',context);
-  const expected=['media_player.television','binary_sensor.camera_motion','sensor.room_activity','binary_sensor.receiver','sensor.receiver_activity','sensor.receiver_modules','sensor.signal_activity','binary_sensor.person','binary_sensor.motion','sensor.motion_room','sensor.temperature','sensor.power'].sort();
+  const expected=['media_player.television','binary_sensor.camera_motion','sensor.room_activity','binary_sensor.receiver','sensor.receiver_activity','sensor.receiver_modules','sensor.signal_activity','binary_sensor.person','binary_sensor.motion','sensor.motion_room','sensor.temperature','sensor.power','binary_sensor.cooktop','sensor.oven','binary_sensor.smoke','sensor.smoke_battery','binary_sensor.presence'].sort();
   assert.deepEqual(plain(context.result).sort(),expected,'geometry and unrelated text cannot exhaust or expand the dependency list');
   const f=stateFixture();for(const id of expected){f.panel._hass.states[id]={state:'on',attributes:{}};f.panel.readableEntities.add(id);}
   f.configure({state_entities:[...context.result,'invalid reference',null]});
   assert.equal(f.panel.scopedStates,true);assert.equal(f.catalogs().length,1);
   assert.deepEqual(Object.keys(f.snapshot().states).sort(),[...expected,'media_player.speaker'].sort());
+  f.panel.readableEntities.delete('sensor.oven');f.panel.publishEntityStates();
+  assert.equal(f.snapshot().states['sensor.oven'],undefined,'a denied auxiliary state never crosses the bridge');
   assert.equal(f.snapshot().states['light.unbound'],undefined);
   assert.ok(f.catalogs()[0].entities.some(([id])=>id==='light.unbound'),'unbound picker choices remain available without raw state');
 });

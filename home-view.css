@@ -155,3 +155,16 @@ body.control-only>header,body.control-only>main,body.control-only #editLayout,bo
 .home-map-tools .environment-controls summary{color:#e0e8e7;background:#24363d;border-color:#425961;font-weight:500}
 .home-map-tools .environment-controls summary:hover{background:#304951}
 .home-map-tools .environment-options select{color:#334e46;background:#fff;border-color:#bac9bc}
+
+#homeView [data-appliance]{--appliance-rgb:156,172,182}#homeView [data-tone="ok"]{--appliance-rgb:69,225,156}#homeView [data-tone="alarm"]{--appliance-rgb:255,72,92}#homeView [data-tone="active"]{--appliance-rgb:75,191,255}
+#homeView .home-marker[data-appliance],#homeView .home-marker[data-appliance]:hover:not(:disabled){color:rgb(var(--appliance-rgb));background:#172831;border-color:rgb(var(--appliance-rgb));box-shadow:0 0 9px rgba(var(--appliance-rgb),.3)}#homeView .home-device[data-appliance] .home-device-icon{color:rgb(var(--appliance-rgb))}.appliance-reading{position:absolute;bottom:calc(100% + 5px);left:50%;transform:translateX(-50%);padding:3px 6px;border:1px solid currentColor;border-radius:5px;background:#14232fe8;color:inherit;white-space:nowrap;font:10px system-ui}
+.cooktop-flames{position:absolute;inset:0;pointer-events:none}.cooktop-flames[hidden]{display:none}.cooktop-flame{position:absolute;left:0;top:0;width:64px;height:64px;transform-origin:0 0;pointer-events:none}.cooktop-flame svg{width:100%;height:100%;overflow:visible}.gas-jets{animation:gas-flicker .8s ease-in-out infinite alternate;transform-origin:32px 32px}.cooktop-flame:nth-child(even) .gas-jets{animation-delay:-.37s}@keyframes gas-flicker{from{opacity:.65;transform:scale(.94)}to{opacity:1;transform:scale(1.04)}}@media(prefers-reduced-motion:reduce){.gas-jets{animation:none}}
+.oven-glow{position:absolute;left:0;top:0;width:64px;height:64px;transform-origin:0 0;pointer-events:none}.oven-glow[hidden]{display:none}.oven-glow>span{display:block;width:100%;height:100%;border-radius:6px;background:radial-gradient(ellipse at 50% 65%,#ffc45cb0,#ff5d1b88 42%,#b4270620 85%);box-shadow:inset 0 -3px 4px #ff933ca0;animation:oven-heat 2.8s ease-in-out infinite alternate}@keyframes oven-heat{from{opacity:.6}to{opacity:1}}@media(prefers-reduced-motion:reduce){.oven-glow>span{animation:none}}
+
+/* Held occupancy uses a compact room-label badge, never a trail or inferred heartbeat. */
+.home-presence-layer{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;overflow:hidden}
+.home-presence-indicator{transition:none;pointer-events:none}
+.home-presence-indicator[data-state="quiet"]{transition:opacity 15s ease-out}
+#homeView [data-kind="presence"]{color:#95e9df;background:#213e40;border-color:#568a89}
+#homeView [data-kind="presence"][data-state="on"]{color:#cefff8;background:#245650;border-color:#61e0cc;box-shadow:0 0 10px #36e7df55}
+@media(prefers-reduced-motion:reduce){.home-presence-indicator[data-state="quiet"]{transition:none}}

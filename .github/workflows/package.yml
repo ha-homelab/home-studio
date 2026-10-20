@@ -170,7 +170,7 @@ jobs:
         run: node --test scripts/test-tv-screen.cjs
       - name: Test linked media previews and bounded TV power commands
         run: |
-          node --test scripts/test-media-preview.cjs scripts/test-media-artwork-host.cjs scripts/test-media-command-host.cjs
+          node --test scripts/test-media-preview.cjs scripts/test-media-artwork-host.cjs scripts/test-media-command-host.cjs scripts/test-appliance-state.cjs scripts/test-presence-view.cjs
           node --test scripts/test-dashboard-card.cjs
           for engine in chromium firefox webkit; do
             MEDIA_ARTWORK_ENGINE="$engine" node scripts/test-media-artwork-browser.cjs
