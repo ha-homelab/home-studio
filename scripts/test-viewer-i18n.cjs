@@ -69,14 +69,14 @@ assert.equal(context.viewerStateLabel('on'), 'On');
   let browser;
   try {
     const generated = path.join(temp, 'viewer.html');
-    const script = `import json,sys\nfrom pathlib import Path\nfrom planner.project import validate_project,make_floor,render_viewer\np=json.loads(Path('planner/example-home.json').read_text())\nf=p['floors'][0]\nf['name']='User <room> __VIEWER_I18N_DATA__'\nf['items'][1]['entity_id']='light.user_lamp'\nf['items'][1]['name']='My <lamp> العربية'\np=validate_project(p)\ndata,svg=make_floor(p,p['floors'][0],None)\nPath(sys.argv[1]).write_text(render_viewer(data,svg))\n`;
+    const script = `import json,sys\nfrom pathlib import Path\nfrom planner.project import validate_project,make_floor,render_viewer\np=json.loads(Path('planner/example-home.json').read_text())\nf=p['floors'][0]\nf['name']='User <room> __VIEWER_I18N_DATA__ /*__ENVIRONMENT_JS__*/'\nf['items'][1]['entity_id']='light.user_lamp'\nf['items'][1]['name']='My <lamp> العربية'\np=validate_project(p)\ndata,svg=make_floor(p,p['floors'][0],None)\nPath(sys.argv[1]).write_text(render_viewer(data,svg))\n`;
     const built = spawnSync(process.env.PYTHON || 'python3', ['-c', script, generated], { cwd: root, encoding: 'utf8' });
     assert.equal(built.status, 0, built.stderr || built.stdout);
     const html = fs.readFileSync(generated, 'utf8');
     assert.ok(html.includes("connect-src 'none'"));
     assert.ok(!html.includes('planner/locales/'), 'editor translations are not embedded');
     assert.ok(!html.includes('__VIEWER_I18N_JS__'));
-    assert.ok(html.includes('User &lt;room&gt; __VIEWER_I18N_DATA__'), 'user tokens are not expanded');
+    assert.ok(html.includes('User &lt;room&gt; __VIEWER_I18N_DATA__ /*__ENVIRONMENT_JS__*/'), 'user tokens are not expanded');
     browser = await browserTypes[engine].launch({ headless: true, ...(engine === 'chromium' ? {
       executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
       args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
@@ -99,7 +99,7 @@ assert.equal(context.viewerStateLabel('on'), 'On');
     assert.equal(await page.locator('html').getAttribute('dir'), 'rtl');
     assert.equal(await page.locator('#addItem').textContent(), dictionaries.ar['Save changes']);
     for (const selector of ['#entity', '#x', '#plan', '#view3d']) assert.equal(await page.locator(selector).evaluate(node => getComputedStyle(node).direction), 'ltr', selector);
-    assert.equal(await page.locator('h1').textContent(), 'User <room> __VIEWER_I18N_DATA__');
+    assert.equal(await page.locator('h1').textContent(), 'User <room> __VIEWER_I18N_DATA__ /*__ENVIRONMENT_JS__*/');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2), 'RTL layout stays within the viewport');
     if(screenshotDir){fs.mkdirSync(screenshotDir,{recursive:true});await page.screenshot({path:path.join(screenshotDir,'viewer-ar.png'),fullPage:true});}
     // RTL text can resize the stage after the synchronous language update.

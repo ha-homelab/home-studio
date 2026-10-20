@@ -524,7 +524,7 @@ def render_viewer(data, svg):
     }
     # Expand source fragments before inserting user text, so a title resembling a
     # template token cannot trigger a replacement inside the model or HTML.
-    source_tokens = {k: v for k, v in replacements.items() if k.endswith("_JS__") or k in {"__HOME_HTML__", "__HOME_CSS__"}}
+    source_tokens = {k: v for k, v in replacements.items() if k.endswith(("_JS__", "_JS__*/")) or k in {"__HOME_HTML__", "__HOME_CSS__"}}
     token = re.compile("|".join(map(re.escape, replacements)))
     while any(key in template for key in source_tokens):
         template = token.sub(lambda m: source_tokens.get(m.group(), m.group()), template)
