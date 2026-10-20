@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const {Connection} = require('home-assistant-js-websocket');
 const source = fs.readFileSync(path.join(__dirname, '../custom_components/home_floorplan/static/panel.js'), 'utf8');
 const deferred = () => {
   let resolve, reject;
@@ -27,8 +28,9 @@ function connection({subscribe, viewer, eventOnly = false} = {}) {
       if (!eventOnly) value.connected=event==='ready';
       for (const handler of [...(listeners.get(event) || [])]) handler();
     },
-    subscribeMessage(callback, request) {
+    subscribeMessage(callback, request, options) {
       assert.equal(request.type, 'home_floorplan/curtains');
+      assert.equal(options?.resubscribe, false, 'the panel owns subscription recovery');
       registrations.push(callback);
       return subscribe ? subscribe(callback) : Promise.resolve(() => {released.push(callback);});
     },
@@ -70,6 +72,112 @@ function fixture() {
   }
   return {panel, notices, nodes, hass, error:value => context.planLoadError(value)};
 }
+
+// Only the transport is synthetic: HAWS owns command IDs, pending requests,
+// subscription restoration and its actual disconnected/ready event ordering.
+class Socket {
+  constructor({holdSubscription = false} = {}) {
+    this.OPEN=1;
+    this.readyState=this.OPEN;
+    this.haVersion='2026.10.2';
+    this.listeners=new Map();
+    this.sent=[];
+    this.subscriptions=new Set();
+    this.holdSubscription=holdSubscription;
+  }
+  addEventListener(type, callback) {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type).add(callback);
+  }
+  removeEventListener(type, callback) {this.listeners.get(type)?.delete(callback);}
+  emit(type, event) {
+    for (const callback of [...(this.listeners.get(type) || [])]) callback(event);
+  }
+  receive(message) {this.emit('message', {data:JSON.stringify(message)});}
+  send(raw) {
+    assert.equal(this.readyState, this.OPEN);
+    const request=JSON.parse(raw);
+    this.sent.push(request);
+    assert.ok(['home_floorplan/curtains', 'home_floorplan/viewer', 'unsubscribe_events'].includes(request.type),
+      'reconnect must never replay a save or device command');
+    if (request.type==='home_floorplan/curtains') {
+      this.subscriptions.add(request.id);
+      if (this.holdSubscription) return;
+    } else if (request.type==='unsubscribe_events') {
+      this.subscriptions.delete(request.subscription);
+    }
+    queueMicrotask(() => {
+      if (this.readyState!==this.OPEN) return;
+      this.receive({id:request.id, type:'result', success:true,
+        result:request.type==='home_floorplan/viewer' ? emptyPlan(request.floor || 'upper') : null});
+    });
+  }
+  close() {
+    if (this.readyState!==this.OPEN) return;
+    this.readyState=3;
+    this.subscriptions.clear();
+    this.emit('close');
+  }
+}
+
+function hawsFixture(t, firstSocketOptions) {
+  const f=fixture(), sockets=[new Socket(firstSocketOptions)];
+  const client=new Connection(sockets[0], {
+    setupRetry:0,
+    createSocket:async () => {
+      const socket=new Socket();
+      sockets.push(socket);
+      return socket;
+    }
+  });
+  t.after(async () => {
+    f.panel.isConnected=false;
+    f.panel.disconnectedCallback();
+    await flush();
+    client.close();
+  });
+  f.panel.hass=f.hass({value:client}, {callWS:request => client.sendMessagePromise(request)});
+  const reconnect=async () => {
+    const ready=new Promise(resolve => {
+      const listener=() => {client.removeEventListener('ready', listener); resolve();};
+      client.addEventListener('ready', listener);
+    });
+    sockets.at(-1).close();
+    await ready;
+    await flush();
+  };
+  return {...f, client, sockets, reconnect};
+}
+
+test('real HAWS reconnect keeps one curtain subscription across three reconnects', {timeout:3000}, async t => {
+  const f=hawsFixture(t);
+  await flush();
+  for (let cycle=0; cycle<4; cycle++) {
+    const socket=f.sockets.at(-1);
+    assert.equal(socket.sent.filter(request => request.type==='home_floorplan/curtains').length, 1);
+    assert.equal(socket.subscriptions.size, 1, 'only one backend curtain subscription may remain active');
+    assert.equal(f.client.commands.size, 1, 'only the active curtain subscription remains in HAWS');
+    assert.equal(socket.sent.filter(request => request.type==='home_floorplan/viewer').length, 1);
+    const [id]=socket.subscriptions;
+    socket.receive({id, type:'event', event:{cycle}});
+    assert.equal(f.panel.curtains.cycle, cycle);
+    if (cycle<3) await f.reconnect();
+  }
+  assert.equal(f.sockets.length, 4);
+});
+
+test('real HAWS reconnect abandons an unacknowledged old subscription without restoring it', {timeout:3000}, async t => {
+  const f=hawsFixture(t, {holdSubscription:true});
+  await flush();
+  assert.equal(f.sockets[0].sent.length, 1, 'viewer waits for its first subscription');
+  await f.reconnect();
+  const current=f.sockets.at(-1);
+  assert.equal(current.sent.filter(request => request.type==='home_floorplan/curtains').length, 1);
+  assert.equal(current.subscriptions.size, 1);
+  assert.equal(f.client.commands.size, 1);
+  assert.equal(current.sent.filter(request => request.type==='home_floorplan/viewer').length, 1);
+  assert.equal(f.panel.floor, 'upper');
+});
 
 test('errors normalize HA result envelopes, numeric disconnects and unknown values safely', () => {
   const f=fixture();
@@ -183,6 +291,50 @@ test('a late viewer reply from the replaced connection cannot overwrite the new 
   old.value.emit('disconnected'); old.value.emit('ready');
   await flush();
   assert.equal(current.reads.length, 1);
+});
+
+test('reconnect retains the latest requested floor before its reply arrives', async () => {
+  const interrupted=deferred();
+  let groundReads=0;
+  const f=fixture(), c=connection({viewer:request => {
+    const floor=request.floor || 'upper';
+    if (floor==='ground' && ++groundReads===1) return interrupted.promise;
+    return emptyPlan(floor);
+  }});
+  f.panel.hass=f.hass(c);
+  await flush();
+  assert.equal(f.panel.floor, 'upper');
+  const pending=f.panel.loadFloor('ground');
+  await flush();
+  assert.equal(f.panel.floor, 'upper', 'the new floor has not returned yet');
+  c.value.emit('disconnected'); c.value.emit('ready');
+  await flush();
+  assert.deepEqual(c.reads.map(request => request.floor || 'upper'), ['upper', 'ground', 'ground']);
+  assert.equal(f.panel.floor, 'ground');
+  const generation=f.panel.generation;
+  interrupted.resolve(emptyPlan('obsolete'));
+  await pending;
+  await flush();
+  assert.equal(f.panel.floor, 'ground');
+  assert.equal(f.panel.generation, generation);
+});
+
+test('replacement connection retains navigation awaiting its first subscription', async () => {
+  const registration=deferred();
+  const f=fixture(), old=connection({subscribe:() => registration.promise}), current=connection();
+  f.panel.initialFloor='upper';
+  f.panel.hass=f.hass(old);
+  const pending=f.panel.loadFloor('ground');
+  await flush();
+  assert.equal(old.reads.length, 0);
+  f.panel.hass=f.hass(current);
+  await flush();
+  assert.deepEqual(current.reads.map(request => request.floor), ['ground']);
+  registration.resolve(() => {});
+  await pending;
+  await flush();
+  assert.equal(old.reads.length, 0);
+  assert.equal(f.panel.floor, 'ground');
 });
 
 test('an unresolved old subscription neither blocks recovery nor publishes stale curtain data', async () => {

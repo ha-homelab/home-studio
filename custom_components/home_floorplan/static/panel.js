@@ -225,6 +225,7 @@ class HomeFloorplanPanel extends HTMLElement {
     this.readableEntities = new Set();
     this.controllableEntities = new Set();
     this.floor = null;
+    this.requestedFloor = null;
     this.floors = [];
     this.siteFeatures = false;
     this.recovery = null;
@@ -271,7 +272,7 @@ class HomeFloorplanPanel extends HTMLElement {
       if (this.pending) return this.notice('Wait for the current save to finish.', true);
       if ((this.failed || this.suspendedEdits) && !confirm('Unsaved edits will be discarded. Export inventory JSON first. Reload?')) return;
       this.discardLocalEdits();
-      this.loadFloor(this.revision === undefined ? undefined : this.floor);
+      this.loadFloor(this.requestedFloor ?? (this.revision === undefined ? undefined : this.floor));
     };
     this.$('local-export').onclick = () => this.exportLocalEdits();
     this.$('recovery-export').onclick = () => this.exportRecovery();
@@ -424,7 +425,7 @@ class HomeFloorplanPanel extends HTMLElement {
     }
     if (ready && this._hass?.user?.id && !this.started) {
       this.started = true;
-      this.loadFloor(this.floor || this.initialFloor);
+      this.loadFloor(this.requestedFloor ?? this.floor ?? this.initialFloor);
     }
   }
   stopTrackingConnection() {
@@ -737,6 +738,8 @@ class HomeFloorplanPanel extends HTMLElement {
   async loadFloor(floor = this.initialFloor) {
     if (!this._hass?.user?.id) return;
     if (this.suspendedEdits && this.localEdits) {this.showLocalEditRecovery();return;}
+    // A reconnect must finish the latest navigation, even before its first reply.
+    this.requestedFloor = floor;
     this.notice('Loading private model…');
     this.invalidateViewerLoad();
     this.mediaArtworkSnapshotKey=null;
@@ -750,12 +753,13 @@ class HomeFloorplanPanel extends HTMLElement {
     this.cancelViewerRequest = cancel;
     try {
       if (!this.curtainSubscription && this._hass.connection?.subscribeMessage) {
-        // Share registration; release it if the panel detaches before it resolves.
+        // The panel recreates this subscription on ready. Disable HAWS replay
+        // so a disconnected registration cannot also restore itself.
         const subscription = this.curtainSubscription = {};
         subscription.ready = this._hass.connection.subscribeMessage(value => {
           if (this.curtainSubscription !== subscription) return;
           this.curtains = value; this.publishEntityStates();
-        }, {type:'home_floorplan/curtains'}).then(unsubscribe => {
+        }, {type:'home_floorplan/curtains'}, {resubscribe:false}).then(unsubscribe => {
           if (this.curtainSubscription === subscription) subscription.unsubscribe = unsubscribe;
           else this.releaseCurtainSubscription(unsubscribe);
         }).catch(error => {
