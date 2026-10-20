@@ -89,6 +89,10 @@ by a floor cannot load that floor's embedded model; the integration does not
 send a partially redacted model containing hidden entity identifiers. For
 readable entities, the host also checks control permissions before exposing
 commands. Removing the edit buttons alone is not the authorization boundary.
+The host indexes model entity references when loading or publishing a generation,
+outside Home Assistant's event loop. Each request still checks current placements,
+curtain guards, and user permissions. A failed index build leaves the previous
+published generation active.
 
 ## Updates, backups, and concurrent editing
 

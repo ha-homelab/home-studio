@@ -1,5 +1,6 @@
 """Apply Home Assistant entity permissions at the authenticated host boundary."""
 import re
+from types import MappingProxyType
 
 from homeassistant.auth.permissions.const import POLICY_CONTROL, POLICY_READ
 
@@ -25,8 +26,16 @@ def referenced_entities(value):
     return set()
 
 
+def model_references(models):
+    """Index all model values once in the loader's executor, including assets."""
+    return MappingProxyType({floor: frozenset(referenced_entities(model))
+                             for floor, model in models.items()})
+
+
 def floor_entities(state, floor, profiles):
-    result = referenced_entities(state.get("models", {}).get(floor, {}))
+    # Models are immutable within an active generation. Placements and profile
+    # guards remain live inputs, and authorization is never cached here.
+    result = set(state["model_entities"][floor])
     result.update(referenced_entities(state["data"].get(floor, {})))
     for entity_id in tuple(result):
         guard = profiles.get(entity_id, {}).get("guard")

@@ -16,6 +16,8 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
 
+from .permissions import model_references
+
 _LOGGER = logging.getLogger(__name__)
 MAX_PROJECT_BYTES = 2_000_000
 MAX_NATIVE_TRIANGLES = 200_000
@@ -95,6 +97,16 @@ def validate_draft(project):
         raise NativeError("invalid_project", str(error)) from error
 
 
+def load_models(assets, floors):
+    """Read and index a generation together before it can become active."""
+    models = {floor: json.loads((assets / floor / "model-data.json").read_text(encoding="utf-8"))
+              for floor in floors}
+    references = model_references(models)
+    if set(references) != set(models):
+        raise RuntimeError("The model reference index does not match the loaded floors.")
+    return models, references
+
+
 def build_generation(project, root, generation):
     """Produce a complete immutable generation in private HA configuration storage."""
     runtime = compiler()
@@ -123,9 +135,8 @@ def build_generation(project, root, generation):
             raise NativeError("invalid_project", "The generated plan exceeds the native size budget. Reduce its geometry before publishing.")
         target.chmod(0o700)
         site = json.loads((target / "site.json").read_text(encoding="utf-8"))
-        models = {floor: json.loads((target / floor / "model-data.json").read_text(encoding="utf-8"))
-                  for floor in site["floors"]}
-        return site, models
+        models, references = load_models(target, site["floors"])
+        return site, models, references
     except Exception:
         if target.exists():
             shutil.rmtree(target)
@@ -139,9 +150,8 @@ def load_generation(root, generation):
     target = root / generation
     from .site import load_site
     site = load_site(target)
-    models = {floor: json.loads((target / floor / "model-data.json").read_text(encoding="utf-8"))
-              for floor in site["floors"]}
-    return target, site, models
+    models, references = load_models(target, site["floors"])
+    return target, site, models, references
 
 
 class NativeProject:
@@ -216,7 +226,7 @@ class NativeProject:
             raise NativeError("invalid_project", "Save a project before publishing it.")
         generation = uuid.uuid4().hex
         try:
-            site, models = await self.hass.async_add_executor_job(
+            site, models, references = await self.hass.async_add_executor_job(
                 build_generation, self.document["project"], self.root, generation)
         except NativeError:
             raise
@@ -246,7 +256,7 @@ class NativeProject:
             await self.hass.async_add_executor_job(self._cleanup, {generation, old_generation})
         except OSError:
             _LOGGER.warning("Could not clean up old Home Studio generations")
-        return self.root / generation, site, models, inventory
+        return self.root / generation, site, models, inventory, references
 
     def _cleanup(self, keep):
         for path in self.root.iterdir():
