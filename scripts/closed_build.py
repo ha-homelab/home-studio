@@ -209,8 +209,11 @@ def public_inputs(args, temporary):
     public = temporary / "public"
     public.mkdir()
     if args.public_context_artifact:
+        # The run inventory also contains the other action's skipped resolver.
+        expected_producer = {"rebuild": "closed_existing_resolve", "validate": "closed_stable_resolve"}.get(args.action)
+        require(expected_producer is not None)
         download_artifact(gh, args.public_context_artifact, public,
-                          producer=lambda name: name in {"Resolve closed public release", "closed_existing_resolve", "closed_stable_resolve"})
+                          producer=lambda name: name == expected_producer)
         context = decode_json(regular(public / "context.json", 2_000_000))
         plan_path, assets = public / "version-plan.json", public / "payloads"
         require(context["mode"] == "published" and context["release_tag"] == args.release_tag)
