@@ -208,6 +208,13 @@ async function normalizeMediaArtwork(source, signal) {
   }
 }
 
+function planLoadError(error) {
+  const detail = error?.error || error;
+  if (detail === 3 || detail?.code === 3) return 'Connection lost. Reconnecting to Home Assistant…';
+  const message = typeof detail === 'string' ? detail : detail?.message;
+  return typeof message === 'string' && message.trim() ? message.slice(0, 500) : 'Home Assistant could not load the plan. Try reloading the saved plan.';
+}
+
 class HomeFloorplanPanel extends HTMLElement {
   constructor() {
     super();
@@ -262,7 +269,7 @@ class HomeFloorplanPanel extends HTMLElement {
     this.$('menu').onclick = () => this.dispatchEvent(new CustomEvent('hass-toggle-menu', {bubbles:true, composed:true}));
     this.$('retry').onclick = () => {
       if (this.pending) return this.notice('Wait for the current save to finish.', true);
-      if (this.failed && !confirm('Unsaved edits will be discarded. Export inventory JSON first. Reload?')) return;
+      if ((this.failed || this.suspendedEdits) && !confirm('Unsaved edits will be discarded. Export inventory JSON first. Reload?')) return;
       this.discardLocalEdits();
       this.loadFloor(this.revision === undefined ? undefined : this.floor);
     };
@@ -387,8 +394,66 @@ class HomeFloorplanPanel extends HTMLElement {
       this.updateLanguageUI();
       this.port?.postMessage({type:'view_preferences',language});
     }
-    if (value?.user?.id && !this.started && this.isConnected) { this.started = true; this.loadFloor(); }
+    this.syncConnection();
     this.publishEntityStates();
+  }
+  syncConnection() {
+    if (!this.isConnected) return;
+    const connection = this._hass?.connection;
+    if (!this.connectionState || this.connectionState.connection !== connection) {
+      if (this.connectionState) {
+        this.stopTrackingConnection();
+        this.resetConnectionLoad();
+      }
+      const state = this.connectionState = {connection, ready:null};
+      state.disconnected = () => this.connectionReadiness(state, false);
+      state.readyListener = () => this.connectionReadiness(state, true);
+      connection?.addEventListener?.('disconnected', state.disconnected);
+      connection?.addEventListener?.('ready', state.readyListener);
+    }
+    // Keep a scalar snapshot: some hosts mutate their existing hass object.
+    const ready = typeof connection?.connected === 'boolean' ? connection.connected : this._hass?.connected !== false;
+    this.connectionReadiness(this.connectionState, ready);
+  }
+  connectionReadiness(state, ready) {
+    if (state !== this.connectionState || !this.isConnected) return;
+    if (state.ready !== ready) {
+      if (state.ready !== null) this.resetConnectionLoad();
+      state.ready = ready;
+      if (!ready) this.notice('Connection lost. Reconnecting to Home Assistant…', true);
+    }
+    if (ready && this._hass?.user?.id && !this.started) {
+      this.started = true;
+      this.loadFloor(this.floor || this.initialFloor);
+    }
+  }
+  stopTrackingConnection() {
+    const state = this.connectionState;
+    this.connectionState = null;
+    state?.connection?.removeEventListener?.('disconnected', state.disconnected);
+    state?.connection?.removeEventListener?.('ready', state.readyListener);
+  }
+  resetConnectionLoad() {
+    this.suspendedEdits ||= !!this.localEdits;
+    this.invalidateViewerLoad();
+    this.clearCurtainSubscription();
+    this.started = false;
+  }
+  clearCurtainSubscription() {
+    const subscription = this.curtainSubscription;
+    this.curtainSubscription = null;
+    if (subscription?.unsubscribe) this.releaseCurtainSubscription(subscription.unsubscribe);
+  }
+  releaseCurtainSubscription(unsubscribe) {
+    // A disconnected socket can reject cleanup; it must not strand a new load.
+    Promise.resolve().then(unsubscribe).catch(() => {});
+  }
+  invalidateViewerLoad() {
+    this.generation = (this.generation || 0) + 1;
+    this.cancelViewerRequest?.(); this.cancelViewerRequest = null;
+    this.clearMediaArtwork();
+    this.clearViewerLoad();
+    this.port?.close(); this.port = null;
   }
   connectedCallback() {
     globalThis.addEventListener?.('storage',this.onDryRunStorage);
@@ -397,7 +462,7 @@ class HomeFloorplanPanel extends HTMLElement {
     this.overlayDocument.addEventListener('keydown',this.onOverlayEscape,true);
     this.overlayDocument.addEventListener('pointerdown',this.onOverlayPointer,true);
     this.checkDryRunStorage();
-    if (this._hass?.user?.id && !this.started) { this.started = true; this.loadFloor(); }
+    this.syncConnection();
   }
   disconnectedCallback() {
     this.suspendedEdits ||= !!this.localEdits && !!(this.pending || this.failed);
@@ -405,15 +470,13 @@ class HomeFloorplanPanel extends HTMLElement {
     this.overlayDocument?.removeEventListener('keydown',this.onOverlayEscape,true);
     this.overlayDocument?.removeEventListener('pointerdown',this.onOverlayPointer,true);
     this.overlayDocument=null;
-    this.generation = (this.generation || 0) + 1;
-    this.clearMediaArtwork();
-    this.clearViewerLoad();
-    this.port?.close(); this.port = null; this.started = false;
+    this.stopTrackingConnection();
+    this.invalidateViewerLoad(); this.started = false;
     const iframe=this.$('iframe',false);
     iframe.onload=null;iframe.removeAttribute('src');iframe.removeAttribute('srcdoc');
     if (this.viewerURL) URL.revokeObjectURL(this.viewerURL);
     this.viewerURL = null;
-    this.curtainSubscription?.unsubscribe?.(); this.curtainSubscription = null;
+    this.clearCurtainSubscription();
     for(const tv of Object.values(this.tvFrames)){clearTimeout(tv.timer);tv.timer=null;}
     clearTimeout(this.cameraTimer);this.cameraTimer=null;
     document.removeEventListener('visibilitychange', this.tvVisibility);
@@ -675,15 +738,16 @@ class HomeFloorplanPanel extends HTMLElement {
     if (!this._hass?.user?.id) return;
     if (this.suspendedEdits && this.localEdits) {this.showLocalEditRecovery();return;}
     this.notice('Loading private model…');
-    this.clearViewerLoad();
-    this.clearMediaArtwork();
-    this.port?.close(); this.port = null;
+    this.invalidateViewerLoad();
     this.mediaArtworkSnapshotKey=null;
     clearTimeout(this.cameraTimer);this.cameraTimer=null;
     for(const tv of Object.values(this.tvFrames)){clearTimeout(tv.timer);tv.timer=null;tv.source=null;}
     this.resetModelConfig();
     this.serverCanEdit=false;this.readableEntities=new Set();this.controllableEntities=new Set();this.updateAccessUI();
-    const generation = this.generation = (this.generation || 0) + 1;
+    const generation = this.generation, hass = this._hass;
+    let cancel;
+    const cancelled = new Promise(resolve => { cancel = () => resolve(null); });
+    this.cancelViewerRequest = cancel;
     try {
       if (!this.curtainSubscription && this._hass.connection?.subscribeMessage) {
         // Share registration; release it if the panel detaches before it resolves.
@@ -693,16 +757,16 @@ class HomeFloorplanPanel extends HTMLElement {
           this.curtains = value; this.publishEntityStates();
         }, {type:'home_floorplan/curtains'}).then(unsubscribe => {
           if (this.curtainSubscription === subscription) subscription.unsubscribe = unsubscribe;
-          else unsubscribe();
+          else this.releaseCurtainSubscription(unsubscribe);
         }).catch(error => {
           if (this.curtainSubscription === subscription) this.curtainSubscription = null;
           throw error;
         });
       }
-      await this.curtainSubscription?.ready; await this.queue;
+      await Promise.race([Promise.resolve(this.curtainSubscription?.ready).then(() => this.queue), cancelled]);
       if (!this.isCurrent(generation)) return;
       this.failed=false;
-      const result = await this._hass.callWS({type:'home_floorplan/viewer', ...(floor ? {floor} : {})});
+      const result = await Promise.race([hass.callWS({type:'home_floorplan/viewer', ...(floor ? {floor} : {})}), cancelled]);
       if (!this.isCurrent(generation)) return;
       this.serverCanEdit = result.can_edit === true;
       this.runtimeMode = result.mode;this.hasEditor = result.has_editor === true;
@@ -768,8 +832,11 @@ class HomeFloorplanPanel extends HTMLElement {
         URL.revokeObjectURL(this.viewerURL); this.viewerURL = null;
         iframe.srcdoc = result.html;
       }, 8000);
-    } catch (error) { if (this.isCurrent(generation)) this.notice(`Cannot load plan: ${error.message || error}`, true); }
-    finally { this.notifySaveStatus(); }
+    } catch (error) { if (this.isCurrent(generation)) this.notice(`Cannot load plan: ${planLoadError(error)}`, true); }
+    finally {
+      if (this.cancelViewerRequest === cancel) this.cancelViewerRequest = null;
+      this.notifySaveStatus();
+    }
   }
   handleViewerMessage(message, generation) {
     if (generation !== this.generation || !this._hass?.user?.id || this.isConnected === false || this.recovery || !message || typeof message !== 'object') return;

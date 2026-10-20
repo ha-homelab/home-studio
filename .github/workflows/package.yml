@@ -147,6 +147,7 @@ jobs:
           node scripts/test-viewer-i18n.cjs
       - name: Test dry-run command gate without physical devices
         run: |
+          node --test scripts/test-panel-connection.cjs
           node --test scripts/test-dry-run.cjs
           node --test scripts/test-dry-run-browser.cjs
       - name: Test lock status and native controls without device commands

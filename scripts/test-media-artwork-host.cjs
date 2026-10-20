@@ -110,6 +110,9 @@ test('HA connection changes invalidate cached art and in-flight old-session resp
   const pending=[],f=fixture({fetch(){const request=deferred();pending.push(request);return request.promise;}});
   f.panel._hass.connection={};f.panel.started=true;f.panel.viewPreferences={};
   f.panel.publishEntityStates=()=>f.panel.refreshMediaArtwork();
+  // Model the newly loaded viewer's port; the connection suite exercises loading itself.
+  f.panel.loadFloor=()=>{f.panel.port={postMessage(message){f.messages.push(plain(message));},close(){}};};
+  f.panel.syncConnection();
   f.panel.refreshMediaArtwork();pending[0].resolve(response());await flush();
   const old=f.messages.at(-1).artwork.speaker.identity;
   f.panel.hass={...f.panel._hass,connection:{}};assert.deepEqual(f.messages.at(-1).artwork,{});await flush();

@@ -114,6 +114,11 @@ stale artwork. Images remain in memory and are not added to your project JSON.
   that floor. Adding a card does not bypass backend permissions; only
   administrators can edit its layout.
 - **Wrong initial floor:** use the exact floor ID from your own project JSON.
+- **Connection lost while loading:** the panel reloads the saved plan once Home
+  Assistant reconnects. Ordinary state updates do not repeat the request. If a
+  request still fails on a connected session, use **Reload saved plan**. Unsaved
+  layout edits remain in the card for export; export them before confirming a
+  reload. Reconnecting never repeats a save or device command.
 - **No artwork:** check the media player's native HA controls and its saved
   binding. Unsupported, oversized, or malformed images are rejected. Off and
   unavailable players do not retain artwork. A busy or small layout may have no

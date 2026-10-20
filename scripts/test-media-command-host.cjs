@@ -148,9 +148,14 @@ test('a successful saved binding immediately republishes its state without waiti
 
 test('catalogs refresh for a replacement connection and floor while routine state updates stay compact',()=>{
   const f=stateFixture(),p=f.panel;f.configure({state_entities:[]});assert.equal(f.catalogs().length,1);
+  let reloads=0,closed=0;const port=p.port;port.close=()=>{closed++;};
+  p.clearViewerLoad=()=>{};
+  // The replacement viewer negotiates a fresh catalog after its read-only reload.
+  p.loadFloor=()=>{reloads++;p.port=port;p.resetModelConfig();f.configure({state_entities:[]});};
   p.hass={...p._hass,states:{...p._hass.states,'sensor.new_choice':{state:'17',attributes:{friendly_name:'New fictional choice'}}}};
   assert.equal(f.catalogs().length,1);
   p.hass={...p._hass,connection:{}};assert.equal(f.catalogs().length,2);
+  assert.equal(reloads,1);assert.equal(closed,1);
   assert.ok(f.catalogs()[1].entities.some(([id])=>id==='sensor.new_choice'));
   p.resetModelConfig();f.configure({state_entities:[]});assert.equal(f.catalogs().length,3,'the next floor negotiates and publishes a fresh catalog');
 });
