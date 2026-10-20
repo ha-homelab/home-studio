@@ -154,8 +154,17 @@ const server=http.createServer((request,response)=>{
   if(route==='/planner/')route='/planner/index.html';
   if(!/^\/(planner|vendor)\/[\w./-]+$/.test(route) || route.includes('..')){response.writeHead(404).end();return;}
   const file=path.join(root,route),extension=path.extname(file);
-  if(!fs.existsSync(file) || !fs.statSync(file).isFile()){response.writeHead(404).end();return;}
-  let content=route==='/planner/editor.js'?editor:fs.readFileSync(file);
+  let descriptor,content;
+  try {
+    descriptor=fs.openSync(file,'r');
+    if(!fs.fstatSync(descriptor).isFile()){response.writeHead(404).end();return;}
+    content=route==='/planner/editor.js'?editor:fs.readFileSync(descriptor);
+  } catch(error) {
+    if(['ENOENT','ENOTDIR'].includes(error.code)){response.writeHead(404).end();return;}
+    throw error;
+  } finally {
+    if(descriptor!==undefined)fs.closeSync(descriptor);
+  }
   if(fixtureOnly && route==='/planner/index.html') {
     const origin=`http://127.0.0.1:${server.address().port}`;
     content=startup.allowLoopback(content.toString(),origin).replace('<head>',`<head><script>${startup.scriptFor(origin)}(${instrument.toString()})();</script>`);
