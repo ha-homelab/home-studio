@@ -117,6 +117,54 @@
         ".github/release-tests/test_prepare_version.py",
         ".github/release-tests/test_release_import_modes.py"
       ]
+    },
+    {
+      "toolkit_revision": "45d7fb35910d49a29dc643c373ab5ecaae9c0b17",
+      "pull_request": 231,
+      "description": "Forward exactly eight named environment secrets to each closed worker call and retain the required child declarations. No inherited secrets or unrelated workflow changes.",
+      "base_consumer_commit": "ec810f989d58394f3cf292e2804fb67bb9845bd9",
+      "closed_build_enabled": true,
+      "closed_specific_files": [
+        ".github/workflows/release-pipeline.yml",
+        "docs/closed-builds.md"
+      ],
+      "required_runtime_closure": [],
+      "generated_sha256": {
+        ".github/workflows/release-pipeline.yml": "7956cb61343d542840b5291ec1c398c5c78bd9ab8e4d150828061392c18a1a1a",
+        "docs/closed-builds.md": "19f8070b73cca77890c4a2461b2ca93e569ad6cedb0f4b2f246f088ed0fcf07a"
+      },
+      "verified_unchanged_sha256": {
+        "scripts/release_closed.py": "b8b73b780c7361e0e156c476d08e6745ce741fc2d4b24e091dc2e64c6692b250",
+        "scripts/release_promotion.py": "622bc6fa4ad7467437f96e0f81ecc30e21d50d4423ba1bc9658303a594d3a8c9",
+        ".github/release-tests/test_release_closed.py": "1fc8e5741db61eae1d514457273da2fabcb8ee30844625f15640bec8ee30a550",
+        "scripts/release_control.py": "7808464f92c4965c086b171520e96b252290e3034a102995b2be2d074f1c7e10",
+        "scripts/install_release_gh.py": "d6a8c094047c1d810cc0fec80f38acbf34c3c27361e40e2e70c91b2693594c48",
+        "scripts/download_release_gh.go": "85ee32824cf22bf9cc117bc0e4a95932e7321d0063789acd0c367c07aac68fdf",
+        ".github/gh/release.json": "2c2ca7a71c18a33ab752f1b21028ae4bd6ca59ef0ca0cece2705af045c1cfc32",
+        ".github/gh/LICENSE": "6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f",
+        "docs/release-github-cli.md": "c6955dba5a3a72021c3e88f73779d1f97badc35aecff8ddc9a06520e10906571"
+      },
+      "workflow_reproduction": [
+        "Check out the exact toolkit_revision and base_consumer_commit in separate directories. The base includes the child workflow required secret declarations.",
+        "In a temporary consumer copy, set both toolkit_revision fields to this revision; retain the closed_build configuration and independently pinned fuzzing.toolkit_ref.",
+        "Import scripts/install_release.py from the exact toolkit checkout and call install_release.render(temporary_consumer_root).",
+        "Copy only closed_specific_files from the returned mapping. The documentation already matches the canonical bytes in the recorded base.",
+        "Verify generated_sha256 and verified_unchanged_sha256. The only parsed workflow additions must be the eight named secrets on closed_build, closed_stable_validate and closed_rebuild.",
+        "Run the child worker, exported release and workflow contracts. Do not replace other generated consumer files."
+      ],
+      "excluded_full_render_drift": [
+        "scripts/workflow_contracts.py",
+        ".github/workflow-tests/test_workflow_yaml_contracts.py",
+        "docs/release-workflow.md",
+        "scripts/release_fuzz.py",
+        "docs/rc-fuzzing.md",
+        "RELEASING.md",
+        "scripts/release_provenance.py",
+        "scripts/merge_oci_archives.py",
+        "scripts/prepare_version.py",
+        ".github/release-tests/test_prepare_version.py",
+        ".github/release-tests/test_release_import_modes.py"
+      ]
     }
   ]
 }

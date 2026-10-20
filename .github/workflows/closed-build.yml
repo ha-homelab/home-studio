@@ -17,6 +17,23 @@ on:
       release_tag:
         type: string
         default: ''
+    secrets:
+      CLOSED_INPUT_READ_URL:
+        required: true
+      CLOSED_OUTPUT_WRITE_URL:
+        required: true
+      CLOSED_OUTPUT_READ_URL:
+        required: true
+      CLOSED_ACCEPTANCE_READ_URL:
+        required: true
+      CLOSED_INPUT_DECRYPT_KEY:
+        required: true
+      CLOSED_INPUT_VERIFY_KEY:
+        required: true
+      CLOSED_OUTPUT_ENCRYPT_KEY:
+        required: true
+      CLOSED_OUTPUT_SIGN_KEY:
+        required: true
 permissions:
   contents: read
   actions: read
