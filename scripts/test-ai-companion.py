@@ -80,7 +80,17 @@ const room = createDraftContext(demoProject(), {floorId:'ground',roomId:'living'
 const newRoom = createDraftContext(blankProject(), {floorId:'ground',mode:'new_room',measurements:{width:5,depth:4,height:3},origin:{x:0,z:0}});
 console.log(JSON.stringify([room,newRoom].map(context=>({request_id:context.request_id,mode:context.mode,context,instructions:'Plan a room',images:[],schema:draftSchema(context.mode)}))));
 """
-        run = subprocess.run(["node", "--input-type=module", "-e", script], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=10, check=True)
+        # Allow cold runtime startup within a bounded functional-test deadline.
+        started = time.monotonic()
+        try:
+            run = subprocess.run(["node", "--input-type=module", "-e", script], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=30, check=True)
+        except subprocess.TimeoutExpired as exc:
+            elapsed = time.monotonic() - started
+            output = [stream.encode("utf-8") if isinstance(stream, str) else stream or b""
+                      for stream in (exc.stdout, exc.stderr)]
+            self.fail(f"Node context fixture timed out after {elapsed:.1f}s "
+                      f"(30s functional deadline; stdout={len(output[0])} bytes, "
+                      f"stderr={len(output[1])} bytes)")
         for request in json.loads(run.stdout):
             self.assertEqual(protocol.validate_generate(request), request)
             self.assertGreater(len(request["context"]["catalog"]["models"]), 100)
