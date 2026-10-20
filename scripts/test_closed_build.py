@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 import tarfile
@@ -480,6 +481,25 @@ class BoundaryTests(unittest.TestCase):
         self.assertIn("runs-on: ubuntu-24.04", workflow)
         self.assertIn("environment: closed-build", workflow)
         self.assertIn("persist-credentials: false", workflow)
+
+    def test_closed_workflow_requires_exact_named_secrets_at_call_boundary(self):
+        workflow = (build.ROOT / ".github/workflows/closed-build.yml").read_text()
+        names = (
+            "CLOSED_INPUT_READ_URL", "CLOSED_OUTPUT_WRITE_URL", "CLOSED_OUTPUT_READ_URL",
+            "CLOSED_ACCEPTANCE_READ_URL", "CLOSED_INPUT_DECRYPT_KEY", "CLOSED_INPUT_VERIFY_KEY",
+            "CLOSED_OUTPUT_ENCRYPT_KEY", "CLOSED_OUTPUT_SIGN_KEY",
+        )
+        call = workflow.split("  workflow_call:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertIn("    secrets:\n", call, "Environment secrets still require caller forwarding and declarations")
+        declarations = call.split("    secrets:\n", 1)[1]
+        self.assertCountEqual(re.findall(r"^      ([A-Z][A-Z0-9_]*):$", declarations, re.MULTILINE), names)
+        for name in names:
+            self.assertRegex(declarations, rf"(?m)^      {name}:\n        required: true$")
+        public_steps, process = workflow.split("      - name: Process closed package\n", 1)
+        self.assertNotIn("${{ secrets.", public_steps, "Public preparation cannot receive closed credentials")
+        self.assertEqual({line.strip() for line in process.splitlines() if "${{ secrets." in line},
+                         {f"{name}: ${{{{ secrets.{name} }}}}" for name in names})
+        self.assertNotIn("secrets: inherit", workflow)
 
     def test_cli_error_canary_is_never_printed(self):
         for exception in (RuntimeError, KeyboardInterrupt, SystemExit):
