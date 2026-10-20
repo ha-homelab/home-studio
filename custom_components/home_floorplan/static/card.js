@@ -69,7 +69,7 @@ class HomeFloorplanCard extends HTMLElement {
     if (this._panel && (this._panelUser !== this._hass.user.id || this._panelAdmin !== this._hass.user.is_admin)) this._removePanel();
     if (this._panel && this._panelConnection !== this._hass.connection) {
       if (this._panel.pending || this._panel.failed) {
-        // Keep the edited viewer available; the current connection supports recovery.
+        // Keep the submitted draft available for export through session recovery.
         this._panel.hass = this._hass;
         status.hidden = false;
         status.textContent = this._panel.pending ? 'Home Assistant reconnected. Waiting for layout edits to finish saving…' :

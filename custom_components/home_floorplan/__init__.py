@@ -19,8 +19,8 @@ from homeassistant.util import dt as dt_util
 from .validation import validate_inventory
 from .site import load_site, prepare_inventory, repair_inventory
 from .curtains import async_setup_curtains, PROFILES, BOOT_SECONDS, is_motor_available, read_reported_position
-from .native import NativeError, NativeProject, StudioAssetsView, EDITOR_URL, studio_asset_files
-from .permissions import can_read, can_control, floor_entities
+from .native import NativeError, NativeProject, StudioAssetsView, EDITOR_URL, studio_asset_files, load_models
+from .permissions import can_read, can_control, floor_entities, model_references
 
 DOMAIN = "home_floorplan"
 ROOT = Path(__file__).parent
@@ -40,8 +40,10 @@ FORMATS = ("glb", "usdz", "obj", "mtl", "dae")
 CONFIG_SCHEMA = vol.Schema({DOMAIN: SITE_ADAPTER.CONFIG_SCHEMA if SITE["site_features"] else vol.Schema({})}, extra=vol.ALLOW_EXTRA)
 
 
-def _apply_active(state, assets, site, models, data):
-    state.update(assets=assets, site=site, models=models, data=data,
+def _apply_active(state, assets, site, models, data, references):
+    if set(references) != set(models) or set(models) != set(site["floors"]):
+        raise RuntimeError("The model reference index does not match the active floors.")
+    state.update(assets=assets, site=site, models=models, data=data, model_entities=references,
                  rooms={floor: {room["id"] for room in model["rooms"]} for floor, model in models.items()})
 
 
@@ -63,8 +65,7 @@ async def async_setup(hass, config):
     if SITE["floors"]:
         store = Store(hass, 1, STORE_KEY, private=True, atomic_writes=True)
         saved = await store.async_load()
-        models = await hass.async_add_executor_job(
-            lambda: {floor: json.loads((ROOT / "assets" / floor / "model-data.json").read_text(encoding="utf-8")) for floor in FLOORS})
+        models, references = await hass.async_add_executor_job(load_models, ROOT / "assets", FLOORS)
         rooms = {floor: {room["id"] for room in model["rooms"]} for floor, model in models.items()}
         if SITE["site_id"]:
             data, recovery = prepare_inventory({} if saved is None else saved, models, rooms, SITE["site_id"], validate_inventory)
@@ -75,19 +76,19 @@ async def async_setup(hass, config):
                 validate_inventory(data[floor]["items"], rooms[floor])
             recovery = None
         state.update(store=store, recovery=recovery)
-        _apply_active(state, ROOT / "assets", SITE, models, data)
+        _apply_active(state, ROOT / "assets", SITE, models, data, references)
     else:
         native = NativeProject(hass)
         active = await native.load()
         state["native"] = native
         if active:
-            assets, site, models = active
+            assets, site, models, references = active
             rooms = {floor: {room["id"] for room in model["rooms"]} for floor, model in models.items()}
             data, recovery = prepare_inventory(native.document["inventory"], models, rooms, site["site_id"], validate_inventory)
             state["recovery"] = recovery
-            _apply_active(state, assets, site, models, data)
+            _apply_active(state, assets, site, models, data, references)
         else:
-            _apply_active(state, None, SITE, {}, {})
+            _apply_active(state, None, SITE, {}, {}, model_references({}))
     hass.data[DOMAIN] = state
     return await _finish_setup(hass, state)
 
@@ -261,8 +262,8 @@ async def ws_project_publish(hass, connection, msg):
         return
     try:
         async with state["lock"]:
-            assets, site, models, data = await state["native"].publish(msg["revision"])
-            _apply_active(state, assets, site, models, data)
+            assets, site, models, data, references = await state["native"].publish(msg["revision"])
+            _apply_active(state, assets, site, models, data, references)
             state["recovery"] = None
             state["curtains"]["capture"]()
             connection.send_result(msg["id"], _project_result(state, connection))

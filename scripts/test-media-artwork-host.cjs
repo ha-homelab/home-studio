@@ -108,14 +108,18 @@ test('detach and floor generation changes discard old decoded images and release
 
 test('HA connection changes invalidate cached art and in-flight old-session responses',async()=>{
   const pending=[],f=fixture({fetch(){const request=deferred();pending.push(request);return request.promise;}});
+  const latestArtwork=()=>f.messages.findLast(message=>message.type==='media_artwork').artwork;
   f.panel._hass.connection={};f.panel.started=true;f.panel.viewPreferences={};
   f.panel.publishEntityStates=()=>f.panel.refreshMediaArtwork();
+  // Model the newly loaded viewer's port; the connection suite exercises loading itself.
+  f.panel.loadFloor=()=>{f.panel.port={postMessage(message){f.messages.push(plain(message));},close(){}};};
+  f.panel.syncConnection();
   f.panel.refreshMediaArtwork();pending[0].resolve(response());await flush();
-  const old=f.messages.at(-1).artwork.speaker.identity;
-  f.panel.hass={...f.panel._hass,connection:{}};assert.deepEqual(f.messages.at(-1).artwork,{});await flush();
+  const old=latestArtwork().speaker.identity;
+  f.panel.hass={...f.panel._hass,connection:{}};assert.deepEqual(latestArtwork(),{});await flush();
   f.panel.hass={...f.panel._hass,connection:{}};await flush();
-  pending[1].resolve(response());await flush();assert.deepEqual(f.messages.at(-1).artwork,{});
-  pending[2].resolve(response());await flush();assert.notEqual(f.messages.at(-1).artwork.speaker.identity,old);
+  pending[1].resolve(response());await flush();assert.deepEqual(latestArtwork(),{});
+  pending[2].resolve(response());await flush();assert.notEqual(latestArtwork().speaker.identity,old);
 });
 
 test('account replacement tears down the old viewer and cannot republish late artwork',async()=>{

@@ -189,7 +189,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><but
     await page.evaluate(() => missing.remove());
     assert.equal(await page.evaluate(() => subscriptions),0);
 
-    // Same-user reconnects retain the edited viewer until a pending save settles.
+    // Same-user reconnects retain the submitted draft while retiring the old viewer.
     await page.evaluate(() => { window.protectedCard = makeCard({floor:'main'}); });
     await page.waitForFunction(() => protectedCard._panel?.port);
     await page.evaluate(() => {
@@ -203,16 +203,33 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><but
       protectedPanel.handleViewerMessage({type:'save',items:[{id:'edited',entity_id:'switch.lamp'}]},protectedPanel.generation);
     });
     await page.waitForFunction(() => window.finishSave);
+    const protectedDraft=await page.evaluate(() => protectedPanel.localEdits.json);
     await page.evaluate(() => {
+      window.readCountAtReconnect=calls.length;
       window.reconnected = {...makeHass(),connection:{subscribeMessage:haConnection.subscribeMessage}};
       protectedCard.hass = reconnected;
     });
-    assert.deepEqual(await page.evaluate(() => [protectedCard._panel === protectedPanel,protectedPanel.pending,!!protectedPanel.port]),[true,1,true]);
+    assert.deepEqual(await page.evaluate(() => [protectedCard._panel === protectedPanel,protectedPanel.pending,protectedPanel.port]),[true,1,null]);
     assert.match(await page.locator('#status').textContent(),/Waiting for layout edits/);
-    assert((await page.locator('iframe').boundingBox()).height > 200,'reconnect notice leaves edited viewer usable');
+    assert.equal(await page.locator('#local-recovery').isVisible(),true);
+    assert.equal(await page.locator('iframe').isVisible(),false,'the obsolete viewer cannot issue new edits');
     await page.evaluate(() => finishSave({revision:1}));
+    await page.waitForFunction(() => !protectedPanel.pending && protectedPanel.failed);
+    assert.deepEqual(await page.evaluate(() => [protectedCard._panel === protectedPanel,protectedPanel.port,
+      protectedPanel.savedItems[0].id,saveCalls.length,calls.length===readCountAtReconnect]),[true,null,'lamp',1,true],
+      'a stale acknowledgement must not clear the draft, replay the save, or fetch a replacement automatically');
+    assert.equal(await page.evaluate(() => protectedPanel.localEdits.json),protectedDraft);
+    const reconnectDownloading=page.waitForEvent('download');
+    await page.locator('#local-export').click();
+    const reconnectDownload=await reconnectDownloading,reconnectStream=await reconnectDownload.createReadStream(),reconnectChunks=[];
+    for await (const chunk of reconnectStream) reconnectChunks.push(chunk);
+    assert.equal(Buffer.concat(reconnectChunks).toString('utf8'),protectedDraft,'export preserves the exact submitted draft');
+    page.once('dialog',dialog=>dialog.dismiss());await page.locator('#retry').click();
+    assert.equal(await page.evaluate(() => protectedPanel.localEdits.json),protectedDraft,'cancelled reload retains the draft');
+    assert.equal(await page.evaluate(() => calls.length===readCountAtReconnect),true);
+    page.once('dialog',dialog=>dialog.accept());await page.locator('#retry').click();
     await page.waitForFunction(() => protectedCard._panel !== protectedPanel && protectedCard._panel?.port);
-    assert.deepEqual(await page.evaluate(() => [protectedPanel.savedItems[0].id,protectedPanel.port,saveCalls.length]),['edited',null,1]);
+    assert.deepEqual(await page.evaluate(() => [protectedPanel.localEdits,protectedPanel.port,saveCalls.length]),[null,null,1]);
     assert.equal(await page.locator('#status').isVisible(),false);
 
     // Failed edits remain available for export; a successful explicit reload releases the hold.
@@ -224,7 +241,8 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><but
     });
     await page.waitForFunction(() => protectedPanel.failed && !protectedPanel.pending);
     await page.evaluate(() => protectedCard.hass = {...makeHass(),connection:{subscribeMessage:haConnection.subscribeMessage}});
-    assert.deepEqual(await page.evaluate(() => [protectedCard._panel === protectedPanel,protectedPanel.failed,!!protectedPanel.port]),[true,true,true]);
+    assert.deepEqual(await page.evaluate(() => [protectedCard._panel === protectedPanel,protectedPanel.failed,protectedPanel.port]),[true,true,null]);
+    assert.equal(await page.locator('#local-recovery').isVisible(),true);
     assert.match(await page.locator('#status').textContent(),/Export inventory JSON/);
     page.once('dialog',dialog => dialog.accept());
     await page.locator('#retry').click();

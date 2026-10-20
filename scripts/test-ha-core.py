@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, DEFAULT, patch
@@ -217,6 +218,107 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(legacy.read_bytes(), original)
         reopened = self.integration.NativeProject(self.hass)
         self.assertEqual((await reopened.load())[0], assets)
+
+    async def test_model_index_failure_preserves_publication_and_retry_replaces_generation(self):
+        project = json.loads((ROOT / 'planner/example-home.json').read_text())
+        project['floors'][0]['items'][-1]['entity_id'] = 'light.before'
+        native_module = sys.modules[self.integration.__package__ + '.native']
+        index_models = native_module.model_references
+        loop_thread = threading.get_ident()
+        indexed = []
+
+        def checked_index(models):
+            self.assertNotEqual(threading.get_ident(), loop_thread)
+            result = index_models(models)
+            indexed.append(result)
+            return result
+
+        await self.request('project_save', revision=0, project=project)
+        with patch.object(native_module, 'model_references', side_effect=checked_index):
+            await self.request('project_publish', revision=1)
+        state = self.hass.data['home_floorplan']
+        native = state['native']
+        previous_state = {key: state[key] for key in ('assets', 'site', 'models', 'data', 'rooms', 'model_entities')}
+        self.assertIs(state['model_entities'], indexed[0])
+        self.assertIn('light.before', state['model_entities']['main'])
+        project['floors'][0]['items'][-1]['entity_id'] = 'light.after'
+        await self.request('project_save', revision=1, project=project)
+        previous_document = copy.deepcopy(native.document)
+        previous_bytes = Path(native.store.path).read_bytes()
+
+        for failure in (RuntimeError('index failed'), {}):
+            options = {'side_effect': failure} if isinstance(failure, Exception) else {'return_value': failure}
+            with self.subTest(failure=failure), patch.object(native_module, 'model_references', **options), \
+                 patch.object(native.store, 'async_save', wraps=native.store.async_save) as save, \
+                 self.assertLogs(native_module.__name__, level='ERROR'):
+                with self.assertRaisesRegex(ValueError, 'build_failed'):
+                    await self.request('project_publish', revision=2)
+                save.assert_not_awaited()
+            self.assertEqual(native.document, previous_document)
+            self.assertEqual(Path(native.store.path).read_bytes(), previous_bytes)
+            self.assertEqual(set(native.root.iterdir()), {previous_state['assets']})
+            for key, value in previous_state.items():
+                self.assertIs(state[key], value)
+
+        with patch.object(native_module, 'model_references', side_effect=checked_index):
+            await self.request('project_publish', revision=2)
+            reopened = self.integration.NativeProject(self.hass)
+            loaded_assets, _, _, loaded_references = await reopened.load()
+        self.assertEqual(len(indexed), 3)
+        self.assertIs(state['model_entities'], indexed[1])
+        self.assertIs(loaded_references, indexed[2])
+        self.assertEqual(loaded_assets, state['assets'])
+        self.assertEqual(loaded_references, state['model_entities'])
+        self.assertIn('light.after', loaded_references['main'])
+        self.assertNotIn('light.before', loaded_references['main'])
+        self.assertIn('light.before', previous_state['model_entities']['main'])
+        self.assertNotIn('light.after', previous_state['model_entities']['main'])
+
+    async def test_legacy_model_index_loads_off_loop_and_refreshes_on_restart(self):
+        integration = self.integration
+        native_module = sys.modules[integration.__package__ + '.native']
+        index_models = native_module.model_references
+        loop_thread = threading.get_ident()
+        indexed = []
+
+        def checked_index(models):
+            self.assertNotEqual(threading.get_ident(), loop_thread)
+            result = index_models(models)
+            indexed.append(result)
+            return result
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            model_path = root / 'assets/main/model-data.json'
+            model_path.parent.mkdir(parents=True)
+            model = {'rooms': [{'id': 'room'}], 'mesh': {'metadata': {'entity': 'sensor.before'}}}
+            model_path.write_text(json.dumps(model))
+            site = {'floors': {'main': {'stem': 'main', 'title': 'Main'}},
+                    'default_floor': 'main', 'site_id': None, 'site_features': True}
+            adapter = SimpleNamespace(async_prepare=AsyncMock(), async_setup=AsyncMock())
+            first, restarted = HomeAssistant(str(root / 'first')), HomeAssistant(str(root / 'restarted'))
+            first.http, restarted.http = HTTPRecorder(), HTTPRecorder()
+            try:
+                with patch.object(integration, 'ROOT', root), patch.object(integration, 'SITE', site), \
+                     patch.object(integration, 'FLOORS', {'main': 'main'}), \
+                     patch.object(integration, 'SITE_ADAPTER', adapter, create=True), \
+                     patch.object(native_module, 'model_references', side_effect=checked_index):
+                    self.assertTrue(await integration.async_setup(first, {}))
+                    references = first.data['home_floorplan']['model_entities']
+                    self.assertEqual(references['main'], {'sensor.before'})
+                    self.assertTrue(await integration.async_unload_entry(first, None))
+                    self.assertTrue(await integration.async_setup_entry(first, None))
+                    self.assertIs(first.data['home_floorplan']['model_entities'], references)
+                    self.assertEqual(len(indexed), 1)
+                    model['mesh']['metadata']['entity'] = 'sensor.after'
+                    model_path.write_text(json.dumps(model))
+                    self.assertTrue(await integration.async_setup(restarted, {}))
+                self.assertEqual(len(indexed), 2)
+                self.assertEqual(restarted.data['home_floorplan']['model_entities']['main'], {'sensor.after'})
+                self.assertEqual(references['main'], {'sensor.before'})
+            finally:
+                await first.async_stop(force=True)
+                await restarted.async_stop(force=True)
 
     async def test_previous_native_assets_remain_readable_during_upgrade(self):
         old_root = Path(self.temp.name) / '.storage/home_floorplan/studio'

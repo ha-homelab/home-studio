@@ -230,13 +230,13 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         await self.project.save(0, document)
         document["title"] = "Changed outside storage"
         self.assertNotEqual(self.project.document["project"]["title"], document["title"])
-        assets, site, models, inventory = await self.project.publish(1)
+        assets, site, models, inventory, references = await self.project.publish(1)
         self.assertTrue((assets / "main/index.html").is_file())
         self.assertEqual(sys.path, paths)
         self.assertEqual(self.project.document["published_revision"], 1)
         restarted = native.NativeProject(self.hass, self.project.root)
-        loaded_assets, loaded_site, loaded_models = await restarted.load()
-        self.assertEqual((loaded_assets, loaded_site, loaded_models), (assets, site, models))
+        loaded_assets, loaded_site, loaded_models, loaded_references = await restarted.load()
+        self.assertEqual((loaded_assets, loaded_site, loaded_models, loaded_references), (assets, site, models, references))
         self.assertEqual(restarted.document["inventory"], inventory)
         self.assertTrue(self.hass.executor_calls)
 
@@ -299,7 +299,7 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_viewer_save_synchronizes_source_and_conflicts_with_draft(self):
         await self.project.save(0, sample())
-        assets, site, models, inventory = await self.project.publish(1)
+        assets, site, models, inventory, references = await self.project.publish(1)
         await self.project.save_inventory(inventory)
         self.assertEqual(self.project.document["revision"], 2)
         self.assertEqual(self.project.document["published_revision"], 2)
@@ -318,13 +318,13 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         await self.project.save(0, original)
         stale = []
         for _ in range(4):
-            assets, site, models, inventory = await self.project.publish(1)
+            assets, site, models, inventory, references = await self.project.publish(1)
             stale.append(copy.deepcopy(inventory["main"]))
         self.assertGreater(stale[-1]["revision"], self.project.document["revision"])
 
         state = {"native": self.project, "lock": asyncio.Lock(), "recovery": None,
                  "curtains": {"capture": lambda: None}}
-        integration._apply_active(state, assets, site, models, inventory)
+        integration._apply_active(state, assets, site, models, inventory, references)
         self.hass.data[integration.DOMAIN] = state
         placements = copy.deepcopy(inventory["main"]["items"])
         placements[0]["name"] = "Placement saved before removal"
@@ -338,7 +338,7 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         replacement = sample()
         replacement["floors"][0]["id"] = "replacement"
         await self.project.save(2, replacement)
-        _, _, _, replaced_inventory = await self.project.publish(3)
+        _, _, _, replaced_inventory, _ = await self.project.publish(3)
         self.assertNotIn("main", replaced_inventory)
         self.assertGreater(replaced_inventory["replacement"]["revision"], stale[-1]["revision"])
 
@@ -347,12 +347,12 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         recreated = sample()
         recreated["floors"][0]["items"][0]["name"] = "Newly recreated furniture"
         await restarted.save(3, recreated)
-        assets, site, models, inventory = await restarted.publish(4)
+        assets, site, models, inventory, references = await restarted.publish(4)
         self.assertGreater(inventory["main"]["revision"], replaced_inventory["replacement"]["revision"])
 
         state = {"native": restarted, "lock": asyncio.Lock(), "recovery": None,
                  "curtains": {"capture": lambda: None}}
-        integration._apply_active(state, assets, site, models, inventory)
+        integration._apply_active(state, assets, site, models, inventory, references)
         self.hass.data[integration.DOMAIN] = state
         expected = copy.deepcopy(restarted.document)
         for previous in stale:
@@ -395,7 +395,8 @@ class PermissionTests(unittest.IsolatedAsyncioTestCase):
         (self.root / "main").mkdir()
         (self.root / "main/index.html").write_text('<head></head><p>Private plan</p>', encoding="utf-8")
         model = {"rooms": [{"id": "room"}], "inventory": [{"entity_id": "light.secret"}]}
-        integration._apply_active(self.state, self.root, site, {"main": model}, {"main": {"revision": 0, "items": []}})
+        integration._apply_active(self.state, self.root, site, {"main": model}, {"main": {"revision": 0, "items": []}},
+                                  integration.model_references({"main": model}))
         self.hass.data[integration.DOMAIN] = self.state
 
     async def test_nonadmin_cannot_call_authoring_or_export_handlers(self):
@@ -420,6 +421,128 @@ class PermissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(connection.results[0]["readable_entities"], ["light.secret"])
         self.assertEqual(connection.results[0]["controllable_entities"], [])
         self.assertIn("Private plan", connection.results[0]["html"])
+
+    async def test_complete_model_index_is_immutable_and_never_rescanned_by_requests(self):
+        class GuardedModel(dict):
+            readable = True
+
+            def values(self):
+                if not self.readable:
+                    raise AssertionError("Request rescanned the immutable model")
+                return super().values()
+
+        model = GuardedModel({
+            "rooms": [{"id": "room", "light": "light.room"}],
+            "inventory": [{"entity_id": "light.secret", "linked": ["cover.blind"]}],
+            "mesh": {"positions": [0, 1, 2], "materials": [{"metadata": ["camera.mesh"]}]},
+            "assets": [{"nested": {"reference": "binary_sensor.asset"}}],
+            "sensor.key_only": "ordinary label", "invalid": ["Light.wrong", "light.bad-id", None, True],
+        })
+        expected = {"light.room", "light.secret", "cover.blind", "camera.mesh", "binary_sensor.asset"}
+        references = integration.model_references({"main": model})
+        self.assertEqual(references["main"], expected)
+        with self.assertRaises(TypeError):
+            references["main"] = frozenset()
+        with self.assertRaises(AttributeError):
+            references["main"].add("light.later")
+        integration._apply_active(self.state, self.root, self.state["site"], {"main": model},
+                                  self.state["data"], references)
+        model.readable = False
+        for _ in range(3):
+            connection = Connection(admin=False, read=expected, control={"cover.blind"})
+            integration.ws_status(self.hass, connection, {"id": 1})
+            self.assertEqual(connection.results[-1]["floors"], ["main"])
+            await integration.ws_viewer(self.hass, connection, {"id": 2, "floor": "main"})
+            self.assertEqual(set(connection.results[-1]["readable_entities"]), expected)
+            self.assertEqual(connection.results[-1]["controllable_entities"], ["cover.blind"])
+        denied = Connection(admin=False, read=expected - {"camera.mesh"})
+        await integration.ws_viewer(self.hass, denied, {"id": 3, "floor": "main"})
+        self.assertEqual(denied.errors[0][0], "unauthorized")
+
+    async def test_live_inventory_guards_and_permissions_are_not_cached(self):
+        readable, controllable = {"light.secret"}, {"light.secret"}
+        connection = Connection(admin=False, read=readable, control=controllable)
+        self.assertEqual(integration._capabilities(self.state, connection, "main")["controllable_entities"], ["light.secret"])
+        controllable.clear()
+        self.assertEqual(integration._capabilities(self.state, connection, "main")["controllable_entities"], [])
+        self.state["data"]["main"]["items"] = [{"entity_id": "cover.later", "related": "sensor.placement"}]
+        self.assertEqual(integration._status(self.state, connection)["floors"], [])
+        readable.update({"cover.later", "sensor.placement", "binary_sensor.guard"})
+        profiles = {"cover.later": {"guard": "binary_sensor.guard"}}
+        with patch.object(integration, "PROFILES", profiles):
+            self.assertEqual(integration._status(self.state, connection)["floors"], ["main"])
+            profiles["cover.later"]["guard"] = "binary_sensor.changed"
+            self.assertEqual(integration._status(self.state, connection)["floors"], [])
+            self.state["data"]["main"]["items"] = []
+            self.assertEqual(integration._capabilities(self.state, connection, "main")["readable_entities"], ["light.secret"])
+            self.assertEqual(integration._status(self.state, connection)["floors"], ["main"])
+            readable.remove("light.secret")
+            await integration.ws_viewer(self.hass, connection, {"id": 4, "floor": "main"})
+            self.assertEqual(connection.errors[-1][0], "unauthorized")
+
+    async def test_permission_revocation_during_asset_read_still_rejects_viewer(self):
+        readable = {"light.secret"}
+        connection = Connection(admin=False, read=readable)
+        original = self.hass.async_add_executor_job
+
+        async def revoke_before_read(function, *args):
+            if function is integration._read_open_file:
+                readable.clear()
+            return await original(function, *args)
+
+        with patch.object(self.hass, "async_add_executor_job", side_effect=revoke_before_read):
+            await integration.ws_viewer(self.hass, connection, {"id": 5, "floor": "main"})
+        self.assertFalse(connection.results)
+        self.assertEqual(connection.errors[-1][0], "unauthorized")
+
+    async def test_missing_or_partial_index_fails_closed(self):
+        for references in (None, {}, {"other": frozenset()}):
+            with self.subTest(references=references):
+                if references is None:
+                    self.state.pop("model_entities", None)
+                else:
+                    self.state["model_entities"] = references
+                connection = Connection(admin=False)
+                with self.assertRaises(KeyError):
+                    await integration.ws_viewer(self.hass, connection, {"id": 1, "floor": "main"})
+                self.assertFalse(connection.results)
+                self.assertFalse(self.hass.executor_calls)
+        previous = dict(self.state)
+        with self.assertRaisesRegex(RuntimeError, "active floors"):
+            integration._apply_active(self.state, self.root, self.state["site"], self.state["models"],
+                                      self.state["data"], {})
+        self.assertEqual(self.state, previous)
+
+    async def test_inflight_viewer_rechecks_pinned_generation_after_replacement(self):
+        previous = {key: self.state[key] for key in ("assets", "site", "models", "data", "model_entities")}
+        new_models = {"main": {"rooms": [{"id": "other"}], "inventory": [{"entity_id": "light.new"}]}}
+        new_references = integration.model_references(new_models)
+        original = self.hass.async_add_executor_job
+        for revoke in (False, True):
+            with self.subTest(revoke=revoke):
+                integration._apply_active(self.state, previous["assets"], previous["site"],
+                                          previous["models"], previous["data"], previous["model_entities"])
+                readable = {"light.secret"}
+                connection = Connection(admin=False, read=readable)
+
+                async def replace_before_read(function, *args):
+                    if function is integration._read_open_file:
+                        integration._apply_active(self.state, self.root / "replacement", previous["site"],
+                                                  new_models, {"main": {"revision": 1, "items": []}}, new_references)
+                        if revoke:
+                            readable.clear()
+                            readable.add("light.new")
+                    return await original(function, *args)
+
+                with patch.object(self.hass, "async_add_executor_job", side_effect=replace_before_read):
+                    await integration.ws_viewer(self.hass, connection, {"id": 1, "floor": "main"})
+                if revoke:
+                    self.assertFalse(connection.results)
+                    self.assertEqual(connection.errors[-1][0], "unauthorized")
+                else:
+                    self.assertFalse(connection.errors)
+                    self.assertIn("Private plan", connection.results[-1]["html"])
+                    self.assertEqual(connection.results[-1]["readable_entities"], ["light.secret"])
 
     async def test_unknown_floor_is_not_a_path(self):
         connection = Connection()
