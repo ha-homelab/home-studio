@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.10.1] - Permission freshness and safer editing
+
+- Recheck viewer permissions after asynchronous asset reads. Role and entity
+  permission changes during loading now update editing controls, available
+  floors, and entity capabilities in the response while keeping one consistent
+  publication snapshot.
+- Keep each 2D drag attached to its starting pointer. Additional touches cannot
+  replace its undo snapshot or finish the edit. Interrupted gestures restore the
+  previous placement instead of leaving an unfinished change in the drawing.
+
+## [0.10.0] - Draw and publish inside Home Assistant
+
 - Bound pointer-motion rendering on all detected software graphics paths while
   retaining full resting resolution, lighting, and the final release frame.
 - Add 11 garden and animal designs, bringing the local Item library to 206
@@ -18,8 +30,6 @@
   animation frames; motion pauses when hidden, offscreen, inactive, or reduced
   motion is requested. Slower render profiles use slower animation intervals.
   Surroundings are temporary view preferences, not device or occupancy readings.
-
-## [0.10.0] - Draw and publish inside Home Assistant
 
 - Keep pictureless and powered-off media devices as compact launchers. Hover,
   keyboard focus, or tap opens their available controls without an empty image.

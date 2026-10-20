@@ -90,6 +90,13 @@ all entity references used by that floor. A restricted floor is rejected in
 full rather than leaking identifiers through embedded JavaScript. Curtain
 subscriptions and commands enforce their own entity permissions as well.
 
+An in-flight viewer response pins the publication's files, inventory, revisions,
+and entity references. Permission decisions are not part of that snapshot:
+after the asynchronous file open and read finish, the server checks the current
+user again and derives the visible floors, edit capability, and read/control
+lists. This prevents mixing generations while honoring role changes during
+loading. Later device commands still require their own authorization.
+
 The dashboard card may additionally lock editing for administrators. Client
 controls honor the server scope, but UI hiding never replaces server checks.
 A role/account change tears down the old viewer and capabilities. An unpublished
