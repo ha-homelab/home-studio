@@ -432,6 +432,15 @@ jobs:
     permissions:
       contents: read
       actions: read
+    secrets:
+      CLOSED_INPUT_READ_URL: ${{ secrets.CLOSED_INPUT_READ_URL }}
+      CLOSED_OUTPUT_WRITE_URL: ${{ secrets.CLOSED_OUTPUT_WRITE_URL }}
+      CLOSED_OUTPUT_READ_URL: ${{ secrets.CLOSED_OUTPUT_READ_URL }}
+      CLOSED_ACCEPTANCE_READ_URL: ${{ secrets.CLOSED_ACCEPTANCE_READ_URL }}
+      CLOSED_INPUT_DECRYPT_KEY: ${{ secrets.CLOSED_INPUT_DECRYPT_KEY }}
+      CLOSED_INPUT_VERIFY_KEY: ${{ secrets.CLOSED_INPUT_VERIFY_KEY }}
+      CLOSED_OUTPUT_ENCRYPT_KEY: ${{ secrets.CLOSED_OUTPUT_ENCRYPT_KEY }}
+      CLOSED_OUTPUT_SIGN_KEY: ${{ secrets.CLOSED_OUTPUT_SIGN_KEY }}
     with:
       action: build
       closed_request: ${{ needs.prepare.outputs.closed_request }}
@@ -493,6 +502,15 @@ jobs:
     permissions:
       contents: read
       actions: read
+    secrets:
+      CLOSED_INPUT_READ_URL: ${{ secrets.CLOSED_INPUT_READ_URL }}
+      CLOSED_OUTPUT_WRITE_URL: ${{ secrets.CLOSED_OUTPUT_WRITE_URL }}
+      CLOSED_OUTPUT_READ_URL: ${{ secrets.CLOSED_OUTPUT_READ_URL }}
+      CLOSED_ACCEPTANCE_READ_URL: ${{ secrets.CLOSED_ACCEPTANCE_READ_URL }}
+      CLOSED_INPUT_DECRYPT_KEY: ${{ secrets.CLOSED_INPUT_DECRYPT_KEY }}
+      CLOSED_INPUT_VERIFY_KEY: ${{ secrets.CLOSED_INPUT_VERIFY_KEY }}
+      CLOSED_OUTPUT_ENCRYPT_KEY: ${{ secrets.CLOSED_OUTPUT_ENCRYPT_KEY }}
+      CLOSED_OUTPUT_SIGN_KEY: ${{ secrets.CLOSED_OUTPUT_SIGN_KEY }}
     with:
       action: validate
       closed_request: ${{ needs.prepare.outputs.closed_request }}
@@ -554,6 +572,15 @@ jobs:
     permissions:
       contents: read
       actions: read
+    secrets:
+      CLOSED_INPUT_READ_URL: ${{ secrets.CLOSED_INPUT_READ_URL }}
+      CLOSED_OUTPUT_WRITE_URL: ${{ secrets.CLOSED_OUTPUT_WRITE_URL }}
+      CLOSED_OUTPUT_READ_URL: ${{ secrets.CLOSED_OUTPUT_READ_URL }}
+      CLOSED_ACCEPTANCE_READ_URL: ${{ secrets.CLOSED_ACCEPTANCE_READ_URL }}
+      CLOSED_INPUT_DECRYPT_KEY: ${{ secrets.CLOSED_INPUT_DECRYPT_KEY }}
+      CLOSED_INPUT_VERIFY_KEY: ${{ secrets.CLOSED_INPUT_VERIFY_KEY }}
+      CLOSED_OUTPUT_ENCRYPT_KEY: ${{ secrets.CLOSED_OUTPUT_ENCRYPT_KEY }}
+      CLOSED_OUTPUT_SIGN_KEY: ${{ secrets.CLOSED_OUTPUT_SIGN_KEY }}
     with:
       action: rebuild
       closed_request: ${{ needs.closed_request.outputs.closed_request }}
