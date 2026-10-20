@@ -225,6 +225,11 @@ See [dashboard and artwork setup](docs/dashboard-and-media.md) and
 [device controls](docs/device-controls.md). Updating the hosted planner alone
 does not update an existing Home Assistant installation.
 
+Generated installations can also configure [appliance and presence indicators](docs/indicators.md):
+smoke and battery status, symbolic cooktop and oven activity, and a small
+room-presence badge. These optional displays require model metadata; the
+portable planner does not yet provide a form for configuring them.
+
 For in-HA drawing and publishing, follow the [native editor guide](docs/home-assistant-editor.md).
 The commands below remain available for the separate editor and portable toolkit.
 

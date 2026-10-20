@@ -55,8 +55,18 @@ const server = http.createServer(async (request, response) => {
   }
   const relative = url.pathname === '/planner/' ? 'planner/index.html' : url.pathname.slice(1);
   const target = path.resolve(root, relative);
-  if (!target.startsWith(root + path.sep) || !fs.existsSync(target) || fs.statSync(target).isDirectory()) return response.writeHead(404).end();
-  let body = fs.readFileSync(target);
+  if (!target.startsWith(root + path.sep)) return response.writeHead(404).end();
+  let descriptor, body;
+  try {
+    descriptor = fs.openSync(target, 'r');
+    if (!fs.fstatSync(descriptor).isFile()) return response.writeHead(404).end();
+    body = fs.readFileSync(descriptor);
+  } catch (error) {
+    if (['ENOENT', 'ENOTDIR', 'EISDIR'].includes(error.code)) return response.writeHead(404).end();
+    throw error;
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
   if (relative === 'planner/index.html' && !url.searchParams.has('static')) {
     const token = `test_session_${++counter}`; connections.set(token, { connected: false });
     body = Buffer.from(body.toString().replace("connect-src 'none'", "connect-src 'self'; worker-src 'self'").replace('</head>', `<meta name="home-studio-ai-session" content="${token}"></head>`).replace('</body>', '<script type="module" src="/ai/bootstrap.js"></script></body>'));

@@ -2,6 +2,50 @@
 
 ## [Unreleased]
 
+## [0.10.1] - Safer editing and clearer device status
+
+- Recheck viewer permissions after asynchronous asset reads. Role and entity
+  permission changes during loading now update editing controls, available
+  floors, and entity capabilities in the response while keeping one consistent
+  publication snapshot.
+- Keep each 2D drag attached to its starting pointer. Additional touches cannot
+  replace its undo snapshot or finish the edit. Interrupted gestures restore the
+  previous placement instead of leaving an unfinished change in the drawing.
+- Update the optional closed-build session gateway pin so rejected requests
+  cannot stall responses by leaving their request bodies unfinished.
+- Add optional read-only smoke and battery status, cooktop and oven indicators,
+  and compact room-presence badges to generated installations. Missing,
+  disconnected, or rebound data never implies an all-clear or active heating.
+  Idle presence markers stay clear of whole-floor controls.
+- Remove repeated English fallback strings from compiled viewer translations.
+  All source language catalogs remain complete, and translated output is
+  checked against the original catalogs across all 24 languages.
+- Read browser-test fixture files through one open descriptor, avoiding a
+  filesystem check/read race and closing descriptors on failure.
+
+### Upgrade
+
+Back up Home Assistant and export your drawing JSON before updating the
+integration. Restart Home Assistant after installing the integration update,
+then reload the editor and viewer to load the new code. Existing drawings and
+entity bindings remain compatible. Generated or customized installations must
+rebuild and reinstall their viewers through their existing deployment workflow;
+updating the hosted editor alone does not update an installed plan.
+Optional appliance and presence indicators require explicit model metadata;
+see [indicator setup and limitations](docs/indicators.md). Existing models
+without this metadata keep their previous device display.
+
+### Security
+
+Viewer responses now recheck the connected account's permissions after loading
+assets, so a role or entity-permission change cannot retain outdated controls
+in a newly loaded view. Existing server-side command checks remain in place.
+Private geometry, entity bindings, and credentials stay outside public release
+assets. The optional session gateway also rejects unfinished request bodies
+without waiting indefinitely for the sender.
+
+## [0.10.0] - Draw and publish inside Home Assistant
+
 - Bound pointer-motion rendering on all detected software graphics paths while
   retaining full resting resolution, lighting, and the final release frame.
 - Add 11 garden and animal designs, bringing the local Item library to 206
@@ -18,8 +62,6 @@
   animation frames; motion pauses when hidden, offscreen, inactive, or reduced
   motion is requested. Slower render profiles use slower animation intervals.
   Surroundings are temporary view preferences, not device or occupancy readings.
-
-## [0.10.0] - Draw and publish inside Home Assistant
 
 - Keep pictureless and powered-off media devices as compact launchers. Hover,
   keyboard focus, or tap opens their available controls without an empty image.

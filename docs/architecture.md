@@ -90,6 +90,13 @@ all entity references used by that floor. A restricted floor is rejected in
 full rather than leaking identifiers through embedded JavaScript. Curtain
 subscriptions and commands enforce their own entity permissions as well.
 
+An in-flight viewer response pins the publication's files, inventory, revisions,
+and entity references. Permission decisions are not part of that snapshot:
+after the asynchronous file open and read finish, the server checks the current
+user again and derives the visible floors, edit capability, and read/control
+lists. This prevents mixing generations while honoring role changes during
+loading. Later device commands still require their own authorization.
+
 The dashboard card may additionally lock editing for administrators. Client
 controls honor the server scope, but UI hiding never replaces server checks.
 A role/account change tears down the old viewer and capabilities. An unpublished
@@ -106,6 +113,19 @@ show bounded state text and open native HA details. Sensor values retain their
 units and sign. Binary-sensor device classes supply human-readable state labels,
 and a small explicit climate projection supplies current/target temperature and
 HVAC activity. Raw attribute dictionaries are never copied to the viewer.
+
+Optional `appliance_status` and `presence_sources` metadata attach read-only
+indicators to an exact item, entity, and room binding. Rebinding invalidates
+the old association. Unknown or disconnected readings cannot produce a smoke
+all-clear, heating animation, or presence claim. Appliance overlays reuse camera
+renders; held presence appears as a fixed-size room badge, without a new WebGL
+loop or an inferred person location. See [indicator contracts](indicators.md)
+for supported states, lifecycle rules, and generated-installation setup.
+
+The shared Python `viewer_locales.py` loader compacts generated language data
+by omitting only strings identical to the English fallback. Source catalogs
+remain complete. Native and portable compilers package the same helper, while
+the existing JavaScript fallback and interpolation behavior remain unchanged.
 
 New viewers announce `state_entities` in `model_config`. They collect references
 from the model's named display configuration fields, without walking geometry.

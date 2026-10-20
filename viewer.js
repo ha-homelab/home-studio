@@ -21,7 +21,7 @@ if(model.site_features===false){
   document.querySelector('aside .note').textContent='Geometry follows your project. Verify measurements, openings and device bindings on site.';
   $('heightCaption').textContent=vt('Full-height walls and windows · ceiling {height} m.',{height:model.ceiling_height_m.toFixed(2)});
   for(const link of document.querySelectorAll('a.download'))if(link.getAttribute('href')?.endsWith('.usdz'))link.hidden=true;
-    if(!Object.keys(model.room_activity||{}).length)$('homeToggleActivity').hidden=true;
+    if(!Object.keys(model.room_activity||{}).length&&!Object.keys(model.presence_sources||{}).length)$('homeToggleActivity').hidden=true;
 }
 
 if(!model.next_floor){$('otherFloor').hidden=true;$('homeOtherFloor').hidden=true;}
@@ -553,7 +553,7 @@ function collectStateEntities(value,depth=0){
   if(typeof value==='string'&&/^[a-z_]+\.[a-z0-9_]{1,137}$/.test(value))stateEntities.add(value);
   else if(value&&typeof value==='object')for(const child of Object.values(value))collectStateEntities(child,depth+1);
 }
-for(const key of ['tv_entities','camera_entities','room_activity','receiver_activity','assumed_activity','motion_sources','motion_zones','telemetry','power_labels'])collectStateEntities(model[key]);
+for(const key of ['tv_entities','camera_entities','room_activity','receiver_activity','assumed_activity','motion_sources','motion_zones','telemetry','power_labels','appliance_status','presence_sources'])collectStateEntities(model[key]);
 bridge.postMessage({type:'model_config',model_id:model.id,state_entities:[...stateEntities],...Object.fromEntries(['tv_entities','camera_entities','room_activity','receiver_activity','assumed_activity'].map(key=>[key,model[key]]))});
 document.querySelector('aside').inert=!canEdit;if(inventoryChanged)rebuildInventoryView();setEditorStatus(appearanceRefreshNotice || 'Connected. Select an entity from the list to bind an object.');window.removeEventListener('message',init);
 });

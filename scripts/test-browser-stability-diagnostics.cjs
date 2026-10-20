@@ -784,7 +784,7 @@ function freshPreviewHarness(view = 'preview') {
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../planner/render-capacity.js'), 'utf8').replace('export function ', 'function '), context);
   vm.runInContext(`
-    let previewDirty=true,canvasSuspended=false,spaceHeld=false,size={width:934,height:824},view=${JSON.stringify(view)};
+    let drag=null,previewDirty=true,canvasSuspended=false,spaceHeld=false,size={width:934,height:824},view=${JSON.stringify(view)};
     let firstResize=false,planSize='old',map={x:0,y:0};
     const project={floors:[{elevation_m:0,walls:[],items:[{position_m:{x:7,z:9}}]}]};
     function displayedProject(){return project;}
@@ -1085,7 +1085,11 @@ test('planner recovery traces loss across resize and render without sampling nor
   assert.equal(reads,cappedReads,'The bounded trace stops GL sampling after 30 recovery operations');
 });
 
-test('planner operation tracing is opt-in and primary acceptance makes no layout probes', () => {
+test('planner operation tracing is opt-in and primary acceptance makes no layout probes', t => {
+  const fixture=fs.mkdtempSync(path.join(os.tmpdir(),'planner-trace-source-'));
+  t.after(()=>fs.rmSync(fixture,{recursive:true,force:true}));
+  fs.mkdirSync(path.join(fixture,'planner'));
+  fs.writeFileSync(path.join(fixture,'planner/editor.js'),'// Local source fixture.');
   const source=fs.readFileSync(path.join(__dirname,'test-planner-stability.cjs'),'utf8');
   const settings=source.slice(source.indexOf('const restoreLayout ='),source.indexOf('const diagnostics ='));
   const start=source.indexOf('const server=http.createServer('),end=source.indexOf('\nasync function run(',start);
@@ -1098,8 +1102,7 @@ test('planner operation tracing is opt-in and primary acceptance makes no layout
     assert.equal(traceRecovery,value==='1');
     const handle=vm.runInNewContext(source.slice(start,end)+'\nserver',{
       startup:require('./browser-startup-diagnostics.cjs').createStartupDiagnostics(),sourceHash:null,
-      http:{createServer:callback=>callback},URL,path,root:'/fixture',fixtureOnly:false,traceRecovery,
-      fs:{existsSync:()=>true,statSync:()=>({isFile:()=>true})},
+      http:{createServer:callback=>callback},URL,path,root:fixture,fixtureOnly:false,traceRecovery,fs,
       editor:'function initPreview(){renderer={ready:true};return 42;}',
     });
     let served,layoutReads=0;

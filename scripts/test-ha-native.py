@@ -462,9 +462,10 @@ class PermissionTests(unittest.IsolatedAsyncioTestCase):
     async def test_live_inventory_guards_and_permissions_are_not_cached(self):
         readable, controllable = {"light.secret"}, {"light.secret"}
         connection = Connection(admin=False, read=readable, control=controllable)
-        self.assertEqual(integration._capabilities(self.state, connection, "main")["controllable_entities"], ["light.secret"])
+        self.assertEqual(integration._capabilities(connection, integration.floor_entities(self.state, "main", {}))["controllable_entities"],
+                         ["light.secret"])
         controllable.clear()
-        self.assertEqual(integration._capabilities(self.state, connection, "main")["controllable_entities"], [])
+        self.assertEqual(integration._capabilities(connection, integration.floor_entities(self.state, "main", {}))["controllable_entities"], [])
         self.state["data"]["main"]["items"] = [{"entity_id": "cover.later", "related": "sensor.placement"}]
         self.assertEqual(integration._status(self.state, connection)["floors"], [])
         readable.update({"cover.later", "sensor.placement", "binary_sensor.guard"})
@@ -474,7 +475,8 @@ class PermissionTests(unittest.IsolatedAsyncioTestCase):
             profiles["cover.later"]["guard"] = "binary_sensor.changed"
             self.assertEqual(integration._status(self.state, connection)["floors"], [])
             self.state["data"]["main"]["items"] = []
-            self.assertEqual(integration._capabilities(self.state, connection, "main")["readable_entities"], ["light.secret"])
+            self.assertEqual(integration._capabilities(connection, integration.floor_entities(self.state, "main", profiles))["readable_entities"],
+                             ["light.secret"])
             self.assertEqual(integration._status(self.state, connection)["floors"], ["main"])
             readable.remove("light.secret")
             await integration.ws_viewer(self.hass, connection, {"id": 4, "floor": "main"})
@@ -494,6 +496,122 @@ class PermissionTests(unittest.IsolatedAsyncioTestCase):
             await integration.ws_viewer(self.hass, connection, {"id": 5, "floor": "main"})
         self.assertFalse(connection.results)
         self.assertEqual(connection.errors[-1][0], "unauthorized")
+
+    async def test_viewer_metadata_uses_permissions_after_each_asset_await(self):
+        other = {"rooms": [], "inventory": [{"entity_id": "camera.other"}]}
+        self.state["site"]["floors"]["other"] = {"stem": "other", "title": "Other"}
+        self.state["site"]["default_floor"] = "other"
+        self.state["models"]["other"] = other
+        self.state["model_entities"] = integration.model_references(self.state["models"])
+        self.state["data"]["other"] = {"revision": 0, "items": []}
+        self.state["native"] = types.SimpleNamespace(document={"revision": 7, "published_revision": 5})
+        original = self.hass.async_add_executor_job
+
+        for phase in ("open", "read"):
+            for grant in (False, True):
+                with self.subTest(phase=phase, grant=grant):
+                    readable = {"light.secret"}
+                    controllable = set()
+                    if not grant:
+                        readable.update({"camera.other", "sun.sun"})
+                        controllable.add("light.secret")
+                    connection = Connection(admin=False, read=readable, control=controllable)
+                    connection.user.is_admin = not grant
+
+                    async def change_permissions(function, *args):
+                        value = await original(function, *args)
+                        if ((phase == "read" and function is integration._read_open_file)
+                                or (phase == "open" and function.__name__ == "open")):
+                            connection.user.is_admin = grant
+                            if grant:
+                                readable.update({"camera.other", "sun.sun"})
+                                controllable.add("light.secret")
+                            else:
+                                readable.difference_update({"camera.other", "sun.sun"})
+                                controllable.clear()
+                        return value
+
+                    with patch.object(self.hass, "async_add_executor_job", side_effect=change_permissions):
+                        await integration.ws_viewer(self.hass, connection, {"id": 1, "floor": "main"})
+                    self.assertFalse(connection.errors)
+                    result = connection.results[-1]
+                    self.assertEqual(result["can_edit"], grant)
+                    self.assertEqual(result["floors"], ["main", "other"] if grant else ["main"])
+                    self.assertEqual(result["default_floor"], "other" if grant else "main")
+                    self.assertEqual(result["readable_entities"], ["light.secret", "sun.sun"] if grant else ["light.secret"])
+                    self.assertEqual(result["controllable_entities"], ["light.secret"] if grant else [])
+                    if grant:
+                        self.assertEqual((result["revision"], result["published_revision"]), (0, 5))
+                    else:
+                        # Inventory revision stays public; native publication metadata is admin-only.
+                        self.assertEqual(result["revision"], 0)
+                        self.assertNotIn("published_revision", result)
+
+    async def test_viewer_refreshes_permissions_without_mixing_publication_snapshots(self):
+        self.state["native"] = types.SimpleNamespace(document={"revision": 7, "published_revision": 5})
+        self.state["has_editor"] = True
+        self.state["data"]["main"] = {
+            "revision": 3, "items": [{"entity_id": "sensor.placement", "name": "Original placement"}],
+        }
+        old_inventory = self.state["data"]["main"]
+        readable = {"light.secret", "sensor.placement", "binary_sensor.old_guard", "sun.sun"}
+        controllable = {"light.secret"}
+        connection = Connection(admin=False, read=readable, control=controllable)
+        connection.user.is_admin = True
+        original = self.hass.async_add_executor_job
+        profiles = {"light.secret": {"guard": "binary_sensor.old_guard"}}
+
+        async def publish_before_returning_read(function, *args):
+            value = await original(function, *args)
+            if function is integration._read_open_file:
+                replacement = {"new": {"rooms": [], "inventory": [{"entity_id": "light.new"}]}}
+                site = {"floors": {"new": {"stem": "new", "title": "New"}},
+                        "default_floor": "new", "site_features": True}
+                integration._apply_active(self.state, self.root / "replacement", site, replacement,
+                                          {"new": {"revision": 11, "items": []}},
+                                          integration.model_references(replacement))
+                self.state["native"].document.update(revision=12, published_revision=11)
+                self.state["has_editor"] = False
+                old_inventory["items"].clear()
+                profiles["light.secret"]["guard"] = "binary_sensor.new_guard"
+                readable.remove("sun.sun")
+                controllable.clear()
+            return value
+
+        with patch.object(integration, "PROFILES", profiles), \
+             patch.object(self.hass, "async_add_executor_job", side_effect=publish_before_returning_read):
+            await integration.ws_viewer(self.hass, connection, {"id": 1, "floor": "main"})
+        self.assertFalse(connection.errors)
+        result = connection.results[-1]
+        self.assertIn("Private plan", result["html"])
+        self.assertEqual((result["floor"], result["floors"], result["default_floor"]), ("main", ["main"], "main"))
+        self.assertEqual((result["revision"], result["published_revision"]), (3, 5))
+        self.assertEqual(result["items"], [{"entity_id": "sensor.placement", "name": "Original placement"}])
+        self.assertEqual(result["readable_entities"], ["binary_sensor.old_guard", "light.secret", "sensor.placement"])
+        self.assertEqual(result["controllable_entities"], [])
+        self.assertTrue(result["has_editor"])
+        self.assertFalse(result["site_features"])
+
+    async def test_viewer_rechecks_inventory_and_guard_permissions_after_read(self):
+        self.state["data"]["main"]["items"] = [{"entity_id": "sensor.placement"}]
+        profiles = {"light.secret": {"guard": "binary_sensor.guard"}}
+        original = self.hass.async_add_executor_job
+        for revoked in ("sensor.placement", "binary_sensor.guard"):
+            with self.subTest(revoked=revoked):
+                readable = {"light.secret", "sensor.placement", "binary_sensor.guard"}
+                connection = Connection(admin=False, read=readable)
+
+                async def revoke_before_returning_read(function, *args):
+                    value = await original(function, *args)
+                    if function is integration._read_open_file:
+                        readable.remove(revoked)
+                    return value
+
+                with patch.object(integration, "PROFILES", profiles), \
+                     patch.object(self.hass, "async_add_executor_job", side_effect=revoke_before_returning_read):
+                    await integration.ws_viewer(self.hass, connection, {"id": 1, "floor": "main"})
+                self.assertFalse(connection.results)
+                self.assertEqual(connection.errors[-1][0], "unauthorized")
 
     async def test_missing_or_partial_index_fails_closed(self):
         for references in (None, {}, {"other": frozenset()}):
@@ -579,6 +697,7 @@ class PackagingTests(unittest.TestCase):
                 names = set(zipped.namelist())
                 self.assertIn("config_flow.py", names)
                 self.assertIn("runtime/planner/project.py", names)
+                self.assertIn("runtime/viewer_locales.py", names)
                 self.assertIn("static/studio.js", names)
                 self.assertNotIn("site.json", names)
                 self.assertNotIn("project.json", names)

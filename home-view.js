@@ -32,6 +32,10 @@ homeView = (() => {
   const motionIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="14" cy="4" r="2"/><path d="m10 22 2-7-4-3 3-5 4 5 4 1M5 11l3-4 3-1M5 21l3-6"/></svg>';
   const tvIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>';
   const receiverSpec=item=>model.receiver_activity?.[item.id];
+  const presenceSpec=item=>model.presence_sources?.[item.id];
+  const presenceForRoom=room=>model.presence_sources?presenceEvidence(model.presence_sources,items,haStates,haConnected,room):{};
+  const presenceView=Object.keys(model.presence_sources||{}).length?createPresenceView($('homeStage'),model.rooms,model.presence_sources,THREE,xm,zm):null;
+  const applianceSpec=item=>{const spec=model.appliance_status?.[item.id];return spec&&['smoke','cooktop'].includes(spec.kind)?spec:null;};
   const activityState=id=>haConnected&&!haStates[id]?.restored?haStates[id]?.state||'unknown':'unknown';
   const receiverState=item=>{const spec=receiverSpec(item);return spec.entity_id===item.entity_id&&spec.room===item.room?activityState(spec.sensor):'unbound';};
   const activityText={motion:'Motion detected',presence:'Presence detected',quiet:'No detection',experimental:'Signal activity · room coverage unverified',unverified_motion:'Motion signal · room coverage unverified',unverified_presence:'Presence signal · room coverage unverified',unverified_quiet:'No elevated signal · room coverage unverified',misplaced:'Receiver moved · room sensing disabled',unbound:'Receiver binding changed',unknown:'Activity unknown'};
@@ -41,7 +45,7 @@ homeView = (() => {
     for(const [key,value] of Object.entries(properties))if(el[key]!==value)el[key]=value;
     for(const [key,value] of Object.entries(attributes))if(el.getAttribute(key)!==value)el.setAttribute(key,value);
   };
-  const roomActivity=room=>['motion','presence','quiet','experimental'].includes(activityState(model.room_activity?.[room]))?activityState(model.room_activity[room]):'unknown';
+  const roomActivity=room=>{const state=activityState(model.room_activity?.[room]),base=model.room_activity?.[room]?['motion','presence','quiet','experimental'].includes(state)?state:'unknown':null;return model.presence_sources?mergePresenceActivity(base,presenceForRoom(room)):base||'unknown';};
   function clearActivityLocation(){
     if(activityLocation)for(const el of [activityLocation.marker,activityLocation.card])el.removeAttribute('data-activity-location');
     activityLocation=null;
@@ -75,8 +79,10 @@ homeView = (() => {
     }
     const visibleSources=new Set();
     const id=model.room_activity?.[selected],entity=haConnected?haStates[id]:null;
+    const configured=id||Object.keys(presenceForRoom(selected)).length;
     let sources=0;
-    if(entity&&!entity.restored&&['motion','presence','quiet','experimental','unknown'].includes(entity.state))for(const [itemId,value] of Object.entries(entity.activity?.evidence||{})){
+    const evidence={...(entity&&!entity.restored&&['motion','presence','quiet','experimental','unknown'].includes(entity.state)?entity.activity?.evidence:{}),...(haConnected?presenceForRoom(selected):{})};
+    for(const [itemId,value] of Object.entries(evidence)){
       const item=items.find(i=>i.id===itemId);
       if(!item||!Object.hasOwn(activityText,value))continue;
       visibleSources.add(itemId);
@@ -103,7 +109,7 @@ homeView = (() => {
     }
     updateNode($('homeActivityAll'),{},{'aria-pressed':String(!selected)});
     updateNode($('homeActivitySummary'),{textContent:!activityRooms.size?'Room sensing not configured':!haConnected?'Disconnected · activity unavailable':selected?
-      roomName(selected)+' · '+(id?activityText[roomActivity(selected)]:'Room sensing not configured')+(sources?' · Select a source for details':id?' · Source details unavailable':''):
+      roomName(selected)+' · '+(configured?activityText[roomActivity(selected)]:'Room sensing not configured')+(sources?' · Select a source for details':configured?' · Source details unavailable':''):
       `${detected} room${detected===1?'':'s'} with detection · ${signalOnly} signal only · ${unknown} unknown. Select a room for sources.`});
   }
   $('homeActivityAll').onclick=()=>selectHomeRoom('');
@@ -112,25 +118,25 @@ homeView = (() => {
     $('homeToggleActivity').setAttribute('aria-expanded',String(!$('homeActivity').hidden));
     refreshActivity();requestAnimationFrame(()=>window.resizeModel?.());
   };
-  const isMotion=item=>item.entity_id?.startsWith('binary_sensor.') && (receiverSpec(item) || model.motion_paths?.[item.id] || model.motion_sources?.[item.entity_id] || ['motion','occupancy','presence'].includes(haStates[item.entity_id]?.device_class));
+  const isMotion=item=>!presenceSpec(item)&&!applianceSpec(item)&&item.entity_id?.startsWith('binary_sensor.') && (receiverSpec(item) || model.motion_paths?.[item.id] || model.motion_sources?.[item.entity_id] || ['motion','occupancy','presence'].includes(haStates[item.entity_id]?.device_class));
   const coverIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h20M4 4v17h5V4m11 0v17h-5V4M7 5v13m10-13v13M9 16l-5-2m11 2 5-2"/></svg>';
-  const isCover=item=>item.entity_id?.startsWith('cover.');
+  const isCover=item=>!applianceSpec(item)&&!presenceSpec(item)&&item.entity_id?.startsWith('cover.');
   const curtainStateFor=item=>deriveCurtainStatus(haStates[item.entity_id],haStates);
   let curtainItem=null,curtainDirty=false,curtainCheckCycle=null;
   const curtainCommands=new Map();
   const describeCurtain=item=>{const info=curtainStateFor(item);return (info.description||describeDeviceState(deviceDisplayState(item)))+(info.position!==null?` · ${info.remembered?'last known ':'HA reports '}${info.position}% open`:' · position unknown');};
-  const isTV=item=>item.entity_id?.startsWith('media_player.');
+  const isTV=item=>!applianceSpec(item)&&!presenceSpec(item)&&item.entity_id?.startsWith('media_player.');
   const isAudio=item=>isTV(item)&&item.type!=='tv'&&!model.tv_entities?.[item.id];
-  const isLock=item=>item.entity_id?.startsWith('lock.');
+  const isLock=item=>!applianceSpec(item)&&!presenceSpec(item)&&item.entity_id?.startsWith('lock.');
   const lockStates=['locked','unlocked','locking','unlocking','jammed','open'];
   const lockIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path data-lock-shackle d="M8 10V6a4 4 0 0 1 8 0v4"/><path d="M12 14v3"/></svg>';
   const entityDomain=item=>item.entity_id?.split('.')[0]||'';
-  const isToggle=item=>['light','switch','input_boolean','fan'].includes(entityDomain(item));
+  const isToggle=item=>!applianceSpec(item)&&!presenceSpec(item)&&['light','switch','input_boolean','fan'].includes(entityDomain(item));
   const isGeneric=item=>!isToggle(item)&&!isMotion(item)&&!isTV(item)&&!isCover(item)&&!isLock(item);
   const isSupportedControl=item=>typeof item.entity_id==='string'&&item.entity_id.length<=150&&/^[a-z_]+\.[a-z0-9_]+$/.test(item.entity_id);
   const unavailableStates=['preview','disconnected','missing','unknown','unavailable','restored'];
   // Telemetry bound to a lamp-shaped object must not create a light source.
-  const isLight=item=>entityDomain(item)==='light'||isToggle(item)&&['chandelier','lamp'].includes(item.type);
+  const isLight=item=>!applianceSpec(item)&&!presenceSpec(item)&&(entityDomain(item)==='light'||isToggle(item)&&['chandelier','lamp'].includes(item.type));
   const genericIcons={
     sensor:'<path d="M4 19a9 9 0 1 1 16 0M12 14l4-6"/><circle cx="12" cy="14" r="2"/>',
     binary_sensor:'<rect x="4" y="3" width="11" height="18" rx="1"/><path d="M18 5h2v14h-2M11 12h1"/>',
@@ -139,8 +145,9 @@ homeView = (() => {
   };
   const knownValue=(values,key)=>Object.hasOwn(values,key)?values[key]:null;
   const genericGlyph=item=>'<svg viewBox="0 0 24 24" aria-hidden="true">'+(knownValue(genericIcons,entityDomain(item))||'<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/>')+'</svg>';
-  const deviceKind=item=>isMotion(item)?'motion':isTV(item)?'tv':isCover(item)?'cover':isLock(item)?'lock':isGeneric(item)?entityDomain(item):'control';
-  const deviceGlyph=item=>receiverSpec(item)?'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/></svg>':isMotion(item)?motionIcon:isTV(item)?tvIcon:isCover(item)?coverIcon:isLock(item)?lockIcon:isGeneric(item)?genericGlyph(item):icon;
+  const deviceKind=item=>presenceSpec(item)?'presence':isMotion(item)?'motion':isTV(item)?'tv':isCover(item)?'cover':isLock(item)?'lock':isGeneric(item)?entityDomain(item):'control';
+  const applianceGlyphs={smoke:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 14a4 4 0 0 1-1-8 5 5 0 0 1 9-1 4 4 0 0 1 4 9M7 19c-2-2 2-3 0-5m5 7c-2-2 2-3 0-5m5 3c-2-2 2-3 0-5"/></svg>',cooktop:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c2 5-2 6 1 9 2-1 3-3 3-4 6 7 5 15-4 15S2 13 7 8c-1 4 1 5 2 5-2-5 3-7 3-11Z"/></svg>'};
+  const deviceGlyph=item=>applianceSpec(item)?applianceGlyphs[applianceSpec(item).kind]:receiverSpec(item)||presenceSpec(item)?'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/></svg>':isMotion(item)?motionIcon:isTV(item)?tvIcon:isCover(item)?coverIcon:isLock(item)?lockIcon:isGeneric(item)?genericGlyph(item):icon;
   const classLabels={temperature:'Temperature',humidity:'Humidity',battery:'Battery',battery_charging:'Battery charging',power:'Power',energy:'Energy',illuminance:'Illuminance',aqi:'Air quality',pm25:'PM2.5',pressure:'Pressure',atmospheric_pressure:'Atmospheric pressure',duration:'Duration',water:'Water',carbon_dioxide:'Carbon dioxide',door:'Door',window:'Window',opening:'Opening',smoke:'Smoke',moisture:'Moisture',gas:'Gas',problem:'Problem',safety:'Safety',tamper:'Tamper',connectivity:'Connectivity',lock:'Lock'};
   const boundedText=(value,length=200)=>typeof value==='string'?value.slice(0,length):'';
   function describeGeneric(item,state){
@@ -192,7 +199,7 @@ homeView = (() => {
 
   for (const room of model.rooms) {
     const option = document.createElement('option'); option.value = room.id; option.textContent = roomName(room.id); $('homeRoom').append(option);
-    if(model.room_activity?.[room.id]){
+    if(model.room_activity?.[room.id]||Object.values(model.presence_sources||{}).some(spec=>spec.room===room.id)){
       const button=document.createElement('button');button.onclick=()=>selectHomeRoom(room.id);
       activityRooms.set(room.id,button);$('homeActivityRooms').append(button);
     }
@@ -318,7 +325,7 @@ homeView = (() => {
     if(id!==nativeHoverId)nativeHoverId=null;
   });
   window.addEventListener('pagehide',()=>{cancelHomeGesture();cancelNativeHover(true);discardMediaControls();});
-  document.addEventListener('visibilitychange',()=>{if(document.hidden)cancelHomeGesture();});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)cancelHomeGesture();refreshControls();});
   function rebuildControls() {
     hideMediaControls();cancelNativeHover(true);
     for(const point of points)for(const cleanup of point.controlCleanup||[])cleanup();
@@ -357,6 +364,15 @@ homeView = (() => {
       $('homeMarkers').append(marker);
       const position = new THREE.Vector3(item.position_m.x,item.position_m.y + item.dimensions_m.height / 2,item.position_m.z);
       const point = {item,marker,card,detail,details,position,object:objectsById.get(item.id),original:model.inventory.find(i=>i.id===item.id),duplicateControl:isCover(item)&&points.some(p=>p.item.entity_id===item.entity_id)}; points.push(point);
+      const appliance=applianceSpec(item);
+      if(appliance){
+        for(const element of [marker,card])element.dataset.appliance=appliance.kind;
+        if(appliance.kind==='smoke'){point.reading=document.createElement('span');point.reading.className='appliance-reading';marker.append(point.reading);}
+        if(appliance.kind==='cooktop'){
+          point.flames=createCooktopFlames(appliance);$('homeMarkers').append(point.flames);
+          if(appliance.oven_entity_id){point.oven=document.createElement('span');point.oven.className='oven-glow';point.oven.hidden=true;point.oven.setAttribute('aria-hidden','true');point.oven.append(document.createElement('span'));$('homeMarkers').append(point.oven);}
+        }
+      }
       point.controlCleanup=[marker,card].map(element=>isAudio(item)?bindMediaControlTrigger(item.id,element):bindNativeHover(item,element));
       const anchor=objectsById.get(model.control_anchors?.[item.id]);
       if(anchor)point.anchor=anchor.localToWorld(new THREE.Vector3(0,.5,.5));
@@ -428,7 +444,7 @@ homeView = (() => {
     if(!canEdit)$('homeEmpty').textContent=deviceFilter==='controls'?'No controls in this view. Choose All devices to see sensors.':'No devices are linked in this view.';
     let on=0, motion=0, unavailable=0, total=0; const counted=new Set();
     for (const point of points) {
-      const {item,marker,card,detail} = point, sensing=receiverSpec(item)?receiverState(item):null;
+      const {item,marker,card,detail} = point, sensing=receiverSpec(item)?receiverState(item):presenceSpec(item)?presenceState(item,presenceSpec(item),haStates,haConnected):null;
       const state=sensing?['motion','presence','unverified_motion','unverified_presence'].includes(sensing)?'on':['quiet','unverified_quiet'].includes(sensing)?'off':'unavailable':deviceDisplayState(item), waiting=pending.get(item.entity_id);
       const kind=deviceKind(item);
       if(marker.dataset.kind!==kind){
@@ -441,7 +457,7 @@ homeView = (() => {
       card.hidden = marker.hidden = !visible || point.duplicateControl;
       if(point.details)point.details.parentElement.hidden=card.hidden;
       marker.dataset.label=item.name;
-      if(isMotion(item) && !selected && state!=='on')marker.hidden=true;
+      if((isMotion(item)||presenceSpec(item)) && !selected && state!=='on')marker.hidden=true;
       const enabled=isGeneric(item)?!unavailableStates.includes(state):isLock(item)?lockStates.includes(state):['on','off','open','closed','opening','closing'].includes(state);
       if (waiting && state !== waiting.before && enabled) { clearTimeout(waiting.timer); pending.delete(item.entity_id); }
       const busy=pending.has(item.entity_id)||curtainCommands.has(item.entity_id);
@@ -456,10 +472,16 @@ homeView = (() => {
           invalidateShadows();
         }
       }
-      const description=(isGeneric(item)?describeGeneric(item,state):sensing?activityText[sensing]||activityText.unknown:isCover(item)?describeCurtain(item):isMotion(item)&&enabled?vt(state==='on'?'Motion detected':'No detection'):isTV(item)&&enabled?haStates[item.entity_id].state:describeDeviceState(state))+(isLight(item) && state==='on' && appearance.percent!==null?' · '+appearance.percent+'%':'')+
+      const appliance=applianceSpec(item),status=appliance?resolveApplianceStatus(item,appliance,haStates,haConnected,vt):null;
+      const oven=appliance?.oven_entity_id?resolveOvenStatus(appliance,haStates,haConnected&&item.entity_id===appliance.entity_id&&item.room===appliance.room,vt):null;
+      if(point.reading)point.reading.textContent=status.text;
+      if(point.flames)point.flames.hidden=!point.object||!active||!visible||!status.running||document.hidden;
+      if(point.oven)point.oven.hidden=!point.object||!active||!visible||!oven.running||document.hidden;
+      const description=(status?status.text+(oven?' · '+oven.text:'')+(appliance.kind==='cooktop'&&status.running?' · '+vt('Individual burners are not reported'):''):sensing?activityText[sensing]||activityText.unknown:isGeneric(item)?describeGeneric(item,state):isCover(item)?describeCurtain(item):isMotion(item)&&enabled?vt(state==='on'?'Motion detected':'No detection'):isTV(item)&&enabled?haStates[item.entity_id].state:describeDeviceState(state))+(isLight(item) && state==='on' && appearance.percent!==null?' · '+appearance.percent+'%':'')+
         (isLight(item) && state==='on' && appearance.kelvin?' · '+appearance.kelvin+' K':'');
       for (const button of [marker,card]) {
         button.dataset.activity=sensing||'';
+        if(status)button.dataset.tone=oven?.running&&status.tone==='idle'?'active':status.tone;
         button.style.setProperty('--light-rgb',appearance.rgb.join(','));
         button.style.setProperty('--light-level',String(appearance.brightness));
         button.style.setProperty('--light-fill-rgb',appearance.indicatorRGB.join(','));
@@ -498,7 +520,7 @@ homeView = (() => {
         point.overlay.material.uniforms.brightness.value=appearance.brightness;
         point.overlay.visible=state==='on';
       }
-      if (visible && !counted.has(item.entity_id)) { counted.add(item.entity_id);total++; if(state==='on'){if(isMotion(item))motion++;else on++;} if(!enabled)unavailable++; }
+      if (visible && !counted.has(item.entity_id)) { counted.add(item.entity_id);total++; if(state==='on'){if(isMotion(item)||presenceSpec(item))motion++;else on++;} if(!enabled)unavailable++; }
     }
     refreshTVPreviews();
     updateTelemetryPreviews(haStates,haConnected);
@@ -508,11 +530,12 @@ homeView = (() => {
     for (const label of labels) {
       label.power=roomPowerText(label.room,selected);
       label.el.hidden=(!roomLabels&&!selected)||!!selected&&(label.room!==selected||!label.power);
-      const value=activityState(model.room_activity?.[label.room]);
+      const value=roomActivity(label.room);
       label.el.dataset.activity=value||'unknown';
       label.el.title=roomName(label.room)+(label.power?' · '+label.power:'')+' · '+(activityText[value]||activityText.unknown);
       label.el.setAttribute('aria-description',label.el.title);
     }
+    presenceView?.update(items,haStates,haConnected,active&&roomLabels&&!document.hidden,selected);
     $('homeSummary').textContent=vt('{on} on · {total} linked · {motion} active sensors · {unavailable} unavailable',{on,total,motion,unavailable});
     $('homeEmpty').hidden=total>0;
     $('homeFeedback').textContent=errorText([...errors.values()].at(-1))||(!renderer ? vt('The 3D view is unavailable in this browser. Use the device cards to control your lights.') : '');
@@ -530,6 +553,7 @@ homeView = (() => {
       details:()=>openEntityDetails(item),power:()=>activateDevice(item,false,true)})));
   }
   function activateDevice(item,quick=true,tvPower=false) {
+    if(applianceSpec(item)||presenceSpec(item)){openEntityDetails(item);return;}
     const state=deviceDisplayState(item);
     if(!tvPower&&isAudio(item)){const anchor=points.find(point=>point.item.id===item.id)?.marker;if(showMediaControls(item.id,anchor,{focus:true}))return;}
     if(receiverSpec(item)&&bridge&&haConnected){inspectActivitySource(item);return;}
@@ -709,6 +733,11 @@ homeView = (() => {
       step.el.style.left=((p.x+1)*rect.width/2)+'px';step.el.style.top=((1-p.y)*rect.height/2)+'px';
       step.el.style.setProperty('--angle',(Math.atan2(-(q.y-p.y)*rect.height,(q.x-p.x)*rect.width)*180/Math.PI+90)+'deg');
     }
+    presenceView?.render(camera,rect);
+    for(const point of points){
+      if(point.flames)positionCooktopFlames(point.flames,point.object,camera,rect,THREE);
+      if(point.oven)positionOvenGlow(point.oven,point.object,camera,rect,THREE);
+    }
     positionMediaPreviews(camera,rect,selected);
   }
 
@@ -861,6 +890,6 @@ homeView = (() => {
     $('homeToggleControls').textContent=vt(controlsCollapsed?'Show controls':'Hide controls');
     for(const label of labels)label.el.setAttribute('aria-label',vt('Focus room')+': '+roomName(label.room));
   }
-  return {get active(){return active},releaseGPU(){roomLighting?.releaseGPU();},dispose(){roomLighting?.dispose();},dismissOverlays,refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
+  return {get active(){return active},releaseGPU(){roomLighting?.releaseGPU();},dispose(){roomLighting?.dispose();presenceView?.dispose();},dismissOverlays,refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
     get illuminated(){return points.filter(p=>p.overlay?.visible && active).map(p=>p.item.id)}};
 })();
