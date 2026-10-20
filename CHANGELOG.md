@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [0.10.1] - Permission freshness and safer editing
+## [0.10.1] - Safer editing and clearer device status
 
 - Recheck viewer permissions after asynchronous asset reads. Role and entity
   permission changes during loading now update editing controls, available
@@ -13,6 +13,15 @@
   previous placement instead of leaving an unfinished change in the drawing.
 - Update the optional closed-build session gateway pin so rejected requests
   cannot stall responses by leaving their request bodies unfinished.
+- Add optional read-only smoke and battery status, cooktop and oven indicators,
+  and compact room-presence badges to generated installations. Missing,
+  disconnected, or rebound data never implies an all-clear or active heating.
+  Idle presence markers stay clear of whole-floor controls.
+- Remove repeated English fallback strings from compiled viewer translations.
+  All source language catalogs remain complete, and translated output is
+  checked against the original catalogs across all 24 languages.
+- Read browser-test fixture files through one open descriptor, avoiding a
+  filesystem check/read race and closing descriptors on failure.
 
 ### Upgrade
 
@@ -22,6 +31,9 @@ then reload the editor and viewer to load the new code. Existing drawings and
 entity bindings remain compatible. Generated or customized installations must
 rebuild and reinstall their viewers through their existing deployment workflow;
 updating the hosted editor alone does not update an installed plan.
+Optional appliance and presence indicators require explicit model metadata;
+see [indicator setup and limitations](docs/indicators.md). Existing models
+without this metadata keep their previous device display.
 
 ### Security
 

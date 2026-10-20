@@ -114,6 +114,19 @@ units and sign. Binary-sensor device classes supply human-readable state labels,
 and a small explicit climate projection supplies current/target temperature and
 HVAC activity. Raw attribute dictionaries are never copied to the viewer.
 
+Optional `appliance_status` and `presence_sources` metadata attach read-only
+indicators to an exact item, entity, and room binding. Rebinding invalidates
+the old association. Unknown or disconnected readings cannot produce a smoke
+all-clear, heating animation, or presence claim. Appliance overlays reuse camera
+renders; held presence appears as a fixed-size room badge, without a new WebGL
+loop or an inferred person location. See [indicator contracts](indicators.md)
+for supported states, lifecycle rules, and generated-installation setup.
+
+The shared Python `viewer_locales.py` loader compacts generated language data
+by omitting only strings identical to the English fallback. Source catalogs
+remain complete. Native and portable compilers package the same helper, while
+the existing JavaScript fallback and interpolation behavior remain unchanged.
+
 New viewers announce `state_entities` in `model_config`. They collect references
 from the model's named display configuration fields, without walking geometry.
 The trusted host unions those references with saved bindings, `sun.sun` and
