@@ -495,6 +495,77 @@ class BoundaryTests(unittest.TestCase):
         self.assertEqual(out.getvalue(), "CLOSED_REQUEST_REJECTED\n")
         self.assertEqual(err.getvalue(), "")
 
+    def test_nested_diagnostic_failures_cannot_expose_original_exception_chain(self):
+        class InterruptedLog:
+            def __init__(self, exception):
+                self.exception = exception
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def tell(self):
+                return 0
+
+            def write(self, _):
+                raise self.exception(MARKER)
+
+        for stage in ("format", "write"):
+            for exception in (RuntimeError, KeyboardInterrupt, SystemExit):
+                failure = (patch.object(build.traceback, "format_exc", side_effect=exception(MARKER))
+                           if stage == "format" else patch.object(Path, "open", return_value=InterruptedLog(exception)))
+                with self.subTest(stage=stage, exception=exception), failure, \
+                     patch.dict(os.environ, {}, clear=True), \
+                     patch.object(build, "execute", side_effect=RuntimeError(MARKER)), \
+                     contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                    result = build.main(["--action", "build", "--prepared-root", "/unused"])
+                self.assertEqual(result, 1)
+                self.assertEqual(out.getvalue(), "CLOSED_BUILD_REJECTED\n")
+                self.assertEqual(err.getvalue(), "")
+
+    def test_temporary_directory_entry_and_cleanup_failures_are_private(self):
+        class InterruptedDirectory:
+            def __init__(self, stage, exception):
+                self.stage, self.exception = stage, exception
+
+            def __enter__(self):
+                if self.stage == "entry":
+                    raise self.exception(MARKER)
+                return "/unused"
+
+            def __exit__(self, *_):
+                raise self.exception(MARKER)
+
+        for stage in ("entry", "cleanup"):
+            for exception in (OSError, KeyboardInterrupt, SystemExit):
+                with self.subTest(stage=stage, exception=exception), patch.dict(os.environ, {}, clear=True), \
+                     patch.object(build.tempfile, "TemporaryDirectory", return_value=InterruptedDirectory(stage, exception)), \
+                     patch.object(build, "execute", return_value="CLOSED_CANDIDATE_STORED") as execute, \
+                     patch.object(Path, "exists", return_value=False), \
+                     contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                    result = build.main(["--action", "build", "--prepared-root", "/unused"])
+                self.assertEqual(result, 1)
+                self.assertEqual(out.getvalue(), "CLOSED_BUILD_REJECTED\n")
+                self.assertEqual(err.getvalue(), "")
+                self.assertEqual(execute.call_count, int(stage == "cleanup"))
+
+    def test_diagnostic_upload_interruptions_remain_fixed_status(self):
+        environment = {name: "fictional" for name in (
+            "CLOSED_OUTPUT_ENCRYPT_KEY", "CLOSED_OUTPUT_SIGN_KEY", "CLOSED_OUTPUT_WRITE_URL")}
+        environment.update(GITHUB_RUN_ID="1", GITHUB_RUN_ATTEMPT="1")
+        for exception in (RuntimeError, KeyboardInterrupt, SystemExit):
+            with self.subTest(exception=exception), patch.dict(os.environ, environment, clear=True), \
+                 patch.object(build, "execute", side_effect=RuntimeError(MARKER)), \
+                 patch.object(build, "seal", return_value=b"fictional encrypted diagnostic"), \
+                 patch.object(build, "transport", side_effect=exception(MARKER)), \
+                 contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                result = build.main(["--action", "build", "--prepared-root", "/unused", "--closed-request", "fixture"])
+            self.assertEqual(result, 1)
+            self.assertEqual(out.getvalue(), "CLOSED_DIAGNOSTIC_UPLOAD_FAILED\n")
+            self.assertEqual(err.getvalue(), "")
+
     def test_transport_rejects_insecure_or_redirected_capabilities(self):
         for url in ("http://example.com/a", "https://name:secret@example.com/a", "https://example.com:80/a", "https://example.com/a#secret"):
             with self.assertRaises(build.Rejected):

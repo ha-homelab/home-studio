@@ -591,34 +591,40 @@ def main(argv=None):
         print("CLOSED_REQUEST_REJECTED")
         return 1
     status, code = "CLOSED_BUILD_REJECTED", 1
-    os.umask(0o077)
-    with tempfile.TemporaryDirectory(prefix="closed-build-", ignore_cleanup_errors=True) as directory:
-        temporary = Path(directory)
-        try:
-            status = prepare(args, temporary) if args.action == "prepare" else execute(args, temporary)
-            code = 0
-        except (Exception, KeyboardInterrupt, SystemExit):
-            # Interrupts and explicit exits also stay behind the fixed public status boundary.
-            # Exception details, including network/Docker failures, stay in the closed log.
+    try:
+        os.umask(0o077)
+        with tempfile.TemporaryDirectory(prefix="closed-build-", ignore_cleanup_errors=True) as directory:
+            temporary = Path(directory)
             try:
-                with (temporary / "private.log").open("ab") as log:
-                    remaining = max(0, MAX_LOG - log.tell())
-                    log.write(traceback.format_exc().encode()[:remaining])
-            except OSError:
-                # A failed local diagnostic write must never expose the exception publicly.
-                pass
-        finally:
-            try:
-                log = temporary / "private.log"
-                if (log.exists() and REQUEST.fullmatch(args.closed_request)
-                        and all(os.environ.get(key) for key in ("CLOSED_OUTPUT_ENCRYPT_KEY", "CLOSED_OUTPUT_SIGN_KEY", "CLOSED_OUTPUT_WRITE_URL"))):
-                    encrypted = seal(regular(log, MAX_LOG), os.environ["CLOSED_OUTPUT_ENCRYPT_KEY"],
-                                     os.environ["CLOSED_OUTPUT_SIGN_KEY"], purpose="diagnostic")
-                    name = args.closed_request + "/" + os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"] + ".diagnostic.json"
-                    transport(os.environ["CLOSED_OUTPUT_WRITE_URL"], data=encrypted, suffix=name)
+                status = prepare(args, temporary) if args.action == "prepare" else execute(args, temporary)
+                code = 0
             except (Exception, KeyboardInterrupt, SystemExit):
-                # An interrupted diagnostic upload must not emit a private traceback.
-                status, code = "CLOSED_DIAGNOSTIC_UPLOAD_FAILED", 1
+                # Interrupts and explicit exits also stay behind the fixed public status boundary.
+                # Exception details, including network/Docker failures, stay in the closed log.
+                try:
+                    with (temporary / "private.log").open("ab") as log:
+                        remaining = max(0, MAX_LOG - log.tell())
+                        log.write(traceback.format_exc().encode()[:remaining])
+                except (Exception, KeyboardInterrupt, SystemExit):
+                    # Formatting/writing diagnostics is inside the same private boundary.
+                    # A second interruption must not expose the original exception chain.
+                    pass
+            finally:
+                try:
+                    log = temporary / "private.log"
+                    if (log.exists() and REQUEST.fullmatch(args.closed_request)
+                            and all(os.environ.get(key) for key in ("CLOSED_OUTPUT_ENCRYPT_KEY", "CLOSED_OUTPUT_SIGN_KEY", "CLOSED_OUTPUT_WRITE_URL"))):
+                        encrypted = seal(regular(log, MAX_LOG), os.environ["CLOSED_OUTPUT_ENCRYPT_KEY"],
+                                         os.environ["CLOSED_OUTPUT_SIGN_KEY"], purpose="diagnostic")
+                        name = args.closed_request + "/" + os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"] + ".diagnostic.json"
+                        transport(os.environ["CLOSED_OUTPUT_WRITE_URL"], data=encrypted, suffix=name)
+                except (Exception, KeyboardInterrupt, SystemExit):
+                    # An interrupted diagnostic upload must not emit a private traceback.
+                    status, code = "CLOSED_DIAGNOSTIC_UPLOAD_FAILED", 1
+    except (Exception, KeyboardInterrupt, SystemExit):
+        # Temporary-directory entry/cleanup can also fail or be interrupted.
+        # Never let that outer exception chain bypass fixed public statuses.
+        status, code = "CLOSED_BUILD_REJECTED", 1
     print(status)
     return code
 
