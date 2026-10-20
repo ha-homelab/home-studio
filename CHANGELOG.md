@@ -11,6 +11,8 @@
 - Keep each 2D drag attached to its starting pointer. Additional touches cannot
   replace its undo snapshot or finish the edit. Interrupted gestures restore the
   previous placement instead of leaving an unfinished change in the drawing.
+- Update the optional closed-build session gateway pin so rejected requests
+  cannot stall responses by leaving their request bodies unfinished.
 
 ## [0.10.0] - Draw and publish inside Home Assistant
 

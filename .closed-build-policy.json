@@ -4,7 +4,7 @@
   "dependencies": {
     "tv_capture": {"repository": "https://github.com/ha-homelab/ha-lg-tv-capture.git", "commit": "c1c8f3164a27da33d0fdb0a56858700927f17ecc"},
     "onvif_room_direction": {"repository": "https://github.com/ha-homelab/ha-onvif-room-direction.git", "commit": "8c5aa149ececab788229299d1ed8727d3e547816"},
-    "access_session": {"repository": "https://github.com/ha-homelab/ha-access-session.git", "commit": "fbb02f263cc47139f5a941ced05cf64a82e01e97"},
+    "access_session": {"repository": "https://github.com/ha-homelab/ha-access-session.git", "commit": "6fd08a807247f30d1036d6ec17049c817ed03a1a"},
     "sensing_evidence": {"repository": "https://github.com/ha-homelab/sensing-evidence-kit.git", "commit": "a82465dfcaa453fe3cf8a9a59e46044f6c18839e"}
   }
 }
