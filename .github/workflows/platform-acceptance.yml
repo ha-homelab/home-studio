@@ -48,6 +48,9 @@ jobs:
         id: python
         with:
           python-version: '3.13'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
       - name: Validate the public site and source inventory
         run: python3 scripts/validate-site.py
       - name: Test archive validation, installation, backup and rollback
