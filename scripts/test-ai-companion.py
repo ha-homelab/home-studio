@@ -50,6 +50,89 @@ def response_for(profile, text=None):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_nvidia_fixed_destination_and_bounded_draft_budget(self):
+        profile = providers.PROFILES["nvidia"]
+        self.assertEqual(profile.endpoint, "https://integrate.api.nvidia.com/v1/chat/completions")
+        self.assertTrue(profile.vision)
+        payload = providers.request_payload(profile, "nvidia/nemotron-3.5-super-vl-120b-a12b", REQUEST)
+        self.assertEqual(payload["chat_template_kwargs"], {"enable_thinking": False})
+        self.assertEqual(payload["response_format"]["type"], "json_schema")
+        self.assertEqual(payload["max_tokens"], 8192)
+        gemma = providers.request_payload(profile, "google/gemma-4-31b-it", REQUEST)
+        self.assertEqual(gemma["chat_template_kwargs"], {"enable_thinking": False})
+        self.assertEqual(gemma["response_format"]["json_schema"]["schema"], REQUEST["schema"])
+        self.assertEqual(gemma["max_tokens"], 8192)
+        self.assertIs(gemma["stream"], False)
+        self.assertNotIn("chat_template_kwargs", providers.request_payload(profile, "another-model", REQUEST))
+        self.assertNotIn("chat_template_kwargs", providers.request_payload(providers.PROFILES["openrouter"], "google/gemma-4-31b-it", REQUEST))
+        self.assertNotIn(FAKE_KEY, json.dumps(payload))
+        with self.assertRaises(protocol.CompanionError):
+            providers.normalize_endpoint(profile, "https://example.invalid/v1/chat/completions")
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed to cross-check placement guidance against the validator")
+    def test_centered_rotated_placement_guidance_matches_real_validator(self):
+        # Every adapter receives the exact same geometry contract, including
+        # catalog defaults and the distinction between global centers and corners.
+        for profile in providers.PROFILES.values():
+            payload = providers.request_payload(profile, "fixture", REQUEST)
+            prompt = (payload["instructions"] if profile.protocol == "responses" else
+                      payload["system"] if profile.protocol == "anthropic" else payload["messages"][0]["content"])
+            self.assertIn(providers.PLACEMENT_RULES, prompt)
+            self.assertIn("CENTER", prompt)
+            self.assertIn("add that origin exactly once", prompt)
+            self.assertIn("dimensions_m and elevation_m as unmeasured catalog defaults", prompt)
+            self.assertIn(providers.OPENING_RULES, prompt)
+            self.assertIn("never as furniture items or wall_art proxies", prompt)
+        script = """
+import assert from 'node:assert/strict';
+import {blankProject} from './planner/model.js';
+import {createDraftContext, prepareDraft, footprintInsideRoom} from './ai/draft.js';
+const rectangle = [[0,0],[5,0],[5,4],[0,4]];
+const example = {position_m:{x:.47,y:0,z:1.02},dimensions_m:{width:2,depth:.9,height:.86},rotation_deg:90};
+assert(footprintInsideRoom(example, rectangle), 'prompt example fits with center-based coordinates');
+assert(!footprintInsideRoom({...example,position_m:{...example.position_m,x:.02}}, rectangle), 'corner-based placement crosses the wall');
+for (const origin of [{x:0,z:0},{x:-3,z:7}]) {
+  const base = blankProject();
+  const context = createDraftContext(base,{floorId:base.floors[0].id,mode:'new_room',measurements:{width:5,depth:4,height:3},origin});
+  const model = context.catalog.models.find(value=>value.model_id==='sofa_3');
+  for (const angle of [0,45,90,180,270]) {
+    const theta = angle*Math.PI/180, {width,depth} = model.dimensions_m;
+    const hx=(Math.abs(Math.cos(theta))*width+Math.abs(Math.sin(theta))*depth)/2;
+    const hz=(Math.abs(Math.sin(theta))*width+Math.abs(Math.cos(theta))*depth)/2;
+    const item = {candidate_key:'sofa',name:'Catalog sofa',model_id:model.model_id,style_id:model.default_style,
+      position_m:{x:origin.x+hx+.02,y:model.elevation_m,z:origin.z+hz+.02},dimensions_m:{...model.dimensions_m},rotation_deg:angle,evidence:'Unmeasured catalog dimensions.'};
+    const draft = {draft_version:1,request_id:context.request_id,kind:'new_room',room_name:'Measured room',items:[item],openings:[],assumptions:['Unmeasured catalog dimensions.'],needs_measurements:[]};
+    const accepted = prepareDraft(base,context,draft);
+    assert.deepEqual(accepted.project.floors[0].items[0].dimensions_m, model.dimensions_m, 'rotation preserves local catalog dimensions');
+    assert.deepEqual(accepted.project.floors[0].rooms[0].polygon, context.room.polygon, 'measured room and global origin remain unchanged');
+    const invalid = structuredClone(draft); invalid.items[0].position_m.x=origin.x+.02;
+    assert.throws(()=>prepareDraft(base,context,invalid), /complete rotated footprint/, 'validator still rejects a center at the wall');
+  }
+  const openings = [
+    {candidate_key:'door',type:'door',edge_index:0,offset_m:.9,width_m:.8,sill_m:0,head_m:2.1},
+    {candidate_key:'window',type:'window',edge_index:2,offset_m:.8,width_m:1.2,sill_m:.9,head_m:2.1}
+  ];
+  const openingDraft = {draft_version:1,request_id:context.request_id,kind:'new_room',room_name:'Measured room',items:[],openings,assumptions:['Photo-estimated opening placement.'],needs_measurements:['Confirm opening dimensions.']};
+  const accepted = prepareDraft(base,context,openingDraft).project.floors[0];
+  assert.equal(accepted.items.length,0,'openings are not represented by furniture proxies');
+  assert.equal(accepted.openings.length,2);
+  for (const candidate of openings) {
+    const added = accepted.openings.find(value=>value.type===candidate.type);
+    const wall = accepted.walls.find(value=>value.id===added.wall_id);
+    const edgeStart = context.room.polygon[candidate.edge_index];
+    const edgeEnd = context.room.polygon[(candidate.edge_index+1)%4];
+    const edgeLength = Math.hypot(edgeEnd[0]-edgeStart[0],edgeEnd[1]-edgeStart[1]);
+    const forward = JSON.stringify(wall.start)===JSON.stringify(edgeStart);
+    assert.equal(added.offset_m,forward ? candidate.offset_m : edgeLength-candidate.offset_m-candidate.width_m);
+    assert.equal(added.width_m,candidate.width_m);
+    assert.equal(added.sill_m,candidate.sill_m);
+    assert.equal(added.head_m,candidate.head_m);
+  }
+}
+"""
+        subprocess.run(["node", "--input-type=module", "-e", script], cwd=Path(__file__).resolve().parents[1],
+                       capture_output=True, text=True, timeout=30, check=True)
+
     def test_strict_json(self):
         for value in [b'{"a":1,"a":2}', b'```json\n{}\n```', b'{}{}', b'{"x":NaN}', b'{"x":1e999}', b'{"x":"\\ud800"}', b'{', b'\xff']:
             with self.subTest(value=value), self.assertRaises(protocol.CompanionError):
@@ -98,6 +181,62 @@ console.log(JSON.stringify([room,newRoom].map(context=>({request_id:context.requ
                 payload = providers.request_payload(profile, "fixture", request)
                 self.assertNotIn(FAKE_KEY, json.dumps(payload))
 
+    @unittest.skipUnless(shutil.which("node"), "Node is needed to load all real catalog descriptors")
+    def test_outbound_catalog_table_is_lossless_for_every_provider(self):
+        script = """
+import {blankProject} from './planner/model.js';
+import {createDraftContext,draftSchema} from './ai/draft.js';
+const context = createDraftContext(blankProject(),{floorId:'ground',mode:'new_room',measurements:{width:5,depth:4,height:3},origin:{x:-3,z:7}});
+console.log(JSON.stringify({request_id:context.request_id,mode:context.mode,context,instructions:'Plan a room',images:[],schema:draftSchema(context.mode)}));
+"""
+        run = subprocess.run(["node", "--input-type=module", "-e", script], cwd=Path(__file__).resolve().parents[1],
+                             capture_output=True, text=True, timeout=30, check=True)
+        request = json.loads(run.stdout)
+        original = copy.deepcopy(request)
+        self.assertEqual(len(request["context"]["catalog"]["models"]), 206)
+        for profile in providers.PROFILES.values():
+            with self.subTest(profile=profile.id):
+                payload = providers.request_payload(profile, "fixture", request)
+                if profile.protocol == "responses":
+                    text = payload["input"][0]["content"][0]["text"]
+                    schema = payload["text"]["format"]["schema"]
+                elif profile.protocol == "anthropic":
+                    text = payload["messages"][0]["content"][0]["text"]
+                    schema = payload["output_config"]["format"]["schema"]
+                else:
+                    text = payload["messages"][1]["content"]
+                    schema = payload.get("format", payload.get("response_format", {}).get("json_schema", {}).get("schema"))
+                envelope = json.loads(text)
+                compressed = envelope["context"]
+                table = compressed["catalog"]["models"]
+                rebuilt = []
+                for row in table["rows"]:
+                    self.assertEqual(len(row), len(table["columns"]))
+                    model = {}
+                    for column, value in zip(table["columns"], row):
+                        if "." in column:
+                            parent, child = column.split(".")
+                            model.setdefault(parent, {})[child] = value
+                        else:
+                            model[column] = value
+                    rebuilt.append(model)
+                self.assertEqual(rebuilt, original["context"]["catalog"]["models"])
+                # All room geometry, styles, patterns, every descriptor field,
+                # and the complete response schema survive the wire projection.
+                restored = copy.deepcopy(compressed)
+                restored["catalog"]["models"] = rebuilt
+                self.assertEqual(restored, original["context"])
+                self.assertEqual(envelope["response_schema"], original["schema"])
+                if schema is not None:
+                    self.assertEqual(schema, providers.grammar_schema(profile, original["schema"]))
+                self.assertLess(len(protocol.dumps(table)), len(protocol.dumps(rebuilt)) * .5)
+                self.assertEqual(request, original, "outbound projection must not mutate trusted context or schema")
+
+    def test_unrecognized_catalog_descriptors_are_preserved_verbatim(self):
+        for catalog in (None, {}, {"models": []}, {"models": [{"model_id": "future", "new_field": 1}]}):
+            context = {"room": {"name": "Test"}, "catalog": catalog}
+            self.assertIs(providers.prompt_context(context), context)
+
     def test_no_tools_urls_or_private_context(self):
         bad = [{"mode": "execute"}, {"request_id": "x\n"}, {"context": {"api_key": "secret"}},
                {"context": {"room": {"notes": "private"}}}, {"context": {"tools": []}},
@@ -117,7 +256,7 @@ console.log(JSON.stringify([room,newRoom].map(context=>({request_id:context.requ
                 protocol.validate_generate({**REQUEST, "images": images})
 
     def test_all_profiles_need_model_and_key_as_advertised(self):
-        self.assertEqual(len(providers.PROFILES), 15)
+        self.assertEqual(len(providers.PROFILES), 16)
         for profile in providers.PROFILES.values():
             with self.subTest(profile=profile.id):
                 _, model, key, endpoint = providers.validate_connection({"provider": profile.id, "model": "fixture-model", "api_key": FAKE_KEY})
@@ -626,6 +765,79 @@ class UpstreamTests(unittest.TestCase):
             self.generate()
         self.assertEqual(caught.exception.code, "provider_timeout")
         self.assertLess(time.monotonic() - start, 1)
+
+    def test_queued_response_headers_use_remaining_total_budget(self):
+        # Advance a synthetic clock instead of sleeping through a model queue.
+        # Exercise the real _connect path, including its TLS-stage socket limit.
+        for header_delay, succeeds in ((35, True), (89, False)):
+            with self.subTest(header_delay=header_delay):
+                clock, observed = {"now": 100.0}, {"requests": 0, "timeouts": []}
+                reply = json.dumps(response_for(providers.PROFILES["openai"])).encode()
+
+                class Socket:
+                    def settimeout(self, seconds):
+                        self.timeout = seconds
+                        observed["timeouts"].append(seconds)
+                    def connect(self, _address):
+                        observed["connect_timeout"] = self.timeout
+                        clock["now"] += 1
+                    def shutdown(self, _how):
+                        pass
+                    def close(self):
+                        pass
+
+                class TLS:
+                    def wrap_socket(self, sock, **_kwargs):
+                        observed["tls_timeout"] = sock.timeout
+                        clock["now"] += 1
+                        return sock
+
+                class Response:
+                    status = 200
+                    body = reply
+                    def getheader(self, name, default=None):
+                        return str(len(reply)) if name == "Content-Length" else default
+                    def read(self, _size):
+                        result, self.body = self.body, b""
+                        return result
+                    def close(self):
+                        pass
+
+                class Connection:
+                    sock = None
+                    def request(self, *_args, **_kwargs):
+                        observed["requests"] += 1
+                    def getresponse(self):
+                        observed["header_timeout"] = self.sock.timeout
+                        if header_delay > self.sock.timeout:
+                            raise TimeoutError("synthetic header delay")
+                        clock["now"] += header_delay
+                        return Response()
+                    def close(self):
+                        if self.sock:
+                            self.sock.close()
+
+                with patch.object(transport.time, "monotonic", side_effect=lambda: clock["now"]), \
+                     patch.object(transport.threading, "Timer") as timer, \
+                     patch.object(transport, "_resolve", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 443))]), \
+                     patch.object(transport.socket, "socket", side_effect=lambda *_args: Socket()), \
+                     patch.object(transport, "configured_context", return_value=TLS()), \
+                     patch.object(transport.http.client, "HTTPConnection", return_value=Connection()):
+                    operation = lambda: transport.generate(providers.PROFILES["openai"], "fixture", FAKE_KEY,
+                                                           providers.PROFILES["openai"].endpoint, REQUEST, transport.RequestControl())
+                    if succeeds:
+                        self.assertEqual(operation()["draft"], DRAFT)
+                    else:
+                        with self.assertRaises(protocol.CompanionError) as caught:
+                            operation()
+                        self.assertEqual(caught.exception.code, "provider_timeout")
+                    self.assertEqual(observed["connect_timeout"], 10)
+                    self.assertEqual(observed["tls_timeout"], 10)
+                    self.assertEqual(observed["header_timeout"], transport.REQUEST_TIMEOUT - 2)
+                    self.assertEqual(observed["requests"], 1)
+                    self.assertEqual(timer.call_args.args[0], transport.REQUEST_TIMEOUT)
+                    timer.return_value.start.assert_called_once()
+                    timer.return_value.cancel.assert_called_once()
 
     def test_cancel_before_network(self):
         control = transport.RequestControl()

@@ -1,15 +1,55 @@
 import { createDraftContext, draftSchema, prepareDraft } from './draft.js';
+import { processPhotoFile } from './photo-processing.js';
 
 const PHOTO_LIMIT = 6, TOTAL_BYTES = 30 * 1024 * 1024;
 const SAFE_ERRORS = {
   session_expired: 'This AI session expired. Reload this page to start another session.',
-  unauthorized: 'This AI session expired. Reload this page to start another session.',
+  session_required: 'The AI session is missing. Reload this page and connect again.',
+  session_forbidden: 'This AI session is unavailable for the current login. Reload this page and connect again.',
+  session_changed: 'The AI session changed during the request. Your plan is unchanged. Connect again before generating.',
+  session_limit: 'Too many AI sessions are open. Close unused Home Studio tabs. If this persists, try again after an older session expires.',
+  not_connected: 'The provider session is disconnected. Connect again before generating.',
+  cancellation_limit: 'This session reached its cancellation limit. Connect again to start a fresh request.',
+  not_loaded: 'The AI service is not ready. Reload the editor after Home Studio finishes starting.',
+  origin_rejected: 'The AI service rejected this editor connection. Open Home Studio again from its original Home Assistant or companion address.',
+  provider_timeout: 'The provider took too long to respond. Your plan is unchanged. Try again, request fewer objects, or choose another model.',
+  provider_connection: 'Could not connect to the selected provider. Check its availability and, for a local model, its endpoint and running server. Your plan is unchanged.',
+  provider_http: 'The provider rejected the request. Check model access, account limits, and provider availability before trying again. Your plan is unchanged.',
+  provider_size: 'The provider response exceeded the size limit. Request fewer objects or choose another model. Your plan is unchanged.',
+  provider_encoding: 'The provider returned an unsupported response encoding. Check endpoint compatibility or choose another provider. Your plan is unchanged.',
+  invalid_provider_output: 'The provider returned an incomplete or invalid draft. Try again with fewer requested objects or another model. Your plan is unchanged.',
+  dns_busy: 'An earlier network address lookup is still finishing. Wait briefly, then try again. Your plan is unchanged.',
+  endpoint_rejected: 'The local model endpoint was rejected. Use an allowed numeric loopback address and port, then connect again.',
+  request_size: 'The AI request is too large. Remove some photos or shorten the instructions, then try again. Your plan is unchanged.',
+  request_timeout: 'Sending the AI inputs timed out. Check the connection, or remove some photos and try again. Your plan is unchanged.',
+  unauthorized: 'AI access is unavailable for the current login. Sign in with an administrator account, then reload this page.',
   invalid_key: 'The provider rejected the key. Check the key and connect again.',
   upstream_auth: 'The provider rejected the key. Check the key and connect again.',
   timeout: 'The model took too long. The plan is unchanged; you can try again.',
   cancelled: 'Generation cancelled. Your plan is unchanged.',
-  busy: 'The companion is already generating a draft. Wait for it to finish or cancel it.',
+  busy: 'An AI draft is already being generated. Wait for it to finish or cancel it.',
 };
+function apiFailure(code, status, upstreamStatus) {
+  let message = SAFE_ERRORS[code];
+  if (code === 'provider_http') {
+    if ([401, 403].includes(upstreamStatus)) message = 'The provider rejected this key or its model access. Check the key and permissions, then end this session and connect again. Your plan is unchanged.';
+    else if (upstreamStatus === 429) message = 'The provider rate or usage limit was reached. Check your account limits and wait before trying again. Your plan is unchanged.';
+    else if ([400, 404, 422].includes(upstreamStatus)) message = 'The provider rejected the selected model or input format. Check that the exact model supports your photos and structured JSON, then connect again. Your plan is unchanged.';
+    else if (upstreamStatus >= 300 && upstreamStatus < 400) message = 'The provider redirected the request, so it was stopped. Check the selected endpoint before reconnecting. Your plan is unchanged.';
+  }
+  return Object.assign(new Error(message || 'The AI request failed. Check your model, endpoint, and connection, then try again. Your plan is unchanged.'), { code, status });
+}
+// Fixed categories keep model-provided names and unrelated project fields out
+// of retry instructions. The user explicitly starts every new model request.
+function draftCorrection(error) {
+  const message = String(error?.message || '');
+  if (message.includes('complete rotated footprint')) return 'The previous draft placed furniture outside the room. Use x/z as the item center and keep its entire rotated width/depth footprint inside the supplied measured room polygon. Move the item inward or omit it if it cannot fit; do not enlarge the room or change known measurements.';
+  if (message.includes('above the ceiling')) return 'The previous draft placed an item above the ceiling. Item y is its bottom elevation. Keep y plus item height at or below the supplied ceiling height; omit an item that cannot fit.';
+  if (/Opening|opening|sill|head must/.test(message)) return 'The previous draft included an invalid opening. Keep each opening on a supplied measured edge, with offset plus width within that edge and valid sill/head heights below the ceiling. Doors and passages start at floor level.';
+  if (/Unknown furniture (model|style)/.test(message)) return 'The previous draft used an unknown furniture model or style. Choose model_id and style_id only from the supplied catalog.';
+  if (message.includes('does not match this request')) return 'The previous draft did not match its request. Use the current request_id and kind exactly as supplied in this new request.';
+  return 'The previous draft failed validation. Return only the requested JSON schema, use catalog identifiers and valid measured coordinates, and check every proposed item and opening against the supplied room. Omit candidates that cannot satisfy these constraints.';
+}
 function el(tag, text, className) {
   const result = document.createElement(tag);
   if (text !== undefined) result.textContent = text;
@@ -24,7 +64,10 @@ function control(label, type, value, onChange) {
   wrapper.append(caption, input); return wrapper;
 }
 
-export function mountAiPanel(bridge, session) {
+export function mountAiPanel(bridge, sessionOrTransport) {
+  const native = typeof sessionOrTransport !== 'string';
+  const transport = native ? sessionOrTransport : null, session = native ? null : sessionOrTransport;
+  let disposed = false, providersLoaded = false, providersLoading = null;
   const panel = el('aside', undefined, 'ai-panel'); panel.id = 'ai-panel'; panel.hidden = true;
   panel.setAttribute('aria-labelledby', 'ai-title');
   // Static template only. All filenames, provider values and model text below
@@ -59,7 +102,7 @@ export function mountAiPanel(bridge, session) {
       <p id="ai-send-summary" class="ai-note"></p>
       <div class="ai-actions"><button id="ai-generate" class="primary" disabled>Generate draft</button><button id="ai-cancel-request" class="quiet" hidden>Cancel generation</button></div>
     </section>
-    <p id="ai-status" class="ai-status" role="status" aria-live="polite"></p>
+    <p id="ai-status" class="ai-status" role="status" aria-live="polite"></p><p id="ai-retry-hint" class="ai-privacy" hidden></p>
     <section id="ai-review" aria-labelledby="ai-review-title" hidden><h3 id="ai-review-title">3. Review the draft</h3>
       <p class="ai-preview-label">Preview only · not saved</p><p id="ai-review-summary"></p>
       <p class="ai-note">Purple outlines mark additions in 2D. Use the existing 2D / 3D tabs to inspect the preview. Select candidates and correct dimensions below. Editing the main plan invalidates this draft.</p>
@@ -73,11 +116,19 @@ export function mountAiPanel(bridge, session) {
   document.querySelector('.file-actions').append(open);
   const previewBadge = el('div', 'AI preview · not saved', 'ai-preview-badge'); previewBadge.hidden = true; document.querySelector('.canvas-shell').append(previewBadge);
   let providers = [], connection = null, photos = [], photoEpoch = 0, photoWorker = null, cancelPhoto = null, processing = false;
-  let contextPreviewKey = null;
+  let contextPreviewKey = null, lastDraftIssue = '';
   let controller = null, requestEpoch = 0, pending = null, review = null, connecting = false, connectionEpoch = 0, expiryTimer = null, disconnectPromise = null, connectPromise = null, cancelPromise = null;
   const selectedProvider = () => providers.find(provider => provider.id === $('provider').value);
-  const setStatus = (text, error = false) => { $('status').textContent = text; $('status').classList.toggle('ai-error', error); };
+  const setStatus = (text, error = false) => { if (disposed) return; $('status').textContent = text; $('status').classList.toggle('ai-error', error); };
   async function api(path, body, signal) {
+    if (disposed) throw new DOMException('AI panel closed.', 'AbortError');
+    if (transport) {
+      try { return await transport.request(path, body, signal); }
+      catch (error) {
+        if (error.name === 'AbortError') throw error;
+        throw apiFailure(error.code, error.status, error.upstreamStatus);
+      }
+    }
     const deadline = signal ? null : new AbortController();
     const timer = deadline ? setTimeout(() => deadline.abort(), 20000) : null;
     let response, result;
@@ -90,9 +141,7 @@ export function mountAiPanel(bridge, session) {
       throw error;
     } finally { clearTimeout(timer); }
     if (!response.ok) {
-      const code = result?.error?.code;
-      const error = new Error(SAFE_ERRORS[code] || 'The AI request failed. Check your model, endpoint, and connection, then try again. Your plan is unchanged.');
-      error.status = response.status; throw error;
+      throw apiFailure(result?.error?.code, response.status, result?.error?.upstream_status);
     }
     return result;
   }
@@ -101,6 +150,7 @@ export function mountAiPanel(bridge, session) {
     $('review').hidden = true; $('candidates').replaceChildren(); $('review-notes').replaceChildren(); $('review-confirm').checked = false;
   }
   function invalidate(message) {
+    lastDraftIssue = '';
     const hadWork = Boolean(pending || review);
     requestEpoch++; controller?.abort(); controller = null;
     if (pending) {
@@ -124,12 +174,17 @@ export function mountAiPanel(bridge, session) {
   }
   async function endSession(message) {
     const wasActive = Boolean(connection || connecting); connecting = false; connectionEpoch++;
-    forgetSession(message);
+    forgetSession(native && wasActive && !message ? 'Ending session. Photos, instructions, and the draft were cleared from the editor.' : message);
     if (wasActive) {
       // A late Connect must settle before the final Disconnect, otherwise it
       // could resurrect a key after the UI has forgotten the session.
       const connectingNow = connectPromise, cancellingNow = cancelPromise;
-      const current = Promise.allSettled([connectingNow, cancellingNow]).then(() => api('disconnect', {})).catch(() => {});
+      const endingEpoch = connectionEpoch;
+      const current = Promise.allSettled([connectingNow, cancellingNow]).then(() => api('disconnect', {})).then(() => {
+        if (native && endingEpoch === connectionEpoch && !message) setStatus('Session ended. The session key, photos, instructions, and draft were cleared.');
+      }).catch(() => {
+        if (native && endingEpoch === connectionEpoch) setStatus('Editor data cleared. Home Assistant could not confirm that the provider session ended. Its in-memory key expires automatically; reconnect to Home Assistant and reload to try again.', true);
+      });
       disconnectPromise = current; update();
       await current;
       if (disconnectPromise === current) { disconnectPromise = null; update(); }
@@ -142,6 +197,7 @@ export function mountAiPanel(bridge, session) {
       origin: { x: Number($('origin-x').value), z: Number($('origin-z').value) } });
   }
   function update() {
+    if (disposed) return;
     const provider = selectedProvider(), active = Boolean(connection);
     $('connect').disabled = !provider || connecting || active || Boolean(disconnectPromise);
     $('disconnect').disabled = !active && !connecting;
@@ -162,13 +218,18 @@ export function mountAiPanel(bridge, session) {
     if ($('context').dataset.valid !== 'true') $('generate').disabled = true;
     const bytes = photos.reduce((total, photo) => total + photo.blob.size, 0);
     $('send-summary').textContent = `Generate sends the ${photos.length} photos shown (${(bytes / 1024).toFixed(0)} KiB after processing), your instructions, the limited room context above, and the catalog/schema to ${active ? connection.provider + ' / ' + connection.model : 'the destination you connect'}. Photos are not sent when selected or when connecting.`;
+    $('retry-hint').hidden = !lastDraftIssue;
+    $('retry-hint').textContent = lastDraftIssue ? `Next Generate includes this correction: ${lastDraftIssue}` : '';
     $('apply').disabled = !review || !$('review-confirm').checked || Boolean(review.invalid);
   }
   function providerFields() {
     const provider = selectedProvider(); if (!provider) return;
     $('endpoint-label').hidden = !provider.local; $('endpoint').value = provider.default_endpoint || '';
     $('key-label').hidden = !provider.requires_key && !provider.local; $('key-label').querySelector('span').textContent = provider.local ? 'Local server token · optional, this session only' : 'API key · this session only'; $('key').value = '';
-    $('privacy').textContent = provider.local
+    $('privacy').textContent = native ? (provider.local
+      ? 'Requests run on your Home Assistant host and go to the local model endpoint below. Loopback means the Home Assistant host, not this browser. Keep cloud features and fallbacks disabled in that model server; its downloads and logs are controlled separately. An optional server token is held only in Home Assistant process session memory.'
+      : `After connecting, your API key is held in Home Assistant process session memory and sent to ${provider.label} to authenticate. Approved photos, instructions, and room details go to this provider. Its data policy and API charges apply.${provider.id === 'openrouter' ? ' OpenRouter also forwards your request to its selected upstream provider.' : ''} End session clears the local key; it cannot delete provider records.`)
+      : provider.local
       ? 'Requests go through the local companion to the loopback model address below. Keep cloud features and fallbacks disabled in that model server; its downloads and logs are controlled separately. Only same-computer local endpoints are accepted. If your local server needs authentication, enter its token below; it stays in session memory.'
       : `Your API key is kept in memory by this session and the local companion, then sent to ${provider.label} to authenticate. Approved photos, instructions, and room details go to this provider. Its data policy and API charges apply. Home Studio operates no relay or key database.${provider.id === 'openrouter' ? ' OpenRouter is a gateway: your request also goes to its selected upstream provider under its routing and data policies.' : ''} End session forgets local state; it cannot delete provider records.`;
     update();
@@ -183,6 +244,12 @@ export function mountAiPanel(bridge, session) {
     });
   }
   function processPhoto(file) {
+    if (native) {
+      const abort = new AbortController();
+      const timer = setTimeout(() => abort.abort(), 15000);
+      const cancel = () => abort.abort(); cancelPhoto = cancel;
+      return processPhotoFile(file, abort.signal).finally(() => { clearTimeout(timer); if (cancelPhoto === cancel) cancelPhoto = null; });
+    }
     return new Promise((resolve, reject) => {
       const worker = new Worker(new URL('./photo-worker.js', import.meta.url), { type: 'module' }); photoWorker = worker;
       const finish = (error, result) => { clearTimeout(timeout); worker.terminate(); if (photoWorker === worker) photoWorker = null; cancelPhoto = null; error ? reject(error) : resolve(result); };
@@ -276,14 +343,22 @@ export function mountAiPanel(bridge, session) {
         images.push({ mime_type: photo.blob.type, data: btoa(binary) });
       }
       if (epoch !== requestEpoch) return;
-      const result = await api('generate', { request_id: draftContext.request_id, mode: $('mode').value, context: draftContext, instructions: $('instructions').value, images, schema: draftSchema($('mode').value) }, signal);
+      const instructions = $('instructions').value + (lastDraftIssue ? `\n\nPrevious draft validation feedback:\n${lastDraftIssue}` : '');
+      const result = await api('generate', { request_id: draftContext.request_id, mode: $('mode').value, context: draftContext, instructions, images, schema: draftSchema($('mode').value) }, signal);
       if (epoch !== requestEpoch || bridge.revision() !== revision || !connection) return;
-      const prepared = prepareDraft(baseProject, draftContext, result.draft);
+      let prepared;
+      try { prepared = prepareDraft(baseProject, draftContext, result.draft); }
+      catch (error) {
+        lastDraftIssue = draftCorrection(error);
+        setStatus(`Draft could not be used: ${error.message} Your plan is unchanged. Review the correction below, then choose Generate draft to try again.`, true);
+        return;
+      }
+      lastDraftIssue = '';
       review = { baseProject, revision, context: draftContext, raw: structuredClone(result.draft), prepared, selected: new Set(prepared.candidates.map(candidate => candidate.candidate_key)), invalid: false };
       pending = null; renderReview(); setStatus('Draft ready for review. Your saved plan is unchanged.'); $('review-title').scrollIntoView({ block: 'nearest' });
     } catch (error) {
       if (epoch === requestEpoch) {
-        if ([401, 403, 410].includes(error.status)) forgetSession(error.message);
+        if ([401, 403, 410].includes(error.status) || ['not_connected', 'session_changed', 'cancellation_limit'].includes(error.code)) forgetSession(error.message);
         else if (error.name !== 'AbortError') setStatus(error.message, true);
       }
     } finally { clearTimeout(timeout); if (epoch === requestEpoch) { pending = null; controller = null; update(); } }
@@ -295,7 +370,7 @@ export function mountAiPanel(bridge, session) {
       // Revalidate the complete selected project immediately before one undoable transaction.
       const prepared = prepareDraft(bridge.snapshot(), current.context, current.raw, { selectedCandidateKeys: [...current.selected] });
       if (!bridge.applyProject(prepared.project, current.revision)) throw new Error('The editor could not apply this draft.');
-      clearReview(); clearPhotos(); setStatus('Selected additions applied. Use Undo to restore the previous plan, or Export JSON to keep the editable result.');
+      clearReview(); clearPhotos(); setStatus(native ? 'Selected additions applied. Undo restores the previous plan. Save draft in Home Assistant, then Publish family view.' : 'Selected additions applied. Use Undo to restore the previous plan, or Export JSON to keep the editable result.');
     } catch (error) { setStatus(error.message, true); }
     update();
   });
@@ -322,23 +397,37 @@ export function mountAiPanel(bridge, session) {
   $('provider').addEventListener('change', () => { void endSession('Destination changed. Connect a new session before sending.'); providerFields(); });
   for (const id of ['model', 'endpoint']) $(id).addEventListener('input', () => { if (connection || connecting) void endSession('Connection settings changed. Connect a new session before sending.'); });
   for (const id of ['mode', 'width', 'depth', 'height', 'origin-x', 'origin-z', 'instructions']) $(id).addEventListener('input', () => { invalidate('Request inputs changed. Generate a fresh draft.'); update(); });
-  bridge.subscribe(() => invalidate('The plan or selection changed. Generate a fresh draft for the current room.'));
-  open.addEventListener('click', () => { panel.hidden = false; open.setAttribute('aria-expanded', 'true'); $('title').focus(); update(); });
-  function closePanel() { invalidate(); clearPhotos(); panel.hidden = true; open.setAttribute('aria-expanded', 'false'); open.focus(); }
+  const unsubscribe = bridge.subscribe(() => invalidate('The plan or selection changed. Generate a fresh draft for the current room.'));
+  open.addEventListener('click', () => { void loadProviders(); panel.hidden = false; open.setAttribute('aria-expanded', 'true'); $('title').focus(); update(); });
+  function closePanel() { invalidate(); clearPhotos(); $('key').value = ''; panel.hidden = true; open.setAttribute('aria-expanded', 'false'); open.focus(); }
   $('close').addEventListener('click', closePanel);
   panel.addEventListener('keydown', event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); closePanel(); } });
-  window.addEventListener('pagehide', () => {
+  const pagehide = () => {
     connectionEpoch++; connecting = false; forgetSession('Session closed. Connect again before generating.');
+    if (transport) { transport.close(); return; }
     const cleanup = () => fetch('/api/ai/disconnect', { method: 'POST', headers: { 'X-Home-Studio-Session': session, 'Content-Type': 'application/json' }, body: '{}', credentials: 'omit', keepalive: true }).catch(() => {});
     void cleanup();
     // Best effort on unload; the companion also expires abandoned sessions.
     // A bfcache restore must never accept a late connection or generation.
     if (connectPromise) void connectPromise.then(cleanup, cleanup);
-  });
-  api('providers').then(result => {
-    providers = result.providers;
-    for (const provider of providers) { const option = el('option', `${provider.label}${provider.local ? ' · local' : ' · cloud'}`); option.value = provider.id; $('provider').append(option); }
-    $('provider').disabled = false; providerFields();
-  }).catch(error => setStatus(error.message, true));
+  };
+  window.addEventListener('pagehide', pagehide);
+  function loadProviders() {
+    if (providersLoaded || disposed) return;
+    if (providersLoading) return providersLoading;
+    providersLoading = api('providers').then(result => {
+      if (disposed) return;
+      providersLoaded = true; providers = result.providers;
+      for (const provider of providers) { const option = el('option', `${provider.label}${provider.local ? ' · local' : ' · cloud'}`); option.value = provider.id; $('provider').append(option); }
+      $('provider').disabled = false; providerFields();
+    }).catch(error => { if (!disposed) setStatus(error.message, true); }).finally(() => { providersLoading = null; });
+    return providersLoading;
+  }
+  if (!native) void loadProviders();
   update();
+  return () => {
+    if (disposed) return;
+    pagehide(); disposed = true; unsubscribe(); window.removeEventListener('pagehide', pagehide);
+    transport?.dispose(); panel.remove(); open.remove(); previewBadge.remove();
+  };
 }

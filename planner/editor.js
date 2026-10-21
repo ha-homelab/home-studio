@@ -1374,7 +1374,7 @@ export const editorBridge = Object.freeze({
 // drafts never touch the standalone localStorage keys or receive HA credentials.
 if (haContext) {
   connectHost(haContext, {
-    initialize(value, catalog) {
+    initialize(value, catalog, aiTransport) {
       const next = value || blankProject(); validateProject(next); serializeProject(next);
       haCatalog = catalog && Array.isArray(catalog.areas) && Array.isArray(catalog.entities) ? catalog : { floors: [], areas: [], entities: [] };
       installRecoveredProject(next); history = []; future = [];
@@ -1382,6 +1382,12 @@ if (haContext) {
       translatedText('save-status', 'Draft in this tab · save in Home Assistant above');
       $('ha-workflow-note').textContent = 'Draw rooms, link Home Assistant areas, then add devices. Save draft above; publish when ready for the family view.';
       status('Home Assistant drawing ready. Save draft above before leaving.');
+      if (aiTransport) {
+        const stylesheet = document.createElement('link'); stylesheet.rel = 'stylesheet';
+        stylesheet.href = new URL('../ai/panel.css', import.meta.url).href; document.head.append(stylesheet);
+        void import('../ai/panel.js').then(({ mountAiPanel }) => mountAiPanel(editorBridge, aiTransport))
+          .catch(() => status('AI tools could not load. Reload Home Studio to try again.', true));
+      }
     },
     snapshot: () => clone(project),
     editState() {

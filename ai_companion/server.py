@@ -1,6 +1,5 @@
 """Loopback-only companion with isolated, expiring page sessions."""
 import argparse
-from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
 import mimetypes
@@ -15,42 +14,13 @@ import webbrowser
 from .protocol import CompanionError, MAX_REQUEST_BYTES, dumps, parse_json, reject, validate_generate, validate_request_id
 from .providers import PROFILES, UNSUPPORTED, validate_connection
 from .transport import RequestControl, generate
+from .session import Session
 
 SESSION_TTL = 30 * 60
 MAX_SESSIONS = 8
 MAX_CANCELLED_REQUESTS = 256
 CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 WORKER_CSP = "default-src 'none'; script-src 'self'; connect-src 'none'; img-src blob:"
-
-
-@dataclass(repr=False)
-class Session:
-    expires_at: float
-    profile: object = None
-    model: str = ""
-    api_key: str = ""
-    endpoint: str = ""
-    generation: int = 0
-    pending: object = None
-    pending_request_id: str = ""
-    cancelled_request_ids: set = field(default_factory=set)
-    lock: object = field(default_factory=threading.RLock)
-
-    def clear(self):
-        with self.lock:
-            self.generation += 1
-            self.cancelled_request_ids.clear()
-            if self.pending:
-                self.pending.cancel()
-            self.profile = None
-            self.model = self.api_key = self.endpoint = ""
-
-    def public(self):
-        with self.lock:
-            result = {"connected": self.profile is not None, "expires_at": int(self.expires_at)}
-            if self.profile:
-                result.update(provider=self.profile.id, model=self.model, endpoint=self.endpoint, local=self.profile.local)
-            return result
 
 
 class CompanionServer(ThreadingHTTPServer):

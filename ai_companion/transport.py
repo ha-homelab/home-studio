@@ -7,7 +7,12 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from scripts.download_tls import configured_context
+# The HA build nests both reviewed packages under its private runtime namespace.
+# Keep their imports relative there; the standalone companion uses top-level scripts.
+if "." in __package__:
+    from ..scripts.download_tls import configured_context
+else:
+    from scripts.download_tls import configured_context
 
 from .protocol import CompanionError, MAX_UPSTREAM_BYTES, dumps, parse_json
 from .providers import normalize_endpoint, request_headers, request_payload, extract_draft
@@ -109,7 +114,10 @@ def _connect(connection, hostname, port, tls, control, deadline, local=False):
                 # The original fixed hostname remains the TLS identity and Host header.
                 connection.sock = configured_context().wrap_socket(sock, server_hostname=hostname)
                 control.attach(connection)
-            connection.sock.settimeout(max(0.1, min(30, deadline - time.monotonic())))
+            # Non-streaming vision models may queue before response headers.
+            # Keep the short connect/TLS timeout above, then allow the remaining
+            # total request budget; the cancellation timer still enforces it.
+            connection.sock.settimeout(max(0.1, deadline - time.monotonic()))
             return
         except (OSError, ssl.SSLError):
             connection.close()

@@ -1,6 +1,9 @@
 # Local AI models for room-planning drafts
 
-This is optional setup for the [local AI companion](ai-planning.md). The
+This is optional setup for [AI drafting](ai-planning.md), either in native HA or
+the separate desktop companion. For native HA, loopback means the HA host or
+container network namespace. A model running only on your laptop's loopback is
+reachable through the laptop companion, not through a remote HA server. The
 recommended [Home Assistant workflow](home-assistant-editor.md) installs, draws,
 and publishes without a local model, Python setup, or inference service.
 
@@ -10,17 +13,19 @@ OpenAI-compatible Chat Completions APIs of LM Studio, llama.cpp, vLLM and LocalA
 The examples below prepare third-party runtimes; they were checked against their
 documentation, not executed as live model acceptance tests.
 
-Start a runtime with a vision-capable model, then start Home Studio using
-`python3 scripts/serve-ai-planner.py`. Open its printed address and choose **Plan
-from photos**. Select the runtime, paste its exact model ID and numeric loopback
+Start a runtime with a vision-capable model in the same network namespace as HA,
+then open **Home Assistant → Home Studio → Plan from photos**. For a separate
+desktop workflow, run `python3 scripts/serve-ai-planner.py` on the runtime's
+computer and open its printed address. Select the runtime, paste its exact model ID and numeric loopback
 endpoint, and enter a local authentication token when configured. Plain `localhost`
 and LAN addresses are intentionally rejected; use `127.0.0.1` or `[::1]` with an
 explicit port. The profile supplies the inference path. See the [workflow](ai-planning.md),
 [cloud providers](ai-provider-setup.md), and [architecture](ai-planner-architecture.md).
 
-A runtime does not connect to the native HA editor or ordinary hosted editor automatically. Its offline
-network policy remains unchanged. The companion serves UI and API on one local
-origin, avoiding browser-to-runtime CORS and mixed-content workarounds. Furnish a
+A runtime is used only after you explicitly connect its profile. The native HA
+integration or same-origin desktop companion handles the model request; the
+browser does not call the runtime directly. The ordinary hosted editor has no AI
+transport. This avoids browser-to-runtime CORS and mixed-content workarounds. Furnish a
 measured room or create a measured rectangle, then review before applying. Photos
 cannot establish reliable dimensions by themselves.
 

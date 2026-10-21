@@ -1,16 +1,46 @@
 # AI-assisted planner architecture
 
-The optional companion adds an inference boundary to the authoring tool. It does
-not add AI code to the installed Home Assistant viewer or weaken the hosted
-editor's `connect-src 'none'` policy. Both AI modes produce the existing project
-schema. After review, a user can export JSON and open it in the native HA editor
-to save and publish. Existing portable workflows can use the local compiler and
-installer. The companion is optional; native installation and manual drawing do
-not depend on it.
+AI drafting has two transports sharing one panel, draft validator, provider
+adapters and bounded inference client. Native Home Assistant uses authenticated,
+administrator-only HTTP routes with user-bound in-memory sessions. The optional
+standalone companion supplies its own loopback transport. Neither weakens the
+hosted editor's `connect-src 'none'` policy or the native iframe's opaque sandbox.
+Accepted native proposals go directly to Save draft and Publish family view.
+The companion can export the same project JSON for deliberate import into HA.
+Manual drawing and the published viewer do not depend on AI.
+
+## Native request boundary
+
+The native host advertises AI only for active native authoring. `studio.js` owns
+the authenticated HA connection and a separate random AI session token. The iframe
+receives no HA token or AI session token. A fixed-operation bridge accepts
+providers/status/connect/disconnect/cancel/generate, validates source window,
+opaque origin, per-editor channel, request IDs and message bounds, and forwards
+requests through HA's authenticated HTTP client. Keys entered in the masked AI
+form cross only this bridge's connect payload; they never enter a drawing snapshot.
+
+`POST /api/home_floorplan/ai/session` starts a 30-minute session. Further calls use
+`X-Home-Studio-Session` and the HA bearer authorization. Every call checks the active
+native integration, administrator permission and owning user. The backend imposes
+body limits, read deadlines, a global single-inference slot and bounded sessions.
+It does not use WebSocket commands for provider credentials. Unload, shutdown,
+expiry, disconnect and cancellation invalidate pending results. Provider endpoints
+remain fixed; local URLs remain numeric loopback only.
+
+The trusted host also calls `POST /api/home_floorplan/ai/close` when the editor is
+disposed. This removes the session token and expiry timer and cancels its work.
+Ordinary Disconnect keeps the session available for an explicit reconnect.
+
+The native iframe cannot fetch worker source across its opaque origin. Its photo
+preparation uses the same bounded decoder asynchronously; the companion uses that
+decoder in a worker. Neither path grants the decoder credentials or network access.
 
 ## Modules and ownership
 
 - `scripts/serve-ai-planner.py`: stdlib-only Python 3.10+ launcher.
+- `custom_components/home_floorplan/ai.py`: authenticated native session lifecycle
+  and AI HTTP routes; no persistent credential store.
+- `ai_companion/session.py`: shared session metadata and key cleanup.
 - `ai_companion/server.py`: exact loopback Host/Origin checks, per-page sessions,
   bounded HTTP concurrency, static allowlist, authenticated API and cleanup.
 - `ai_companion/providers.py`: fixed cloud profiles, local endpoint policy, native
@@ -21,10 +51,11 @@ not depend on it.
   context envelope, image byte limits and header inspection without pixel decoding.
 - `ai_companion/assets.json`: exact reviewed static files served by the companion.
   Python files, repository metadata, tests, keys and arbitrary paths are not served.
-- `ai/bootstrap.js`: injected only by the companion; loads the optional UI and CSS.
+- `ai/bootstrap.js`: companion bootstrap; native bootstrap is gated by the HA capability.
 - `ai/panel.js`: provider connection, request/review lifecycle and editor integration.
-- `ai/photo-worker.js`: bounded image inspection, decode, resize and re-encoding,
-  served with `connect-src 'none'`. It has no session credential or provider key.
+- `ai/photo-processing.js`: shared bounded image inspection, decode, resize and
+  re-encoding; it receives no session credential or provider key.
+- `ai/photo-worker.js`: companion worker wrapper, served with `connect-src 'none'`.
 - `ai/draft.js` and `ai/json.js`: pure draft/context/schema/geometry validation.
 - `planner/editor.js`: a small exported bridge for accepted snapshot, revision,
   selection, detached preview, explicit transactional apply and subscriptions.
@@ -32,7 +63,7 @@ not depend on it.
 The public website publishes the setup guide, not a key-entry form. The source
 release includes the companion and its tests. AI modules are outside `planner/`
 so the ordinary planner's static no-network check still applies to every editor
-module. The editor never imports the optional bootstrap on its own.
+module. The ordinary hosted editor never activates the optional AI panel.
 
 ## Request and credential lifecycle
 
@@ -67,11 +98,19 @@ excludes project notes, entity bindings, unrelated rooms, source URLs and creden
 It includes measured room geometry, relevant existing objects, openings and bounded
 catalog vocabulary. User instructions and visible text in photos remain untrusted.
 
+The provider adapter encodes catalog models as named columns and rows in the
+outbound prompt. This preserves every model, label, dimension and appearance
+capability while removing repeated field names (about 55% fewer catalog bytes for
+the 206-model catalog). The browser context and complete response schema remain
+unchanged. Tests reconstruct every descriptor to prevent a lossy optimization.
+
 `POST /api/ai/cancel` aborts pending work and invalidates late results.
 `POST /api/ai/disconnect` also clears credentials. Sessions expire after at most
 30 minutes; the process periodically cleans abandoned sessions. There are at most
 8 page sessions, 12 concurrent HTTP handlers and one inference request. Requests
-have a 90-second total deadline. DNS resolution is independently bounded and does
+have a 90-second total deadline. Connection and TLS setup use a short timeout;
+response headers and content may use the remaining total budget, allowing a
+non-streaming vision model time to generate. DNS resolution is independently bounded and does
 not carry keys or images. No retries, redirects or inherited HTTP proxy environment
 are used. Only reviewed remote HTTPS endpoints or numeric local HTTP endpoints
 are accepted. No arbitrary proxy, tool execution or server-side URL fetch exists.
@@ -128,6 +167,11 @@ Apply rechecks the accepted revision and invokes one normal history transaction.
 Undo restores the preceding accepted project. Cancellation and failure do not add
 history entries. Provider text is rendered with `textContent`, not interpreted HTML.
 
+When a generated draft fails validation, the panel displays the error and a fixed
+correction hint. The hint is included only if the user chooses Generate again;
+there is no automatic retry. Changing the plan, inputs, photos or session clears
+it. Raw rejected output and private project fields are never added to the hint.
+
 Image work is sequential and isolated in a disposable worker. The browser checks
 10 MiB per source, 30 MiB total, six images and 24 megapixels before decoding. It
 re-encodes a maximum 1600-pixel image and drops original metadata. The server checks
@@ -159,7 +203,7 @@ Azure/Bedrock/Vertex adapters, direct-browser provider access, LAN endpoints,
 WebGPU inference and photo reconstruction of arbitrary floor geometry are not
 implemented. The current AI UI is English; instructions may be multilingual.
 
-No continuous render loop is added for AI. Worker decoding happens only for selected
-photos; requests happen only on Generate. The installed viewer and its resource
+No continuous render loop is added for AI. Image decoding happens only for selected
+photos; inference requests happen only on Generate. The installed viewer and its resource
 budget are unchanged. A very large catalog context can still cost provider tokens;
 one room per request bounds the private spatial context and makes review practical.

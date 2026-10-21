@@ -41,6 +41,8 @@ jobs:
         run: python -m pip install -r requirements-ha-test.txt
       - name: Verify real storage, registries, permissions and publication
         run: python scripts/test-ha-core.py
+      - name: Verify native AI authentication, session boundaries and cancellation
+        run: python scripts/test-ha-ai.py
   platforms:
     uses: ./.github/workflows/platform-acceptance.yml
   package:
@@ -108,6 +110,7 @@ jobs:
         run: |
           for engine in chromium firefox webkit; do
             BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-studio.cjs || exit 1
+            BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-ai.cjs || exit 1
           done
           node --test scripts/test-family-view.cjs
       - name: Test drawing, furnishing, export and installation through the editor

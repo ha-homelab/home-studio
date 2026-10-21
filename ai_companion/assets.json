@@ -70,6 +70,7 @@
   "ai/panel.js",
   "ai/panel.css",
   "ai/photo-worker.js",
+  "ai/photo-processing.js",
   "ai/draft.js",
   "ai/json.js",
   "planner/guide-assets/12-ai-review.jpg",

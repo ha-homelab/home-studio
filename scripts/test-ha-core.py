@@ -124,6 +124,9 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
         panels = self.hass.data[frontend.DATA_PANELS]
         self.assertTrue(panels['home-studio'].require_admin)
         self.assertFalse(panels['home-floorplan'].require_admin)
+        project = await self.request('project_get')
+        self.assertTrue(project['capabilities']['ai'])
+        self.assertEqual(sum(view.name == 'api:home_floorplan:ai' for view in self.hass.http.views), 1)
 
     async def test_save_publish_reopen_and_conflict(self):
         project = json.loads((ROOT / 'planner/guide-assets/practice-home.json').read_text())
@@ -444,7 +447,7 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
                             adapter.async_setup.assert_awaited_with(retry_hass, config)
                             self.assertEqual(adapter.async_prepare.await_count, 1)
                         self.assertEqual(len(retry_hass.http.paths), 1)
-                        self.assertEqual(len(retry_hass.http.views), 1)
+                        self.assertEqual(len(retry_hass.http.views), 2)
                         connection = Connection(self.admin)
                         integration.ws_curtains(retry_hass, connection, {'id': 1})
                         await asyncio.wait_for(connection.result, 1)
