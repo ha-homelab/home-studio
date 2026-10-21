@@ -1,12 +1,11 @@
 # From room photos to an editable plan
 
-Home Studio includes an optional local AI companion. It can furnish an existing
-measured room or create a measured rectangular room with proposed doors, windows,
-and furniture. The result is ordinary editable Home Studio geometry, not a picture.
-The recommended [native Home Assistant workflow](home-assistant-editor.md)
-needs no AI setup. This companion is an optional separate authoring tool; AI
-controls appear only when it serves the editor. The native editor and hosted
-editor do not proxy AI requests.
+Home Studio can draft from photos directly in the [native Home Assistant
+editor](home-assistant-editor.md). It can furnish an existing measured room or
+create a measured rectangular room with proposed doors, windows and furniture.
+The result is ordinary editable Home Studio geometry, not a picture. Manual
+drawing needs no AI setup. The standalone local companion is also available;
+the public hosted editor never collects keys or calls a model.
 
 Provider adapters are implemented and tested with synthetic requests and mock
 responses. This is **not** a claim that every provider/model combination has passed
@@ -18,7 +17,16 @@ chosen vision model using a fictional room before submitting private photos.
 - [Ollama, LM Studio, llama.cpp, vLLM, and LocalAI](ai-local-models.md)
 - [Implementation, boundaries, and acceptance tests](ai-planner-architecture.md)
 
-## Start the companion
+## Start inside Home Assistant
+
+Open **Home Assistant → Home Studio → Plan from photos** as an administrator.
+Connect your provider and exact model ID, then follow **Make a draft** below.
+The integration supplies the AI transport; no separate Python process or JSON
+transfer is required. After applying a proposal, **Save draft** and **Publish
+family view** in the same page. A local-model endpoint refers to the HA machine's
+network namespace; `127.0.0.1` does not refer to the browser's computer.
+
+## Optional separate desktop companion
 
 Extract the complete source toolkit, open a terminal in that folder, and run:
 
@@ -36,8 +44,8 @@ If you started in Home Assistant, use **Save draft** and **Export JSON** there,
 then **Open JSON** in the local editor. The same export/import steps apply to a
 drawing from the optional hosted editor. These editors have separate drafts and
 do not transfer source automatically. Do not serve the AI files with a generic
-static server: only the companion creates authenticated sessions and exposes the
-restricted API.
+static server: it has no AI session service. Use the native HA integration or
+the companion to supply the restricted API.
 
 ## Make a draft
 
@@ -66,12 +74,11 @@ restricted API.
 6. Confirm the review and **Apply selected additions**. This is one undoable edit.
    Cancel or discard leaves the accepted plan unchanged. If the plan or selection
    changes while the model is working, the old result cannot be applied.
-7. Adjust the result with the normal editor. Repeat for another room, then Export
-   JSON. In Home Studio inside Home Assistant, use **Open JSON**, check the
-   drawing, then **Save draft** and **Publish family view**. Existing portable
-   deployments can use the [portable installation reference](../install.html#export).
-   The installed viewer contains neither the companion nor AI credentials or
-   source photographs.
+7. Adjust the result with the normal editor and link devices yourself. Repeat for
+   another room, then **Save draft → Publish family view** inside HA. If using the
+   separate companion, Export JSON and use **Open JSON** in HA first. Existing
+   portable deployments can use the [portable installation reference](../install.html#export).
+   Published viewer assets contain no AI credentials or source photographs.
 
 Example instruction:
 
@@ -89,12 +96,14 @@ must match exactly; partial overlaps require manual drawing.
 
 ## Where the key and photos go
 
-![Browser, local companion, and selected local or cloud model; drafts return for review before becoming an editable plan.](assets/ai/planning-data-flow.svg)
+![Native editor, user-owned AI session, and selected local or cloud model; drafts return for review before becoming an editable plan.](assets/ai/planning-data-flow.svg)
 
-In cloud mode, the browser sends the key to the companion on your computer. The
-companion sends it to your chosen provider to authenticate. The chosen photos,
-instructions, sanitized room context and catalog vocabulary travel to that provider
-for inference. OpenRouter and other gateways add their upstream processing boundary.
+In native mode, the browser sends the key through your authenticated HA connection
+to a user-bound session in HA memory. Use HTTPS for remote access. In the separate
+companion, it sends the key to that local process instead. On Generate, the HA
+integration or companion sends the key to your chosen provider to authenticate.
+The chosen photos, instructions, sanitized room context and catalog vocabulary
+travel to that provider for inference. OpenRouter and other gateways add their upstream processing boundary.
 Home Studio has no operated AI relay, key database, or photo collection.
 
 **A cloud API key is not “never transmitted.”** It stays out of persistent Home Studio
@@ -102,24 +111,27 @@ storage, but must reach the selected provider. Provider retention and billing ru
 still apply. OpenAI Responses requests use `store: false`; that does not disable all
 [provider retention](https://developers.openai.com/api/docs/guides/your-data).
 
-In local mode, the companion accepts numeric loopback endpoints only. It does not
+In local mode, both transports accept numeric loopback endpoints only. It does not
 support LAN, arbitrary cloud proxies, or user-selected remote URLs. The runtime's
 own cloud features, telemetry, downloads and logging are separate. Disable cloud
 fallback and check the actual runtime configuration before claiming local-only
 inference. Ollama models named with `:cloud` or `-cloud` are rejected by the profile.
 
 Credentials are kept only in process memory for the connected page session, for at
-most 30 minutes. End session clears the connection; restarting the companion clears
-all sessions. Reloading creates a separate disconnected session. Abandoned sessions
+most 30 minutes. End session clears the connection; restarting HA or the companion
+clears its sessions. Native integration unload also cancels work and clears keys.
+Reloading creates a separate disconnected session. Abandoned sessions
 expire even if a browser-close event is lost. No key goes into localStorage,
 sessionStorage, cookies, project JSON or exported Home Assistant files. Browser
 extensions, local administrators, operating-system swap and crash dumps remain
 outside this memory-lifetime guarantee.
 
-Photo processing runs in a bounded worker without credentials or network access.
-It resizes and re-encodes images to strip metadata. This does not remove people,
+Photo processing happens in the browser: asynchronously in the native editor's
+opaque iframe, or in a worker for the companion. The shared decoder receives no
+credentials and makes no network requests. It resizes and re-encodes images to
+strip metadata. This does not remove people,
 readable documents or private possessions from the visible image. Crop those before
-selecting the file. The companion does not decode pixels or write photographs to disk.
+selecting the file. The HA backend and companion do not decode pixels or write photographs to disk.
 
 ## Bounds and failure behavior
 

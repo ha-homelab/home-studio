@@ -97,10 +97,10 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'docs/ai-provider-setup.md', 'docs/ai-local-models.md',
               'docs/assets/ai/planning-data-flow.svg',
               'ai/package.json', 'ai/bootstrap.js', 'ai/panel.js', 'ai/panel.css',
-              'ai/photo-worker.js', 'ai/draft.js', 'ai/json.js',
+              'ai/photo-worker.js', 'ai/photo-processing.js', 'ai/draft.js', 'ai/json.js',
               'ai_companion/__init__.py', 'ai_companion/assets.json',
               'ai_companion/server.py', 'ai_companion/protocol.py',
-              'ai_companion/providers.py', 'ai_companion/transport.py',
+              'ai_companion/providers.py', 'ai_companion/transport.py', 'ai_companion/session.py',
               'scripts/serve-ai-planner.py', 'scripts/test-ai-companion.py',
               'scripts/test-ai-draft.mjs', 'scripts/test-ai-planner.cjs',
               'scripts/test-ai-integration.cjs',
@@ -141,7 +141,7 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'assumed-zone-view.js', 'home-view.js', 'light-state.js', 'room-lighting.js',
               'custom_components/home_floorplan/__init__.py',
               'custom_components/home_floorplan/site.py',
-              'custom_components/home_floorplan/native.py',
+              'custom_components/home_floorplan/native.py', 'custom_components/home_floorplan/ai.py',
               'custom_components/home_floorplan/permissions.py',
               'custom_components/home_floorplan/config_flow.py',
               'custom_components/home_floorplan/strings.json',
@@ -149,8 +149,8 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'custom_components/home_floorplan/static/studio.js',
               'hacs.json', 'requirements-ha-test.txt',
               'scripts/build-home-studio.py', 'scripts/test-ha-native.py',
-              'scripts/test-ha-project-metadata.py', 'scripts/test-ha-core.py',
-              'scripts/test-native-studio.cjs', 'scripts/test-family-view.cjs',
+              'scripts/test-ha-project-metadata.py', 'scripts/test-ha-core.py', 'scripts/test-ha-ai.py',
+              'scripts/test-native-studio.cjs', 'scripts/test-native-ai.cjs', 'scripts/test-family-view.cjs',
               'custom_components/home_floorplan/validation.py',
               'custom_components/home_floorplan/curtains.py',
               'custom_components/home_floorplan/manifest.json',
@@ -212,7 +212,7 @@ def validate(root):
     # The companion may serve only reviewed UI files, never its Python source or
     # arbitrary repository content. Network-capable AI modules stay off Pages.
     ai_assets = {'ai/bootstrap.js', 'ai/panel.js', 'ai/panel.css',
-                 'ai/photo-worker.js', 'ai/draft.js', 'ai/json.js'}
+                 'ai/photo-worker.js', 'ai/photo-processing.js', 'ai/draft.js', 'ai/json.js'}
     allowed = json.loads(regular_file(root, 'ai_companion/assets.json').read_text())
     if (not isinstance(allowed, list) or not all(isinstance(name, str) for name in allowed)
             or len(allowed) != len(set(allowed)) or set(allowed) != set(SITE_FILES) | ai_assets):
@@ -242,7 +242,10 @@ def validate(root):
         code = (root / relative).read_text(encoding="utf-8")
         for imported in re.findall(r'(?:from\s+|import\(\s*)[\'"]([^\'"]+)[\'"]', code):
             target = ((root / relative).parent / imported).resolve()
-            if not target.is_relative_to(root) or target.relative_to(root).as_posix() not in SITE_FILES:
+            # Reviewed native-only dynamic import: the authenticated host capability
+            # gates this module; it is bundled into HA and never loaded by Pages.
+            native_ai = (relative == "planner/editor.js" and imported == "../ai/panel.js")
+            if not target.is_relative_to(root) or (target.relative_to(root).as_posix() not in SITE_FILES and not native_ai):
                 raise ValueError(f'Unpublished import: {relative}: {imported}')
         if re.search(r'\b(?:fetch|WebSocket|XMLHttpRequest|sendBeacon)\s*\(', code):
             raise ValueError(f'New network API needs public-data review: {relative}')

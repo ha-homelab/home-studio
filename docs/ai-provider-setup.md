@@ -1,23 +1,24 @@
 # AI provider setup
 
-This guide is only for the optional [local AI companion](ai-planning.md).
-Installing Home Studio, drawing, and publishing in [Home Assistant](home-assistant-editor.md)
-require no provider account, API key, or AI setup.
+This guide covers optional [AI drafting](ai-planning.md) directly inside
+[Home Assistant](home-assistant-editor.md), and the separate desktop companion.
+Manual drawing, installation and publishing require no provider account or key.
 
 **Implemented adapters; live model compatibility requires a user smoke test.**
 Official documentation checked **2026-10-16**. Automated tests use synthetic payloads
 and mock servers, not provider accounts, private photos or paid requests. Console
 labels, model access, prices, and API capabilities can change.
 
-Start the [local companion](ai-planning.md), choose a profile, enter your exact model
-ID and key, then connect. Select a vision model for photographs. Connect stores
+Open **Home Assistant → Home Studio → Plan from photos**, or start the optional
+[local companion](ai-planning.md). Choose a profile, enter your exact model ID and
+key, then connect. Select a vision model for photographs. Connect stores
 settings locally; Generate is the action that actually calls the model. The
 [architecture](ai-planner-architecture.md) describes the implemented boundaries;
 [local models](ai-local-models.md) covers same-computer inference.
 
 Implemented cloud profiles are OpenAI and xAI Responses; native Anthropic Messages;
 Google Gemini's OpenAI-compatible endpoint; Mistral, OpenRouter, Groq, Together,
-Fireworks Chat Completions; and DeepSeek text-only JSON mode. A listed provider is
+Fireworks and NVIDIA NIM Chat Completions; and DeepSeek text-only JSON mode. A listed provider is
 not a promise that every model on it supports this request. DeepSeek's profile
 rejects images. There is no automatic model selection or paid fallback.
 
@@ -47,9 +48,11 @@ key with minimum required permissions, and a small usage budget. Keep the key ou
 project files, screenshots, prompts, issue reports, and browser storage. Store a backup
 in your own password manager if needed. Do not paste keys into this documentation.
 
-The default transport is an optional local companion serving Home Studio and
-its API bridge from the same origin. The key is held in session memory, cleared
-on disconnect or expiry, and sent over HTTPS to the selected provider for authentication.
+Inside HA, the authenticated native integration handles requests in a user-bound
+session. The separate desktop companion serves its UI and API from one loopback
+origin. In both cases the key is held in process memory, cleared on disconnect or
+expiry, and sent over HTTPS to the selected provider for authentication. Use HTTPS
+for a remote browser connection to HA; the masked field alone does not encrypt it.
 Selected photos, instructions, and required plan context go to that provider.
 With a gateway, that gateway receives the request and routes its content to an upstream
 provider. Memory-only handling does not mean nothing is transmitted or retained by
@@ -209,6 +212,21 @@ an upstream provider processes it. Review both parties' policies and routing set
 Connecting your own upstream key to a gateway is an additional credential-sharing
 decision, not the same as calling that provider directly.
 
+## NVIDIA NIM
+
+Create a key in [NVIDIA Build](https://build.nvidia.com/) and select **NVIDIA NIM**.
+Use the full model ID from a model's API example and confirm image input and JSON
+schema support. This profile uses the fixed HTTPS endpoint
+`https://integrate.api.nvidia.com/v1/chat/completions` with Bearer authentication.
+The [Nemotron 3.5 Super VL example](https://build.nvidia.com/nvidia/nemotron-3.5-super-vl-120b-a12b)
+uses `nvidia/nemotron-3.5-super-vl-120b-a12b` for multimodal requests. For that exact
+model and `google/gemma-4-31b-it`, the adapter disables the documented optional
+thinking transcript so the bounded output budget is available for the editable
+draft. See the [Gemma 4 hosted parameters](https://docs.api.nvidia.com/nim/reference/google-gemma-4-31b-it-infer).
+Other models retain their defaults.
+Account quotas and model availability still apply; a working model-list request
+alone does not prove photo generation works. No automatic fallback is enabled.
+
 ## Other OpenAI-compatible services
 
 Compatibility covers particular endpoints and fields, not every OpenAI capability.
@@ -283,7 +301,7 @@ never record keys or raw private request bodies.
   apply action; do not execute returned code.
 - **429/5xx/timeout:** respect retry guidance and use bounded backoff. Repeated
   generations can cost money; an interrupted client does not prove billing stopped.
-- **Browser fetch/CORS failure:** use the local companion; the hosted editor intentionally has no AI network access.
+- **Browser fetch/CORS failure:** use the native HA editor or local companion; the hosted editor intentionally has no AI network access.
   Do not disable browser security or send a key through an untrusted public proxy.
 
 These are diagnostic categories, not a promise that every provider uses identical

@@ -1,6 +1,13 @@
 /* Trusted Home Assistant authoring host. Credentials never enter the editor. */
 const STUDIO_PROTOCOL = 'home-studio-editor-v1';
 const MAX_PROJECT_BYTES = 2000000;
+const AI_RESPONSE_LIMIT = 2 * 1024 * 1024;
+const AI_ACTIONS = Object.freeze({
+  providers: {}, status: {},
+  connect: { fields: ['provider', 'model', 'api_key', 'endpoint'], limit: 32768 },
+  disconnect: { fields: [], limit: 2 }, cancel: { fields: ['request_id'], limit: 256 },
+  generate: { fields: ['request_id', 'mode', 'context', 'instructions', 'images', 'schema'], limit: 17 * 1024 * 1024 },
+});
 const STARTUP_TIMEOUT_MS = 15000;
 const EDITOR_PATH = '/home-floorplan-studio/planner/index.html';
 const EXTERNAL_EDITOR = 'https://ha-homelab.github.io/home-studio/planner/';
@@ -30,12 +37,14 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this._busy = false; this._ready = false; this._started = false; this._project = null;
     this._savedRaw = null; this._revision = 0; this._publishedRevision = null;
     this._pending = new Map(); this._sequence = 0; this._request = 0; this._generation = 0;
+    this._aiPending = new Map(); this._aiEpoch = 0; this._aiSequence = 0; this._aiSession = null; this._aiSessionPromise = null;
+    this._aiPagehide = () => this._disposeAi();
     this._edits = {}; this._startupTimer = null; this._startupFailed = false;
     this._receive = event => this._onMessage(event);
     this._beforeUnload = event => { if (this._unsaved() || this._busy) { event.preventDefault(); event.returnValue = ''; } };
     this.shadowRoot.innerHTML = `
       <style>
-      :host{display:flex;flex-direction:column;height:100%;min-height:640px;color:var(--primary-text-color,#263737);background:var(--primary-background-color,#f7f8f5);font:14px system-ui,sans-serif}
+      :host{display:flex;flex-direction:column;height:100vh;height:100dvh;min-height:640px;overflow:auto;color:var(--primary-text-color,#263737);background:var(--primary-background-color,#f7f8f5);font:14px system-ui,sans-serif}
       *{box-sizing:border-box}header{padding:16px 22px 12px;border-bottom:1px solid var(--divider-color,#d9e0d9)}h1{font-size:22px;margin:0 0 5px}p{line-height:1.5;margin:6px 0}.muted{color:var(--secondary-text-color,#5b6d67);font-size:13px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.actions{margin:12px 0 8px}button,a{font:inherit}button{min-height:44px;padding:9px 14px;border:1px solid var(--divider-color,#becbc2);border-radius:7px;background:var(--card-background-color,#fff);color:inherit;cursor:pointer}button.primary{background:#326857;color:white;border-color:#326857}button:disabled{opacity:.5;cursor:default}a{color:var(--primary-color,#326857);text-underline-offset:3px}a.external{margin-inline-start:auto}button:focus-visible,a:focus-visible{outline:3px solid #ce8c52;outline-offset:3px}#status{min-height:22px;overflow-wrap:anywhere}#status.error{color:var(--error-color,#a53d29)}#recovery{padding:14px 22px;background:#fff0d5;color:#4c402c;border-bottom:1px solid #e2c996}iframe{display:block;flex:1;width:100%;border:0;min-height:600px;background:#f6f6f1}#loading{padding:24px}[hidden]{display:none!important}details{font-size:13px;margin:8px 0}summary{cursor:pointer}details p{max-width:900px} @media(max-width:600px){header{padding:12px}.actions{gap:6px}.actions button{padding:8px 10px;font-size:12px}a.external{margin-inline-start:0}iframe{min-height:780px}}
       </style>
       <header>
@@ -49,7 +58,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
           <a class="external" href="${EXTERNAL_EDITOR}" target="_blank" rel="noopener noreferrer">Open browser editor ↗</a>
         </div>
         <div id="status" role="status" aria-live="polite" aria-atomic="true">Opening your drawing…</div><button id="retry" aria-describedby="status" hidden>Retry connection</button>
-        <details><summary>Two ways to design your home</summary><p>Here, use your Home Assistant areas and devices while drawing. Save draft keeps the editable project in Home Assistant; Publish family view updates the runnable plan. Draft changes stay separate until you publish.</p><p>The browser editor also works independently, including its offline and optional AI workflows. Export JSON here, then open it there, or use Open JSON below to bring a drawing back. Opening the browser editor never sends it your drawing or Home Assistant access.</p><p>Accepted drawing changes are kept in this browser tab, separately from standalone editor drafts. Correct unfinished or invalid fields before leaving. Export JSON for a portable backup of the last valid drawing. The drawing tools do not operate devices.</p></details>
+        <details><summary>Two ways to design your home</summary><p>Here, use your Home Assistant areas and devices while drawing. Save draft keeps the editable project in Home Assistant; Publish family view updates the runnable plan. Draft changes stay separate until you publish.</p><p>When available, Plan from photos here creates an optional AI draft for your review before applying. The browser editor also works independently, including its offline workflow. Export JSON here, then open it there, or use Open JSON below to bring a drawing back. Opening the browser editor never sends it your drawing or Home Assistant access.</p><p>Accepted drawing changes are kept in this browser tab, separately from standalone editor drafts. Correct unfinished or invalid fields before leaving. Export JSON for a portable backup of the last valid drawing. The drawing tools do not operate devices.</p></details>
       </header>
       <section id="recovery" hidden><strong>Unsaved drawing found in this tab</strong><p id="recovery-description"></p><div class="row"><button id="resume">Resume recovered drawing</button><button id="download-recovery">Export recovered JSON</button><button id="discard">Use saved drawing</button></div></section>
       <p id="loading">Loading the local editor…</p>`;
@@ -71,6 +80,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     if (this.isConnected && !this._started && value) void this._start();
   }
   _reset() {
+    this._disposeAi();
     this._clearStartup(); this._startupFailed = false; this._edits = {};
     this._generation++; this._started = false; this._ready = false; this._busy = false;
     this._project = null; this._savedRaw = null; this._catalog = null; this._recovery = null; this._saved = null; this._channel = null;
@@ -79,10 +89,12 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this._pending.clear(); this.$('recovery').hidden = true; this.$('retry').hidden = true; this._buttons();
   }
   connectedCallback() {
+    window.addEventListener('pagehide', this._aiPagehide);
     window.addEventListener('message', this._receive); window.addEventListener('beforeunload', this._beforeUnload);
     if (this._hass && !this._started) void this._start();
   }
   disconnectedCallback() {
+    window.removeEventListener('pagehide', this._aiPagehide);
     this._persist(); window.removeEventListener('message', this._receive); window.removeEventListener('beforeunload', this._beforeUnload);
     this._reset();
   }
@@ -108,6 +120,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this._startupTimer = setTimeout(() => this._failStartup(message), STARTUP_TIMEOUT_MS);
   }
   _failStartup(message, allowRetry = true, error = true) {
+    this._disposeAi();
     this._clearStartup(); this._generation++; this._startupFailed = allowRetry; this._ready = false; this._busy = false;
     this._frame?.remove(); this._frame = null; this._channel = null;
     // A connection failure must not hide a recovery copy already in this tab.
@@ -173,6 +186,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     else { try { sessionStorage.removeItem(this._key()); } catch {} this._openEditor(this._saved.project); }
   }
   _openEditor(project) {
+    this._disposeAi(); this._aiSequence = 0;
     this._ready = false; this._sequence = 0; this._edits = {}; this._startupFailed = false; this.$('retry').hidden = true;
     this._project = project ? clone(project) : null;
     this._channel = Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, '0')).join('');
@@ -194,7 +208,10 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   _onMessage(event) {
     const data = event.data;
     if (event.source !== this._frame?.contentWindow || event.origin !== 'null' || data?.protocol !== STUDIO_PROTOCOL || data.channel !== this._channel) return;
-    if (data.type === 'ready' && !this._ready) this._send('initialize', { project: this._project, catalog: this._catalog });
+    if (data.type === 'ready' && !this._ready) this._send('initialize', { project: this._project, catalog: this._catalog, capabilities: { ai: this._saved?.capabilities?.ai === true } });
+    if (data.type === 'ai-request') { void this._aiRequest(data); return; }
+    if (data.type === 'ai-abort') { this._aiPending.get(data.requestId)?.controller.abort(); return; }
+    if (data.type === 'ai-close') { this._disposeAi(); return; }
     if (data.type === 'error' && !this._ready) { this._failStartup('The drawing could not be opened. Retry or export the original JSON.'); return; }
     if (data.type === 'snapshot-error') {
       const pending = this._pending.get(data.requestId);
@@ -214,6 +231,104 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       const pending = this._pending.get(data.requestId);
       if (pending) { clearTimeout(pending.timer); this._pending.delete(data.requestId); pending.resolve(clone(this._project)); }
     } catch { this._status('The editor returned an invalid drawing. Your saved copy is unchanged.', true); }
+  }
+  _disposeAi() {
+    this._aiEpoch++;
+    for (const entry of this._aiPending.values()) entry.controller.abort();
+    this._aiPending.clear();
+    const session = this._aiSession, hass = this._hass;
+    this._aiSession = null; this._aiSessionPromise = null;
+    if (session) this._cleanupAiSession(hass, session.token);
+  }
+  _cleanupAiSession(hass, token) {
+    // Best effort on navigation; the HA service also expires abandoned sessions.
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 10000);
+    try {
+      Promise.resolve(hass.fetchWithAuth('/api/home_floorplan/ai/close', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Home-Studio-Session': token },
+        body: '{}', signal: controller.signal, keepalive: true,
+      })).catch(() => {}).finally(() => clearTimeout(timer));
+    } catch { clearTimeout(timer); }
+  }
+  async _readAiResponse(response) {
+    if (Number(response.headers?.get('content-length')) > AI_RESPONSE_LIMIT) throw new Error('invalid_response');
+    const raw = await response.text();
+    if (new Blob([raw]).size > AI_RESPONSE_LIMIT) throw new Error('invalid_response');
+    let result;
+    try { result = JSON.parse(raw); } catch { throw new Error('invalid_response'); }
+    if (!response.ok) throw Object.assign(new Error('AI service request failed'), {
+      code: /^[a-z_]{1,60}$/.test(result?.error?.code || '') ? result.error.code : 'request_failed', status: response.status,
+      upstreamStatus: Number.isInteger(result?.error?.upstream_status) && result.error.upstream_status >= 300 && result.error.upstream_status <= 599 ? result.error.upstream_status : undefined,
+    });
+    return result;
+  }
+  async _ensureAiSession() {
+    if (this._aiSession && this._aiSession.expires > Date.now()) return this._aiSession.token;
+    if (this._aiSessionPromise) return this._aiSessionPromise;
+    const hass = this._hass, epoch = this._aiEpoch;
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
+    const attempt = (async () => {
+      const response = await hass.fetchWithAuth('/api/home_floorplan/ai/session', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', signal: controller.signal,
+      });
+      const result = await this._readAiResponse(response);
+      if (typeof result.session !== 'string' || result.session.length < 20 || result.session.length > 256 || !Number.isFinite(result.expires_at)) throw new Error('invalid_response');
+      if (epoch !== this._aiEpoch) { this._cleanupAiSession(hass, result.session); throw new DOMException('Editor session changed', 'AbortError'); }
+      this._aiSession = { token: result.session, expires: result.expires_at * 1000 };
+      return result.session;
+    })();
+    this._aiSessionPromise = attempt;
+    try { return await attempt; }
+    finally { clearTimeout(timer); if (this._aiSessionPromise === attempt) this._aiSessionPromise = null; }
+  }
+  async _aiRequest(data) {
+    const match = /^ai-([1-9][0-9]{0,9})$/.exec(data.requestId || '');
+    if (!match || Number(match[1]) <= this._aiSequence || !this._ready || this._saved?.capabilities?.ai !== true || !this._hass?.user?.is_admin) return;
+    this._aiSequence = Number(match[1]);
+    const action = data.action, epoch = this._aiEpoch;
+    const reply = payload => { if (epoch === this._aiEpoch) this._send('ai-response', { requestId: data.requestId, ...payload }); };
+    let body, requestToken;
+    try {
+      if (!Object.hasOwn(AI_ACTIONS, action) || this._aiPending.size >= 8) throw new Error('invalid_request');
+      const spec = AI_ACTIONS[action];
+      if (!spec.fields) {
+        if (data.body !== undefined) throw new Error('invalid_request');
+      } else {
+        if (!data.body || typeof data.body !== 'object' || Array.isArray(data.body) || Object.keys(data.body).some(key => !spec.fields.includes(key))) throw new Error('invalid_request');
+        body = JSON.stringify(data.body);
+        if (new Blob([body]).size > spec.limit) throw new Error('invalid_request');
+      }
+    } catch { reply({ error: { code: 'invalid_request', status: 400 } }); return; }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), action === 'generate' ? 120000 : 20000);
+    this._aiPending.set(data.requestId, { controller, action });
+    try {
+      const token = await this._ensureAiSession(); requestToken = token;
+      if (epoch !== this._aiEpoch || controller.signal.aborted) throw new DOMException('AI request aborted', 'AbortError');
+      const response = await this._hass.fetchWithAuth(`/api/home_floorplan/ai/${action}`, {
+        method: body === undefined ? 'GET' : 'POST',
+        headers: { 'X-Home-Studio-Session': token, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+        body, signal: controller.signal,
+      });
+      body = undefined;
+      const result = await this._readAiResponse(response);
+      // No token or unexpected server metadata crosses into the untrusted child.
+      const clean = action === 'generate' ? { draft: result.draft }
+        : action === 'providers' ? { providers: Array.isArray(result.providers) ? result.providers.slice(0, 32).map(value => ({
+          id: boundedText(value.id, 60), label: boundedText(value.label, 100), local: value.local === true,
+          requires_key: value.requires_key === true, default_endpoint: boundedText(value.default_endpoint, 2048),
+        })) : [] }
+        : action === 'cancel' ? { cancelled: result.cancelled === true }
+        : { connected: result.connected === true, expires_at: result.expires_at,
+          provider: boundedText(result.provider, 60), model: boundedText(result.model, 200), endpoint: boundedText(result.endpoint, 2048), local: result.local === true };
+      reply({ result: clean });
+    } catch (error) {
+      if (epoch === this._aiEpoch && this._aiSession?.token === requestToken && [401, 403, 410].includes(error.status)) this._aiSession = null;
+      reply({ error: { code: error.name === 'AbortError' ? 'timeout' : error.code || 'request_failed', status: error.status || 503, upstreamStatus: error.upstreamStatus } });
+    } finally {
+      clearTimeout(timer); body = undefined;
+      if (this._aiPending.get(data.requestId)?.controller === controller) this._aiPending.delete(data.requestId);
+    }
   }
   _snapshot(allowInvalid = false) {
     const requestId = String(++this._request);

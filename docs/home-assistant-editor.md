@@ -109,9 +109,26 @@ other editor. Check the imported drawing, save it, and publish when ready.
 The external editor keeps its own browser draft; the native editor stores its
 saved source in HA. Neither silently overwrites the other.
 
-Optional AI photo drafting remains available through the
-[local AI companion](ai-planning.md). The native integration does not proxy
-provider credentials or automatically send room photos to a provider.
+## Draft from photos without leaving Home Assistant
+
+Choose **Plan from photos** in the native drawing editor. Select your provider,
+exact vision-model ID, and session-only key (the field is masked). Connect, choose
+an existing measured room or enter a new rectangular room's dimensions, and add
+photos and instructions. **Generate draft** sends the selected input to that model.
+Review the detached 2D/3D proposal, correct dimensions, confirm, and **Apply selected
+additions**. Then **Save draft → Publish family view**; no JSON transfer is needed.
+
+Only administrators can create AI sessions. The provider key stays in HA process
+memory for at most 30 minutes, is cleared on **End session**, and is not persisted
+in your drawing, browser storage or HA configuration. The key is sent to your chosen
+provider to authenticate; photos and sanitized room context are sent on Generate.
+Use HTTPS when connecting to HA remotely. An API key does not grant an AI model any
+Home Assistant service access. Failed or cancelled generations leave the plan intact.
+
+The [full AI guide](ai-planning.md) explains limits, privacy and providers. The
+optional desktop companion remains available for separate editing. For native
+local-model profiles, `127.0.0.1` means the HA host/container, not your laptop;
+LAN model URLs are not accepted by these profiles.
 
 ## Existing generated homes
 

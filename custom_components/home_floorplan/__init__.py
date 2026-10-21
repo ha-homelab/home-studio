@@ -112,6 +112,12 @@ async def _finish_setup(hass, state):
         if asset_files and not state.get("editor_registered"):
             hass.http.register_view(StudioAssetsView(asset_files))
             state["editor_registered"] = True
+        if asset_files and state["native"] and not state.get("ai_registered"):
+            from .ai import NativeAI, NativeAIView
+            if "ai" not in state:
+                state["ai"] = NativeAI(hass)
+            hass.http.register_view(NativeAIView(state["ai"]))
+            state["ai_registered"] = True
         if not state.get("ws_registered"):
             for handler in (ws_status, ws_viewer, ws_save, ws_recover, ws_export, ws_curtains, ws_curtain_command,
                             ws_project_get, ws_project_save, ws_project_publish, ws_entity_catalog):
@@ -153,6 +159,8 @@ async def async_unload_entry(hass, entry):
     if hass.data[DOMAIN]["has_editor"]:
         frontend.async_remove_panel(hass, "home-studio", warn_if_unknown=False)
     hass.data[DOMAIN]["panels_unloaded"] = True
+    if ai := hass.data[DOMAIN].get("ai"):
+        ai.clear()
     return True
 
 
@@ -194,7 +202,10 @@ def _project_result(state, connection):
     return {**_status(state, connection), "project": copy.deepcopy(native.document["project"]) if native else None,
             "revision": native.document["revision"] if native else 0,
             "published_revision": native.document["published_revision"] if native else None,
-            "editor_url": EDITOR_URL, "capabilities": {"authoring": bool(native)}}
+            "editor_url": EDITOR_URL, "capabilities": {
+                "authoring": bool(native),
+                "ai": bool(native and state.get("ai_registered") and state.get("initialized")
+                           and not state.get("panels_unloaded") and connection.user and connection.user.is_admin)}}
 
 
 def _capabilities(connection, references):

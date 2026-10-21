@@ -298,20 +298,28 @@ sensing adapters.
 
 ## Draft from room photos with your own AI
 
-Run the optional local companion with Python 3.10+:
+Inside **Home Assistant → Home Studio**, choose **Plan from photos**. Connect your
+own provider with its exact vision-model ID and a session-only API key. Add room
+photos, instructions and measured dimensions; generate, review in 2D/3D, and apply
+selected additions as one undoable edit. Then **Save draft → Publish family view**.
+No separate editor, terminal or JSON transfer is needed for this native workflow.
+AI is optional; manual drawing and published device controls work without a key.
+
+The key field is masked and cleared after connection. The native integration holds
+credentials in a user-bound session in HA process memory for at most 30 minutes.
+End session clears the key and cancels pending generation. Credentials and source
+photos are not saved in project JSON, browser storage or HA configuration. Generate
+sends your selected photos, instructions and room context to the chosen provider,
+with the key for authentication. Use HTTPS for remote HA access.
+
+For a separate desktop workflow, the optional Python 3.10+ companion remains:
 
 ```sh
 python3 scripts/serve-ai-planner.py
 ```
 
-On Windows: `py -3 scripts/serve-ai-planner.py`. Choose **Plan from photos** in the
-local editor, connect your provider or local vision model, and add photos,
-instructions and measured dimensions. Furnish an existing room or create a measured
-rectangular room, preview the suggestions, then apply one undoable edit. Export JSON from the companion and use **Open JSON** in Home Studio inside HA,
-then **Save draft** and **Publish family view**. Existing portable deployments
-can instead rebuild through the optional toolkit.
-
-Credentials stay in temporary companion memory and out of project/browser storage.
+On Windows use `py -3 scripts/serve-ai-planner.py`. Export its accepted JSON and open
+it in HA when ready. Credentials stay in temporary companion memory and out of project/browser storage.
 Cloud generation sends the chosen data and authentication key to your provider;
 local generation requires a loopback model runtime. There is no Home Studio AI relay.
 The hosted website does not collect keys, and the installed HA viewer has no AI dependency.

@@ -14,7 +14,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT_FILES = (
     "__init__.py", "site.py", "validation.py", "curtains.py", "native.py", "permissions.py",
-    "config_flow.py", "manifest.json", "strings.json", "translations/en.json",
+    "ai.py", "config_flow.py", "manifest.json", "strings.json", "translations/en.json",
     "static/panel.js", "static/card.js", "static/studio.js",
 )
 RUNTIME_FILES = (
@@ -23,8 +23,11 @@ RUNTIME_FILES = (
     "curtain-state.js", "motion-state.js", "appliance-state.js", "presence-view.js", "tv-screen.js", "camera-preview.js", "media-preview.js",
     "assumed-zone-view.js", "light-state.js", "planner/render-capacity.js", "planner/interaction-render.js",
     "room-lighting.js", "vendor/three.module.min.js", "planner/environment.js",
+    "ai_companion/__init__.py", "ai_companion/protocol.py", "ai_companion/providers.py",
+    "ai_companion/transport.py", "ai_companion/session.py",
+    "scripts/download_tls.py", "scripts/tls_key_policy.py", "scripts/_darwin_certificate.py",
 )
-AI_EDITOR_FILES = ("ai/bootstrap.js", "ai/panel.js", "ai/panel.css", "ai/photo-worker.js", "ai/draft.js", "ai/json.js")
+AI_EDITOR_FILES = ("ai/bootstrap.js", "ai/panel.js", "ai/panel.css", "ai/photo-worker.js", "ai/photo-processing.js", "ai/draft.js", "ai/json.js")
 
 
 def regular_file(root, name):
@@ -52,13 +55,14 @@ def bundle_component(source_root, destination):
         "viewer-locales/" + code + ".json" for code in inventory.LOCALE_CODES)
     for name in runtime_files:
         copy_file(name, destination / "runtime" / name)
-    for name in ("runtime/__init__.py", "runtime/planner/__init__.py"):
+    for name in ("runtime/__init__.py", "runtime/planner/__init__.py", "runtime/scripts/__init__.py"):
         (destination / name).write_text('"""Build-time bundled public Home Studio runtime."""\n', encoding="utf-8")
     public_files = tuple(sorted(set(inventory.SITE_FILES + AI_EDITOR_FILES)))
     for name in public_files:
         copy_file(name, destination / "static/studio" / name)
     (destination / "studio-files.json").write_text(json.dumps(public_files) + "\n", encoding="utf-8")
-    for source, target in (("LICENSE", "LICENSE"), ("vendor/THREE-LICENSE.txt", "THREE-LICENSE.txt")):
+    for source, target in (("LICENSE", "LICENSE"), ("vendor/THREE-LICENSE.txt", "THREE-LICENSE.txt"),
+                           ("THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md")):
         copy_file(source, destination / target)
     return destination
 

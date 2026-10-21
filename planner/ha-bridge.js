@@ -1,5 +1,5 @@
 // The embedded editor is deliberately unprivileged. This protocol carries only
-// editable drawings and registry labels; authentication stays in the HA host.
+// editable drawings, registry labels, and bounded AI operations; HA authentication stays in the host.
 export const PROTOCOL = 'home-studio-editor-v1';
 export function embeddedContext(win = window) {
   const url = new URL(win.location.href);
@@ -15,6 +15,7 @@ export function memoryDraftOptions() {
   };
 }
 export function connectHost(context, { initialize, snapshot, editState, subscribe, flush, failed }, win = window) {
+  const ai = createNativeAiTransport(context, win);
   let initialized = false, previous = '', previousState = '', sequence = 0;
   const send = (type, payload = {}) => win.parent.postMessage({ protocol: PROTOCOL, channel: context.channel, type, ...payload }, context.origin);
   const changed = (requestId) => {
@@ -29,7 +30,7 @@ export function connectHost(context, { initialize, snapshot, editState, subscrib
     const data = event.data;
     if (event.source !== win.parent || event.origin !== context.origin || data?.protocol !== PROTOCOL || data.channel !== context.channel) return;
     if (data.type === 'initialize' && !initialized) {
-      try { initialize(data.project, data.catalog); initialized = true; changed(); }
+      try { initialize(data.project, data.catalog, data.capabilities?.ai === true ? ai : null); initialized = true; changed(); }
       catch { failed(); send('error', { message: 'The saved drawing could not be opened. Export its JSON from Home Assistant for recovery.' }); }
     } else if (data.type === 'snapshot-request' && initialized && typeof data.requestId === 'string' && data.requestId.length < 80) {
       try { flush(data.allowInvalid === true); changed(data.requestId); }
@@ -40,5 +41,52 @@ export function connectHost(context, { initialize, snapshot, editState, subscrib
   // Transactions refresh inspector controls before the host reads field state.
   const unsubscribe = subscribe(() => queueMicrotask(() => changed()));
   send('ready');
-  return () => { unsubscribe(); win.removeEventListener('message', receive); };
+  return () => { unsubscribe(); ai.dispose(); win.removeEventListener('message', receive); };
+}
+
+// This is an RPC for the AI service only, never a general URL/fetch proxy. The
+// opaque child receives no HA credential or AI session token in either direction.
+const AI_ACTION_LIMITS = Object.freeze({ providers: 0, status: 0, connect: 32768, disconnect: 2, cancel: 256, generate: 17 * 1024 * 1024 });
+const MAX_AI_RESPONSE = 2 * 1024 * 1024;
+export function createNativeAiTransport(context, win = window) {
+  let sequence = 0, disposed = false;
+  const pending = new Map();
+  const send = (type, payload = {}) => win.parent.postMessage({ protocol: PROTOCOL, channel: context.channel, type, ...payload }, context.origin);
+  const finish = (requestId, error, result) => {
+    const entry = pending.get(requestId); if (!entry) return;
+    pending.delete(requestId); clearTimeout(entry.timer); entry.signal?.removeEventListener('abort', entry.abort);
+    error ? entry.reject(error) : entry.resolve(result);
+  };
+  const receive = event => {
+    const data = event.data;
+    if (event.source !== win.parent || event.origin !== context.origin || data?.protocol !== PROTOCOL || data.channel !== context.channel || data.type !== 'ai-response' || !pending.has(data.requestId)) return;
+    try {
+      if (new Blob([JSON.stringify(data)]).size > MAX_AI_RESPONSE) throw new Error('AI response exceeds the limit');
+      if (data.error) finish(data.requestId, Object.assign(new Error('AI request failed'), { code: data.error.code, status: data.error.status, upstreamStatus: data.error.upstreamStatus }));
+      else finish(data.requestId, null, data.result);
+    } catch { finish(data.requestId, Object.assign(new Error('Invalid AI response'), { code: 'invalid_response' })); }
+  };
+  win.addEventListener('message', receive);
+  const close = () => {
+    send('ai-close');
+    for (const id of [...pending.keys()]) finish(id, new DOMException('AI session closed.', 'AbortError'));
+  };
+  return Object.freeze({
+    request(action, body, signal) {
+      if (disposed || signal?.aborted) return Promise.reject(new DOMException('AI request aborted.', 'AbortError'));
+      if (!Object.hasOwn(AI_ACTION_LIMITS, action) || pending.size >= 8) return Promise.reject(new Error('AI request unavailable'));
+      const raw = body === undefined ? '' : JSON.stringify(body);
+      if (new Blob([raw]).size > AI_ACTION_LIMITS[action]) return Promise.reject(new Error('AI request exceeds the limit'));
+      const requestId = `ai-${++sequence}`;
+      return new Promise((resolve, reject) => {
+        const abort = () => { send('ai-abort', { requestId }); finish(requestId, new DOMException('AI request aborted.', 'AbortError')); };
+        const timer = setTimeout(() => { send('ai-abort', { requestId }); finish(requestId, Object.assign(new Error('AI request timed out'), { code: 'timeout' })); }, action === 'generate' ? 125000 : 25000);
+        pending.set(requestId, { resolve, reject, timer, signal, abort });
+        signal?.addEventListener('abort', abort, { once: true });
+        send('ai-request', { requestId, action, ...(body === undefined ? {} : { body }) });
+      });
+    },
+    close,
+    dispose() { if (disposed) return; close(); disposed = true; win.removeEventListener('message', receive); },
+  });
 }
