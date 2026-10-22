@@ -47,7 +47,7 @@ class DistributionTests(unittest.TestCase):
             self.assertIn(b'Permission is hereby granted', bytes(package.files['THREE-LICENSE.txt']))
             python_files = {name for name in package.files if name.endswith('.py')}
             self.assertEqual(python_files, {'__init__.py', 'site.py', 'validation.py', 'curtains.py',
-                                            'native.py', 'permissions.py', 'config_flow.py'})
+                                            'native.py', 'generated.py', 'permissions.py', 'config_flow.py'})
             # A generic archive must not silently activate optional household services.
             self.assertNotIn('private_site.py', package.files)
             self.assertNotIn('private_site_config.py', package.files)

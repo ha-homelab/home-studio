@@ -10,8 +10,7 @@ we test both browser paths, recover graphics resources, and qualify a release.
 ## Two hosts, one project and compiler
 
 The [native editor guide](home-assistant-editor.md) describes the primary workflow:
-install the integration, draw in the Home Studio sidebar, Save draft, and Publish
-family view. The separate editor is an optional fallback for HA setup problems,
+install the integration, draw in the Home Studio sidebar, Save draft, and Publish to 3D Home. The separate editor is an optional fallback for HA setup problems,
 offline work, and existing portable deployments.
 Both hosts use the same `planner` modules and metric project schema; the native
 release packages reviewed source files without maintaining a second editor.
@@ -26,6 +25,35 @@ connection. It hosts the editor in an opaque sandbox, validates its message
 source and session, and passes only project data and a bounded registry catalog.
 `planner/ha-bridge.js` gives the shared editor an explicit native mode. No HA
 token enters the sandbox, public website, exported project or generated viewer.
+
+If the browser stalls the initial editor document navigation, the host retries
+the bundled document through a bounded same-origin fetch and an opaque `srcdoc`
+frame. It accepts only the expected HTML content type, restrictive CSP and known
+local entry points; redirects and oversized responses are rejected. A separate
+early loading signal prevents this recovery from replacing an editor that has
+already started. Both routes use the same source/origin/channel checks and keep
+HA credentials outside the frame. For the fallback only, CSP `self` sources are
+written as the exact HA origin: Firefox otherwise interprets them as the opaque
+frame origin. Script and stylesheet scope stays local; network connections,
+objects, base tags, and form submissions remain disallowed.
+
+The host also passes a presentation-only palette: light/dark mode and eight
+normalized hex colors from HA's inherited CSS variables. The editor accepts
+only this fixed shape through the authenticated bridge, derives accessible text
+and selection colors, and repaints on a theme change without changing project
+state or restarting the editor. No CSS text or resource URLs cross this boundary.
+The standalone editor retains its default palette. Theme changes never rewrite
+furniture materials or the published model.
+
+The native first-room guide sends an allowlisted `guide-action` through this
+same bridge: `room`, `devices`, `preview`, or `photos`. These shortcuts open
+existing editor controls; they do not save, publish, operate a device, or
+start AI generation. The editor checks the parent window, origin and channel
+before handling them, and preserves unfinished fields before changing rooms.
+An untouched initial blank project is a comparison baseline, not a saved
+draft. It creates neither a recovery warning nor a publishable revision.
+Saving and publishing remain explicit host actions; client-side empty-floor
+checks explain the next step while the compiler remains authoritative.
 
 `native.py` stores the editable source with revisions using HA private storage.
 Saving permits unfinished floors; publishing requires the compiler's full
@@ -80,8 +108,10 @@ request, privacy, geometry and transactional preview boundaries.
 The [portable installation reference](https://ha-homelab.github.io/home-studio/install.html#export)
 covers this route's commands, manual YAML entry, restart, and Home Assistant OS
 file transfer. These are optional portable steps, not requirements for a new
-native installation. Installing the native release does not automatically
-migrate customized generated homes.
+native installation. A customized installation must retain its generated assets
+and private adapters when updating the shared integration. With that complete
+bundle in place, Home Studio opens an editable projection of the installed home
+and preserves its original architecture as described below.
 
 ## Permissions and editing roles
 
@@ -813,3 +843,37 @@ indicator. Switch-only lamps without brightness retain full on/off behavior.
 This is a UI intensity cue, not a claim about measured illuminance. It adds no
 polling, render loop or GPU effect. Run `node --test scripts/test-light-state.cjs`
 for brightness, color, missing-state and icon-contrast regressions.
+
+
+## Editing an existing generated home
+
+`GeneratedProject` is the compatibility boundary between a compiled home and
+the native authoring UI. The server derives a small metric project from the
+installed rooms and the current saved inventory. Detailed meshes, custom object
+assets, private adapters, calibrated coordinate frames, activity maps and
+control metadata remain in a server-owned baseline. They are not flattened
+into the portable project's schema or sent through the editor bridge.
+
+The imported floor/room geometry is protected on both sides of the boundary.
+The UI explains the restriction; backend validation enforces it independently.
+Names, HA mappings, object placements and bindings remain editable. Newly
+created geometry is compiled as an addition and merged with the baseline,
+rather than recompiling and replacing the original house. Publication retains
+the original viewer runtime and its inert model-data payload, with the approved
+changes applied. Draft saves and active publications remain separate revisioned
+transactions. A failed build or save keeps the previous live plan available.
+
+The embedded viewer retains each original object's commissioned transform and
+binding for calibrated effects, while receiving the published appearance and
+the current placements through the HA bridge. Permission indexing includes
+both raw and embedded model references, including objects removed from the
+editable inventory. Static GLB, USDZ, OBJ and DAE downloads are unavailable after
+publishing these edits because the preserved exports would describe the old
+model. The editable JSON and private baseline remain available for recovery.
+
+The native host's **Published home** view uses the actual viewer on demand with
+editing locked and dry run forced. Its label distinguishes the active model
+from unpublished draft changes. Returning removes that renderer before showing
+the editor, preventing two large WebGL scenes from staying live. Native projects
+continue to use their normal draft 3D preview. No external editor navigation is
+required from the HA interface.

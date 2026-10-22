@@ -1,17 +1,28 @@
 # Install, draw, and publish inside Home Assistant
 
-Start with the native Home Studio integration. This is the recommended path:
-install it in Home Assistant, draw your rooms, link devices, save the draft, and
-publish the family view in one place. No terminal or local compiler is needed
-for a new native installation. The separate editor remains an optional fallback
-when HA setup is blocked, or for offline work and existing portable deployments.
+Install Home Studio in Home Assistant, then start with one room. You can save
+and publish that room before adding furniture or connecting any devices.
+
+Use these two Home Assistant sidebar entries:
+
+- **Home Studio** is where an administrator draws rooms, adds furniture, links
+  devices, and saves and publishes changes.
+- **3D Home** is the published view your household uses to see the home and
+  control linked devices. Administrators can choose **Edit home** in its header
+  to return directly to Home Studio.
+
+The steps below are for a new native installation, where the drawing is saved
+inside Home Assistant. No terminal or local compiler is needed. If you already
+use a generated or customized home, read [Existing generated homes](#existing-generated-homes)
+before changing its installation. The separate editor remains an optional
+fallback for offline work or while resolving HA setup.
 
 The native workflow requires Home Assistant 2026.10 or newer and a release with **home_floorplan.zip**. A release
 that only contains **home-studio-VERSION.zip** provides the portable toolkit.
 Check the release assets rather than assuming a hosted editor update changes
 an installed Home Assistant integration.
 
-![The native editor with a fictional room and lamp, plus Save draft and Publish family view actions.](images/native-editor.png)
+![The native editor with a fictional room, plus save and publish controls.](images/native-editor.png)
 
 This screenshot uses the actual editor and trusted host with a simulated HA
 connection and fictional devices. No personal home or credentials are shown.
@@ -35,32 +46,77 @@ the source-toolkit ZIP there. Keep only one installed copy of the domain.
 
 ## Your first working room
 
-1. Start a new project or use **Open JSON** for an existing Home Studio drawing.
-2. Create one measured room and its walls. Add a window and a lamp from the item
-   library. The [illustrated drawing guide](../planner/guide.html) applies to
-   either editor.
-3. Associate the room with its Home Assistant area. Choose the lamp's real
-   entity from the suggested devices. Areas help find devices; they do not
-   discover physical positions or dimensions. Place each item yourself.
-4. **Save draft** preserves the editable project in HA. A draft may contain an
-   empty floor while you are still drawing.
-5. **Publish family view** validates and builds the saved project into the live **3D Home**
-   view. A floor needs at least one valid room before publication. An error
-   leaves the previously published home available.
-6. Open **3D Home** and use **Dry run** to check your layout and bindings without
-   sending device commands. Turn Dry run off only when you want live controls.
+For your first drawing, use a desktop browser with a mouse or trackpad. Start
+with an empty floor. If a saved drawing opens, continue working on it instead;
+use **More options → Export drawing (JSON)** to keep a copy before replacing it.
+The short guide in Home Studio follows three steps: **Draw a room**,
+**Add devices (optional)**, and **Save and publish**. Expand **Getting started ·
+one room is enough** if it is closed. Once you have a room, the first shortcut
+becomes **Add another room**.
 
-Publishing a drawing does not turn on lights, move covers, or operate locks.
-Saving a draft and publishing a dashboard are separate actions. Changing a
-draft does not change the currently published geometry.
+1. Choose **Add your first room**. Enter **Room name**, **Width (m)**, and
+   **Depth (m)**. For practice, try a room four meters wide and three meters
+   deep. For your own room, use your measurements. Leave **Include walls**
+   checked and choose **Create room**.
+2. Choose **Preview 3D** to check the floor and walls. Doors, windows,
+   furniture, and devices can wait until this first room works.
+3. Choose **Save draft** and wait for confirmation that the drawing was saved
+   in Home Assistant. You can leave and continue this saved drawing later.
+4. Choose **Publish to 3D Home** and wait for confirmation. This updates
+   **3D Home** from the saved drawing. Each floor needs at least one valid room;
+   a failed publication leaves the previous published home available.
+5. Choose **Open 3D Home**, or open **3D Home** in the HA sidebar, to see your room.
+   Choose **Edit home** in the viewer header to add more detail, then save and publish again
+   when ready.
+
+**Save draft** keeps your work for editing. **Publish to 3D Home** makes the
+saved drawing visible in 3D Home. An unfinished draft can be saved without
+changing what your household sees. Neither action operates devices.
+
+For pictures of the drawing tools and a two-room example, follow the
+[illustrated drawing guide](../planner/guide.html).
+
+## Add your first device
+
+1. In **Home Studio**, choose **Add devices**, select the room, and choose its
+   **Home Assistant area**. This helps find devices already set up in HA; it
+   does not measure the room or find their positions.
+2. Under **Add device to this room**, choose a light and select **Add linked
+   item**. Drag the new item to its place in the room. The list uses HA
+   entities: the lights, switches, sensors, and other controls or readings
+   already in Home Assistant.
+3. **Save draft**, then **Publish to 3D Home**. In **3D Home**, enable
+   **Dry run** before trying the lamp's controls. You can check its link without
+   sending commands. Turn Dry run off when you want to operate the real light.
+
+Use **Item library** to add furniture that is only part of the drawing; you
+can leave **Entity ID (optional)** empty. A lamp model does not create a new
+device in Home Assistant.
+
+## Match your Home Assistant theme
+
+Home Studio follows the active Home Assistant theme, including light and dark
+mode. The toolbars, property fields, dialogs, drawing background, grid, and
+selection outlines use the same palette as HA. Text and selection contrast are
+adjusted for readability.
+
+Change your theme in your Home Assistant profile as usual. The editor updates
+without reloading the drawing or discarding an unfinished field edit. This only
+changes the editing interface: your furniture colors, room materials, saved
+project, and published home's appearance stay as you designed them. The separate
+browser editor keeps its own default appearance.
+
+## Saving while you work
 
 **Save draft** also applies the value you are currently typing. Unfinished
 fields count as unsaved work. If a field is invalid, saving and publishing
 stop, and Save draft focuses the field so you can correct it without losing
 your entered text. The tab recovery copy contains accepted drawing changes;
-correct unfinished fields before leaving the editor. **Export JSON** remains
-available for a backup of the last valid drawing and tells you when invalid
-field text is excluded.
+correct unfinished fields before leaving the editor.
+**More options → Export drawing (JSON)** downloads a backup of the last valid
+drawing and tells you when invalid field text is excluded. **Load saved draft**
+is also under More options; export your work first if you need to keep the
+current edits before loading the saved copy.
 
 ## Everyday controls without editing access
 
@@ -98,25 +154,28 @@ published generation active.
 ## Optional fallback: the separate editor
 
 If setup is blocked, or you want to work offline, use the separate editor.
-The in-HA editor links to the [hosted browser editor](https://ha-homelab.github.io/home-studio/planner/);
-a local copy is available in the portable toolkit.
+The [hosted browser editor](https://ha-homelab.github.io/home-studio/planner/)
+and a local copy in the portable toolkit are separate alternatives. Home Studio
+does not send you there: drawing and publication happen inside Home Assistant.
 The separate editor links back to the native installation instructions. It
 does not know your private HA address, connect to HA, or receive your project
 just because you follow that link.
 
-To move a design deliberately, use **Export JSON**, then **Open JSON** in the
-other editor. Check the imported drawing, save it, and publish when ready.
+To move a design deliberately, use **More options → Export drawing (JSON)**
+in Home Studio, or **Export JSON** in the separate editor. Then use **Open JSON**
+in the other editor. Check the imported drawing, save it, and publish when ready.
 The external editor keeps its own browser draft; the native editor stores its
 saved source in HA. Neither silently overwrites the other.
 
 ## Draft from photos without leaving Home Assistant
 
-Choose **Plan from photos** in the native drawing editor. Select your provider,
+If the AI option is available, choose **Draft from photos (AI)** in Home Studio
+to open **Plan from photos**. Select your provider,
 exact vision-model ID, and session-only key (the field is masked). Connect, choose
 an existing measured room or enter a new rectangular room's dimensions, and add
 photos and instructions. **Generate draft** sends the selected input to that model.
 Review the detached 2D/3D proposal, correct dimensions, confirm, and **Apply selected
-additions**. Then **Save draft → Publish family view**; no JSON transfer is needed.
+additions**. Then **Save draft → Publish to 3D Home**; no JSON transfer is needed.
 
 Only administrators can create AI sessions. The provider key stays in HA process
 memory for at most 30 minutes, is cleared on **End session**, and is not persisted
@@ -132,19 +191,41 @@ LAN model URLs are not accepted by these profiles.
 
 ## Existing generated homes
 
-The portable workflow is retained: external editor → JSON → Python compiler →
-local installer. Its [build and installation instructions](../install.html#export)
-continue to apply. Generated packages and specialized private adapters are not
-automatically converted into native projects.
+With the complete editor/runtime installed, **Home Studio opens the home that
+is already installed**. You do not need to redraw it or visit another website.
+Its rooms and current saved object placements become an editable draft. The
+original detailed architecture, custom objects and runtime integrations stay
+with the installed home.
 
-Do not replace a customized component with the generic HACS package and expect
-its private adapters or prebuilt assets to be preserved. Keep its existing
-deployment route unless you intentionally migrate. For an ordinary portable
-project, retain its source JSON and HA backup, then import the source into a
-fresh native installation. Check bindings in Dry run before using live controls.
-If Home Studio identifies the installation as a generated home, its sidebar
-explains this workflow and keeps the family view and browser editor links
-available. This compatibility state is not a connection error.
+1. Open **Home Studio** as an administrator, or choose **Edit home** in 3D Home.
+2. Select a room or object on the drawing. Rename rooms, link their HA areas,
+   move or resize objects, change device bindings, or add furniture and devices.
+   You can add new rooms, walls and openings alongside the original architecture.
+3. Choose **Save draft**, then **Publish to 3D Home** when ready. Saving alone
+   does not change the household's live view.
+4. Choose **Open 3D Home** to use the updated plan. **Edit home** brings you back.
+   Save any unfinished edits before switching views.
+
+Original room boundaries and floor geometry are protected because compiled
+meshes do not retain the source wall/door construction history. Selecting them
+explains this in the inspector; it does not pretend that a room outline can
+safely rewrite its detailed walls or sensing zones. Newly drawn architecture
+is editable normally. Keep the original source/build route for structural
+changes to the imported building.
+
+For these homes, **Published home** shows the actual installed 3D model with
+controls locked for preview. **Back to editing** returns to the same drawing.
+This preview shows the last publication, not unpublished draft changes. The
+editor keeps only one 3D renderer active at a time.
+
+Back up the complete HA configuration, including the generated-home baseline,
+drafts and publication assets. An exported drawing JSON contains the editable
+projection, not the original custom model; it is not a complete backup of an
+imported home. Never replace a customized integration with a generic ZIP and
+expect its private adapters or baked assets to survive. Use its existing
+composition/update process to install the shared editor/runtime while retaining
+those files. Older thin portable packages need that complete runtime before
+in-HA editing is available.
 
 ## Troubleshooting
 
@@ -200,10 +281,26 @@ publish access tokens, cookies, client addresses, or full private logs in a repo
 - **Save succeeds but Publish fails:** saving allows an unfinished drawing;
   publication requires complete, valid geometry. Follow the field named by
   the error. The previous publication is retained.
+- **Publish to 3D Home is unavailable:** save your latest changes and check
+  that every floor has a room. The message below the guide explains the next
+  step. **Open 3D Home** becomes available after your first successful publication.
 - **The drawing tools do not finish loading:** after a short wait, use
   **Retry connection** to reopen the preserved drawing. Retry does not replace
-  a recovered drawing with the saved HA version. **Export JSON** remains
-  available when the host has a drawing, including after an editor load error.
+  a recovered drawing with the saved HA version.
+  A stalled initial document navigation is retried automatically inside HA;
+  no external editor or weaker browser security settings are needed. If it
+  still fails, inspect the `/home-floorplan-studio/planner/index.html` request
+  in Network. A pending request with no response differs from a 401/403/404
+  or a script error; report that distinction with the browser version.
+  **More options → Export drawing (JSON)** remains available when the host has
+  a drawing, including after an editor load error.
+- **`editor-assets` appears only through a reverse proxy:** HTML rewriting can
+  change the reviewed script or stylesheet list. Bundled editor responses send
+  `Cache-Control: no-cache, no-transform`; preserve that header on
+  `/home-floorplan-studio/` so proxies leave the resources intact.
+  [Cloudflare documents that `no-transform` prevents JavaScript Detection injection](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/javascript-detections/#if-your-origin-sends-a-no-transform-header).
+  The error alone does not identify which proxy feature changed the response.
+  The editor keeps its existing CSP and exact asset allowlist.
 - **The external editor opens a different draft:** this is expected. Export
   and open the JSON file when you want to transfer a design.
 

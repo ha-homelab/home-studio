@@ -10,7 +10,7 @@ assert(browserType, 'BROWSER must be chromium, firefox, or webkit');
 const root = path.resolve(__dirname, '..');
 const version = JSON.parse(fs.readFileSync(path.join(root, 'custom_components/home_floorplan/manifest.json'), 'utf8')).version;
 const panelPath = `/home-floorplan-static/studio.js?v=${version}`;
-const fixture = `<!doctype html><html style="height:100%"><head><meta charset="utf-8"></head><body style="margin:0;height:100%"><home-floorplan-studio-panel></home-floorplan-studio-panel><script type="module">
+const fixture = `<!doctype html><html style="height:100%"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;height:100%"><home-floorplan-studio-panel></home-floorplan-studio-panel><script type="module">
 // Match Home Assistant's loadModule: append an async module script and wait for
 // its load event before giving the registered custom element its hass object.
 window.loadPanelModule = url => new Promise((resolve, reject) => {
@@ -24,11 +24,223 @@ const saved=JSON.parse(sessionStorage.getItem('fixture-server')||'null')||{proje
 window.server=saved;
 window.catalog={floors:[{id:'ground',name:'Ground floor'}],areas:[{id:'living',name:'Living room',floor_id:'ground'}],entities:[{entity_id:'light.ceiling',name:'Ceiling light',domain:'light',area_id:'living',available:true,attributes:{secret:'PRIVATE_ATTRIBUTE'}},{entity_id:'sensor.temperature',name:'Temperature',domain:'sensor',area_id:'living',available:true},{entity_id:'switch.disabled',name:'Disabled',domain:'switch',area_id:'living',disabled:true}],secrets:'PRIVATE_CATALOG'};
 window.host=document.querySelector('home-floorplan-studio-panel');
-window.host.hass={user:{id:'test-user',is_admin:true},auth:{accessToken:window.tokens},callWS:async data=>{window.calls.push(structuredClone(data));if(data.type.endsWith('entity_catalog'))return window.catalog;if(data.type.endsWith('project_get')&&window.holdGet)await new Promise(resolve=>window.releaseGet=resolve);if(data.type.endsWith('project_save')){if(window.failSave)throw {code:'connection_error',message:'Offline'};if(data.revision!==saved.revision)throw {code:'conflict'};if(window.holdSave)await new Promise(resolve=>window.releaseSave=resolve);saved.project=data.project;saved.revision++;sessionStorage.setItem('fixture-server',JSON.stringify(saved));}if(data.type.endsWith('project_publish')){if(data.revision!==saved.revision)throw {code:'conflict'};saved.published_revision=saved.revision;sessionStorage.setItem('fixture-server',JSON.stringify(saved));}return {...structuredClone(saved),can_edit:true,editor_url:'/home-floorplan-studio/planner/index.html',capabilities:{authoring:true}};}};
+window.host.hass={user:{id:'test-user',is_admin:true},auth:{accessToken:window.tokens},callWS:async data=>{window.calls.push(structuredClone(data));if(data.type.endsWith('entity_catalog'))return window.catalog;if(data.type==='home_floorplan/viewer')return {mode:saved.mode||'native',has_editor:true,can_edit:true,site_features:false,floor:'ground',floors:['ground'],revision:1,items:[],readable_entities:[],controllable_entities:[],html:'<html><head></head><body>Published synthetic home</body></html>'};if(data.type.endsWith('project_get')&&window.holdGet)await new Promise(resolve=>window.releaseGet=resolve);if(data.type.endsWith('project_save')){if(window.failSave)throw {code:'connection_error',message:'Offline'};if(data.revision!==saved.revision)throw {code:'conflict'};if(window.holdSave)await new Promise(resolve=>window.releaseSave=resolve);saved.project=data.project;saved.has_saved_draft=true;saved.revision++;sessionStorage.setItem('fixture-server',JSON.stringify(saved));}if(data.type.endsWith('project_publish')){if(data.revision!==saved.revision)throw {code:'conflict'};if(!saved.project?.floors?.length||saved.project.floors.some(floor=>!floor.rooms?.length))throw {code:'invalid_project',message:'Add at least one room to every floor before publishing.'};saved.published_revision=saved.revision;saved.published_project=structuredClone(saved.project);sessionStorage.setItem('fixture-server',JSON.stringify(saved));}return {...structuredClone(saved),can_edit:true,has_saved_draft:saved.has_saved_draft??!!saved.project,has_published:saved.has_published??Number.isInteger(saved.published_revision),editor_url:'/home-floorplan-studio/planner/index.html',capabilities:{authoring:true,...saved.capabilities}};}};
 </script></body></html>`;
+// This destination checks the real navigation URL and saved publication source.
+// Rendering the generated family viewer is covered by separate acceptance tests.
+const familyFixture = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+<h1>3D Home navigation fixture</h1><p id="publication"></p><home-floorplan-panel></home-floorplan-panel>
+<script type="module">await import('/home-floorplan-static/panel.js?v=${version}');
+const saved=JSON.parse(sessionStorage.getItem('fixture-server')||'null');
+document.getElementById('publication').textContent=saved?.published_project?.floors.flatMap(floor=>floor.rooms.map(room=>room.name)).join(', ')||'No published drawing';
+window.viewer=document.querySelector('home-floorplan-panel');
+viewer.hass={user:{id:'test-user',is_admin:true},states:{},callWS:async()=>({mode:saved?.mode||'native',has_editor:true,can_edit:true,site_features:false,floor:'ground',floors:['ground'],revision:1,items:[],readable_entities:[],controllable_entities:[],html:'<html><body>Published viewer navigation fixture</body></html>'})};
+</script></body></html>`;
+async function openMoreOptions(page) {
+  const details=page.locator('#more-options');
+  if (await details.getAttribute('open')===null) await details.getByText('More options',{exact:true}).click();
+}
+// Exercise the document-navigation fallback with real opaque frames and network
+// responses. The fallback must not change the editor's credential boundary.
+async function testDocumentFallback(context, origin, project, errors) {
+  const editorPath='/home-floorplan-studio/planner/index.html';
+  const makePage=async(pageErrors=errors)=>{
+    const page=await context.newPage(); page.setDefaultTimeout(15000); page.on('pageerror',error=>pageErrors.push(String(error)));
+    await page.addInitScript(project=>{
+      if(window.parent===window)sessionStorage.setItem('fixture-server',JSON.stringify({project,revision:2,published_revision:2}));
+    },project);
+    await page.clock.install();
+    return page;
+  };
+  const fallback=await makePage();
+  let fallbackRequests=0;
+  await fallback.route('**/planner/index.html*',async route=>{
+    if(route.request().isNavigationRequest())return route.abort();
+    assert.equal(route.request().url(),origin+editorPath,'Fallback must fetch only the fixed same-origin editor document');
+    assert.equal(route.request().headers().authorization,undefined,'Fallback must not inject the HA bearer token');
+    fallbackRequests++; await route.continue();
+  });
+  await fallback.goto(origin+'/fixture',{waitUntil:'domcontentloaded'});
+  await fallback.waitForFunction(()=>window.host?._frame);
+  assert.equal(await fallback.evaluate(()=>{
+    const host=window.host, data={protocol:'home-studio-editor-v1',channel:host._channel,type:'loading'};
+    for(const event of [
+      {source:host._frame.contentWindow,origin:location.origin,data},
+      {source:window,origin:'null',data},
+      {source:host._frame.contentWindow,origin:'null',data:{...data,channel:'wrong-channel'}},
+    ])host._onMessage(event);
+    return !host._editorLoading&&host._editorNavigationTimer!==null;
+  }),true,'Untrusted loading messages must not suppress the navigation fallback');
+  await fallback.clock.fastForward(8001);
+  await fallback.waitForFunction(()=>window.host._ready);
+  assert.equal(fallbackRequests,1,'A stalled initial document should use one bounded fallback fetch');
+  assert.equal(await fallback.locator('iframe').count(),1);
+  const child=await fallback.locator('iframe').elementHandle().then(handle=>handle.contentFrame());
+  assert(child,'Fallback mounted an editor document');
+  assert.equal(child.url(),'about:srcdoc');
+  assert.equal(await child.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content'),
+    `default-src 'none'; script-src ${origin}; style-src ${origin} 'unsafe-inline'; img-src ${origin} data: blob:; font-src ${origin}; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`,
+    'Fallback CSP must allow only the original asset origin and keep its other restrictions');
+  assert.deepEqual(await child.evaluate(()=>window.planner.getProject()),project);
+  assert.deepEqual(await child.evaluate(()=>({
+    origin:window.origin,
+    parent:(()=>{try{return parent.document.body.innerHTML;}catch{return 'isolated';}})(),
+    storage:(()=>{try{return localStorage.length;}catch{return 'isolated';}})(),
+  })),{origin:'null',parent:'isolated',storage:'isolated'});
+  assert.equal(await fallback.locator('iframe').getAttribute('sandbox'),'allow-scripts allow-downloads allow-modals allow-forms');
+  assert.doesNotMatch(await fallback.locator('iframe').getAttribute('srcdoc'),/NEVER_SEND_TOKEN|PRIVATE_CATALOG|PRIVATE_ATTRIBUTE/);
+  await child.locator('#project-title').fill('Edited after document fallback');
+  await child.locator('#project-title').press('Tab');
+  await fallback.locator('#save').click();
+  await fallback.waitForFunction(()=>!window.host._busy&&window.server.project.title==='Edited after document fallback');
+  assert.equal(await fallback.evaluate(()=>window.server.revision),3);
+  await fallback.clock.fastForward(16000);
+  assert.equal(fallbackRequests,1,'A ready fallback must not enter a replacement loop');
+  assert.equal(await fallback.evaluate(()=>window.host._ready),true);
+  const contexts=await fallback.evaluate(async()=>{
+    const {embeddedContext}=await import('/home-floorplan-studio/planner/ha-bridge.js');
+    const channel='a'.repeat(32), valid={origin:location.origin,channel};
+    const context=(href,entries,top=false)=>{
+      const document=new DOMParser().parseFromString('<html><head></head></html>','text/html');
+      for(const value of entries){const meta=document.createElement('meta');meta.name='home-studio-bootstrap';meta.content=typeof value==='string'?value:JSON.stringify(value);document.head.append(meta);}
+      const win={location:{href},document,parent:{}};if(top)win.parent=win;
+      return embeddedContext(win);
+    };
+    return {
+      valid:context('about:srcdoc',[valid]),
+      rejected:[context('about:srcdoc',[]),context('about:srcdoc',[valid,valid]),context('about:srcdoc',['invalid JSON']),
+        context('about:srcdoc',[{...valid,origin:location.origin+'/path'}]),context('about:srcdoc',[{...valid,origin:'null'}]),
+        context('about:srcdoc',[{...valid,origin:'file:///tmp/editor'}]),context('about:srcdoc',[{...valid,channel:'bad'}]),
+        context('about:blank',[valid]),context('about:srcdoc',[valid],true)],
+      direct:context(location.origin+'/planner/index.html?embed=home-assistant#ha-studio='+channel,[{origin:'https://untrusted.invalid',channel:'b'.repeat(32)}]),
+    };
+  });
+  assert.deepEqual(contexts.valid,{origin,channel:'a'.repeat(32)});
+  assert.deepEqual(contexts.rejected,Array(9).fill(null),'Only valid srcdoc bootstrap metadata may define an embedded context');
+  assert.deepEqual(contexts.direct,contexts.valid,'A direct editor URL must ignore bootstrap metadata');
+  await fallback.close();
+  // A fetch that never returns is bounded; explicit Retry still opens the draft.
+  const timed=await makePage(); let timedRoute, timedNavigations=0;
+  await timed.route('**/planner/index.html*',route=>{
+    if(route.request().isNavigationRequest())return ++timedNavigations===1?route.abort():route.continue();
+    timedRoute=route;
+  });
+  await timed.goto(origin+'/fixture',{waitUntil:'domcontentloaded'});
+  await timed.waitForFunction(()=>window.host?._frame);
+  const timedRequest=timed.waitForRequest(request=>request.url()===origin+editorPath&&!request.isNavigationRequest());
+  await timed.clock.fastForward(8001); await timedRequest;
+  await timed.waitForFunction(()=>!!window.host._editorFetchController);
+  const timedAbort=timed.waitForEvent('requestfailed',request=>request.url()===origin+editorPath&&!request.isNavigationRequest());
+  await timed.clock.fastForward(15001); await timedAbort;
+  await timed.waitForFunction(()=>!window.host._editorFetchController);
+  assert.match(await timed.locator('#status').innerText(),/timed out.*\(editor-timeout\)/);
+  assert.equal(await timed.locator('#retry').isVisible(),true);
+  assert.equal(await timed.locator('iframe').getAttribute('srcdoc'),null);
+  assert.deepEqual(await timed.evaluate(()=>window.host._project),project);
+  assert(timedRoute,'A stalled fallback request was observed');
+  await timedRoute.fulfill({status:200,contentType:'text/html',body:fs.readFileSync(path.join(root,'planner/index.html'),'utf8')});
+  await timed.locator('#retry').click(); await timed.waitForFunction(()=>window.host._ready);
+  assert.equal(await timed.locator('iframe').getAttribute('srcdoc'),null,'Retry must use a fresh direct document');
+  await timed.close();
+  // A response from the old session must never replace the new editor.
+  const stale=await makePage(); let heldRoute, navigationCount=0;
+  await stale.route('**/planner/index.html*',async route=>{
+    if(route.request().isNavigationRequest())return ++navigationCount===1?route.abort():route.continue();
+    heldRoute=route;
+  });
+  await stale.goto(origin+'/fixture',{waitUntil:'domcontentloaded'});
+  await stale.waitForFunction(()=>window.host?._frame);
+  const staleRequest=stale.waitForRequest(request=>request.url()===origin+editorPath&&!request.isNavigationRequest());
+  await stale.clock.fastForward(8001); await staleRequest;
+  // The route handler runs after the request event; wait for its observable hold.
+  await stale.waitForFunction(()=>!!window.host._editorFetchController);
+  const aborted=stale.waitForEvent('requestfailed',request=>request.url()===origin+editorPath&&!request.isNavigationRequest());
+  await stale.evaluate(()=>{window.host.remove();document.body.append(window.host);});
+  await aborted; await stale.waitForFunction(()=>window.host._ready);
+  await stale.evaluate(()=>{window.replacementEditor=window.host._frame;window.replacementChannel=window.host._channel;});
+  assert(heldRoute,'The old session started a fallback request');
+  await heldRoute.fulfill({status:200,contentType:'text/html',body:fs.readFileSync(path.join(root,'planner/index.html'),'utf8')});
+  await stale.clock.fastForward(16000);
+  assert.equal(await stale.evaluate(()=>window.host._frame===window.replacementEditor&&window.host._channel===window.replacementChannel&&window.host._ready),true);
+  assert.equal(await stale.locator('iframe').getAttribute('srcdoc'),null,'An obsolete response must not replace the new direct editor');
+  assert.deepEqual(await stale.evaluate(()=>window.host._project),project);
+  await stale.close();
+  // These are server responses, not project input. Only the expected bundled
+  // document is permitted to become an iframe document.
+  const original=fs.readFileSync(path.join(root,'planner/index.html'),'utf8');
+  const invalidResponses=[
+    ['HTTP failure',{status:503,contentType:'text/html',body:'PRIVATE_UPSTREAM_FAILURE'},'editor-http-503'],
+    ['wrong MIME',{status:200,contentType:'text/plain',body:original},'editor-type'],
+    ['redirect',null,'editor-redirect'],
+    ['oversized document',{status:200,contentType:'text/html',body:original+' '.repeat(128*1024)},'editor-size'],
+    ['oversized stream','stream','editor-size'],
+    ['invalid UTF-8',{status:200,contentType:'text/html',body:Buffer.from([0xff,0xfe,0xff])},'editor-decode'],
+    ['changed policy',{status:200,contentType:'text/html',body:original.replace("default-src 'none'","default-src *")},'editor-policy'],
+    ['foreign script',{status:200,contentType:'text/html',body:original.replace('./editor.js','https://untrusted.invalid/editor.js')},'editor-assets'],
+    ['untrusted bootstrap',{status:200,contentType:'text/html',body:original.replace('</head>','<meta name="home-studio-bootstrap" content="untrusted"></head>')},'editor-document'],
+    ['blocked document parsing',{status:200,contentType:'text/html',body:original},'editor-parse','parse'],
+    ['blocked document assignment',{status:200,contentType:'text/html',body:original},'editor-open','open'],
+  ];
+  for(const [reason,response,code,blockedApi] of invalidResponses){
+    const rejectedErrors=[]; const rejected=await makePage(rejectedErrors); let fetches=0, escaped=false;
+    if(blockedApi)await rejected.addInitScript(kind=>{
+      if(window.parent!==window)return;
+      if(kind==='parse'){
+        const original=DOMParser.prototype.parseFromString;
+        DOMParser.prototype.parseFromString=()=>{throw new TypeError('PRIVATE_BROWSER_FAILURE');};
+        window.restoreBlockedApi=()=>{DOMParser.prototype.parseFromString=original;};
+      }else{
+        const original=Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'srcdoc');
+        Object.defineProperty(HTMLIFrameElement.prototype,'srcdoc',{...original,set(){throw new TypeError('PRIVATE_BROWSER_FAILURE');}});
+        window.restoreBlockedApi=()=>Object.defineProperty(HTMLIFrameElement.prototype,'srcdoc',original);
+      }
+    },blockedApi);
+    await rejected.route('**/unexpected-editor',route=>{escaped=true;return route.abort();});
+    await rejected.route('**/planner/index.html*',route=>{
+      if(route.request().isNavigationRequest())return route.abort();
+      fetches++;
+      if(response==='stream')return route.continue({headers:{...route.request().headers(),'x-test-editor-stream':'oversize'}});
+      return response?route.fulfill(response):route.continue({url:origin+'/test-fallback-redirect'});
+    });
+    await rejected.goto(origin+'/fixture',{waitUntil:'domcontentloaded'});
+    await rejected.waitForFunction(()=>window.host?._frame);
+    await rejected.clock.fastForward(8001);
+    await rejected.waitForFunction(()=>window.host._startupFailed&&!window.host._editorFetchController);
+    assert.equal(fetches,1,reason);
+    assert.equal(escaped,false,'Fallback must reject redirects without following them');
+    assert.equal(await rejected.evaluate(()=>window.host._ready),false,reason);
+    assert.equal(await rejected.locator('iframe').getAttribute('srcdoc'),null,reason);
+    assert.equal(await rejected.locator('#retry').isVisible(),true,reason);
+    const diagnostic=await rejected.locator('#status').innerText();
+    assert(diagnostic.includes('('+code+')'),reason+': '+diagnostic);
+    assert.doesNotMatch(diagnostic,/PRIVATE_|https?:|127\.0\.0\.1|untrusted\.invalid/,'Diagnostics must never include upstream bodies, URLs, or exception text');
+    assert.deepEqual(await rejected.evaluate(()=>window.host._project),project,reason);
+    assert.equal(await rejected.evaluate(()=>window.calls.some(call=>/project_(save|publish)$/.test(call.type))),false,reason);
+    await rejected.clock.fastForward(16000); assert.equal(fetches,1,'Rejected fallback must not retry automatically');
+    assert.equal(await rejected.locator('#status').innerText(),diagnostic,'The generic startup warning must not replace the specific failure code');
+    if(blockedApi){
+      await rejected.evaluate(()=>window.restoreBlockedApi());
+      await rejected.unroute('**/planner/index.html*');
+      await rejected.locator('#retry').click(); await rejected.waitForFunction(()=>window.host._ready);
+      assert.deepEqual(await rejected.evaluate(()=>window.host._project),project);
+    }
+    // WebKit reports its deliberate redirect refusal as a page error as well
+    // as a rejected fetch. Other script errors must still fail this scenario.
+    if(reason==='redirect')for(const error of rejectedErrors)assert.match(error,/^Fetch API cannot load .*test-fallback-redirect due to access control checks\.$/);
+    else assert.deepEqual(rejectedErrors,[],reason);
+    await rejected.close();
+  }
+}
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  if (url.pathname === '/fixture') return res.writeHead(200, {'Content-Type':'text/html'}).end(fixture);
+  if(url.pathname==='/test-fallback-redirect')return res.writeHead(302,{Location:'/unexpected-editor'}).end();
+  if(url.pathname==='/home-floorplan-studio/planner/index.html'&&req.headers['x-test-editor-stream']==='oversize'){
+    res.writeHead(200,{'Content-Type':'text/html'});
+    res.write(fs.readFileSync(path.join(root,'planner/index.html')));
+    res.write(' '.repeat(128*1024));return res.end();
+  }
+  if (['/fixture','/home-studio'].includes(url.pathname)) return res.writeHead(200, {'Content-Type':'text/html'}).end(fixture);
+  if (url.pathname === '/home-floorplan') return res.writeHead(200, {'Content-Type':'text/html'}).end(familyFixture);
   const route = url.pathname.replace(/^\/home-floorplan-static\//, '/custom_components/home_floorplan/static/')
     .replace(/^\/home-floorplan-studio\//, '/');
   const file = path.resolve(root, '.' + route + (route.endsWith('/') ? 'index.html' : ''));
@@ -71,12 +283,33 @@ const server = http.createServer((req, res) => {
   assert(frame,'Sandboxed editor loaded');
   assert.equal(await frame.evaluate(()=>{try{return parent.document.body.innerHTML;}catch{return 'isolated';}}),'isolated');
   assert.equal(await frame.evaluate(()=>{try{return localStorage.length;}catch{return 'isolated';}}),'isolated');
+  // A novice who only opens Studio has no edits to recover or publish.
+  assert.equal(await page.evaluate(()=>window.host._unsaved()),false);
+  assert.equal(await page.evaluate(()=>sessionStorage.getItem(window.host._key())),null);
+  assert.equal(await page.getByRole('button',{name:'Save draft',exact:true}).isDisabled(),true);
+  assert.equal(await page.getByRole('button',{name:'Publish to 3D Home',exact:true}).isDisabled(),true);
+  assert.equal(await page.getByRole('button',{name:'Add devices',exact:true}).isDisabled(),true);
+  assert.equal(await page.getByRole('link',{name:'Open 3D Home',exact:true}).getAttribute('aria-disabled'),'true');
+  assert.equal(await page.locator('#more-options').getAttribute('open'),null);
+  assert.equal(await page.locator('#export').isVisible(),false);
+  assert.equal(await page.locator('#reload').isVisible(),false);
+  await page.reload(); await page.waitForFunction(()=>window.host?._ready);
+  assert.equal(await page.locator('#recovery').isVisible(),false,'Revisiting an untouched blank drawing must not prompt for recovery');
+  assert.equal(await page.evaluate(()=>sessionStorage.getItem(window.host._key())),null);
+  frame=page.frames().find(frame=>frame.url().includes('embed='));
   await page.evaluate(()=>localStorage.setItem('home-studio.project.v1','standalone draft sentinel'));
   await frame.getByLabel('Home Assistant floor',{exact:true}).selectOption('ground');
-  await frame.locator('#start-room').click();
-  await frame.locator('#starter-name').fill('Living room');
-  await frame.locator('#starter-width').fill('5'); await frame.locator('#starter-depth').fill('4');
-  await frame.locator('#starter-create').click();
+  const firstRoom=page.getByRole('button',{name:'Add your first room',exact:true});
+  await firstRoom.focus(); await firstRoom.press('Enter');
+  const starter=frame.getByRole('dialog',{name:'Create a room',exact:true});
+  await starter.waitFor({state:'visible'});
+  assert.equal(await starter.getByLabel('Room name',{exact:true}).evaluate(field=>field===document.activeElement),true);
+  await starter.getByLabel('Room name',{exact:true}).fill('Living room');
+  await starter.getByLabel('Width (m)',{exact:true}).fill('5');
+  await starter.getByLabel('Depth (m)',{exact:true}).fill('4');
+  await starter.getByLabel('Depth (m)',{exact:true}).press('Enter');
+  await page.getByRole('button',{name:'Add another room',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Add devices',exact:true}).click();
   await frame.getByLabel('Home Assistant area',{exact:true}).selectOption('living');
   await frame.getByLabel('Add device to this room',{exact:true}).selectOption('light.ceiling');
   await frame.getByRole('button',{name:'Add linked item',exact:true}).click();
@@ -88,12 +321,50 @@ const server = http.createServer((req, res) => {
   assert.equal(await page.evaluate(()=>localStorage.getItem('home-studio.project.v1')),'standalone draft sentinel');
   assert.equal(await page.evaluate(()=>JSON.stringify(window.host._catalog).includes('PRIVATE')),false);
   assert.equal(await page.evaluate(()=>JSON.stringify(window.host._catalog).includes('NEVER_SEND_TOKEN')),false);
-  await page.locator('#save').click();
+  await page.getByRole('button',{name:'Preview 3D',exact:true}).click();
+  await frame.waitForFunction(()=>window.planner.getView()==='preview'&&window.planner.getPreviewMetadata().renderCount>0);
+  await frame.getByRole('tab',{name:'Plan 2D',exact:true}).click();
+  await page.getByRole('button',{name:'Save draft',exact:true}).click();
   await page.waitForFunction(()=>window.server.revision===1 && !window.host._busy);
   assert.deepEqual(await page.evaluate(()=>window.server.project),project);
-  await page.locator('#publish').click(); await page.waitForFunction(()=>window.server.published_revision===1);
+  assert.equal(await page.evaluate(()=>window.server.published_revision),null,'Saving a draft must not publish it');
+  await page.getByRole('button',{name:'Publish to 3D Home',exact:true}).click();
+  await page.waitForFunction(()=>window.server.published_revision===1&&!window.host._busy);
+  assert.equal(await page.evaluate(()=>sessionStorage.getItem(window.host._key())),null);
+  // HA can detach and reattach a panel without a document reload.
+  await page.evaluate(()=>{window.host.remove();document.body.append(window.host);});
+  await page.waitForFunction(()=>window.host._ready);
+  frame=page.frames().find(frame=>frame.url().includes('embed='));
+  assert.deepEqual(await frame.evaluate(()=>window.planner.getProject()),project);
+  assert.equal(await page.locator('#recovery').isVisible(),false);
+  assert.equal(await page.evaluate(()=>window.host._unsaved()),false);
+  // Follow the user-facing link, then return through the navigation fixture.
+  await page.getByRole('link',{name:'Open 3D Home',exact:true}).click();
+  await page.waitForURL(origin+'/home-floorplan');
+  assert.equal(await page.locator('#publication').innerText(),'Living room');
+  const editHome=page.getByRole('link',{name:'Edit home',exact:true});
+  await editHome.waitFor({state:'visible'});
+  await page.evaluate(()=>window.viewer.pending=1);
+  await editHome.click();
+  assert.equal(new URL(page.url()).pathname,'/home-floorplan');
+  assert.match(await page.locator('#notice').innerText(),/Wait for the current save/);
+  await page.evaluate(()=>{window.viewer.pending=0;window.viewer.failed=true;});
+  await editHome.click();
+  assert.equal(new URL(page.url()).pathname,'/home-floorplan');
+  assert.match(await page.locator('#notice').innerText(),/Keep this view open/);
+  await page.evaluate(()=>{window.viewer.failed=false;window.viewer.serverCanEdit=false;window.viewer.updateAccessUI();});
+  assert.equal(await editHome.isVisible(),false,'A non-editable viewer must not expose authoring navigation');
+  await page.evaluate(()=>{window.viewer.serverCanEdit=true;window.viewer.updateAccessUI();});
+  await editHome.click();
+  await page.waitForURL(origin+'/home-studio'); await page.waitForFunction(()=>window.host?._ready);
+  frame=page.frames().find(frame=>frame.url().includes('embed='));
+  assert.deepEqual(await frame.evaluate(()=>window.planner.getProject()),project);
+  assert.equal(await page.locator('#recovery').isVisible(),false);
+  assert.equal(await page.evaluate(()=>window.host._unsaved()),false);
+  assert.equal(await page.evaluate(()=>window.server.published_revision),1);
   if (process.env.STUDIO_SCREENSHOT) await page.screenshot({path:process.env.STUDIO_SCREENSHOT,fullPage:true});
   // Metadata and device mapping survive JSON export.
+  await openMoreOptions(page);
   const downloadEvent=page.waitForEvent('download'); await page.locator('#export').click();
   const downloaded=await downloadEvent;
   assert.deepEqual(JSON.parse(fs.readFileSync(await downloaded.path(),'utf8')),project);
@@ -101,7 +372,20 @@ const server = http.createServer((req, res) => {
   const previous=await page.evaluate(()=>JSON.stringify(window.host._project));
   await page.evaluate(()=>window.postMessage({protocol:'home-studio-editor-v1',channel:window.host._channel,type:'snapshot',sequence:500,project:{title:'forged'}},'*'));
   await frame.evaluate(()=>parent.postMessage({protocol:'home-studio-editor-v1',channel:'wrong',type:'snapshot',sequence:500,project:{title:'forged'}},'*'));
+  await frame.evaluate(()=>new Promise(resolve=>{
+    const received=event=>{
+      if(event.source!==window||event.origin!=='null'||event.data?.requestId!=='forged-guide')return;
+      window.removeEventListener('message',received);resolve();
+    };
+    window.addEventListener('message',received);
+    window.postMessage({protocol:'home-studio-editor-v1',channel:new URLSearchParams(location.hash.slice(1)).get('ha-studio'),type:'guide-action',action:'room',requestId:'forged-guide'},'*');
+  }));
+  await page.evaluate(async()=>{
+    window.host._frame.contentWindow.postMessage({protocol:'home-studio-editor-v1',channel:'wrong',type:'guide-action',action:'room'},'*');
+    await window.host._snapshot(true);
+  });
   assert.equal(await page.evaluate(()=>JSON.stringify(window.host._project)),previous);
+  assert.equal(await frame.getByRole('dialog',{name:'Create a room',exact:true}).isVisible(),false,'Forged guide messages must not open editor controls');
   // Failure keeps editing usable and recovery intact.
   await page.evaluate(()=>window.failSave=true);
   await frame.locator('#project-title').fill('Offline edits'); await frame.locator('#project-title').press('Tab');
@@ -117,6 +401,7 @@ const server = http.createServer((req, res) => {
   await page.locator('#save').click(); await page.waitForFunction(()=>!window.host._busy);
   assert.match(await page.locator('#status').innerText(),/Another session/);
   assert.equal(await frame.evaluate(()=>window.planner.getProject().title),'Offline edits');
+  await openMoreOptions(page);
   await page.locator('#reload').click(); await page.waitForFunction(()=>window.host._ready && window.host._revision===2);
   frame=page.frames().find(frame=>frame.url().includes('embed='));
   assert.equal(await frame.evaluate(()=>window.planner.getProject().title),project.title);
@@ -202,6 +487,7 @@ const server = http.createServer((req, res) => {
   assert.equal(await page.evaluate(()=>window.host._project),null);
   assert.equal(await page.locator('#export').isDisabled(),true);
   assert.match(await page.locator('#status').innerText(),/administrator/);
+  assert.equal(await page.getByRole('link',{name:'Open 3D Home',exact:true}).getAttribute('aria-disabled'),'false','Non-admin users must retain access to the viewer link');
   // Late initialization cannot mount a frame after its host is detached.
   await page.evaluate(async()=>{
     const detached=document.createElement('home-floorplan-studio-panel'); window.detached=detached;
@@ -219,9 +505,45 @@ const server = http.createServer((req, res) => {
     retry.hass=hass;retry.hass=hass;
   });
   assert.equal(await page.evaluate(()=>window.retryCalls),2);
+  assert.equal(await page.evaluate(()=>window.retryHost.$('family').getAttribute('aria-disabled')),'false','An unavailable authoring connection must not disable viewer navigation');
   await page.evaluate(()=>window.retryHost.$('retry').click());
   await page.waitForFunction(()=>window.retryCalls===4);
-  // Script failures have a bounded wait and retry preserves the chosen recovery.
+  // Slow first-load assets survive the warning and finish without a forced reload.
+  const delayed=await context.newPage(); delayed.on('pageerror',e=>errors.push(String(e)));
+  await delayed.addInitScript(project=>{
+    if(window.parent!==window)return;
+    sessionStorage.setItem('fixture-server',JSON.stringify({project,revision:2,published_revision:2}));
+  },project);
+  await delayed.clock.install();
+  let requestedEditor, prematureFallbacks=0;
+  await delayed.route('**/planner/index.html*',route=>{if(!route.request().isNavigationRequest())prematureFallbacks++;return route.continue();});
+  const delayedRequest=new Promise((resolve,reject)=>{
+    const timeout=setTimeout(()=>reject(new Error('The delayed editor script was not requested')),15000);
+    requestedEditor=route=>{clearTimeout(timeout);resolve(route);};
+  });
+  await delayed.route('**/planner/editor.js',route=>requestedEditor(route));
+  await delayed.goto(origin+'/fixture',{waitUntil:'domcontentloaded'});
+  const delayedRoute=await delayedRequest;
+  await delayed.waitForFunction(()=>window.host._frame&&window.host._editorLoading);
+  await delayed.evaluate(()=>{window.firstEditor=window.host._frame;window.firstChannel=window.host._channel;window.firstGeneration=window.host._generation;});
+  await delayed.clock.fastForward(15001);
+  assert.equal(await delayed.locator('#retry').isVisible(),true);
+  assert.match(await delayed.locator('#status').innerText(),/taking longer.*keep waiting/);
+  assert.equal(await delayed.evaluate(()=>window.host._frame===window.firstEditor&&window.host._channel===window.firstChannel&&window.host._generation===window.firstGeneration),true);
+  assert.equal(await delayed.evaluate(()=>window.host._ready),false);
+  assert.equal(prematureFallbacks,0,'A committed document with delayed assets must retain its original load');
+  assert.equal(await delayed.locator('iframe').getAttribute('srcdoc'),null);
+  await delayedRoute.continue();
+  await delayed.waitForFunction(()=>window.host._ready);
+  assert.equal(await delayed.evaluate(()=>window.host._frame===window.firstEditor&&window.host._channel===window.firstChannel&&window.host._generation===window.firstGeneration),true);
+  assert.equal(await delayed.locator('#retry').isVisible(),false);
+  assert.equal(await delayed.evaluate(()=>window.host._startupFailed),false);
+  assert.equal(await delayed.evaluate(()=>window.host._startupTimer),null);
+  assert.deepEqual(await delayed.evaluate(()=>window.host._project),project);
+  assert.equal(await delayed.evaluate(()=>window.calls.filter(call=>call.type.endsWith('project_get')).length),1);
+  await delayed.close();
+  await testDocumentFallback(context,origin,project,errors);
+  // A stalled script offers explicit retry without discarding the chosen recovery.
   const startup=await context.newPage(); startup.on('pageerror',e=>errors.push(String(e)));
   const recovered={...project,title:'Recovery after loading failure'};
   await startup.addInitScript(({project,recovered})=>{
@@ -233,17 +555,21 @@ const server = http.createServer((req, res) => {
   await startup.route('**/planner/editor.js',route=>route.abort());
   await startup.goto(origin+'/fixture'); await startup.locator('#resume').click();
   await startup.waitForFunction(()=>window.host._frame);
+  await startup.evaluate(()=>window.stalledEditor=window.host._frame);
   await startup.clock.fastForward(15001);
   await startup.waitForFunction(()=>window.host._startupFailed);
-  assert.equal(await startup.locator('iframe').count(),0);
+  assert.equal(await startup.locator('iframe').count(),1);
+  assert.equal(await startup.evaluate(()=>window.host._frame===window.stalledEditor),true);
   assert.equal(await startup.locator('#retry').isVisible(),true);
   assert.equal(await startup.locator('#export').isEnabled(),true);
   assert.equal(await startup.evaluate(()=>window.host._startupTimer),null);
   assert.equal(await startup.evaluate(()=>window.host._project.title),recovered.title);
+  await openMoreOptions(startup);
   const recoveryExport=startup.waitForEvent('download'); await startup.locator('#export').click();
   assert.deepEqual(JSON.parse(fs.readFileSync(await (await recoveryExport).path(),'utf8')),recovered);
   await startup.unroute('**/planner/editor.js');
   await startup.locator('#retry').click(); await startup.waitForFunction(()=>window.host._ready);
+  assert.equal(await startup.evaluate(()=>window.host._frame!==window.stalledEditor),true);
   assert.equal(await startup.locator('iframe').count(),1);
   assert.equal(await startup.evaluate(()=>window.host._project.title),recovered.title);
   assert.equal(await startup.evaluate(()=>window.host._startupTimer),null);
@@ -265,31 +591,141 @@ const server = http.createServer((req, res) => {
   });
   await damaged.goto(origin+'/fixture'); await damaged.waitForFunction(()=>window.host._startupFailed);
   assert.equal(await damaged.locator('iframe').count(),0);
+  await openMoreOptions(damaged);
   const originalExport=damaged.waitForEvent('download'); await damaged.locator('#export').click();
   assert.deepEqual(JSON.parse(fs.readFileSync(await (await originalExport).path(),'utf8')),{title:'Unreadable original'});
   await damaged.locator('#retry').click(); await damaged.waitForFunction(()=>window.host._startupFailed);
   assert.equal(await damaged.locator('iframe').count(),0);
   assert.equal(await damaged.evaluate(()=>window.host._startupTimer),null);
   await damaged.close();
-  // A generated installation uses its established source workflow, not connection retry.
+  // A missing authoring source stays local and never sends users to an external editor.
   const legacy=await context.newPage();
   await legacy.addInitScript(project=>{
     if (window.parent !== window) return;
-    sessionStorage.setItem('fixture-server',JSON.stringify({project,mode:'legacy',revision:1,published_revision:1}));
+    sessionStorage.setItem('fixture-server',JSON.stringify({project,mode:'legacy',revision:1,published_revision:1,has_published:true,capabilities:{authoring:false}}));
   },project);
   await legacy.goto(origin+'/fixture'); await legacy.waitForFunction(()=>window.calls.length===2&&!window.host._startupTimer);
-  assert.match(await legacy.locator('#status').innerText(),/original project JSON/);
-  assert.equal(await legacy.locator('#status').evaluate(status=>status.classList.contains('error')),false);
+  assert.match(await legacy.locator('#status').innerText(),/drawing source.*unavailable/);
+  assert.equal(await legacy.locator('#status').evaluate(status=>status.classList.contains('error')),true);
   assert.equal(await legacy.locator('#retry').isVisible(),false);
   assert.equal(await legacy.locator('#family').isVisible(),true);
-  assert.equal(await legacy.locator('a.external').isVisible(),true);
+  await openMoreOptions(legacy);
+  assert.equal(await legacy.getByRole('link',{name:/browser editor/i}).count(),0);
   assert.equal(await legacy.locator('iframe').count(),0);
   assert.deepEqual(await legacy.evaluate(()=>window.server.project),project);
   assert.equal(await legacy.evaluate(()=>window.calls.some(call=>/project_(save|publish)$/.test(call.type))),false);
   await legacy.evaluate(()=>{window.host.hass=window.host._hass;window.host._retryStartup();});
   assert.equal(await legacy.evaluate(()=>window.calls.length),2);
   await legacy.close();
-  // A late HA response after the connection deadline cannot mount a stale frame.
+  // An existing generated home remains viewable while its genuine source opens
+  // in the same native editor, even before its first native publication.
+  const generatedProject=structuredClone(project);
+  for(const floor of generatedProject.floors){floor.walls=[];floor.openings=[];for(const item of floor.items)for(const key of ['model_id','style_id','color','pattern_id','pattern_color'])delete item[key];}
+  const generated=await context.newPage();generated.on('pageerror',error=>errors.push(String(error)));
+  await generated.addInitScript(project=>{
+    if(window.parent!==window||sessionStorage.getItem('generated-seeded'))return;
+    sessionStorage.setItem('generated-seeded','1');
+    sessionStorage.setItem('fixture-server',JSON.stringify({project,mode:'legacy',revision:0,published_revision:null,
+      published_project:project,has_published:true,has_saved_draft:false,capabilities:{architecture_editing:false},source:{kind:'generated',protected_floors:project.floors.map(floor=>floor.id),
+        protected_rooms:Object.fromEntries(project.floors.map(floor=>[floor.id,floor.rooms.map(room=>room.id)])),
+        custom_items:Object.fromEntries(project.floors.map(floor=>[floor.id,floor.items.map(item=>item.id)]))}}));
+  },generatedProject);
+  await generated.goto(origin+'/fixture');await generated.waitForFunction(()=>window.host._ready);
+  // A generated seed is editable source, but no private draft exists until Save succeeds.
+  assert.equal(await generated.evaluate(()=>window.server.has_saved_draft),false);
+  assert.equal(await generated.evaluate(()=>window.host._unsaved()),false);
+  assert.equal(await generated.evaluate(()=>sessionStorage.getItem(window.host._key())),null);
+  assert.equal(await generated.getByRole('button',{name:'Save draft',exact:true}).isDisabled(),false);
+  assert.equal(await generated.getByRole('button',{name:'Publish to 3D Home',exact:true}).isDisabled(),true);
+  await generated.evaluate(()=>window.host._publish());
+  assert.equal(await generated.evaluate(()=>window.calls.some(call=>call.type.endsWith('project_publish'))),false);
+  await generated.evaluate(()=>window.failSave=true);
+  await generated.getByRole('button',{name:'Save draft',exact:true}).click();
+  await generated.waitForFunction(()=>!window.host._busy&&window.host.$('status').textContent.includes('Save failed'));
+  assert.equal(await generated.evaluate(()=>window.server.has_saved_draft),false);
+  assert.equal(await generated.getByRole('button',{name:'Save draft',exact:true}).isDisabled(),false);
+  assert.equal(await generated.getByRole('button',{name:'Publish to 3D Home',exact:true}).isDisabled(),true);
+  await generated.evaluate(()=>window.failSave=false);
+  await generated.getByRole('button',{name:'Save draft',exact:true}).click();
+  await generated.waitForFunction(()=>!window.host._busy&&window.server.revision===1);
+  assert.equal(await generated.evaluate(()=>window.server.has_saved_draft),true);
+  assert.equal(await generated.evaluate(()=>window.server.published_revision),null);
+  assert.equal(await generated.getByRole('button',{name:'Save draft',exact:true}).isDisabled(),true);
+  assert.equal(await generated.getByRole('button',{name:'Publish to 3D Home',exact:true}).isDisabled(),false);
+  await generated.reload();await generated.waitForFunction(()=>window.host._ready);
+  assert.equal(await generated.evaluate(()=>window.host._saved.has_saved_draft),true);
+  assert.equal(await generated.getByRole('button',{name:'Save draft',exact:true}).isDisabled(),true);
+  assert.equal(await generated.getByRole('button',{name:'Publish to 3D Home',exact:true}).isDisabled(),false);
+  let generatedFrame=generated.frames().find(frame=>frame.url().includes('embed='));
+  assert.deepEqual(await generatedFrame.evaluate(()=>planner.getProject()),generatedProject);
+  assert.equal(await generated.getByRole('link',{name:'Open 3D Home',exact:true}).getAttribute('aria-disabled'),'false');
+  assert.equal(await generated.getByRole('link',{name:/browser editor/i}).count(),0);
+  assert.equal(await generatedFrame.getByRole('button',{name:'Add floor',exact:true}).isDisabled(),true);
+  assert.equal(await generatedFrame.getByLabel('Elevation (m)',{exact:true}).getAttribute('readonly'),'');
+  await generatedFrame.locator('[data-object-kind="rooms"]').first().click();
+  assert.equal(await generatedFrame.getByLabel('x, z coordinates (m)',{exact:true}).getAttribute('readonly'),'');
+  assert.equal(await generatedFrame.getByLabel('Floor material',{exact:true}).isDisabled(),true);
+  assert.equal(await generatedFrame.getByRole('button',{name:'Delete room',exact:true}).count(),0);
+  await generatedFrame.locator('[data-object-kind="items"]').first().click();
+  assert.equal(await generatedFrame.getByLabel('Design',{exact:true}).inputValue(),'');
+  assert.match(await generatedFrame.getByLabel('Design',{exact:true}).locator('option:checked').innerText(),/Original installed model/);
+  await generatedFrame.getByLabel('x (m)',{exact:true}).fill('2.2');
+  await generatedFrame.getByLabel('x (m)',{exact:true}).press('Tab');
+  await generated.waitForFunction(()=>window.host._project.floors[0].items[0].position_m.x===2.2);
+  const generatedTitle=generatedFrame.locator('#project-title');
+  await generatedTitle.fill('');
+  await generated.getByRole('link',{name:'Open 3D Home',exact:true}).click();
+  await generated.waitForFunction(()=>!window.host._busy&&window.host.$('status').textContent.includes('highlighted field'));
+  assert.equal(new URL(generated.url()).pathname,'/fixture');
+  assert.equal(await generatedTitle.inputValue(),'');
+  // Published preview is the real read-only viewer, retaining the draft iframe
+  // and its unfinished field instead of approximating the protected geometry.
+  const draftBeforePreview=await generatedFrame.evaluate(()=>planner.getProject());
+  await generated.evaluate(()=>window.originalEditorFrame=window.host._frame);
+  await generatedFrame.getByRole('button',{name:'Published home',exact:true}).click();
+  await generated.waitForFunction(()=>window.host._publishedPanel?.serverCanEdit===true);
+  assert.deepEqual(await generated.evaluate(()=>({canEdit:window.host._publishedPanel.canEdit,dryRun:window.host._publishedPanel.dryRun,hidden:window.originalEditorFrame.hidden})),{canEdit:false,dryRun:true,hidden:true});
+  assert.equal(await generatedFrame.evaluate(()=>planner.getView()),'plan');
+  assert.equal(await generatedFrame.evaluate(()=>planner.getPreviewMetadata().renderCount||0),0);
+  await generated.getByRole('button',{name:'Back to editing',exact:true}).click();
+  assert.equal(await generated.evaluate(()=>window.host._frame===window.originalEditorFrame&&!window.originalEditorFrame.hidden&&window.host._publishedPanel===null),true);
+  assert.equal(await generatedTitle.inputValue(),'');
+  assert.deepEqual(await generatedFrame.evaluate(()=>planner.getProject()),draftBeforePreview);
+  // Re-requesting the family view returns keyboard focus to the pending field.
+  await generated.getByRole('link',{name:'Open 3D Home',exact:true}).click();
+  await generated.waitForFunction(()=>!window.host._busy&&window.host.$('status').textContent.includes('highlighted field'));
+  assert.equal(await generatedTitle.evaluate(input=>input===document.activeElement&&document.hasFocus()),true);
+  assert.equal(await generated.evaluate(()=>window.server.project.title),project.title);
+  assert.equal(await generated.evaluate(()=>window.calls.some(call=>/project_(save|publish)$/.test(call.type))),false);
+  await generatedTitle.fill('Edited generated home');await generatedTitle.press('Tab');
+  await generated.waitForFunction(()=>window.host._dirty());
+  await generated.getByRole('link',{name:'Open 3D Home',exact:true}).click();
+  await generated.waitForFunction(()=>!window.host._busy&&window.host.$('status').textContent.includes('Save draft before'));
+  assert.equal(new URL(generated.url()).pathname,'/fixture');
+  assert.equal(await generated.locator('#save').evaluate(button=>button===button.getRootNode().activeElement),true);
+  await generated.evaluate(()=>window.holdSave=true);
+  await generated.getByRole('button',{name:'Save draft',exact:true}).click();
+  await generated.waitForFunction(()=>typeof window.releaseSave==='function');
+  await generated.getByRole('link',{name:'Open 3D Home',exact:true}).click();
+  assert.equal(new URL(generated.url()).pathname,'/fixture');
+  assert.match(await generated.locator('#status').innerText(),/Wait for the current operation/);
+  await generated.evaluate(()=>window.releaseSave());await generated.waitForFunction(()=>!window.host._busy);
+  assert.equal(await generated.evaluate(()=>window.server.revision),2);
+  assert.equal(await generated.evaluate(()=>window.server.published_revision),null);
+  await generated.getByRole('button',{name:'Publish to 3D Home',exact:true}).click();
+  await generated.waitForFunction(()=>window.server.published_revision===2&&!window.host._busy);
+  await generated.getByRole('link',{name:'Open 3D Home',exact:true}).click();
+  await generated.waitForURL(origin+'/home-floorplan');
+  await generated.getByRole('link',{name:'Edit home',exact:true}).click();
+  await generated.waitForURL(origin+'/home-studio');await generated.waitForFunction(()=>window.host._ready);
+  generatedFrame=generated.frames().find(frame=>frame.url().includes('embed='));
+  assert.equal(await generatedFrame.evaluate(()=>planner.getProject().title),'Edited generated home');
+  assert.equal(await generatedFrame.evaluate(()=>planner.getProject().floors[0].items[0].position_m.x),2.2);
+  assert.deepEqual(await generatedFrame.evaluate(()=>planner.getProject().floors[0].rooms),generatedProject.floors[0].rooms);
+  assert.deepEqual(await generated.evaluate(()=>window.server.published_project),await generatedFrame.evaluate(()=>planner.getProject()));
+  assert.equal(await generated.evaluate(()=>window.host._unsaved()),false);
+  await generated.close();
+  // A late HA response clears the warning and still offers the original recovery.
   await page.clock.install();
   await page.evaluate(project=>{
     sessionStorage.setItem('home-studio.ha-tab-draft.v1:late-admin',JSON.stringify({project,revision:8}));
@@ -297,21 +733,29 @@ const server = http.createServer((req, res) => {
     lateHost.hass={user:{id:'late-admin',is_admin:true},callWS:data=>data.type.endsWith('entity_catalog')?Promise.resolve(window.catalog):new Promise(resolve=>window.lateResponse=resolve)};
     document.body.append(lateHost);
   },recovered);
+  await page.evaluate(()=>window.lateGeneration=window.lateHost._generation);
   await page.clock.fastForward(15001);
   assert.equal(await page.evaluate(()=>window.lateHost._startupFailed),true);
   assert.equal(await page.evaluate(()=>window.lateHost.$('export').disabled),false);
-  await page.evaluate(project=>window.lateResponse({project,revision:8,can_edit:true}),project);
-  assert.equal(await page.evaluate(()=>window.lateHost.shadowRoot.querySelectorAll('iframe').length),0);
+  assert.equal(await page.evaluate(()=>window.lateHost.$('family').getAttribute('aria-disabled')),'false','Unknown publication state after startup timeout must retain viewer navigation');
   const originalRecovery=await page.evaluate(()=>sessionStorage.getItem(window.lateHost._key()));
   await page.evaluate(project=>{
     window.newRemote={...project,title:'Newer server drawing'};
+    window.lateResponse({project:window.newRemote,revision:9,published_revision:null,can_edit:true,capabilities:{authoring:true}});
+  },project);
+  await page.waitForFunction(()=>!window.lateHost.$('recovery').hidden);
+  assert.equal(await page.evaluate(()=>window.lateHost._startupFailed),false);
+  assert.equal(await page.evaluate(()=>window.lateHost.$('retry').hidden),true);
+  assert.equal(await page.evaluate(()=>window.lateHost._generation===window.lateGeneration),true);
+  assert.equal(await page.evaluate(()=>window.lateHost._startupTimer),null);
+  assert.equal(await page.evaluate(()=>window.lateHost.shadowRoot.querySelectorAll('iframe').length),0);
+  await page.evaluate(()=>{
     window.lateHost.hass={user:{id:'late-admin',is_admin:true},callWS:async data=>{
       if (data.type.endsWith('entity_catalog')) return window.catalog;
       if (data.type.endsWith('project_save')) throw {code:'conflict'};
-      return {project:window.newRemote,revision:9,published_revision:null,can_edit:true};
+      return {project:window.newRemote,revision:9,published_revision:null,can_edit:true,capabilities:{authoring:true}};
     }};
-    window.lateHost._retryStartup();
-  },project);
+  });
   await page.waitForFunction(()=>!window.lateHost.$('recovery').hidden);
   assert.equal(await page.evaluate(()=>window.lateHost._revision),9);
   assert.equal(await page.evaluate(()=>window.lateHost._project.title),recovered.title);
@@ -326,8 +770,143 @@ const server = http.createServer((req, res) => {
   assert.match(await page.evaluate(()=>window.lateHost.$('status').textContent),/Another session/);
   assert.equal(await page.evaluate(()=>window.newRemote.title),'Newer server drawing');
   await page.evaluate(()=>window.lateHost.remove());
+  // Linking HA areas and devices is optional: plain room geometry can publish.
+  const unlinkedProject=structuredClone(project);
+  for (const floor of unlinkedProject.floors) {
+    delete floor.ha_floor_id; floor.items=[];
+    for (const room of floor.rooms) delete room.ha_area_id;
+  }
+  const incomplete=await context.newPage(); incomplete.on('pageerror',e=>errors.push(String(e)));
+  await incomplete.addInitScript(project=>{
+    if (window.parent!==window) return;
+    sessionStorage.setItem('fixture-server',JSON.stringify({project,revision:1,published_revision:null}));
+  },unlinkedProject);
+  await incomplete.goto(origin+'/fixture'); await incomplete.waitForFunction(()=>window.host?._ready);
+  await incomplete.getByRole('button',{name:'Publish to 3D Home',exact:true}).click();
+  await incomplete.waitForFunction(()=>window.server.published_revision===1&&!window.host._busy);
+  assert.deepEqual(await incomplete.evaluate(()=>window.server.published_project),unlinkedProject);
+  // An empty additional floor remains a valid draft, but cannot be published.
+  const incompleteFrame=incomplete.frames().find(frame=>frame.url().includes('embed='));
+  await incompleteFrame.getByRole('button',{name:'Add floor',exact:true}).click();
+  await incomplete.waitForFunction(()=>window.host._project.floors.length===2);
+  await incomplete.getByRole('button',{name:'Save draft',exact:true}).click();
+  await incomplete.waitForFunction(()=>window.server.revision===2&&!window.host._busy);
+  assert.equal(await incomplete.evaluate(()=>window.host._unsaved()),false);
+  assert.equal(await incomplete.evaluate(()=>window.server.project.floors[1].rooms.length),0);
+  assert.equal(await incomplete.getByRole('button',{name:'Publish to 3D Home',exact:true}).isDisabled(),true);
+  assert.match(await incomplete.locator('#status').innerText(),/room/i,'Publication guidance must explain the missing room');
+  const incompletePublishes=await incomplete.evaluate(()=>window.calls.filter(call=>call.type.endsWith('project_publish')).length);
+  await incomplete.evaluate(()=>window.host._publish());
+  assert.equal(await incomplete.evaluate(()=>window.calls.filter(call=>call.type.endsWith('project_publish')).length),incompletePublishes,'The publish method also rejects incomplete floors');
+  assert.equal(await incomplete.evaluate(()=>window.server.published_revision),1);
+  assert.deepEqual(await incomplete.evaluate(()=>window.server.published_project),unlinkedProject,'The existing publication remains unchanged');
+  await incomplete.close();
+  // Exercise rejected shortcuts and recovery on their own first-room draft.
+  {
+    const page=await context.newPage();page.setDefaultTimeout(15000);
+    page.on('pageerror',error=>errors.push(String(error)));
+    await page.goto(origin+'/fixture');await page.waitForFunction(()=>window.host?._ready);
+    const frame=page.frames().find(frame=>frame.url().includes('embed='));
+    await page.getByRole('button',{name:'Add your first room',exact:true}).click();
+    const starter=frame.getByRole('dialog',{name:'Create a room',exact:true});
+    await starter.getByLabel('Room name',{exact:true}).fill('Field recovery room');
+    await starter.getByRole('button',{name:'Create room',exact:true}).click();
+    await page.getByRole('button',{name:'Add another room',exact:true}).waitFor();
+    const originalProject=await frame.evaluate(()=>planner.getProject());
+    // Host shortcuts must not discard raw inspector text while changing context.
+    await frame.evaluate(parentOrigin=>{
+      window.guideMessages=0;
+      window.addEventListener('message',event=>{
+        if(event.source===parent&&event.origin===parentOrigin&&event.data?.type==='guide-action')window.guideMessages++;
+      });
+    },origin);
+    async function assertGuideRetainsField(buttonName,field,raw) {
+      const before=await frame.evaluate(()=>({project:planner.getProject(),selection:planner.getSelection(),messages:window.guideMessages}));
+      await page.waitForFunction(()=>window.host._edits.pending);
+      await page.getByRole('button',{name:buttonName,exact:true}).click();
+      // Observe the real bridge event without requesting a snapshot that would
+      // itself validate the field and mask a missing shortcut guard.
+      await frame.waitForFunction(count=>window.guideMessages>count,before.messages);
+      assert.equal(await field.inputValue(),raw,`${buttonName} retains unfinished field text`);
+      assert.equal(await frame.evaluate(()=>document.hasFocus()),true,`${buttonName} returns keyboard focus to the editor`);
+      assert.equal(await field.evaluate(input=>input===document.activeElement),true,`${buttonName} returns focus to the unfinished field`);
+      assert.equal(await starter.isVisible(),false,`${buttonName} does not open a new room over unfinished text`);
+      assert.deepEqual(await frame.evaluate(()=>planner.getSelection()),before.selection);
+      assert.deepEqual(await frame.evaluate(()=>planner.getProject()),before.project);
+      assert.equal(await page.evaluate(()=>window.host._edits.pending),true);
+    }
+    const firstPolygon=frame.getByLabel('x, z coordinates (m)',{exact:true});
+    const originalPolygon=await firstPolygon.inputValue();
+    await firstPolygon.fill('unfinished corner');
+    await assertGuideRetainsField('Add another room',firstPolygon,'unfinished corner');
+    await assertGuideRetainsField('Add devices',firstPolygon,'unfinished corner');
+    await firstPolygon.fill(originalPolygon);await firstPolygon.press('Tab');
+    await page.getByRole('button',{name:'Save draft',exact:true}).click();
+    await page.waitForFunction(()=>window.server.revision===1&&!window.host._busy&&!window.host._edits.pending);
+    assert.deepEqual(await page.evaluate(()=>window.server.project),originalProject);
+    assert.equal(await page.evaluate(()=>window.server.published_revision),null);
+    const firstTitle=frame.locator('#project-title');
+    // Global fields need the same guard after keyboard focus has moved elsewhere.
+    await firstTitle.fill('');await firstTitle.press('Tab');
+    await assertGuideRetainsField('Add another room',firstTitle,'');
+    await firstTitle.fill('Recovered field edits');
+    await page.getByRole('button',{name:'Save draft',exact:true}).click();
+    await page.waitForFunction(()=>window.server.revision===2&&!window.host._busy&&!window.host._edits.pending);
+    assert.deepEqual(await page.evaluate(()=>window.server.project),{...originalProject,title:'Recovered field edits'});
+    assert.equal(await page.evaluate(()=>window.server.published_revision),null);
+    await page.getByRole('button',{name:'Add another room',exact:true}).click();
+    await starter.waitFor({state:'visible'});
+    await starter.getByRole('button',{name:'Close',exact:true}).click();
+    assert.equal(await frame.evaluate(()=>planner.getProject().floors[0].rooms.length),1);
+    await page.getByRole('button',{name:'Add devices',exact:true}).click();
+    await frame.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')==='Home Assistant area');
+    assert.equal(await page.evaluate(()=>window.host._unsaved()),false);
+    await page.close();
+  }
+  // HA supplies a viewport meta tag. Exercise the actual narrow layout rather
+  // than the 980px layout viewport that mobile browsers use without that tag.
+  const mobileContext=await browser.newContext({viewport:{width:390,height:844},hasTouch:true,
+    ...(engine==='firefox'?{}:{isMobile:true})}); // Firefox supports the touch viewport, not isMobile emulation.
+  const mobile=await mobileContext.newPage(); mobile.setDefaultTimeout(15000);
+  mobile.on('pageerror',e=>errors.push(String(e)));
+  await mobile.goto(origin+'/fixture'); await mobile.waitForFunction(()=>window.host?._ready);
+  const mobileFrame=mobile.frames().find(frame=>frame.url().includes('embed='));
+  async function checkMobileWidths() {
+    const outer=await mobile.evaluate(()=>({viewport:innerWidth,document:document.documentElement.scrollWidth,
+      host:window.host.scrollWidth,hostClient:window.host.clientWidth}));
+    const editor=await mobileFrame.evaluate(()=>({viewport:innerWidth,document:document.documentElement.scrollWidth}));
+    assert.equal(outer.viewport,390);
+    assert(outer.document<=outer.viewport&&outer.host<=outer.hostClient,'The native shell must not scroll horizontally');
+    assert.equal(editor.viewport,390);
+    assert(editor.document<=editor.viewport,'The embedded editor must not scroll horizontally');
+  }
+  function insideMobileViewport(box,label) {
+    assert(box&&box.x>=0&&box.y>=0&&box.x+box.width<=391&&box.y+box.height<=845,`${label} must fit the visible mobile viewport`);
+  }
+  await checkMobileWidths();
+  await mobile.getByRole('button',{name:'Add your first room',exact:true}).tap();
+  const mobileStarter=mobileFrame.getByRole('dialog',{name:'Create a room',exact:true});
+  await mobileStarter.waitFor({state:'visible'});
+  const mobileName=mobileStarter.getByLabel('Room name',{exact:true});
+  assert.equal(await mobileName.evaluate(field=>field===document.activeElement),true);
+  insideMobileViewport(await mobileStarter.boundingBox(),'Room dialog');
+  insideMobileViewport(await mobileName.boundingBox(),'Room name field');
+  await mobileName.fill('Mobile room');
+  await mobileStarter.getByRole('button',{name:'Create room',exact:true}).tap();
+  await mobile.waitForFunction(()=>window.host._project.floors[0].rooms.length===1);
+  assert.equal(await mobileFrame.evaluate(()=>window.planner.getProject().floors[0].walls.length),4);
+  const mobileSave=mobile.getByRole('button',{name:'Save draft',exact:true});
+  await mobileSave.scrollIntoViewIfNeeded();
+  const mobileSaveBox=await mobileSave.boundingBox();
+  insideMobileViewport(mobileSaveBox,'Save draft');
+  assert(mobileSaveBox.height>=44,'Save draft retains a mobile touch target');
+  await mobileSave.tap(); await mobile.waitForFunction(()=>window.server.revision===1&&!window.host._busy);
+  assert.equal(await mobile.evaluate(()=>window.server.project.floors[0].rooms[0].name),'Mobile room');
+  assert.equal(await mobile.evaluate(()=>window.host._unsaved()),false);
+  await checkMobileWidths();
+  await mobileContext.close();
   assert.deepEqual(errors,[]);
   await context.close();
-  console.log(`Native studio passed (${engine}): production panel module route, repeated module loading, opaque sandbox, area/device onboarding, save/publish, JSON roundtrip, forged messages, local draft isolation, offline recovery, revision conflict, in-flight edits, pending/invalid fields, loading timeout and recovery retry.`);
+  console.log(`Native studio passed (${engine}): production panel module route, repeated module loading, opaque sandbox, clean first visit, guided room/device/preview flow, unfinished-field guard and recovery, separate save/publish, generated protected editing and published preview, guarded navigation and remount, incomplete-floor publication guard, JSON roundtrip, forged messages, local draft isolation, offline recovery, revision conflict, in-flight edits, pending/invalid fields, bounded document fallback, loading timeout and recovery retry.`);
  } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

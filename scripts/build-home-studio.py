@@ -13,14 +13,14 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT_FILES = (
-    "__init__.py", "site.py", "validation.py", "curtains.py", "native.py", "permissions.py",
+    "__init__.py", "site.py", "validation.py", "curtains.py", "native.py", "generated.py", "permissions.py",
     "ai.py", "config_flow.py", "manifest.json", "strings.json", "translations/en.json",
     "static/panel.js", "static/card.js", "static/studio.js",
 )
 RUNTIME_FILES = (
     "geometry.py", "exporters.py", "viewer_locales.py", "planner/project.py", "planner/furniture.py", "planner/catalog.json",
     "viewer.template.html", "viewer.js", "viewer-i18n.js", "home-view.html", "home-view.css", "home-view.js",
-    "curtain-state.js", "motion-state.js", "appliance-state.js", "presence-view.js", "tv-screen.js", "camera-preview.js", "media-preview.js",
+    "curtain-state.js", "motion-state.js", "appliance-state.js", "presence-view.js", "vacuum-state.js", "vacuum-view.js", "tv-screen.js", "camera-preview.js", "media-preview.js",
     "assumed-zone-view.js", "light-state.js", "planner/render-capacity.js", "planner/interaction-render.js",
     "room-lighting.js", "vendor/three.module.min.js", "planner/environment.js",
     "ai_companion/__init__.py", "ai_companion/protocol.py", "ai_companion/providers.py",

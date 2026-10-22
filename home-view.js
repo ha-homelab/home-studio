@@ -35,6 +35,10 @@ homeView = (() => {
   const presenceSpec=item=>model.presence_sources?.[item.id];
   const presenceForRoom=room=>model.presence_sources?presenceEvidence(model.presence_sources,items,haStates,haConnected,room):{};
   const presenceView=Object.keys(model.presence_sources||{}).length?createPresenceView($('homeStage'),model.rooms,model.presence_sources,THREE,xm,zm):null;
+  const vacuumView=Array.isArray(model.vacuum_sources)&&model.vacuum_sources.length?createVacuumView($('homeStage'),model.vacuum_sources,model.floor,THREE,{
+    onInspect:entityId=>{if(bridge&&haConnected)bridge.postMessage({type:'more_info',entity_id:entityId});},
+    onResume:()=>refreshControls()
+  }):null;
   const applianceSpec=item=>{const spec=model.appliance_status?.[item.id];return spec&&['smoke','cooktop'].includes(spec.kind)?spec:null;};
   const activityState=id=>haConnected&&!haStates[id]?.restored?haStates[id]?.state||'unknown':'unknown';
   const receiverState=item=>{const spec=receiverSpec(item);return spec.entity_id===item.entity_id&&spec.room===item.room?activityState(spec.sensor):'unbound';};
@@ -536,6 +540,7 @@ homeView = (() => {
       label.el.setAttribute('aria-description',label.el.title);
     }
     presenceView?.update(items,haStates,haConnected,active&&roomLabels&&!document.hidden,selected);
+    vacuumView?.update(haStates,haConnected,active);
     $('homeSummary').textContent=vt('{on} on · {total} linked · {motion} active sensors · {unavailable} unavailable',{on,total,motion,unavailable});
     $('homeEmpty').hidden=total>0;
     $('homeFeedback').textContent=errorText([...errors.values()].at(-1))||(!renderer ? vt('The 3D view is unavailable in this browser. Use the device cards to control your lights.') : '');
@@ -734,6 +739,7 @@ homeView = (() => {
       step.el.style.setProperty('--angle',(Math.atan2(-(q.y-p.y)*rect.height,(q.x-p.x)*rect.width)*180/Math.PI+90)+'deg');
     }
     presenceView?.render(camera,rect);
+    vacuumView?.render(camera,rect);
     for(const point of points){
       if(point.flames)positionCooktopFlames(point.flames,point.object,camera,rect,THREE);
       if(point.oven)positionOvenGlow(point.oven,point.object,camera,rect,THREE);
@@ -890,6 +896,6 @@ homeView = (() => {
     $('homeToggleControls').textContent=vt(controlsCollapsed?'Show controls':'Hide controls');
     for(const label of labels)label.el.setAttribute('aria-label',vt('Focus room')+': '+roomName(label.room));
   }
-  return {get active(){return active},releaseGPU(){roomLighting?.releaseGPU();},dispose(){roomLighting?.dispose();presenceView?.dispose();},dismissOverlays,refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
+  return {get active(){return active},releaseGPU(){roomLighting?.releaseGPU();},dispose(){roomLighting?.dispose();presenceView?.dispose();vacuumView?.dispose();},dismissOverlays,refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
     get illuminated(){return points.filter(p=>p.overlay?.visible && active).map(p=>p.item.id)}};
 })();

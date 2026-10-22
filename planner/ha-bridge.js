@@ -1,11 +1,28 @@
 // The embedded editor is deliberately unprivileged. This protocol carries only
 // editable drawings, registry labels, and bounded AI operations; HA authentication stays in the host.
 export const PROTOCOL = 'home-studio-editor-v1';
+const GUIDE_ACTIONS = Object.freeze(['room', 'devices', 'preview', 'photos', 'focus-edit']);
 export function embeddedContext(win = window) {
   const url = new URL(win.location.href);
+  if (win.parent === win) return null;
+  if (url.href === 'about:srcdoc') {
+    try {
+      const entries = win.document.querySelectorAll('meta[name="home-studio-bootstrap"]');
+      if (entries.length !== 1) return null;
+      const value = JSON.parse(entries[0].content), origin = new URL(value.origin);
+      if (!['http:', 'https:'].includes(origin.protocol) || origin.origin !== value.origin || !/^[a-f0-9]{32}$/.test(value.channel || '')) return null;
+      return { channel: value.channel, origin: value.origin };
+    } catch { return null; }
+  }
   const channel = new URLSearchParams(url.hash.slice(1)).get('ha-studio');
-  if (win.parent === win || url.searchParams.get('embed') !== 'home-assistant' || !/^[a-f0-9]{32}$/.test(channel || '')) return null;
+  if (!['http:', 'https:'].includes(url.protocol) || url.searchParams.get('embed') !== 'home-assistant' || !/^[a-f0-9]{32}$/.test(channel || '')) return null;
   return { channel, origin: url.origin };
+}
+// A separate, dependency-free module entry reports that the document committed
+// before the larger editor import graph or initialization is ready.
+if (typeof window !== 'undefined') {
+  const context = embeddedContext();
+  if (context) window.parent.postMessage({ protocol: PROTOCOL, channel: context.channel, type: 'loading' }, context.origin);
 }
 export function memoryDraftOptions() {
   const values = new Map();
@@ -14,7 +31,7 @@ export function memoryDraftOptions() {
     locks: { request: async (_name, operation) => operation() },
   };
 }
-export function connectHost(context, { initialize, snapshot, editState, subscribe, flush, failed }, win = window) {
+export function connectHost(context, { initialize, snapshot, editState, subscribe, flush, failed, guideAction, theme }, win = window) {
   const ai = createNativeAiTransport(context, win);
   let initialized = false, previous = '', previousState = '', sequence = 0;
   const send = (type, payload = {}) => win.parent.postMessage({ protocol: PROTOCOL, channel: context.channel, type, ...payload }, context.origin);
@@ -30,11 +47,22 @@ export function connectHost(context, { initialize, snapshot, editState, subscrib
     const data = event.data;
     if (event.source !== win.parent || event.origin !== context.origin || data?.protocol !== PROTOCOL || data.channel !== context.channel) return;
     if (data.type === 'initialize' && !initialized) {
-      try { initialize(data.project, data.catalog, data.capabilities?.ai === true ? ai : null); initialized = true; changed(); }
+      try {
+        theme?.(data.theme);
+        initialize(data.project, data.catalog, data.capabilities?.ai === true ? ai : null,
+          { architectureEditing: data.capabilities?.architecture_editing !== false, source: data.source },
+          { publishedPreview: () => { if (initialized) send('published-preview'); } });
+        initialized = true; changed();
+      }
       catch { failed(); send('error', { message: 'The saved drawing could not be opened. Export its JSON from Home Assistant for recovery.' }); }
     } else if (data.type === 'snapshot-request' && initialized && typeof data.requestId === 'string' && data.requestId.length < 80) {
-      try { flush(data.allowInvalid === true); changed(data.requestId); }
+      try { if (data.commit !== false) flush(data.allowInvalid === true); changed(data.requestId); }
       catch (error) { changed(); send('snapshot-error', { requestId: data.requestId, message: error.message }); }
+    } else if (data.type === 'guide-action' && initialized && GUIDE_ACTIONS.includes(data.action)) {
+      // Navigation only: the existing editor controls still own every edit.
+      guideAction?.(data.action);
+    } else if (data.type === 'theme' && initialized) {
+      theme?.(data.theme);
     }
   };
   win.addEventListener('message', receive);

@@ -18,8 +18,19 @@ const initialLocale = await initI18n();
 const $ = id => document.getElementById(id);
 const haContext = embeddedContext();
 let haCatalog = null;
+let haAiReady = null;
+let haSourcePolicy = null, haPublishedPreview = null;
 if (haContext) {
   document.body.classList.add('ha-embedded');
+  // A relative logo link would leave the authenticated host bridge behind.
+  document.querySelector('.brand').removeAttribute('href');
+  // Native guidance follows the English host; standalone copy stays translated.
+  for (const [id, text] of [
+    ['empty-description', 'Start with measurements to create a room and its walls, then add doors and windows.'],
+    ['empty-note', 'Save your draft in Home Assistant. Photos and AI are optional.'],
+  ]) {
+    const element = $(id); delete element.dataset.i18n; element.lang = 'en'; element.textContent = text;
+  }
   document.querySelector('.workspace').inert = true; document.querySelector('.app-header').inert = true;
 }
 const draftStorage = createDraftStorage({ validate: validateProject, maxBytes: LIMITS.bytes, ...(haContext ? memoryDraftOptions() : {}) });
@@ -29,6 +40,73 @@ const BUILD_COMMAND = 'python3 scripts/build-planner-project.py --project /path/
 const LABELS = { furniture: 'Furniture', lamp: 'Lamp', chandelier: 'Ceiling light', tv: 'TV / display', appliance: 'Appliance', switch: 'Switch', outlet: 'Outlet', sensor: 'Sensor' };
 const COLORS = { floor: '#e7dac2', tile: '#e0e8df', deck: '#d8dfbe', furniture: '#96aca6', lamp: '#d9ae68', chandelier: '#d9ae68', tv: '#677d89', appliance: '#a1abb0', switch: '#b4c39d', outlet: '#b4c39d', sensor: '#c4b09a' };
 const HINTS = { select: 'Drag a shape to move, or empty space to pan.', room: 'Drag a rectangle to create a room. Add walls separately.', wall: 'Drag from one wall endpoint to the other.', door: 'Click a wall to cut a door opening.', window: 'Click a wall to cut a window opening.', item: 'Click to place your item. Refine its position in the inspector.' };
+// Presentation only: a host theme never changes the drawing or its materials.
+const THEME_COLORS = ['background', 'surface', 'text', 'muted', 'border', 'accent', 'accentText', 'error'];
+const PLAN_DEFAULTS = { background: '#f2f4ed', grid: '#e2e7dc', axis: '#c5d0bd', dots: '#dde4d6', room: COLORS, roomBorder: '#b4bba3', roomText: '#697c63', roomArea: '#8d9a7c', selection: '#4a8073', handle: '#fff', wall: '#778776', wallSelection: '#3a7b6a', openingSelection: '#df935b', window: '#75a8ae', door: '#839980', itemSelection: '#bd783c', itemText: '#5e776a', drawing: '#3c8c79', drawingText: '#2c7663', candidate: '#8051ad', scale: '#9bab8f', scaleText: '#8a9b7e' };
+let planColors = PLAN_DEFAULTS, hostThemeKey = '';
+const colorChannels = hex => [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16));
+function mixColor(a, b, amount) {
+  const target = colorChannels(b);
+  return '#' + colorChannels(a).map((channel, index) => Math.round(channel + (target[index] - channel) * amount).toString(16).padStart(2, '0')).join('');
+}
+function luminance(color) {
+  const rgb = colorChannels(color).map(channel => channel / 255).map(channel => channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4);
+  return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722;
+}
+function contrastColor(color, backgrounds, minimum) {
+  const contrast = value => Math.min(...backgrounds.map(background => {
+    const a = luminance(value), b = luminance(background);
+    return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+  }));
+  if (contrast(color) >= minimum) return color;
+  const endpoint = contrast('#ffffff') > contrast('#000000') ? '#ffffff' : '#000000';
+  for (let step = 1; step <= 20; step++) {
+    const adjusted = mixColor(color, endpoint, step / 20);
+    if (contrast(adjusted) >= minimum) return adjusted;
+  }
+  return endpoint;
+}
+function applyHostTheme(theme) {
+  if (!haContext || !theme || typeof theme !== 'object' || Array.isArray(theme)
+      || !Object.hasOwn(theme, 'mode') || !['light', 'dark'].includes(theme.mode) || Object.keys(theme).length !== THEME_COLORS.length + 1
+      || !THEME_COLORS.every(key => Object.hasOwn(theme, key) && typeof theme[key] === 'string' && /^#[0-9a-f]{6}$/i.test(theme[key]))) return;
+  const key = JSON.stringify([theme.mode, ...THEME_COLORS.map(name => theme[name])]);
+  if (key === hostThemeKey) return;
+  hostThemeKey = key;
+  const surfaces = [theme.background, theme.surface];
+  const accent = contrastColor(theme.accent, surfaces, 3);
+  const selectedBackground = mixColor(theme.surface, accent, .13);
+  const hover = mixColor(theme.surface, theme.text, .08);
+  const textSurfaces = [...surfaces, selectedBackground, hover];
+  const text = contrastColor(theme.text, textSurfaces, 4.5);
+  const muted = contrastColor(theme.muted, textSurfaces, 4.5);
+  const errorBackground = mixColor(theme.surface, theme.error, .1);
+  const variables = {
+    background: theme.background, surface: theme.surface, text, muted,
+    border: contrastColor(theme.border, surfaces, 1.5), accent, link: contrastColor(theme.accent, textSurfaces, 4.5),
+    'accent-text': contrastColor(theme.accentText, [accent], 4.5),
+    hover, selected: selectedBackground,
+    error: contrastColor(theme.error, [...surfaces, errorBackground], 4.5),
+    'error-bg': errorBackground, shadow: '#00000030', backdrop: '#00000080', canvas: theme.background,
+  };
+  const room = Object.fromEntries(['floor', 'tile', 'deck'].map(material => [material, mixColor(theme.background, COLORS[material], theme.mode === 'dark' ? .16 : .45)]));
+  const canvasSurfaces = [theme.background, ...Object.values(room)];
+  const selectionColor = contrastColor(accent, canvasSurfaces, 3);
+  planColors = {
+    background: theme.background, grid: mixColor(theme.background, text, .13), axis: mixColor(theme.background, text, .3), dots: mixColor(theme.background, text, .1), room,
+    roomBorder: contrastColor(theme.border, canvasSurfaces, 2), roomText: contrastColor(text, canvasSurfaces, 4.5), roomArea: contrastColor(muted, canvasSurfaces, 4.5),
+    selection: selectionColor, handle: theme.surface, wall: contrastColor(muted, canvasSurfaces, 3), wallSelection: selectionColor,
+    openingSelection: selectionColor, window: contrastColor('#75a8ae', canvasSurfaces, 3), door: contrastColor('#839980', canvasSurfaces, 3),
+    itemSelection: selectionColor, itemText: contrastColor(text, canvasSurfaces, 4.5), drawing: selectionColor, drawingText: contrastColor(text, canvasSurfaces, 4.5),
+    candidate: contrastColor('#8051ad', canvasSurfaces, 3), scale: contrastColor(muted, canvasSurfaces, 3), scaleText: contrastColor(muted, canvasSurfaces, 4.5),
+  };
+  variables.selection = selectionColor;
+  for (const [name, value] of Object.entries(variables)) document.documentElement.style.setProperty(`--studio-${name}`, value);
+  document.documentElement.dataset.haTheme = theme.mode;
+  document.documentElement.style.colorScheme = theme.mode;
+  if (renderer) renderer.setClearColor(planColors.background);
+  requestCanvasRender();
+}
 const planCanvas = $('plan-canvas'), ctx = planCanvas.getContext('2d', { alpha: false });
 let project = blankProject(), activeFloorId, selection = null, tool = 'select', view = 'plan', history = [], future = [], drag = null;
 let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, spaceHeld = false, saveFailed = false, previewDirty = true;
@@ -90,6 +168,37 @@ $('floor-navigator-toggle').addEventListener('click', () => {
   updateFloorNavigator();
 });
 const selected = () => selection ? floor()[selection.kind]?.find(o => o.id === selection.id) : null;
+const protectedRoom = (floorId, roomId) => haSourcePolicy?.rooms.get(floorId)?.has(roomId) === true;
+const customItem = (floorId, itemId) => haSourcePolicy?.customItems.get(floorId)?.has(itemId) === true;
+const protectedArchitectureMessage = 'Existing room shapes and floor heights are protected. You can rename rooms, place items, link devices, and draw additions.';
+function installSourcePolicy(value, policy, hostActions) {
+  haSourcePolicy = null; haPublishedPreview = null;
+  if (policy?.architectureEditing !== false) return;
+  const source = policy.source;
+  if (source?.kind !== 'generated' || !Array.isArray(source.protected_floors)
+    || JSON.stringify(source.protected_floors) !== JSON.stringify(value.floors.map(f => f.id))) throw new Error('Invalid protected home source.');
+  const rooms = new Map(), customItems = new Map();
+  for (const f of value.floors) {
+    const ids = source.protected_rooms?.[f.id];
+    if (!Array.isArray(ids) || ids.some(id => !f.rooms.some(room => room.id === id))) throw new Error('Invalid protected room source.');
+    rooms.set(f.id, new Set(ids)); customItems.set(f.id, new Set(source.custom_items?.[f.id] || []));
+  }
+  haSourcePolicy = { baseline: clone(value), rooms, customItems };
+  haPublishedPreview = hostActions.publishedPreview;
+}
+function validateSourcePolicy(value) {
+  if (!haSourcePolicy) return;
+  const base = haSourcePolicy.baseline;
+  if (value.id !== base.id || JSON.stringify(value.floors.map(f => f.id)) !== JSON.stringify(base.floors.map(f => f.id))) throw new Error(protectedArchitectureMessage);
+  for (const f of value.floors) {
+    const original = base.floors.find(entry => entry.id === f.id);
+    if (f.elevation_m !== original.elevation_m || f.height_m !== original.height_m) throw new Error(protectedArchitectureMessage);
+    for (const id of haSourcePolicy.rooms.get(f.id)) {
+      const room = f.rooms.find(entry => entry.id === id), old = original.rooms.find(entry => entry.id === id);
+      if (!room || room.material !== old.material || JSON.stringify(room.polygon) !== JSON.stringify(old.polygon)) throw new Error(protectedArchitectureMessage);
+    }
+  }
+}
 const snap = value => $('snap').checked ? Math.round(value * 4) / 4 : round(value);
 function node(tag, className, text) { const n = document.createElement(tag); if (className) n.className = className; if (text !== undefined) n.textContent = text; return n; }
 function button(text, handler, className = 'quiet') { const b = node('button', className, text); b.type = 'button'; b.onclick = handler; b.dataset.inspectorKey = `button:${text}`; return b; }
@@ -258,7 +367,7 @@ function transact(change, message = () => t('Project updated.'), { fit = false }
   if (drag) finishPointer(null, true);
   const draft = clone(project), priorSelection = selection && { ...selection };
   try {
-    change(draft, draft.floors.find(f => f.id === activeFloorId) || draft.floors[0]); validateProject(draft); serializeProject(draft);
+    change(draft, draft.floors.find(f => f.id === activeFloorId) || draft.floors[0]); validateProject(draft); validateSourcePolicy(draft); serializeProject(draft);
     if (committingField) { committingField.inspectorDraft = false; committingField.removeAttribute('aria-invalid'); }
     historyPush(project); project = draft; previewDirty = true;
     if (!project.floors.some(f => f.id === activeFloorId)) activeFloorId = project.floors[0].id;
@@ -268,7 +377,7 @@ function transact(change, message = () => t('Project updated.'), { fit = false }
   } catch (error) { if (committingField) { committingField.inspectorDraft = true; committingField.setAttribute('aria-invalid', 'true'); } selection = priorSelection; status(() => t('Change not applied: {error}', { error: formatValidationError(error, t) }), true); renderInspector(); editorChanged(); return false; }
 }
 async function replaceProject(next, message) {
-  validateProject(next); const raw = serializeProject(next), previous = serializeProject(project);
+  validateProject(next); validateSourcePolicy(next); const raw = serializeProject(next), previous = serializeProject(project);
   const result = await save({ raw, previous: hasContent() ? previous : undefined, isCurrent: () => serializeProject(project) === previous });
   if (result.status !== 'saved') {
     if (result.status === 'unavailable' && confirm(t('Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.'))) {
@@ -297,6 +406,10 @@ function renderUI() {
   if (!$('project-title').inspectorDraft) $('project-title').value = project.title;
   $('floor-caption').textContent = floor().name;
   $('undo').disabled = history.length === 0; $('redo').disabled = future.length === 0;
+  for (const id of ['add-floor', 'new-project', 'browse-examples', 'load-demo']) {
+    $(id).disabled = !!haSourcePolicy;
+    if (haSourcePolicy) $(id).title = protectedArchitectureMessage;
+  }
   const floorList = node('div');
   project.floors.forEach(f => {
     const b = button('', () => selectFloor(f.id), 'floor-button');
@@ -365,10 +478,11 @@ function buildInspector(parent) {
   const object = selected(), f = floor();
   if (!object) {
     $('inspector-title').textContent = t('Floor settings'); $('inspector-subtitle').textContent = t('A good plan starts with the basics.');
-    if (haCatalog) field(parent, 'Home Assistant floor', f.ha_floor_id || '', v => transact((_p, d) => { if (v) d.ha_floor_id = v; else delete d.ha_floor_id; }), { options: registryOptions(haCatalog.floors, f.ha_floor_id, 'No floor linked'), help: 'Links this drawing floor to your Home Assistant floor. Geometry stays editable.' });
+    if (haSourcePolicy) parent.append(node('p', 'callout', protectedArchitectureMessage));
+    if (haCatalog) field(parent, 'Home Assistant floor', f.ha_floor_id || '', v => transact((_p, d) => { if (v) d.ha_floor_id = v; else delete d.ha_floor_id; }), { options: registryOptions(haCatalog.floors, f.ha_floor_id, 'No floor linked'), help: 'Links this drawing floor to your Home Assistant floor.' });
     field(parent, t('Floor name'), f.name, v => transact((_p, d) => { d.name = v; }, () => t('Floor renamed.')));
-    const dimensions = row(parent); field(dimensions, t('Elevation (m)'), f.elevation_m, v => transact((_p, d) => { d.elevation_m = v; }), { type: 'number', min: -100, max: 100 });
-    field(dimensions, t('Ceiling height (m)'), f.height_m, v => transact((_p, d) => { d.height_m = v; }), { type: 'number', min: .5, max: 20 });
+    const dimensions = row(parent); field(dimensions, t('Elevation (m)'), f.elevation_m, haSourcePolicy ? null : v => transact((_p, d) => { d.elevation_m = v; }), { type: 'number', min: -100, max: 100, readOnly: !!haSourcePolicy });
+    field(dimensions, t('Ceiling height (m)'), f.height_m, haSourcePolicy ? null : v => transact((_p, d) => { d.height_m = v; }), { type: 'number', min: .5, max: 20, readOnly: !!haSourcePolicy });
     parent.append(node('p', 'field-note', t('Elevation is measured from the building origin. Items use height above their own floor.')));
     section(parent, t('Add room by dimensions'));
     const bounds = floorBounds(f), proposedX = f.rooms.length ? Math.ceil(bounds.maxX + 1) : 0;
@@ -390,33 +504,37 @@ function buildInspector(parent) {
       }, () => t('Garden added. Place trees, paths or animals from the Item library.'), { fit: true });
     }));
     parent.append(node('p', 'callout', t('Rooms are floor areas. Draw walls yourself, or select a room and build its wall outline. Moving a room will not move its walls.')));
-    parent.append(button(t('Clear this floor'), () => { if (confirm(t('Clear every room, wall, opening, and item on {floor}? You can undo this.', { floor: f.name }))) transact((_p, target) => { for (const key of ['rooms', 'walls', 'openings', 'items']) target[key] = []; selection = null; }, () => t('Floor cleared.')); }, 'danger'));
-    if (project.floors.length > 1) parent.append(button(t('Delete this floor'), () => { if (confirm(t('Delete {floor} and everything on it? You can undo this.', { floor: f.name }))) transact(p => { p.floors = p.floors.filter(item => item.id !== activeFloorId); selection = null; }, () => t('Floor deleted.'), { fit: true }); }, 'danger'));
+    if (!haSourcePolicy) parent.append(button(t('Clear this floor'), () => { if (confirm(t('Clear every room, wall, opening, and item on {floor}? You can undo this.', { floor: f.name }))) transact((_p, target) => { for (const key of ['rooms', 'walls', 'openings', 'items']) target[key] = []; selection = null; }, () => t('Floor cleared.')); }, 'danger'));
+    if (!haSourcePolicy && project.floors.length > 1) parent.append(button(t('Delete this floor'), () => { if (confirm(t('Delete {floor} and everything on it? You can undo this.', { floor: f.name }))) transact(p => { p.floors = p.floors.filter(item => item.id !== activeFloorId); selection = null; }, () => t('Floor deleted.'), { fit: true }); }, 'danger'));
     parent.append(node('p', 'property-id', t('Floor ID: {id}', { id: f.id }))); return;
   }
   const kind = selection.kind;
   $('inspector-title').textContent = ({ rooms: t('Room details'), walls: t('Wall details'), openings: t('Opening details'), items: t('Item details') })[kind];
-  $('inspector-subtitle').textContent = ({ rooms: t('Shape the space. Then add its walls.'), walls: t('A physical segment with real thickness.'), openings: t('A true cutout in the selected wall.'), items: t('Give every object a place and a purpose.') })[kind];
+  $('inspector-subtitle').textContent = ({ rooms: haContext ? 'Shape the space. Walls are edited separately.' : t('Shape the space. Then add its walls.'), walls: t('A physical segment with real thickness.'), openings: t('A true cutout in the selected wall.'), items: t('Give every object a place and a purpose.') })[kind];
   if (kind === 'rooms') {
+    const locked = protectedRoom(f.id, object.id);
+    if (locked) { $('inspector-subtitle').textContent = 'Existing room shape protected. Rename it, add items, or link devices.'; parent.append(node('p', 'field-note', 'The original walls and details remain in the published home. New rooms and walls can be drawn separately.')); }
     const metric = node('div', 'metric-strip'); metric.append(node('strong', '', Math.abs(signedArea(object.polygon)).toFixed(2)), node('span', '', t('m² floor area'))); parent.append(metric);
     if (haCatalog) {
       field(parent, 'Home Assistant area', object.ha_area_id || '', v => editObject(o => { if (v) o.ha_area_id = v; else delete o.ha_area_id; }), { options: registryOptions(haCatalog.areas, object.ha_area_id, 'No area linked'), help: 'Choose the existing area for this room to find its devices below.' });
       renderAreaDevices(parent, object);
     }
     field(parent, t('Room name'), object.name, v => editObject(o => { o.name = v; }));
-    field(parent, t('Floor material'), object.material, v => editObject(o => { o.material = v; }), { options: [{ value: 'floor', label: t('Warm timber') }, { value: 'tile', label: t('Tile / stone') }, { value: 'deck', label: t('Outdoor deck') }] });
-    parent.append(button(t('Build wall outline'), () => { let n = 0; const ok = transact((_p, d) => { n = outlineRoom(d, d.rooms.find(r => r.id === object.id)); }, () => t('Wall outline added. Exact shared walls are reused.')); if (ok) status(() => n ? t('{count} wall segments added. Exact shared walls were reused.', { count: n }) : t('This room already has a complete wall outline.')); }, 'primary'));
-    parent.append(node('p', 'field-note', t('Outlines use 0.15 m walls. Existing walls stay independent of this room.')));
+    field(parent, t('Floor material'), object.material, locked ? null : v => editObject(o => { o.material = v; }), { options: [{ value: 'floor', label: t('Warm timber') }, { value: 'tile', label: t('Tile / stone') }, { value: 'deck', label: t('Outdoor deck') }] }).disabled = locked;
+    if (!locked) {
+      parent.append(button(t('Build wall outline'), () => { let n = 0; const ok = transact((_p, d) => { n = outlineRoom(d, d.rooms.find(r => r.id === object.id)); }, () => t('Wall outline added. Exact shared walls are reused.')); if (ok) status(() => n ? t('{count} wall segments added. Exact shared walls were reused.', { count: n }) : t('This room already has a complete wall outline.')); }, 'primary'));
+      parent.append(node('p', 'field-note', t('Outlines use 0.15 m walls. Existing walls stay independent of this room.')));
+    }
     parent.append(button(t('Place item at room center'), () => {
       const center = object.polygon.reduce((sum, p) => [sum[0] + p[0] / object.polygon.length, sum[1] + p[1] / object.polygon.length], [0, 0]);
       addItem(center, object.id);
     }));
     parent.append(node('p', 'field-note', t('Places {item}. Choose another design in the Item library, then select this room again.', { item: placementName() })));
     section(parent, t('Polygon points'));
-    field(parent, t('x, z coordinates (m)'), object.polygon.map(p => p.join(', ')).join('\n'), value => editObject(o => {
+    field(parent, t('x, z coordinates (m)'), object.polygon.map(p => p.join(', ')).join('\n'), locked ? null : value => editObject(o => {
       const points = value.trim().split('\n').filter(s => s.trim()).map(line => line.trim().split(/[\s,]+/).map(Number));
       if (points.some(p => p.length !== 2 || p.some(v => !Number.isFinite(v)))) throw new Error(t('Use one x, z coordinate pair per line.')); o.polygon = points;
-    }), { rows: Math.min(7, object.polygon.length), dir: 'ltr', help: t('One corner per line, around the perimeter. Do not repeat the first point. Concave shapes are supported; crossing edges are not.') });
+    }), { rows: Math.min(7, object.polygon.length), dir: 'ltr', readOnly: locked, help: locked ? 'Original room outline, in meters. Its shape stays protected when you publish.' : t('One corner per line, around the perimeter. Do not repeat the first point. Concave shapes are supported; crossing edges are not.') });
   } else if (kind === 'walls') {
     const length = distance(object.start, object.end); const metric = node('div', 'metric-strip'); metric.append(node('strong', '', length.toFixed(2)), node('span', '', t('m segment length'))); parent.append(metric);
     for (const endpoint of ['start', 'end']) { section(parent, t(`${endpoint} point`)); const r = row(parent); ['x', 'z'].forEach((axis, index) => field(r, t(`${endpoint} ${axis} (m)`), object[endpoint][index], v => editObject(o => { o[endpoint][index] = v; }), { type: 'number', min: -100, max: 100 })); }
@@ -440,6 +558,8 @@ function buildInspector(parent) {
     parent.append(node('p', 'callout', t('These dimensions remove wall geometry in both the preview and the exported build. The window tint is only a preview aid.')));
     parent.append(button(t('Select parent wall'), () => { setSelection({ kind: 'walls', id: wall.id }); renderUI(); renderPlan(); }));
   } else if (kind === 'items') {
+    const originalModel = customItem(f.id, object.id);
+    if (originalModel) parent.append(node('p', 'field-note', 'This item has an original installed model. Its detailed appearance is kept in the published home unless you choose a different design below. The 2D plan shows its footprint.'));
     field(parent, t('Item name'), object.name, v => editObject(o => { o.name = v; }));
     const model = object.model_id ? getCatalogModel(object.model_id) : null;
     field(parent, t('Design'), object.model_id || '', value => editObject(o => {
@@ -448,7 +568,7 @@ function buildInspector(parent) {
       if (o.name === previous?.label || o.name === LABELS[o.type]) o.name = next.label;
       o.model_id = next.id; o.type = next.type; o.style_id ||= next.default_style;
       if (!supportsFurniturePattern(next)) { delete o.pattern_id; delete o.pattern_color; }
-    }, () => t('Item design changed. Size and position kept.')), { options: [{ value: '', label: t('Basic shape / device') }, ...CATALOG.models.map(entry => ({ value: entry.id, label: t(`model.${entry.id}`) }))], help: t('Changes the shape while keeping your size and placement.') });
+    }, () => t('Item design changed. Size and position kept.')), { options: [{ value: '', label: originalModel ? 'Original installed model' : t('Basic shape / device') }, ...CATALOG.models.map(entry => ({ value: entry.id, label: t(`model.${entry.id}`) }))], help: t('Changes the shape while keeping your size and placement.') });
     if (model) {
       const style = getCatalogStyle(object.style_id || model.default_style);
       field(parent, t('Color palette'), style.id, value => editObject(o => { o.style_id = value; delete o.color; delete o.pattern_color; }, () => t('Color palette applied.')), { options: CATALOG.styles.map(entry => ({ value: entry.id, label: t(`palette.${entry.id}`) })), help: t('Coordinated colors for the whole item. Changing palette resets custom colors and keeps your pattern.') });
@@ -493,11 +613,12 @@ function buildInspector(parent) {
     field(parent, t('Entity ID (optional)'), object.entity_id, v => editObject(o => { o.entity_id = v.trim(); }), { dir: 'ltr', help: haContext ? 'Bind an entity to this item. Publishing enables its controls in the family view.' : t('Example: light.living_room. Any Home Assistant entity can be linked. In the installed plan, lights, switches and fans have quick toggles; sensors show readings; media players show artwork and controls; Details opens native controls for other entities. This offline planner only stores the mapping and never controls devices.') });
     field(parent, t('Notes'), object.notes, v => editObject(o => { o.notes = v; }), { rows: 3 });
   }
-  parent.append(button(t(`Delete ${kind === 'openings' ? 'opening' : kind.slice(0, -1)}`), deleteSelection, 'danger'));
+  if (kind !== 'rooms' || !protectedRoom(f.id, object.id)) parent.append(button(t(`Delete ${kind === 'openings' ? 'opening' : kind.slice(0, -1)}`), deleteSelection, 'danger'));
   parent.append(node('p', 'property-id', object.wall_id ? t('ID: {id} · Wall: {wall}', { id: object.id, wall: object.wall_id }) : t('ID: {id}', { id: object.id })));
 }
 function deleteSelection() {
   if (!selection || !selected()) return;
+  if (selection.kind === 'rooms' && protectedRoom(activeFloorId, selection.id)) { status(protectedArchitectureMessage); return; }
   const { kind, id } = selection;
   transact((_p, f) => {
     f[kind] = f[kind].filter(o => o.id !== id);
@@ -515,12 +636,15 @@ function setTool(next) {
   $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || view !== 'plan';
 }
 function setView(next) {
+  if (next === 'preview' && haPublishedPreview) { haPublishedPreview(); return; }
   if (drag) finishPointer(null, true);
   releasePreviewPointer();
   view = next;
   previewEnvironment?.setActive(next === 'preview' && !previewLost && !canvasSuspended);
-  $('plan-tab').setAttribute('aria-selected', String(next === 'plan')); $('preview-tab').setAttribute('aria-selected', String(next === 'preview'));
-  $('plan-tab').tabIndex = next === 'plan' ? 0 : -1; $('preview-tab').tabIndex = next === 'preview' ? 0 : -1;
+  if (!haSourcePolicy) {
+    $('plan-tab').setAttribute('aria-selected', String(next === 'plan')); $('preview-tab').setAttribute('aria-selected', String(next === 'preview'));
+    $('plan-tab').tabIndex = next === 'plan' ? 0 : -1; $('preview-tab').tabIndex = next === 'preview' ? 0 : -1;
+  }
   $('plan-view').hidden = next !== 'plan'; $('preview-view').hidden = next !== 'preview'; $('snap-label').hidden = next !== 'plan';
   $('tool-hint').textContent = next === 'preview' ? previewHint() : toolHint();
   updatePreviewNavigation();
@@ -577,38 +701,38 @@ function planShapePath(shape, width, depth) {
 function renderPlan() {
   if (view !== 'plan' || canvasSuspended || document.hidden) return;
   cancelCanvasRender();
-  ctx.clearRect(0, 0, size.width, size.height); ctx.fillStyle = '#f2f4ed'; ctx.fillRect(0, 0, size.width, size.height);
+  ctx.clearRect(0, 0, size.width, size.height); ctx.fillStyle = planColors.background; ctx.fillRect(0, 0, size.width, size.height);
   const top = toWorld([0, 0]), bottom = toWorld([size.width, size.height]), gridStep = map.scale > 22 ? 1 : 5;
   ctx.lineWidth = 1;
-  for (let x = Math.floor(top[0] / gridStep) * gridStep; x <= bottom[0]; x += gridStep) { const px = Math.round(toScreen([x, 0])[0]) + .5; ctx.strokeStyle = x === 0 ? '#c5d0bd' : '#e2e7dc'; ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, size.height); ctx.stroke(); }
-  for (let z = Math.floor(top[1] / gridStep) * gridStep; z <= bottom[1]; z += gridStep) { const py = Math.round(toScreen([0, z])[1]) + .5; ctx.strokeStyle = z === 0 ? '#c5d0bd' : '#e2e7dc'; ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(size.width, py); ctx.stroke(); }
-  if (map.scale >= 44) { ctx.fillStyle = '#dde4d6'; for (let x = Math.floor(top[0]); x <= bottom[0]; x += .25) for (let z = Math.floor(top[1]); z <= bottom[1]; z += .25) { const [px, py] = toScreen([x, z]); ctx.fillRect(px, py, 1, 1); } }
+  for (let x = Math.floor(top[0] / gridStep) * gridStep; x <= bottom[0]; x += gridStep) { const px = Math.round(toScreen([x, 0])[0]) + .5; ctx.strokeStyle = x === 0 ? planColors.axis : planColors.grid; ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, size.height); ctx.stroke(); }
+  for (let z = Math.floor(top[1] / gridStep) * gridStep; z <= bottom[1]; z += gridStep) { const py = Math.round(toScreen([0, z])[1]) + .5; ctx.strokeStyle = z === 0 ? planColors.axis : planColors.grid; ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(size.width, py); ctx.stroke(); }
+  if (map.scale >= 44) { ctx.fillStyle = planColors.dots; for (let x = Math.floor(top[0]); x <= bottom[0]; x += .25) for (let z = Math.floor(top[1]); z <= bottom[1]; z += .25) { const [px, py] = toScreen([x, z]); ctx.fillRect(px, py, 1, 1); } }
   const f = displayedFloor();
   for (const r of f.rooms) {
     const active = selection?.kind === 'rooms' && selection.id === r.id;
-    path(r.polygon, true); ctx.fillStyle = COLORS[r.material]; ctx.globalAlpha = active ? .85 : .65; ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = active ? '#4a8073' : '#b4bba3'; ctx.lineWidth = active ? 2 : 1; ctx.setLineDash(active ? [5, 3] : []); ctx.stroke(); ctx.setLineDash([]);
+    path(r.polygon, true); ctx.fillStyle = planColors.room[r.material]; ctx.globalAlpha = active ? .85 : .65; ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = active ? planColors.selection : planColors.roomBorder; ctx.lineWidth = active ? 2 : 1; ctx.setLineDash(active ? [5, 3] : []); ctx.stroke(); ctx.setLineDash([]);
     const centroid = r.polygon.reduce((a, p) => [a[0] + p[0] / r.polygon.length, a[1] + p[1] / r.polygon.length], [0, 0]), [cx, cy] = toScreen(centroid);
-    if (map.scale > 15) { ctx.textAlign = 'center'; ctx.fillStyle = '#697c63'; ctx.font = '600 11px -apple-system, sans-serif'; ctx.fillText(r.name.length > 25 ? r.name.slice(0, 24) + '…' : r.name, cx, cy - 3); ctx.font = '9px -apple-system, sans-serif'; ctx.fillStyle = '#8d9a7c'; ctx.fillText(`${Math.abs(signedArea(r.polygon)).toFixed(1)} m²`, cx, cy + 12); }
-    if (active) for (const p of r.polygon) { const [x, y] = toScreen(p); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#4a8073'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    if (map.scale > 15) { ctx.textAlign = 'center'; ctx.fillStyle = planColors.roomText; ctx.font = '600 11px -apple-system, sans-serif'; ctx.fillText(r.name.length > 25 ? r.name.slice(0, 24) + '…' : r.name, cx, cy - 3); ctx.font = '9px -apple-system, sans-serif'; ctx.fillStyle = planColors.roomArea; ctx.fillText(`${Math.abs(signedArea(r.polygon)).toFixed(1)} m²`, cx, cy + 12); }
+    if (active) for (const p of r.polygon) { const [x, y] = toScreen(p); ctx.fillStyle = planColors.handle; ctx.strokeStyle = planColors.selection; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
   }
   for (const w of f.walls) {
     const active = selection?.kind === 'walls' && selection.id === w.id;
-    path([w.start, w.end]); ctx.strokeStyle = active ? '#3a7b6a' : '#778776'; ctx.lineWidth = Math.max(3, w.thickness_m * map.scale); ctx.lineCap = 'butt'; ctx.stroke();
-    if (active) { for (const [i, p] of [w.start, w.end].entries()) { const [x, y] = toScreen(p); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#3a7b6a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#3a7b6a'; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(t(i ? 'end' : 'start'), x + 7, y - 7); } }
+    path([w.start, w.end]); ctx.strokeStyle = active ? planColors.wallSelection : planColors.wall; ctx.lineWidth = Math.max(3, w.thickness_m * map.scale); ctx.lineCap = 'butt'; ctx.stroke();
+    if (active) { for (const [i, p] of [w.start, w.end].entries()) { const [x, y] = toScreen(p); ctx.fillStyle = planColors.handle; ctx.strokeStyle = planColors.wallSelection; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.fillStyle = planColors.wallSelection; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(t(i ? 'end' : 'start'), x + 7, y - 7); } }
   }
   for (const o of f.openings) {
     const w = f.walls.find(wall => wall.id === o.wall_id); if (!w) continue;
     const len = distance(w.start, w.end), ux = (w.end[0] - w.start[0]) / len, uz = (w.end[1] - w.start[1]) / len;
     const start = [w.start[0] + ux * o.offset_m, w.start[1] + uz * o.offset_m], end = [start[0] + ux * o.width_m, start[1] + uz * o.width_m];
     const active = selection?.kind === 'openings' && selection.id === o.id;
-    path([start, end]); ctx.lineWidth = Math.max(6, w.thickness_m * map.scale + 2); ctx.strokeStyle = '#f2f4ed'; ctx.stroke();
-    ctx.strokeStyle = active ? '#df935b' : o.type === 'window' ? '#75a8ae' : '#839980'; ctx.lineWidth = active ? 3 : 1.5;
+    path([start, end]); ctx.lineWidth = Math.max(6, w.thickness_m * map.scale + 2); ctx.strokeStyle = planColors.background; ctx.stroke();
+    ctx.strokeStyle = active ? planColors.openingSelection : o.type === 'window' ? planColors.window : planColors.door; ctx.lineWidth = active ? 3 : 1.5;
     if (o.type === 'window') { path([start, end]); ctx.stroke(); const shift = .035; path([[start[0] - uz * shift, start[1] + ux * shift], [end[0] - uz * shift, end[1] + ux * shift]]); ctx.stroke(); }
     else if (o.type === 'door') {
       const [x, y] = toScreen(start), angle = Math.atan2(uz, ux), radius = o.width_m * map.scale;
       ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - Math.sin(angle) * radius, y + Math.cos(angle) * radius); ctx.stroke(); ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(x, y, radius, angle, angle + Math.PI / 2); ctx.stroke(); ctx.setLineDash([]);
     } else { ctx.setLineDash([3, 3]); path([start, end]); ctx.stroke(); ctx.setLineDash([]); }
-    if (active) { path([start, end]); ctx.lineWidth = 7; ctx.strokeStyle = '#df935b55'; ctx.stroke(); }
+    if (active) { path([start, end]); ctx.lineWidth = 7; ctx.strokeStyle = planColors.openingSelection + '55'; ctx.stroke(); }
   }
   // Draw individual top surfaces by elevation, so a newly placed rug remains
   // below furniture and a raised lamp stays above a table regardless of order.
@@ -631,21 +755,26 @@ function renderPlan() {
   if (activeItem) {
     const [x, y] = toScreen([activeItem.position_m.x, activeItem.position_m.z]);
     const w = Math.max(7, activeItem.dimensions_m.width * map.scale), d = Math.max(7, activeItem.dimensions_m.depth * map.scale);
-    ctx.save(); ctx.translate(x, y); ctx.rotate(-activeItem.rotation_deg * Math.PI / 180); ctx.strokeStyle = '#bd783c'; ctx.lineWidth = 2;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(-activeItem.rotation_deg * Math.PI / 180);
+    if (hostThemeKey) {
+      ctx.strokeStyle = planColors.background; ctx.lineWidth = 6; ctx.strokeRect(-w / 2 - 5, -d / 2 - 5, w + 10, d + 10);
+      ctx.strokeStyle = planColors.itemSelection; ctx.lineWidth = 2; ctx.strokeRect(-w / 2 - 5, -d / 2 - 5, w + 10, d + 10);
+    }
+    ctx.strokeStyle = planColors.itemSelection; ctx.lineWidth = 2;
     if (activeItem.model_id) { ctx.setLineDash([4, 3]); ctx.strokeRect(-w / 2 - 3, -d / 2 - 3, w + 6, d + 6); }
     else if (['chandelier', 'lamp', 'sensor'].includes(activeItem.type)) { ctx.beginPath(); ctx.ellipse(0, 0, w / 2, d / 2, 0, 0, Math.PI * 2); ctx.stroke(); }
     else ctx.strokeRect(-w / 2, -d / 2, w, d);
-    ctx.restore(); ctx.fillStyle = '#5e776a'; ctx.textAlign = 'center'; ctx.font = '10px sans-serif'; ctx.fillText(activeItem.name, x, y + Math.max(activeItem.dimensions_m.width, activeItem.dimensions_m.depth) * map.scale / 2 + 15);
+    ctx.restore(); ctx.fillStyle = planColors.itemText; ctx.textAlign = 'center'; ctx.font = '10px sans-serif'; ctx.fillText(activeItem.name, x, y + Math.max(activeItem.dimensions_m.width, activeItem.dimensions_m.depth) * map.scale / 2 + 15);
   }
   if (drag?.kind === 'draw') {
-    const a = drag.startWorld, b = drag.endWorld; ctx.strokeStyle = '#3c8c79'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
-    if (tool === 'room') { path([a, [b[0], a[1]], b, [a[0], b[1]]], true); ctx.fillStyle = '#639e8122'; ctx.fill(); ctx.stroke(); }
+    const a = drag.startWorld, b = drag.endWorld; ctx.strokeStyle = planColors.drawing; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+    if (tool === 'room') { path([a, [b[0], a[1]], b, [a[0], b[1]]], true); ctx.fillStyle = hostThemeKey ? planColors.drawing + '22' : '#639e8122'; ctx.fill(); ctx.stroke(); }
     else { path([a, b]); ctx.stroke(); } ctx.setLineDash([]);
-    const p = toScreen(b); ctx.fillStyle = '#2c7663'; ctx.textAlign = 'left'; ctx.font = '11px sans-serif'; ctx.fillText(tool === 'room' ? `${Math.abs(b[0] - a[0]).toFixed(2)} × ${Math.abs(b[1] - a[1]).toFixed(2)} m` : `${distance(a, b).toFixed(2)} m`, p[0] + 12, p[1] - 12);
+    const p = toScreen(b); ctx.fillStyle = planColors.drawingText; ctx.textAlign = 'left'; ctx.font = '11px sans-serif'; ctx.fillText(tool === 'room' ? `${Math.abs(b[0] - a[0]).toFixed(2)} × ${Math.abs(b[1] - a[1]).toFixed(2)} m` : `${distance(a, b).toFixed(2)} m`, p[0] + 12, p[1] - 12);
   }
   if (candidatePreview) {
     const accepted = floor();
-    ctx.save(); ctx.strokeStyle = '#8051ad'; ctx.lineWidth = 3; ctx.setLineDash([5, 4]);
+    ctx.save(); ctx.strokeStyle = planColors.candidate; ctx.lineWidth = 3; ctx.setLineDash([5, 4]);
     for (const room of f.rooms) if (!accepted.rooms.some(r => r.id === room.id)) { path(room.polygon, true); ctx.stroke(); }
     for (const item of f.items) if (!accepted.items.some(i => i.id === item.id)) {
       const [x, y] = toScreen([item.position_m.x, item.position_m.z]);
@@ -656,7 +785,7 @@ function renderPlan() {
   }
   // A fixed metric scale makes the current zoom unambiguous.
   const scaleMeters = map.scale < 20 ? 5 : map.scale > 150 ? .5 : 1, sx = 20, sy = size.height - 76;
-  ctx.strokeStyle = '#9bab8f'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sx, sy - 3); ctx.lineTo(sx, sy + 3); ctx.moveTo(sx, sy); ctx.lineTo(sx + scaleMeters * map.scale, sy); ctx.moveTo(sx + scaleMeters * map.scale, sy - 3); ctx.lineTo(sx + scaleMeters * map.scale, sy + 3); ctx.stroke(); ctx.fillStyle = '#8a9b7e'; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(t('{scale} m · grid {grid} m', { scale: scaleMeters, grid: gridStep }), sx, sy - 9);
+  ctx.strokeStyle = planColors.scale; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sx, sy - 3); ctx.lineTo(sx, sy + 3); ctx.moveTo(sx, sy); ctx.lineTo(sx + scaleMeters * map.scale, sy); ctx.moveTo(sx + scaleMeters * map.scale, sy - 3); ctx.lineTo(sx + scaleMeters * map.scale, sy + 3); ctx.stroke(); ctx.fillStyle = planColors.scaleText; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(t('{scale} m · grid {grid} m', { scale: scaleMeters, grid: gridStep }), sx, sy - 9);
 }
 function wallAt(point) { return floor().walls.map(w => ({ wall: w, hit: projectOnWall(point, w) })).filter(o => o.hit.distance < Math.max(.1, 10 / map.scale)).sort((a, b) => a.hit.distance - b.hit.distance)[0]; }
 function hitTest(point) {
@@ -679,6 +808,7 @@ planCanvas.addEventListener('pointerdown', event => {
   if (tool === 'door' || tool === 'window') { const near = wallAt(world); if (near) addOpening(near.wall, near.hit.offset, tool); else status(() => t('Click directly on an existing wall to add an opening.'), true); return; }
   if (tool === 'item') { addItem(world); return; }
   setSelection(hitTest(world));
+  if (selection?.kind === 'rooms' && protectedRoom(activeFloorId, selection.id)) { status(protectedArchitectureMessage); return; }
   if (selection) {
     // Keep one immutable undo snapshot; only the selected object changes while dragging.
     drag = { kind: 'move', pointerId: event.pointerId, startWorld: world, original: project, selection: { ...selection }, moved: false, offset: [0, 0] };
@@ -690,7 +820,7 @@ planCanvas.addEventListener('pointermove', event => {
   if (drag && drag.pointerId !== event.pointerId) return;
   if (drag && event.buttons === 0) { finishPointer(event, true); return; }
   const screen = localPoint(event), world = toWorld(screen); $('pointer-position').textContent = `x ${world[0].toFixed(2)} · z ${world[1].toFixed(2)} m`;
-  if (!drag) { if (tool === 'select') planCanvas.style.cursor = hitTest(world) ? 'grab' : 'default'; return; }
+  if (!drag) { if (tool === 'select') { const hit = hitTest(world); planCanvas.style.cursor = hit && !(hit.kind === 'rooms' && protectedRoom(activeFloorId, hit.id)) ? 'grab' : 'default'; } return; }
   if (drag.kind === 'pan') { map.x = drag.map.x + screen[0] - drag.screen[0]; map.y = drag.map.y + screen[1] - drag.screen[1]; }
   if (drag.kind === 'draw') drag.endWorld = world.map(snap);
   if (drag.kind === 'move') {
@@ -725,7 +855,7 @@ function finishPointer(event, cancel = false) {
   if (current.kind === 'move') {
     if (cancel || !current.moved) project = current.original;
     else {
-      try { validateProject(project); serializeProject(project); historyPush(current.original); previewDirty = true; status(() => t('Object moved.')); save(); }
+      try { validateProject(project); validateSourcePolicy(project); serializeProject(project); historyPush(current.original); previewDirty = true; status(() => t('Object moved.')); save(); }
       catch (error) { project = current.original; status(() => t('Move cancelled: {error}', { error: formatValidationError(error, t) }), true); }
     }
     if (project !== current.original) {
@@ -773,7 +903,7 @@ function previewRenderProfile(gl) {
 function initPreview() {
   if (renderer || previewUnavailable) return;
   try {
-    renderer = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: true, alpha: false }); previewRendererDisposed = false; renderer.setClearColor(0xf2f4ed); renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: true, alpha: false }); previewRendererDisposed = false; renderer.setClearColor(planColors.background); renderer.outputColorSpace = THREE.SRGBColorSpace;
     const profile = previewRenderProfile(renderer.getContext()); previewPixels = profile.pixels; previewInstancing = profile.instanceCatalog; previewDiffuseLighting = profile.diffuseLighting;
     renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = .9; renderer.shadowMap.enabled = true; renderer.shadowMap.type = previewDiffuseLighting ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
     scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(40, 1, .02, 1500); scene.add(new THREE.HemisphereLight(0xffffff, 0xc7cfbc, 1.7));
@@ -1290,6 +1420,7 @@ function renderLocale() {
   // Switching a presentation preference must not discard an unfinished form.
   const drafts = [...$('inspector-body').querySelectorAll('input,select,textarea')].map(input => ({ value: input.value, checked: input.checked, draft: input.inspectorDraft, invalid: input.getAttribute('aria-invalid') }));
   translateStatic();
+  if (haSourcePolicy) $('preview-tab').textContent = 'Published home';
   $('language-select').value = getLocale();
   document.querySelectorAll('[data-tool]').forEach(element => {
     const label = element.querySelector('span:nth-child(2)').textContent;
@@ -1333,7 +1464,7 @@ installOnboarding({
   t, getFloor: floor, hasContent, replaceProject, validateProject, status, onLocaleChange,
   createRoom(options) {
     const ok = transact((_p, target) => { selection = { kind: 'rooms', id: addMeasuredRoom(target, options) }; },
-      () => options.walls ? t('Room ready. Add a door or an item, then preview and export.') : t('Room added. Choose Build wall outline to create its walls.'), { fit: true });
+      () => options.walls ? (haContext ? 'Room ready. Add furniture, a door or a window. Then Save draft and Publish to 3D Home above.' : t('Room ready. Add a door or an item, then preview and export.')) : t('Room added. Choose Build wall outline to create its walls.'), { fit: true });
     if (ok) { setView('plan'); setTool('select'); }
     return { ok, error: !ok && lastStatus ? (typeof lastStatus.message === 'function' ? lastStatus.message() : lastStatus.message) : '' };
   },
@@ -1342,6 +1473,48 @@ installOnboarding({
   focusPlan() { planCanvas.focus(); },
 });
 if (!initialLocale.loaded) status(() => t('Language could not be loaded. English is shown instead.'), true);
+
+function focusUnfinishedGuideField(message = 'Finish the highlighted field before choosing a room. Save draft above applies and saves your changes.') {
+  const unfinished = document.querySelector('[data-project-field][aria-invalid="true"]')
+    || [...document.querySelectorAll('[data-project-field]')].find(field => field.inspectorDraft);
+  if (!unfinished) return false;
+  status(message);
+  unfinished.focus({ preventScroll: true }); unfinished.scrollIntoView({ block: 'center' }); return true;
+}
+
+function guideAction(action) {
+  if (!haContext || !haCatalog) return;
+  // Firefox needs the iframe's browsing context focused after a host click.
+  window.focus();
+  // Keep a form already being edited intact when a host shortcut is clicked.
+  const modal = document.querySelector('dialog[open]');
+  if (modal) { modal.focus(); return; }
+  if (action === 'focus-edit') {
+    focusUnfinishedGuideField('Finish the highlighted field, then Save draft before opening 3D Home. Your entered text is still here.');
+    return;
+  }
+  if ((action === 'room' || action === 'devices') && focusUnfinishedGuideField()) return;
+  if (action === 'room') { $('measured-room').click(); return; }
+  if (action === 'preview') { setView('preview'); $('preview-tab').focus(); return; }
+  if (action === 'photos') {
+    if (haAiReady) void haAiReady.then(ready => { if (ready) $('ai-open')?.click(); });
+    else status('Photo planning is unavailable. You can draw a room with Start with measurements.');
+    return;
+  }
+  if (action !== 'devices') return;
+  const room = selection?.kind === 'rooms' ? selected()
+    : floor().rooms.find(entry => entry.id === (selection?.kind === 'items' ? selected()?.room : null)) || floor().rooms[0];
+  if (!room) { $('measured-room').click(); return; }
+  setView('plan'); setTool('select'); setSelection({ kind: 'rooms', id: room.id });
+  const label = room.ha_area_id ? 'Add device to this room' : 'Home Assistant area';
+  const chooser = [...$('inspector-body').querySelectorAll('select')].find(field => field.getAttribute('aria-label') === label);
+  chooser?.focus(); chooser?.scrollIntoView({ block: 'center' });
+  status(room.ha_area_id ? 'Choose a device, then Add linked item. Drag the new item into position.' : 'Choose this room’s Home Assistant area to see its devices. Linking devices is optional.');
+}
+
+document.querySelectorAll('[data-guide-action]').forEach(button => button.addEventListener('click', () => {
+  $('help-dialog').close(); guideAction(button.dataset.guideAction);
+}));
 
 
 // A narrow, opt-in bridge. Snapshots are copies; preview never replaces accepted
@@ -1353,7 +1526,7 @@ export const editorBridge = Object.freeze({
   selectionContext: () => ({ floorId: activeFloorId, roomId: selection?.kind === 'rooms' ? selection.id : selection?.kind === 'items' ? selected()?.room : null }),
   subscribe(listener) { editorListeners.add(listener); return () => editorListeners.delete(listener); },
   previewProject(candidate) {
-    validateProject(candidate); serializeProject(candidate); candidatePreview = clone(candidate); previewDirty = true;
+    validateProject(candidate); validateSourcePolicy(candidate); serializeProject(candidate); candidatePreview = clone(candidate); previewDirty = true;
     $('empty-state').hidden = true; fitPlan(); fitPreview(); requestCanvasRender();
   },
   cancelPreview() {
@@ -1374,22 +1547,34 @@ export const editorBridge = Object.freeze({
 // drafts never touch the standalone localStorage keys or receive HA credentials.
 if (haContext) {
   connectHost(haContext, {
-    initialize(value, catalog, aiTransport) {
+    theme: applyHostTheme,
+    initialize(value, catalog, aiTransport, policy, hostActions) {
       const next = value || blankProject(); validateProject(next); serializeProject(next);
+      installSourcePolicy(next, policy, hostActions);
+      if (haSourcePolicy) {
+        for (const id of ['plan-tab', 'preview-tab']) { $(id).setAttribute('role', 'button'); $(id).removeAttribute('aria-selected'); $(id).removeAttribute('aria-controls'); $(id).tabIndex = 0; }
+        $('plan-tab').parentElement.setAttribute('role', 'group');
+        $('plan-tab').parentElement.setAttribute('aria-label', 'Drawing and published home');
+        $('preview-tab').textContent = 'Published home'; $('preview-tab').lang = 'en';
+        const helpPreview = document.querySelector('.native-help [data-guide-action="preview"]');
+        helpPreview.textContent = 'Published home';
+        helpPreview.parentElement.querySelector('p').textContent = 'Use Published home to inspect the current installed details. Changes to your drawing appear there only after Save draft and Publish to 3D Home. Back to editing returns to this drawing.';
+      }
       haCatalog = catalog && Array.isArray(catalog.areas) && Array.isArray(catalog.entities) ? catalog : { floors: [], areas: [], entities: [] };
       installRecoveredProject(next); history = []; future = [];
       document.querySelector('.workspace').inert = false; document.querySelector('.app-header').inert = false; renderUI();
       translatedText('save-status', 'Draft in this tab · save in Home Assistant above');
-      $('ha-workflow-note').textContent = 'Draw rooms, link Home Assistant areas, then add devices. Save draft above; publish when ready for the family view.';
+      $('ha-workflow-note').textContent = haSourcePolicy ? 'Edit item placements or draw additions. Existing room shapes stay protected. Published home shows the installed details.' : 'Draw a room, add devices if you want, then Save draft and Publish to 3D Home above.';
       status('Home Assistant drawing ready. Save draft above before leaving.');
       if (aiTransport) {
         const stylesheet = document.createElement('link'); stylesheet.rel = 'stylesheet';
         stylesheet.href = new URL('../ai/panel.css', import.meta.url).href; document.head.append(stylesheet);
-        void import('../ai/panel.js').then(({ mountAiPanel }) => mountAiPanel(editorBridge, aiTransport))
-          .catch(() => status('AI tools could not load. Reload Home Studio to try again.', true));
+        haAiReady = import('../ai/panel.js').then(({ mountAiPanel }) => { mountAiPanel(editorBridge, aiTransport); return true; })
+          .catch(() => { status('AI tools could not load. Reload Home Studio to try again.', true); return false; });
       }
     },
     snapshot: () => clone(project),
+    guideAction,
     editState() {
       const fields = [...document.querySelectorAll('[data-project-field]')].filter(field => field.inspectorDraft);
       const invalid = fields.find(field => field.getAttribute('aria-invalid') === 'true');

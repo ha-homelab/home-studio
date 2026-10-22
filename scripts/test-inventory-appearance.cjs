@@ -3,6 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const { execFileSync } = require('node:child_process');
 
 const source = fs.readFileSync('viewer.js', 'utf8');
 const functions = source.slice(source.indexOf('function inventoryAppearance('), source.indexOf('try{items=reconcileStoredAppearance('));
@@ -86,4 +87,53 @@ test('rebuilding refreshes saved appearances while preserving positions and bind
   assert(!Object.hasOwn(missing, 'model_id')); assert.equal(missing.entity_id, saved.entity_id);
   const basic = { ...saved }; delete basic.model_id; delete basic.style_id; delete basic.color; delete basic.pattern_id; delete basic.pattern_color;
   assert.equal(context.reconcileStoredAppearance([basic])[0], basic, 'An intentionally generic object remains generic');
+});
+
+
+test('generated publication keeps commissioned geometry references and publishes a new catalog appearance', () => {
+  // Feed the real generated adapter's output to the unchanged installed viewer.
+  // The fixture is deliberately synthetic and lives entirely in a temporary directory.
+  const publication = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-B', '-c', `
+import asyncio, copy, importlib.util, json, tempfile
+from pathlib import Path
+from unittest.mock import patch
+spec = importlib.util.spec_from_file_location("generated_fixture", "scripts/test-ha-generated.py")
+fixture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fixture)
+async def main():
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        component = root / "component"
+        site, models, inventory = fixture.fixture(component)
+        hass = fixture.support.Hass(root)
+        with patch.object(fixture.generated, "compiler", return_value=fixture.compiler), patch.object(fixture.native, "compiler", return_value=fixture.compiler):
+            adapter = fixture.generated.GeneratedProject(hass, component, site, models, inventory)
+            await adapter.load()
+            draft = copy.deepcopy(adapter.document["project"])
+            item = draft["floors"][0]["items"][0]
+            item.update(type="furniture", model_id="sofa_2", style_id="contemporary", color="#2A8E91",
+                        entity_id="light.rebound_lamp", rotation_deg=92)
+            item["position_m"]["x"] = 2.7
+            await adapter.save(0, draft)
+            assets, _, _, current, _ = await adapter.publish(1)
+            print(json.dumps({"original": models["upper"]["inventory"][0],
+                              "runtime": fixture.embedded_model(assets / "upper/index.html")["inventory"],
+                              "current": current["upper"]["items"]}))
+asyncio.run(main())
+`], { encoding: 'utf8', timeout: 60000 }));
+  const { context } = fixture();
+  context.model.inventory = publication.runtime;
+  const restored = JSON.parse(JSON.stringify(context.reconcileStoredAppearance(publication.current)));
+  assert.deepEqual(restored, publication.current, 'Viewer reconciliation must retain the explicitly published appearance');
+  assert.equal(restored[0].model_id, 'sofa_2');
+  assert.equal(restored[0].style_id, 'contemporary');
+  assert.equal(restored[0].color, '#2A8E91');
+  assert.equal(publication.runtime[0].type, restored[0].type);
+  assert.deepEqual(publication.runtime[0].position_m, publication.original.position_m);
+  assert.deepEqual(publication.runtime[0].dimensions_m, publication.original.dimensions_m);
+  assert.equal(publication.runtime[0].rotation_deg, publication.original.rotation_deg);
+  assert.equal(publication.runtime[0].entity_id, publication.original.entity_id);
+  assert.equal(restored[0].position_m.x, 2.7);
+  assert.equal(restored[0].rotation_deg, 92);
+  assert.equal(restored[0].entity_id, 'light.rebound_lamp');
 });

@@ -11,9 +11,11 @@ Use **Home Assistant 2026.10 or newer** and a release with **home_floorplan.zip*
    in the **Integration** category and download Home Studio.
 3. Restart Home Assistant, open **Settings → Devices & services → Add integration**,
    and choose **Home Studio**.
-4. Open **Home Studio** in the sidebar as an administrator. Draw a measured room,
-   add walls and items, and choose your Home Assistant area and device bindings.
-5. Choose **Save draft**, then **Publish family view**. Open **3D Home** and enable
+4. Open **Home Studio** in the sidebar as an administrator. Choose **Add your
+   first room** and enter its dimensions; this shortcut includes walls.
+   Furniture and device links can wait until your first room works.
+5. Choose **Save draft**, then **Publish to 3D Home**, waiting for each confirmation.
+   Choose **Open 3D Home** and enable
    [runtime Dry run](Dry-run.md) before trying device buttons.
 
 New native installations need no terminal, Python, API token, or YAML entry.
@@ -23,7 +25,8 @@ or the [illustrated drawing lesson](../../planner/guide.html) for room drawing.
 
 ## Updates and backups
 
-Keep Home Assistant backups and portable copies made with **Export JSON**.
+Keep Home Assistant backups and copies made with
+**More options → Export drawing (JSON)**.
 Update the native integration through HACS and restart HA. The drawing and
 published assets are stored outside the integration code. Publish the saved
 drawing again to regenerate it with new viewer changes. A failed publication

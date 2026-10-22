@@ -9,8 +9,33 @@ const AI_ACTIONS = Object.freeze({
   generate: { fields: ['request_id', 'mode', 'context', 'instructions', 'images', 'schema'], limit: 17 * 1024 * 1024 },
 });
 const STARTUP_TIMEOUT_MS = 15000;
+const EDITOR_NAVIGATION_TIMEOUT_MS = 8000;
+const EDITOR_FETCH_TIMEOUT_MS = 15000;
+const MAX_EDITOR_HTML_BYTES = 128 * 1024;
 const EDITOR_PATH = '/home-floorplan-studio/planner/index.html';
-const EXTERNAL_EDITOR = 'https://ha-homelab.github.io/home-studio/planner/';
+const EDITOR_CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+const EDITOR_LOAD_MESSAGES = Object.freeze({
+  http: 'Home Assistant returned an HTTP error for the local editor',
+  redirect: 'The local editor request was redirected',
+  address: 'The local editor responded from an unexpected address',
+  type: 'The local editor returned an unsupported file type',
+  size: 'The local editor response exceeded its size limit',
+  body: 'The local editor download was interrupted',
+  decode: 'The local editor text could not be decoded',
+  parse: 'The browser could not prepare the local editor document',
+  policy: 'The local editor security policy did not match this version',
+  document: 'The local editor document did not match this version',
+  assets: 'The local editor scripts or styles did not match this version',
+  open: 'The browser could not open the prepared editor document',
+  fetch: 'Could not fetch the local editor',
+  timeout: 'Loading the local drawing tools timed out',
+});
+function editorLoadError(code, status) {
+  return Object.assign(new Error(EDITOR_LOAD_MESSAGES[code]), { editorCode: code, status });
+}
+const THEME_COLORS = Object.freeze({ background: 'primary-background-color', surface: 'card-background-color',
+  text: 'primary-text-color', muted: 'secondary-text-color', border: 'divider-color',
+  accent: 'primary-color', accentText: 'text-primary-color', error: 'error-color' });
 const clone = value => JSON.parse(JSON.stringify(value));
 const boundedText = (value, max = 128) => typeof value === 'string' ? value.slice(0, max) : '';
 function projectBytes(project) {
@@ -18,6 +43,50 @@ function projectBytes(project) {
   const raw = JSON.stringify(project);
   if (new Blob([raw]).size > MAX_PROJECT_BYTES) throw new Error('Drawing exceeds the 2 MB limit');
   return raw;
+}
+async function editorDocument(response, url, channel) {
+  if (response.type === 'opaqueredirect' || response.redirected) throw editorLoadError('redirect');
+  if (!response.ok) throw editorLoadError('http', response.status);
+  if (response.url !== url.href) throw editorLoadError('address');
+  if (!/^text\/html(?:\s*;|\s*$)/i.test(response.headers.get('Content-Type') || '')) throw editorLoadError('type');
+  if (Number(response.headers.get('Content-Length')) > MAX_EDITOR_HTML_BYTES) throw editorLoadError('size');
+  const chunks = []; let reader, size = 0;
+  try {
+    reader = response.body?.getReader(); if (!reader) throw editorLoadError('body');
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      size += value.byteLength;
+      if (size > MAX_EDITOR_HTML_BYTES) throw editorLoadError('size');
+      chunks.push(value);
+    }
+  } catch (error) { throw error?.editorCode ? error : editorLoadError('body'); }
+  finally { await reader?.cancel().catch(() => {}); }
+  const bytes = new Uint8Array(size); let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  let html, document;
+  try { html = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+  catch { throw editorLoadError('decode'); }
+  try { document = new DOMParser().parseFromString(html, 'text/html'); }
+  catch { throw editorLoadError('parse'); }
+  const policy = document.querySelectorAll('meta[http-equiv="Content-Security-Policy"]');
+  if (policy.length !== 1 || policy[0].content !== EDITOR_CSP) throw editorLoadError('policy');
+  if (document.querySelector('base, meta[http-equiv="refresh"], meta[name="home-studio-bootstrap"]')) throw editorLoadError('document');
+  // Firefox resolves srcdoc's 'self' to its opaque origin. Spell out the same
+  // trusted origin allowed by the URL document, without widening its CSP scope.
+  policy[0].content = EDITOR_CSP.replaceAll("'self'", url.origin);
+  // Only the known bundled entry points are rebased; module-relative imports
+  // then resolve from these URLs. No base tag or arbitrary URL is accepted.
+  const assets = [['link[rel="stylesheet"]', 'href', ['./editor.css', './floor-navigator.css']],
+    ['script', 'src', ['./ha-bridge.js', './editor.js']]];
+  for (const [selector, attribute, expected] of assets) {
+    const elements = [...document.querySelectorAll(selector)];
+    if (elements.length !== expected.length || elements.some((element, index) =>
+      element.getAttribute(attribute) !== expected[index] || (selector === 'script' && element.type !== 'module'))) throw editorLoadError('assets');
+    for (const element of elements) element.setAttribute(attribute, new URL(element.getAttribute(attribute), url).href);
+  }
+  const context = document.createElement('meta'); context.name = 'home-studio-bootstrap';
+  context.content = JSON.stringify({ origin: url.origin, channel }); document.head.append(context);
+  return '<!doctype html>\n' + document.documentElement.outerHTML;
 }
 function catalogForEditor(catalog = {}) {
   // Copy an explicit allowlist. State attributes, integration settings, registry
@@ -31,11 +100,25 @@ function catalogForEditor(catalog = {}) {
   }));
   return { floors, areas, entities };
 }
+function sourceForEditor(saved) {
+  if (saved.capabilities?.architecture_editing !== false) return undefined;
+  const source = saved.source;
+  if (source?.kind !== 'generated' || !Array.isArray(source.protected_floors) || source.protected_floors.length > 8) throw new Error('The protected home source is unavailable.');
+  const ids = value => {
+    if (!Array.isArray(value) || value.length > 256 || value.some(id => typeof id !== 'string' || id.length > 128)) throw new Error('The protected home source is invalid.');
+    return [...value];
+  };
+  const floors = ids(source.protected_floors);
+  return { kind: 'generated', protected_floors: floors,
+    protected_rooms: Object.fromEntries(floors.map(id => [id, ids(source.protected_rooms?.[id])])),
+    custom_items: Object.fromEntries(floors.map(id => [id, ids(source.custom_items?.[id] || [])])),
+  };
+}
 class HomeFloorplanStudioPanel extends HTMLElement {
   constructor() {
     super(); this.attachShadow({ mode: 'open' });
     this._busy = false; this._ready = false; this._started = false; this._project = null;
-    this._savedRaw = null; this._revision = 0; this._publishedRevision = null;
+    this._savedRaw = null; this._pristineRaw = null; this._initializingBlank = false; this._revision = 0; this._publishedRevision = null;
     this._pending = new Map(); this._sequence = 0; this._request = 0; this._generation = 0;
     this._aiPending = new Map(); this._aiEpoch = 0; this._aiSequence = 0; this._aiSession = null; this._aiSessionPromise = null;
     this._aiPagehide = () => this._disposeAi();
@@ -45,25 +128,40 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
       :host{display:flex;flex-direction:column;height:100vh;height:100dvh;min-height:640px;overflow:auto;color:var(--primary-text-color,#263737);background:var(--primary-background-color,#f7f8f5);font:14px system-ui,sans-serif}
-      *{box-sizing:border-box}header{padding:16px 22px 12px;border-bottom:1px solid var(--divider-color,#d9e0d9)}h1{font-size:22px;margin:0 0 5px}p{line-height:1.5;margin:6px 0}.muted{color:var(--secondary-text-color,#5b6d67);font-size:13px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.actions{margin:12px 0 8px}button,a{font:inherit}button{min-height:44px;padding:9px 14px;border:1px solid var(--divider-color,#becbc2);border-radius:7px;background:var(--card-background-color,#fff);color:inherit;cursor:pointer}button.primary{background:#326857;color:white;border-color:#326857}button:disabled{opacity:.5;cursor:default}a{color:var(--primary-color,#326857);text-underline-offset:3px}a.external{margin-inline-start:auto}button:focus-visible,a:focus-visible{outline:3px solid #ce8c52;outline-offset:3px}#status{min-height:22px;overflow-wrap:anywhere}#status.error{color:var(--error-color,#a53d29)}#recovery{padding:14px 22px;background:#fff0d5;color:#4c402c;border-bottom:1px solid #e2c996}iframe{display:block;flex:1;width:100%;border:0;min-height:600px;background:#f6f6f1}#loading{padding:24px}[hidden]{display:none!important}details{font-size:13px;margin:8px 0}summary{cursor:pointer}details p{max-width:900px} @media(max-width:600px){header{padding:12px}.actions{gap:6px}.actions button{padding:8px 10px;font-size:12px}a.external{margin-inline-start:0}iframe{min-height:780px}}
+      *{box-sizing:border-box}header{padding:14px 20px 10px;border-bottom:1px solid var(--divider-color,#d9e0d9)}h1{font-size:22px;margin:0}p{line-height:1.5;margin:6px 0}.muted{color:var(--secondary-text-color,#5b6d67);font-size:13px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.actions{margin:12px 0 8px}button,a{font:inherit}button,summary{min-height:44px;padding:9px 14px;border:1px solid var(--divider-color,#becbc2);border-radius:7px;background:var(--card-background-color,#fff);color:inherit;cursor:pointer}button.primary{background:var(--primary-color,#326857);color:var(--home-studio-primary-foreground,var(--text-primary-color,#fff));border-color:var(--primary-color,#326857)}button:disabled,a[aria-disabled=true]{opacity:.5;cursor:default}a{color:var(--primary-color,#326857);text-underline-offset:3px}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var(--primary-text-color,#263737);outline-offset:3px}#family{margin-inline-start:auto;display:inline-flex;align-items:center;min-height:44px;padding:8px}#status{min-height:22px;overflow-wrap:anywhere}#status.error{color:var(--error-color,#a53d29)}#more-options{position:relative;margin-inline-start:auto}#more-options summary{list-style:revert}#more-options .options{position:absolute;inset-inline-end:0;top:100%;z-index:5;min-width:260px;max-width:90vw;display:grid;gap:8px;padding:12px;border:1px solid var(--divider-color,#becbc2);border-radius:8px;background:var(--card-background-color,#fff);box-shadow:var(--ha-card-box-shadow,0 8px 24px #0002)}#guide{border-bottom:1px solid var(--divider-color,#d9e0d9);padding:0 20px 10px}#guide summary{border:0;background:transparent;font-weight:600;padding-inline:0}.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.step{padding:10px 12px;border:1px solid var(--divider-color,#d9e0d9);border-radius:9px;background:var(--card-background-color,#fff)}.step h2{font-size:14px;margin:0 0 5px}.step p{font-size:12px;color:var(--secondary-text-color,#5b6d67)}.step button{font-size:12px;min-height:40px;padding:7px 10px}.step-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.step[data-current=true]{border-color:var(--primary-color,#398472);box-shadow:inset 3px 0 var(--primary-color,#398472)}#next-step{font-size:13px;margin:10px 0 0}#published-view{display:flex;flex:1;min-height:580px;flex-direction:column}.published-heading{padding:12px 20px;background:var(--card-background-color,#fff)}.published-heading h2{font-size:18px;margin:10px 0 4px}.published-heading p{font-size:13px}#published-canvas{display:flex;flex:1;min-height:460px}#published-canvas>home-floorplan-panel{width:100%;height:65vh;min-height:460px}#recovery{padding:14px 22px;background:var(--card-background-color,#fff0d5);color:var(--primary-text-color,#4c402c);border-bottom:1px solid var(--warning-color,var(--divider-color,#e2c996))}iframe{display:block;flex:1;width:100%;border:0;min-height:520px;background:var(--primary-background-color,#f6f6f1)}#loading{padding:24px}[hidden]{display:none!important}@media(max-width:700px){header{padding:12px}.actions{gap:6px}.actions button{padding:8px 10px;font-size:12px}#guide{padding-inline:12px}.steps{grid-template-columns:1fr}.step{padding:9px 12px}#family{font-size:13px}iframe{min-height:780px}}
       </style>
       <header>
-        <div class="row"><button id="menu" aria-label="Open navigation menu">☰</button><h1>Home Studio</h1><a id="family" href="/home-floorplan">Open family view</a></div>
-        <p class="muted">Draw your home, link its areas and devices, then publish the family view.</p>
+        <div class="row"><button id="menu" aria-label="Open navigation menu">☰</button><h1>Home Studio</h1><a id="family" href="/home-floorplan">Open 3D Home</a></div>
+        <p id="workflow-description" class="muted">Draw here. Save your draft, then publish it to use your home in 3D Home.</p>
         <div class="row actions">
           <button id="save" class="primary" aria-describedby="status" disabled>Save draft</button>
-          <button id="publish" aria-describedby="status" disabled>Publish family view</button>
-          <button id="export" disabled>Export JSON</button>
-          <button id="reload" disabled>Load saved draft</button>
-          <a class="external" href="${EXTERNAL_EDITOR}" target="_blank" rel="noopener noreferrer">Open browser editor ↗</a>
+          <button id="publish" aria-describedby="status next-step" disabled>Publish to 3D Home</button>
+          <details id="more-options"><summary>More options</summary><div class="options">
+            <button id="export" disabled>Export drawing (JSON)</button>
+            <button id="reload" disabled>Load saved draft</button>
+          </div></details>
         </div>
         <div id="status" role="status" aria-live="polite" aria-atomic="true">Opening your drawing…</div><button id="retry" aria-describedby="status" hidden>Retry connection</button>
-        <details><summary>Two ways to design your home</summary><p>Here, use your Home Assistant areas and devices while drawing. Save draft keeps the editable project in Home Assistant; Publish family view updates the runnable plan. Draft changes stay separate until you publish.</p><p>When available, Plan from photos here creates an optional AI draft for your review before applying. The browser editor also works independently, including its offline workflow. Export JSON here, then open it there, or use Open JSON below to bring a drawing back. Opening the browser editor never sends it your drawing or Home Assistant access.</p><p>Accepted drawing changes are kept in this browser tab, separately from standalone editor drafts. Correct unfinished or invalid fields before leaving. Export JSON for a portable backup of the last valid drawing. The drawing tools do not operate devices.</p></details>
       </header>
+      <details id="guide" open hidden><summary>Getting started · one room is enough</summary>
+        <div class="steps">
+          <section class="step" id="step-room"><h2>1. Draw a room</h2><p>Name it and enter its width and depth. Walls are included. Approximate measurements are fine to start.</p><div class="step-actions"><button id="guide-room" disabled>Add your first room</button><button id="guide-photos" hidden disabled>Draft from photos (AI)</button></div></section>
+          <section class="step" id="step-devices"><h2>2. Add devices <span class="muted">(optional)</span></h2><p>Select a room, choose its Home Assistant area, then add a light or another device. You can do this later.</p><div class="step-actions"><button id="guide-devices" disabled>Add devices</button></div></section>
+          <section class="step" id="step-publish"><h2>3. Save and publish</h2><p id="publish-help">Preview your drawing, then use Save draft and Publish to 3D Home above. Saving alone keeps the live plan unchanged.</p><div class="step-actions"><button id="guide-preview" disabled>Preview 3D</button></div></section>
+        </div><p id="next-step">Start with one room. Add the rest of your home whenever you are ready.</p>
+      </details>
       <section id="recovery" hidden><strong>Unsaved drawing found in this tab</strong><p id="recovery-description"></p><div class="row"><button id="resume">Resume recovered drawing</button><button id="download-recovery">Export recovered JSON</button><button id="discard">Use saved drawing</button></div></section>
+      <section id="published-view" hidden><div class="published-heading"><button id="back-to-editor">Back to editing</button><h2>Published home</h2><p>This is the current published home. Draft changes appear here only after you publish. Device controls and layout editing are disabled.</p></div><div id="published-canvas"></div></section>
       <p id="loading">Loading the local editor…</p>`;
     this.$('menu').onclick = () => this.dispatchEvent(new Event('hass-toggle-menu', { bubbles: true, composed: true }));
+    for (const action of ['room', 'devices', 'preview', 'photos']) this.$('guide-' + action).onclick = () => this._guideAction(action);
+    this.$('family').onclick = event => {
+      if (this._busy) { event.preventDefault(); this._status('Wait for the current operation to finish before opening 3D Home.'); return; }
+      if (this.$('family').getAttribute('aria-disabled') === 'true') { event.preventDefault(); this._status('Create and publish your first room to open it in 3D Home.'); return; }
+      if (this._ready) { event.preventDefault(); void this._openFamily(); }
+    };
     this.$('retry').onclick = () => this._retryStartup();
+    this.$('back-to-editor').onclick = () => this._closePublishedHome();
     this.$('save').onclick = () => this._save();
     this.$('publish').onclick = () => this._publish();
     this.$('export').onclick = () => this._exportCurrent();
@@ -77,13 +175,17 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     const identity = `${value?.user?.id || ''}:${value?.user?.is_admin === true}`;
     if (this._identity !== undefined && this._identity !== identity) this._reset();
     this._identity = identity; this._hass = value;
+    this._scheduleTheme();
+    if (this._publishedPanel) this._publishedPanel.hass = value;
     if (this.isConnected && !this._started && value) void this._start();
   }
   _reset() {
+    this._closePublishedHome(false);
     this._disposeAi();
-    this._clearStartup(); this._startupFailed = false; this._edits = {};
+    this._clearStartup(); this._clearEditorNavigation(); this._startupFailed = false; this._edits = {};
+    cancelAnimationFrame(this._themeFrame); this._themeFrame = null;
     this._generation++; this._started = false; this._ready = false; this._busy = false;
-    this._project = null; this._savedRaw = null; this._catalog = null; this._recovery = null; this._saved = null; this._channel = null;
+    this._project = null; this._savedRaw = null; this._pristineRaw = null; this._initializingBlank = false; this._saved = null; this._source = null; this._publishedRevision = null; this.$('guide').hidden = true; this._catalog = null; this._recovery = null; this._channel = null;
     this._frame?.remove(); this._frame = null;
     for (const { reject, timer } of this._pending.values()) { clearTimeout(timer); reject(new Error('Editor session changed')); }
     this._pending.clear(); this.$('recovery').hidden = true; this.$('retry').hidden = true; this._buttons();
@@ -91,6 +193,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   connectedCallback() {
     window.addEventListener('pagehide', this._aiPagehide);
     window.addEventListener('message', this._receive); window.addEventListener('beforeunload', this._beforeUnload);
+    this._scheduleTheme();
     if (this._hass && !this._started) void this._start();
   }
   disconnectedCallback() {
@@ -98,35 +201,235 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this._persist(); window.removeEventListener('message', this._receive); window.removeEventListener('beforeunload', this._beforeUnload);
     this._reset();
   }
+  _scheduleTheme() {
+    if (!this.isConnected || this._themeFrame != null) return;
+    this._themeFrame = requestAnimationFrame(() => { this._themeFrame = null; this._refreshTheme(); });
+  }
+  _refreshTheme() {
+    if (!this.isConnected) return;
+    const dark = this._hass?.themes?.darkMode;
+    const hostStyle = getComputedStyle(this);
+    const inputs = JSON.stringify([dark, ...Object.values(THEME_COLORS).map(variable => hostStyle.getPropertyValue('--' + variable))]);
+    // Entity state updates normally reuse the theme. Check its raw inputs once
+    // before creating probes or reading pixels; direct CSS changes still apply.
+    if (this._themeInputs === inputs && this._themeSource === this._hass?.themes) return;
+    const defaults = dark === true
+      ? { background: '#111b21', surface: '#1c282e', text: '#e7eef1', muted: '#a7b7bf', border: '#42545d', accent: '#6acdb0', accentText: '#111b21', error: '#ff9e91' }
+      : { background: '#f7f8f5', surface: '#ffffff', text: '#263737', muted: '#5b6d67', border: '#becbc2', accent: '#326857', accentText: '#ffffff', error: '#a53d29' };
+    const probe = document.createElement('span'), colors = {};
+    probe.style.display = 'none'; this.shadowRoot.append(probe);
+    try {
+      for (const [key, variable] of Object.entries(THEME_COLORS)) {
+        probe.style.color = `var(--${variable}, ${defaults[key]})`;
+        colors[key] = getComputedStyle(probe).color;
+      }
+    } finally { probe.remove(); }
+    this._themeInputs = inputs; this._themeSource = this._hass?.themes;
+    const raw = JSON.stringify([dark, colors]); if (raw === this._themeRaw) return;
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+    const context = canvas.getContext('2d', { willReadFrequently: true }); if (!context) return;
+    const normalize = (color, background) => {
+      context.clearRect(0, 0, 1, 1); context.fillStyle = '#000000'; context.fillStyle = color; context.fillRect(0, 0, 1, 1);
+      const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data;
+      return '#' + [red, green, blue].map((value, index) => Math.round(value * alpha / 255 +
+        parseInt(background.slice(1 + index * 2, 3 + index * 2), 16) * (1 - alpha / 255)).toString(16).padStart(2, '0')).join('');
+    };
+    const background = normalize(colors.background, defaults.background);
+    const theme = { mode: typeof dark === 'boolean' ? dark ? 'dark' : 'light'
+      : [1, 3, 5].reduce((sum, index) => sum + parseInt(background.slice(index, index + 2), 16), 0) < 384 ? 'dark' : 'light' };
+    for (const key of Object.keys(THEME_COLORS)) theme[key] = key === 'background' ? background : normalize(colors[key], background);
+    const luminance = color => [1, 3, 5].map(index => {
+      const channel = parseInt(color.slice(index, index + 2), 16) / 255;
+      return channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4;
+    }).reduce((sum, channel, index) => sum + channel * [.2126, .7152, .0722][index], 0);
+    const accentLuminance = luminance(theme.accent);
+    const contrast = color => (Math.max(accentLuminance, luminance(color)) + .05) / (Math.min(accentLuminance, luminance(color)) + .05);
+    // Some HA accents are too light for the theme's usual white button label.
+    const foreground = contrast(theme.accentText) >= 4.5 ? theme.accentText
+      : contrast('#000000') > contrast('#ffffff') ? '#000000' : '#ffffff';
+    this.style.setProperty('--home-studio-primary-foreground', foreground);
+    // Only concrete, bounded colors cross the bridge; no theme CSS, variables,
+    // URLs, or the authenticated hass object are exposed to the child.
+    this._themeRaw = raw; this._theme = theme;
+    if (this._ready) this._send('theme', { theme });
+  }
   _key() { return `home-studio.ha-tab-draft.v1:${this._hass?.user?.id || 'unknown'}`; }
-  _dirty() { return !!this._project && JSON.stringify(this._project) !== this._savedRaw; }
+  _dirty() { return !!this._project && JSON.stringify(this._project) !== (this._savedRaw ?? this._pristineRaw); }
   _unsaved() { return this._dirty() || this._edits.pending === true; }
+  _hasPublishedHome() { return this._saved?.has_published === true || this._publishedRevision != null; }
+  _requiresInitialSave() { return !!this._source && this._saved?.has_saved_draft === false; }
   _status(message, error = false) { this.$('status').textContent = message; this.$('status').classList.toggle('error', error); }
+  _publicationIssue() {
+    const floors = Array.isArray(this._project?.floors) ? this._project.floors : [];
+    if (!floors.length) return 'Add a floor and draw your first room before publishing.';
+    const empty = floors.find(floor => !Array.isArray(floor.rooms) || !floor.rooms.length);
+    return empty ? `Add a room to “${boundedText(empty.name || empty.id, 120)}” before publishing, or remove that unused floor.` : '';
+  }
   _drawingStatus() {
     if (this._edits.invalid) this._status(`Correct ${this._edits.field || 'the highlighted field'} before saving or publishing. Save draft will take you to the field.`, true);
     else if (this._edits.pending) this._status('Unsaved field edits · Save draft applies and saves your entered values.');
-    else this._status(this._dirty() ? 'Unsaved changes · save draft to keep them in Home Assistant.' : `Draft saved · revision ${this._revision}${this._publishedRevision === this._revision ? ' · family view is current.' : ' · publish when ready.'}`);
+    else if (this._requiresInitialSave() && !this._dirty()) this._status('Save draft to create a private draft in Home Assistant. Your published home stays unchanged.');
+    else if (!this._savedRaw && !this._dirty()) this._status(this._hasPublishedHome() ? 'Start with one room below. Your published home stays unchanged until you publish.' : 'Start with one room below. Nothing has been published yet.');
+    else this._status(this._dirty() ? 'Unsaved changes · Save draft keeps them in Home Assistant.' : this._publicationIssue() || (this._publishedRevision === this._revision ? 'Draft saved · 3D Home is up to date.' : 'Draft saved · Publish to 3D Home when you are ready.'));
   }
   _buttons() {
-    const disabled = !this._ready || this._busy;
-    this.$('save').disabled = disabled || !this._unsaved();
-    this.$('publish').disabled = disabled || this._unsaved() || !this._savedRaw;
+    const disabled = !this._ready || this._busy || this._showingPublished;
+    const floors = Array.isArray(this._project?.floors) ? this._project.floors : [];
+    const rooms = floors.reduce((count, floor) => count + (floor.rooms?.length || 0), 0);
+    const issue = this._publicationIssue();
+    const needsSave = this._unsaved() || this._requiresInitialSave();
+    this.$('save').disabled = disabled || !needsSave;
+    this.$('publish').disabled = disabled || needsSave || !this._savedRaw || !!issue;
+    this.$('publish').classList.toggle('primary', !this.$('publish').disabled && this._publishedRevision !== this._revision);
+    this.$('save').classList.toggle('primary', needsSave);
     this.$('export').disabled = !this._project || this._busy;
     this.$('reload').disabled = disabled;
+    // Unknown publication state must not block access to an existing live home.
+    const unpublished = !!this._saved && !this._hasPublishedHome();
+    this.$('family').setAttribute('aria-disabled', String(unpublished));
+    this.$('family').title = unpublished ? 'Publish your first room to open the live plan' : 'Open the published plan and device controls';
+    this.$('guide-room').disabled = disabled;
+    const roomLabel = rooms ? 'Add another room' : 'Add your first room';
+    // A field can commit between pointerdown and click. Replacing this label
+    // then cancels the pending click in WebKit, even if its text is unchanged.
+    if (this.$('guide-room').textContent !== roomLabel) this.$('guide-room').textContent = roomLabel;
+    this.$('guide-devices').disabled = disabled || !rooms;
+    this.$('guide-preview').disabled = disabled || !rooms;
+    this.$('guide-photos').hidden = this._saved?.capabilities?.ai !== true;
+    this.$('guide-photos').disabled = disabled;
+    this.$('step-room').dataset.current = String(!rooms);
+    this.$('step-publish').dataset.current = String(!!rooms);
+    this.$('next-step').textContent = !rooms ? 'Start with one room. Add the rest of your home whenever you are ready.'
+      : issue || (needsSave ? this._source ? 'Next: Save draft, then publish when you are ready. Your installed home stays unchanged until you publish.' : 'Next: preview your room, then Save draft. Devices and furniture can be added later.'
+      : this._publishedRevision !== this._revision ? 'Next: Publish to 3D Home. Your saved draft will become the live plan.'
+      : 'Your plan is ready. Open 3D Home to use it, or keep editing here and publish again later.');
+  }
+  _guideAction(action) {
+    if (!this._ready || this._busy || !['room', 'devices', 'preview', 'photos'].includes(action)) return;
+    if (action === 'preview' && this._source) { void this._showPublishedHome(); return; }
+    this._send('guide-action', { action });
+    this._frame?.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+  }
+  async _showPublishedHome() {
+    if (!this._ready || this._busy || !this._source || !this._hasPublishedHome() || this._showingPublished) return;
+    const generation = this._generation;
+    this._showingPublished = true; this._buttons();
+    try {
+      // Generated drawings use the published renderer on demand. Their editor
+      // stays in 2D, so this is the only active WebGL context.
+      await import(new URL('./panel.js', import.meta.url));
+      if (generation !== this._generation || !this.isConnected || !this._showingPublished) return;
+      const panel = document.createElement('home-floorplan-panel');
+      panel.configureDashboard({ editLocked: true, dryRun: true });
+      this._publishedPanel = panel;
+      this._frame.hidden = true; this.$('guide').hidden = true; this.$('published-view').hidden = false;
+      this.$('published-canvas').append(panel); panel.hass = this._hass;
+      this.$('back-to-editor').focus(); this.$('published-view').scrollIntoView({ block: 'start' });
+    } catch {
+      if (generation === this._generation) { this._closePublishedHome(false); this._status('Could not open the published home. Your drawing is still available. Try again.', true); }
+    }
+  }
+  _closePublishedHome(focus = true) {
+    this._showingPublished = false;
+    this._publishedPanel?.remove(); this._publishedPanel = null;
+    this.$('published-view').hidden = true;
+    if (this._frame) this._frame.hidden = false;
+    this.$('guide').hidden = !this._ready;
+    this._buttons();
+    if (focus && this._ready) { this.$('guide-preview').focus(); this._drawingStatus(); }
+  }
+  async _openFamily() {
+    if (!this._ready || this._busy) return;
+    const generation = this._generation;
+    let navigate = false, focusSave = false;
+    this._busy = true; this._buttons();
+    try {
+      // Read current field state without applying unfinished values. A field's
+      // latest message may still be crossing the sandbox boundary on click.
+      await this._snapshot(true, false);
+      if (generation !== this._generation) return;
+      if (this._edits.pending) {
+        this._closePublishedHome(false);
+        this._status('Finish the highlighted field, then Save draft before opening 3D Home. Your entered text is still here.', true);
+        this._send('guide-action', { action: 'focus-edit' });
+        this._frame?.scrollIntoView({ block: 'nearest' });
+      } else if (this._dirty()) {
+        this._closePublishedHome(false);
+        this._status('Save draft before opening 3D Home. Your changes are kept in this tab.');
+        focusSave = true;
+      } else navigate = true;
+    } catch (error) {
+      if (generation === this._generation) this._status(error.message || 'Could not check your edits. Keep this tab open and try again.', true);
+    } finally {
+      if (generation === this._generation) {
+        this._busy = false; this._buttons();
+        if (focusSave) this.$('save').focus();
+        if (navigate) location.assign(this.$('family').href);
+      }
+    }
   }
   _clearStartup() { clearTimeout(this._startupTimer); this._startupTimer = null; }
+  _clearEditorNavigation() {
+    clearTimeout(this._editorNavigationTimer); this._editorNavigationTimer = null;
+    clearTimeout(this._editorFetchTimer); this._editorFetchTimer = null;
+    this._editorFetchController?.abort(); this._editorFetchController = null;
+  }
+  async _fallbackEditor(frame, channel, generation) {
+    this._editorNavigationTimer = null;
+    const current = () => this.isConnected && this._frame === frame && this._channel === channel &&
+      this._generation === generation && !this._editorLoading && !this._ready;
+    if (!current()) return;
+    const controller = new AbortController(); this._editorFetchController = controller;
+    let timedOut = false, stage = 'fetch';
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, EDITOR_FETCH_TIMEOUT_MS);
+    this._editorFetchTimer = timer;
+    try {
+      // The parent fetch carries only this origin's normal cookies. Only this
+      // fixed bundled HTML is loaded; no HA token enters the sandbox.
+      const url = new URL(EDITOR_PATH, location.origin);
+      // Manual redirects are never followed and can be reported separately
+      // from a network failure without exposing their destination.
+      const response = await fetch(url, { credentials: 'same-origin', redirect: 'manual', cache: 'no-store', signal: controller.signal });
+      stage = 'document';
+      const html = await editorDocument(response, url, channel);
+      stage = 'open';
+      if (current() && !controller.signal.aborted) frame.srcdoc = html;
+    } catch (error) {
+      if (current() && (timedOut || !controller.signal.aborted)) {
+        const code = timedOut ? 'timeout' : Object.hasOwn(EDITOR_LOAD_MESSAGES, error?.editorCode) ? error.editorCode : stage;
+        const status = code === 'http' && Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599 ? `-${error.status}` : '';
+        // Keep the fixed diagnostic visible instead of replacing it with the
+        // generic slow-start warning. Never display raw exception/response data.
+        this._clearStartup();
+        this._startupFailed = true; this.$('retry').hidden = false;
+        this._status(`${EDITOR_LOAD_MESSAGES[code]} (editor-${code}${status}). Retry connection to try again.`, true); this._buttons();
+      }
+    } finally {
+      controller.abort(); // Stop any unread body after a header/validation rejection.
+      clearTimeout(timer); if (this._editorFetchTimer === timer) this._editorFetchTimer = null;
+      if (this._editorFetchController === controller) this._editorFetchController = null;
+    }
+  }
   _watchStartup(message) {
     this._clearStartup();
-    this._startupTimer = setTimeout(() => this._failStartup(message), STARTUP_TIMEOUT_MS);
+    this._startupTimer = setTimeout(() => {
+      this._startupTimer = null;
+      // Cold HA startup can outlast this warning. Keep the request and iframe
+      // alive so a late response can finish without losing its initialized state.
+      this._startupFailed = true;
+      if (!this._project && this._recovery) { this._project = clone(this._recovery.project); this._revision = this._recovery.revision; }
+      this.$('retry').hidden = !this._hass?.user?.is_admin;
+      this._status(message); this._buttons();
+    }, STARTUP_TIMEOUT_MS);
   }
   _failStartup(message, allowRetry = true, error = true) {
     this._disposeAi();
-    this._clearStartup(); this._generation++; this._startupFailed = allowRetry; this._ready = false; this._busy = false;
+    this._clearStartup(); this._clearEditorNavigation(); this._generation++; this._startupFailed = allowRetry; this._ready = false; this._busy = false;
     this._frame?.remove(); this._frame = null; this._channel = null;
     // A connection failure must not hide a recovery copy already in this tab.
     if (!this._project && this._recovery) { this._project = clone(this._recovery.project); this._revision = this._recovery.revision; }
     this.$('loading').hidden = true; this.$('retry').hidden = !allowRetry || !this._hass?.user?.is_admin;
-    this._status(`${message}${this._project ? ' Export JSON is available for your preserved drawing.' : ''}`, error); this._buttons();
+    this._status(`${message}${this._project ? ' More options → Export drawing (JSON) is available for your preserved drawing.' : ''}`, error); this._buttons();
   }
   _retryStartup() {
     if (!this._startupFailed || !this.isConnected) return;
@@ -141,7 +444,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     try {
       if (this._dirty()) sessionStorage.setItem(this._key(), JSON.stringify({ project: this._project, revision: this._revision }));
       else sessionStorage.removeItem(this._key());
-    } catch { this._status('Tab recovery is unavailable. Export JSON before leaving; you can still save to Home Assistant.', true); }
+    } catch { this._status('Tab recovery is unavailable. Use More options → Export drawing (JSON) before leaving; you can still save to Home Assistant.', true); }
   }
   _readRecovery() {
     try {
@@ -157,25 +460,32 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     try {
       if (!this._hass.user?.is_admin) throw new Error('An administrator account is required to edit this home.');
       this._recovery = this._readRecovery();
-      this._watchStartup('Home Assistant did not respond. Check the connection, then retry.');
+      this._watchStartup('Home Assistant is taking longer than expected. You can keep waiting or retry.');
       const [saved, catalog] = await Promise.all([this._hass.callWS({ type: 'home_floorplan/project_get' }), this._hass.callWS({ type: 'home_floorplan/entity_catalog' })]);
       if (generation !== this._generation || !this.isConnected) return;
-      this._clearStartup();
-      if (saved.mode === 'legacy' || saved.capabilities?.authoring === false) {
-        this._failStartup('This installation uses a generated home. Open the browser editor with your original project JSON, then use your existing build and installation workflow. Open family view to use the installed home.', false, false);
+      this._clearStartup(); this._startupFailed = false; this.$('retry').hidden = true;
+      this._saved = saved; this._revision = saved.revision; this._publishedRevision = saved.published_revision;
+      // The live home may still use generated assets while a local drawing is
+      // editable. Only the server's authoring capability controls this editor.
+      if (saved.capabilities?.authoring !== true) {
+        this._failStartup(boundedText(saved.source_error, 500) || 'The drawing source for this home is unavailable. Restore its editable source to use Home Studio. You can still open the installed home in 3D Home.', false);
         return;
       }
-      if (saved.can_edit === false) { this._failStartup('Editing is unavailable for this account. Open family view to use the installed home.', false); return; }
+      if (saved.can_edit === false) { this._failStartup('Editing is unavailable for this account. Open 3D Home to use the installed home.', false); return; }
       const url = new URL(saved.editor_url || EDITOR_PATH, location.origin);
       if (url.origin !== location.origin || url.pathname !== EDITOR_PATH || url.search || url.hash) throw new Error('Unexpected local editor address.');
-      this._editorUrl = url; this._catalog = catalogForEditor(catalog); this._saved = saved;
-      this._revision = saved.revision; this._publishedRevision = saved.published_revision;
+      this._editorUrl = url; this._catalog = catalogForEditor(catalog);
+      this._source = sourceForEditor(saved);
+      this.$('guide-preview').textContent = this._source ? 'Published home' : 'Preview 3D';
+      this.$('workflow-description').textContent = this._source ? 'Edit your home here. Save a draft, then publish it when you are ready to update 3D Home.' : 'Draw here. Save your draft, then publish it to use your home in 3D Home.';
+      this.$('publish-help').textContent = this._source ? 'Use Save draft, then Publish to 3D Home above. Published home shows the current installed details; your draft changes appear there after you publish.' : 'Preview your drawing, then use Save draft and Publish to 3D Home above. Saving alone keeps the live plan unchanged.';
       this._savedRaw = saved.project ? projectBytes(saved.project) : null;
+      this.$('guide').hidden = false; this.$('guide').open = !this._hasPublishedHome();
       this._recovery = this._readRecovery();
       if (this._recovery && JSON.stringify(this._recovery.project) !== this._savedRaw) {
         this.$('recovery').hidden = false; this.$('loading').hidden = true;
         this.$('recovery-description').textContent = this._recovery.revision === this._revision ? 'Resume your edits, or export them before using the Home Assistant copy.' : 'The Home Assistant copy has changed since these edits. Resume keeps both copies separate; saving will report a conflict until you load the current saved draft.';
-        this._status('Choose which drawing to open. Your recovered work has not been replaced.');
+        this._status('Choose which drawing to open. Your recovered work has not been replaced.'); this._buttons();
       } else this._openEditor(saved.project);
     } catch (error) { if (generation === this._generation) this._failStartup(error.message || 'Could not open Home Studio. Check the connection, then retry.'); }
   }
@@ -187,8 +497,10 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   }
   _openEditor(project) {
     this._disposeAi(); this._aiSequence = 0;
+    this._clearEditorNavigation(); this._editorLoading = false;
     this._ready = false; this._sequence = 0; this._edits = {}; this._startupFailed = false; this.$('retry').hidden = true;
     this._project = project ? clone(project) : null;
+    this._pristineRaw = null; this._initializingBlank = !project && !this._savedRaw;
     this._channel = Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, '0')).join('');
     this._frame?.remove();
     const frame = document.createElement('iframe'); this._frame = frame;
@@ -197,7 +509,9 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     frame.referrerPolicy = 'no-referrer';
     const url = new URL(this._editorUrl); url.searchParams.set('embed', 'home-assistant'); url.hash = `ha-studio=${this._channel}`;
     frame.src = url.href; this.shadowRoot.append(frame); this.$('loading').hidden = true;
-    this._watchStartup('The drawing tools did not finish loading. Retry to reopen your preserved drawing.');
+    const channel = this._channel, generation = this._generation;
+    this._editorNavigationTimer = setTimeout(() => void this._fallbackEditor(frame, channel, generation), EDITOR_NAVIGATION_TIMEOUT_MS);
+    this._watchStartup('The drawing tools are taking longer than expected. You can keep waiting or retry.');
     this._status('Opening the drawing tools…'); this._buttons();
   }
   _send(type, payload = {}) {
@@ -208,7 +522,13 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   _onMessage(event) {
     const data = event.data;
     if (event.source !== this._frame?.contentWindow || event.origin !== 'null' || data?.protocol !== STUDIO_PROTOCOL || data.channel !== this._channel) return;
-    if (data.type === 'ready' && !this._ready) this._send('initialize', { project: this._project, catalog: this._catalog, capabilities: { ai: this._saved?.capabilities?.ai === true } });
+    if (data.type === 'loading' || data.type === 'ready') { this._editorLoading = true; this._clearEditorNavigation(); }
+    if (data.type === 'ready' && !this._ready) {
+      this._refreshTheme();
+      this._send('initialize', { project: this._project, catalog: this._catalog, source: this._source, theme: this._theme,
+        capabilities: { ai: this._saved?.capabilities?.ai === true, architecture_editing: !this._source } });
+    }
+    if (data.type === 'published-preview') { void this._showPublishedHome(); return; }
     if (data.type === 'ai-request') { void this._aiRequest(data); return; }
     if (data.type === 'ai-abort') { this._aiPending.get(data.requestId)?.controller.abort(); return; }
     if (data.type === 'ai-close') { this._disposeAi(); return; }
@@ -223,8 +543,13 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     }
     if (data.type !== 'snapshot' || !Number.isInteger(data.sequence) || data.sequence <= this._sequence) return;
     try {
-      projectBytes(data.project); this._sequence = data.sequence; this._project = clone(data.project); this._ready = true;
-      this._clearStartup();
+      const raw = projectBytes(data.project);
+      const initializing = !this._ready;
+      if (this._initializingBlank) { this._pristineRaw = raw; this._initializingBlank = false; }
+      this._sequence = data.sequence; this._project = clone(data.project); this._ready = true;
+      // A HA theme change may arrive while the child's initialize is in flight.
+      if (initializing && this._theme) this._send('theme', { theme: this._theme });
+      this._clearStartup(); this._startupFailed = false; this.$('retry').hidden = true;
       this._edits = { pending: data.edits?.pending === true, invalid: data.edits?.invalid === true, field: boundedText(data.edits?.field) };
       this._persist(); this._buttons();
       if (!this._busy) this._drawingStatus();
@@ -330,11 +655,11 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       if (this._aiPending.get(data.requestId)?.controller === controller) this._aiPending.delete(data.requestId);
     }
   }
-  _snapshot(allowInvalid = false) {
+  _snapshot(allowInvalid = false, commit = true) {
     const requestId = String(++this._request);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this._pending.delete(requestId); reject(new Error('The editor did not respond. Your saved copy is unchanged.')); }, 5000);
-      this._pending.set(requestId, { resolve, reject, timer }); this._send('snapshot-request', { requestId, allowInvalid });
+      this._pending.set(requestId, { resolve, reject, timer }); this._send('snapshot-request', { requestId, allowInvalid, commit });
     });
   }
   async _save() {
@@ -346,22 +671,26 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       const saved = await this._hass.callWS({ type: 'home_floorplan/project_save', revision: this._revision, project });
       if (generation !== this._generation) return;
       this._revision = saved.revision; this._publishedRevision = saved.published_revision; this._savedRaw = raw;
-      this._persist(); this._status(this._unsaved() ? 'Draft saved. Newer edits remain unsaved; save again when ready.' : 'Draft saved in Home Assistant. Publish when ready to update the family view.');
-    } catch (error) { if (generation !== this._generation) return; this._status(error.code === 'invalid_fields' ? error.message : error.code === 'conflict' ? 'Another session changed the saved draft. Your edits are safe in this tab. Export JSON, then Load saved draft to review the current copy.' : `Save failed: ${error.message || 'check your Home Assistant connection'}. Your edits remain in this tab.`, true); }
+      this._saved = { ...this._saved, ...saved };
+      this._persist(); this._status(this._unsaved() ? 'Draft saved. Newer edits remain unsaved; save again when ready.' : this._publicationIssue() || 'Draft saved in Home Assistant. Next: Publish to 3D Home.');
+    } catch (error) { if (generation !== this._generation) return; this._status(error.code === 'invalid_fields' ? error.message : error.code === 'conflict' ? 'Another session changed the saved draft. Your edits are safe in this tab. Use More options to export your drawing (JSON), then Load saved draft to review the current copy.' : `Save failed: ${error.message || 'check your Home Assistant connection'}. Your edits remain in this tab.`, true); }
     finally { if (generation === this._generation) { this._busy = false; this._buttons(); } }
   }
   async _publish() {
     if (this._busy || !this._ready || this._dirty()) return;
+    if (this._requiresInitialSave()) { this._status('Save draft to create a private draft in Home Assistant before publishing.'); return; }
+    if (this._publicationIssue()) { this._status(this._publicationIssue(), true); return; }
     const generation = this._generation;
     this._busy = true; this._buttons();
     try {
       await this._snapshot(); if (generation !== this._generation) return;
-      if (this._dirty()) { this._status('Save your latest edits before publishing.'); return; }
+      if (this._dirty() || !this._savedRaw || this._requiresInitialSave()) { this._status('Save your latest edits before publishing.'); return; }
+      if (this._publicationIssue()) { this._status(this._publicationIssue(), true); return; }
       this._status('Building and publishing the saved drawing…');
       const saved = await this._hass.callWS({ type: 'home_floorplan/project_publish', revision: this._revision });
       if (generation !== this._generation) return;
       this._publishedRevision = saved.published_revision;
-      this._status(this._unsaved() ? 'Published the saved drawing. Newer edits remain unsaved; save and publish again when ready.' : 'Published. Open family view to use your home.');
+      this._status(this._unsaved() ? 'Published the saved drawing. Newer edits remain unsaved; save and publish again when ready.' : 'Published. Open 3D Home to use your home.');
     } catch (error) { if (generation !== this._generation) return; this._status(error.code === 'invalid_fields' ? error.message : error.code === 'conflict' ? 'The saved draft changed in another session. Load saved draft before publishing.' : `Publish failed: ${error.message || 'check the drawing and connection'}. Your draft is still available.`, true); }
     finally { if (generation === this._generation) { this._busy = false; this._buttons(); } }
   }
@@ -371,7 +700,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this._busy = true; this._buttons();
     try {
       await this._snapshot(true); if (generation !== this._generation) return;
-      if (this._unsaved() && !window.confirm('Replace this tab’s edits, including any unfinished field text, with the current saved draft? Export JSON first to keep a separate copy of the last valid drawing.')) return;
+      if (this._unsaved() && !window.confirm('Replace this tab’s edits, including any unfinished field text, with the current saved draft? Export your drawing (JSON) from More options first to keep a separate copy of the last valid drawing.')) return;
       const sequence = this._sequence;
       const saved = await this._hass.callWS({ type: 'home_floorplan/project_get' });
       if (generation !== this._generation) return;
@@ -385,7 +714,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
         return;
       }
       this._revision = saved.revision; this._publishedRevision = saved.published_revision; this._savedRaw = saved.project ? projectBytes(saved.project) : null;
-      this._saved = saved; this._openEditor(saved.project); this._persist();
+      this._saved = saved; this._source = sourceForEditor(saved); this._openEditor(saved.project); this._persist();
     } catch (error) { if (generation !== this._generation) return; this._status(`Could not load the saved draft: ${error.message || 'check the connection'}`, true); }
     finally { if (generation === this._generation) { this._busy = false; this._buttons(); } }
   }

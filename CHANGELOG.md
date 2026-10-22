@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Add optional calibrated vacuum position markers with explicit reported versus
+  last-known state, strict map/floor checks, and read-only inspection. A missing
+  observation timestamp stays visibly unknown; retrieval time is never presented
+  as observation time. The overlay adds no GPU resources or continuous rendering.
+
 ## [0.10.1] - Safer editing and clearer device status
 
 - Recheck viewer permissions after asynchronous asset reads. Role and entity
