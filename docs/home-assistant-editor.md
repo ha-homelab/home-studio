@@ -148,6 +148,42 @@ available. This compatibility state is not a connection error.
 
 ## Troubleshooting
 
+### Unable to load custom panel
+
+If Home Assistant reports **Unable to load custom panel**, open the browser's
+developer tools, select **Network**, and reload the panel. Inspect the failed
+`/home-floorplan-static/studio.js` or `panel.js` request, including its HTTP
+status, redirects, response body, and `Content-Type`. Preserve any unsaved drawing
+in a working tab before reloading it.
+
+- **401 or 403:** access was refused before the module could run. Check your HA
+  login and any reverse-proxy login or access policy. If other HA routes also
+  fail, investigate access first. A working local connection and failing remote
+  connection can help isolate the affected route; they do not prove an IP ban.
+  Check HA logs and `ip_bans.yaml` in the configuration directory for the actual
+  client address, including IPv6. For a confirmed accidental ban, back up that
+  file, remove only the matching client entry, and restart HA. Correct the client
+  or stale credentials causing failed logins before retrying repeatedly. Keep
+  authentication, IP banning, and unrelated bans enabled. See
+  [Home Assistant's IP-ban guidance](https://www.home-assistant.io/integrations/http/#ip-filtering-and-banning).
+- **404:** check that the requested file exists in the installed component and
+  that HA loaded that component successfully. Reinstall the complete matching
+  release, then restart HA and reload the browser. Customized installations
+  must use their existing package/deployment route. Do not copy individual
+  scripts from a different release or replace private assets with a generic ZIP.
+- **200 with HTML, or an unexpected MIME type:** a login page, proxy fallback,
+  or cached error may have replaced the JavaScript response. Fix that route or
+  cache rule so the module URL returns JavaScript with a JavaScript content type.
+- **200 with JavaScript:** inspect the first relevant **Console** error and any
+  failed imported modules. Record the browser version, installed release, and
+  sanitized error; a syntax or module-loading error needs different diagnosis
+  from an access refusal.
+
+After fixing the cause, reload the panel and confirm its module loads. Do not
+publish access tokens, cookies, client addresses, or full private logs in a report.
+
+### Other setup and editing problems
+
 - **No Home Studio integration in the picker:** check that you installed the
   native ZIP into the correct domain directory and restarted HA. The toolkit
   ZIP is a separate download.
