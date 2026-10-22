@@ -93,6 +93,39 @@ Use **Item library** to add furniture that is only part of the drawing; you
 can leave **Entity ID (optional)** empty. A lamp model does not create a new
 device in Home Assistant.
 
+## Move items and refine measurements
+
+In **Plan 2D**, choose **Select / move** and drag an item to change its position.
+In **Preview 3D**, choose **Edit items**, then drag an item across the floor.
+Choose **Orbit** or **Pan** to move the view. Shift-drag also pans while editing.
+
+**Snap 0.25 m** aligns item positions to the quarter-meter grid. Hold **Alt** while
+dragging, drawing, or placing an item to bypass the grid temporarily; release it
+to use snapping again. Uncheck Snap for continuous placement. Numeric fields
+accept measurements independently of the grid. Select an item and enter
+**x (m)** and **z (m)** when you know its exact position.
+
+To raise or lower an item, select it in 3D editing and drag its **↕ Y** handle.
+Use **Raise 5 cm**, **Lower 5 cm**, or **y (m)** in Item details for small or exact
+changes. The handle also accepts Up/Down arrow keys in 5 cm steps, or 1 cm with
+Alt. Height is measured from the selected floor, and the whole item must fit
+between that floor and its ceiling.
+
+Select a room to edit **Width (m)** and **Depth (m)**, or drag one of its four
+corner handles in 2D. Numeric dimensions scale the room from its minimum x/z
+corner; dragging keeps the opposite corner fixed. Matching boundary walls and
+their openings follow the room when they belong only to that room. Doors and
+windows keep their measured widths while their positions adjust. Item
+positions stay where you placed them. If the walls are shared with another
+room or joined to other wall geometry, the change is rejected so you can edit
+the connected architecture deliberately. Original room shapes imported from
+generated homes remain protected; their inspector does not offer resizing.
+
+Press **Escape** before releasing a drag to cancel it. Losing window focus also
+cancels an unfinished drag. **Undo** restores a completed move or resize in one
+step, including its wall and opening changes. After checking the result, choose
+**Save draft**, then **Publish to 3D Home** when the household should see it.
+
 ## Match your Home Assistant theme
 
 Home Studio follows the active Home Assistant theme, including light and dark
@@ -176,6 +209,11 @@ an existing measured room or enter a new rectangular room's dimensions, and add
 photos and instructions. **Generate draft** sends the selected input to that model.
 Review the detached 2D/3D proposal, correct dimensions, confirm, and **Apply selected
 additions**. Then **Save draft → Publish to 3D Home**; no JSON transfer is needed.
+
+After applying the proposal, its additions use the same native editing tools.
+Move items in 2D or **Preview 3D → Edit items**, adjust their height, and refine
+room dimensions before saving and publishing. The AI draft is a starting point;
+check positions and dimensions against your measurements.
 
 Only administrators can create AI sessions. The provider key stays in HA process
 memory for at most 30 minutes, is cleared on **End session**, and is not persisted

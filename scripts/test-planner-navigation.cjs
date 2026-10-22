@@ -39,6 +39,7 @@ let serial = 0, draws = 0, planDraws = 0;
 const project = Object.freeze({title: 'Accepted plan', floors: Object.freeze([])});
 const context = vm.createContext({AbortController, THREE: {Vector3: Vector}, $: get,
   view: 'preview', previewLost: false, previewUnavailable: false, previewMetadata: {},
+  previewEdit: null, camera: null, candidatePreview: null, selected() { return null; },
   project, history: Object.freeze([]), future: Object.freeze([]), selection: Object.freeze({kind: 'items', id: 'chair'}),
   size: {width: 800, height: 600}, spaceHeld: false, renderer: {}, devicePixelRatio: 1,
   planCanvas: surface(), map: {x: 0, y: 0}, ctx: {setTransform() {}}, fitPlan() {},

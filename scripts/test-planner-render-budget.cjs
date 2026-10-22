@@ -81,7 +81,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     forceContextLoss() { losses++; }
   }
   const c = vm.createContext({createEnvironmentLayer: (T, options) => createEnvironmentLayer(T, {...options, document:null, window:null}), createEnvironmentControls: () => ({refresh() {}}), t: value => value, AbortController, THREE: {...THREE, WebGLRenderer: Renderer}, project, activeFloorId: f.id, floor: () => project.floors[0],
-    view: 'plan', drag: null, spaceHeld: false, previewDirty: true, size: {...rect}, map: {x: 0, y: 0}, devicePixelRatio: 3,
+    view: 'plan', drag: null, previewEdit: null, selection: null, spaceHeld: false, previewDirty: true, size: {...rect}, map: {x: 0, y: 0}, devicePixelRatio: 3,
     $: get, planCanvas: get('plan-canvas'), ctx: {setTransform() {}},
     planColors: {background: '#f2f4ed'},
     floorBounds: model.floorBounds, distance: model.distance, wallPieces: model.wallPieces,
@@ -205,6 +205,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   const sharedWorld = new THREE.Group();
   const shared = vm.createContext({previewEnvironment: null, environmentSite: () => ({}), THREE, worldGroup: sharedWorld, previewSun: new THREE.DirectionalLight(),
     previewMetadata: {}, previewDirty: true, previewInstancing: false, previewDiffuseLighting: false, previewFloors: () => catalogProject.floors,
+    previewItemNodes: new Map(), orbit: {mode: 'orbit'}, selection: null, activeFloorId: catalogFloor.id,
     assetCache: new Map(), APPEARANCE_CACHE_LIMIT: 100, buildFurnitureAsset: furniture.buildFurnitureAsset,
     distance: model.distance, wallPieces: model.wallPieces, floorBounds: model.floorBounds,
     COLORS: {floor: '#eeeeee', furniture: '#aaaaaa'},
@@ -345,10 +346,11 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     }));
     const controls = {'object-list': {children: buttons}, undo: {disabled: true}, redo: {disabled: true}, 'pointer-position': {textContent: ''}};
     const p = vm.createContext({previewEnvironment: null, haSourcePolicy: null, haPublishedPreview: null,
-      project: original, activeFloorId: f.id, selection: null, tool: 'select', view: 'plan', drag: null,
+      project: original, activeFloorId: f.id, selection: null, tool: 'select', view: 'plan', drag: null, previewEdit: null,
       planCanvas: plan, spaceHeld: false, previewDirty: false, map: {x: 0, y: 0},
       clone(value) { clones++; return model.clone(value); }, round: model.round, distance: model.distance,
       snap: value => value, localPoint: e => [e.clientX, e.clientY], toWorld: point => point,
+      roomHandleAt: () => -1,
       hitTest: () => ({kind, id: original.floors[0][kind][0].id}),
       floor: () => p.project.floors[0], selected: () => p.selection && p.project.floors[0][p.selection.kind].find(o => o.id === p.selection.id),
       $: id => controls[id] ||= surface(), renderUI() { uiDraws++; p.renderInspector(); },

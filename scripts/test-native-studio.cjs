@@ -666,6 +666,21 @@ const server = http.createServer((req, res) => {
   assert.equal(await generatedFrame.getByLabel('x, z coordinates (m)',{exact:true}).getAttribute('readonly'),'');
   assert.equal(await generatedFrame.getByLabel('Floor material',{exact:true}).isDisabled(),true);
   assert.equal(await generatedFrame.getByRole('button',{name:'Delete room',exact:true}).count(),0);
+  assert.equal(await generatedFrame.locator('#inspector-body').getByLabel('Width (m)',{exact:true}).count(),0,'Protected room does not expose editable width');
+  assert.equal(await generatedFrame.locator('#inspector-body').getByLabel('Depth (m)',{exact:true}).count(),0,'Protected room does not expose editable depth');
+  const protectedBefore=await generatedFrame.evaluate(()=>planner.getProject());
+  const protectedCorner=await generatedFrame.evaluate(()=>planner.worldToScreen(planner.getProject().floors[0].rooms[0].polygon[0]));
+  const protectedCanvas=await generatedFrame.locator('#plan-canvas').boundingBox();
+  assert(protectedCanvas,'Native protected plan is visible');
+  assert.equal(await generatedFrame.evaluate(([x,y])=>{
+    const canvas=document.getElementById('plan-canvas'),rect=canvas.getBoundingClientRect();
+    return document.elementFromPoint(rect.x+x,rect.y+y)===canvas;
+  },protectedCorner),true,'Protected corner drag starts on the real canvas');
+  await generated.mouse.move(protectedCanvas.x+protectedCorner[0],protectedCanvas.y+protectedCorner[1]);
+  await generated.mouse.down();
+  await generated.mouse.move(protectedCanvas.x+protectedCorner[0]+40,protectedCanvas.y+protectedCorner[1]+30,{steps:5});
+  await generated.mouse.up();
+  assert.deepEqual(await generatedFrame.evaluate(()=>planner.getProject()),protectedBefore,'Dragging an imported room corner cannot resize protected source geometry');
   await generatedFrame.locator('[data-object-kind="items"]').first().click();
   assert.equal(await generatedFrame.getByLabel('Design',{exact:true}).inputValue(),'');
   assert.match(await generatedFrame.getByLabel('Design',{exact:true}).locator('option:checked').innerText(),/Original installed model/);
