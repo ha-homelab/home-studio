@@ -167,8 +167,14 @@ in a working tab before reloading it.
   authentication, IP banning, and unrelated bans enabled. See
   [Home Assistant's IP-ban guidance](https://www.home-assistant.io/integrations/http/#ip-filtering-and-banning).
 - **404:** check that the requested file exists in the installed component and
-  that HA loaded that component successfully. Reinstall the complete matching
-  release, then restart HA and reload the browser. Customized installations
+  that HA loaded that component successfully. A reverse proxy may have cached a
+  temporary 404 while HA was starting. Compare the local response with the
+  external response and inspect `Age` and cache-status headers before reinstalling.
+  Bypass shared caching for `/home-floorplan-static/`, `/home-floorplan-studio/`
+  and `/api/home_floorplan/`, then purge the affected module URLs. This changes
+  caching only; retain the same authentication and access policies. If the file
+  is actually missing, reinstall the complete matching release, then restart HA
+  and reload the browser. Customized installations
   must use their existing package/deployment route. Do not copy individual
   scripts from a different release or replace private assets with a generic ZIP.
 - **200 with HTML, or an unexpected MIME type:** a login page, proxy fallback,
