@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+- Refine rooms directly in the Home Assistant editor: move furniture in
+  Preview 3D, raise or lower it with the Y handle or 5 cm buttons, and enter
+  exact positions and dimensions. Hold Alt during a drag to temporarily
+  bypass the 0.25 m grid. A completed gesture is one Undo step; cancelled
+  gestures restore the previous position.
+- Resize rectangular rooms with dimension fields or corner handles while
+  keeping their exclusive wall outline and measured opening widths consistent.
+  Shared or attached walls and protected generated-home architecture remain
+  guarded against changes that could distort neighboring rooms.
+- Keep inspector values synchronized after typing and then reverting a field
+  to its original value. Invalid drafts remain visible for correction.
+- Synchronize completed and cancelled placement gestures with Home Assistant
+  session recovery, so reopening the editor never restores an intermediate
+  drag position in place of the final or restored drawing.
 - Add optional calibrated vacuum position markers with explicit reported versus
   last-known state, strict map/floor checks, and read-only inspection. A missing
   observation timestamp stays visibly unknown; retrieval time is never presented

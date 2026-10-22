@@ -39,7 +39,7 @@ let committingField = null, inspectorScope = '', fieldEditRevision = 0;
 const BUILD_COMMAND = 'python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package';
 const LABELS = { furniture: 'Furniture', lamp: 'Lamp', chandelier: 'Ceiling light', tv: 'TV / display', appliance: 'Appliance', switch: 'Switch', outlet: 'Outlet', sensor: 'Sensor' };
 const COLORS = { floor: '#e7dac2', tile: '#e0e8df', deck: '#d8dfbe', furniture: '#96aca6', lamp: '#d9ae68', chandelier: '#d9ae68', tv: '#677d89', appliance: '#a1abb0', switch: '#b4c39d', outlet: '#b4c39d', sensor: '#c4b09a' };
-const HINTS = { select: 'Drag a shape to move, or empty space to pan.', room: 'Drag a rectangle to create a room. Add walls separately.', wall: 'Drag from one wall endpoint to the other.', door: 'Click a wall to cut a door opening.', window: 'Click a wall to cut a window opening.', item: 'Click to place your item. Refine its position in the inspector.' };
+const HINTS = { select: 'Drag to move · room corners resize · Alt bypasses snap · empty space pans', room: 'Drag a rectangle to create a room · Alt bypasses snap · add walls separately', wall: 'Drag from one wall endpoint to the other · Alt bypasses snap', door: 'Click a wall to cut a door opening.', window: 'Click a wall to cut a window opening.', item: 'Click to place your item. Refine its position in the inspector.' };
 // Presentation only: a host theme never changes the drawing or its materials.
 const THEME_COLORS = ['background', 'surface', 'text', 'muted', 'border', 'accent', 'accentText', 'error'];
 const PLAN_DEFAULTS = { background: '#f2f4ed', grid: '#e2e7dc', axis: '#c5d0bd', dots: '#dde4d6', room: COLORS, roomBorder: '#b4bba3', roomText: '#697c63', roomArea: '#8d9a7c', selection: '#4a8073', handle: '#fff', wall: '#778776', wallSelection: '#3a7b6a', openingSelection: '#df935b', window: '#75a8ae', door: '#839980', itemSelection: '#bd783c', itemText: '#5e776a', drawing: '#3c8c79', drawingText: '#2c7663', candidate: '#8051ad', scale: '#9bab8f', scaleText: '#8a9b7e' };
@@ -108,7 +108,7 @@ function applyHostTheme(theme) {
   requestCanvasRender();
 }
 const planCanvas = $('plan-canvas'), ctx = planCanvas.getContext('2d', { alpha: false });
-let project = blankProject(), activeFloorId, selection = null, tool = 'select', view = 'plan', history = [], future = [], drag = null;
+let project = blankProject(), activeFloorId, selection = null, tool = 'select', view = 'plan', history = [], future = [], drag = null, previewEdit = null;
 let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, spaceHeld = false, saveFailed = false, previewDirty = true;
 let canvasFrame = 0, canvasSuspended = false;
 // Optional integrations render a detached candidate; project/history/storage always
@@ -199,7 +199,59 @@ function validateSourcePolicy(value) {
     }
   }
 }
-const snap = value => $('snap').checked ? Math.round(value * 4) / 4 : round(value);
+const snap = (value, precise = false) => $('snap').checked && !precise ? Math.round(value * 4) / 4 : round(value);
+function roomBounds(room) {
+  const xs = room.polygon.map(point => point[0]), zs = room.polygon.map(point => point[1]);
+  const minX = Math.min(...xs), minZ = Math.min(...zs), maxX = Math.max(...xs), maxZ = Math.max(...zs);
+  return { minX, minZ, maxX, maxZ, width: round(maxX - minX), depth: round(maxZ - minZ) };
+}
+function sizeRoom(room, width, depth, anchor = null) {
+  if (!Number.isFinite(width) || !Number.isFinite(depth) || width < .05 || depth < .05) throw new Error('Room width and depth must be at least 0.05 m.');
+  const bounds = roomBounds(room), fixed = anchor || [bounds.minX, bounds.minZ];
+  room.polygon = room.polygon.map(([x, z]) => [round(fixed[0] + (x - fixed[0]) * width / bounds.width), round(fixed[1] + (z - fixed[1]) * depth / bounds.depth)]);
+}
+function segmentTouchesRoomBoundary(start, end, room) {
+  const wall = { start, end }, cross = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  return room.polygon.some((a, index) => {
+    const b = room.polygon[(index + 1) % room.polygon.length], edge = { start: a, end: b };
+    // Check both segments' endpoints: a neighboring room can share only the
+    // middle of a longer wall. Proper crossings also attach the two outlines.
+    return cross(start, end, a) * cross(start, end, b) < 0 && cross(a, b, start) * cross(a, b, end) < 0
+      || projectOnWall(start, edge).distance < .002 || projectOnWall(end, edge).distance < .002
+      || projectOnWall(a, wall).distance < .002 || projectOnWall(b, wall).distance < .002;
+  });
+}
+function resizeRoomWithOutline(target, room, width, depth, anchor = null) {
+  const bounds = roomBounds(room), fixed = anchor || [bounds.minX, bounds.minZ];
+  const transform = ([x, z]) => [round(fixed[0] + (x - fixed[0]) * width / bounds.width), round(fixed[1] + (z - fixed[1]) * depth / bounds.depth)];
+  const walls = target.walls.filter(wall => segmentTouchesRoomBoundary(wall.start, wall.end, room));
+  for (const wall of walls) {
+    const boundary = room.polygon.some((start, index) => {
+      const edge = { start, end: room.polygon[(index + 1) % room.polygon.length] };
+      return projectOnWall(wall.start, edge).distance < .002 && projectOnWall(wall.end, edge).distance < .002;
+    });
+    const shared = target.rooms.some(other => other.id !== room.id && segmentTouchesRoomBoundary(wall.start, wall.end, other));
+    if (!boundary || shared) throw new Error('This room has shared or attached walls. Adjust its polygon and wall endpoints separately to preserve the adjacent space.');
+  }
+  sizeRoom(room, width, depth, fixed);
+  for (const wall of walls) {
+    const oldLength = distance(wall.start, wall.end);
+    wall.start = transform(wall.start); wall.end = transform(wall.end);
+    const newLength = distance(wall.start, wall.end), scale = newLength / oldLength;
+    for (const opening of target.openings.filter(entry => entry.wall_id === wall.id)) {
+      if (opening.width_m > newLength) throw new Error('The resized wall is too short for its door or window. Increase the room dimension or edit the opening first.');
+      opening.offset_m = round(Math.max(0, Math.min(newLength - opening.width_m, (opening.offset_m + opening.width_m / 2) * scale - opening.width_m / 2)));
+    }
+  }
+}
+function roomCorners(room) {
+  const b = roomBounds(room); return [[b.minX, b.minZ], [b.maxX, b.minZ], [b.maxX, b.maxZ], [b.minX, b.maxZ]];
+}
+function roomHandleAt(screen) {
+  if (tool !== 'select' || selection?.kind !== 'rooms' || protectedRoom(activeFloorId, selection.id)) return -1;
+  const room = selected(); if (!room) return -1;
+  return roomCorners(room).findIndex(point => distance(toScreen(point), screen) <= 11);
+}
 function node(tag, className, text) { const n = document.createElement(tag); if (className) n.className = className; if (text !== undefined) n.textContent = text; return n; }
 function button(text, handler, className = 'quiet') { const b = node('button', className, text); b.type = 'button'; b.onclick = handler; b.dataset.inspectorKey = `button:${text}`; return b; }
 function status(message, error = false) {
@@ -219,7 +271,7 @@ function itemAsset(item) {
 }
 function materialColor(material, shade = 1) { return new THREE.Color(...material.slice(0, 3)).multiplyScalar(shade).getStyle(); }
 function placementName() { return placementModelId ? t(`model.${placementModelId}`) : t(LABELS[$('place-type').value]); }
-function toolHint() { return tool === 'item' ? t('Click inside a room to place: {item}. V returns to Select / move.', { item: placementName() }) : t(HINTS[tool]); }
+function toolHint() { return tool === 'item' ? t('Click inside a room to place: {item}. V returns to Select / move.', { item: placementName() }) + ' · Alt bypasses snap' : t(HINTS[tool]); }
 function updatePlacement() {
   $('placement-summary').textContent = t('Ready to place: {item}', { item: placementName() });
   $('browse-items').title = t('Open item library. Ready to place: {item}', { item: placementName() });
@@ -365,6 +417,7 @@ async function save(options) {
 function historyPush(previous) { history.push(previous); if (history.length > 60) history.shift(); future = []; }
 function transact(change, message = () => t('Project updated.'), { fit = false } = {}) {
   if (drag) finishPointer(null, true);
+  if (previewEdit) finishPreviewEdit(null, true);
   const draft = clone(project), priorSelection = selection && { ...selection };
   try {
     change(draft, draft.floors.find(f => f.id === activeFloorId) || draft.floors[0]); validateProject(draft); validateSourcePolicy(draft); serializeProject(draft);
@@ -398,6 +451,7 @@ function installRecoveredProject(next) {
 }
 function undo(redo = false) {
   if (drag) finishPointer(null, true);
+  if (previewEdit) finishPreviewEdit(null, true);
   const source = redo ? future : history, destination = redo ? history : future; if (!source.length) return;
   destination.push(project); project = source.pop(); if (!project.floors.some(f => f.id === activeFloorId)) activeFloorId = project.floors[0].id;
   selection = null; drag = null; previewDirty = true; editorChanged(); renderUI(); renderPlan(); status(() => redo ? t('Change restored.') : t('Change undone.')); save();
@@ -436,6 +490,7 @@ function renderUI() {
 }
 function setSelection(next) {
   if (selection?.kind === next?.kind && selection?.id === next?.id) return;
+  if (previewEdit) finishPreviewEdit(null, true);
   selection = next; editorChanged();
   // Selection changes do not alter floor names, object labels, or their order.
   for (const b of $('object-list').children) if (b.dataset.objectId) {
@@ -452,7 +507,13 @@ function field(parent, label, value, onChange, { type = 'text', min, max, step =
   if (dir) input.dir = dir;
   input.setAttribute('aria-label', label); input.dataset.inspectorKey = `input:${label}`; wrap.dataset.inspectorKey = `field:${label}`;
   if (onChange) { input.dataset.projectField = 'true'; input.setAttribute('aria-describedby', 'status'); }
-  input.oninput = event => { event.currentTarget.inspectorDraft = true; if (onChange) { fieldEditRevision++; editorChanged(); } };
+  input.oninput = event => {
+    const control = event.currentTarget;
+    // Returning to the committed text may not emit change on blur. Clear that
+    // draft so later model updates can refresh this reused inspector control.
+    control.inspectorDraft = control.validity.badInput || control.value !== String(value ?? '');
+    if (onChange) { fieldEditRevision++; editorChanged(); }
+  };
   input.onchange = event => {
     if (!onChange) return;
     committingField = event.currentTarget;
@@ -522,8 +583,13 @@ function buildInspector(parent) {
     field(parent, t('Room name'), object.name, v => editObject(o => { o.name = v; }));
     field(parent, t('Floor material'), object.material, locked ? null : v => editObject(o => { o.material = v; }), { options: [{ value: 'floor', label: t('Warm timber') }, { value: 'tile', label: t('Tile / stone') }, { value: 'deck', label: t('Outdoor deck') }] }).disabled = locked;
     if (!locked) {
+      section(parent, 'Room dimensions');
+      const bounds = roomBounds(object), dimensions = row(parent);
+      field(dimensions, t('Width (m)'), bounds.width, value => editObject((o, target) => resizeRoomWithOutline(target, o, value, roomBounds(o).depth)), { type: 'number', min: .05, max: 200, step: '.01' });
+      field(dimensions, t('Depth (m)'), bounds.depth, value => editObject((o, target) => resizeRoomWithOutline(target, o, roomBounds(o).width, value)), { type: 'number', min: .05, max: 200, step: '.01' });
+      parent.append(node('p', 'field-note', 'Drag a corner in 2D or enter dimensions. The room and its exclusive wall outline resize together. Doors and windows keep their widths and follow the wall; items keep their positions. Shared or attached walls require separate endpoint edits.'));
       parent.append(button(t('Build wall outline'), () => { let n = 0; const ok = transact((_p, d) => { n = outlineRoom(d, d.rooms.find(r => r.id === object.id)); }, () => t('Wall outline added. Exact shared walls are reused.')); if (ok) status(() => n ? t('{count} wall segments added. Exact shared walls were reused.', { count: n }) : t('This room already has a complete wall outline.')); }, 'primary'));
-      parent.append(node('p', 'field-note', t('Outlines use 0.15 m walls. Existing walls stay independent of this room.')));
+      parent.append(node('p', 'field-note', 'Outlines use 0.15 m walls. Room resizing follows an exclusive outline; moving the room leaves walls in place.'));
     }
     parent.append(button(t('Place item at room center'), () => {
       const center = object.polygon.reduce((sum, p) => [sum[0] + p[0] / object.polygon.length, sum[1] + p[1] / object.polygon.length], [0, 0]);
@@ -600,8 +666,15 @@ function buildInspector(parent) {
     }
     field(parent, t('Room'), object.room, v => editObject(o => { o.room = v; }), { options: f.rooms.map(r => ({ value: r.id, label: r.name })) });
     section(parent, t('Position')); const pos = row(parent, true);
-    for (const axis of ['x', 'y', 'z']) field(pos, t(`${axis} (m)`), object.position_m[axis], v => editObject(o => { o.position_m[axis] = v; }), { type: 'number', min: axis === 'y' ? 0 : -100, max: axis === 'y' ? f.height_m : 100 });
+    for (const axis of ['x', 'y', 'z']) field(pos, t(`${axis} (m)`), object.position_m[axis], v => editObject(o => { o.position_m[axis] = v; }), { type: 'number', min: axis === 'y' ? 0 : -100, max: axis === 'y' ? round(f.height_m - object.dimensions_m.height) : 100, step: '.01' });
     parent.append(node('p', 'field-note', t('x/z locate the center. y is the bottom height above this floor.')));
+    const heightActions = row(parent);
+    for (const [label, delta] of [['Lower 5 cm', -.05], ['Raise 5 cm', .05]]) {
+      const control = button(label, () => editObject((o, target) => { o.position_m.y = round(Math.max(0, Math.min(target.height_m - o.dimensions_m.height, o.position_m.y + delta))); }, 'Item height changed.'));
+      control.disabled = delta < 0 ? object.position_m.y <= 0 : object.position_m.y >= f.height_m - object.dimensions_m.height;
+      heightActions.append(control);
+    }
+    parent.append(node('p', 'field-note', haSourcePolicy ? 'Drag this item in 2D; hold Alt to bypass the 0.25 m snap. Enter y above for an exact height. The Published home tab shows the installed view.' : 'In Preview 3D, choose Edit items, then drag the item or its ↕ Y handle. Hold Alt to bypass the 0.25 m snap. Enter y above for an exact height.'));
     section(parent, t('Size & rotation')); const dims = row(parent, true);
     for (const [axis, title] of [['width', 'Width'], ['depth', 'Depth'], ['height', 'Height']]) field(dims, t(`${title} (m)`), object.dimensions_m[axis], v => editObject(o => { o.dimensions_m[axis] = v; }), { type: 'number', min: .001, max: 100 });
     if (model) parent.append(button(t('Use design’s original size'), () => editObject(o => {
@@ -645,22 +718,22 @@ function setView(next) {
     $('plan-tab').setAttribute('aria-selected', String(next === 'plan')); $('preview-tab').setAttribute('aria-selected', String(next === 'preview'));
     $('plan-tab').tabIndex = next === 'plan' ? 0 : -1; $('preview-tab').tabIndex = next === 'preview' ? 0 : -1;
   }
-  $('plan-view').hidden = next !== 'plan'; $('preview-view').hidden = next !== 'preview'; $('snap-label').hidden = next !== 'plan';
+  $('plan-view').hidden = next !== 'plan'; $('preview-view').hidden = next !== 'preview'; $('snap-label').hidden = false;
   $('tool-hint').textContent = next === 'preview' ? previewHint() : toolHint();
   updatePreviewNavigation();
   $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || next !== 'plan';
   if (next === 'preview') renderPreview(); else renderPlan(); updateZoom();
 }
-function addOpening(wall, offset, type) {
+function addOpening(wall, offset, type, precise = false) {
   const len = distance(wall.start, wall.end), width = round(Math.min(type === 'window' ? 1.2 : .9, Math.max(.05, len - .1)));
-  const start = round(Math.max(0, Math.min(len - width, snap(offset - width / 2))));
+  const start = round(Math.max(0, Math.min(len - width, snap(offset - width / 2, precise))));
   const height = floor().height_m;
   transact((_p, f) => {
     const id = nextId(f, type), head = round(Math.min(type === 'window' ? 2.2 : 2.1, height));
     f.openings.push({ id, wall_id: wall.id, type, offset_m: start, width_m: width, sill_m: type === 'window' ? round(Math.min(.9, head / 2)) : 0, head_m: head }); selection = { kind: 'openings', id };
   }, () => t(type === 'window' ? 'Window opening added. Adjust its dimensions in the inspector.' : 'Door opening added. Adjust its dimensions in the inspector.'));
 }
-function addItem(point, roomId) {
+function addItem(point, roomId, precise = false) {
   if (!floor().rooms.length) return status(() => t('Add a room before placing items. Each item belongs to a room.'), true);
   const model = placementModelId ? getCatalogModel(placementModelId) : null, type = model ? model.type : $('place-type').value;
   const defaults = { furniture: [1.5, .75, .75, 0], lamp: [.3, .3, 1.4, 0], chandelier: [.55, .55, .35, Math.max(0, floor().height_m - .55)], tv: [1.3, .1, .8, .85], appliance: [.6, .65, .9, 0], switch: [.1, .05, .1, 1.2], outlet: [.1, .05, .1, .3], sensor: [.12, .08, .12, 1.8] };
@@ -668,7 +741,7 @@ function addItem(point, roomId) {
   const catalogDefaults = model ? modelDimensions(model, floor().height_m) : null;
   transact((_p, f) => {
     const id = nextId(f, type), room = f.rooms.find(r => r.id === roomId) || f.rooms.find(r => pointInPolygon(point, r.polygon)) || f.rooms[0];
-    f.items.push({ id, name: model?.label || LABELS[type], type, room: room.id, position_m: { x: snap(point[0]), y: catalogDefaults?.elevation ?? round(safeY), z: snap(point[1]) }, dimensions_m: catalogDefaults?.dimensions || { width: w, depth: d, height: round(safeHeight) }, rotation_deg: 0, entity_id: '', notes: '', ...(model ? { model_id: model.id, style_id: model.default_style } : {}) }); selection = { kind: 'items', id };
+    f.items.push({ id, name: model?.label || LABELS[type], type, room: room.id, position_m: { x: snap(point[0], precise), y: catalogDefaults?.elevation ?? round(safeY), z: snap(point[1], precise) }, dimensions_m: catalogDefaults?.dimensions || { width: w, depth: d, height: round(safeHeight) }, rotation_deg: 0, entity_id: '', notes: '', ...(model ? { model_id: model.id, style_id: model.default_style } : {}) }); selection = { kind: 'items', id };
   }, () => t('{item} placed. Change its finish, color, or size in Item details.', { item: model ? t(`model.${model.id}`) : t(LABELS[type]) }));
 }
 
@@ -713,7 +786,6 @@ function renderPlan() {
     path(r.polygon, true); ctx.fillStyle = planColors.room[r.material]; ctx.globalAlpha = active ? .85 : .65; ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = active ? planColors.selection : planColors.roomBorder; ctx.lineWidth = active ? 2 : 1; ctx.setLineDash(active ? [5, 3] : []); ctx.stroke(); ctx.setLineDash([]);
     const centroid = r.polygon.reduce((a, p) => [a[0] + p[0] / r.polygon.length, a[1] + p[1] / r.polygon.length], [0, 0]), [cx, cy] = toScreen(centroid);
     if (map.scale > 15) { ctx.textAlign = 'center'; ctx.fillStyle = planColors.roomText; ctx.font = '600 11px -apple-system, sans-serif'; ctx.fillText(r.name.length > 25 ? r.name.slice(0, 24) + '…' : r.name, cx, cy - 3); ctx.font = '9px -apple-system, sans-serif'; ctx.fillStyle = planColors.roomArea; ctx.fillText(`${Math.abs(signedArea(r.polygon)).toFixed(1)} m²`, cx, cy + 12); }
-    if (active) for (const p of r.polygon) { const [x, y] = toScreen(p); ctx.fillStyle = planColors.handle; ctx.strokeStyle = planColors.selection; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
   }
   for (const w of f.walls) {
     const active = selection?.kind === 'walls' && selection.id === w.id;
@@ -772,6 +844,13 @@ function renderPlan() {
     else { path([a, b]); ctx.stroke(); } ctx.setLineDash([]);
     const p = toScreen(b); ctx.fillStyle = planColors.drawingText; ctx.textAlign = 'left'; ctx.font = '11px sans-serif'; ctx.fillText(tool === 'room' ? `${Math.abs(b[0] - a[0]).toFixed(2)} × ${Math.abs(b[1] - a[1]).toFixed(2)} m` : `${distance(a, b).toFixed(2)} m`, p[0] + 12, p[1] - 12);
   }
+  const resizeRoom = selection?.kind === 'rooms' && !protectedRoom(activeFloorId, selection.id) ? f.rooms.find(room => room.id === selection.id) : null;
+  if (resizeRoom && tool === 'select') {
+    ctx.save(); ctx.strokeStyle = planColors.selection; ctx.fillStyle = planColors.handle; ctx.lineWidth = 2;
+    for (const point of roomCorners(resizeRoom)) { const [x, y] = toScreen(point); ctx.fillRect(x - 5, y - 5, 10, 10); ctx.strokeRect(x - 5, y - 5, 10, 10); }
+    const bounds = roomBounds(resizeRoom), [x, y] = toScreen([bounds.maxX, bounds.maxZ]);
+    ctx.font = '11px sans-serif'; ctx.textAlign = 'right'; ctx.fillStyle = planColors.roomText; ctx.fillText(`${bounds.width} × ${bounds.depth} m`, x - 9, y - 12); ctx.restore();
+  }
   if (candidatePreview) {
     const accepted = floor();
     ctx.save(); ctx.strokeStyle = planColors.candidate; ctx.lineWidth = 3; ctx.setLineDash([5, 4]);
@@ -804,9 +883,14 @@ planCanvas.addEventListener('pointerdown', event => {
   if (drag || view !== 'plan' || canvasSuspended || document.hidden || event.isPrimary === false || event.button !== 0 && event.button !== 1) return;
   event.preventDefault(); planCanvas.focus(); const screen = localPoint(event), world = toWorld(screen); planCanvas.setPointerCapture(event.pointerId);
   if (spaceHeld || event.shiftKey || event.button === 1) { drag = { kind: 'pan', pointerId: event.pointerId, screen, map: { ...map } }; planCanvas.style.cursor = 'grabbing'; return; }
-  if (tool === 'room' || tool === 'wall') { const p = world.map(snap); drag = { kind: 'draw', pointerId: event.pointerId, startWorld: p, endWorld: p, screen }; return; }
-  if (tool === 'door' || tool === 'window') { const near = wallAt(world); if (near) addOpening(near.wall, near.hit.offset, tool); else status(() => t('Click directly on an existing wall to add an opening.'), true); return; }
-  if (tool === 'item') { addItem(world); return; }
+  if (tool === 'room' || tool === 'wall') { const p = world.map(value => snap(value, event.altKey)); drag = { kind: 'draw', pointerId: event.pointerId, startWorld: p, endWorld: p, screen }; return; }
+  if (tool === 'door' || tool === 'window') { const near = wallAt(world); if (near) addOpening(near.wall, near.hit.offset, tool, event.altKey); else status(() => t('Click directly on an existing wall to add an opening.'), true); return; }
+  if (tool === 'item') { addItem(world, undefined, event.altKey); return; }
+  const corner = roomHandleAt(screen);
+  if (corner >= 0) {
+    drag = { kind: 'resize', pointerId: event.pointerId, startWorld: world, original: project, selection: { ...selection }, corner, moved: false, offset: [0, 0] };
+    project = clone(project); return;
+  }
   setSelection(hitTest(world));
   if (selection?.kind === 'rooms' && protectedRoom(activeFloorId, selection.id)) { status(protectedArchitectureMessage); return; }
   if (selection) {
@@ -820,18 +904,34 @@ planCanvas.addEventListener('pointermove', event => {
   if (drag && drag.pointerId !== event.pointerId) return;
   if (drag && event.buttons === 0) { finishPointer(event, true); return; }
   const screen = localPoint(event), world = toWorld(screen); $('pointer-position').textContent = `x ${world[0].toFixed(2)} · z ${world[1].toFixed(2)} m`;
-  if (!drag) { if (tool === 'select') { const hit = hitTest(world); planCanvas.style.cursor = hit && !(hit.kind === 'rooms' && protectedRoom(activeFloorId, hit.id)) ? 'grab' : 'default'; } return; }
+  if (!drag) { if (tool === 'select') { const hit = hitTest(world), corner = roomHandleAt(screen); planCanvas.style.cursor = corner >= 0 ? (corner % 2 ? 'nesw-resize' : 'nwse-resize') : hit && !(hit.kind === 'rooms' && protectedRoom(activeFloorId, hit.id)) ? 'grab' : 'default'; } return; }
   if (drag.kind === 'pan') { map.x = drag.map.x + screen[0] - drag.screen[0]; map.y = drag.map.y + screen[1] - drag.screen[1]; }
-  if (drag.kind === 'draw') drag.endWorld = world.map(snap);
+  if (drag.kind === 'draw') drag.endWorld = world.map(value => snap(value, event.altKey));
+  if (drag.kind === 'resize') {
+    const originalFloor = drag.original.floors.find(f => f.id === activeFloorId), original = originalFloor.rooms.find(room => room.id === drag.selection.id);
+    const corners = roomCorners(original), anchor = corners[(drag.corner + 2) % 4], corner = corners[drag.corner];
+    const dx = round(snap(corner[0] + world[0] - drag.startWorld[0], event.altKey) - corner[0]), dz = round(snap(corner[1] + world[1] - drag.startWorld[1], event.altKey) - corner[1]);
+    if (dx === drag.offset[0] && dz === drag.offset[1]) return;
+    drag.offset = [dx, dz];
+    const width = Math.max(.05, (corner[0] + dx - anchor[0]) * (corner[0] > anchor[0] ? 1 : -1));
+    const depth = Math.max(.05, (corner[1] + dz - anchor[1]) * (corner[1] > anchor[1] ? 1 : -1));
+    const target = { ...originalFloor, rooms: originalFloor.rooms.map(room => room.id === original.id ? clone(room) : room), walls: clone(originalFloor.walls), openings: clone(originalFloor.openings) };
+    try {
+      resizeRoomWithOutline(target, target.rooms.find(room => room.id === drag.selection.id), width, depth, anchor);
+      project.floors[project.floors.findIndex(f => f.id === activeFloorId)] = target;
+      if (!drag.moved) editorChanged(); drag.moved = true;
+    } catch (error) { status(error.message, true); }
+  }
   if (drag.kind === 'move') {
-    const dx = snap(world[0] - drag.startWorld[0]), dz = snap(world[1] - drag.startWorld[1]);
+    const original = drag.original.floors.find(f => f.id === activeFloorId)[selection.kind].find(o => o.id === selection.id);
+    const dx = selection.kind === 'items' ? round(snap(original.position_m.x + world[0] - drag.startWorld[0], event.altKey) - original.position_m.x) : snap(world[0] - drag.startWorld[0], event.altKey);
+    const dz = selection.kind === 'items' ? round(snap(original.position_m.z + world[1] - drag.startWorld[1], event.altKey) - original.position_m.z) : snap(world[1] - drag.startWorld[1], event.altKey);
     // Pointer events within one snap cell do not change the plan. Avoid repainting
     // every catalog surface until the object's visible position actually changes.
     if (dx === drag.offset[0] && dz === drag.offset[1]) return;
     drag.offset = [dx, dz];
     if (!drag.moved && (dx || dz)) editorChanged();
     if (dx || dz) drag.moved = true; const object = selected();
-    const original = drag.original.floors.find(f => f.id === activeFloorId)[selection.kind].find(o => o.id === selection.id);
     if (selection.kind === 'rooms') object.polygon = original.polygon.map(p => [round(p[0] + dx), round(p[1] + dz)]);
     if (selection.kind === 'walls') { object.start = [round(original.start[0] + dx), round(original.start[1] + dz)]; object.end = [round(original.end[0] + dx), round(original.end[1] + dz)]; }
     if (selection.kind === 'items') { object.position_m.x = round(original.position_m.x + dx); object.position_m.z = round(original.position_m.z + dz); }
@@ -852,12 +952,15 @@ function finishPointer(event, cancel = false) {
     } else transact((_p, f) => { const id = nextId(f, 'wall'); f.walls.push({ id, start: a, end: b, thickness_m: .15 }); selection = { kind: 'walls', id }; }, () => t('Wall drawn. Add a door or window by clicking the wall.'));
     setTool('select');
   }
-  if (current.kind === 'move') {
-    if (cancel || !current.moved) project = current.original;
+  if (current.kind === 'move' || current.kind === 'resize') {
+    if (cancel || !current.moved || JSON.stringify(project) === JSON.stringify(current.original)) project = current.original;
     else {
-      try { validateProject(project); validateSourcePolicy(project); serializeProject(project); historyPush(current.original); previewDirty = true; status(() => t('Object moved.')); save(); }
+      try { validateProject(project); validateSourcePolicy(project); serializeProject(project); historyPush(current.original); previewDirty = true; status(current.kind === 'resize' ? 'Room and its wall outline resized. Items kept their positions.' : () => t('Object moved.')); save(); }
       catch (error) { project = current.original; status(() => t('Move cancelled: {error}', { error: formatValidationError(error, t) }), true); }
     }
+    // The host observes the first movement for dirty-state feedback. Publish
+    // the final commit or rollback once so its recovery copy matches the canvas.
+    if (current.moved) editorChanged();
     if (project !== current.original) {
       $('undo').disabled = history.length === 0; $('redo').disabled = future.length === 0;
       renderInspector();
@@ -876,6 +979,7 @@ planCanvas.addEventListener('wheel', e => { e.preventDefault(); zoomPlan(Math.ex
 
 // On-demand 3D rendering. Opening cuts and solid wall pieces use the same metric project.
 let renderer = null, scene = null, camera = null, worldGroup = null, previewSun = null, previewUnavailable = false, previewMetadata = {};
+const previewItemNodes = new Map();
 let previewEnvironment = null, previewEnvironmentSettings = { enabled: false, motion: false, palette: 'sage' };
 const previewEnvironmentControls = createEnvironmentControls($('preview-view'), { getLayer: () => previewEnvironment, t, onChange: settings => { previewEnvironmentSettings = settings; } });
 function environmentSite() {
@@ -987,6 +1091,7 @@ function instancePreviewCatalog(groups) {
 }
 function rebuildPreview() {
   disposePreviewGeometry();
+  previewItemNodes.clear();
   const surroundings = environmentSite(); previewEnvironment?.setBounds(surroundings.bounds, surroundings.elevation);
   // Cached asset parts are immutable. Share their geometry only within this
   // rebuild; every mesh keeps its own material, transform and rendering order.
@@ -1017,6 +1122,7 @@ function rebuildPreview() {
       }
     }
     for (const item of f.items) {
+      const firstNode = worldGroup.children.length;
       const p = item.position_m, d = item.dimensions_m, rotation = item.rotation_deg * Math.PI / 180;
       const asset = itemAsset(item); itemCount++;
       if (asset) {
@@ -1030,7 +1136,11 @@ function rebuildPreview() {
           const material = createPreviewMaterial({ color: new THREE.Color(...asset.materials[part.material].slice(0, 3)), roughness: .78 });
           const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; mesh.castShadow = true; mesh.receiveShadow = true; group.add(mesh); itemMeshCount++;
         }
-        worldGroup.add(group); catalogGroups.push(group); catalogItemCount++; continue;
+        worldGroup.add(group);
+        if (f.id === activeFloorId) previewItemNodes.set(item.id, { nodes: [group], positions: [group.position.clone()], origin: { ...p } });
+        // The selected item stays independent for inexpensive live dragging.
+        if (orbit.mode !== 'edit' || f.id !== activeFloorId || selection?.kind !== 'items' || selection.id !== item.id) catalogGroups.push(group);
+        catalogItemCount++; continue;
       }
       box(d.width, d.height, d.depth, [p.x, f.elevation_m + p.y + d.height / 2, p.z], COLORS[item.type], rotation); itemMeshCount++;
       if (item.type === 'tv') {
@@ -1038,7 +1148,19 @@ function rebuildPreview() {
         box(d.width * .92, d.height * .88, .008, [p.x + forward.x, f.elevation_m + p.y + d.height / 2, p.z + forward.z], '#344c54', rotation);
         itemMeshCount++;
       }
+      if (f.id === activeFloorId) {
+        const nodes = worldGroup.children.slice(firstNode);
+        previewItemNodes.set(item.id, { nodes, positions: nodes.map(node => node.position.clone()), origin: { ...p } });
+      }
     }
+  }
+  const activeItem = selection?.kind === 'items' ? selected() : null;
+  if (activeItem && orbit.mode === 'edit') {
+    const p = activeItem.position_m, d = activeItem.dimensions_m;
+    const boundsGeometry = new THREE.BoxGeometry(d.width + .025, d.height + .025, d.depth + .025), geometry = new THREE.EdgesGeometry(boundsGeometry); boundsGeometry.dispose();
+    const outline = new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color: planColors.selection, depthTest: false, transparent: true, opacity: .9 }));
+    outline.position.set(p.x, floor().elevation_m + p.y + d.height / 2, p.z); outline.rotation.y = activeItem.rotation_deg * Math.PI / 180; outline.renderOrder = 10; worldGroup.add(outline);
+    const record = previewItemNodes.get(activeItem.id); if (record) { record.nodes.push(outline); record.positions.push(outline.position.clone()); }
   }
   const floors = previewFloors(), bounds = floors.map(floorBounds), minX = Math.min(...bounds.map(b => b.minX)), maxX = Math.max(...bounds.map(b => b.maxX)), minZ = Math.min(...bounds.map(b => b.minZ)), maxZ = Math.max(...bounds.map(b => b.maxZ));
   const low = Math.min(...floors.map(f => f.elevation_m)), high = Math.max(...floors.map(f => f.elevation_m + f.height_m)), span = Math.max(12, maxX - minX, maxZ - minZ, high - low), cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
@@ -1066,6 +1188,7 @@ function drawPreview() {
   previewMetadata.projectedBounds = { minX: Math.min(...corners.map(p => p.x)), maxX: Math.max(...corners.map(p => p.x)), minY: Math.min(...corners.map(p => p.y)), maxY: Math.max(...corners.map(p => p.y)) };
   previewMetadata.viewport = { width, height };
   previewMetadata.camera = { yaw: orbit.yaw, pitch: orbit.pitch, radius: orbit.radius, target: { x: orbit.target.x, y: orbit.target.y, z: orbit.target.z }, mode: orbit.mode };
+  updateElevationHandle();
   updateZoom();
 }
 function renderPreview() { if (view !== 'preview' || canvasSuspended || document.hidden || previewLost) return; initPreview(); if (!renderer || previewUnavailable) return; if (previewDirty) rebuildPreview(); drawPreview(); }
@@ -1085,27 +1208,30 @@ function previewYaw(value) {
   return ((value + Math.PI) % turn + turn) % turn - Math.PI;
 }
 function previewHint() {
+  if (orbit.mode === 'edit') return 'Drag an item to move · ↕ Y changes height · Alt bypasses snap · Shift/right-drag pans';
   return t(orbit.mode === 'pan' ? 'Drag to pan · scroll to zoom · arrow keys to move' : 'Drag to orbit · right-drag or Shift-drag to pan · scroll to zoom');
 }
 function updatePreviewNavigation() {
   const unavailable = previewLost || previewUnavailable;
   const navigation = $('preview-navigation');
   if (navigation) navigation.hidden = view !== 'preview' || unavailable;
-  for (const mode of ['orbit', 'pan']) {
+  for (const mode of ['orbit', 'pan', 'edit']) {
     const control = $(`preview-${mode}`);
     if (control) control.setAttribute('aria-pressed', String(orbit.mode === mode));
   }
-  for (const name of ['orbit', 'pan', 'top', 'rotate-left', 'rotate-right']) {
+  for (const name of ['orbit', 'pan', 'edit', 'top', 'rotate-left', 'rotate-right']) {
     const control = $(`preview-${name}`);
     if (control) control.disabled = unavailable;
   }
   previewCanvas.dataset.navigationMode = orbit.mode;
   previewCanvas.dataset.navigating = String(orbit.pointers.size > 0);
-  previewCanvas.style.cursor = orbit.pointers.size ? 'grabbing' : 'grab';
+  previewCanvas.style.cursor = orbit.pointers.size || previewEdit ? 'grabbing' : orbit.mode === 'edit' ? 'default' : 'grab';
+  if (view !== 'preview' || unavailable || orbit.mode !== 'edit') $('preview-elevation-handle').hidden = true;
 }
 function setPreviewMode(mode) {
   if (!canNavigatePreview()) return;
   releasePreviewPointer(); orbit.mode = mode; updatePreviewNavigation();
+  previewDirty = true; requestCanvasRender();
   if (previewMetadata.camera) previewMetadata.camera.mode = mode;
   $('tool-hint').textContent = previewHint();
 }
@@ -1141,6 +1267,7 @@ function panPreview(dx, dy, origin = orbit) {
     origin.target.z + (cos * dx - sin * tilt * dy) * scale);
 }
 function releasePreviewPointer(event) {
+  if (previewEdit && (!event || event.pointerId === previewEdit.pointerId)) finishPreviewEdit(event, true);
   const ids = event ? [event.pointerId] : [...orbit.pointers.keys()];
   for (const id of ids) {
     // Delete first: releasing capture can synchronously emit lostpointercapture.
@@ -1149,22 +1276,120 @@ function releasePreviewPointer(event) {
   }
   rebasePreviewGesture(); updatePreviewNavigation();
 }
+function previewRay(event) {
+  if (!camera) return null;
+  const rect = previewCanvas.getBoundingClientRect(), ray = new THREE.Raycaster();
+  ray.setFromCamera(new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, 1 - (event.clientY - rect.top) / rect.height * 2), camera);
+  return ray.ray;
+}
+function pickPreviewItem(event) {
+  const ray = previewRay(event); if (!ray) return null;
+  let nearest = null;
+  // Metric boxes work for catalog, basic, and instanced rendering alike.
+  for (const item of floor().items) {
+    const p = item.position_m, d = item.dimensions_m;
+    const matrix = new THREE.Matrix4().compose(new THREE.Vector3(p.x, floor().elevation_m + p.y + d.height / 2, p.z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), item.rotation_deg * Math.PI / 180), new THREE.Vector3(1, 1, 1));
+    const half = new THREE.Vector3(Math.max(.04, d.width / 2), Math.max(.04, d.height / 2), Math.max(.04, d.depth / 2));
+    const point = ray.clone().applyMatrix4(matrix.clone().invert()).intersectBox(new THREE.Box3(half.clone().negate(), half), new THREE.Vector3());
+    if (!point) continue;
+    point.applyMatrix4(matrix); const distance = point.distanceTo(ray.origin);
+    if (!nearest || distance < nearest.distance) nearest = { item, point, distance };
+  }
+  return nearest;
+}
+function updateElevationHandle() {
+  const handle = $('preview-elevation-handle'), item = selection?.kind === 'items' ? selected() : null;
+  handle.hidden = !item || orbit.mode !== 'edit' || !canNavigatePreview() || !!candidatePreview;
+  if (handle.hidden || !camera) return;
+  const projected = new THREE.Vector3(item.position_m.x, floor().elevation_m + item.position_m.y + item.dimensions_m.height, item.position_m.z).project(camera);
+  const x = (projected.x + 1) * size.width / 2, y = (1 - projected.y) * size.height / 2 - 22;
+  if ((projected.z < -1 || projected.z > 1 || x < 0 || x > size.width || y < 45 || y > size.height) && previewEdit?.axis !== 'height') { handle.hidden = true; return; }
+  handle.style.left = `${Math.max(65, Math.min(size.width - 65, x))}px`; handle.style.top = `${Math.max(45, Math.min(size.height - 12, y))}px`;
+  $('preview-elevation-value').textContent = `${item.position_m.y.toFixed(3)} m`;
+}
+function beginPreviewEdit(event, axis, hit = null) {
+  if (previewEdit || orbit.pointers.size || candidatePreview || !canNavigatePreview()) return false;
+  if (axis === 'floor') setSelection({ kind: 'items', id: hit.item.id });
+  const item = selection?.kind === 'items' ? selected() : null; if (!item) return false;
+  const target = axis === 'height' ? $('preview-elevation-handle') : previewCanvas;
+  const position = new THREE.Vector3(item.position_m.x, floor().elevation_m + item.position_m.y, item.position_m.z);
+  previewEdit = { pointerId: event.pointerId, axis, target, id: item.id, original: project, startY: event.clientY, planeY: hit?.point.y, startPoint: hit?.point.clone(), metersPerPixel: 2 * position.distanceTo(camera.position) * Math.tan(20 * Math.PI / 180) / Math.max(1, size.height), moved: false };
+  project = clone(project); target.setPointerCapture(event.pointerId); updatePreviewNavigation(); return true;
+}
+function movePreviewEdit(event) {
+  const current = previewEdit; if (!current || event.pointerId !== current.pointerId) return;
+  if (event.buttons === 0) { finishPreviewEdit(event, true); return; }
+  event.preventDefault();
+  const item = floor().items.find(item => item.id === current.id), origin = current.original.floors.find(f => f.id === activeFloorId).items.find(item => item.id === current.id);
+  const next = { ...origin.position_m };
+  if (current.axis === 'height') next.y = round(Math.max(0, Math.min(floor().height_m - item.dimensions_m.height, snap(origin.position_m.y + (current.startY - event.clientY) * current.metersPerPixel, event.altKey))));
+  else {
+    const point = previewRay(event)?.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -current.planeY), new THREE.Vector3());
+    if (!point) return;
+    next.x = snap(origin.position_m.x + point.x - current.startPoint.x, event.altKey);
+    next.z = snap(origin.position_m.z + point.z - current.startPoint.z, event.altKey);
+  }
+  if (['x', 'y', 'z'].every(axis => next[axis] === item.position_m[axis])) return;
+  item.position_m = next;
+  if (!current.moved) editorChanged(); current.moved = true;
+  const record = previewItemNodes.get(item.id);
+  if (record && !previewDirty) {
+    record.nodes.forEach((node, index) => node.position.copy(record.positions[index]).add(new THREE.Vector3(next.x - record.origin.x, next.y - record.origin.y, next.z - record.origin.z)));
+    previewSun.shadow.needsUpdate = true;
+  } else previewDirty = true;
+  $('pointer-position').textContent = `x ${next.x.toFixed(3)} · y ${next.y.toFixed(3)} · z ${next.z.toFixed(3)} m`;
+  requestCanvasRender();
+}
+function finishPreviewEdit(event, cancel = false) {
+  const current = previewEdit; if (!current || event && event.pointerId !== current.pointerId) return;
+  previewEdit = null;
+  if (current.target.hasPointerCapture(current.pointerId)) current.target.releasePointerCapture(current.pointerId);
+  if (cancel || !current.moved || JSON.stringify(project) === JSON.stringify(current.original)) project = current.original;
+  else {
+    try {
+      validateProject(project); validateSourcePolicy(project); serializeProject(project);
+      historyPush(current.original); status(current.axis === 'height' ? 'Item height changed.' : 'Item moved.'); save();
+    } catch (error) { project = current.original; status(`Move cancelled: ${formatValidationError(error, t)}`, true); }
+  }
+  if (current.moved) editorChanged();
+  previewDirty = true; updatePreviewNavigation(); renderUI(); requestCanvasRender();
+}
+const elevationHandle = $('preview-elevation-handle');
+elevationHandle.addEventListener('pointerdown', event => {
+  if (event.button !== 0 || event.isPrimary === false) return;
+  event.preventDefault(); event.stopPropagation(); elevationHandle.focus({ preventScroll: true }); beginPreviewEdit(event, 'height');
+});
+elevationHandle.addEventListener('pointermove', movePreviewEdit);
+elevationHandle.addEventListener('pointerup', event => finishPreviewEdit(event));
+for (const type of ['pointercancel', 'lostpointercapture']) elevationHandle.addEventListener(type, event => finishPreviewEdit(event, true));
+elevationHandle.addEventListener('keydown', event => {
+  if (!['ArrowUp', 'ArrowDown'].includes(event.key) || !selected() || event.ctrlKey || event.metaKey) return;
+  event.preventDefault(); event.stopPropagation();
+  const delta = (event.key === 'ArrowUp' ? 1 : -1) * (event.altKey ? .01 : .05);
+  editObject((item, target) => { item.position_m.y = round(Math.max(0, Math.min(target.height_m - item.dimensions_m.height, item.position_m.y + delta))); }, 'Item height changed.');
+});
 function bindPreviewCanvas() {
   previewEvents = new AbortController();
   const canvas = previewCanvas, options = { signal: previewEvents.signal };
   updatePreviewNavigation();
   canvas.addEventListener('pointerdown', e => {
-    if (!canNavigatePreview() || ![0, 1, 2].includes(e.button) || orbit.pointers.has(e.pointerId)) return;
+    if (!canNavigatePreview() || previewEdit || ![0, 1, 2].includes(e.button) || orbit.pointers.has(e.pointerId)) return;
     const touch = e.pointerType === 'touch';
     // At most two touches participate; mixed devices never replace an active drag.
     if (orbit.pointers.size && (!touch || orbit.pointers.size >= 2 || !orbit.pointers.values().next().value.touch)) return;
     e.preventDefault(); canvas.focus({ preventScroll: true });
     const mode = e.button === 1 || e.button === 2 || e.shiftKey || spaceHeld ? 'pan' : orbit.mode;
-    orbit.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, mode, touch });
+    if (mode === 'edit' && !orbit.pointers.size) {
+      const hit = pickPreviewItem(e);
+      if (hit && beginPreviewEdit(e, 'floor', hit)) return;
+      setSelection(null);
+    }
+    orbit.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, mode: mode === 'edit' ? 'pan' : mode, touch });
     canvas.setPointerCapture(e.pointerId);
     rebasePreviewGesture(); updatePreviewNavigation();
   }, options);
   canvas.addEventListener('pointermove', e => {
+    if (previewEdit) { movePreviewEdit(e); return; }
     const pointer = orbit.pointers.get(e.pointerId);
     if (!pointer || !canNavigatePreview()) return;
     if (!pointer.touch && e.buttons === 0) { releasePreviewPointer(e); return; }
@@ -1176,12 +1401,12 @@ function bindPreviewCanvas() {
     if (orbit.pointers.size === 2 && start.distance > 0 && center.distance > 0) orbit.radius = previewRadius(start.radius * start.distance / center.distance);
     requestCanvasRender();
   }, options);
-  canvas.addEventListener('pointerup', releasePreviewPointer, options);
+  canvas.addEventListener('pointerup', e => { if (previewEdit?.pointerId === e.pointerId) finishPreviewEdit(e); else releasePreviewPointer(e); }, options);
   canvas.addEventListener('lostpointercapture', releasePreviewPointer, options);
-  canvas.addEventListener('pointercancel', e => { if (orbit.pointers.has(e.pointerId)) releasePreviewPointer(); }, options);
+  canvas.addEventListener('pointercancel', e => { if (previewEdit?.pointerId === e.pointerId || orbit.pointers.has(e.pointerId)) releasePreviewPointer(); }, options);
   canvas.addEventListener('contextmenu', e => { if (canNavigatePreview()) e.preventDefault(); }, options);
   canvas.addEventListener('wheel', e => {
-    if (!canNavigatePreview() || e.ctrlKey || e.metaKey || !e.deltaY) return;
+    if (!canNavigatePreview() || previewEdit || e.ctrlKey || e.metaKey || !e.deltaY) return;
     e.preventDefault();
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? Math.max(1, size.height) : 1;
     zoomPreview(Math.exp(Math.max(-1, Math.min(1, -e.deltaY * unit * .0015))));
@@ -1236,7 +1461,7 @@ function bindPreviewCanvas() {
   }, options);
 }
 bindPreviewCanvas();
-for (const mode of ['orbit', 'pan']) $(`preview-${mode}`)?.addEventListener('click', () => setPreviewMode(mode));
+for (const mode of ['orbit', 'pan', 'edit']) $(`preview-${mode}`)?.addEventListener('click', () => setPreviewMode(mode));
 $('preview-top')?.addEventListener('click', topPreview);
 $('preview-rotate-left')?.addEventListener('click', () => rotatePreview(-Math.PI / 4));
 $('preview-rotate-right')?.addEventListener('click', () => rotatePreview(Math.PI / 4));
@@ -1365,7 +1590,7 @@ $('copy-command').addEventListener('click', async () => { try { await navigator.
 window.addEventListener('keydown', e => {
   if (e.defaultPrevented) return;
   if (e.target.closest('input, textarea, select') || document.querySelector('dialog[open]')) return;
-  if (e.key === 'Escape') { finishPointer(null, true); setSelection(null); setTool('select'); renderUI(); renderPlan(); return; }
+  if (e.key === 'Escape') { finishPointer(null, true); releasePreviewPointer(); setSelection(null); setTool('select'); renderUI(); renderPlan(); return; }
   if (e.code === 'Space' && (e.target === planCanvas || e.target === previewCanvas || e.target === document.body)) { e.preventDefault(); spaceHeld = true; if (view === 'plan') planCanvas.style.cursor = 'grab'; }
   if (e.ctrlKey || e.metaKey) {
     if (e.key.toLowerCase() === 'z') { e.preventDefault(); undo(e.shiftKey); }
@@ -1385,6 +1610,7 @@ window.addEventListener('beforeunload', e => { if ((saveFailed || pendingSaves) 
 let firstResize = true, planSize = '';
 function resizeCanvases(rect) {
   if (rect.width < 1 || rect.height < 1) return;
+  if (previewEdit && (rect.width !== size.width || rect.height !== size.height)) finishPreviewEdit(null, true);
   const old = { ...size }; size = { width: rect.width, height: rect.height };
   const dpr = canvasPixelRatio(size.width, size.height, 4000000), nextSize = [size.width, size.height, dpr].join();
   if (!canvasSuspended && !document.hidden && nextSize !== planSize) {

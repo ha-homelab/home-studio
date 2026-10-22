@@ -76,7 +76,7 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'docs/images/dry-run-validation.svg', 'docs/data/dry-run-validation.json',
               'scripts/render-validation-chart.py',
               *(f'docs/translations/README.{code}.md' for code in LOCALE_CODES if code != 'en'),
-              'scripts/build-example-modules.py', 'scripts/test-draft-storage.mjs', 'scripts/test-planner-editing.cjs', 'scripts/test-onboarding.mjs', 'scripts/test-onboarding-browser.cjs',
+              'scripts/build-example-modules.py', 'scripts/test-draft-storage.mjs', 'scripts/test-planner-editing.cjs', 'scripts/test-planner-precision.cjs', 'scripts/test-onboarding.mjs', 'scripts/test-onboarding-browser.cjs',
               'scripts/test-floor-navigator.cjs', 'scripts/test-planner-navigation.cjs', 'scripts/test-floor-navigation.cjs',
               'scripts/test-i18n.mjs', 'scripts/test-i18n-browser.cjs', 'scripts/test-validation-i18n.mjs',
               'scripts/test-help-i18n.cjs', 'scripts/test-panel-language.cjs', 'scripts/test-viewer-i18n.cjs', 'scripts/test-lock-control.cjs',

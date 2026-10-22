@@ -36,6 +36,94 @@ document.getElementById('publication').textContent=saved?.published_project?.flo
 window.viewer=document.querySelector('home-floorplan-panel');
 viewer.hass={user:{id:'test-user',is_admin:true},states:{},callWS:async()=>({mode:saved?.mode||'native',has_editor:true,can_edit:true,site_features:false,floor:'ground',floors:['ground'],revision:1,items:[],readable_entities:[],controllable_entities:[],html:'<html><body>Published viewer navigation fixture</body></html>'})};
 </script></body></html>`;
+async function testGestureRecovery(context, origin, errors) {
+  const page = await context.newPage(); page.setDefaultTimeout(15000);
+  page.on('pageerror', error => errors.push(String(error))); page.on('dialog', dialog => dialog.accept());
+  await page.goto(origin + '/fixture'); await page.waitForFunction(() => window.host?._ready);
+  const frame = page.frames().find(frame => frame.url().includes('embed='));
+  const baseline = { schema_version: 1, id: 'gesture_recovery', title: 'Gesture recovery', floors: [{
+    id: 'ground', name: 'Ground', elevation_m: 0, height_m: 2.8,
+    rooms: [{ id: 'room', name: 'Room', polygon: [[0, 0], [6, 0], [6, 5], [0, 5]], material: 'floor' }],
+    walls: [], openings: [], items: [{ id: 'box', name: 'Box', type: 'furniture', room: 'room',
+      position_m: { x: 3, y: .5, z: 2.5 }, dimensions_m: { width: 1, height: .5, depth: 1 },
+      rotation_deg: 0, entity_id: '', notes: '' }],
+  }] };
+  baseline.floors[0].walls = baseline.floors[0].rooms[0].polygon.map((start, index, points) => ({
+    id: `wall_${index}`, start: [...start], end: [...points[(index + 1) % points.length]], thickness_m: .15,
+  }));
+  baseline.floors[0].openings = [{ id: 'window', wall_id: 'wall_0', type: 'window', offset_m: 1, width_m: 1.5, sill_m: .7, head_m: 2.1 }];
+  await frame.locator('#file-input').setInputFiles({ name: 'gesture.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(baseline)) });
+  await frame.waitForFunction(() => planner.getProject().id === 'gesture_recovery');
+  await page.locator('#save').click(); await page.waitForFunction(() => !host._busy && !host._unsaved());
+  const guide = page.locator('#guide');
+  if (await guide.getAttribute('open') !== null) await guide.locator('summary').click();
+  await frame.evaluate(() => document.addEventListener('pointerdown', event => { window.gesturePointerId = event.pointerId; }, true));
+  const project = () => frame.evaluate(() => planner.getProject());
+  async function synchronized(expected, dirty, label) {
+    await page.waitForFunction(expected => JSON.stringify(host._project) === JSON.stringify(expected), expected);
+    const state = await page.evaluate(() => ({ dirty: host._unsaved(), recovery: JSON.parse(sessionStorage.getItem(host._key())) }));
+    assert.equal(state.dirty, dirty, `${label}: native dirty state agrees with the completed gesture`);
+    assert.deepEqual(state.recovery?.project ?? null, dirty ? expected : null, `${label}: recovery contains the final project, never an intermediate pointer position`);
+  }
+  async function planPoint(point) {
+    const local = await frame.evaluate(point => planner.worldToScreen(point), point), rect = await frame.locator('#plan-canvas').boundingBox();
+    return { x: rect.x + local[0], y: rect.y + local[1] };
+  }
+  async function startPoint(kind) {
+    await frame.locator(kind.startsWith('2D') ? '#plan-tab' : '#preview-tab').click();
+    await frame.locator(`[data-object-kind="${kind === '2D resize' ? 'rooms' : 'items'}"]`).first().click();
+    if (kind.startsWith('2D')) {
+      await frame.locator('#fit-view').click();
+      return { from: await planPoint(kind === '2D resize' ? [6, 5] : [3, 2.5]), to: await planPoint(kind === '2D resize' ? [7, 5.75] : [3.5, 3]), target: '#plan-canvas' };
+    }
+    await frame.locator('#preview-edit').click();
+    await frame.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    if (kind === '3D height') {
+      const rect = await frame.locator('#preview-elevation-handle').boundingBox(); assert(rect);
+      const from = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      return { from, to: { x: from.x, y: from.y - 30 }, target: '#preview-elevation-handle' };
+    }
+    const local = await frame.evaluate(async () => {
+      const THREE = await import('/home-floorplan-studio/vendor/three.module.min.js');
+      const state = planner.getPreviewMetadata().camera, rect = document.getElementById('preview-canvas').getBoundingClientRect();
+      const camera = new THREE.PerspectiveCamera(40, rect.width / rect.height, .02, 1500), horizontal = Math.cos(state.pitch) * state.radius;
+      camera.position.set(state.target.x + Math.cos(state.yaw) * horizontal, state.target.y + Math.sin(state.pitch) * state.radius, state.target.z + Math.sin(state.yaw) * horizontal);
+      camera.lookAt(new THREE.Vector3(state.target.x, state.target.y, state.target.z)); camera.updateMatrixWorld();
+      const point = new THREE.Vector3(3, .75, 2.5).project(camera);
+      return { x: (point.x + 1) * rect.width / 2, y: (1 - point.y) * rect.height / 2 };
+    });
+    const rect = await frame.locator('#preview-canvas').boundingBox(), from = { x: rect.x + local.x, y: rect.y + local.y };
+    return { from, to: { x: from.x + 50, y: from.y + 25 }, target: '#preview-canvas' };
+  }
+  for (const kind of ['2D move', '2D resize', '3D move', '3D height']) for (const finish of ['commit', 'cancel', 'return to start']) {
+    const label = `${kind} ${finish}`, gesture = await startPoint(kind);
+    const historyState = [await frame.locator('#undo').isDisabled(), await frame.locator('#redo').isDisabled()];
+    await page.mouse.move(gesture.from.x, gesture.from.y); await page.mouse.down();
+    await page.mouse.move(gesture.to.x, gesture.to.y, { steps: 5 });
+    assert.notDeepEqual(await project(), baseline, `${label}: the real pointer changed the working copy`);
+    await page.waitForFunction(() => host._dirty());
+    if (finish === 'cancel') {
+      if (kind === '3D move') await page.keyboard.press('Escape');
+      else await frame.locator(gesture.target).dispatchEvent('pointercancel', { pointerId: await frame.evaluate(() => window.gesturePointerId) });
+    } else if (finish === 'return to start') await page.mouse.move(gesture.from.x, gesture.from.y, { steps: 5 });
+    await page.mouse.up();
+    const final = await project();
+    if (finish === 'commit') {
+      await synchronized(final, true, label);
+      await frame.locator('#undo').click(); assert.deepEqual(await project(), baseline, `${label}: one Undo restores the whole gesture`);
+      await synchronized(baseline, false, label + ' undo');
+      await frame.locator('#redo').click(); assert.deepEqual(await project(), final, `${label}: one Redo restores the whole gesture`);
+      await synchronized(final, true, label + ' redo');
+      await frame.locator('#undo').click();
+    } else {
+      assert.deepEqual(final, baseline, `${label}: the original project is restored`);
+      assert.deepEqual([await frame.locator('#undo').isDisabled(), await frame.locator('#redo').isDisabled()], historyState, `${label}: cancellation and zero net movement leave Undo/Redo intact`);
+    }
+    await synchronized(baseline, false, label + ' restored');
+  }
+  assert.deepEqual(await page.evaluate(() => server.project), baseline, 'Pointer gestures do not write to Home Assistant until Save draft');
+  await page.close();
+}
 async function openMoreOptions(page) {
   const details=page.locator('#more-options');
   if (await details.getAttribute('open')===null) await details.getByText('More options',{exact:true}).click();
@@ -666,6 +754,21 @@ const server = http.createServer((req, res) => {
   assert.equal(await generatedFrame.getByLabel('x, z coordinates (m)',{exact:true}).getAttribute('readonly'),'');
   assert.equal(await generatedFrame.getByLabel('Floor material',{exact:true}).isDisabled(),true);
   assert.equal(await generatedFrame.getByRole('button',{name:'Delete room',exact:true}).count(),0);
+  assert.equal(await generatedFrame.locator('#inspector-body').getByLabel('Width (m)',{exact:true}).count(),0,'Protected room does not expose editable width');
+  assert.equal(await generatedFrame.locator('#inspector-body').getByLabel('Depth (m)',{exact:true}).count(),0,'Protected room does not expose editable depth');
+  const protectedBefore=await generatedFrame.evaluate(()=>planner.getProject());
+  const protectedCorner=await generatedFrame.evaluate(()=>planner.worldToScreen(planner.getProject().floors[0].rooms[0].polygon[0]));
+  const protectedCanvas=await generatedFrame.locator('#plan-canvas').boundingBox();
+  assert(protectedCanvas,'Native protected plan is visible');
+  assert.equal(await generatedFrame.evaluate(([x,y])=>{
+    const canvas=document.getElementById('plan-canvas'),rect=canvas.getBoundingClientRect();
+    return document.elementFromPoint(rect.x+x,rect.y+y)===canvas;
+  },protectedCorner),true,'Protected corner drag starts on the real canvas');
+  await generated.mouse.move(protectedCanvas.x+protectedCorner[0],protectedCanvas.y+protectedCorner[1]);
+  await generated.mouse.down();
+  await generated.mouse.move(protectedCanvas.x+protectedCorner[0]+40,protectedCanvas.y+protectedCorner[1]+30,{steps:5});
+  await generated.mouse.up();
+  assert.deepEqual(await generatedFrame.evaluate(()=>planner.getProject()),protectedBefore,'Dragging an imported room corner cannot resize protected source geometry');
   await generatedFrame.locator('[data-object-kind="items"]').first().click();
   assert.equal(await generatedFrame.getByLabel('Design',{exact:true}).inputValue(),'');
   assert.match(await generatedFrame.getByLabel('Design',{exact:true}).locator('option:checked').innerText(),/Original installed model/);
@@ -905,6 +1008,7 @@ const server = http.createServer((req, res) => {
   assert.equal(await mobile.evaluate(()=>window.host._unsaved()),false);
   await checkMobileWidths();
   await mobileContext.close();
+  await testGestureRecovery(context, origin, errors);
   assert.deepEqual(errors,[]);
   await context.close();
   console.log(`Native studio passed (${engine}): production panel module route, repeated module loading, opaque sandbox, clean first visit, guided room/device/preview flow, unfinished-field guard and recovery, separate save/publish, generated protected editing and published preview, guarded navigation and remount, incomplete-floor publication guard, JSON roundtrip, forged messages, local draft isolation, offline recovery, revision conflict, in-flight edits, pending/invalid fields, bounded document fallback, loading timeout and recovery retry.`);
