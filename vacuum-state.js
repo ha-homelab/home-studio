@@ -24,7 +24,7 @@ function vacuumObservedAt(value){
 }
 function resolveVacuumPosition(spec,states,connected,floorId,previous,now=Date.now()){
   const key=vacuumSourceKey(spec,floorId),robot=states?.[spec?.entity_id],reading=states?.[spec?.position_entity_id];
-  let lastGood=key&&previous?.key===key?previous:null,reason='unavailable';
+  let lastGood=key&&previous?.key===key?previous:null,reason;
   const available=value=>value&&!value.restored&&typeof value.state==='string'&&value.state.trim()&&
     !['unknown','unavailable','offline','disconnected'].includes(value.state.trim().toLowerCase());
   const robotValid=connected&&available(robot);

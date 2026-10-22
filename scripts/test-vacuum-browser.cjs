@@ -88,7 +88,7 @@ assert(['chromium','firefox','webkit'].includes(engine));
     assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
     console.log('PASS ('+engine+'): generated vacuum projection, reported/observed labels, native details, expiry, no rendering loop, disconnect, map change and hidden-page freshness.');
   }catch(error){
-    const artifacts=path.resolve(process.env.VACUUM_BROWSER_ARTIFACTS||path.join(os.tmpdir(),'home-vacuum-failure-'+Date.now()));
+    const artifacts=process.env.VACUUM_BROWSER_ARTIFACTS?path.resolve(process.env.VACUUM_BROWSER_ARTIFACTS):fs.mkdtempSync(path.join(os.tmpdir(),'home-vacuum-failure-'));
     fs.mkdirSync(artifacts,{recursive:true});
     if(page&&!page.isClosed())await page.screenshot({path:path.join(artifacts,engine+'-failure.png'),timeout:5000}).catch(()=>{});
     fs.writeFileSync(path.join(artifacts,engine+'-failure.json'),JSON.stringify({error:String(error),pageErrors:errors,external},null,2));
