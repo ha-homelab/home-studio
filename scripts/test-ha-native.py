@@ -758,9 +758,27 @@ class PackagingTests(unittest.TestCase):
                 self.assertIn("runtime/planner/project.py", names)
                 self.assertIn("runtime/viewer_locales.py", names)
                 self.assertIn("static/studio.js", names)
+                self.assertIn("static/studio/planner/index.html", names)
+                self.assertIn("static/studio/ai/panel.js", names)
                 self.assertNotIn("site.json", names)
                 self.assertNotIn("project.json", names)
                 self.assertFalse(any(name.startswith("assets/") or "private_site" in name or "/.storage/" in name for name in names))
+                # Public demo media must ship on Pages, never in the installed
+                # integration or the loopback companion's served asset set.
+                website_only = {"index.html", "docs/media/native-ha-workflow.mp4",
+                                "docs/media/native-ha-workflow-poster.jpg",
+                                "docs/media/native-ha-workflow-preview.gif",
+                                "docs/media/native-ha-workflow.en.vtt"}
+                inventory = load_file("ha_native_public_inventory", ROOT / "scripts/validate-site.py")
+                self.assertTrue(website_only <= set(inventory.SITE_FILES))
+                self.assertFalse({"static/studio/" + name for name in website_only} & names)
+                self.assertFalse(any(name.startswith("static/studio/docs/media/") for name in names))
+                served = set(json.loads(zipped.read("studio-files.json")))
+                self.assertFalse(website_only & served)
+                self.assertTrue({"planner/index.html", "ai/panel.js"} <= served)
+                companion = set(json.loads((ROOT / "ai_companion/assets.json").read_text()))
+                self.assertFalse(website_only & companion)
+                self.assertTrue({"planner/index.html", "ai/panel.js"} <= companion)
             package = module("isolated_bundle")
             package.__path__ = [str(component)]
             bundled = __import__("isolated_bundle.runtime.planner.project", fromlist=["compile_project"])

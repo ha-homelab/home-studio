@@ -1,0 +1,106 @@
+WEBVTT
+
+1
+00:00:00.000 --> 00:00:07.000
+HOME STUDIO | MY HOME, INSIDE HOME ASSISTANT
+My real home and installed tools. Now let’s build a new room from a photo.
+
+2
+00:00:07.000 --> 00:00:12.000
+START WITH A PHOTO AND REAL MEASUREMENTS
+This fictional room is our reference. The tutorial uses a separate, empty Home Assistant project.
+
+3
+00:00:12.000 --> 00:00:19.000
+01 | START INSIDE HOME ASSISTANT
+Open Home Studio in the HA sidebar. Start with a blank project and choose Draft from photos.
+
+4
+00:00:19.000 --> 00:00:28.000
+02 | CONNECT YOUR OWN AI PROVIDER
+The API key stays masked on screen. HA holds it for this session and sends it only to authenticate with the provider.
+
+5
+00:00:28.000 --> 00:00:35.000
+03 | GIVE THE PHOTO A SCALE
+Enter known width, depth and ceiling height. Explain which wall, door and window you are looking at.
+
+6
+00:00:35.000 --> 00:00:40.000
+04 | ADD THE REFERENCE PHOTO
+Review the selected photo. It is sent to your chosen model only when you press Generate.
+
+7
+00:00:40.000 --> 00:00:49.000
+05 | A REAL REQUEST, WITH VALIDATION
+The first draft puts a sofa outside the room. Validation rejects it without changing the drawing.
+
+8
+00:00:49.000 --> 00:00:58.000
+06 | RETRY WITH THE SUGGESTED CORRECTION
+A second real request returns a valid draft. Waiting time is shortened here.
+
+9
+00:00:58.000 --> 00:01:05.000
+07 | REVIEW, THEN APPLY
+Inspect the proposed room in 3D. It becomes editable only after you choose Apply.
+
+10
+00:01:05.000 --> 00:01:13.000
+08 | REFINE THE ROOM SIZE
+Change the room to 5.5 × 4.5 m. Save draft commits the edits while leaving the published view unchanged.
+
+11
+00:01:13.000 --> 00:01:20.600
+09 | MOVE FURNITURE ON THE GRID
+Select the coffee table and drag it. Snap aligns it to the 0.25 m grid; exact coordinates stay visible.
+
+12
+00:01:20.600 --> 00:01:25.600
+10 | SET EXACT DIMENSIONS
+Set the table to 1.10 × 0.65 × 0.45 m. The same object updates in the 3D preview.
+
+13
+00:01:25.600 --> 00:01:32.600
+11 | POSITION ITEMS DIRECTLY IN 3D
+Choose Edit items and drag the table across the floor. Orbit remains a separate tool.
+
+14
+00:01:32.600 --> 00:01:38.920
+12 | FIND THE RIGHT VIEW
+Orbit the room to see the selected item and its vertical handle clearly.
+
+15
+00:01:38.920 --> 00:01:43.920
+13 | RAISE AN OBJECT
+Drag the vertical Y handle to lift the table 0.50 m above the floor.
+
+16
+00:01:43.920 --> 00:01:48.920
+14 | MAKE A FINE ADJUSTMENT
+Hold Alt and press Arrow Up for a precise 1 cm height step. Alt also bypasses the grid while dragging.
+
+17
+00:01:48.920 --> 00:01:54.920
+15 | LOWER IT TO AN EXACT HEIGHT
+Enter 0.25 m, then 0 m to return the table to the floor. You stay in control of the final placement.
+
+18
+00:01:54.920 --> 00:02:01.920
+16 | CONNECT A HOME ASSISTANT DEVICE
+Select the floor lamp and link the demo light entity. This tutorial controls no physical devices.
+
+19
+00:02:01.920 --> 00:02:08.920
+17 | SAVE, THEN PUBLISH
+Save the editable draft. Publish it when you are ready to update the household’s 3D Home.
+
+20
+00:02:08.920 --> 00:02:17.680
+18 | USE THE ROOM YOU CREATED
+Open 3D Home and switch the linked demo light on. The room responds to its real HA entity state.
+
+21
+00:02:17.680 --> 00:02:25.680
+19 | RETURN TO EDITING ANYTIME
+Choose Edit home to continue the saved drawing. Built and recorded inside Home Assistant, using v0.10.1-beta.6.

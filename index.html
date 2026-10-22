@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self'; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="Install Home Studio in Home Assistant, draw your home, link devices, and publish your interactive 3D dashboard. Includes a step-by-step setup guide.">
+  <meta name="description" content="Draw your home inside Home Assistant. Start with measurements or a photo-assisted AI draft, refine it by hand, link devices, and publish an interactive 3D dashboard.">
   <title>Home studio · Your home, in 3D and Home Assistant</title>
   <link rel="stylesheet" href="./planner/guide.css">
   <link rel="stylesheet" href="./site.css">
@@ -20,24 +20,33 @@
     <section class="hero">
       <p class="eyebrow">DRAW IT. MAKE IT YOURS. BRING IT HOME.</p>
       <h1>Your home.<br>In 3D. In Home Assistant.</h1>
-      <p class="lead">Install Home Studio in Home Assistant. Draw your rooms, add your devices, and publish a 3D dashboard — all in the same place.</p>
+      <p class="lead">Draw your rooms inside Home Assistant. Start by hand or with a photo-assisted AI draft, refine the details, link your devices, and publish your 3D Home.</p>
       <p>Start with Home Assistant 2026.10 or newer and an administrator account. Install through HACS, restart HA, then add the Home Studio integration. No terminal build, YAML entry, or pasted access token is needed for a new installation.</p>
       <div class="hero-actions">
         <a class="button" href="./install.html#native-studio">Get started in Home Assistant <span aria-hidden="true">→</span></a>
-        <a class="text-link" href="#get-started">See the three steps ↓</a>
+        <a class="text-link" href="#native-ha-demo">Watch the Home Assistant demo ↓</a>
       </div>
       <ul class="hero-facts" aria-label="Included in Home Studio"><li>Free &amp; open source</li><li>24 editor languages</li><li>206 built-in designs</li><li>Saved in your Home Assistant</li></ul>
       <p class="small">Your draft and published view stay in HA. Export JSON for an extra backup. <a href="./privacy.html">How your data is handled</a></p>
+    </section>
+    <section class="preview-section native-demo" id="native-ha-demo" aria-labelledby="native-demo-title">
+      <div class="preview-heading"><p class="eyebrow">RECORDED INSIDE HOME ASSISTANT</p><h2 id="native-demo-title">From a photo to your 3D Home.</h2><p>Give the AI a room photo and your measurements. Review its draft, then move, resize, and raise or lower items by hand. Link your Home Assistant entities and publish when it looks right.</p></div>
+      <ol class="demo-workflow" aria-label="The demonstrated workflow"><li>Room photo</li><li>AI draft</li><li>Refine by hand</li><li>Link entities</li><li>Publish to 3D Home</li></ol>
+      <figure class="demo-player">
+        <video controls playsinline preload="none" width="1920" height="1440" poster="./docs/media/native-ha-workflow-poster.jpg" aria-label="Home Studio photo-to-publish walkthrough in Home Assistant" aria-describedby="native-demo-caption">
+          <source src="./docs/media/native-ha-workflow.mp4" type="video/mp4">
+          <track kind="captions" src="./docs/media/native-ha-workflow.en.vtt" srclang="en" label="English">
+          <p><a href="./docs/media/native-ha-workflow.mp4">Open the Home Assistant walkthrough video.</a></p>
+        </video>
+        <figcaption id="native-demo-caption">A real AI proposal, reviewed and edited in Home Assistant. AI gives you a starting point; check the dimensions, placements, and device bindings before publishing. The opening shows the author’s installed home; the tutorial starts with an empty project and a fictional reference room. English captions are shown in the video; an optional text track is also available.</figcaption>
+      </figure>
+      <p class="small">Recorded with <a href="https://github.com/ha-homelab/home-studio/releases/tag/v0.10.1-beta.6">v0.10.1-beta.6</a>. Enable pre-release versions in HACS to try this build.</p>
+      <div class="demo-links"><a href="./docs/media/native-ha-workflow.mp4">Open the full video ↗</a><a href="./docs/media/native-ha-workflow-preview.gif">Animated preview ↗</a><a href="./install.html#native-studio">Set up Home Studio in HA →</a><a href="./ai-setup.html">Connect your own AI →</a></div>
     </section>
     <section class="start-cards" id="get-started" aria-label="Get started in Home Assistant">
       <article><p class="eyebrow">01 · INSTALL</p><h2>Add Home Studio.</h2><p>In HACS, add <strong>ha-homelab/home-studio</strong> as a custom <strong>Integration</strong> repository and download the stable version. Restart HA, then choose <strong>Settings → Devices &amp; services → Add integration → Home Studio</strong>.</p><a href="./install.html#native-studio">Follow the installation steps →</a></article>
       <article><p class="eyebrow">02 · DRAW</p><h2>Make your first room.</h2><p>Open <strong>Home Studio</strong> in the HA sidebar. Draw walls, doors, and windows, add furniture, and select your HA devices. The illustrated guide walks through the drawing tools.</p><a href="./planner/guide.html">Learn the drawing tools →</a></article>
       <article><p class="eyebrow">03 · PUBLISH</p><h2>Bring the plan to life.</h2><p>Choose <strong>Save draft</strong>, then <strong>Publish to 3D Home</strong>. Open <strong>3D Home</strong> and check your bindings with <strong>Dry run</strong>. Later edits need no reinstall or restart.</p><a href="./install.html#first-room">Publish your first room →</a></article>
-    </section>
-    <section class="preview-section" aria-labelledby="preview-title">
-      <div class="preview-heading"><p class="eyebrow">YOUR EDITOR, INSIDE HOME ASSISTANT</p><h2 id="preview-title">Draw. Save. Publish.</h2><p>Keep an unfinished draft while everyone uses the last published view. Add a room, change a finish, or move a window, then publish when you are ready.</p></div>
-      <a href="./install.html#first-room"><img src="./docs/images/native-editor.png" width="1422" height="1094" alt="Home Studio editor with Save draft and Publish to 3D Home controls, a fictional room."></a>
-      <p class="small">The actual editor and host, shown with a simulated HA connection and fictional devices.</p>
     </section>
     <section class="ai-feature" aria-labelledby="ai-title">
       <div><p class="eyebrow">A NEW WAY TO BEGIN</p><h2 id="ai-title">Your photos.<br>Your model. Your home.</h2><p>Let a vision model sketch a measured room or suggest furniture for one you have already drawn. Preview its proposal, choose what to keep, and make the final edits yourself.</p><a class="button" href="./ai-setup.html">Plan from photos <span aria-hidden="true">→</span></a></div>
