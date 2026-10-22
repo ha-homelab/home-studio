@@ -102,6 +102,9 @@ jobs:
         run: |
           node scripts/test-ai-draft.mjs
           python3 scripts/test-ai-companion.py
+      - name: Select the canonical archive on hosted Ubuntu
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+        run: python3 scripts/prepare-ubuntu-apt.py
       - name: Install browser test tools
         timeout-minutes: 12
         run: |

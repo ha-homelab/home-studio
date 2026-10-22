@@ -118,6 +118,7 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'scripts/waterfox-versions.json', 'scripts/setup-waterfox.py', 'scripts/test-waterfox-acceptance.py',
               'scripts/test-waterfox-tooling.py', 'scripts/native-viewer-program-diagnostics.js', 'scripts/test-native-viewer-programs.cjs',
               'scripts/prepare-intel-macos-ci.py', 'scripts/test-intel-macos-ci.py',
+              'scripts/prepare-ubuntu-apt.py', 'scripts/test-ubuntu-apt.py',
               'scripts/firefox-versions.json', 'scripts/native_browser.py',
               'scripts/setup-native-browser.py', 'scripts/test-native-browser-acceptance.py',
               'scripts/diagnose-native-draw.py', 'scripts/native-draw-diagnostic.js',

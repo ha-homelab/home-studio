@@ -25,6 +25,7 @@ jobs:
         run: |
           python3 scripts/test-browser-matrix.py
           python3 scripts/test-browser-install.py
+          python3 scripts/test-ubuntu-apt.py
       - name: Expand all required targets
         id: matrix
         run: python3 scripts/browser-matrix.py --github-output "$GITHUB_OUTPUT"
@@ -110,6 +111,9 @@ jobs:
           python3 scripts/setup-browser-toolchain.py --version "$PLAYWRIGHT_VERSION" --output "$TOOLCHAIN_DIR" --github-env "$GITHUB_ENV"
           mkdir -p acceptance-artifacts
           cp "$TOOLCHAIN_DIR/toolchain.json" acceptance-artifacts/toolchain.json
+      - name: Select the canonical archive on hosted Ubuntu
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+        run: python3 scripts/prepare-ubuntu-apt.py
       - name: Install the selected browser and native system dependencies
         run: python3 scripts/install-browser-with-retry.py
       - name: Extract checksum-pinned historical Chrome for Testing
@@ -252,6 +256,9 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '22'
+      - name: Select the canonical archive on hosted Ubuntu
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+        run: python3 scripts/prepare-ubuntu-apt.py
       - name: Install fixture tooling and Linux graphics dependencies
         run: |
           npm ci --ignore-scripts --no-audit --no-fund

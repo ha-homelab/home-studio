@@ -83,6 +83,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   const c = vm.createContext({createEnvironmentLayer: (T, options) => createEnvironmentLayer(T, {...options, document:null, window:null}), createEnvironmentControls: () => ({refresh() {}}), t: value => value, AbortController, THREE: {...THREE, WebGLRenderer: Renderer}, project, activeFloorId: f.id, floor: () => project.floors[0],
     view: 'plan', drag: null, spaceHeld: false, previewDirty: true, size: {...rect}, map: {x: 0, y: 0}, devicePixelRatio: 3,
     $: get, planCanvas: get('plan-canvas'), ctx: {setTransform() {}},
+    planColors: {background: '#f2f4ed'},
     floorBounds: model.floorBounds, distance: model.distance, wallPieces: model.wallPieces,
     COLORS: {floor: '#eeeeee', furniture: '#aaaaaa'}, itemAsset: () => null,
     updateZoom() {}, fitPlan() {}, translatedText() {},
@@ -119,6 +120,8 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     const r = c.canvasPixelRatio(w, h, budget); assert(w * h * r * r <= budget + .001); assert(r <= 2);
   }
   c.view = 'preview'; c.renderPreview();
+  const previewError = vm.runInContext('previewMetadata.error', c);
+  assert.equal(previewError, undefined, `Preview initialization failed: ${previewError}`);
   assert.equal(constructions, 1); assert.equal(draws, 1); assert.equal(shadows, 1);
   assert.equal(vm.runInContext('previewInstancing', c), false, 'SwiftShader retains ordinary catalog meshes');
   assert.equal(vm.runInContext('previewSun.shadow.mapSize.x', c), 512);
@@ -341,7 +344,8 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
       attributes: {}, setAttribute(name, value) { this.attributes[name] = value; },
     }));
     const controls = {'object-list': {children: buttons}, undo: {disabled: true}, redo: {disabled: true}, 'pointer-position': {textContent: ''}};
-    const p = vm.createContext({previewEnvironment: null, project: original, activeFloorId: f.id, selection: null, tool: 'select', view: 'plan', drag: null,
+    const p = vm.createContext({previewEnvironment: null, haSourcePolicy: null, haPublishedPreview: null,
+      project: original, activeFloorId: f.id, selection: null, tool: 'select', view: 'plan', drag: null,
       planCanvas: plan, spaceHeld: false, previewDirty: false, map: {x: 0, y: 0},
       clone(value) { clones++; return model.clone(value); }, round: model.round, distance: model.distance,
       snap: value => value, localPoint: e => [e.clientX, e.clientY], toWorld: point => point,
@@ -354,7 +358,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
       validateProject: model.validateProject, serializeProject: JSON.stringify, historyPush: value => history.push(value),
       document: {hidden: false}, zoomPlan() {}, history, future: [],
     });
-    const gestureClock = frames(p); vm.runInContext(scheduler + section('function setSelection(', 'function field(') + section("planCanvas.addEventListener('pointerdown'", '// On-demand 3D rendering.'), p);
+    const gestureClock = frames(p); vm.runInContext(scheduler + section('const protectedRoom =', 'const snap =') + section('function setSelection(', 'function field(') + section("planCanvas.addEventListener('pointerdown'", '// On-demand 3D rendering.'), p);
     plan.events.pointerdown(event(1, 1));
     assert.equal(uiDraws, 0, 'Selecting an existing object retains the floor and object list nodes');
     assert.equal(inspectorDraws, 1, 'A changed selection updates its inspector once');
