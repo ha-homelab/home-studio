@@ -139,6 +139,9 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(project.source["protected_rooms"][floor["id"]], ["room_a"])
         self.assertIn("sensor.synthetic_environment", project.references["upper"])
         self.assertEqual(project.store.options, {"private": True, "atomic_writes": True})
+        self.assertEqual(project.store.key, "home_floorplan.generated_studio")
+        self.assertEqual(project.root, self.root / ".storage/home_floorplan_generated_assets")
+        self.assertIsNone(project.legacy_root, "Generated homes never load a native project's legacy assets")
         self.assert_baseline_unchanged()
 
     async def test_noop_publication_preserves_complete_model_and_trusted_viewer(self):

@@ -177,7 +177,7 @@ const server = http.createServer((req, res) => {
   await frame.evaluate(()=>parent.postMessage({protocol:'home-studio-editor-v1',channel:'wrong',type:'snapshot',sequence:500,project:{title:'forged'}},'*'));
   await frame.evaluate(()=>new Promise(resolve=>{
     const received=event=>{
-      if(event.data?.requestId!=='forged-guide')return;
+      if(event.source!==window||event.origin!=='null'||event.data?.requestId!=='forged-guide')return;
       window.removeEventListener('message',received);resolve();
     };
     window.addEventListener('message',received);
@@ -547,12 +547,12 @@ const server = http.createServer((req, res) => {
     await page.getByRole('button',{name:'Add another room',exact:true}).waitFor();
     const originalProject=await frame.evaluate(()=>planner.getProject());
     // Host shortcuts must not discard raw inspector text while changing context.
-    await frame.evaluate(()=>{
+    await frame.evaluate(parentOrigin=>{
       window.guideMessages=0;
       window.addEventListener('message',event=>{
-        if(event.source===parent&&event.data?.type==='guide-action')window.guideMessages++;
+        if(event.source===parent&&event.origin===parentOrigin&&event.data?.type==='guide-action')window.guideMessages++;
       });
-    });
+    },origin);
     async function assertGuideRetainsField(buttonName,field,raw) {
       const before=await frame.evaluate(()=>({project:planner.getProject(),selection:planner.getSelection(),messages:window.guideMessages}));
       await page.waitForFunction(()=>window.host._edits.pending);

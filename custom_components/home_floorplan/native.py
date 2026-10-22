@@ -157,14 +157,14 @@ def load_generation(root, generation):
 class NativeProject:
     """Commit source and active generation together using HA's atomic private Store."""
 
-    def __init__(self, hass, root=None):
+    def __init__(self, hass, root=None, *, store_key="home_floorplan.studio"):
         self.hass = hass
         self.root = Path(root) if root is not None else Path(hass.config.path(".storage", "home_floorplan_studio_assets"))
         # Earlier native builds nested assets under home_floorplan, but that
         # name is also a regular Store file in older installations. New writes
         # use a distinct directory; existing native generations remain readable.
         self.legacy_root = Path(hass.config.path(".storage", "home_floorplan", "studio")) if root is None else None
-        self.store = NativeStore(hass, 1, "home_floorplan.studio", private=True, atomic_writes=True)
+        self.store = NativeStore(hass, 1, store_key, private=True, atomic_writes=True)
         self.document = {"revision": 0, "project": None, "published_revision": None,
                          "generation": None, "inventory": {}}
 

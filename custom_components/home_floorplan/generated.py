@@ -19,7 +19,7 @@ from types import MappingProxyType
 import uuid
 
 from .native import (GENERATION, MAX_NATIVE_TRIANGLES, NativeError, NativeProject,
-                     NativeStore, compiler, load_models, validate_draft)
+                     compiler, load_models, validate_draft)
 from .site import validate_floor_inventory
 from .validation import validate_inventory
 from .permissions import model_references, referenced_entities
@@ -266,14 +266,12 @@ class GeneratedProject(NativeProject):
     mode = "generated"
 
     def __init__(self, hass, component_root, site, models, inventory):
-        self.hass = hass
+        super().__init__(hass, root=hass.config.path(".storage", "home_floorplan_generated_assets"),
+                         store_key="home_floorplan.generated_studio")
         self.component_root = Path(component_root)
-        self.root = Path(hass.config.path(".storage", "home_floorplan_generated_assets"))
-        self.store = NativeStore(hass, 1, "home_floorplan.generated_studio", private=True, atomic_writes=True)
         self.installed_site, self.installed_models = copy.deepcopy(site), models
         self.installed_inventory = copy.deepcopy(inventory)
-        self.document = {"revision": 0, "project": None, "published_revision": None,
-                         "generation": None, "inventory": copy.deepcopy(inventory), "baseline": None}
+        self.document.update(inventory=copy.deepcopy(inventory), baseline=None)
         self.baseline_project = None
         self.source = {"kind": "generated", "protected_floors": [], "protected_rooms": {}, "custom_items": {}}
 
