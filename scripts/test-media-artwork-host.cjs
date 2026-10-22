@@ -147,6 +147,94 @@ test('bounded queue caps concurrent fetches and saved artwork entries without po
   for(let i=0;i<10;i++)f.panel.refreshMediaArtwork();await flush();assert.equal(f.calls.length,16);
 });
 
+test('401 and 403 abort peer artwork requests and pause the whole queue across ordinary UI changes',async()=>{
+  for (const status of [401,403]) {
+    const pending=[],f=fixture({fetch(){const request=deferred();pending.push(request);return request.promise;}});
+    for(let i=0;i<15;i++){
+      const entity_id='media_player.player_'+i;f.panel.savedItems.push({id:'item_'+i,entity_id});
+      f.panel._hass.states[entity_id]={state:'playing',attributes:{entity_picture:'/image'}};
+    }
+    f.panel.refreshMediaArtwork();assert.equal(f.calls.length,2);
+    pending[0].resolve(new Response(null,{status}));await flush();
+    assert.equal(f.calls[1].options.signal.aborted,true);
+    pending[1].resolve(response());await flush();
+    assert.equal(f.calls.length,2);assert.equal(f.panel.mediaArtworkRequests,0);
+    assert.equal(f.timers.size,0);assert.equal(f.images.length,0);
+    for(let i=0;i<5;i++){
+      f.panel._hass.states['media_player.study'].attributes.media_title='Changed track '+i;
+      f.panel._hass={...f.panel._hass};f.panel.refreshMediaArtwork();
+      f.document.hidden=true;f.panel.refreshMediaArtwork();f.document.hidden=false;f.panel.refreshMediaArtwork();
+    }
+    f.panel.clearMediaArtwork();f.panel.generation++;f.panel.refreshMediaArtwork();await flush();
+    assert.equal(f.calls.length,2,'metadata, hass updates, visibility and viewer resets must not retry denied auth');
+    assert.deepEqual(f.messages.at(-1).artwork,{});
+  }
+});
+
+test('artwork resumes after an actual auth, token, connection or account change',async()=>{
+  for(const change of ['token','auth','connection','account']){
+    let token='private-initial-token',attempts=0;
+    const f=fixture({fetch:async()=>++attempts===1?new Response(null,{status:401}):response()});
+    f.panel._hass.auth={get accessToken(){return token;}};f.panel._hass.connection={};
+    f.panel.refreshMediaArtwork();await flush();assert.equal(f.calls.length,1);
+    if(change==='token')token='private-renewed-token';
+    if(change==='auth')f.panel._hass.auth={get accessToken(){return token;}};
+    if(change==='connection')f.panel._hass.connection={};
+    if(change==='account')f.panel._hass.user={id:'replacement-user',is_admin:true};
+    f.panel.refreshMediaArtwork();await flush();assert.equal(f.calls.length,2,change);
+    assert.ok(f.messages.at(-1).artwork.speaker);assert.equal(f.panel.mediaArtworkAuthFailure,null);
+    assert.doesNotMatch(JSON.stringify(f.messages),/private-(initial|renewed)-token/);
+  }
+});
+
+test('renewal inside fetchWithAuth cannot bypass an authentication rejection',async()=>{
+  let token='before-renewal';
+  const f=fixture({fetch:async()=>{token='renewed-but-denied';return new Response(null,{status:401});}});
+  f.panel._hass.auth={get accessToken(){return token;}};
+  f.panel.refreshMediaArtwork();await flush();
+  f.panel.refreshMediaArtwork();await flush();assert.equal(f.calls.length,1);
+});
+
+test('a completed reconnect resumes artwork but duplicate ready updates do not',async()=>{
+  let attempts=0;const f=fixture({fetch:async()=>++attempts===1?new Response(null,{status:401}):response()});
+  f.panel._hass.connection={};f.panel.started=true;
+  const state=f.panel.connectionState={connection:f.panel._hass.connection,ready:true};
+  f.panel.notice=()=>{};
+  f.panel.loadFloor=()=>{f.panel.port={postMessage(message){f.messages.push(plain(message));},close(){}};};
+  f.panel.refreshMediaArtwork();await flush();
+  f.panel.connectionReadiness(state,true);f.panel.refreshMediaArtwork();await flush();assert.equal(f.calls.length,1);
+  f.panel.connectionReadiness(state,false);f.panel.connectionReadiness(state,true);
+  f.panel.refreshMediaArtwork();await flush();assert.equal(f.calls.length,2);
+  assert.ok(f.messages.at(-1).artwork.speaker);
+});
+
+test('a late denied response from an old auth session cannot pause its replacement',async()=>{
+  const pending=[],f=fixture({fetch(){const request=deferred();pending.push(request);return request.promise;}});
+  f.panel._hass.auth={accessToken:'old-private-token'};
+  f.panel.refreshMediaArtwork();
+  f.panel._hass.auth={accessToken:'new-private-token'};
+  pending[0].resolve(new Response(null,{status:401}));await flush();
+  assert.equal(f.panel.mediaArtworkAuthFailure,undefined);
+  f.panel._hass.states['media_player.study'].attributes.media_title='New session track';
+  f.panel.refreshMediaArtwork();pending[1].resolve(response());await flush();
+  assert.ok(f.messages.at(-1).artwork.speaker);assert.equal(f.calls.length,2);
+});
+
+test('ordinary HTTP artwork failures keep the queue and later source retries available',async()=>{
+  for(const status of [404,500]){
+    let denied=true;const f=fixture({fetch:async()=>denied?new Response(null,{status}):response()});
+    for(let i=0;i<3;i++){
+      const entity_id='media_player.player_'+i;f.panel.savedItems.push({id:'item_'+i,entity_id});
+      f.panel._hass.states[entity_id]={state:'playing',attributes:{entity_picture:'/image'}};
+    }
+    f.panel.refreshMediaArtwork();await flush();assert.equal(f.calls.length,4);
+    assert.equal(f.panel.mediaArtworkAuthFailure,undefined);
+    denied=false;f.panel._hass.states['media_player.study'].attributes.media_title='New track';
+    f.panel.refreshMediaArtwork();await flush();assert.equal(f.calls.length,5);
+    assert.ok(f.messages.at(-1).artwork.speaker);
+  }
+});
+
 test('request and decoder deadlines abort and clean up even when auth transport ignores its signal',async()=>{
   const waiting=deferred(),f=fixture({fetch:()=>waiting.promise});f.panel.refreshMediaArtwork();f.expire();await flush();
   assert.equal(f.calls[0].options.signal.aborted,true);assert.equal(f.panel.mediaArtworkRequests,0);assert.equal(f.calls.length,1);

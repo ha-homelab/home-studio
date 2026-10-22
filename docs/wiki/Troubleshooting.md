@@ -11,6 +11,13 @@ from a release containing **home_floorplan.zip**, restart HA, then add
 The Home Studio sidebar requires an administrator account; family accounts use
 **3D Home** after publication.
 
+If HA says **Unable to load custom panel**, inspect the module request in the
+browser's Network tools first: 401/403 indicates refused access, 404 indicates
+a missing route or file, and a 200 response still needs to contain JavaScript.
+Follow the [custom-panel recovery steps](../home-assistant-editor.md#unable-to-load-custom-panel)
+to check proxy responses, accidental IP bans, package completeness, and Console
+errors without disabling authentication.
+
 For a loading error, use **Retry connection**. Preserve unsaved work with
 **Export JSON** before reloading or switching editors. If setup remains blocked,
 the [separate editor](https://ha-homelab.github.io/home-studio/planner/) is an
