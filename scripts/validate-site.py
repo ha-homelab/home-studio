@@ -152,7 +152,7 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'scripts/build-home-studio.py', 'scripts/test-ha-native.py',
               'scripts/test-ha-generated.py',
               'scripts/test-ha-project-metadata.py', 'scripts/test-ha-core.py', 'scripts/test-ha-ai.py',
-              'scripts/test-native-studio.cjs', 'scripts/test-native-ai.cjs', 'scripts/test-family-view.cjs',
+              'scripts/test-native-studio.cjs', 'scripts/test-native-theme.cjs', 'scripts/test-native-ai.cjs', 'scripts/test-family-view.cjs',
               'custom_components/home_floorplan/validation.py',
               'custom_components/home_floorplan/curtains.py',
               'custom_components/home_floorplan/manifest.json',

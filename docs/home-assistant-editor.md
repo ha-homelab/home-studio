@@ -93,6 +93,19 @@ Use **Item library** to add furniture that is only part of the drawing; you
 can leave **Entity ID (optional)** empty. A lamp model does not create a new
 device in Home Assistant.
 
+## Match your Home Assistant theme
+
+Home Studio follows the active Home Assistant theme, including light and dark
+mode. The toolbars, property fields, dialogs, drawing background, grid, and
+selection outlines use the same palette as HA. Text and selection contrast are
+adjusted for readability.
+
+Change your theme in your Home Assistant profile as usual. The editor updates
+without reloading the drawing or discarding an unfinished field edit. This only
+changes the editing interface: your furniture colors, room materials, saved
+project, and published home's appearance stay as you designed them. The separate
+browser editor keeps its own default appearance.
+
 ## Saving while you work
 
 **Save draft** also applies the value you are currently typing. Unfinished
@@ -274,6 +287,11 @@ publish access tokens, cookies, client addresses, or full private logs in a repo
 - **The drawing tools do not finish loading:** after a short wait, use
   **Retry connection** to reopen the preserved drawing. Retry does not replace
   a recovered drawing with the saved HA version.
+  A stalled initial document navigation is retried automatically inside HA;
+  no external editor or weaker browser security settings are needed. If it
+  still fails, inspect the `/home-floorplan-studio/planner/index.html` request
+  in Network. A pending request with no response differs from a 401/403/404
+  or a script error; report that distinction with the browser version.
   **More options → Export drawing (JSON)** remains available when the host has
   a drawing, including after an editor load error.
 - **The external editor opens a different draft:** this is expected. Export

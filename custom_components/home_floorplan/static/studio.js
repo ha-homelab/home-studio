@@ -9,7 +9,14 @@ const AI_ACTIONS = Object.freeze({
   generate: { fields: ['request_id', 'mode', 'context', 'instructions', 'images', 'schema'], limit: 17 * 1024 * 1024 },
 });
 const STARTUP_TIMEOUT_MS = 15000;
+const EDITOR_NAVIGATION_TIMEOUT_MS = 8000;
+const EDITOR_FETCH_TIMEOUT_MS = 15000;
+const MAX_EDITOR_HTML_BYTES = 128 * 1024;
 const EDITOR_PATH = '/home-floorplan-studio/planner/index.html';
+const EDITOR_CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+const THEME_COLORS = Object.freeze({ background: 'primary-background-color', surface: 'card-background-color',
+  text: 'primary-text-color', muted: 'secondary-text-color', border: 'divider-color',
+  accent: 'primary-color', accentText: 'text-primary-color', error: 'error-color' });
 const clone = value => JSON.parse(JSON.stringify(value));
 const boundedText = (value, max = 128) => typeof value === 'string' ? value.slice(0, max) : '';
 function projectBytes(project) {
@@ -17,6 +24,42 @@ function projectBytes(project) {
   const raw = JSON.stringify(project);
   if (new Blob([raw]).size > MAX_PROJECT_BYTES) throw new Error('Drawing exceeds the 2 MB limit');
   return raw;
+}
+async function editorDocument(response, url, channel) {
+  if (!response.ok || response.redirected || response.url !== url.href ||
+      !/^text\/html(?:\s*;|\s*$)/i.test(response.headers.get('Content-Type') || '') ||
+      Number(response.headers.get('Content-Length')) > MAX_EDITOR_HTML_BYTES) throw new Error('Unexpected editor response');
+  const reader = response.body.getReader(), chunks = []; let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      size += value.byteLength;
+      if (size > MAX_EDITOR_HTML_BYTES) throw new Error('Editor response exceeds the limit');
+      chunks.push(value);
+    }
+  } finally { await reader.cancel().catch(() => {}); }
+  const bytes = new Uint8Array(size); let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  const document = new DOMParser().parseFromString(new TextDecoder('utf-8', { fatal: true }).decode(bytes), 'text/html');
+  const policy = document.querySelectorAll('meta[http-equiv="Content-Security-Policy"]');
+  if (policy.length !== 1 || policy[0].content !== EDITOR_CSP ||
+      document.querySelector('base, meta[http-equiv="refresh"], meta[name="home-studio-bootstrap"]')) throw new Error('Unexpected editor document');
+  // Firefox resolves srcdoc's 'self' to its opaque origin. Spell out the same
+  // trusted origin allowed by the URL document, without widening its CSP scope.
+  policy[0].content = EDITOR_CSP.replaceAll("'self'", url.origin);
+  // Only the known bundled entry points are rebased; module-relative imports
+  // then resolve from these URLs. No base tag or arbitrary URL is accepted.
+  const assets = [['link[rel="stylesheet"]', 'href', ['./editor.css', './floor-navigator.css']],
+    ['script', 'src', ['./ha-bridge.js', './editor.js']]];
+  for (const [selector, attribute, expected] of assets) {
+    const elements = [...document.querySelectorAll(selector)];
+    if (elements.length !== expected.length || elements.some((element, index) =>
+      element.getAttribute(attribute) !== expected[index] || (selector === 'script' && element.type !== 'module'))) throw new Error('Unexpected editor assets');
+    for (const element of elements) element.setAttribute(attribute, new URL(element.getAttribute(attribute), url).href);
+  }
+  const context = document.createElement('meta'); context.name = 'home-studio-bootstrap';
+  context.content = JSON.stringify({ origin: url.origin, channel }); document.head.append(context);
+  return '<!doctype html>\n' + document.documentElement.outerHTML;
 }
 function catalogForEditor(catalog = {}) {
   // Copy an explicit allowlist. State attributes, integration settings, registry
@@ -58,7 +101,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
       :host{display:flex;flex-direction:column;height:100vh;height:100dvh;min-height:640px;overflow:auto;color:var(--primary-text-color,#263737);background:var(--primary-background-color,#f7f8f5);font:14px system-ui,sans-serif}
-      *{box-sizing:border-box}header{padding:14px 20px 10px;border-bottom:1px solid var(--divider-color,#d9e0d9)}h1{font-size:22px;margin:0}p{line-height:1.5;margin:6px 0}.muted{color:var(--secondary-text-color,#5b6d67);font-size:13px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.actions{margin:12px 0 8px}button,a{font:inherit}button,summary{min-height:44px;padding:9px 14px;border:1px solid var(--divider-color,#becbc2);border-radius:7px;background:var(--card-background-color,#fff);color:inherit;cursor:pointer}button.primary{background:#326857;color:white;border-color:#326857}button:disabled,a[aria-disabled=true]{opacity:.5;cursor:default}a{color:var(--primary-color,#326857);text-underline-offset:3px}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #ce8c52;outline-offset:3px}#family{margin-inline-start:auto;display:inline-flex;align-items:center;min-height:44px;padding:8px}#status{min-height:22px;overflow-wrap:anywhere}#status.error{color:var(--error-color,#a53d29)}#more-options{position:relative;margin-inline-start:auto}#more-options summary{list-style:revert}#more-options .options{position:absolute;inset-inline-end:0;top:100%;z-index:5;min-width:260px;max-width:90vw;display:grid;gap:8px;padding:12px;border:1px solid var(--divider-color,#becbc2);border-radius:8px;background:var(--card-background-color,#fff);box-shadow:0 8px 24px #0002}#guide{border-bottom:1px solid var(--divider-color,#d9e0d9);padding:0 20px 10px}#guide summary{border:0;background:transparent;font-weight:600;padding-inline:0}.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.step{padding:10px 12px;border:1px solid var(--divider-color,#d9e0d9);border-radius:9px;background:var(--card-background-color,#fff)}.step h2{font-size:14px;margin:0 0 5px}.step p{font-size:12px;color:var(--secondary-text-color,#5b6d67)}.step button{font-size:12px;min-height:40px;padding:7px 10px}.step-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.step[data-current=true]{border-color:#398472;box-shadow:inset 3px 0 #398472}#next-step{font-size:13px;margin:10px 0 0}#published-view{display:flex;flex:1;min-height:580px;flex-direction:column}.published-heading{padding:12px 20px;background:var(--card-background-color,#fff)}.published-heading h2{font-size:18px;margin:10px 0 4px}.published-heading p{font-size:13px}#published-canvas{display:flex;flex:1;min-height:460px}#published-canvas>home-floorplan-panel{width:100%;height:65vh;min-height:460px}#recovery{padding:14px 22px;background:#fff0d5;color:#4c402c;border-bottom:1px solid #e2c996}iframe{display:block;flex:1;width:100%;border:0;min-height:520px;background:#f6f6f1}#loading{padding:24px}[hidden]{display:none!important}@media(max-width:700px){header{padding:12px}.actions{gap:6px}.actions button{padding:8px 10px;font-size:12px}#guide{padding-inline:12px}.steps{grid-template-columns:1fr}.step{padding:9px 12px}#family{font-size:13px}iframe{min-height:780px}}
+      *{box-sizing:border-box}header{padding:14px 20px 10px;border-bottom:1px solid var(--divider-color,#d9e0d9)}h1{font-size:22px;margin:0}p{line-height:1.5;margin:6px 0}.muted{color:var(--secondary-text-color,#5b6d67);font-size:13px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.actions{margin:12px 0 8px}button,a{font:inherit}button,summary{min-height:44px;padding:9px 14px;border:1px solid var(--divider-color,#becbc2);border-radius:7px;background:var(--card-background-color,#fff);color:inherit;cursor:pointer}button.primary{background:var(--primary-color,#326857);color:var(--home-studio-primary-foreground,var(--text-primary-color,#fff));border-color:var(--primary-color,#326857)}button:disabled,a[aria-disabled=true]{opacity:.5;cursor:default}a{color:var(--primary-color,#326857);text-underline-offset:3px}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var(--primary-text-color,#263737);outline-offset:3px}#family{margin-inline-start:auto;display:inline-flex;align-items:center;min-height:44px;padding:8px}#status{min-height:22px;overflow-wrap:anywhere}#status.error{color:var(--error-color,#a53d29)}#more-options{position:relative;margin-inline-start:auto}#more-options summary{list-style:revert}#more-options .options{position:absolute;inset-inline-end:0;top:100%;z-index:5;min-width:260px;max-width:90vw;display:grid;gap:8px;padding:12px;border:1px solid var(--divider-color,#becbc2);border-radius:8px;background:var(--card-background-color,#fff);box-shadow:var(--ha-card-box-shadow,0 8px 24px #0002)}#guide{border-bottom:1px solid var(--divider-color,#d9e0d9);padding:0 20px 10px}#guide summary{border:0;background:transparent;font-weight:600;padding-inline:0}.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.step{padding:10px 12px;border:1px solid var(--divider-color,#d9e0d9);border-radius:9px;background:var(--card-background-color,#fff)}.step h2{font-size:14px;margin:0 0 5px}.step p{font-size:12px;color:var(--secondary-text-color,#5b6d67)}.step button{font-size:12px;min-height:40px;padding:7px 10px}.step-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.step[data-current=true]{border-color:var(--primary-color,#398472);box-shadow:inset 3px 0 var(--primary-color,#398472)}#next-step{font-size:13px;margin:10px 0 0}#published-view{display:flex;flex:1;min-height:580px;flex-direction:column}.published-heading{padding:12px 20px;background:var(--card-background-color,#fff)}.published-heading h2{font-size:18px;margin:10px 0 4px}.published-heading p{font-size:13px}#published-canvas{display:flex;flex:1;min-height:460px}#published-canvas>home-floorplan-panel{width:100%;height:65vh;min-height:460px}#recovery{padding:14px 22px;background:var(--card-background-color,#fff0d5);color:var(--primary-text-color,#4c402c);border-bottom:1px solid var(--warning-color,var(--divider-color,#e2c996))}iframe{display:block;flex:1;width:100%;border:0;min-height:520px;background:var(--primary-background-color,#f6f6f1)}#loading{padding:24px}[hidden]{display:none!important}@media(max-width:700px){header{padding:12px}.actions{gap:6px}.actions button{padding:8px 10px;font-size:12px}#guide{padding-inline:12px}.steps{grid-template-columns:1fr}.step{padding:9px 12px}#family{font-size:13px}iframe{min-height:780px}}
       </style>
       <header>
         <div class="row"><button id="menu" aria-label="Open navigation menu">☰</button><h1>Home Studio</h1><a id="family" href="/home-floorplan">Open 3D Home</a></div>
@@ -105,13 +148,15 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     const identity = `${value?.user?.id || ''}:${value?.user?.is_admin === true}`;
     if (this._identity !== undefined && this._identity !== identity) this._reset();
     this._identity = identity; this._hass = value;
+    this._scheduleTheme();
     if (this._publishedPanel) this._publishedPanel.hass = value;
     if (this.isConnected && !this._started && value) void this._start();
   }
   _reset() {
     this._closePublishedHome(false);
     this._disposeAi();
-    this._clearStartup(); this._startupFailed = false; this._edits = {};
+    this._clearStartup(); this._clearEditorNavigation(); this._startupFailed = false; this._edits = {};
+    cancelAnimationFrame(this._themeFrame); this._themeFrame = null;
     this._generation++; this._started = false; this._ready = false; this._busy = false;
     this._project = null; this._savedRaw = null; this._pristineRaw = null; this._initializingBlank = false; this._saved = null; this._source = null; this._publishedRevision = null; this.$('guide').hidden = true; this._catalog = null; this._recovery = null; this._channel = null;
     this._frame?.remove(); this._frame = null;
@@ -121,12 +166,65 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   connectedCallback() {
     window.addEventListener('pagehide', this._aiPagehide);
     window.addEventListener('message', this._receive); window.addEventListener('beforeunload', this._beforeUnload);
+    this._scheduleTheme();
     if (this._hass && !this._started) void this._start();
   }
   disconnectedCallback() {
     window.removeEventListener('pagehide', this._aiPagehide);
     this._persist(); window.removeEventListener('message', this._receive); window.removeEventListener('beforeunload', this._beforeUnload);
     this._reset();
+  }
+  _scheduleTheme() {
+    if (!this.isConnected || this._themeFrame != null) return;
+    this._themeFrame = requestAnimationFrame(() => { this._themeFrame = null; this._refreshTheme(); });
+  }
+  _refreshTheme() {
+    if (!this.isConnected) return;
+    const dark = this._hass?.themes?.darkMode;
+    const hostStyle = getComputedStyle(this);
+    const inputs = JSON.stringify([dark, ...Object.values(THEME_COLORS).map(variable => hostStyle.getPropertyValue('--' + variable))]);
+    // Entity state updates normally reuse the theme. Check its raw inputs once
+    // before creating probes or reading pixels; direct CSS changes still apply.
+    if (this._themeInputs === inputs && this._themeSource === this._hass?.themes) return;
+    const defaults = dark === true
+      ? { background: '#111b21', surface: '#1c282e', text: '#e7eef1', muted: '#a7b7bf', border: '#42545d', accent: '#6acdb0', accentText: '#111b21', error: '#ff9e91' }
+      : { background: '#f7f8f5', surface: '#ffffff', text: '#263737', muted: '#5b6d67', border: '#becbc2', accent: '#326857', accentText: '#ffffff', error: '#a53d29' };
+    const probe = document.createElement('span'), colors = {};
+    probe.style.display = 'none'; this.shadowRoot.append(probe);
+    try {
+      for (const [key, variable] of Object.entries(THEME_COLORS)) {
+        probe.style.color = `var(--${variable}, ${defaults[key]})`;
+        colors[key] = getComputedStyle(probe).color;
+      }
+    } finally { probe.remove(); }
+    this._themeInputs = inputs; this._themeSource = this._hass?.themes;
+    const raw = JSON.stringify([dark, colors]); if (raw === this._themeRaw) return;
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+    const context = canvas.getContext('2d', { willReadFrequently: true }); if (!context) return;
+    const normalize = (color, background) => {
+      context.clearRect(0, 0, 1, 1); context.fillStyle = '#000000'; context.fillStyle = color; context.fillRect(0, 0, 1, 1);
+      const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data;
+      return '#' + [red, green, blue].map((value, index) => Math.round(value * alpha / 255 +
+        parseInt(background.slice(1 + index * 2, 3 + index * 2), 16) * (1 - alpha / 255)).toString(16).padStart(2, '0')).join('');
+    };
+    const background = normalize(colors.background, defaults.background);
+    const theme = { mode: typeof dark === 'boolean' ? dark ? 'dark' : 'light'
+      : [1, 3, 5].reduce((sum, index) => sum + parseInt(background.slice(index, index + 2), 16), 0) < 384 ? 'dark' : 'light' };
+    for (const key of Object.keys(THEME_COLORS)) theme[key] = key === 'background' ? background : normalize(colors[key], background);
+    const luminance = color => [1, 3, 5].map(index => {
+      const channel = parseInt(color.slice(index, index + 2), 16) / 255;
+      return channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4;
+    }).reduce((sum, channel, index) => sum + channel * [.2126, .7152, .0722][index], 0);
+    const accentLuminance = luminance(theme.accent);
+    const contrast = color => (Math.max(accentLuminance, luminance(color)) + .05) / (Math.min(accentLuminance, luminance(color)) + .05);
+    // Some HA accents are too light for the theme's usual white button label.
+    const foreground = contrast(theme.accentText) >= 4.5 ? theme.accentText
+      : contrast('#000000') > contrast('#ffffff') ? '#000000' : '#ffffff';
+    this.style.setProperty('--home-studio-primary-foreground', foreground);
+    // Only concrete, bounded colors cross the bridge; no theme CSS, variables,
+    // URLs, or the authenticated hass object are exposed to the child.
+    this._themeRaw = raw; this._theme = theme;
+    if (this._ready) this._send('theme', { theme });
   }
   _key() { return `home-studio.ha-tab-draft.v1:${this._hass?.user?.id || 'unknown'}`; }
   _dirty() { return !!this._project && JSON.stringify(this._project) !== (this._savedRaw ?? this._pristineRaw); }
@@ -244,6 +342,37 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     }
   }
   _clearStartup() { clearTimeout(this._startupTimer); this._startupTimer = null; }
+  _clearEditorNavigation() {
+    clearTimeout(this._editorNavigationTimer); this._editorNavigationTimer = null;
+    clearTimeout(this._editorFetchTimer); this._editorFetchTimer = null;
+    this._editorFetchController?.abort(); this._editorFetchController = null;
+  }
+  async _fallbackEditor(frame, channel, generation) {
+    this._editorNavigationTimer = null;
+    const current = () => this.isConnected && this._frame === frame && this._channel === channel &&
+      this._generation === generation && !this._editorLoading && !this._ready;
+    if (!current()) return;
+    const controller = new AbortController(); this._editorFetchController = controller;
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, EDITOR_FETCH_TIMEOUT_MS);
+    this._editorFetchTimer = timer;
+    try {
+      // The parent fetch carries only this origin's normal cookies. Only this
+      // fixed bundled HTML is loaded; no HA token enters the sandbox.
+      const url = new URL(EDITOR_PATH, location.origin);
+      const response = await fetch(url, { credentials: 'same-origin', redirect: 'error', cache: 'no-store', signal: controller.signal });
+      const html = await editorDocument(response, url, channel);
+      if (current() && !controller.signal.aborted) frame.srcdoc = html;
+    } catch {
+      if (current() && (timedOut || !controller.signal.aborted)) {
+        this._startupFailed = true; this.$('retry').hidden = false;
+        this._status(timedOut ? 'Loading the local drawing tools timed out. Retry connection to try again.' : 'The drawing tools have not connected. You can keep waiting or retry.', true); this._buttons();
+      }
+    } finally {
+      clearTimeout(timer); if (this._editorFetchTimer === timer) this._editorFetchTimer = null;
+      if (this._editorFetchController === controller) this._editorFetchController = null;
+    }
+  }
   _watchStartup(message) {
     this._clearStartup();
     this._startupTimer = setTimeout(() => {
@@ -258,7 +387,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   }
   _failStartup(message, allowRetry = true, error = true) {
     this._disposeAi();
-    this._clearStartup(); this._generation++; this._startupFailed = allowRetry; this._ready = false; this._busy = false;
+    this._clearStartup(); this._clearEditorNavigation(); this._generation++; this._startupFailed = allowRetry; this._ready = false; this._busy = false;
     this._frame?.remove(); this._frame = null; this._channel = null;
     // A connection failure must not hide a recovery copy already in this tab.
     if (!this._project && this._recovery) { this._project = clone(this._recovery.project); this._revision = this._recovery.revision; }
@@ -331,6 +460,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   }
   _openEditor(project) {
     this._disposeAi(); this._aiSequence = 0;
+    this._clearEditorNavigation(); this._editorLoading = false;
     this._ready = false; this._sequence = 0; this._edits = {}; this._startupFailed = false; this.$('retry').hidden = true;
     this._project = project ? clone(project) : null;
     this._pristineRaw = null; this._initializingBlank = !project && !this._savedRaw;
@@ -342,6 +472,8 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     frame.referrerPolicy = 'no-referrer';
     const url = new URL(this._editorUrl); url.searchParams.set('embed', 'home-assistant'); url.hash = `ha-studio=${this._channel}`;
     frame.src = url.href; this.shadowRoot.append(frame); this.$('loading').hidden = true;
+    const channel = this._channel, generation = this._generation;
+    this._editorNavigationTimer = setTimeout(() => void this._fallbackEditor(frame, channel, generation), EDITOR_NAVIGATION_TIMEOUT_MS);
     this._watchStartup('The drawing tools are taking longer than expected. You can keep waiting or retry.');
     this._status('Opening the drawing tools…'); this._buttons();
   }
@@ -353,8 +485,12 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   _onMessage(event) {
     const data = event.data;
     if (event.source !== this._frame?.contentWindow || event.origin !== 'null' || data?.protocol !== STUDIO_PROTOCOL || data.channel !== this._channel) return;
-    if (data.type === 'ready' && !this._ready) this._send('initialize', { project: this._project, catalog: this._catalog, source: this._source,
-      capabilities: { ai: this._saved?.capabilities?.ai === true, architecture_editing: !this._source } });
+    if (data.type === 'loading' || data.type === 'ready') { this._editorLoading = true; this._clearEditorNavigation(); }
+    if (data.type === 'ready' && !this._ready) {
+      this._refreshTheme();
+      this._send('initialize', { project: this._project, catalog: this._catalog, source: this._source, theme: this._theme,
+        capabilities: { ai: this._saved?.capabilities?.ai === true, architecture_editing: !this._source } });
+    }
     if (data.type === 'published-preview') { void this._showPublishedHome(); return; }
     if (data.type === 'ai-request') { void this._aiRequest(data); return; }
     if (data.type === 'ai-abort') { this._aiPending.get(data.requestId)?.controller.abort(); return; }
@@ -371,8 +507,11 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     if (data.type !== 'snapshot' || !Number.isInteger(data.sequence) || data.sequence <= this._sequence) return;
     try {
       const raw = projectBytes(data.project);
+      const initializing = !this._ready;
       if (this._initializingBlank) { this._pristineRaw = raw; this._initializingBlank = false; }
       this._sequence = data.sequence; this._project = clone(data.project); this._ready = true;
+      // A HA theme change may arrive while the child's initialize is in flight.
+      if (initializing && this._theme) this._send('theme', { theme: this._theme });
       this._clearStartup(); this._startupFailed = false; this.$('retry').hidden = true;
       this._edits = { pending: data.edits?.pending === true, invalid: data.edits?.invalid === true, field: boundedText(data.edits?.field) };
       this._persist(); this._buttons();

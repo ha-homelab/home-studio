@@ -40,6 +40,73 @@ const BUILD_COMMAND = 'python3 scripts/build-planner-project.py --project /path/
 const LABELS = { furniture: 'Furniture', lamp: 'Lamp', chandelier: 'Ceiling light', tv: 'TV / display', appliance: 'Appliance', switch: 'Switch', outlet: 'Outlet', sensor: 'Sensor' };
 const COLORS = { floor: '#e7dac2', tile: '#e0e8df', deck: '#d8dfbe', furniture: '#96aca6', lamp: '#d9ae68', chandelier: '#d9ae68', tv: '#677d89', appliance: '#a1abb0', switch: '#b4c39d', outlet: '#b4c39d', sensor: '#c4b09a' };
 const HINTS = { select: 'Drag a shape to move, or empty space to pan.', room: 'Drag a rectangle to create a room. Add walls separately.', wall: 'Drag from one wall endpoint to the other.', door: 'Click a wall to cut a door opening.', window: 'Click a wall to cut a window opening.', item: 'Click to place your item. Refine its position in the inspector.' };
+// Presentation only: a host theme never changes the drawing or its materials.
+const THEME_COLORS = ['background', 'surface', 'text', 'muted', 'border', 'accent', 'accentText', 'error'];
+const PLAN_DEFAULTS = { background: '#f2f4ed', grid: '#e2e7dc', axis: '#c5d0bd', dots: '#dde4d6', room: COLORS, roomBorder: '#b4bba3', roomText: '#697c63', roomArea: '#8d9a7c', selection: '#4a8073', handle: '#fff', wall: '#778776', wallSelection: '#3a7b6a', openingSelection: '#df935b', window: '#75a8ae', door: '#839980', itemSelection: '#bd783c', itemText: '#5e776a', drawing: '#3c8c79', drawingText: '#2c7663', candidate: '#8051ad', scale: '#9bab8f', scaleText: '#8a9b7e' };
+let planColors = PLAN_DEFAULTS, hostThemeKey = '';
+const colorChannels = hex => [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16));
+function mixColor(a, b, amount) {
+  const target = colorChannels(b);
+  return '#' + colorChannels(a).map((channel, index) => Math.round(channel + (target[index] - channel) * amount).toString(16).padStart(2, '0')).join('');
+}
+function luminance(color) {
+  const rgb = colorChannels(color).map(channel => channel / 255).map(channel => channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4);
+  return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722;
+}
+function contrastColor(color, backgrounds, minimum) {
+  const contrast = value => Math.min(...backgrounds.map(background => {
+    const a = luminance(value), b = luminance(background);
+    return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+  }));
+  if (contrast(color) >= minimum) return color;
+  const endpoint = contrast('#ffffff') > contrast('#000000') ? '#ffffff' : '#000000';
+  for (let step = 1; step <= 20; step++) {
+    const adjusted = mixColor(color, endpoint, step / 20);
+    if (contrast(adjusted) >= minimum) return adjusted;
+  }
+  return endpoint;
+}
+function applyHostTheme(theme) {
+  if (!haContext || !theme || typeof theme !== 'object' || Array.isArray(theme)
+      || !Object.hasOwn(theme, 'mode') || !['light', 'dark'].includes(theme.mode) || Object.keys(theme).length !== THEME_COLORS.length + 1
+      || !THEME_COLORS.every(key => Object.hasOwn(theme, key) && typeof theme[key] === 'string' && /^#[0-9a-f]{6}$/i.test(theme[key]))) return;
+  const key = JSON.stringify([theme.mode, ...THEME_COLORS.map(name => theme[name])]);
+  if (key === hostThemeKey) return;
+  hostThemeKey = key;
+  const surfaces = [theme.background, theme.surface];
+  const accent = contrastColor(theme.accent, surfaces, 3);
+  const selectedBackground = mixColor(theme.surface, accent, .13);
+  const hover = mixColor(theme.surface, theme.text, .08);
+  const textSurfaces = [...surfaces, selectedBackground, hover];
+  const text = contrastColor(theme.text, textSurfaces, 4.5);
+  const muted = contrastColor(theme.muted, textSurfaces, 4.5);
+  const errorBackground = mixColor(theme.surface, theme.error, .1);
+  const variables = {
+    background: theme.background, surface: theme.surface, text, muted,
+    border: contrastColor(theme.border, surfaces, 1.5), accent, link: contrastColor(theme.accent, textSurfaces, 4.5),
+    'accent-text': contrastColor(theme.accentText, [accent], 4.5),
+    hover, selected: selectedBackground,
+    error: contrastColor(theme.error, [...surfaces, errorBackground], 4.5),
+    'error-bg': errorBackground, shadow: '#00000030', backdrop: '#00000080', canvas: theme.background,
+  };
+  const room = Object.fromEntries(['floor', 'tile', 'deck'].map(material => [material, mixColor(theme.background, COLORS[material], theme.mode === 'dark' ? .16 : .45)]));
+  const canvasSurfaces = [theme.background, ...Object.values(room)];
+  const selectionColor = contrastColor(accent, canvasSurfaces, 3);
+  planColors = {
+    background: theme.background, grid: mixColor(theme.background, text, .13), axis: mixColor(theme.background, text, .3), dots: mixColor(theme.background, text, .1), room,
+    roomBorder: contrastColor(theme.border, canvasSurfaces, 2), roomText: contrastColor(text, canvasSurfaces, 4.5), roomArea: contrastColor(muted, canvasSurfaces, 4.5),
+    selection: selectionColor, handle: theme.surface, wall: contrastColor(muted, canvasSurfaces, 3), wallSelection: selectionColor,
+    openingSelection: selectionColor, window: contrastColor('#75a8ae', canvasSurfaces, 3), door: contrastColor('#839980', canvasSurfaces, 3),
+    itemSelection: selectionColor, itemText: contrastColor(text, canvasSurfaces, 4.5), drawing: selectionColor, drawingText: contrastColor(text, canvasSurfaces, 4.5),
+    candidate: contrastColor('#8051ad', canvasSurfaces, 3), scale: contrastColor(muted, canvasSurfaces, 3), scaleText: contrastColor(muted, canvasSurfaces, 4.5),
+  };
+  variables.selection = selectionColor;
+  for (const [name, value] of Object.entries(variables)) document.documentElement.style.setProperty(`--studio-${name}`, value);
+  document.documentElement.dataset.haTheme = theme.mode;
+  document.documentElement.style.colorScheme = theme.mode;
+  if (renderer) renderer.setClearColor(planColors.background);
+  requestCanvasRender();
+}
 const planCanvas = $('plan-canvas'), ctx = planCanvas.getContext('2d', { alpha: false });
 let project = blankProject(), activeFloorId, selection = null, tool = 'select', view = 'plan', history = [], future = [], drag = null;
 let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, spaceHeld = false, saveFailed = false, previewDirty = true;
@@ -634,38 +701,38 @@ function planShapePath(shape, width, depth) {
 function renderPlan() {
   if (view !== 'plan' || canvasSuspended || document.hidden) return;
   cancelCanvasRender();
-  ctx.clearRect(0, 0, size.width, size.height); ctx.fillStyle = '#f2f4ed'; ctx.fillRect(0, 0, size.width, size.height);
+  ctx.clearRect(0, 0, size.width, size.height); ctx.fillStyle = planColors.background; ctx.fillRect(0, 0, size.width, size.height);
   const top = toWorld([0, 0]), bottom = toWorld([size.width, size.height]), gridStep = map.scale > 22 ? 1 : 5;
   ctx.lineWidth = 1;
-  for (let x = Math.floor(top[0] / gridStep) * gridStep; x <= bottom[0]; x += gridStep) { const px = Math.round(toScreen([x, 0])[0]) + .5; ctx.strokeStyle = x === 0 ? '#c5d0bd' : '#e2e7dc'; ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, size.height); ctx.stroke(); }
-  for (let z = Math.floor(top[1] / gridStep) * gridStep; z <= bottom[1]; z += gridStep) { const py = Math.round(toScreen([0, z])[1]) + .5; ctx.strokeStyle = z === 0 ? '#c5d0bd' : '#e2e7dc'; ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(size.width, py); ctx.stroke(); }
-  if (map.scale >= 44) { ctx.fillStyle = '#dde4d6'; for (let x = Math.floor(top[0]); x <= bottom[0]; x += .25) for (let z = Math.floor(top[1]); z <= bottom[1]; z += .25) { const [px, py] = toScreen([x, z]); ctx.fillRect(px, py, 1, 1); } }
+  for (let x = Math.floor(top[0] / gridStep) * gridStep; x <= bottom[0]; x += gridStep) { const px = Math.round(toScreen([x, 0])[0]) + .5; ctx.strokeStyle = x === 0 ? planColors.axis : planColors.grid; ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, size.height); ctx.stroke(); }
+  for (let z = Math.floor(top[1] / gridStep) * gridStep; z <= bottom[1]; z += gridStep) { const py = Math.round(toScreen([0, z])[1]) + .5; ctx.strokeStyle = z === 0 ? planColors.axis : planColors.grid; ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(size.width, py); ctx.stroke(); }
+  if (map.scale >= 44) { ctx.fillStyle = planColors.dots; for (let x = Math.floor(top[0]); x <= bottom[0]; x += .25) for (let z = Math.floor(top[1]); z <= bottom[1]; z += .25) { const [px, py] = toScreen([x, z]); ctx.fillRect(px, py, 1, 1); } }
   const f = displayedFloor();
   for (const r of f.rooms) {
     const active = selection?.kind === 'rooms' && selection.id === r.id;
-    path(r.polygon, true); ctx.fillStyle = COLORS[r.material]; ctx.globalAlpha = active ? .85 : .65; ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = active ? '#4a8073' : '#b4bba3'; ctx.lineWidth = active ? 2 : 1; ctx.setLineDash(active ? [5, 3] : []); ctx.stroke(); ctx.setLineDash([]);
+    path(r.polygon, true); ctx.fillStyle = planColors.room[r.material]; ctx.globalAlpha = active ? .85 : .65; ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = active ? planColors.selection : planColors.roomBorder; ctx.lineWidth = active ? 2 : 1; ctx.setLineDash(active ? [5, 3] : []); ctx.stroke(); ctx.setLineDash([]);
     const centroid = r.polygon.reduce((a, p) => [a[0] + p[0] / r.polygon.length, a[1] + p[1] / r.polygon.length], [0, 0]), [cx, cy] = toScreen(centroid);
-    if (map.scale > 15) { ctx.textAlign = 'center'; ctx.fillStyle = '#697c63'; ctx.font = '600 11px -apple-system, sans-serif'; ctx.fillText(r.name.length > 25 ? r.name.slice(0, 24) + '…' : r.name, cx, cy - 3); ctx.font = '9px -apple-system, sans-serif'; ctx.fillStyle = '#8d9a7c'; ctx.fillText(`${Math.abs(signedArea(r.polygon)).toFixed(1)} m²`, cx, cy + 12); }
-    if (active) for (const p of r.polygon) { const [x, y] = toScreen(p); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#4a8073'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    if (map.scale > 15) { ctx.textAlign = 'center'; ctx.fillStyle = planColors.roomText; ctx.font = '600 11px -apple-system, sans-serif'; ctx.fillText(r.name.length > 25 ? r.name.slice(0, 24) + '…' : r.name, cx, cy - 3); ctx.font = '9px -apple-system, sans-serif'; ctx.fillStyle = planColors.roomArea; ctx.fillText(`${Math.abs(signedArea(r.polygon)).toFixed(1)} m²`, cx, cy + 12); }
+    if (active) for (const p of r.polygon) { const [x, y] = toScreen(p); ctx.fillStyle = planColors.handle; ctx.strokeStyle = planColors.selection; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
   }
   for (const w of f.walls) {
     const active = selection?.kind === 'walls' && selection.id === w.id;
-    path([w.start, w.end]); ctx.strokeStyle = active ? '#3a7b6a' : '#778776'; ctx.lineWidth = Math.max(3, w.thickness_m * map.scale); ctx.lineCap = 'butt'; ctx.stroke();
-    if (active) { for (const [i, p] of [w.start, w.end].entries()) { const [x, y] = toScreen(p); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#3a7b6a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#3a7b6a'; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(t(i ? 'end' : 'start'), x + 7, y - 7); } }
+    path([w.start, w.end]); ctx.strokeStyle = active ? planColors.wallSelection : planColors.wall; ctx.lineWidth = Math.max(3, w.thickness_m * map.scale); ctx.lineCap = 'butt'; ctx.stroke();
+    if (active) { for (const [i, p] of [w.start, w.end].entries()) { const [x, y] = toScreen(p); ctx.fillStyle = planColors.handle; ctx.strokeStyle = planColors.wallSelection; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.fillStyle = planColors.wallSelection; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(t(i ? 'end' : 'start'), x + 7, y - 7); } }
   }
   for (const o of f.openings) {
     const w = f.walls.find(wall => wall.id === o.wall_id); if (!w) continue;
     const len = distance(w.start, w.end), ux = (w.end[0] - w.start[0]) / len, uz = (w.end[1] - w.start[1]) / len;
     const start = [w.start[0] + ux * o.offset_m, w.start[1] + uz * o.offset_m], end = [start[0] + ux * o.width_m, start[1] + uz * o.width_m];
     const active = selection?.kind === 'openings' && selection.id === o.id;
-    path([start, end]); ctx.lineWidth = Math.max(6, w.thickness_m * map.scale + 2); ctx.strokeStyle = '#f2f4ed'; ctx.stroke();
-    ctx.strokeStyle = active ? '#df935b' : o.type === 'window' ? '#75a8ae' : '#839980'; ctx.lineWidth = active ? 3 : 1.5;
+    path([start, end]); ctx.lineWidth = Math.max(6, w.thickness_m * map.scale + 2); ctx.strokeStyle = planColors.background; ctx.stroke();
+    ctx.strokeStyle = active ? planColors.openingSelection : o.type === 'window' ? planColors.window : planColors.door; ctx.lineWidth = active ? 3 : 1.5;
     if (o.type === 'window') { path([start, end]); ctx.stroke(); const shift = .035; path([[start[0] - uz * shift, start[1] + ux * shift], [end[0] - uz * shift, end[1] + ux * shift]]); ctx.stroke(); }
     else if (o.type === 'door') {
       const [x, y] = toScreen(start), angle = Math.atan2(uz, ux), radius = o.width_m * map.scale;
       ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - Math.sin(angle) * radius, y + Math.cos(angle) * radius); ctx.stroke(); ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(x, y, radius, angle, angle + Math.PI / 2); ctx.stroke(); ctx.setLineDash([]);
     } else { ctx.setLineDash([3, 3]); path([start, end]); ctx.stroke(); ctx.setLineDash([]); }
-    if (active) { path([start, end]); ctx.lineWidth = 7; ctx.strokeStyle = '#df935b55'; ctx.stroke(); }
+    if (active) { path([start, end]); ctx.lineWidth = 7; ctx.strokeStyle = planColors.openingSelection + '55'; ctx.stroke(); }
   }
   // Draw individual top surfaces by elevation, so a newly placed rug remains
   // below furniture and a raised lamp stays above a table regardless of order.
@@ -688,21 +755,26 @@ function renderPlan() {
   if (activeItem) {
     const [x, y] = toScreen([activeItem.position_m.x, activeItem.position_m.z]);
     const w = Math.max(7, activeItem.dimensions_m.width * map.scale), d = Math.max(7, activeItem.dimensions_m.depth * map.scale);
-    ctx.save(); ctx.translate(x, y); ctx.rotate(-activeItem.rotation_deg * Math.PI / 180); ctx.strokeStyle = '#bd783c'; ctx.lineWidth = 2;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(-activeItem.rotation_deg * Math.PI / 180);
+    if (hostThemeKey) {
+      ctx.strokeStyle = planColors.background; ctx.lineWidth = 6; ctx.strokeRect(-w / 2 - 5, -d / 2 - 5, w + 10, d + 10);
+      ctx.strokeStyle = planColors.itemSelection; ctx.lineWidth = 2; ctx.strokeRect(-w / 2 - 5, -d / 2 - 5, w + 10, d + 10);
+    }
+    ctx.strokeStyle = planColors.itemSelection; ctx.lineWidth = 2;
     if (activeItem.model_id) { ctx.setLineDash([4, 3]); ctx.strokeRect(-w / 2 - 3, -d / 2 - 3, w + 6, d + 6); }
     else if (['chandelier', 'lamp', 'sensor'].includes(activeItem.type)) { ctx.beginPath(); ctx.ellipse(0, 0, w / 2, d / 2, 0, 0, Math.PI * 2); ctx.stroke(); }
     else ctx.strokeRect(-w / 2, -d / 2, w, d);
-    ctx.restore(); ctx.fillStyle = '#5e776a'; ctx.textAlign = 'center'; ctx.font = '10px sans-serif'; ctx.fillText(activeItem.name, x, y + Math.max(activeItem.dimensions_m.width, activeItem.dimensions_m.depth) * map.scale / 2 + 15);
+    ctx.restore(); ctx.fillStyle = planColors.itemText; ctx.textAlign = 'center'; ctx.font = '10px sans-serif'; ctx.fillText(activeItem.name, x, y + Math.max(activeItem.dimensions_m.width, activeItem.dimensions_m.depth) * map.scale / 2 + 15);
   }
   if (drag?.kind === 'draw') {
-    const a = drag.startWorld, b = drag.endWorld; ctx.strokeStyle = '#3c8c79'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
-    if (tool === 'room') { path([a, [b[0], a[1]], b, [a[0], b[1]]], true); ctx.fillStyle = '#639e8122'; ctx.fill(); ctx.stroke(); }
+    const a = drag.startWorld, b = drag.endWorld; ctx.strokeStyle = planColors.drawing; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+    if (tool === 'room') { path([a, [b[0], a[1]], b, [a[0], b[1]]], true); ctx.fillStyle = hostThemeKey ? planColors.drawing + '22' : '#639e8122'; ctx.fill(); ctx.stroke(); }
     else { path([a, b]); ctx.stroke(); } ctx.setLineDash([]);
-    const p = toScreen(b); ctx.fillStyle = '#2c7663'; ctx.textAlign = 'left'; ctx.font = '11px sans-serif'; ctx.fillText(tool === 'room' ? `${Math.abs(b[0] - a[0]).toFixed(2)} × ${Math.abs(b[1] - a[1]).toFixed(2)} m` : `${distance(a, b).toFixed(2)} m`, p[0] + 12, p[1] - 12);
+    const p = toScreen(b); ctx.fillStyle = planColors.drawingText; ctx.textAlign = 'left'; ctx.font = '11px sans-serif'; ctx.fillText(tool === 'room' ? `${Math.abs(b[0] - a[0]).toFixed(2)} × ${Math.abs(b[1] - a[1]).toFixed(2)} m` : `${distance(a, b).toFixed(2)} m`, p[0] + 12, p[1] - 12);
   }
   if (candidatePreview) {
     const accepted = floor();
-    ctx.save(); ctx.strokeStyle = '#8051ad'; ctx.lineWidth = 3; ctx.setLineDash([5, 4]);
+    ctx.save(); ctx.strokeStyle = planColors.candidate; ctx.lineWidth = 3; ctx.setLineDash([5, 4]);
     for (const room of f.rooms) if (!accepted.rooms.some(r => r.id === room.id)) { path(room.polygon, true); ctx.stroke(); }
     for (const item of f.items) if (!accepted.items.some(i => i.id === item.id)) {
       const [x, y] = toScreen([item.position_m.x, item.position_m.z]);
@@ -713,7 +785,7 @@ function renderPlan() {
   }
   // A fixed metric scale makes the current zoom unambiguous.
   const scaleMeters = map.scale < 20 ? 5 : map.scale > 150 ? .5 : 1, sx = 20, sy = size.height - 76;
-  ctx.strokeStyle = '#9bab8f'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sx, sy - 3); ctx.lineTo(sx, sy + 3); ctx.moveTo(sx, sy); ctx.lineTo(sx + scaleMeters * map.scale, sy); ctx.moveTo(sx + scaleMeters * map.scale, sy - 3); ctx.lineTo(sx + scaleMeters * map.scale, sy + 3); ctx.stroke(); ctx.fillStyle = '#8a9b7e'; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(t('{scale} m · grid {grid} m', { scale: scaleMeters, grid: gridStep }), sx, sy - 9);
+  ctx.strokeStyle = planColors.scale; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sx, sy - 3); ctx.lineTo(sx, sy + 3); ctx.moveTo(sx, sy); ctx.lineTo(sx + scaleMeters * map.scale, sy); ctx.moveTo(sx + scaleMeters * map.scale, sy - 3); ctx.lineTo(sx + scaleMeters * map.scale, sy + 3); ctx.stroke(); ctx.fillStyle = planColors.scaleText; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(t('{scale} m · grid {grid} m', { scale: scaleMeters, grid: gridStep }), sx, sy - 9);
 }
 function wallAt(point) { return floor().walls.map(w => ({ wall: w, hit: projectOnWall(point, w) })).filter(o => o.hit.distance < Math.max(.1, 10 / map.scale)).sort((a, b) => a.hit.distance - b.hit.distance)[0]; }
 function hitTest(point) {
@@ -831,7 +903,7 @@ function previewRenderProfile(gl) {
 function initPreview() {
   if (renderer || previewUnavailable) return;
   try {
-    renderer = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: true, alpha: false }); previewRendererDisposed = false; renderer.setClearColor(0xf2f4ed); renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: true, alpha: false }); previewRendererDisposed = false; renderer.setClearColor(planColors.background); renderer.outputColorSpace = THREE.SRGBColorSpace;
     const profile = previewRenderProfile(renderer.getContext()); previewPixels = profile.pixels; previewInstancing = profile.instanceCatalog; previewDiffuseLighting = profile.diffuseLighting;
     renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = .9; renderer.shadowMap.enabled = true; renderer.shadowMap.type = previewDiffuseLighting ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
     scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(40, 1, .02, 1500); scene.add(new THREE.HemisphereLight(0xffffff, 0xc7cfbc, 1.7));
@@ -1475,6 +1547,7 @@ export const editorBridge = Object.freeze({
 // drafts never touch the standalone localStorage keys or receive HA credentials.
 if (haContext) {
   connectHost(haContext, {
+    theme: applyHostTheme,
     initialize(value, catalog, aiTransport, policy, hostActions) {
       const next = value || blankProject(); validateProject(next); serializeProject(next);
       installSourcePolicy(next, policy, hostActions);

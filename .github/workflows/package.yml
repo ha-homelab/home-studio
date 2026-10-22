@@ -111,6 +111,7 @@ jobs:
         run: |
           for engine in chromium firefox webkit; do
             BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-studio.cjs || exit 1
+            BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-theme.cjs || exit 1
             BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-ai.cjs || exit 1
           done
           node --test scripts/test-family-view.cjs

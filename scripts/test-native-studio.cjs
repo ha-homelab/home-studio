@@ -40,8 +40,178 @@ async function openMoreOptions(page) {
   const details=page.locator('#more-options');
   if (await details.getAttribute('open')===null) await details.getByText('More options',{exact:true}).click();
 }
+// Exercise the document-navigation fallback with real opaque frames and network
+// responses. The fallback must not change the editor's credential boundary.
+async function testDocumentFallback(context, origin, project, errors) {
+  const editorPath='/home-floorplan-studio/planner/index.html';
+  const makePage=async(pageErrors=errors)=>{
+    const page=await context.newPage(); page.setDefaultTimeout(15000); page.on('pageerror',error=>pageErrors.push(String(error)));
+    await page.addInitScript(project=>{
+      if(window.parent===window)sessionStorage.setItem('fixture-server',JSON.stringify({project,revision:2,published_revision:2}));
+    },project);
+    await page.clock.install();
+    return page;
+  };
+  const fallback=await makePage();
+  let fallbackRequests=0;
+  await fallback.route('**/planner/index.html*',async route=>{
+    if(route.request().isNavigationRequest())return route.abort();
+    assert.equal(route.request().url(),origin+editorPath,'Fallback must fetch only the fixed same-origin editor document');
+    assert.equal(route.request().headers().authorization,undefined,'Fallback must not inject the HA bearer token');
+    fallbackRequests++; await route.continue();
+  });
+  await fallback.goto(origin+'/fixture',{waitUntil:'domcontentloaded'});
+  await fallback.waitForFunction(()=>window.host?._frame);
+  assert.equal(await fallback.evaluate(()=>{
+    const host=window.host, data={protocol:'home-studio-editor-v1',channel:host._channel,type:'loading'};
+    for(const event of [
+      {source:host._frame.contentWindow,origin:location.origin,data},
+      {source:window,origin:'null',data},
+      {source:host._frame.contentWindow,origin:'null',data:{...data,channel:'wrong-channel'}},
+    ])host._onMessage(event);
+    return !host._editorLoading&&host._editorNavigationTimer!==null;
+  }),true,'Untrusted loading messages must not suppress the navigation fallback');
+  await fallback.clock.fastForward(8001);
+  await fallback.waitForFunction(()=>window.host._ready);
+  assert.equal(fallbackRequests,1,'A stalled initial document should use one bounded fallback fetch');
+  assert.equal(await fallback.locator('iframe').count(),1);
+  const child=await fallback.locator('iframe').elementHandle().then(handle=>handle.contentFrame());
+  assert(child,'Fallback mounted an editor document');
+  assert.equal(child.url(),'about:srcdoc');
+  assert.equal(await child.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content'),
+    `default-src 'none'; script-src ${origin}; style-src ${origin} 'unsafe-inline'; img-src ${origin} data: blob:; font-src ${origin}; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`,
+    'Fallback CSP must allow only the original asset origin and keep its other restrictions');
+  assert.deepEqual(await child.evaluate(()=>window.planner.getProject()),project);
+  assert.deepEqual(await child.evaluate(()=>({
+    origin:window.origin,
+    parent:(()=>{try{return parent.document.body.innerHTML;}catch{return 'isolated';}})(),
+    storage:(()=>{try{return localStorage.length;}catch{return 'isolated';}})(),
+  })),{origin:'null',parent:'isolated',storage:'isolated'});
+  assert.equal(await fallback.locator('iframe').getAttribute('sandbox'),'allow-scripts allow-downloads allow-modals allow-forms');
+  assert.doesNotMatch(await fallback.locator('iframe').getAttribute('srcdoc'),/NEVER_SEND_TOKEN|PRIVATE_CATALOG|PRIVATE_ATTRIBUTE/);
+  await child.locator('#project-title').fill('Edited after document fallback');
+  await child.locator('#project-title').press('Tab');
+  await fallback.locator('#save').click();
+  await fallback.waitForFunction(()=>!window.host._busy&&window.server.project.title==='Edited after document fallback');
+  assert.equal(await fallback.evaluate(()=>window.server.revision),3);
+  await fallback.clock.fastForward(16000);
+  assert.equal(fallbackRequests,1,'A ready fallback must not enter a replacement loop');
+  assert.equal(await fallback.evaluate(()=>window.host._ready),true);
+  const contexts=await fallback.evaluate(async()=>{
+    const {embeddedContext}=await import('/home-floorplan-studio/planner/ha-bridge.js');
+    const channel='a'.repeat(32), valid={origin:location.origin,channel};
+    const context=(href,entries,top=false)=>{
+      const document=new DOMParser().parseFromString('<html><head></head></html>','text/html');
+      for(const value of entries){const meta=document.createElement('meta');meta.name='home-studio-bootstrap';meta.content=typeof value==='string'?value:JSON.stringify(value);document.head.append(meta);}
+      const win={location:{href},document,parent:{}};if(top)win.parent=win;
+      return embeddedContext(win);
+    };
+    return {
+      valid:context('about:srcdoc',[valid]),
+      rejected:[context('about:srcdoc',[]),context('about:srcdoc',[valid,valid]),context('about:srcdoc',['invalid JSON']),
+        context('about:srcdoc',[{...valid,origin:location.origin+'/path'}]),context('about:srcdoc',[{...valid,origin:'null'}]),
+        context('about:srcdoc',[{...valid,origin:'file:///tmp/editor'}]),context('about:srcdoc',[{...valid,channel:'bad'}]),
+        context('about:blank',[valid]),context('about:srcdoc',[valid],true)],
+      direct:context(location.origin+'/planner/index.html?embed=home-assistant#ha-studio='+channel,[{origin:'https://untrusted.invalid',channel:'b'.repeat(32)}]),
+    };
+  });
+  assert.deepEqual(contexts.valid,{origin,channel:'a'.repeat(32)});
+  assert.deepEqual(contexts.rejected,Array(9).fill(null),'Only valid srcdoc bootstrap metadata may define an embedded context');
+  assert.deepEqual(contexts.direct,contexts.valid,'A direct editor URL must ignore bootstrap metadata');
+  await fallback.close();
+  // A fetch that never returns is bounded; explicit Retry still opens the draft.
+  const timed=await makePage(); let timedRoute, timedNavigations=0;
+  await timed.route('**/planner/index.html*',route=>{
+    if(route.request().isNavigationRequest())return ++timedNavigations===1?route.abort():route.continue();
+    timedRoute=route;
+  });
+  await timed.goto(origin+'/fixture',{waitUntil:'domcontentloaded'});
+  await timed.waitForFunction(()=>window.host?._frame);
+  const timedRequest=timed.waitForRequest(request=>request.url()===origin+editorPath&&!request.isNavigationRequest());
+  await timed.clock.fastForward(8001); await timedRequest;
+  await timed.waitForFunction(()=>!!window.host._editorFetchController);
+  const timedAbort=timed.waitForEvent('requestfailed',request=>request.url()===origin+editorPath&&!request.isNavigationRequest());
+  await timed.clock.fastForward(15001); await timedAbort;
+  await timed.waitForFunction(()=>!window.host._editorFetchController);
+  assert.match(await timed.locator('#status').innerText(),/timed out/);
+  assert.equal(await timed.locator('#retry').isVisible(),true);
+  assert.equal(await timed.locator('iframe').getAttribute('srcdoc'),null);
+  assert.deepEqual(await timed.evaluate(()=>window.host._project),project);
+  assert(timedRoute,'A stalled fallback request was observed');
+  await timedRoute.fulfill({status:200,contentType:'text/html',body:fs.readFileSync(path.join(root,'planner/index.html'),'utf8')});
+  await timed.locator('#retry').click(); await timed.waitForFunction(()=>window.host._ready);
+  assert.equal(await timed.locator('iframe').getAttribute('srcdoc'),null,'Retry must use a fresh direct document');
+  await timed.close();
+  // A response from the old session must never replace the new editor.
+  const stale=await makePage(); let heldRoute, navigationCount=0;
+  await stale.route('**/planner/index.html*',async route=>{
+    if(route.request().isNavigationRequest())return ++navigationCount===1?route.abort():route.continue();
+    heldRoute=route;
+  });
+  await stale.goto(origin+'/fixture',{waitUntil:'domcontentloaded'});
+  await stale.waitForFunction(()=>window.host?._frame);
+  const staleRequest=stale.waitForRequest(request=>request.url()===origin+editorPath&&!request.isNavigationRequest());
+  await stale.clock.fastForward(8001); await staleRequest;
+  // The route handler runs after the request event; wait for its observable hold.
+  await stale.waitForFunction(()=>!!window.host._editorFetchController);
+  const aborted=stale.waitForEvent('requestfailed',request=>request.url()===origin+editorPath&&!request.isNavigationRequest());
+  await stale.evaluate(()=>{window.host.remove();document.body.append(window.host);});
+  await aborted; await stale.waitForFunction(()=>window.host._ready);
+  await stale.evaluate(()=>{window.replacementEditor=window.host._frame;window.replacementChannel=window.host._channel;});
+  assert(heldRoute,'The old session started a fallback request');
+  await heldRoute.fulfill({status:200,contentType:'text/html',body:fs.readFileSync(path.join(root,'planner/index.html'),'utf8')});
+  await stale.clock.fastForward(16000);
+  assert.equal(await stale.evaluate(()=>window.host._frame===window.replacementEditor&&window.host._channel===window.replacementChannel&&window.host._ready),true);
+  assert.equal(await stale.locator('iframe').getAttribute('srcdoc'),null,'An obsolete response must not replace the new direct editor');
+  assert.deepEqual(await stale.evaluate(()=>window.host._project),project);
+  await stale.close();
+  // These are server responses, not project input. Only the expected bundled
+  // document is permitted to become an iframe document.
+  const original=fs.readFileSync(path.join(root,'planner/index.html'),'utf8');
+  const invalidResponses=[
+    ['wrong MIME',{status:200,contentType:'text/plain',body:original}],
+    ['redirect',null],
+    ['oversized document',{status:200,contentType:'text/html',body:original+' '.repeat(128*1024)}],
+    ['oversized stream','stream'],
+    ['foreign script',{status:200,contentType:'text/html',body:original.replace('./editor.js','https://untrusted.invalid/editor.js')}],
+    ['untrusted bootstrap',{status:200,contentType:'text/html',body:original.replace('</head>','<meta name="home-studio-bootstrap" content="untrusted"></head>')}],
+  ];
+  for(const [reason,response] of invalidResponses){
+    const rejectedErrors=[]; const rejected=await makePage(rejectedErrors); let fetches=0, escaped=false;
+    await rejected.route('**/unexpected-editor',route=>{escaped=true;return route.abort();});
+    await rejected.route('**/planner/index.html*',route=>{
+      if(route.request().isNavigationRequest())return route.abort();
+      fetches++;
+      if(response==='stream')return route.continue({headers:{...route.request().headers(),'x-test-editor-stream':'oversize'}});
+      return response?route.fulfill(response):route.continue({url:origin+'/test-fallback-redirect'});
+    });
+    await rejected.goto(origin+'/fixture',{waitUntil:'domcontentloaded'});
+    await rejected.waitForFunction(()=>window.host?._frame);
+    await rejected.clock.fastForward(8001);
+    await rejected.waitForFunction(()=>window.host._startupFailed&&!window.host._editorFetchController);
+    assert.equal(fetches,1,reason);
+    assert.equal(escaped,false,'Fallback must reject redirects without following them');
+    assert.equal(await rejected.evaluate(()=>window.host._ready),false,reason);
+    assert.equal(await rejected.locator('iframe').getAttribute('srcdoc'),null,reason);
+    assert.equal(await rejected.locator('#retry').isVisible(),true,reason);
+    assert.deepEqual(await rejected.evaluate(()=>window.host._project),project,reason);
+    assert.equal(await rejected.evaluate(()=>window.calls.some(call=>/project_(save|publish)$/.test(call.type))),false,reason);
+    await rejected.clock.fastForward(16000); assert.equal(fetches,1,'Rejected fallback must not retry automatically');
+    // WebKit reports its deliberate redirect refusal as a page error as well
+    // as a rejected fetch. Other script errors must still fail this scenario.
+    if(reason==='redirect')for(const error of rejectedErrors)assert.match(error,/^Fetch API cannot load .*test-fallback-redirect due to access control checks\.$/);
+    else assert.deepEqual(rejectedErrors,[],reason);
+    await rejected.close();
+  }
+}
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  if(url.pathname==='/test-fallback-redirect')return res.writeHead(302,{Location:'/unexpected-editor'}).end();
+  if(url.pathname==='/home-floorplan-studio/planner/index.html'&&req.headers['x-test-editor-stream']==='oversize'){
+    res.writeHead(200,{'Content-Type':'text/html'});
+    res.write(fs.readFileSync(path.join(root,'planner/index.html')));
+    res.write(' '.repeat(128*1024));return res.end();
+  }
   if (['/fixture','/home-studio'].includes(url.pathname)) return res.writeHead(200, {'Content-Type':'text/html'}).end(fixture);
   if (url.pathname === '/home-floorplan') return res.writeHead(200, {'Content-Type':'text/html'}).end(familyFixture);
   const route = url.pathname.replace(/^\/home-floorplan-static\//, '/custom_components/home_floorplan/static/')
@@ -318,7 +488,8 @@ const server = http.createServer((req, res) => {
     sessionStorage.setItem('fixture-server',JSON.stringify({project,revision:2,published_revision:2}));
   },project);
   await delayed.clock.install();
-  let requestedEditor;
+  let requestedEditor, prematureFallbacks=0;
+  await delayed.route('**/planner/index.html*',route=>{if(!route.request().isNavigationRequest())prematureFallbacks++;return route.continue();});
   const delayedRequest=new Promise((resolve,reject)=>{
     const timeout=setTimeout(()=>reject(new Error('The delayed editor script was not requested')),15000);
     requestedEditor=route=>{clearTimeout(timeout);resolve(route);};
@@ -326,13 +497,15 @@ const server = http.createServer((req, res) => {
   await delayed.route('**/planner/editor.js',route=>requestedEditor(route));
   await delayed.goto(origin+'/fixture',{waitUntil:'domcontentloaded'});
   const delayedRoute=await delayedRequest;
-  await delayed.waitForFunction(()=>window.host._frame);
+  await delayed.waitForFunction(()=>window.host._frame&&window.host._editorLoading);
   await delayed.evaluate(()=>{window.firstEditor=window.host._frame;window.firstChannel=window.host._channel;window.firstGeneration=window.host._generation;});
   await delayed.clock.fastForward(15001);
   assert.equal(await delayed.locator('#retry').isVisible(),true);
   assert.match(await delayed.locator('#status').innerText(),/taking longer.*keep waiting/);
   assert.equal(await delayed.evaluate(()=>window.host._frame===window.firstEditor&&window.host._channel===window.firstChannel&&window.host._generation===window.firstGeneration),true);
   assert.equal(await delayed.evaluate(()=>window.host._ready),false);
+  assert.equal(prematureFallbacks,0,'A committed document with delayed assets must retain its original load');
+  assert.equal(await delayed.locator('iframe').getAttribute('srcdoc'),null);
   await delayedRoute.continue();
   await delayed.waitForFunction(()=>window.host._ready);
   assert.equal(await delayed.evaluate(()=>window.host._frame===window.firstEditor&&window.host._channel===window.firstChannel&&window.host._generation===window.firstGeneration),true);
@@ -342,6 +515,7 @@ const server = http.createServer((req, res) => {
   assert.deepEqual(await delayed.evaluate(()=>window.host._project),project);
   assert.equal(await delayed.evaluate(()=>window.calls.filter(call=>call.type.endsWith('project_get')).length),1);
   await delayed.close();
+  await testDocumentFallback(context,origin,project,errors);
   // A stalled script offers explicit retry without discarding the chosen recovery.
   const startup=await context.newPage(); startup.on('pageerror',e=>errors.push(String(e)));
   const recovered={...project,title:'Recovery after loading failure'};
@@ -706,6 +880,6 @@ const server = http.createServer((req, res) => {
   await mobileContext.close();
   assert.deepEqual(errors,[]);
   await context.close();
-  console.log(`Native studio passed (${engine}): production panel module route, repeated module loading, opaque sandbox, clean first visit, guided room/device/preview flow, unfinished-field guard and recovery, separate save/publish, generated protected editing and published preview, guarded navigation and remount, incomplete-floor publication guard, JSON roundtrip, forged messages, local draft isolation, offline recovery, revision conflict, in-flight edits, pending/invalid fields, loading timeout and recovery retry.`);
+  console.log(`Native studio passed (${engine}): production panel module route, repeated module loading, opaque sandbox, clean first visit, guided room/device/preview flow, unfinished-field guard and recovery, separate save/publish, generated protected editing and published preview, guarded navigation and remount, incomplete-floor publication guard, JSON roundtrip, forged messages, local draft isolation, offline recovery, revision conflict, in-flight edits, pending/invalid fields, bounded document fallback, loading timeout and recovery retry.`);
  } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

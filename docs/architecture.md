@@ -26,6 +26,25 @@ source and session, and passes only project data and a bounded registry catalog.
 `planner/ha-bridge.js` gives the shared editor an explicit native mode. No HA
 token enters the sandbox, public website, exported project or generated viewer.
 
+If the browser stalls the initial editor document navigation, the host retries
+the bundled document through a bounded same-origin fetch and an opaque `srcdoc`
+frame. It accepts only the expected HTML content type, restrictive CSP and known
+local entry points; redirects and oversized responses are rejected. A separate
+early loading signal prevents this recovery from replacing an editor that has
+already started. Both routes use the same source/origin/channel checks and keep
+HA credentials outside the frame. For the fallback only, CSP `self` sources are
+written as the exact HA origin: Firefox otherwise interprets them as the opaque
+frame origin. Script and stylesheet scope stays local; network connections,
+objects, base tags, and form submissions remain disallowed.
+
+The host also passes a presentation-only palette: light/dark mode and eight
+normalized hex colors from HA's inherited CSS variables. The editor accepts
+only this fixed shape through the authenticated bridge, derives accessible text
+and selection colors, and repaints on a theme change without changing project
+state or restarting the editor. No CSS text or resource URLs cross this boundary.
+The standalone editor retains its default palette. Theme changes never rewrite
+furniture materials or the published model.
+
 The native first-room guide sends an allowlisted `guide-action` through this
 same bridge: `room`, `devices`, `preview`, or `photos`. These shortcuts open
 existing editor controls; they do not save, publish, operate a device, or
