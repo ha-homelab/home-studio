@@ -22,7 +22,8 @@
     <section class="hero">
       <p class="eyebrow">GET STARTED · INSTALL IN HOME ASSISTANT</p>
       <h1>Your 3D home.<br>Built inside Home Assistant.</h1>
-      <p class="lead">Install Home Studio, open it in the HA sidebar, and draw your home. Save a draft, then publish the view your household will use.</p>
+      <p class="lead">Install Home Studio, draw one room, save it, and publish it. Add furniture and device controls when you are ready.</p>
+      <p><strong>Home Studio</strong> in the HA sidebar is the administrator's drawing editor. <strong>3D Home</strong> is the published view your household uses for everyday controls.</p>
       <p>You need <strong>Home Assistant 2026.10 or newer</strong>, an administrator account, and a HA backup. HACS is the recommended installation route; manual ZIP installation is available too.</p>
       <div class="hero-actions"><a class="button" href="#native-studio">Install Home Studio <span aria-hidden="true">↓</span></a><a class="text-link" href="#first-room">Already installed? Draw your first room</a></div>
       <p class="small">A new native installation needs no terminal build, Python setup, YAML entry, or pasted access token. Editing and publishing later do not require a reinstall or restart.</p>
@@ -61,28 +62,28 @@
           <p class="step-label">02 · DRAW, SAVE, AND PUBLISH</p>
           <h2>Make your first working room</h2>
           <ol class="instructions">
-            <li>In <strong>Home Studio</strong>, start a project. Add a measured room, walls, a door, and a window. Follow the <a href="./planner/guide.html">illustrated drawing guide</a> for the tools.</li>
-            <li>Choose a lamp from the item library and place it. Associate the room with its HA area and choose the lamp's actual entity. You place objects yourself; HA areas do not supply physical coordinates.</li>
-            <li>Choose <strong>Save draft</strong>, then <strong>Publish family view</strong>. Open <strong>3D Home</strong> in the sidebar to see the published plan.</li>
-            <li>Enable <strong>Dry run</strong> to check the layout and bindings without sending device commands. Turn it off when you intentionally want live controls.</li>
+            <li>In <strong>Home Studio</strong>, choose <strong>Add your first room</strong> and enter its name and dimensions. This shortcut includes walls. The <a href="https://github.com/ha-homelab/home-studio/blob/main/docs/home-assistant-editor.md#your-first-working-room">first-room steps</a> give a simple example.</li>
+            <li>Check the floor and walls in <strong>Preview 3D</strong>. You can add doors, windows, furniture, and devices later.</li>
+            <li>Choose <strong>Save draft</strong> and wait for confirmation. Then choose <strong>Publish to 3D Home</strong> and wait for publication to finish. Choose <strong>Open 3D Home</strong> to see the room.</li>
+            <li>Return to <strong>Home Studio</strong> to add detail. When you link a real HA device, save and publish again, then use <strong>Dry run</strong> in 3D Home to check its controls without sending commands. Turn Dry run off when you want live controls.</li>
           </ol>
-          <figure><img src="./docs/images/native-editor.png" width="1440" height="1000" alt="Home Studio editor with Save draft and Publish family view, a fictional room and a lamp."><figcaption><span>INSIDE HA</span>The actual editor and host with a simulated HA connection and fictional devices.</figcaption></figure>
-          <p>Keep editing in <strong>Home Studio</strong> and publish when ready. An unfinished draft or failed publication does not replace the last working view. The editor and publication require an administrator; household members use the published view with their HA permissions.</p>
-          <p>For backups, keep HA backups and an <strong>Export JSON</strong> copy of your drawing. Update the integration through HACS or its manual package route, and restart when required. Your saved native project and published assets are stored separately from integration code. Read the <a href="https://github.com/ha-homelab/home-studio/blob/main/docs/home-assistant-editor.md">full native editor guide</a> for recovery and updates.</p>
+          <figure><img src="./docs/images/native-editor.png" width="1422" height="1094" alt="Home Studio editor with save and publish controls, a fictional room."><figcaption><span>INSIDE HA</span>The actual editor and host with a simulated HA connection and fictional devices.</figcaption></figure>
+          <p><strong>Save draft</strong> keeps your work for editing. <strong>Publish to 3D Home</strong> updates what your household sees in 3D Home. An unfinished draft or failed publication does not replace the last working view. The editor and publication require an administrator; household members use the published view with their HA permissions. Follow the <a href="./planner/guide.html">illustrated drawing guide</a> to add a second room, a door, a window, and furniture.</p>
+          <p>For backups, keep HA backups and use <strong>More options → Export drawing (JSON)</strong>. Update the integration through HACS or its manual package route, and restart when required. Your saved native project and published assets are stored separately from integration code. Read the <a href="https://github.com/ha-homelab/home-studio/blob/main/docs/home-assistant-editor.md">full native editor guide</a> for recovery and updates.</p>
         </section>
         <section class="help-section" id="native-help">
           <p class="step-label">03 · IF SETUP GETS STUCK</p>
           <h2>Check these before changing your workflow</h2>
           <details><summary>Home Studio is missing from HACS or Add integration</summary><div class="detail-body"><p>Add the repository with type <strong>Integration</strong>, download the stable version, and restart HA. For a manual installation, check that <code>custom_components/home_floorplan/manifest.json</code> exists. Confirm HA is 2026.10 or newer, then refresh the browser.</p></div></details>
           <details><summary>I can see the plan, but not the editor</summary><div class="detail-body"><p>Sign in as an administrator and open <strong>Home Studio</strong>, not just <strong>3D Home</strong>. A generated/customized installation deliberately keeps its existing workflow; read the migration guidance above before replacing it.</p></div></details>
-          <details><summary>The editor does not finish loading or Publish fails</summary><div class="detail-body"><p>Use <strong>Retry connection</strong> after a short wait if it is offered. Keep an <strong>Export JSON</strong> backup before closing an unsaved draft. Publication needs valid geometry and at least one room per floor; correct the named field and publish again. The last successful view remains available.</p></div></details>
+          <details><summary>The editor does not finish loading or Publish fails</summary><div class="detail-body"><p>Use <strong>Retry connection</strong> after a short wait if it is offered. Use <strong>More options → Export drawing (JSON)</strong> before closing an unsaved draft. Publication needs valid geometry and at least one room per floor; correct the named field and publish again. The last successful view remains available.</p></div></details>
           <p>Still blocked? Use the optional editor below to keep drawing while you resolve setup. A <a href="https://github.com/ha-homelab/home-studio/issues/new/choose">bug report</a> should include your HA and Home Studio versions, browser, and a fictional reproduction.</p>
         </section>
         <section class="next-section" id="hosted-fallback">
           <p class="step-label">OPTIONAL · KEEP DRAWING WHILE YOU FIX HA SETUP</p>
           <h2>The separate browser editor</h2>
           <p>The <a href="./planner/">hosted editor</a> and its <a href="./planner/?example=practice">fictional practice home</a> need no account or installation. They keep a draft in that browser and do not connect to or control Home Assistant.</p>
-          <p>Choose <strong>Export JSON</strong> to keep the drawing. Once Home Studio is ready in HA, use <strong>Open JSON → Save draft → Publish family view</strong>. Check the imported drawing and device bindings first. Opening a link never transfers your home automatically.</p>
+          <p>Choose <strong>Export JSON</strong> to keep the drawing. Once Home Studio is ready in HA, use <strong>Open JSON → Save draft → Publish to 3D Home</strong>. Check the imported drawing and device bindings first. Opening a link never transfers your home automatically.</p>
           <p>You can also use a downloaded editor offline. For most users, importing the JSON into HA is all that is needed; the advanced compiler route below is optional.</p>
         </section>
         <section class="next-section" id="portable-toolkit">

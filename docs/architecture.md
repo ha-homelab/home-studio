@@ -10,8 +10,7 @@ we test both browser paths, recover graphics resources, and qualify a release.
 ## Two hosts, one project and compiler
 
 The [native editor guide](home-assistant-editor.md) describes the primary workflow:
-install the integration, draw in the Home Studio sidebar, Save draft, and Publish
-family view. The separate editor is an optional fallback for HA setup problems,
+install the integration, draw in the Home Studio sidebar, Save draft, and Publish to 3D Home. The separate editor is an optional fallback for HA setup problems,
 offline work, and existing portable deployments.
 Both hosts use the same `planner` modules and metric project schema; the native
 release packages reviewed source files without maintaining a second editor.

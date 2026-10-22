@@ -12,6 +12,10 @@ Use **Home Assistant 2026.10 or newer** and an administrator account. The
 recommended route keeps your drawing, devices, saved drafts, and published
 **3D Home** dashboard together in HA.
 
+**Home Studio** in the sidebar is the administrator's drawing editor.
+**3D Home** is the published view for your household's everyday device controls.
+Start with one room; you can add devices after you have saved and published it.
+
 1. **Back up Home Assistant.** Already using a generated or customized
    `home_floorplan` component? Read [migration guidance](docs/home-assistant-editor.md#existing-generated-homes)
    before replacing it.
@@ -20,12 +24,14 @@ recommended route keeps your drawing, devices, saved drafts, and published
    Find **Home Studio** and download the latest stable version.
 3. **Restart Home Assistant**, then open **Settings → Devices & services →
    Add integration** and choose **Home Studio**.
-4. **Open Home Studio in the HA sidebar.** Draw your first room, add walls,
-   doors, windows, and furniture, then associate rooms with HA areas and choose
-   your devices.
-5. **Save draft → Publish family view.** Open **3D Home** to use the published
-   plan. Later drawing changes use the same save-and-publish steps; they do not
-   require another install or HA restart.
+4. **Open Home Studio in the HA sidebar.** Choose **Add your first room** and
+   enter its dimensions; this shortcut includes walls. Check it in **Preview 3D**.
+   Follow the [first-room steps](docs/home-assistant-editor.md#your-first-working-room)
+   for a simple example.
+5. **Save draft**, wait for confirmation, then **Publish to 3D Home**. Open
+   **3D Home** to see the published room. Return to Home Studio to add furniture,
+   more rooms, and devices. Save and publish again when ready; drawing changes
+   do not require another install or HA restart.
 
 Without HACS, download **home_floorplan.zip** from the
 [stable release](https://github.com/ha-homelab/home-studio/releases/latest),
@@ -37,7 +43,7 @@ build, YAML entry, or pasted access token**.
 [Full setup, updates, and troubleshooting](docs/home-assistant-editor.md) ·
 [Check device bindings with Dry run](docs/dry-run.md)
 
-[![Home Studio inside Home Assistant, with drawing tools, Save draft and Publish family view](docs/images/native-editor.png)](docs/home-assistant-editor.md)
+[![Home Studio inside Home Assistant, with drawing tools and save and publish controls](docs/images/native-editor.png)](docs/home-assistant-editor.md)
 
 The screenshot uses the actual editor and host with a simulated HA connection
 and fictional devices. It contains no private home or credentials.
@@ -50,8 +56,9 @@ a mouse or trackpad works best for drawing; the published plan is your everyday
 view for lights, media, covers, and other linked devices.
 
 Saved drafts and the published view are separate. An unfinished drawing or a
-failed publication leaves the last successful view available. Export JSON for
-an additional editable backup. The [separate editor](#optional-help-while-setting-up-home-assistant)
+failed publication leaves the last successful view available. Use
+**More options → Export drawing (JSON)** for an additional editable backup.
+The [separate editor](#optional-help-while-setting-up-home-assistant)
 is available further below if you need to keep drawing while resolving HA setup.
 
 The installed viewer gives walls a soft, rounded profile with a transparent
@@ -166,7 +173,7 @@ Object libraries provide geometry; adding a server or car does not automatically
 connect its telemetry to Home Assistant.
 
 Edit furniture designs, palettes, and patterns in **Home Studio**, then **Save
-draft** and **Publish family view**. The separate **3D Home** placement editor
+draft** and **Publish to 3D Home**. The separate **3D Home** placement editor
 can move, resize, rename, and bind existing objects; its inventory import does
 not replace furniture models. Only the optional portable workflow requires
 rebuilding and reinstalling after source geometry or appearance changes.
@@ -200,8 +207,8 @@ while you resolve setup. It requires no account, stores a draft in that browser,
 and does not connect to or control HA.
 
 Choose **Export JSON** to keep your drawing. Once Home Studio is installed in
-HA, choose **Open JSON**, check your devices, **Save draft**, and **Publish
-family view**. Opening either editor does not transfer a project automatically.
+HA, choose **Open JSON**, check your devices, **Save draft**, and **Publish to 3D Home**.
+Opening either editor does not transfer a project automatically.
 
 ### Optional portable toolkit: draw, build, and preview
 
@@ -298,10 +305,11 @@ sensing adapters.
 
 ## Draft from room photos with your own AI
 
-Inside **Home Assistant → Home Studio**, choose **Plan from photos**. Connect your
-own provider with its exact vision-model ID and a session-only API key. Add room
+Inside **Home Assistant → Home Studio**, choose **Draft from photos (AI)** when
+available to open **Plan from photos**. Connect your own provider with its exact
+vision-model ID and a session-only API key. Add room
 photos, instructions and measured dimensions; generate, review in 2D/3D, and apply
-selected additions as one undoable edit. Then **Save draft → Publish family view**.
+selected additions as one undoable edit. Then **Save draft → Publish to 3D Home**.
 No separate editor, terminal or JSON transfer is needed for this native workflow.
 AI is optional; manual drawing and published device controls work without a key.
 

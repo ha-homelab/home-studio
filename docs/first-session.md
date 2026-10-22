@@ -24,10 +24,11 @@ For manual ZIP installation and troubleshooting, see the
 
 ## 2. Start with one measured room
 
-Choose **New project**, then **Start with measurements**. Give the room a name
-and enter its width and depth in meters: 3.5 means three and a half meters.
-Use **Include walls** when you want a standing outline immediately. You can
-undo the room and its outline together.
+In Home Studio, choose **Add your first room**. Give the room a name and enter
+its width and depth in meters: 3.5 means three and a half meters. Leave
+**Include walls** checked and choose **Create room**. You can undo the room
+and its outline together. If you already have a drawing, continue it with
+**Add another room**; there is no need to start over.
 
 For a whole floor, arrange the rooms before building every wall. A room's floor
 shape, its walls, and its furniture are separate objects: moving the floor shape
@@ -63,24 +64,27 @@ In **Preview 3D**:
 Hold Space or Shift while dragging to move the 2D view instead. Switching floors
 and moving the 3D camera do not add undo steps or change your saved geometry.
 
-## 3. Save the draft and publish the family view
+<a id="3-save-the-draft-and-publish-the-family-view"></a>
+
+## 3. Save the draft and publish to 3D Home
 
 Choose **Save draft** in the Home Studio header. Wait for confirmation that your
 editable drawing is saved in Home Assistant. Saving also applies the field you
 are currently typing; correct any invalid field before continuing.
 
-When the rooms and items look right, choose **Publish family view**, then open
-**3D Home** in the sidebar. Publication validates and builds the saved drawing;
-each floor needs at least one valid room. An unfinished draft can be saved
-without replacing the currently published home. A failed publication keeps the
-last successful home available.
+When your room looks right, choose **Publish to 3D Home**. Wait for confirmation,
+then choose **Open 3D Home** or use **3D Home** in the sidebar. Publication
+validates and builds the saved drawing; each floor needs at least one valid
+room. An unfinished draft can be saved without replacing the currently
+published home. A failed publication keeps the last successful home available.
 
 To connect a device, associate its room with a Home Assistant area and select
 its entity from the suggested devices. Areas help you find entities; they do
 not measure rooms or place objects for you. Use **Dry run** in 3D Home to check
 bindings before choosing to enable live device controls.
 
-**Export JSON** keeps an additional portable backup of the last valid drawing.
+**More options → Export drawing (JSON)** keeps an additional backup of the last
+valid drawing.
 Keep exported versions and Home Assistant backups before large changes. If an
 unsaved drawing is recovered from the current tab, inspect it before choosing
 **Resume recovered drawing** or **Use saved drawing**. Export a copy when you
@@ -93,8 +97,9 @@ reloading. A disconnected editor cannot confirm a save in Home Assistant.
 ## Optional: try a fictional example
 
 Use **Examples** in Home Studio to open the practice home, decor studio, pattern
-studio, or garage. Keep your current drawing with **Save draft** and **Export
-JSON** before replacing it. These examples have no real device bindings.
+studio, or garage. Keep your current drawing with **Save draft** and
+**More options → Export drawing (JSON)** before replacing it. These examples
+have no real device bindings.
 
 In the practice home, choose **Plan 2D**, select the table, change its color, and
 return to **Preview 3D** to look around. An example needs no provider account or
@@ -109,7 +114,7 @@ drawing while you resolve it. For offline work, use a local copy from the
 toolkit. The hosted editor has no HA connection; its draft belongs to that
 browser and website address. **Export JSON** keeps your source. Later, use
 **Open JSON** inside Home Studio in HA, inspect the drawing, then **Save draft**
-and **Publish family view**. Opening either editor never transfers a project
+and **Publish to 3D Home**. Opening either editor never transfers a project
 automatically.
 
 The standalone editor's **Draft recovery** controls can load its saved version,

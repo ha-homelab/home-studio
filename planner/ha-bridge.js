@@ -1,6 +1,7 @@
 // The embedded editor is deliberately unprivileged. This protocol carries only
 // editable drawings, registry labels, and bounded AI operations; HA authentication stays in the host.
 export const PROTOCOL = 'home-studio-editor-v1';
+const GUIDE_ACTIONS = Object.freeze(['room', 'devices', 'preview', 'photos']);
 export function embeddedContext(win = window) {
   const url = new URL(win.location.href);
   const channel = new URLSearchParams(url.hash.slice(1)).get('ha-studio');
@@ -14,7 +15,7 @@ export function memoryDraftOptions() {
     locks: { request: async (_name, operation) => operation() },
   };
 }
-export function connectHost(context, { initialize, snapshot, editState, subscribe, flush, failed }, win = window) {
+export function connectHost(context, { initialize, snapshot, editState, subscribe, flush, failed, guideAction }, win = window) {
   const ai = createNativeAiTransport(context, win);
   let initialized = false, previous = '', previousState = '', sequence = 0;
   const send = (type, payload = {}) => win.parent.postMessage({ protocol: PROTOCOL, channel: context.channel, type, ...payload }, context.origin);
@@ -35,6 +36,9 @@ export function connectHost(context, { initialize, snapshot, editState, subscrib
     } else if (data.type === 'snapshot-request' && initialized && typeof data.requestId === 'string' && data.requestId.length < 80) {
       try { flush(data.allowInvalid === true); changed(data.requestId); }
       catch (error) { changed(); send('snapshot-error', { requestId: data.requestId, message: error.message }); }
+    } else if (data.type === 'guide-action' && initialized && GUIDE_ACTIONS.includes(data.action)) {
+      // Navigation only: the existing editor controls still own every edit.
+      guideAction?.(data.action);
     }
   };
   win.addEventListener('message', receive);

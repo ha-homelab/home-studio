@@ -18,8 +18,18 @@ const initialLocale = await initI18n();
 const $ = id => document.getElementById(id);
 const haContext = embeddedContext();
 let haCatalog = null;
+let haAiReady = null;
 if (haContext) {
   document.body.classList.add('ha-embedded');
+  // A relative logo link would leave the authenticated host bridge behind.
+  document.querySelector('.brand').removeAttribute('href');
+  // Native guidance follows the English host; standalone copy stays translated.
+  for (const [id, text] of [
+    ['empty-description', 'Start with measurements to create a room and its walls, then add doors and windows.'],
+    ['empty-note', 'Save your draft in Home Assistant. Photos and AI are optional.'],
+  ]) {
+    const element = $(id); delete element.dataset.i18n; element.lang = 'en'; element.textContent = text;
+  }
   document.querySelector('.workspace').inert = true; document.querySelector('.app-header').inert = true;
 }
 const draftStorage = createDraftStorage({ validate: validateProject, maxBytes: LIMITS.bytes, ...(haContext ? memoryDraftOptions() : {}) });
@@ -396,7 +406,7 @@ function buildInspector(parent) {
   }
   const kind = selection.kind;
   $('inspector-title').textContent = ({ rooms: t('Room details'), walls: t('Wall details'), openings: t('Opening details'), items: t('Item details') })[kind];
-  $('inspector-subtitle').textContent = ({ rooms: t('Shape the space. Then add its walls.'), walls: t('A physical segment with real thickness.'), openings: t('A true cutout in the selected wall.'), items: t('Give every object a place and a purpose.') })[kind];
+  $('inspector-subtitle').textContent = ({ rooms: haContext ? 'Shape the space. Walls are edited separately.' : t('Shape the space. Then add its walls.'), walls: t('A physical segment with real thickness.'), openings: t('A true cutout in the selected wall.'), items: t('Give every object a place and a purpose.') })[kind];
   if (kind === 'rooms') {
     const metric = node('div', 'metric-strip'); metric.append(node('strong', '', Math.abs(signedArea(object.polygon)).toFixed(2)), node('span', '', t('m² floor area'))); parent.append(metric);
     if (haCatalog) {
@@ -1333,7 +1343,7 @@ installOnboarding({
   t, getFloor: floor, hasContent, replaceProject, validateProject, status, onLocaleChange,
   createRoom(options) {
     const ok = transact((_p, target) => { selection = { kind: 'rooms', id: addMeasuredRoom(target, options) }; },
-      () => options.walls ? t('Room ready. Add a door or an item, then preview and export.') : t('Room added. Choose Build wall outline to create its walls.'), { fit: true });
+      () => options.walls ? (haContext ? 'Room ready. Add furniture, a door or a window. Then Save draft and Publish to 3D Home above.' : t('Room ready. Add a door or an item, then preview and export.')) : t('Room added. Choose Build wall outline to create its walls.'), { fit: true });
     if (ok) { setView('plan'); setTool('select'); }
     return { ok, error: !ok && lastStatus ? (typeof lastStatus.message === 'function' ? lastStatus.message() : lastStatus.message) : '' };
   },
@@ -1342,6 +1352,41 @@ installOnboarding({
   focusPlan() { planCanvas.focus(); },
 });
 if (!initialLocale.loaded) status(() => t('Language could not be loaded. English is shown instead.'), true);
+
+function guideAction(action) {
+  if (!haContext || !haCatalog) return;
+  // Keep a form already being edited intact when a host shortcut is clicked.
+  const modal = document.querySelector('dialog[open]');
+  if (modal) { modal.focus(); return; }
+  if (action === 'room') { $('measured-room').click(); return; }
+  if (action === 'preview') { setView('preview'); $('preview-tab').focus(); return; }
+  if (action === 'photos') {
+    if (haAiReady) void haAiReady.then(ready => { if (ready) $('ai-open')?.click(); });
+    else status('Photo planning is unavailable. You can draw a room with Start with measurements.');
+    return;
+  }
+  if (action !== 'devices') return;
+  const room = selection?.kind === 'rooms' ? selected()
+    : floor().rooms.find(entry => entry.id === (selection?.kind === 'items' ? selected()?.room : null)) || floor().rooms[0];
+  if (!room) { $('measured-room').click(); return; }
+  if (selection?.kind !== 'rooms' || selection.id !== room.id) {
+    const unfinished = $('inspector-body').querySelector('[data-project-field][aria-invalid="true"]')
+      || [...$('inspector-body').querySelectorAll('[data-project-field]')].find(field => field.inspectorDraft);
+    if (unfinished) {
+      status('Finish the highlighted field before choosing a room. Save draft above applies and saves your changes.');
+      unfinished.focus(); unfinished.scrollIntoView({ block: 'center' }); return;
+    }
+  }
+  setView('plan'); setTool('select'); setSelection({ kind: 'rooms', id: room.id });
+  const label = room.ha_area_id ? 'Add device to this room' : 'Home Assistant area';
+  const chooser = [...$('inspector-body').querySelectorAll('select')].find(field => field.getAttribute('aria-label') === label);
+  chooser?.focus(); chooser?.scrollIntoView({ block: 'center' });
+  status(room.ha_area_id ? 'Choose a device, then Add linked item. Drag the new item into position.' : 'Choose this room’s Home Assistant area to see its devices. Linking devices is optional.');
+}
+
+document.querySelectorAll('[data-guide-action]').forEach(button => button.addEventListener('click', () => {
+  $('help-dialog').close(); guideAction(button.dataset.guideAction);
+}));
 
 
 // A narrow, opt-in bridge. Snapshots are copies; preview never replaces accepted
@@ -1380,16 +1425,17 @@ if (haContext) {
       installRecoveredProject(next); history = []; future = [];
       document.querySelector('.workspace').inert = false; document.querySelector('.app-header').inert = false; renderUI();
       translatedText('save-status', 'Draft in this tab · save in Home Assistant above');
-      $('ha-workflow-note').textContent = 'Draw rooms, link Home Assistant areas, then add devices. Save draft above; publish when ready for the family view.';
+      $('ha-workflow-note').textContent = 'Draw a room, add devices if you want, then Save draft and Publish to 3D Home above.';
       status('Home Assistant drawing ready. Save draft above before leaving.');
       if (aiTransport) {
         const stylesheet = document.createElement('link'); stylesheet.rel = 'stylesheet';
         stylesheet.href = new URL('../ai/panel.css', import.meta.url).href; document.head.append(stylesheet);
-        void import('../ai/panel.js').then(({ mountAiPanel }) => mountAiPanel(editorBridge, aiTransport))
-          .catch(() => status('AI tools could not load. Reload Home Studio to try again.', true));
+        haAiReady = import('../ai/panel.js').then(({ mountAiPanel }) => { mountAiPanel(editorBridge, aiTransport); return true; })
+          .catch(() => { status('AI tools could not load. Reload Home Studio to try again.', true); return false; });
       }
     },
     snapshot: () => clone(project),
+    guideAction,
     editState() {
       const fields = [...document.querySelectorAll('[data-project-field]')].filter(field => field.inspectorDraft);
       const invalid = fields.find(field => field.getAttribute('aria-invalid') === 'true');

@@ -5,7 +5,7 @@ adapters and bounded inference client. Native Home Assistant uses authenticated,
 administrator-only HTTP routes with user-bound in-memory sessions. The optional
 standalone companion supplies its own loopback transport. Neither weakens the
 hosted editor's `connect-src 'none'` policy or the native iframe's opaque sandbox.
-Accepted native proposals go directly to Save draft and Publish family view.
+Accepted native proposals go directly to Save draft and Publish to 3D Home.
 The companion can export the same project JSON for deliberate import into HA.
 Manual drawing and the published viewer do not depend on AI.
 

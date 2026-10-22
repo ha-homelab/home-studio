@@ -112,7 +112,12 @@ const server = http.createServer(async (req, res) => {
     assert.equal(nextSession,0,'Opening the drawing must not create an AI session');
     assert.match(await frame.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content'),/connect-src 'none'/);
     assert.equal(await frame.evaluate(()=>{try{return parent.document.body.innerHTML;}catch{return 'isolated';}}),'isolated');
-    await frame.locator('#ai-open').click();await frame.waitForFunction(()=>!document.getElementById('ai-provider').disabled);
+    const beforePhotoGuide=calls.length;
+    await page.getByRole('button',{name:'Draft from photos (AI)',exact:true}).click();
+    await frame.waitForFunction(()=>!document.getElementById('ai-provider').disabled);
+    assert.equal(await frame.locator('#ai-panel').isVisible(),true,'The guide opens the existing AI panel');
+    assert.equal(await frame.locator('#ai-panel').count(),1);
+    assert.equal(calls.slice(beforePhotoGuide).some(call=>['connect','generate'].includes(call.action)),false,'Opening photo guidance must not connect a provider or generate a draft');
     assert.equal(nextSession,1);
     assert.equal(await frame.locator('#ai-key').getAttribute('type'),'password');
     assert.equal(await frame.getByRole('button',{name:/reveal|show.*key/i}).count(),0);
@@ -152,11 +157,16 @@ const server = http.createServer(async (req, res) => {
     await frame.locator('#preview-tab').click();await frame.waitForFunction(()=>planner.getPreviewMetadata().items===1);
     await frame.locator('#ai-review-confirm').check();await frame.locator('#ai-apply').click();
     await frame.waitForFunction(()=>planner.getProject().floors[0].rooms.length===1);
-    assert.match(await frame.locator('#ai-status').innerText(),/Save draft in Home Assistant, then Publish family view/);
+    assert.match(await frame.locator('#ai-status').innerText(),/Save draft in Home Assistant, then Publish to 3D Home/);
     await page.locator('#save').click();await page.waitForFunction(()=>saved.revision===1&&!host._busy);
     const saved=await page.evaluate(()=>JSON.stringify(window.saved));assert(!saved.includes(KEY));assert(!saved.includes(AUTH));assert(!saved.includes('synthetic-native-session-token'));
+    const moreOptions=page.locator('#more-options');
+    assert.equal(await moreOptions.getAttribute('open'),null);
+    await moreOptions.locator('summary').click();
     const download=page.waitForEvent('download');await page.locator('#export').click();
     assert(!fs.readFileSync(await(await download).path(),'utf8').includes(KEY));
+    await moreOptions.locator('summary').click();
+    assert.equal(await moreOptions.getAttribute('open'),null);
     await frame.locator('#undo').click();assert.deepEqual(await frame.evaluate(()=>planner.getProject()),before);
     failGenerate=true;await frame.locator('#ai-generate').click();await frame.waitForFunction(()=>document.getElementById('ai-status').textContent.includes('provider rejected'));
     assert.deepEqual(await frame.evaluate(()=>planner.getProject()),before);failGenerate=false;
@@ -214,6 +224,7 @@ const server = http.createServer(async (req, res) => {
     assert.equal(sessions.size,0);
     await page.evaluate(()=>sessionStorage.clear());
     await page.goto(origin+'/fixture?ai=0');await page.waitForFunction(()=>host._ready);frame=page.frames().find(value=>value.url().includes('embed='));assert.equal(await frame.locator('#ai-open').count(),0);
+    assert.equal(await page.locator('#guide-photos').isVisible(),false,'Photo guidance is absent when the server disables AI');
     // Narrow screens keep the viewport-sized host and can scroll to the full editor.
     await page.setViewportSize({width:390,height:844});
     assert.equal(await page.evaluate(()=>host.getBoundingClientRect().height),844);

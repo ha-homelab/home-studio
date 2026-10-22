@@ -370,7 +370,7 @@ export function mountAiPanel(bridge, sessionOrTransport) {
       // Revalidate the complete selected project immediately before one undoable transaction.
       const prepared = prepareDraft(bridge.snapshot(), current.context, current.raw, { selectedCandidateKeys: [...current.selected] });
       if (!bridge.applyProject(prepared.project, current.revision)) throw new Error('The editor could not apply this draft.');
-      clearReview(); clearPhotos(); setStatus(native ? 'Selected additions applied. Undo restores the previous plan. Save draft in Home Assistant, then Publish family view.' : 'Selected additions applied. Use Undo to restore the previous plan, or Export JSON to keep the editable result.');
+      clearReview(); clearPhotos(); setStatus(native ? 'Selected additions applied. Undo restores the previous plan. Save draft in Home Assistant, then Publish to 3D Home.' : 'Selected additions applied. Use Undo to restore the previous plan, or Export JSON to keep the editable result.');
     } catch (error) { setStatus(error.message, true); }
     update();
   });

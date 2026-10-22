@@ -22,8 +22,7 @@ chosen vision model using a fictional room before submitting private photos.
 Open **Home Assistant → Home Studio → Plan from photos** as an administrator.
 Connect your provider and exact model ID, then follow **Make a draft** below.
 The integration supplies the AI transport; no separate Python process or JSON
-transfer is required. After applying a proposal, **Save draft** and **Publish
-family view** in the same page. A local-model endpoint refers to the HA machine's
+transfer is required. After applying a proposal, **Save draft** and **Publish to 3D Home** in the same page. A local-model endpoint refers to the HA machine's
 network namespace; `127.0.0.1` does not refer to the browser's computer.
 
 ## Optional separate desktop companion
@@ -75,7 +74,7 @@ the companion to supply the restricted API.
    Cancel or discard leaves the accepted plan unchanged. If the plan or selection
    changes while the model is working, the old result cannot be applied.
 7. Adjust the result with the normal editor and link devices yourself. Repeat for
-   another room, then **Save draft → Publish family view** inside HA. If using the
+   another room, then **Save draft → Publish to 3D Home** inside HA. If using the
    separate companion, Export JSON and use **Open JSON** in HA first. Existing
    portable deployments can use the [portable installation reference](../install.html#export).
    Published viewer assets contain no AI credentials or source photographs.

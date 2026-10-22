@@ -3,7 +3,7 @@
 A drawing becomes useful when the objects in it match the devices you use.
 In **Home Studio** inside Home Assistant, associate the room with its HA area
 and choose an object's entity from the suggested devices. Choose **Save draft**,
-then **Publish family view**. You can also bind an existing object in the
+then **Publish to 3D Home**. You can also bind an existing object in the
 published plan's **Edit layout** view. Wait for the saved confirmation before
 controlling it, and check new bindings in **Dry run**.
 
