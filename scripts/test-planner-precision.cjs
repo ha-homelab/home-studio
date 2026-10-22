@@ -210,6 +210,29 @@ outlinedFixture.floors[0].openings = [{ id: 'window', wall_id: 'wall_0', type: '
     assert.equal(await field('y (m)').getAttribute('aria-invalid'), 'true');
     assert.deepEqual(await project(), ceiling, 'The complete item must remain below the ceiling');
     await change('y (m)', .4);
+    await change('y (m)', 0);
+    for (const expected of [.05, .1]) {
+      const height = field('y (m)'), original = await height.inputValue();
+      await height.evaluate(input => {
+        input.__precisionChanges = 0;
+        input.addEventListener('change', () => { input.__precisionChanges++; }, { once: true });
+      });
+      await height.focus(); await height.press('End'); await page.keyboard.type('1');
+      assert.equal(await height.inputValue(), original + '1', 'Keyboard input creates a temporary elevation draft');
+      await page.keyboard.press('Backspace'); await page.keyboard.press('Tab');
+      assert.equal(await height.inputValue(), original);
+      assert.equal(await height.evaluate(input => input.__precisionChanges), 0, 'Restoring the original text does not emit a native change event');
+      await page.getByRole('button', { name: 'Raise 5 cm', exact: true }).click();
+      assert.equal((await item()).position_m.y, expected);
+      assert.equal(await height.inputValue(), String(expected), 'A restored draft must refresh when a height button changes the model');
+    }
+    await change('y (m)', -1);
+    assert.equal(await field('y (m)').getAttribute('aria-invalid'), 'true');
+    await page.getByRole('button', { name: 'Raise 5 cm', exact: true }).click();
+    assert.equal((await item()).position_m.y, .15, 'Height buttons still update the committed elevation with an invalid draft present');
+    assert.equal(await field('y (m)').inputValue(), '-1', 'An invalid draft remains available for correction');
+    assert.equal(await field('y (m)').getAttribute('aria-invalid'), 'true');
+    await change('y (m)', .4);
     await page.locator('#preview-tab').click();
     await page.waitForFunction(() => planner.getPreviewMetadata().renderCount > 0);
     await page.locator('#preview-edit').click();
@@ -321,6 +344,6 @@ outlinedFixture.floors[0].openings = [{ id: 'window', wall_id: 'wall_0', type: '
     await saved();
     assert.deepEqual(errors, [], 'No page errors'); assert.deepEqual(external, [], 'Fictional tests must not contact external services');
     await context.close();
-    console.log(`Planner precision passed (${engine}): 2D/3D snap and Alt movement, numeric and corner room dimensions, wall/opening consistency, shared-wall rejection, elevation bounds, cancellation, Undo/redo and persisted coordinates.`);
+    console.log(`Planner precision passed (${engine}): 2D/3D snap and Alt movement, numeric and corner room dimensions, wall/opening consistency, shared-wall rejection, elevation bounds and restored keyboard drafts, cancellation, Undo/redo and persisted coordinates.`);
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -507,7 +507,13 @@ function field(parent, label, value, onChange, { type = 'text', min, max, step =
   if (dir) input.dir = dir;
   input.setAttribute('aria-label', label); input.dataset.inspectorKey = `input:${label}`; wrap.dataset.inspectorKey = `field:${label}`;
   if (onChange) { input.dataset.projectField = 'true'; input.setAttribute('aria-describedby', 'status'); }
-  input.oninput = event => { event.currentTarget.inspectorDraft = true; if (onChange) { fieldEditRevision++; editorChanged(); } };
+  input.oninput = event => {
+    const control = event.currentTarget;
+    // Returning to the committed text may not emit change on blur. Clear that
+    // draft so later model updates can refresh this reused inspector control.
+    control.inspectorDraft = control.validity.badInput || control.value !== String(value ?? '');
+    if (onChange) { fieldEditRevision++; editorChanged(); }
+  };
   input.onchange = event => {
     if (!onChange) return;
     committingField = event.currentTarget;
