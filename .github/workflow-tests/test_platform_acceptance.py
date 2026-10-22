@@ -184,6 +184,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
         self.assertNotIn('continue-on-error', step)
         self.assertIn('for engine in chromium firefox webkit; do', step['run'])
         self.assertIn('PLANNER_EDITING_ENGINE="$engine" node scripts/test-planner-editing.cjs', step['run'])
+        self.assertIn('PLANNER_PRECISION_ENGINE="$engine" PLANNER_PRECISION_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-planner-precision.cjs', step['run'])
         self.assertIn('ONBOARDING_ENGINE="$engine" ONBOARDING_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-onboarding-browser.cjs', step['run'])
 
     def test_package_setup_contract_rejects_unbounded_or_optional_work(self):
