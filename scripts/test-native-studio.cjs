@@ -8,7 +8,17 @@ const engine = process.env.BROWSER || 'chromium';
 const browserType = { chromium, firefox, webkit }[engine];
 assert(browserType, 'BROWSER must be chromium, firefox, or webkit');
 const root = path.resolve(__dirname, '..');
-const fixture = `<!doctype html><html style="height:100%"><head><meta charset="utf-8"></head><body style="margin:0;height:100%"><home-floorplan-studio-panel></home-floorplan-studio-panel><script src="/custom_components/home_floorplan/static/studio.js"></script><script>
+const version = JSON.parse(fs.readFileSync(path.join(root, 'custom_components/home_floorplan/manifest.json'), 'utf8')).version;
+const panelPath = `/home-floorplan-static/studio.js?v=${version}`;
+const fixture = `<!doctype html><html style="height:100%"><head><meta charset="utf-8"></head><body style="margin:0;height:100%"><home-floorplan-studio-panel></home-floorplan-studio-panel><script type="module">
+// Match Home Assistant's loadModule: append an async module script and wait for
+// its load event before giving the registered custom element its hass object.
+window.loadPanelModule = url => new Promise((resolve, reject) => {
+  const script = document.createElement('script'); script.type = 'module'; script.async = true;
+  script.onload = resolve; script.onerror = () => reject(new Error('Panel module failed to load'));
+  script.src = url; document.body.append(script);
+});
+await window.loadPanelModule(${JSON.stringify(panelPath)});
 window.calls=[];window.failSave=false;window.holdSave=false;window.tokens='NEVER_SEND_TOKEN';
 const saved=JSON.parse(sessionStorage.getItem('fixture-server')||'null')||{project:null,revision:0,published_revision:null};
 window.server=saved;
@@ -19,10 +29,18 @@ window.host.hass={user:{id:'test-user',is_admin:true},auth:{accessToken:window.t
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/fixture') return res.writeHead(200, {'Content-Type':'text/html'}).end(fixture);
-  const route = url.pathname.replace(/^\/home-floorplan-studio\//, '/');
+  const route = url.pathname.replace(/^\/home-floorplan-static\//, '/custom_components/home_floorplan/static/')
+    .replace(/^\/home-floorplan-studio\//, '/');
   const file = path.resolve(root, '.' + route + (route.endsWith('/') ? 'index.html' : ''));
   if (!file.startsWith(root + path.sep)) return res.writeHead(404).end();
-  try { const body=fs.readFileSync(file); const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.jpg':'image/jpeg'}; res.writeHead(200, {'Content-Type':mime[path.extname(file)]||'application/octet-stream','Access-Control-Allow-Origin':'*'}).end(body); } catch { res.writeHead(404).end(); }
+  try {
+    const body=fs.readFileSync(file);
+    const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.jpg':'image/jpeg'};
+    const headers={'Content-Type':mime[path.extname(file)]||'application/octet-stream'};
+    // Only sandboxed editor assets need CORS; the panel module is same-origin.
+    if (url.pathname.startsWith('/home-floorplan-studio/')) headers['Access-Control-Allow-Origin']='*';
+    res.writeHead(200, headers).end(body);
+  } catch { res.writeHead(404).end(); }
 });
 (async()=>{
  let browser;
@@ -36,8 +54,19 @@ const server = http.createServer((req, res) => {
   page.on('requestfailed',r=>{if(process.env.DEBUG_STUDIO)console.log('failed',r.url(),r.failure());});
   page.on('pageerror', e=>errors.push(String(e)));
   page.on('dialog', dialog=>dialog.accept());
+  const moduleResponse = page.waitForResponse(response=>response.url()===origin+panelPath);
   await page.goto(origin+'/fixture');
-  await page.waitForFunction(()=>window.host._ready);
+  const response = await moduleResponse;
+  assert.equal(response.status(),200,'The registered production panel URL must return JavaScript');
+  assert.match(response.headers()['content-type'],/^(?:text|application)\/javascript\b/);
+  assert.equal(response.headers()['access-control-allow-origin'],undefined,'The same-origin panel must not depend on editor CORS');
+  await page.waitForFunction(()=>window.host?._ready);
+  assert.equal(await page.evaluate(async url=>{
+    const registered = customElements.get('home-floorplan-studio-panel');
+    await window.loadPanelModule(url);
+    await window.loadPanelModule(url+'&reload=1');
+    return !!registered && customElements.get('home-floorplan-studio-panel')===registered;
+  },panelPath),true,'Repeated module loads must preserve the registered custom element');
   let frame=page.frames().find(frame=>frame.url().includes('embed='));
   assert(frame,'Sandboxed editor loaded');
   assert.equal(await frame.evaluate(()=>{try{return parent.document.body.innerHTML;}catch{return 'isolated';}}),'isolated');
@@ -299,6 +328,6 @@ const server = http.createServer((req, res) => {
   await page.evaluate(()=>window.lateHost.remove());
   assert.deepEqual(errors,[]);
   await context.close();
-  console.log(`Native studio passed (${engine}): opaque sandbox, area/device onboarding, save/publish, JSON roundtrip, forged messages, local draft isolation, offline recovery, revision conflict, in-flight edits, pending/invalid fields, loading timeout and recovery retry.`);
+  console.log(`Native studio passed (${engine}): production panel module route, repeated module loading, opaque sandbox, area/device onboarding, save/publish, JSON roundtrip, forged messages, local draft isolation, offline recovery, revision conflict, in-flight edits, pending/invalid fields, loading timeout and recovery retry.`);
  } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e);process.exitCode=1;});
