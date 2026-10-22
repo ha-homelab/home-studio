@@ -66,6 +66,7 @@ jobs:
         run: |
           python3 scripts/test-ha-project-metadata.py
           python3 scripts/test-ha-native.py
+          python3 scripts/test-ha-generated.py
       - name: Test archive validation, installation, backup and rollback
         run: python3 scripts/test-install-home-assistant.py
       - name: Test ephemeral Intel runner preparation without system commands

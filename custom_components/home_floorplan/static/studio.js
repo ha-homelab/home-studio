@@ -10,7 +10,6 @@ const AI_ACTIONS = Object.freeze({
 });
 const STARTUP_TIMEOUT_MS = 15000;
 const EDITOR_PATH = '/home-floorplan-studio/planner/index.html';
-const EXTERNAL_EDITOR = 'https://ha-homelab.github.io/home-studio/planner/';
 const clone = value => JSON.parse(JSON.stringify(value));
 const boundedText = (value, max = 128) => typeof value === 'string' ? value.slice(0, max) : '';
 function projectBytes(project) {
@@ -31,11 +30,25 @@ function catalogForEditor(catalog = {}) {
   }));
   return { floors, areas, entities };
 }
+function sourceForEditor(saved) {
+  if (saved.capabilities?.architecture_editing !== false) return undefined;
+  const source = saved.source;
+  if (source?.kind !== 'generated' || !Array.isArray(source.protected_floors) || source.protected_floors.length > 8) throw new Error('The protected home source is unavailable.');
+  const ids = value => {
+    if (!Array.isArray(value) || value.length > 256 || value.some(id => typeof id !== 'string' || id.length > 128)) throw new Error('The protected home source is invalid.');
+    return [...value];
+  };
+  const floors = ids(source.protected_floors);
+  return { kind: 'generated', protected_floors: floors,
+    protected_rooms: Object.fromEntries(floors.map(id => [id, ids(source.protected_rooms?.[id])])),
+    custom_items: Object.fromEntries(floors.map(id => [id, ids(source.custom_items?.[id] || [])])),
+  };
+}
 class HomeFloorplanStudioPanel extends HTMLElement {
   constructor() {
     super(); this.attachShadow({ mode: 'open' });
     this._busy = false; this._ready = false; this._started = false; this._project = null;
-    this._savedRaw = null; this._pristineRaw = null; this._initializingBlank = false; this._legacy = false; this._revision = 0; this._publishedRevision = null;
+    this._savedRaw = null; this._pristineRaw = null; this._initializingBlank = false; this._revision = 0; this._publishedRevision = null;
     this._pending = new Map(); this._sequence = 0; this._request = 0; this._generation = 0;
     this._aiPending = new Map(); this._aiEpoch = 0; this._aiSequence = 0; this._aiSession = null; this._aiSessionPromise = null;
     this._aiPagehide = () => this._disposeAi();
@@ -45,19 +58,17 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
       :host{display:flex;flex-direction:column;height:100vh;height:100dvh;min-height:640px;overflow:auto;color:var(--primary-text-color,#263737);background:var(--primary-background-color,#f7f8f5);font:14px system-ui,sans-serif}
-      *{box-sizing:border-box}header{padding:14px 20px 10px;border-bottom:1px solid var(--divider-color,#d9e0d9)}h1{font-size:22px;margin:0}p{line-height:1.5;margin:6px 0}.muted{color:var(--secondary-text-color,#5b6d67);font-size:13px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.actions{margin:12px 0 8px}button,a{font:inherit}button,summary{min-height:44px;padding:9px 14px;border:1px solid var(--divider-color,#becbc2);border-radius:7px;background:var(--card-background-color,#fff);color:inherit;cursor:pointer}button.primary{background:#326857;color:white;border-color:#326857}button:disabled,a[aria-disabled=true]{opacity:.5;cursor:default}a{color:var(--primary-color,#326857);text-underline-offset:3px}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #ce8c52;outline-offset:3px}#family{margin-inline-start:auto}#status{min-height:22px;overflow-wrap:anywhere}#status.error{color:var(--error-color,#a53d29)}#more-options{position:relative;margin-inline-start:auto}#more-options summary{list-style:revert}#more-options .options{position:absolute;inset-inline-end:0;top:100%;z-index:5;min-width:260px;max-width:90vw;display:grid;gap:8px;padding:12px;border:1px solid var(--divider-color,#becbc2);border-radius:8px;background:var(--card-background-color,#fff);box-shadow:0 8px 24px #0002}#more-options a{padding:8px}#guide{border-bottom:1px solid var(--divider-color,#d9e0d9);padding:0 20px 10px}#guide summary{border:0;background:transparent;font-weight:600;padding-inline:0}.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.step{padding:10px 12px;border:1px solid var(--divider-color,#d9e0d9);border-radius:9px;background:var(--card-background-color,#fff)}.step h2{font-size:14px;margin:0 0 5px}.step p{font-size:12px;color:var(--secondary-text-color,#5b6d67)}.step button{font-size:12px;min-height:40px;padding:7px 10px}.step-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.step[data-current=true]{border-color:#398472;box-shadow:inset 3px 0 #398472}#next-step{font-size:13px;margin:10px 0 0}#recovery{padding:14px 22px;background:#fff0d5;color:#4c402c;border-bottom:1px solid #e2c996}iframe{display:block;flex:1;width:100%;border:0;min-height:520px;background:#f6f6f1}#loading{padding:24px}[hidden]{display:none!important}@media(max-width:700px){header{padding:12px}.actions{gap:6px}.actions button{padding:8px 10px;font-size:12px}#guide{padding-inline:12px}.steps{grid-template-columns:1fr}.step{padding:9px 12px}#family{font-size:13px}iframe{min-height:780px}}
+      *{box-sizing:border-box}header{padding:14px 20px 10px;border-bottom:1px solid var(--divider-color,#d9e0d9)}h1{font-size:22px;margin:0}p{line-height:1.5;margin:6px 0}.muted{color:var(--secondary-text-color,#5b6d67);font-size:13px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.actions{margin:12px 0 8px}button,a{font:inherit}button,summary{min-height:44px;padding:9px 14px;border:1px solid var(--divider-color,#becbc2);border-radius:7px;background:var(--card-background-color,#fff);color:inherit;cursor:pointer}button.primary{background:#326857;color:white;border-color:#326857}button:disabled,a[aria-disabled=true]{opacity:.5;cursor:default}a{color:var(--primary-color,#326857);text-underline-offset:3px}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #ce8c52;outline-offset:3px}#family{margin-inline-start:auto;display:inline-flex;align-items:center;min-height:44px;padding:8px}#status{min-height:22px;overflow-wrap:anywhere}#status.error{color:var(--error-color,#a53d29)}#more-options{position:relative;margin-inline-start:auto}#more-options summary{list-style:revert}#more-options .options{position:absolute;inset-inline-end:0;top:100%;z-index:5;min-width:260px;max-width:90vw;display:grid;gap:8px;padding:12px;border:1px solid var(--divider-color,#becbc2);border-radius:8px;background:var(--card-background-color,#fff);box-shadow:0 8px 24px #0002}#guide{border-bottom:1px solid var(--divider-color,#d9e0d9);padding:0 20px 10px}#guide summary{border:0;background:transparent;font-weight:600;padding-inline:0}.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.step{padding:10px 12px;border:1px solid var(--divider-color,#d9e0d9);border-radius:9px;background:var(--card-background-color,#fff)}.step h2{font-size:14px;margin:0 0 5px}.step p{font-size:12px;color:var(--secondary-text-color,#5b6d67)}.step button{font-size:12px;min-height:40px;padding:7px 10px}.step-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.step[data-current=true]{border-color:#398472;box-shadow:inset 3px 0 #398472}#next-step{font-size:13px;margin:10px 0 0}#published-view{display:flex;flex:1;min-height:580px;flex-direction:column}.published-heading{padding:12px 20px;background:var(--card-background-color,#fff)}.published-heading h2{font-size:18px;margin:10px 0 4px}.published-heading p{font-size:13px}#published-canvas{display:flex;flex:1;min-height:460px}#published-canvas>home-floorplan-panel{width:100%;height:65vh;min-height:460px}#recovery{padding:14px 22px;background:#fff0d5;color:#4c402c;border-bottom:1px solid #e2c996}iframe{display:block;flex:1;width:100%;border:0;min-height:520px;background:#f6f6f1}#loading{padding:24px}[hidden]{display:none!important}@media(max-width:700px){header{padding:12px}.actions{gap:6px}.actions button{padding:8px 10px;font-size:12px}#guide{padding-inline:12px}.steps{grid-template-columns:1fr}.step{padding:9px 12px}#family{font-size:13px}iframe{min-height:780px}}
       </style>
       <header>
         <div class="row"><button id="menu" aria-label="Open navigation menu">☰</button><h1>Home Studio</h1><a id="family" href="/home-floorplan">Open 3D Home</a></div>
-        <p class="muted">Draw here. Save your draft, then publish it to use your home in 3D Home.</p>
+        <p id="workflow-description" class="muted">Draw here. Save your draft, then publish it to use your home in 3D Home.</p>
         <div class="row actions">
           <button id="save" class="primary" aria-describedby="status" disabled>Save draft</button>
           <button id="publish" aria-describedby="status next-step" disabled>Publish to 3D Home</button>
           <details id="more-options"><summary>More options</summary><div class="options">
             <button id="export" disabled>Export drawing (JSON)</button>
             <button id="reload" disabled>Load saved draft</button>
-            <a href="${EXTERNAL_EDITOR}" target="_blank" rel="noopener noreferrer">Open browser editor ↗</a>
-            <p class="muted">Use the browser editor as an alternative. Export your drawing here, then open that file there. Your Home Assistant access is never shared.</p>
           </div></details>
         </div>
         <div id="status" role="status" aria-live="polite" aria-atomic="true">Opening your drawing…</div><button id="retry" aria-describedby="status" hidden>Retry connection</button>
@@ -66,15 +77,21 @@ class HomeFloorplanStudioPanel extends HTMLElement {
         <div class="steps">
           <section class="step" id="step-room"><h2>1. Draw a room</h2><p>Name it and enter its width and depth. Walls are included. Approximate measurements are fine to start.</p><div class="step-actions"><button id="guide-room" disabled>Add your first room</button><button id="guide-photos" hidden disabled>Draft from photos (AI)</button></div></section>
           <section class="step" id="step-devices"><h2>2. Add devices <span class="muted">(optional)</span></h2><p>Select a room, choose its Home Assistant area, then add a light or another device. You can do this later.</p><div class="step-actions"><button id="guide-devices" disabled>Add devices</button></div></section>
-          <section class="step" id="step-publish"><h2>3. Save and publish</h2><p>Preview your drawing, then use Save draft and Publish to 3D Home above. Saving alone keeps the live plan unchanged.</p><div class="step-actions"><button id="guide-preview" disabled>Preview 3D</button></div></section>
+          <section class="step" id="step-publish"><h2>3. Save and publish</h2><p id="publish-help">Preview your drawing, then use Save draft and Publish to 3D Home above. Saving alone keeps the live plan unchanged.</p><div class="step-actions"><button id="guide-preview" disabled>Preview 3D</button></div></section>
         </div><p id="next-step">Start with one room. Add the rest of your home whenever you are ready.</p>
       </details>
       <section id="recovery" hidden><strong>Unsaved drawing found in this tab</strong><p id="recovery-description"></p><div class="row"><button id="resume">Resume recovered drawing</button><button id="download-recovery">Export recovered JSON</button><button id="discard">Use saved drawing</button></div></section>
+      <section id="published-view" hidden><div class="published-heading"><button id="back-to-editor">Back to editing</button><h2>Published home</h2><p>This is the current published home. Draft changes appear here only after you publish. Device controls and layout editing are disabled.</p></div><div id="published-canvas"></div></section>
       <p id="loading">Loading the local editor…</p>`;
     this.$('menu').onclick = () => this.dispatchEvent(new Event('hass-toggle-menu', { bubbles: true, composed: true }));
     for (const action of ['room', 'devices', 'preview', 'photos']) this.$('guide-' + action).onclick = () => this._guideAction(action);
-    this.$('family').onclick = event => { if (this.$('family').getAttribute('aria-disabled') === 'true') { event.preventDefault(); this._status('Create and publish your first room to open it in 3D Home.'); } };
+    this.$('family').onclick = event => {
+      if (this._busy) { event.preventDefault(); this._status('Wait for the current operation to finish before opening 3D Home.'); return; }
+      if (this.$('family').getAttribute('aria-disabled') === 'true') { event.preventDefault(); this._status('Create and publish your first room to open it in 3D Home.'); return; }
+      if (this._ready) { event.preventDefault(); void this._openFamily(); }
+    };
     this.$('retry').onclick = () => this._retryStartup();
+    this.$('back-to-editor').onclick = () => this._closePublishedHome();
     this.$('save').onclick = () => this._save();
     this.$('publish').onclick = () => this._publish();
     this.$('export').onclick = () => this._exportCurrent();
@@ -88,13 +105,15 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     const identity = `${value?.user?.id || ''}:${value?.user?.is_admin === true}`;
     if (this._identity !== undefined && this._identity !== identity) this._reset();
     this._identity = identity; this._hass = value;
+    if (this._publishedPanel) this._publishedPanel.hass = value;
     if (this.isConnected && !this._started && value) void this._start();
   }
   _reset() {
+    this._closePublishedHome(false);
     this._disposeAi();
     this._clearStartup(); this._startupFailed = false; this._edits = {};
     this._generation++; this._started = false; this._ready = false; this._busy = false;
-    this._project = null; this._savedRaw = null; this._pristineRaw = null; this._initializingBlank = false; this._legacy = false; this._saved = null; this._publishedRevision = null; this.$('guide').hidden = true; this._catalog = null; this._recovery = null; this._channel = null;
+    this._project = null; this._savedRaw = null; this._pristineRaw = null; this._initializingBlank = false; this._saved = null; this._source = null; this._publishedRevision = null; this.$('guide').hidden = true; this._catalog = null; this._recovery = null; this._channel = null;
     this._frame?.remove(); this._frame = null;
     for (const { reject, timer } of this._pending.values()) { clearTimeout(timer); reject(new Error('Editor session changed')); }
     this._pending.clear(); this.$('recovery').hidden = true; this.$('retry').hidden = true; this._buttons();
@@ -112,6 +131,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   _key() { return `home-studio.ha-tab-draft.v1:${this._hass?.user?.id || 'unknown'}`; }
   _dirty() { return !!this._project && JSON.stringify(this._project) !== (this._savedRaw ?? this._pristineRaw); }
   _unsaved() { return this._dirty() || this._edits.pending === true; }
+  _hasPublishedHome() { return this._saved?.has_published === true || this._publishedRevision != null; }
   _status(message, error = false) { this.$('status').textContent = message; this.$('status').classList.toggle('error', error); }
   _publicationIssue() {
     const floors = Array.isArray(this._project?.floors) ? this._project.floors : [];
@@ -122,11 +142,11 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   _drawingStatus() {
     if (this._edits.invalid) this._status(`Correct ${this._edits.field || 'the highlighted field'} before saving or publishing. Save draft will take you to the field.`, true);
     else if (this._edits.pending) this._status('Unsaved field edits · Save draft applies and saves your entered values.');
-    else if (!this._savedRaw && !this._dirty()) this._status('Start with one room below. Nothing has been published yet.');
+    else if (!this._savedRaw && !this._dirty()) this._status(this._hasPublishedHome() ? 'Start with one room below. Your published home stays unchanged until you publish.' : 'Start with one room below. Nothing has been published yet.');
     else this._status(this._dirty() ? 'Unsaved changes · Save draft keeps them in Home Assistant.' : this._publicationIssue() || (this._publishedRevision === this._revision ? 'Draft saved · 3D Home is up to date.' : 'Draft saved · Publish to 3D Home when you are ready.'));
   }
   _buttons() {
-    const disabled = !this._ready || this._busy;
+    const disabled = !this._ready || this._busy || this._showingPublished;
     const floors = Array.isArray(this._project?.floors) ? this._project.floors : [];
     const rooms = floors.reduce((count, floor) => count + (floor.rooms?.length || 0), 0);
     const issue = this._publicationIssue();
@@ -137,7 +157,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this.$('export').disabled = !this._project || this._busy;
     this.$('reload').disabled = disabled;
     // Unknown publication state must not block access to an existing live home.
-    const unpublished = !!this._saved && !this._legacy && this._publishedRevision == null;
+    const unpublished = !!this._saved && !this._hasPublishedHome();
     this.$('family').setAttribute('aria-disabled', String(unpublished));
     this.$('family').title = unpublished ? 'Publish your first room to open the live plan' : 'Open the published plan and device controls';
     this.$('guide-room').disabled = disabled;
@@ -152,14 +172,73 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this.$('step-room').dataset.current = String(!rooms);
     this.$('step-publish').dataset.current = String(!!rooms);
     this.$('next-step').textContent = !rooms ? 'Start with one room. Add the rest of your home whenever you are ready.'
-      : issue || (this._unsaved() ? 'Next: preview your room, then Save draft. Devices and furniture can be added later.'
+      : issue || (this._unsaved() ? this._source ? 'Next: Save draft, then publish when you are ready. Your installed home stays unchanged until you publish.' : 'Next: preview your room, then Save draft. Devices and furniture can be added later.'
       : this._publishedRevision !== this._revision ? 'Next: Publish to 3D Home. Your saved draft will become the live plan.'
       : 'Your plan is ready. Open 3D Home to use it, or keep editing here and publish again later.');
   }
   _guideAction(action) {
     if (!this._ready || this._busy || !['room', 'devices', 'preview', 'photos'].includes(action)) return;
+    if (action === 'preview' && this._source) { void this._showPublishedHome(); return; }
     this._send('guide-action', { action });
     this._frame?.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+  }
+  async _showPublishedHome() {
+    if (!this._ready || this._busy || !this._source || !this._hasPublishedHome() || this._showingPublished) return;
+    const generation = this._generation;
+    this._showingPublished = true; this._buttons();
+    try {
+      // Generated drawings use the published renderer on demand. Their editor
+      // stays in 2D, so this is the only active WebGL context.
+      await import(new URL('./panel.js', import.meta.url));
+      if (generation !== this._generation || !this.isConnected || !this._showingPublished) return;
+      const panel = document.createElement('home-floorplan-panel');
+      panel.configureDashboard({ editLocked: true, dryRun: true });
+      this._publishedPanel = panel;
+      this._frame.hidden = true; this.$('guide').hidden = true; this.$('published-view').hidden = false;
+      this.$('published-canvas').append(panel); panel.hass = this._hass;
+      this.$('back-to-editor').focus(); this.$('published-view').scrollIntoView({ block: 'start' });
+    } catch {
+      if (generation === this._generation) { this._closePublishedHome(false); this._status('Could not open the published home. Your drawing is still available. Try again.', true); }
+    }
+  }
+  _closePublishedHome(focus = true) {
+    this._showingPublished = false;
+    this._publishedPanel?.remove(); this._publishedPanel = null;
+    this.$('published-view').hidden = true;
+    if (this._frame) this._frame.hidden = false;
+    this.$('guide').hidden = !this._ready;
+    this._buttons();
+    if (focus && this._ready) { this.$('guide-preview').focus(); this._drawingStatus(); }
+  }
+  async _openFamily() {
+    if (!this._ready || this._busy) return;
+    const generation = this._generation;
+    let navigate = false, focusSave = false;
+    this._busy = true; this._buttons();
+    try {
+      // Read current field state without applying unfinished values. A field's
+      // latest message may still be crossing the sandbox boundary on click.
+      await this._snapshot(true, false);
+      if (generation !== this._generation) return;
+      if (this._edits.pending) {
+        this._closePublishedHome(false);
+        this._status('Finish the highlighted field, then Save draft before opening 3D Home. Your entered text is still here.', true);
+        this._send('guide-action', { action: 'focus-edit' });
+        this._frame?.scrollIntoView({ block: 'nearest' });
+      } else if (this._dirty()) {
+        this._closePublishedHome(false);
+        this._status('Save draft before opening 3D Home. Your changes are kept in this tab.');
+        focusSave = true;
+      } else navigate = true;
+    } catch (error) {
+      if (generation === this._generation) this._status(error.message || 'Could not check your edits. Keep this tab open and try again.', true);
+    } finally {
+      if (generation === this._generation) {
+        this._busy = false; this._buttons();
+        if (focusSave) this.$('save').focus();
+        if (navigate) location.assign(this.$('family').href);
+      }
+    }
   }
   _clearStartup() { clearTimeout(this._startupTimer); this._startupTimer = null; }
   _watchStartup(message) {
@@ -208,18 +287,23 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       const [saved, catalog] = await Promise.all([this._hass.callWS({ type: 'home_floorplan/project_get' }), this._hass.callWS({ type: 'home_floorplan/entity_catalog' })]);
       if (generation !== this._generation || !this.isConnected) return;
       this._clearStartup();
-      if (saved.mode === 'legacy' || saved.capabilities?.authoring === false) {
-        this._legacy = true;
-        this._failStartup('This installation uses a generated home. Open the browser editor with your original project JSON, then use your existing build and installation workflow. Open 3D Home to use the installed home.', false, false);
+      this._saved = saved; this._revision = saved.revision; this._publishedRevision = saved.published_revision;
+      // The live home may still use generated assets while a local drawing is
+      // editable. Only the server's authoring capability controls this editor.
+      if (saved.capabilities?.authoring !== true) {
+        this._failStartup(boundedText(saved.source_error, 500) || 'The drawing source for this home is unavailable. Restore its editable source to use Home Studio. You can still open the installed home in 3D Home.', false);
         return;
       }
       if (saved.can_edit === false) { this._failStartup('Editing is unavailable for this account. Open 3D Home to use the installed home.', false); return; }
       const url = new URL(saved.editor_url || EDITOR_PATH, location.origin);
       if (url.origin !== location.origin || url.pathname !== EDITOR_PATH || url.search || url.hash) throw new Error('Unexpected local editor address.');
-      this._editorUrl = url; this._catalog = catalogForEditor(catalog); this._saved = saved;
-      this._revision = saved.revision; this._publishedRevision = saved.published_revision;
+      this._editorUrl = url; this._catalog = catalogForEditor(catalog);
+      this._source = sourceForEditor(saved);
+      this.$('guide-preview').textContent = this._source ? 'Published home' : 'Preview 3D';
+      this.$('workflow-description').textContent = this._source ? 'Edit your home here. Save a draft, then publish it when you are ready to update 3D Home.' : 'Draw here. Save your draft, then publish it to use your home in 3D Home.';
+      this.$('publish-help').textContent = this._source ? 'Use Save draft, then Publish to 3D Home above. Published home shows the current installed details; your draft changes appear there after you publish.' : 'Preview your drawing, then use Save draft and Publish to 3D Home above. Saving alone keeps the live plan unchanged.';
       this._savedRaw = saved.project ? projectBytes(saved.project) : null;
-      this.$('guide').hidden = false; this.$('guide').open = saved.published_revision == null;
+      this.$('guide').hidden = false; this.$('guide').open = !this._hasPublishedHome();
       this._recovery = this._readRecovery();
       if (this._recovery && JSON.stringify(this._recovery.project) !== this._savedRaw) {
         this.$('recovery').hidden = false; this.$('loading').hidden = true;
@@ -258,7 +342,9 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   _onMessage(event) {
     const data = event.data;
     if (event.source !== this._frame?.contentWindow || event.origin !== 'null' || data?.protocol !== STUDIO_PROTOCOL || data.channel !== this._channel) return;
-    if (data.type === 'ready' && !this._ready) this._send('initialize', { project: this._project, catalog: this._catalog, capabilities: { ai: this._saved?.capabilities?.ai === true } });
+    if (data.type === 'ready' && !this._ready) this._send('initialize', { project: this._project, catalog: this._catalog, source: this._source,
+      capabilities: { ai: this._saved?.capabilities?.ai === true, architecture_editing: !this._source } });
+    if (data.type === 'published-preview') { void this._showPublishedHome(); return; }
     if (data.type === 'ai-request') { void this._aiRequest(data); return; }
     if (data.type === 'ai-abort') { this._aiPending.get(data.requestId)?.controller.abort(); return; }
     if (data.type === 'ai-close') { this._disposeAi(); return; }
@@ -382,11 +468,11 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       if (this._aiPending.get(data.requestId)?.controller === controller) this._aiPending.delete(data.requestId);
     }
   }
-  _snapshot(allowInvalid = false) {
+  _snapshot(allowInvalid = false, commit = true) {
     const requestId = String(++this._request);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this._pending.delete(requestId); reject(new Error('The editor did not respond. Your saved copy is unchanged.')); }, 5000);
-      this._pending.set(requestId, { resolve, reject, timer }); this._send('snapshot-request', { requestId, allowInvalid });
+      this._pending.set(requestId, { resolve, reject, timer }); this._send('snapshot-request', { requestId, allowInvalid, commit });
     });
   }
   async _save() {
@@ -439,7 +525,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
         return;
       }
       this._revision = saved.revision; this._publishedRevision = saved.published_revision; this._savedRaw = saved.project ? projectBytes(saved.project) : null;
-      this._saved = saved; this._openEditor(saved.project); this._persist();
+      this._saved = saved; this._source = sourceForEditor(saved); this._openEditor(saved.project); this._persist();
     } catch (error) { if (generation !== this._generation) return; this._status(`Could not load the saved draft: ${error.message || 'check the connection'}`, true); }
     finally { if (generation === this._generation) { this._busy = false; this._buttons(); } }
   }

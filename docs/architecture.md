@@ -89,8 +89,10 @@ request, privacy, geometry and transactional preview boundaries.
 The [portable installation reference](https://ha-homelab.github.io/home-studio/install.html#export)
 covers this route's commands, manual YAML entry, restart, and Home Assistant OS
 file transfer. These are optional portable steps, not requirements for a new
-native installation. Installing the native release does not automatically
-migrate customized generated homes.
+native installation. A customized installation must retain its generated assets
+and private adapters when updating the shared integration. With that complete
+bundle in place, Home Studio opens an editable projection of the installed home
+and preserves its original architecture as described below.
 
 ## Permissions and editing roles
 
@@ -822,3 +824,37 @@ indicator. Switch-only lamps without brightness retain full on/off behavior.
 This is a UI intensity cue, not a claim about measured illuminance. It adds no
 polling, render loop or GPU effect. Run `node --test scripts/test-light-state.cjs`
 for brightness, color, missing-state and icon-contrast regressions.
+
+
+## Editing an existing generated home
+
+`GeneratedProject` is the compatibility boundary between a compiled home and
+the native authoring UI. The server derives a small metric project from the
+installed rooms and the current saved inventory. Detailed meshes, custom object
+assets, private adapters, calibrated coordinate frames, activity maps and
+control metadata remain in a server-owned baseline. They are not flattened
+into the portable project's schema or sent through the editor bridge.
+
+The imported floor/room geometry is protected on both sides of the boundary.
+The UI explains the restriction; backend validation enforces it independently.
+Names, HA mappings, object placements and bindings remain editable. Newly
+created geometry is compiled as an addition and merged with the baseline,
+rather than recompiling and replacing the original house. Publication retains
+the original viewer runtime and its inert model-data payload, with the approved
+changes applied. Draft saves and active publications remain separate revisioned
+transactions. A failed build or save keeps the previous live plan available.
+
+The embedded viewer retains each original object's commissioned transform and
+binding for calibrated effects, while receiving the published appearance and
+the current placements through the HA bridge. Permission indexing includes
+both raw and embedded model references, including objects removed from the
+editable inventory. Static GLB, USDZ, OBJ and DAE downloads are unavailable after
+publishing these edits because the preserved exports would describe the old
+model. The editable JSON and private baseline remain available for recovery.
+
+The native host's **Published home** view uses the actual viewer on demand with
+editing locked and dry run forced. Its label distinguishes the active model
+from unpublished draft changes. Returning removes that renderer before showing
+the editor, preventing two large WebGL scenes from staying live. Native projects
+continue to use their normal draft 3D preview. No external editor navigation is
+required from the HA interface.

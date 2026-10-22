@@ -19,6 +19,7 @@ const $ = id => document.getElementById(id);
 const haContext = embeddedContext();
 let haCatalog = null;
 let haAiReady = null;
+let haSourcePolicy = null, haPublishedPreview = null;
 if (haContext) {
   document.body.classList.add('ha-embedded');
   // A relative logo link would leave the authenticated host bridge behind.
@@ -100,6 +101,37 @@ $('floor-navigator-toggle').addEventListener('click', () => {
   updateFloorNavigator();
 });
 const selected = () => selection ? floor()[selection.kind]?.find(o => o.id === selection.id) : null;
+const protectedRoom = (floorId, roomId) => haSourcePolicy?.rooms.get(floorId)?.has(roomId) === true;
+const customItem = (floorId, itemId) => haSourcePolicy?.customItems.get(floorId)?.has(itemId) === true;
+const protectedArchitectureMessage = 'Existing room shapes and floor heights are protected. You can rename rooms, place items, link devices, and draw additions.';
+function installSourcePolicy(value, policy, hostActions) {
+  haSourcePolicy = null; haPublishedPreview = null;
+  if (policy?.architectureEditing !== false) return;
+  const source = policy.source;
+  if (source?.kind !== 'generated' || !Array.isArray(source.protected_floors)
+    || JSON.stringify(source.protected_floors) !== JSON.stringify(value.floors.map(f => f.id))) throw new Error('Invalid protected home source.');
+  const rooms = new Map(), customItems = new Map();
+  for (const f of value.floors) {
+    const ids = source.protected_rooms?.[f.id];
+    if (!Array.isArray(ids) || ids.some(id => !f.rooms.some(room => room.id === id))) throw new Error('Invalid protected room source.');
+    rooms.set(f.id, new Set(ids)); customItems.set(f.id, new Set(source.custom_items?.[f.id] || []));
+  }
+  haSourcePolicy = { baseline: clone(value), rooms, customItems };
+  haPublishedPreview = hostActions.publishedPreview;
+}
+function validateSourcePolicy(value) {
+  if (!haSourcePolicy) return;
+  const base = haSourcePolicy.baseline;
+  if (value.id !== base.id || JSON.stringify(value.floors.map(f => f.id)) !== JSON.stringify(base.floors.map(f => f.id))) throw new Error(protectedArchitectureMessage);
+  for (const f of value.floors) {
+    const original = base.floors.find(entry => entry.id === f.id);
+    if (f.elevation_m !== original.elevation_m || f.height_m !== original.height_m) throw new Error(protectedArchitectureMessage);
+    for (const id of haSourcePolicy.rooms.get(f.id)) {
+      const room = f.rooms.find(entry => entry.id === id), old = original.rooms.find(entry => entry.id === id);
+      if (!room || room.material !== old.material || JSON.stringify(room.polygon) !== JSON.stringify(old.polygon)) throw new Error(protectedArchitectureMessage);
+    }
+  }
+}
 const snap = value => $('snap').checked ? Math.round(value * 4) / 4 : round(value);
 function node(tag, className, text) { const n = document.createElement(tag); if (className) n.className = className; if (text !== undefined) n.textContent = text; return n; }
 function button(text, handler, className = 'quiet') { const b = node('button', className, text); b.type = 'button'; b.onclick = handler; b.dataset.inspectorKey = `button:${text}`; return b; }
@@ -268,7 +300,7 @@ function transact(change, message = () => t('Project updated.'), { fit = false }
   if (drag) finishPointer(null, true);
   const draft = clone(project), priorSelection = selection && { ...selection };
   try {
-    change(draft, draft.floors.find(f => f.id === activeFloorId) || draft.floors[0]); validateProject(draft); serializeProject(draft);
+    change(draft, draft.floors.find(f => f.id === activeFloorId) || draft.floors[0]); validateProject(draft); validateSourcePolicy(draft); serializeProject(draft);
     if (committingField) { committingField.inspectorDraft = false; committingField.removeAttribute('aria-invalid'); }
     historyPush(project); project = draft; previewDirty = true;
     if (!project.floors.some(f => f.id === activeFloorId)) activeFloorId = project.floors[0].id;
@@ -278,7 +310,7 @@ function transact(change, message = () => t('Project updated.'), { fit = false }
   } catch (error) { if (committingField) { committingField.inspectorDraft = true; committingField.setAttribute('aria-invalid', 'true'); } selection = priorSelection; status(() => t('Change not applied: {error}', { error: formatValidationError(error, t) }), true); renderInspector(); editorChanged(); return false; }
 }
 async function replaceProject(next, message) {
-  validateProject(next); const raw = serializeProject(next), previous = serializeProject(project);
+  validateProject(next); validateSourcePolicy(next); const raw = serializeProject(next), previous = serializeProject(project);
   const result = await save({ raw, previous: hasContent() ? previous : undefined, isCurrent: () => serializeProject(project) === previous });
   if (result.status !== 'saved') {
     if (result.status === 'unavailable' && confirm(t('Autosave is unavailable. Continue in this tab without saving? Export JSON before leaving.'))) {
@@ -307,6 +339,10 @@ function renderUI() {
   if (!$('project-title').inspectorDraft) $('project-title').value = project.title;
   $('floor-caption').textContent = floor().name;
   $('undo').disabled = history.length === 0; $('redo').disabled = future.length === 0;
+  for (const id of ['add-floor', 'new-project', 'browse-examples', 'load-demo']) {
+    $(id).disabled = !!haSourcePolicy;
+    if (haSourcePolicy) $(id).title = protectedArchitectureMessage;
+  }
   const floorList = node('div');
   project.floors.forEach(f => {
     const b = button('', () => selectFloor(f.id), 'floor-button');
@@ -375,10 +411,11 @@ function buildInspector(parent) {
   const object = selected(), f = floor();
   if (!object) {
     $('inspector-title').textContent = t('Floor settings'); $('inspector-subtitle').textContent = t('A good plan starts with the basics.');
-    if (haCatalog) field(parent, 'Home Assistant floor', f.ha_floor_id || '', v => transact((_p, d) => { if (v) d.ha_floor_id = v; else delete d.ha_floor_id; }), { options: registryOptions(haCatalog.floors, f.ha_floor_id, 'No floor linked'), help: 'Links this drawing floor to your Home Assistant floor. Geometry stays editable.' });
+    if (haSourcePolicy) parent.append(node('p', 'callout', protectedArchitectureMessage));
+    if (haCatalog) field(parent, 'Home Assistant floor', f.ha_floor_id || '', v => transact((_p, d) => { if (v) d.ha_floor_id = v; else delete d.ha_floor_id; }), { options: registryOptions(haCatalog.floors, f.ha_floor_id, 'No floor linked'), help: 'Links this drawing floor to your Home Assistant floor.' });
     field(parent, t('Floor name'), f.name, v => transact((_p, d) => { d.name = v; }, () => t('Floor renamed.')));
-    const dimensions = row(parent); field(dimensions, t('Elevation (m)'), f.elevation_m, v => transact((_p, d) => { d.elevation_m = v; }), { type: 'number', min: -100, max: 100 });
-    field(dimensions, t('Ceiling height (m)'), f.height_m, v => transact((_p, d) => { d.height_m = v; }), { type: 'number', min: .5, max: 20 });
+    const dimensions = row(parent); field(dimensions, t('Elevation (m)'), f.elevation_m, haSourcePolicy ? null : v => transact((_p, d) => { d.elevation_m = v; }), { type: 'number', min: -100, max: 100, readOnly: !!haSourcePolicy });
+    field(dimensions, t('Ceiling height (m)'), f.height_m, haSourcePolicy ? null : v => transact((_p, d) => { d.height_m = v; }), { type: 'number', min: .5, max: 20, readOnly: !!haSourcePolicy });
     parent.append(node('p', 'field-note', t('Elevation is measured from the building origin. Items use height above their own floor.')));
     section(parent, t('Add room by dimensions'));
     const bounds = floorBounds(f), proposedX = f.rooms.length ? Math.ceil(bounds.maxX + 1) : 0;
@@ -400,33 +437,37 @@ function buildInspector(parent) {
       }, () => t('Garden added. Place trees, paths or animals from the Item library.'), { fit: true });
     }));
     parent.append(node('p', 'callout', t('Rooms are floor areas. Draw walls yourself, or select a room and build its wall outline. Moving a room will not move its walls.')));
-    parent.append(button(t('Clear this floor'), () => { if (confirm(t('Clear every room, wall, opening, and item on {floor}? You can undo this.', { floor: f.name }))) transact((_p, target) => { for (const key of ['rooms', 'walls', 'openings', 'items']) target[key] = []; selection = null; }, () => t('Floor cleared.')); }, 'danger'));
-    if (project.floors.length > 1) parent.append(button(t('Delete this floor'), () => { if (confirm(t('Delete {floor} and everything on it? You can undo this.', { floor: f.name }))) transact(p => { p.floors = p.floors.filter(item => item.id !== activeFloorId); selection = null; }, () => t('Floor deleted.'), { fit: true }); }, 'danger'));
+    if (!haSourcePolicy) parent.append(button(t('Clear this floor'), () => { if (confirm(t('Clear every room, wall, opening, and item on {floor}? You can undo this.', { floor: f.name }))) transact((_p, target) => { for (const key of ['rooms', 'walls', 'openings', 'items']) target[key] = []; selection = null; }, () => t('Floor cleared.')); }, 'danger'));
+    if (!haSourcePolicy && project.floors.length > 1) parent.append(button(t('Delete this floor'), () => { if (confirm(t('Delete {floor} and everything on it? You can undo this.', { floor: f.name }))) transact(p => { p.floors = p.floors.filter(item => item.id !== activeFloorId); selection = null; }, () => t('Floor deleted.'), { fit: true }); }, 'danger'));
     parent.append(node('p', 'property-id', t('Floor ID: {id}', { id: f.id }))); return;
   }
   const kind = selection.kind;
   $('inspector-title').textContent = ({ rooms: t('Room details'), walls: t('Wall details'), openings: t('Opening details'), items: t('Item details') })[kind];
   $('inspector-subtitle').textContent = ({ rooms: haContext ? 'Shape the space. Walls are edited separately.' : t('Shape the space. Then add its walls.'), walls: t('A physical segment with real thickness.'), openings: t('A true cutout in the selected wall.'), items: t('Give every object a place and a purpose.') })[kind];
   if (kind === 'rooms') {
+    const locked = protectedRoom(f.id, object.id);
+    if (locked) { $('inspector-subtitle').textContent = 'Existing room shape protected. Rename it, add items, or link devices.'; parent.append(node('p', 'field-note', 'The original walls and details remain in the published home. New rooms and walls can be drawn separately.')); }
     const metric = node('div', 'metric-strip'); metric.append(node('strong', '', Math.abs(signedArea(object.polygon)).toFixed(2)), node('span', '', t('m² floor area'))); parent.append(metric);
     if (haCatalog) {
       field(parent, 'Home Assistant area', object.ha_area_id || '', v => editObject(o => { if (v) o.ha_area_id = v; else delete o.ha_area_id; }), { options: registryOptions(haCatalog.areas, object.ha_area_id, 'No area linked'), help: 'Choose the existing area for this room to find its devices below.' });
       renderAreaDevices(parent, object);
     }
     field(parent, t('Room name'), object.name, v => editObject(o => { o.name = v; }));
-    field(parent, t('Floor material'), object.material, v => editObject(o => { o.material = v; }), { options: [{ value: 'floor', label: t('Warm timber') }, { value: 'tile', label: t('Tile / stone') }, { value: 'deck', label: t('Outdoor deck') }] });
-    parent.append(button(t('Build wall outline'), () => { let n = 0; const ok = transact((_p, d) => { n = outlineRoom(d, d.rooms.find(r => r.id === object.id)); }, () => t('Wall outline added. Exact shared walls are reused.')); if (ok) status(() => n ? t('{count} wall segments added. Exact shared walls were reused.', { count: n }) : t('This room already has a complete wall outline.')); }, 'primary'));
-    parent.append(node('p', 'field-note', t('Outlines use 0.15 m walls. Existing walls stay independent of this room.')));
+    field(parent, t('Floor material'), object.material, locked ? null : v => editObject(o => { o.material = v; }), { options: [{ value: 'floor', label: t('Warm timber') }, { value: 'tile', label: t('Tile / stone') }, { value: 'deck', label: t('Outdoor deck') }] }).disabled = locked;
+    if (!locked) {
+      parent.append(button(t('Build wall outline'), () => { let n = 0; const ok = transact((_p, d) => { n = outlineRoom(d, d.rooms.find(r => r.id === object.id)); }, () => t('Wall outline added. Exact shared walls are reused.')); if (ok) status(() => n ? t('{count} wall segments added. Exact shared walls were reused.', { count: n }) : t('This room already has a complete wall outline.')); }, 'primary'));
+      parent.append(node('p', 'field-note', t('Outlines use 0.15 m walls. Existing walls stay independent of this room.')));
+    }
     parent.append(button(t('Place item at room center'), () => {
       const center = object.polygon.reduce((sum, p) => [sum[0] + p[0] / object.polygon.length, sum[1] + p[1] / object.polygon.length], [0, 0]);
       addItem(center, object.id);
     }));
     parent.append(node('p', 'field-note', t('Places {item}. Choose another design in the Item library, then select this room again.', { item: placementName() })));
     section(parent, t('Polygon points'));
-    field(parent, t('x, z coordinates (m)'), object.polygon.map(p => p.join(', ')).join('\n'), value => editObject(o => {
+    field(parent, t('x, z coordinates (m)'), object.polygon.map(p => p.join(', ')).join('\n'), locked ? null : value => editObject(o => {
       const points = value.trim().split('\n').filter(s => s.trim()).map(line => line.trim().split(/[\s,]+/).map(Number));
       if (points.some(p => p.length !== 2 || p.some(v => !Number.isFinite(v)))) throw new Error(t('Use one x, z coordinate pair per line.')); o.polygon = points;
-    }), { rows: Math.min(7, object.polygon.length), dir: 'ltr', help: t('One corner per line, around the perimeter. Do not repeat the first point. Concave shapes are supported; crossing edges are not.') });
+    }), { rows: Math.min(7, object.polygon.length), dir: 'ltr', readOnly: locked, help: locked ? 'Original room outline, in meters. Its shape stays protected when you publish.' : t('One corner per line, around the perimeter. Do not repeat the first point. Concave shapes are supported; crossing edges are not.') });
   } else if (kind === 'walls') {
     const length = distance(object.start, object.end); const metric = node('div', 'metric-strip'); metric.append(node('strong', '', length.toFixed(2)), node('span', '', t('m segment length'))); parent.append(metric);
     for (const endpoint of ['start', 'end']) { section(parent, t(`${endpoint} point`)); const r = row(parent); ['x', 'z'].forEach((axis, index) => field(r, t(`${endpoint} ${axis} (m)`), object[endpoint][index], v => editObject(o => { o[endpoint][index] = v; }), { type: 'number', min: -100, max: 100 })); }
@@ -450,6 +491,8 @@ function buildInspector(parent) {
     parent.append(node('p', 'callout', t('These dimensions remove wall geometry in both the preview and the exported build. The window tint is only a preview aid.')));
     parent.append(button(t('Select parent wall'), () => { setSelection({ kind: 'walls', id: wall.id }); renderUI(); renderPlan(); }));
   } else if (kind === 'items') {
+    const originalModel = customItem(f.id, object.id);
+    if (originalModel) parent.append(node('p', 'field-note', 'This item has an original installed model. Its detailed appearance is kept in the published home unless you choose a different design below. The 2D plan shows its footprint.'));
     field(parent, t('Item name'), object.name, v => editObject(o => { o.name = v; }));
     const model = object.model_id ? getCatalogModel(object.model_id) : null;
     field(parent, t('Design'), object.model_id || '', value => editObject(o => {
@@ -458,7 +501,7 @@ function buildInspector(parent) {
       if (o.name === previous?.label || o.name === LABELS[o.type]) o.name = next.label;
       o.model_id = next.id; o.type = next.type; o.style_id ||= next.default_style;
       if (!supportsFurniturePattern(next)) { delete o.pattern_id; delete o.pattern_color; }
-    }, () => t('Item design changed. Size and position kept.')), { options: [{ value: '', label: t('Basic shape / device') }, ...CATALOG.models.map(entry => ({ value: entry.id, label: t(`model.${entry.id}`) }))], help: t('Changes the shape while keeping your size and placement.') });
+    }, () => t('Item design changed. Size and position kept.')), { options: [{ value: '', label: originalModel ? 'Original installed model' : t('Basic shape / device') }, ...CATALOG.models.map(entry => ({ value: entry.id, label: t(`model.${entry.id}`) }))], help: t('Changes the shape while keeping your size and placement.') });
     if (model) {
       const style = getCatalogStyle(object.style_id || model.default_style);
       field(parent, t('Color palette'), style.id, value => editObject(o => { o.style_id = value; delete o.color; delete o.pattern_color; }, () => t('Color palette applied.')), { options: CATALOG.styles.map(entry => ({ value: entry.id, label: t(`palette.${entry.id}`) })), help: t('Coordinated colors for the whole item. Changing palette resets custom colors and keeps your pattern.') });
@@ -503,11 +546,12 @@ function buildInspector(parent) {
     field(parent, t('Entity ID (optional)'), object.entity_id, v => editObject(o => { o.entity_id = v.trim(); }), { dir: 'ltr', help: haContext ? 'Bind an entity to this item. Publishing enables its controls in the family view.' : t('Example: light.living_room. Any Home Assistant entity can be linked. In the installed plan, lights, switches and fans have quick toggles; sensors show readings; media players show artwork and controls; Details opens native controls for other entities. This offline planner only stores the mapping and never controls devices.') });
     field(parent, t('Notes'), object.notes, v => editObject(o => { o.notes = v; }), { rows: 3 });
   }
-  parent.append(button(t(`Delete ${kind === 'openings' ? 'opening' : kind.slice(0, -1)}`), deleteSelection, 'danger'));
+  if (kind !== 'rooms' || !protectedRoom(f.id, object.id)) parent.append(button(t(`Delete ${kind === 'openings' ? 'opening' : kind.slice(0, -1)}`), deleteSelection, 'danger'));
   parent.append(node('p', 'property-id', object.wall_id ? t('ID: {id} · Wall: {wall}', { id: object.id, wall: object.wall_id }) : t('ID: {id}', { id: object.id })));
 }
 function deleteSelection() {
   if (!selection || !selected()) return;
+  if (selection.kind === 'rooms' && protectedRoom(activeFloorId, selection.id)) { status(protectedArchitectureMessage); return; }
   const { kind, id } = selection;
   transact((_p, f) => {
     f[kind] = f[kind].filter(o => o.id !== id);
@@ -525,12 +569,15 @@ function setTool(next) {
   $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || view !== 'plan';
 }
 function setView(next) {
+  if (next === 'preview' && haPublishedPreview) { haPublishedPreview(); return; }
   if (drag) finishPointer(null, true);
   releasePreviewPointer();
   view = next;
   previewEnvironment?.setActive(next === 'preview' && !previewLost && !canvasSuspended);
-  $('plan-tab').setAttribute('aria-selected', String(next === 'plan')); $('preview-tab').setAttribute('aria-selected', String(next === 'preview'));
-  $('plan-tab').tabIndex = next === 'plan' ? 0 : -1; $('preview-tab').tabIndex = next === 'preview' ? 0 : -1;
+  if (!haSourcePolicy) {
+    $('plan-tab').setAttribute('aria-selected', String(next === 'plan')); $('preview-tab').setAttribute('aria-selected', String(next === 'preview'));
+    $('plan-tab').tabIndex = next === 'plan' ? 0 : -1; $('preview-tab').tabIndex = next === 'preview' ? 0 : -1;
+  }
   $('plan-view').hidden = next !== 'plan'; $('preview-view').hidden = next !== 'preview'; $('snap-label').hidden = next !== 'plan';
   $('tool-hint').textContent = next === 'preview' ? previewHint() : toolHint();
   updatePreviewNavigation();
@@ -689,6 +736,7 @@ planCanvas.addEventListener('pointerdown', event => {
   if (tool === 'door' || tool === 'window') { const near = wallAt(world); if (near) addOpening(near.wall, near.hit.offset, tool); else status(() => t('Click directly on an existing wall to add an opening.'), true); return; }
   if (tool === 'item') { addItem(world); return; }
   setSelection(hitTest(world));
+  if (selection?.kind === 'rooms' && protectedRoom(activeFloorId, selection.id)) { status(protectedArchitectureMessage); return; }
   if (selection) {
     // Keep one immutable undo snapshot; only the selected object changes while dragging.
     drag = { kind: 'move', pointerId: event.pointerId, startWorld: world, original: project, selection: { ...selection }, moved: false, offset: [0, 0] };
@@ -700,7 +748,7 @@ planCanvas.addEventListener('pointermove', event => {
   if (drag && drag.pointerId !== event.pointerId) return;
   if (drag && event.buttons === 0) { finishPointer(event, true); return; }
   const screen = localPoint(event), world = toWorld(screen); $('pointer-position').textContent = `x ${world[0].toFixed(2)} · z ${world[1].toFixed(2)} m`;
-  if (!drag) { if (tool === 'select') planCanvas.style.cursor = hitTest(world) ? 'grab' : 'default'; return; }
+  if (!drag) { if (tool === 'select') { const hit = hitTest(world); planCanvas.style.cursor = hit && !(hit.kind === 'rooms' && protectedRoom(activeFloorId, hit.id)) ? 'grab' : 'default'; } return; }
   if (drag.kind === 'pan') { map.x = drag.map.x + screen[0] - drag.screen[0]; map.y = drag.map.y + screen[1] - drag.screen[1]; }
   if (drag.kind === 'draw') drag.endWorld = world.map(snap);
   if (drag.kind === 'move') {
@@ -735,7 +783,7 @@ function finishPointer(event, cancel = false) {
   if (current.kind === 'move') {
     if (cancel || !current.moved) project = current.original;
     else {
-      try { validateProject(project); serializeProject(project); historyPush(current.original); previewDirty = true; status(() => t('Object moved.')); save(); }
+      try { validateProject(project); validateSourcePolicy(project); serializeProject(project); historyPush(current.original); previewDirty = true; status(() => t('Object moved.')); save(); }
       catch (error) { project = current.original; status(() => t('Move cancelled: {error}', { error: formatValidationError(error, t) }), true); }
     }
     if (project !== current.original) {
@@ -1300,6 +1348,7 @@ function renderLocale() {
   // Switching a presentation preference must not discard an unfinished form.
   const drafts = [...$('inspector-body').querySelectorAll('input,select,textarea')].map(input => ({ value: input.value, checked: input.checked, draft: input.inspectorDraft, invalid: input.getAttribute('aria-invalid') }));
   translateStatic();
+  if (haSourcePolicy) $('preview-tab').textContent = 'Published home';
   $('language-select').value = getLocale();
   document.querySelectorAll('[data-tool]').forEach(element => {
     const label = element.querySelector('span:nth-child(2)').textContent;
@@ -1353,11 +1402,11 @@ installOnboarding({
 });
 if (!initialLocale.loaded) status(() => t('Language could not be loaded. English is shown instead.'), true);
 
-function focusUnfinishedGuideField() {
+function focusUnfinishedGuideField(message = 'Finish the highlighted field before choosing a room. Save draft above applies and saves your changes.') {
   const unfinished = document.querySelector('[data-project-field][aria-invalid="true"]')
     || [...document.querySelectorAll('[data-project-field]')].find(field => field.inspectorDraft);
   if (!unfinished) return false;
-  status('Finish the highlighted field before choosing a room. Save draft above applies and saves your changes.');
+  status(message);
   unfinished.focus({ preventScroll: true }); unfinished.scrollIntoView({ block: 'center' }); return true;
 }
 
@@ -1368,6 +1417,10 @@ function guideAction(action) {
   // Keep a form already being edited intact when a host shortcut is clicked.
   const modal = document.querySelector('dialog[open]');
   if (modal) { modal.focus(); return; }
+  if (action === 'focus-edit') {
+    focusUnfinishedGuideField('Finish the highlighted field, then Save draft before opening 3D Home. Your entered text is still here.');
+    return;
+  }
   if ((action === 'room' || action === 'devices') && focusUnfinishedGuideField()) return;
   if (action === 'room') { $('measured-room').click(); return; }
   if (action === 'preview') { setView('preview'); $('preview-tab').focus(); return; }
@@ -1401,7 +1454,7 @@ export const editorBridge = Object.freeze({
   selectionContext: () => ({ floorId: activeFloorId, roomId: selection?.kind === 'rooms' ? selection.id : selection?.kind === 'items' ? selected()?.room : null }),
   subscribe(listener) { editorListeners.add(listener); return () => editorListeners.delete(listener); },
   previewProject(candidate) {
-    validateProject(candidate); serializeProject(candidate); candidatePreview = clone(candidate); previewDirty = true;
+    validateProject(candidate); validateSourcePolicy(candidate); serializeProject(candidate); candidatePreview = clone(candidate); previewDirty = true;
     $('empty-state').hidden = true; fitPlan(); fitPreview(); requestCanvasRender();
   },
   cancelPreview() {
@@ -1422,13 +1475,23 @@ export const editorBridge = Object.freeze({
 // drafts never touch the standalone localStorage keys or receive HA credentials.
 if (haContext) {
   connectHost(haContext, {
-    initialize(value, catalog, aiTransport) {
+    initialize(value, catalog, aiTransport, policy, hostActions) {
       const next = value || blankProject(); validateProject(next); serializeProject(next);
+      installSourcePolicy(next, policy, hostActions);
+      if (haSourcePolicy) {
+        for (const id of ['plan-tab', 'preview-tab']) { $(id).setAttribute('role', 'button'); $(id).removeAttribute('aria-selected'); $(id).removeAttribute('aria-controls'); $(id).tabIndex = 0; }
+        $('plan-tab').parentElement.setAttribute('role', 'group');
+        $('plan-tab').parentElement.setAttribute('aria-label', 'Drawing and published home');
+        $('preview-tab').textContent = 'Published home'; $('preview-tab').lang = 'en';
+        const helpPreview = document.querySelector('.native-help [data-guide-action="preview"]');
+        helpPreview.textContent = 'Published home';
+        helpPreview.parentElement.querySelector('p').textContent = 'Use Published home to inspect the current installed details. Changes to your drawing appear there only after Save draft and Publish to 3D Home. Back to editing returns to this drawing.';
+      }
       haCatalog = catalog && Array.isArray(catalog.areas) && Array.isArray(catalog.entities) ? catalog : { floors: [], areas: [], entities: [] };
       installRecoveredProject(next); history = []; future = [];
       document.querySelector('.workspace').inert = false; document.querySelector('.app-header').inert = false; renderUI();
       translatedText('save-status', 'Draft in this tab · save in Home Assistant above');
-      $('ha-workflow-note').textContent = 'Draw a room, add devices if you want, then Save draft and Publish to 3D Home above.';
+      $('ha-workflow-note').textContent = haSourcePolicy ? 'Edit item placements or draw additions. Existing room shapes stay protected. Published home shows the installed details.' : 'Draw a room, add devices if you want, then Save draft and Publish to 3D Home above.';
       status('Home Assistant drawing ready. Save draft above before leaving.');
       if (aiTransport) {
         const stylesheet = document.createElement('link'); stylesheet.rel = 'stylesheet';

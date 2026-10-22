@@ -8,7 +8,8 @@ Use these two Home Assistant sidebar entries:
 - **Home Studio** is where an administrator draws rooms, adds furniture, links
   devices, and saves and publishes changes.
 - **3D Home** is the published view your household uses to see the home and
-  control linked devices. Return to Home Studio when you want to change the drawing.
+  control linked devices. Administrators can choose **Edit home** in its header
+  to return directly to Home Studio.
 
 The steps below are for a new native installation, where the drawing is saved
 inside Home Assistant. No terminal or local compiler is needed. If you already
@@ -65,7 +66,7 @@ becomes **Add another room**.
    **3D Home** from the saved drawing. Each floor needs at least one valid room;
    a failed publication leaves the previous published home available.
 5. Choose **Open 3D Home**, or open **3D Home** in the HA sidebar, to see your room.
-   Return to **Home Studio** to add more detail, then save and publish again
+   Choose **Edit home** in the viewer header to add more detail, then save and publish again
    when ready.
 
 **Save draft** keeps your work for editing. **Publish to 3D Home** makes the
@@ -140,8 +141,9 @@ published generation active.
 ## Optional fallback: the separate editor
 
 If setup is blocked, or you want to work offline, use the separate editor.
-The in-HA editor links to the [hosted browser editor](https://ha-homelab.github.io/home-studio/planner/);
-a local copy is available in the portable toolkit.
+The [hosted browser editor](https://ha-homelab.github.io/home-studio/planner/)
+and a local copy in the portable toolkit are separate alternatives. Home Studio
+does not send you there: drawing and publication happen inside Home Assistant.
 The separate editor links back to the native installation instructions. It
 does not know your private HA address, connect to HA, or receive your project
 just because you follow that link.
@@ -176,19 +178,41 @@ LAN model URLs are not accepted by these profiles.
 
 ## Existing generated homes
 
-The portable workflow is retained: external editor → JSON → Python compiler →
-local installer. Its [build and installation instructions](../install.html#export)
-continue to apply. Generated packages and specialized private adapters are not
-automatically converted into native projects.
+With the complete editor/runtime installed, **Home Studio opens the home that
+is already installed**. You do not need to redraw it or visit another website.
+Its rooms and current saved object placements become an editable draft. The
+original detailed architecture, custom objects and runtime integrations stay
+with the installed home.
 
-Do not replace a customized component with the generic HACS package and expect
-its private adapters or prebuilt assets to be preserved. Keep its existing
-deployment route unless you intentionally migrate. For an ordinary portable
-project, retain its source JSON and HA backup, then import the source into a
-fresh native installation. Check bindings in Dry run before using live controls.
-If Home Studio identifies the installation as a generated home, its sidebar
-explains this workflow and keeps the family view and browser editor links
-available. This compatibility state is not a connection error.
+1. Open **Home Studio** as an administrator, or choose **Edit home** in 3D Home.
+2. Select a room or object on the drawing. Rename rooms, link their HA areas,
+   move or resize objects, change device bindings, or add furniture and devices.
+   You can add new rooms, walls and openings alongside the original architecture.
+3. Choose **Save draft**, then **Publish to 3D Home** when ready. Saving alone
+   does not change the household's live view.
+4. Choose **Open 3D Home** to use the updated plan. **Edit home** brings you back.
+   Save any unfinished edits before switching views.
+
+Original room boundaries and floor geometry are protected because compiled
+meshes do not retain the source wall/door construction history. Selecting them
+explains this in the inspector; it does not pretend that a room outline can
+safely rewrite its detailed walls or sensing zones. Newly drawn architecture
+is editable normally. Keep the original source/build route for structural
+changes to the imported building.
+
+For these homes, **Published home** shows the actual installed 3D model with
+controls locked for preview. **Back to editing** returns to the same drawing.
+This preview shows the last publication, not unpublished draft changes. The
+editor keeps only one 3D renderer active at a time.
+
+Back up the complete HA configuration, including the generated-home baseline,
+drafts and publication assets. An exported drawing JSON contains the editable
+projection, not the original custom model; it is not a complete backup of an
+imported home. Never replace a customized integration with a generic ZIP and
+expect its private adapters or baked assets to survive. Use its existing
+composition/update process to install the shared editor/runtime while retaining
+those files. Older thin portable packages need that complete runtime before
+in-HA editing is available.
 
 ## Troubleshooting
 

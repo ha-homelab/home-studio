@@ -1,7 +1,7 @@
 // The embedded editor is deliberately unprivileged. This protocol carries only
 // editable drawings, registry labels, and bounded AI operations; HA authentication stays in the host.
 export const PROTOCOL = 'home-studio-editor-v1';
-const GUIDE_ACTIONS = Object.freeze(['room', 'devices', 'preview', 'photos']);
+const GUIDE_ACTIONS = Object.freeze(['room', 'devices', 'preview', 'photos', 'focus-edit']);
 export function embeddedContext(win = window) {
   const url = new URL(win.location.href);
   const channel = new URLSearchParams(url.hash.slice(1)).get('ha-studio');
@@ -31,10 +31,15 @@ export function connectHost(context, { initialize, snapshot, editState, subscrib
     const data = event.data;
     if (event.source !== win.parent || event.origin !== context.origin || data?.protocol !== PROTOCOL || data.channel !== context.channel) return;
     if (data.type === 'initialize' && !initialized) {
-      try { initialize(data.project, data.catalog, data.capabilities?.ai === true ? ai : null); initialized = true; changed(); }
+      try {
+        initialize(data.project, data.catalog, data.capabilities?.ai === true ? ai : null,
+          { architectureEditing: data.capabilities?.architecture_editing !== false, source: data.source },
+          { publishedPreview: () => { if (initialized) send('published-preview'); } });
+        initialized = true; changed();
+      }
       catch { failed(); send('error', { message: 'The saved drawing could not be opened. Export its JSON from Home Assistant for recovery.' }); }
     } else if (data.type === 'snapshot-request' && initialized && typeof data.requestId === 'string' && data.requestId.length < 80) {
-      try { flush(data.allowInvalid === true); changed(data.requestId); }
+      try { if (data.commit !== false) flush(data.allowInvalid === true); changed(data.requestId); }
       catch (error) { changed(); send('snapshot-error', { requestId: data.requestId, message: error.message }); }
     } else if (data.type === 'guide-action' && initialized && GUIDE_ACTIONS.includes(data.action)) {
       // Navigation only: the existing editor controls still own every edit.

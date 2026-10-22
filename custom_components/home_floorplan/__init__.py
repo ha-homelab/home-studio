@@ -4,6 +4,7 @@ import asyncio
 import base64
 import copy
 import json
+import logging
 from functools import wraps
 from pathlib import Path
 
@@ -20,9 +21,11 @@ from .validation import validate_inventory
 from .site import load_site, prepare_inventory, repair_inventory
 from .curtains import async_setup_curtains, PROFILES, BOOT_SECONDS, is_motor_available, read_reported_position
 from .native import NativeError, NativeProject, StudioAssetsView, EDITOR_URL, studio_asset_files, load_models
+from .generated import GeneratedProject
 from .permissions import can_read, can_control, floor_entities, model_references
 
 DOMAIN = "home_floorplan"
+_LOGGER = logging.getLogger(__name__)
 ROOT = Path(__file__).parent
 VERSION = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))["version"]
 LOCAL_SITE = None
@@ -77,6 +80,23 @@ async def async_setup(hass, config):
             recovery = None
         state.update(store=store, recovery=recovery)
         _apply_active(state, ROOT / "assets", SITE, models, data, references)
+        # Thin generated packages remain valid viewers. Only complete Studio
+        # installations offer the preservation adapter and its bundled compiler.
+        editor_files = await hass.async_add_executor_job(studio_asset_files, ROOT)
+        if editor_files and (ROOT / "runtime" / "planner" / "project.py").is_file() and not recovery:
+            generated = GeneratedProject(hass, ROOT, SITE, models, data)
+            try:
+                active = await generated.load()
+            except (NativeError, OSError, ValueError, KeyError, TypeError):
+                _LOGGER.exception("Generated home authoring could not be loaded; the installed viewer is unchanged")
+                state["source_error"] = "The installed home could not be opened for editing. Its existing view is preserved; check the integration log and restore its matching private source if needed."
+            else:
+                state["native"] = generated
+                if active:
+                    assets, site, models, references = active
+                    _apply_active(state, assets, site, models, generated.document["inventory"], references)
+                else:
+                    _apply_active(state, ROOT / "assets", SITE, models, data, generated.references)
     else:
         native = NativeProject(hass)
         active = await native.load()
@@ -167,7 +187,7 @@ async def async_unload_entry(hass, entry):
 def _status_snapshot(state):
     """Pin publication facts without retaining any user's permission decisions."""
     native = state["native"]
-    snapshot = {"mode": "native" if native else "legacy",
+    snapshot = {"mode": getattr(native, "mode", "native") if native else "legacy",
                 "has_editor": bool(state.get("has_editor")),
                 "default_floor": state["site"]["default_floor"],
                 "references": {floor: frozenset(floor_entities(state, floor, PROFILES))
@@ -188,7 +208,7 @@ def _status_from_snapshot(snapshot, connection):
     result = {"mode": snapshot["mode"], "can_edit": admin,
               "has_editor": snapshot["has_editor"], "has_published": bool(floors),
               "floors": floors, "default_floor": default_floor}
-    if snapshot["mode"] == "native" and admin:
+    if snapshot["mode"] in ("native", "generated") and admin:
         result.update(revision=snapshot["revision"], published_revision=snapshot["published_revision"])
     return result
 
@@ -202,8 +222,11 @@ def _project_result(state, connection):
     return {**_status(state, connection), "project": copy.deepcopy(native.document["project"]) if native else None,
             "revision": native.document["revision"] if native else 0,
             "published_revision": native.document["published_revision"] if native else None,
+            "source": copy.deepcopy(getattr(native, "source", None)),
+            "source_error": state.get("source_error"),
             "editor_url": EDITOR_URL, "capabilities": {
                 "authoring": bool(native),
+                "architecture_editing": bool(native and not isinstance(native, GeneratedProject)),
                 "ai": bool(native and state.get("ai_registered") and state.get("initialized")
                            and not state.get("panels_unloaded") and connection.user and connection.user.is_admin)}}
 
@@ -225,8 +248,13 @@ def _floor(state, msg, connection):
 
 
 async def _persist_inventory(state, updated):
-    if state["native"]:
-        await state["native"].save_inventory(updated)
+    native = state["native"]
+    if isinstance(native, GeneratedProject) and native.document["generation"] is None:
+        document = await native.hass.async_add_executor_job(native.prepare_legacy_inventory, updated)
+        await state["store"].async_save(updated)
+        native.accept_legacy_inventory(document)
+    elif native:
+        await native.save_inventory(updated)
     else:
         await state["store"].async_save(updated)
     state["data"] = updated
@@ -266,7 +294,7 @@ def ws_project_get(hass, connection, msg):
 async def ws_project_save(hass, connection, msg):
     state = hass.data[DOMAIN]
     if not state["native"]:
-        connection.send_error(msg["id"], "unsupported", "This package uses the offline project workflow. Install Home Studio to author a new native project.")
+        connection.send_error(msg["id"], "unsupported", state.get("source_error") or "Install the complete Home Studio integration to edit this home in Home Assistant.")
         return
     try:
         async with state["lock"]:
@@ -285,7 +313,7 @@ async def ws_project_save(hass, connection, msg):
 async def ws_project_publish(hass, connection, msg):
     state = hass.data[DOMAIN]
     if not state["native"]:
-        connection.send_error(msg["id"], "unsupported", "Publish this offline project using its compiler package.")
+        connection.send_error(msg["id"], "unsupported", state.get("source_error") or "Install the complete Home Studio integration to publish edits in Home Assistant.")
         return
     try:
         async with state["lock"]:
@@ -364,6 +392,7 @@ async def ws_viewer(hass, connection, msg):
         path = state["assets"] / floor / "index.html"
         inventory = copy.deepcopy(state["data"][floor])
         site_features = state["site"]["site_features"]
+        stale_exports = isinstance(state["native"], GeneratedProject) and state["native"].document["generation"] is not None
         stream = await hass.async_add_executor_job(path.open, "r", -1, "utf-8")
     content = await hass.async_add_executor_job(_read_open_file, stream)
     if state.get("panels_unloaded") or any(not can_read(connection, entity_id) for entity_id in references):
@@ -374,6 +403,11 @@ async def ws_viewer(hass, connection, msg):
     result = _status_from_snapshot(snapshot, connection)
     capabilities = _capabilities(connection, references)
     content = content.replace("<head>", "<head><script>window.__HOME_FLOORPLAN_EMBED__=true;</script>", 1)
+    if stale_exports:
+        # Immutable commissioned exports do not describe the newly edited
+        # home. Keep the originals in its backup, but do not offer them as
+        # current downloads. Inventory and draft JSON remain available.
+        content = content.replace("<head>", "<head><style>a.download,a[download]{display:none!important}</style>", 1)
     connection.send_result(msg["id"], {**result, **inventory, **capabilities, "html": content, "floor": floor,
                                      "site_features": site_features})
 
@@ -446,6 +480,9 @@ async def ws_export(hass, connection, msg):
     state = hass.data[DOMAIN]
     try:
         async with state["lock"]:
+            if isinstance(state["native"], GeneratedProject) and state["native"].document["generation"] is not None:
+                connection.send_error(msg["id"], "not_available", "The original model downloads do not include these Home Studio edits. Export the saved drawing or inventory JSON instead.")
+                return
             if not (floor := _floor(state, msg, connection)):
                 return
             filename = f"{state['site']['floors'][floor]['stem']}.{msg['format']}"

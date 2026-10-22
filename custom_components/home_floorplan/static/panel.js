@@ -219,7 +219,7 @@ class HomeFloorplanPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({mode: 'open'});
-    this.shadowRoot.innerHTML = `<style>:host{display:flex;flex-direction:column;height:100dvh;min-height:0;background:#11191f}header{flex-shrink:0;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;font:14px system-ui;color:#b8c8d0}button{padding:8px 10px;cursor:pointer;background:#202d35;color:#e9eeef;border:1px solid #44515a;border-radius:7px;min-height:40px}#notice{flex:1;min-width:160px;overflow-wrap:anywhere}#dry-run[aria-pressed="true"]{border-color:#e8c56c;color:#ffe6a2}iframe{border:0;flex:1;width:100%;min-height:0}.error{color:#ffd19b}#recovery,#local-recovery{padding:20px;color:#e9eeef;font:14px/1.5 system-ui;overflow:auto}#recovery-details{white-space:pre-wrap;overflow-wrap:anywhere}button:disabled{opacity:.5}#studio{color:#a9e0ee;padding:8px;text-decoration:none}[hidden]{display:none!important}</style><header><button id="menu" aria-label="Open sidebar">☰</button><span id="notice" role="status">Connecting to Home Assistant…</span><button id="dry-run" type="button" aria-pressed="false">Dry run: Off</button><button id="retry">Reload saved plan</button><a id="studio" href="/home-studio" hidden>Open Home Studio</a></header><section id="local-recovery" hidden><h2>Unsaved layout edits</h2><p>The latest layout submitted by this card is retained in memory. Export it before reloading the saved plan. Keep this card open until you have saved the file.</p><button id="local-export">Export unsaved inventory JSON</button></section><section id="recovery" hidden><h2>Saved placements need repair</h2><p>Nothing has been overwritten. Export the original inventory, keep it as a backup, and edit a copy using the current floor and room IDs below. Importing the repaired copy replaces all saved floors only after validation.</p><pre id="recovery-details"></pre><button id="recovery-export">Export original inventory</button> <button id="recovery-import">Import repaired inventory</button><input id="recovery-file" type="file" accept="application/json,.json" hidden></section><iframe title="Private home floorplan" sandbox="allow-scripts allow-downloads allow-forms"></iframe>`;
+    this.shadowRoot.innerHTML = `<style>:host{display:flex;flex-direction:column;height:100dvh;min-height:0;background:#11191f}header{flex-shrink:0;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;font:14px system-ui;color:#b8c8d0}button{padding:8px 10px;cursor:pointer;background:#202d35;color:#e9eeef;border:1px solid #44515a;border-radius:7px;min-height:40px}#notice{flex:1;min-width:160px;overflow-wrap:anywhere}#dry-run[aria-pressed="true"]{border-color:#e8c56c;color:#ffe6a2}iframe{border:0;flex:1;width:100%;min-height:0}.error{color:#ffd19b}#recovery,#local-recovery{padding:20px;color:#e9eeef;font:14px/1.5 system-ui;overflow:auto}#recovery-details{white-space:pre-wrap;overflow-wrap:anywhere}button:disabled{opacity:.5}#studio{display:inline-flex;align-items:center;min-height:44px;box-sizing:border-box;color:#a9e0ee;padding:8px 12px;border:1px solid #44515a;border-radius:7px;text-decoration:none}#studio:focus-visible{outline:3px solid #e8c56c;outline-offset:3px}[hidden]{display:none!important}</style><header><button id="menu" aria-label="Open sidebar">☰</button><span id="notice" role="status">Connecting to Home Assistant…</span><button id="dry-run" type="button" aria-pressed="false">Dry run: Off</button><button id="retry">Reload saved plan</button><a id="studio" href="/home-studio" lang="en" hidden>Edit home</a></header><section id="local-recovery" hidden><h2>Unsaved layout edits</h2><p>The latest layout submitted by this card is retained in memory. Export it before reloading the saved plan. Keep this card open until you have saved the file.</p><button id="local-export">Export unsaved inventory JSON</button></section><section id="recovery" hidden><h2>Saved placements need repair</h2><p>Nothing has been overwritten. Export the original inventory, keep it as a backup, and edit a copy using the current floor and room IDs below. Importing the repaired copy replaces all saved floors only after validation.</p><pre id="recovery-details"></pre><button id="recovery-export">Export original inventory</button> <button id="recovery-import">Import repaired inventory</button><input id="recovery-file" type="file" accept="application/json,.json" hidden></section><iframe title="Private home floorplan" sandbox="allow-scripts allow-downloads allow-forms"></iframe>`;
     this.serverCanEdit = false;
     this.editLocked = false;
     this.readableEntities = new Set();
@@ -274,6 +274,17 @@ class HomeFloorplanPanel extends HTMLElement {
       this.discardLocalEdits();
       this.loadFloor(this.requestedFloor ?? (this.revision === undefined ? undefined : this.floor));
     };
+    this.$('studio').onclick = event => {
+      if (!this.canEdit || this.hasEditor !== true) { event.preventDefault(); return; }
+      if (this.pending) {
+        event.preventDefault(); this.notice('Wait for the current save to finish before editing your home.', true); return;
+      }
+      if (this.failed || this.suspendedEdits || this.localEdits) {
+        event.preventDefault();
+        this.notice('Keep this view open. Export your unsaved inventory JSON, then reload the saved plan before opening Edit home.', true);
+        if (this.localEdits) { this.$('local-recovery').hidden = false; this.$('local-export').focus(); }
+      }
+    };
     this.$('local-export').onclick = () => this.exportLocalEdits();
     this.$('recovery-export').onclick = () => this.exportRecovery();
     this.$('recovery-import').onclick = () => this.$('recovery-file').click();
@@ -301,7 +312,7 @@ class HomeFloorplanPanel extends HTMLElement {
     return this._hass?.user?.id && this.readableEntities?.has(id) && this.controllableEntities?.has(id) && this.savedItems.some(item => item.entity_id === id);
   }
   updateAccessUI() {
-    this.$('studio').hidden = !this.canEdit || this.runtimeMode !== 'native' || this.hasEditor !== true;
+    this.$('studio').hidden = !this.canEdit || this.hasEditor !== true;
     this.$('iframe',false).setAttribute?.('sandbox',this.canEdit ? 'allow-scripts allow-downloads allow-forms' : 'allow-scripts');
   }
 

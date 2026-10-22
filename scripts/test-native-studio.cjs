@@ -24,22 +24,25 @@ const saved=JSON.parse(sessionStorage.getItem('fixture-server')||'null')||{proje
 window.server=saved;
 window.catalog={floors:[{id:'ground',name:'Ground floor'}],areas:[{id:'living',name:'Living room',floor_id:'ground'}],entities:[{entity_id:'light.ceiling',name:'Ceiling light',domain:'light',area_id:'living',available:true,attributes:{secret:'PRIVATE_ATTRIBUTE'}},{entity_id:'sensor.temperature',name:'Temperature',domain:'sensor',area_id:'living',available:true},{entity_id:'switch.disabled',name:'Disabled',domain:'switch',area_id:'living',disabled:true}],secrets:'PRIVATE_CATALOG'};
 window.host=document.querySelector('home-floorplan-studio-panel');
-window.host.hass={user:{id:'test-user',is_admin:true},auth:{accessToken:window.tokens},callWS:async data=>{window.calls.push(structuredClone(data));if(data.type.endsWith('entity_catalog'))return window.catalog;if(data.type.endsWith('project_get')&&window.holdGet)await new Promise(resolve=>window.releaseGet=resolve);if(data.type.endsWith('project_save')){if(window.failSave)throw {code:'connection_error',message:'Offline'};if(data.revision!==saved.revision)throw {code:'conflict'};if(window.holdSave)await new Promise(resolve=>window.releaseSave=resolve);saved.project=data.project;saved.revision++;sessionStorage.setItem('fixture-server',JSON.stringify(saved));}if(data.type.endsWith('project_publish')){if(data.revision!==saved.revision)throw {code:'conflict'};if(!saved.project?.floors?.length||saved.project.floors.some(floor=>!floor.rooms?.length))throw {code:'invalid_project',message:'Add at least one room to every floor before publishing.'};saved.published_revision=saved.revision;saved.published_project=structuredClone(saved.project);sessionStorage.setItem('fixture-server',JSON.stringify(saved));}return {...structuredClone(saved),can_edit:true,editor_url:'/home-floorplan-studio/planner/index.html',capabilities:{authoring:true}};}};
+window.host.hass={user:{id:'test-user',is_admin:true},auth:{accessToken:window.tokens},callWS:async data=>{window.calls.push(structuredClone(data));if(data.type.endsWith('entity_catalog'))return window.catalog;if(data.type==='home_floorplan/viewer')return {mode:saved.mode||'native',has_editor:true,can_edit:true,site_features:false,floor:'ground',floors:['ground'],revision:1,items:[],readable_entities:[],controllable_entities:[],html:'<html><head></head><body>Published synthetic home</body></html>'};if(data.type.endsWith('project_get')&&window.holdGet)await new Promise(resolve=>window.releaseGet=resolve);if(data.type.endsWith('project_save')){if(window.failSave)throw {code:'connection_error',message:'Offline'};if(data.revision!==saved.revision)throw {code:'conflict'};if(window.holdSave)await new Promise(resolve=>window.releaseSave=resolve);saved.project=data.project;saved.revision++;sessionStorage.setItem('fixture-server',JSON.stringify(saved));}if(data.type.endsWith('project_publish')){if(data.revision!==saved.revision)throw {code:'conflict'};if(!saved.project?.floors?.length||saved.project.floors.some(floor=>!floor.rooms?.length))throw {code:'invalid_project',message:'Add at least one room to every floor before publishing.'};saved.published_revision=saved.revision;saved.published_project=structuredClone(saved.project);sessionStorage.setItem('fixture-server',JSON.stringify(saved));}return {...structuredClone(saved),can_edit:true,has_published:saved.has_published??Number.isInteger(saved.published_revision),editor_url:'/home-floorplan-studio/planner/index.html',capabilities:{authoring:true,...saved.capabilities}};}};
 </script></body></html>`;
 // This destination checks the real navigation URL and saved publication source.
 // Rendering the generated family viewer is covered by separate acceptance tests.
 const familyFixture = `<!doctype html><html><head><meta charset="utf-8"></head><body>
-<h1>3D Home navigation fixture</h1><p id="publication"></p><a href="/fixture">Open Home Studio</a>
-<script>const saved=JSON.parse(sessionStorage.getItem('fixture-server')||'null');
-document.getElementById('publication').textContent=saved?.published_project?.floors.flatMap(floor=>floor.rooms.map(room=>room.name)).join(', ')||'No published drawing';</script>
-</body></html>`;
+<h1>3D Home navigation fixture</h1><p id="publication"></p><home-floorplan-panel></home-floorplan-panel>
+<script type="module">await import('/home-floorplan-static/panel.js?v=${version}');
+const saved=JSON.parse(sessionStorage.getItem('fixture-server')||'null');
+document.getElementById('publication').textContent=saved?.published_project?.floors.flatMap(floor=>floor.rooms.map(room=>room.name)).join(', ')||'No published drawing';
+window.viewer=document.querySelector('home-floorplan-panel');
+viewer.hass={user:{id:'test-user',is_admin:true},states:{},callWS:async()=>({mode:saved?.mode||'native',has_editor:true,can_edit:true,site_features:false,floor:'ground',floors:['ground'],revision:1,items:[],readable_entities:[],controllable_entities:[],html:'<html><body>Published viewer navigation fixture</body></html>'})};
+</script></body></html>`;
 async function openMoreOptions(page) {
   const details=page.locator('#more-options');
   if (await details.getAttribute('open')===null) await details.getByText('More options',{exact:true}).click();
 }
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  if (url.pathname === '/fixture') return res.writeHead(200, {'Content-Type':'text/html'}).end(fixture);
+  if (['/fixture','/home-studio'].includes(url.pathname)) return res.writeHead(200, {'Content-Type':'text/html'}).end(fixture);
   if (url.pathname === '/home-floorplan') return res.writeHead(200, {'Content-Type':'text/html'}).end(familyFixture);
   const route = url.pathname.replace(/^\/home-floorplan-static\//, '/custom_components/home_floorplan/static/')
     .replace(/^\/home-floorplan-studio\//, '/');
@@ -142,8 +145,21 @@ const server = http.createServer((req, res) => {
   await page.getByRole('link',{name:'Open 3D Home',exact:true}).click();
   await page.waitForURL(origin+'/home-floorplan');
   assert.equal(await page.locator('#publication').innerText(),'Living room');
-  await page.getByRole('link',{name:'Open Home Studio',exact:true}).click();
-  await page.waitForURL(origin+'/fixture'); await page.waitForFunction(()=>window.host?._ready);
+  const editHome=page.getByRole('link',{name:'Edit home',exact:true});
+  await editHome.waitFor({state:'visible'});
+  await page.evaluate(()=>window.viewer.pending=1);
+  await editHome.click();
+  assert.equal(new URL(page.url()).pathname,'/home-floorplan');
+  assert.match(await page.locator('#notice').innerText(),/Wait for the current save/);
+  await page.evaluate(()=>{window.viewer.pending=0;window.viewer.failed=true;});
+  await editHome.click();
+  assert.equal(new URL(page.url()).pathname,'/home-floorplan');
+  assert.match(await page.locator('#notice').innerText(),/Keep this view open/);
+  await page.evaluate(()=>{window.viewer.failed=false;window.viewer.serverCanEdit=false;window.viewer.updateAccessUI();});
+  assert.equal(await editHome.isVisible(),false,'A non-editable viewer must not expose authoring navigation');
+  await page.evaluate(()=>{window.viewer.serverCanEdit=true;window.viewer.updateAccessUI();});
+  await editHome.click();
+  await page.waitForURL(origin+'/home-studio'); await page.waitForFunction(()=>window.host?._ready);
   frame=page.frames().find(frame=>frame.url().includes('embed='));
   assert.deepEqual(await frame.evaluate(()=>window.planner.getProject()),project);
   assert.equal(await page.locator('#recovery').isVisible(),false);
@@ -347,25 +363,108 @@ const server = http.createServer((req, res) => {
   assert.equal(await damaged.locator('iframe').count(),0);
   assert.equal(await damaged.evaluate(()=>window.host._startupTimer),null);
   await damaged.close();
-  // A generated installation uses its established source workflow, not connection retry.
+  // A missing authoring source stays local and never sends users to an external editor.
   const legacy=await context.newPage();
   await legacy.addInitScript(project=>{
     if (window.parent !== window) return;
-    sessionStorage.setItem('fixture-server',JSON.stringify({project,mode:'legacy',revision:1,published_revision:1}));
+    sessionStorage.setItem('fixture-server',JSON.stringify({project,mode:'legacy',revision:1,published_revision:1,has_published:true,capabilities:{authoring:false}}));
   },project);
   await legacy.goto(origin+'/fixture'); await legacy.waitForFunction(()=>window.calls.length===2&&!window.host._startupTimer);
-  assert.match(await legacy.locator('#status').innerText(),/original project JSON/);
-  assert.equal(await legacy.locator('#status').evaluate(status=>status.classList.contains('error')),false);
+  assert.match(await legacy.locator('#status').innerText(),/drawing source.*unavailable/);
+  assert.equal(await legacy.locator('#status').evaluate(status=>status.classList.contains('error')),true);
   assert.equal(await legacy.locator('#retry').isVisible(),false);
   assert.equal(await legacy.locator('#family').isVisible(),true);
   await openMoreOptions(legacy);
-  assert.equal(await legacy.getByRole('link',{name:'Open browser editor ↗',exact:true}).isVisible(),true);
+  assert.equal(await legacy.getByRole('link',{name:/browser editor/i}).count(),0);
   assert.equal(await legacy.locator('iframe').count(),0);
   assert.deepEqual(await legacy.evaluate(()=>window.server.project),project);
   assert.equal(await legacy.evaluate(()=>window.calls.some(call=>/project_(save|publish)$/.test(call.type))),false);
   await legacy.evaluate(()=>{window.host.hass=window.host._hass;window.host._retryStartup();});
   assert.equal(await legacy.evaluate(()=>window.calls.length),2);
   await legacy.close();
+  // An existing generated home remains viewable while its genuine source opens
+  // in the same native editor, even before its first native publication.
+  const generatedProject=structuredClone(project);
+  for(const floor of generatedProject.floors){floor.walls=[];floor.openings=[];for(const item of floor.items)for(const key of ['model_id','style_id','color','pattern_id','pattern_color'])delete item[key];}
+  const generated=await context.newPage();generated.on('pageerror',error=>errors.push(String(error)));
+  await generated.addInitScript(project=>{
+    if(window.parent!==window||sessionStorage.getItem('generated-seeded'))return;
+    sessionStorage.setItem('generated-seeded','1');
+    sessionStorage.setItem('fixture-server',JSON.stringify({project,mode:'legacy',revision:0,published_revision:null,
+      published_project:project,has_published:true,capabilities:{architecture_editing:false},source:{kind:'generated',protected_floors:project.floors.map(floor=>floor.id),
+        protected_rooms:Object.fromEntries(project.floors.map(floor=>[floor.id,floor.rooms.map(room=>room.id)])),
+        custom_items:Object.fromEntries(project.floors.map(floor=>[floor.id,floor.items.map(item=>item.id)]))}}));
+  },generatedProject);
+  await generated.goto(origin+'/fixture');await generated.waitForFunction(()=>window.host._ready);
+  let generatedFrame=generated.frames().find(frame=>frame.url().includes('embed='));
+  assert.deepEqual(await generatedFrame.evaluate(()=>planner.getProject()),generatedProject);
+  assert.equal(await generated.getByRole('link',{name:'Open 3D Home',exact:true}).getAttribute('aria-disabled'),'false');
+  assert.equal(await generated.getByRole('link',{name:/browser editor/i}).count(),0);
+  assert.equal(await generatedFrame.getByRole('button',{name:'Add floor',exact:true}).isDisabled(),true);
+  assert.equal(await generatedFrame.getByLabel('Elevation (m)',{exact:true}).getAttribute('readonly'),'');
+  await generatedFrame.locator('[data-object-kind="rooms"]').first().click();
+  assert.equal(await generatedFrame.getByLabel('x, z coordinates (m)',{exact:true}).getAttribute('readonly'),'');
+  assert.equal(await generatedFrame.getByLabel('Floor material',{exact:true}).isDisabled(),true);
+  assert.equal(await generatedFrame.getByRole('button',{name:'Delete room',exact:true}).count(),0);
+  await generatedFrame.locator('[data-object-kind="items"]').first().click();
+  assert.equal(await generatedFrame.getByLabel('Design',{exact:true}).inputValue(),'');
+  assert.match(await generatedFrame.getByLabel('Design',{exact:true}).locator('option:checked').innerText(),/Original installed model/);
+  await generatedFrame.getByLabel('x (m)',{exact:true}).fill('2.2');
+  await generatedFrame.getByLabel('x (m)',{exact:true}).press('Tab');
+  await generated.waitForFunction(()=>window.host._project.floors[0].items[0].position_m.x===2.2);
+  const generatedTitle=generatedFrame.locator('#project-title');
+  await generatedTitle.fill('');
+  await generated.getByRole('link',{name:'Open 3D Home',exact:true}).click();
+  await generated.waitForFunction(()=>!window.host._busy&&window.host.$('status').textContent.includes('highlighted field'));
+  assert.equal(new URL(generated.url()).pathname,'/fixture');
+  assert.equal(await generatedTitle.inputValue(),'');
+  // Published preview is the real read-only viewer, retaining the draft iframe
+  // and its unfinished field instead of approximating the protected geometry.
+  const draftBeforePreview=await generatedFrame.evaluate(()=>planner.getProject());
+  await generated.evaluate(()=>window.originalEditorFrame=window.host._frame);
+  await generatedFrame.getByRole('button',{name:'Published home',exact:true}).click();
+  await generated.waitForFunction(()=>window.host._publishedPanel?.serverCanEdit===true);
+  assert.deepEqual(await generated.evaluate(()=>({canEdit:window.host._publishedPanel.canEdit,dryRun:window.host._publishedPanel.dryRun,hidden:window.originalEditorFrame.hidden})),{canEdit:false,dryRun:true,hidden:true});
+  assert.equal(await generatedFrame.evaluate(()=>planner.getView()),'plan');
+  assert.equal(await generatedFrame.evaluate(()=>planner.getPreviewMetadata().renderCount||0),0);
+  await generated.getByRole('button',{name:'Back to editing',exact:true}).click();
+  assert.equal(await generated.evaluate(()=>window.host._frame===window.originalEditorFrame&&!window.originalEditorFrame.hidden&&window.host._publishedPanel===null),true);
+  assert.equal(await generatedTitle.inputValue(),'');
+  assert.deepEqual(await generatedFrame.evaluate(()=>planner.getProject()),draftBeforePreview);
+  // Re-requesting the family view returns keyboard focus to the pending field.
+  await generated.getByRole('link',{name:'Open 3D Home',exact:true}).click();
+  await generated.waitForFunction(()=>!window.host._busy&&window.host.$('status').textContent.includes('highlighted field'));
+  assert.equal(await generatedTitle.evaluate(input=>input===document.activeElement&&document.hasFocus()),true);
+  assert.equal(await generated.evaluate(()=>window.server.project.title),project.title);
+  assert.equal(await generated.evaluate(()=>window.calls.some(call=>/project_(save|publish)$/.test(call.type))),false);
+  await generatedTitle.fill('Edited generated home');await generatedTitle.press('Tab');
+  await generated.waitForFunction(()=>window.host._dirty());
+  await generated.getByRole('link',{name:'Open 3D Home',exact:true}).click();
+  await generated.waitForFunction(()=>!window.host._busy&&window.host.$('status').textContent.includes('Save draft before'));
+  assert.equal(new URL(generated.url()).pathname,'/fixture');
+  assert.equal(await generated.locator('#save').evaluate(button=>button===button.getRootNode().activeElement),true);
+  await generated.evaluate(()=>window.holdSave=true);
+  await generated.getByRole('button',{name:'Save draft',exact:true}).click();
+  await generated.waitForFunction(()=>typeof window.releaseSave==='function');
+  await generated.getByRole('link',{name:'Open 3D Home',exact:true}).click();
+  assert.equal(new URL(generated.url()).pathname,'/fixture');
+  assert.match(await generated.locator('#status').innerText(),/Wait for the current operation/);
+  await generated.evaluate(()=>window.releaseSave());await generated.waitForFunction(()=>!window.host._busy);
+  assert.equal(await generated.evaluate(()=>window.server.revision),1);
+  assert.equal(await generated.evaluate(()=>window.server.published_revision),null);
+  await generated.getByRole('button',{name:'Publish to 3D Home',exact:true}).click();
+  await generated.waitForFunction(()=>window.server.published_revision===1&&!window.host._busy);
+  await generated.getByRole('link',{name:'Open 3D Home',exact:true}).click();
+  await generated.waitForURL(origin+'/home-floorplan');
+  await generated.getByRole('link',{name:'Edit home',exact:true}).click();
+  await generated.waitForURL(origin+'/home-studio');await generated.waitForFunction(()=>window.host._ready);
+  generatedFrame=generated.frames().find(frame=>frame.url().includes('embed='));
+  assert.equal(await generatedFrame.evaluate(()=>planner.getProject().title),'Edited generated home');
+  assert.equal(await generatedFrame.evaluate(()=>planner.getProject().floors[0].items[0].position_m.x),2.2);
+  assert.deepEqual(await generatedFrame.evaluate(()=>planner.getProject().floors[0].rooms),generatedProject.floors[0].rooms);
+  assert.deepEqual(await generated.evaluate(()=>window.server.published_project),await generatedFrame.evaluate(()=>planner.getProject()));
+  assert.equal(await generated.evaluate(()=>window.host._unsaved()),false);
+  await generated.close();
   // A late HA response after the connection deadline cannot mount a stale frame.
   await page.clock.install();
   await page.evaluate(project=>{
@@ -386,7 +485,7 @@ const server = http.createServer((req, res) => {
     window.lateHost.hass={user:{id:'late-admin',is_admin:true},callWS:async data=>{
       if (data.type.endsWith('entity_catalog')) return window.catalog;
       if (data.type.endsWith('project_save')) throw {code:'conflict'};
-      return {project:window.newRemote,revision:9,published_revision:null,can_edit:true};
+      return {project:window.newRemote,revision:9,published_revision:null,can_edit:true,capabilities:{authoring:true}};
     }};
     window.lateHost._retryStartup();
   },project);
@@ -541,6 +640,6 @@ const server = http.createServer((req, res) => {
   await mobileContext.close();
   assert.deepEqual(errors,[]);
   await context.close();
-  console.log(`Native studio passed (${engine}): production panel module route, repeated module loading, opaque sandbox, clean first visit, guided room/device/preview flow, unfinished-field guard and recovery, separate save/publish, navigation and remount, incomplete-floor publication guard, JSON roundtrip, forged messages, local draft isolation, offline recovery, revision conflict, in-flight edits, pending/invalid fields, loading timeout and recovery retry.`);
+  console.log(`Native studio passed (${engine}): production panel module route, repeated module loading, opaque sandbox, clean first visit, guided room/device/preview flow, unfinished-field guard and recovery, separate save/publish, generated protected editing and published preview, guarded navigation and remount, incomplete-floor publication guard, JSON roundtrip, forged messages, local draft isolation, offline recovery, revision conflict, in-flight edits, pending/invalid fields, loading timeout and recovery retry.`);
  } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e);process.exitCode=1;});
