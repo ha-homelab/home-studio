@@ -370,9 +370,17 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(initial["has_published"])
             self.assertIn("sensor.synthetic_environment", state["model_entities"]["upper"])
             self.assertIsNone(initial["published_revision"])
+            self.assertIsNotNone(initial["project"])
+            self.assertFalse(initial["has_saved_draft"], "A projected generated source is not yet a saved private draft")
             draft = copy.deepcopy(state["native"].document["project"])
             draft["floors"][0]["items"][0]["position_m"]["x"] = 2.5
+            self.hass.fail_save = True
+            with self.assertRaises(OSError):
+                await state["native"].save(0, draft)
+            self.assertFalse(integration._project_result(state, support.Connection())["has_saved_draft"])
+            self.hass.fail_save = False
             await state["native"].save(0, draft)
+            self.assertTrue(integration._project_result(state, support.Connection())["has_saved_draft"])
             assets, site, models, inventory, references = await state["native"].publish(1)
             self.hass.data.clear()
             await integration.async_setup(self.hass, {})
@@ -384,6 +392,26 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(restored["model_entities"], references)
             self.assertIn("sensor.synthetic_environment", restored["model_entities"]["upper"])
             self.assertEqual(restored["native"].document["project"], draft)
+            self.assertTrue(integration._project_result(restored, support.Connection())["has_saved_draft"])
+
+    async def test_native_draft_flag_changes_only_after_a_successful_save(self):
+        project = native.NativeProject(self.hass)
+        state = {"native": project, "has_editor": True}
+        integration._apply_active(state, None, {"floors": {}, "default_floor": None}, {}, {}, {})
+        before = integration._project_result(state, support.Connection())
+        self.assertIsNone(before["project"])
+        self.assertFalse(before["has_saved_draft"])
+        draft = copy.deepcopy(self.project.document["project"])
+        self.hass.fail_save = True
+        with self.assertRaises(OSError):
+            await project.save(0, draft)
+        self.assertFalse(integration._project_result(state, support.Connection())["has_saved_draft"])
+        self.hass.fail_save = False
+        await project.save(0, draft)
+        saved = integration._project_result(state, support.Connection())
+        self.assertTrue(saved["has_saved_draft"])
+        self.assertEqual(saved["project"], draft)
+        self.assertIsNone(saved["published_revision"])
 
     async def test_stale_geometry_downloads_are_not_presented_as_edited_exports(self):
         state = self.integration_state()

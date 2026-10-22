@@ -132,6 +132,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   _dirty() { return !!this._project && JSON.stringify(this._project) !== (this._savedRaw ?? this._pristineRaw); }
   _unsaved() { return this._dirty() || this._edits.pending === true; }
   _hasPublishedHome() { return this._saved?.has_published === true || this._publishedRevision != null; }
+  _requiresInitialSave() { return !!this._source && this._saved?.has_saved_draft === false; }
   _status(message, error = false) { this.$('status').textContent = message; this.$('status').classList.toggle('error', error); }
   _publicationIssue() {
     const floors = Array.isArray(this._project?.floors) ? this._project.floors : [];
@@ -142,6 +143,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   _drawingStatus() {
     if (this._edits.invalid) this._status(`Correct ${this._edits.field || 'the highlighted field'} before saving or publishing. Save draft will take you to the field.`, true);
     else if (this._edits.pending) this._status('Unsaved field edits · Save draft applies and saves your entered values.');
+    else if (this._requiresInitialSave() && !this._dirty()) this._status('Save draft to create a private draft in Home Assistant. Your published home stays unchanged.');
     else if (!this._savedRaw && !this._dirty()) this._status(this._hasPublishedHome() ? 'Start with one room below. Your published home stays unchanged until you publish.' : 'Start with one room below. Nothing has been published yet.');
     else this._status(this._dirty() ? 'Unsaved changes · Save draft keeps them in Home Assistant.' : this._publicationIssue() || (this._publishedRevision === this._revision ? 'Draft saved · 3D Home is up to date.' : 'Draft saved · Publish to 3D Home when you are ready.'));
   }
@@ -150,10 +152,11 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     const floors = Array.isArray(this._project?.floors) ? this._project.floors : [];
     const rooms = floors.reduce((count, floor) => count + (floor.rooms?.length || 0), 0);
     const issue = this._publicationIssue();
-    this.$('save').disabled = disabled || !this._unsaved();
-    this.$('publish').disabled = disabled || this._unsaved() || !this._savedRaw || !!issue;
+    const needsSave = this._unsaved() || this._requiresInitialSave();
+    this.$('save').disabled = disabled || !needsSave;
+    this.$('publish').disabled = disabled || needsSave || !this._savedRaw || !!issue;
     this.$('publish').classList.toggle('primary', !this.$('publish').disabled && this._publishedRevision !== this._revision);
-    this.$('save').classList.toggle('primary', this._unsaved());
+    this.$('save').classList.toggle('primary', needsSave);
     this.$('export').disabled = !this._project || this._busy;
     this.$('reload').disabled = disabled;
     // Unknown publication state must not block access to an existing live home.
@@ -172,7 +175,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this.$('step-room').dataset.current = String(!rooms);
     this.$('step-publish').dataset.current = String(!!rooms);
     this.$('next-step').textContent = !rooms ? 'Start with one room. Add the rest of your home whenever you are ready.'
-      : issue || (this._unsaved() ? this._source ? 'Next: Save draft, then publish when you are ready. Your installed home stays unchanged until you publish.' : 'Next: preview your room, then Save draft. Devices and furniture can be added later.'
+      : issue || (needsSave ? this._source ? 'Next: Save draft, then publish when you are ready. Your installed home stays unchanged until you publish.' : 'Next: preview your room, then Save draft. Devices and furniture can be added later.'
       : this._publishedRevision !== this._revision ? 'Next: Publish to 3D Home. Your saved draft will become the live plan.'
       : 'Your plan is ready. Open 3D Home to use it, or keep editing here and publish again later.');
   }
@@ -484,18 +487,20 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       const saved = await this._hass.callWS({ type: 'home_floorplan/project_save', revision: this._revision, project });
       if (generation !== this._generation) return;
       this._revision = saved.revision; this._publishedRevision = saved.published_revision; this._savedRaw = raw;
+      this._saved = { ...this._saved, ...saved };
       this._persist(); this._status(this._unsaved() ? 'Draft saved. Newer edits remain unsaved; save again when ready.' : this._publicationIssue() || 'Draft saved in Home Assistant. Next: Publish to 3D Home.');
     } catch (error) { if (generation !== this._generation) return; this._status(error.code === 'invalid_fields' ? error.message : error.code === 'conflict' ? 'Another session changed the saved draft. Your edits are safe in this tab. Use More options to export your drawing (JSON), then Load saved draft to review the current copy.' : `Save failed: ${error.message || 'check your Home Assistant connection'}. Your edits remain in this tab.`, true); }
     finally { if (generation === this._generation) { this._busy = false; this._buttons(); } }
   }
   async _publish() {
     if (this._busy || !this._ready || this._dirty()) return;
+    if (this._requiresInitialSave()) { this._status('Save draft to create a private draft in Home Assistant before publishing.'); return; }
     if (this._publicationIssue()) { this._status(this._publicationIssue(), true); return; }
     const generation = this._generation;
     this._busy = true; this._buttons();
     try {
       await this._snapshot(); if (generation !== this._generation) return;
-      if (this._dirty() || !this._savedRaw) { this._status('Save your latest edits before publishing.'); return; }
+      if (this._dirty() || !this._savedRaw || this._requiresInitialSave()) { this._status('Save your latest edits before publishing.'); return; }
       if (this._publicationIssue()) { this._status(this._publicationIssue(), true); return; }
       this._status('Building and publishing the saved drawing…');
       const saved = await this._hass.callWS({ type: 'home_floorplan/project_publish', revision: this._revision });

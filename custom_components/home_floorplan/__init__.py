@@ -222,6 +222,9 @@ def _project_result(state, connection):
     return {**_status(state, connection), "project": copy.deepcopy(native.document["project"]) if native else None,
             "revision": native.document["revision"] if native else 0,
             "published_revision": native.document["published_revision"] if native else None,
+            "has_saved_draft": bool(native and (native.document["baseline"] is not None
+                                                if isinstance(native, GeneratedProject)
+                                                else native.document["project"] is not None)),
             "source": copy.deepcopy(getattr(native, "source", None)),
             "source_error": state.get("source_error"),
             "editor_url": EDITOR_URL, "capabilities": {

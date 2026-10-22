@@ -24,7 +24,7 @@ const saved=JSON.parse(sessionStorage.getItem('fixture-server')||'null')||{proje
 window.server=saved;
 window.catalog={floors:[{id:'ground',name:'Ground floor'}],areas:[{id:'living',name:'Living room',floor_id:'ground'}],entities:[{entity_id:'light.ceiling',name:'Ceiling light',domain:'light',area_id:'living',available:true,attributes:{secret:'PRIVATE_ATTRIBUTE'}},{entity_id:'sensor.temperature',name:'Temperature',domain:'sensor',area_id:'living',available:true},{entity_id:'switch.disabled',name:'Disabled',domain:'switch',area_id:'living',disabled:true}],secrets:'PRIVATE_CATALOG'};
 window.host=document.querySelector('home-floorplan-studio-panel');
-window.host.hass={user:{id:'test-user',is_admin:true},auth:{accessToken:window.tokens},callWS:async data=>{window.calls.push(structuredClone(data));if(data.type.endsWith('entity_catalog'))return window.catalog;if(data.type==='home_floorplan/viewer')return {mode:saved.mode||'native',has_editor:true,can_edit:true,site_features:false,floor:'ground',floors:['ground'],revision:1,items:[],readable_entities:[],controllable_entities:[],html:'<html><head></head><body>Published synthetic home</body></html>'};if(data.type.endsWith('project_get')&&window.holdGet)await new Promise(resolve=>window.releaseGet=resolve);if(data.type.endsWith('project_save')){if(window.failSave)throw {code:'connection_error',message:'Offline'};if(data.revision!==saved.revision)throw {code:'conflict'};if(window.holdSave)await new Promise(resolve=>window.releaseSave=resolve);saved.project=data.project;saved.revision++;sessionStorage.setItem('fixture-server',JSON.stringify(saved));}if(data.type.endsWith('project_publish')){if(data.revision!==saved.revision)throw {code:'conflict'};if(!saved.project?.floors?.length||saved.project.floors.some(floor=>!floor.rooms?.length))throw {code:'invalid_project',message:'Add at least one room to every floor before publishing.'};saved.published_revision=saved.revision;saved.published_project=structuredClone(saved.project);sessionStorage.setItem('fixture-server',JSON.stringify(saved));}return {...structuredClone(saved),can_edit:true,has_published:saved.has_published??Number.isInteger(saved.published_revision),editor_url:'/home-floorplan-studio/planner/index.html',capabilities:{authoring:true,...saved.capabilities}};}};
+window.host.hass={user:{id:'test-user',is_admin:true},auth:{accessToken:window.tokens},callWS:async data=>{window.calls.push(structuredClone(data));if(data.type.endsWith('entity_catalog'))return window.catalog;if(data.type==='home_floorplan/viewer')return {mode:saved.mode||'native',has_editor:true,can_edit:true,site_features:false,floor:'ground',floors:['ground'],revision:1,items:[],readable_entities:[],controllable_entities:[],html:'<html><head></head><body>Published synthetic home</body></html>'};if(data.type.endsWith('project_get')&&window.holdGet)await new Promise(resolve=>window.releaseGet=resolve);if(data.type.endsWith('project_save')){if(window.failSave)throw {code:'connection_error',message:'Offline'};if(data.revision!==saved.revision)throw {code:'conflict'};if(window.holdSave)await new Promise(resolve=>window.releaseSave=resolve);saved.project=data.project;saved.has_saved_draft=true;saved.revision++;sessionStorage.setItem('fixture-server',JSON.stringify(saved));}if(data.type.endsWith('project_publish')){if(data.revision!==saved.revision)throw {code:'conflict'};if(!saved.project?.floors?.length||saved.project.floors.some(floor=>!floor.rooms?.length))throw {code:'invalid_project',message:'Add at least one room to every floor before publishing.'};saved.published_revision=saved.revision;saved.published_project=structuredClone(saved.project);sessionStorage.setItem('fixture-server',JSON.stringify(saved));}return {...structuredClone(saved),can_edit:true,has_saved_draft:saved.has_saved_draft??!!saved.project,has_published:saved.has_published??Number.isInteger(saved.published_revision),editor_url:'/home-floorplan-studio/planner/index.html',capabilities:{authoring:true,...saved.capabilities}};}};
 </script></body></html>`;
 // This destination checks the real navigation URL and saved publication source.
 // Rendering the generated family viewer is covered by separate acceptance tests.
@@ -391,11 +391,36 @@ const server = http.createServer((req, res) => {
     if(window.parent!==window||sessionStorage.getItem('generated-seeded'))return;
     sessionStorage.setItem('generated-seeded','1');
     sessionStorage.setItem('fixture-server',JSON.stringify({project,mode:'legacy',revision:0,published_revision:null,
-      published_project:project,has_published:true,capabilities:{architecture_editing:false},source:{kind:'generated',protected_floors:project.floors.map(floor=>floor.id),
+      published_project:project,has_published:true,has_saved_draft:false,capabilities:{architecture_editing:false},source:{kind:'generated',protected_floors:project.floors.map(floor=>floor.id),
         protected_rooms:Object.fromEntries(project.floors.map(floor=>[floor.id,floor.rooms.map(room=>room.id)])),
         custom_items:Object.fromEntries(project.floors.map(floor=>[floor.id,floor.items.map(item=>item.id)]))}}));
   },generatedProject);
   await generated.goto(origin+'/fixture');await generated.waitForFunction(()=>window.host._ready);
+  // A generated seed is editable source, but no private draft exists until Save succeeds.
+  assert.equal(await generated.evaluate(()=>window.server.has_saved_draft),false);
+  assert.equal(await generated.evaluate(()=>window.host._unsaved()),false);
+  assert.equal(await generated.evaluate(()=>sessionStorage.getItem(window.host._key())),null);
+  assert.equal(await generated.getByRole('button',{name:'Save draft',exact:true}).isDisabled(),false);
+  assert.equal(await generated.getByRole('button',{name:'Publish to 3D Home',exact:true}).isDisabled(),true);
+  await generated.evaluate(()=>window.host._publish());
+  assert.equal(await generated.evaluate(()=>window.calls.some(call=>call.type.endsWith('project_publish'))),false);
+  await generated.evaluate(()=>window.failSave=true);
+  await generated.getByRole('button',{name:'Save draft',exact:true}).click();
+  await generated.waitForFunction(()=>!window.host._busy&&window.host.$('status').textContent.includes('Save failed'));
+  assert.equal(await generated.evaluate(()=>window.server.has_saved_draft),false);
+  assert.equal(await generated.getByRole('button',{name:'Save draft',exact:true}).isDisabled(),false);
+  assert.equal(await generated.getByRole('button',{name:'Publish to 3D Home',exact:true}).isDisabled(),true);
+  await generated.evaluate(()=>window.failSave=false);
+  await generated.getByRole('button',{name:'Save draft',exact:true}).click();
+  await generated.waitForFunction(()=>!window.host._busy&&window.server.revision===1);
+  assert.equal(await generated.evaluate(()=>window.server.has_saved_draft),true);
+  assert.equal(await generated.evaluate(()=>window.server.published_revision),null);
+  assert.equal(await generated.getByRole('button',{name:'Save draft',exact:true}).isDisabled(),true);
+  assert.equal(await generated.getByRole('button',{name:'Publish to 3D Home',exact:true}).isDisabled(),false);
+  await generated.reload();await generated.waitForFunction(()=>window.host._ready);
+  assert.equal(await generated.evaluate(()=>window.host._saved.has_saved_draft),true);
+  assert.equal(await generated.getByRole('button',{name:'Save draft',exact:true}).isDisabled(),true);
+  assert.equal(await generated.getByRole('button',{name:'Publish to 3D Home',exact:true}).isDisabled(),false);
   let generatedFrame=generated.frames().find(frame=>frame.url().includes('embed='));
   assert.deepEqual(await generatedFrame.evaluate(()=>planner.getProject()),generatedProject);
   assert.equal(await generated.getByRole('link',{name:'Open 3D Home',exact:true}).getAttribute('aria-disabled'),'false');
@@ -450,10 +475,10 @@ const server = http.createServer((req, res) => {
   assert.equal(new URL(generated.url()).pathname,'/fixture');
   assert.match(await generated.locator('#status').innerText(),/Wait for the current operation/);
   await generated.evaluate(()=>window.releaseSave());await generated.waitForFunction(()=>!window.host._busy);
-  assert.equal(await generated.evaluate(()=>window.server.revision),1);
+  assert.equal(await generated.evaluate(()=>window.server.revision),2);
   assert.equal(await generated.evaluate(()=>window.server.published_revision),null);
   await generated.getByRole('button',{name:'Publish to 3D Home',exact:true}).click();
-  await generated.waitForFunction(()=>window.server.published_revision===1&&!window.host._busy);
+  await generated.waitForFunction(()=>window.server.published_revision===2&&!window.host._busy);
   await generated.getByRole('link',{name:'Open 3D Home',exact:true}).click();
   await generated.waitForURL(origin+'/home-floorplan');
   await generated.getByRole('link',{name:'Edit home',exact:true}).click();
