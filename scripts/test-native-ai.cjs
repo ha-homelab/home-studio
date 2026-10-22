@@ -29,7 +29,8 @@ function draft(body) {
       rotation_deg: 0, color: null, pattern_id: null, pattern_color: null, evidence: 'Synthetic image; check dimensions.' }],
     openings: [], assumptions: ['Furniture dimensions estimated.'], needs_measurements: [] };
 }
-const fixture = ai => `<!doctype html><html><body style="margin:0"><home-floorplan-studio-panel></home-floorplan-studio-panel><script src="/custom_components/home_floorplan/static/studio.js"></script><script>
+const fixture = ai => `<!doctype html><html><body style="margin:0"><home-floorplan-studio-panel></home-floorplan-studio-panel><script type="module">
+await import('/custom_components/home_floorplan/static/studio.js');
 window.host=document.querySelector('home-floorplan-studio-panel');window.saved={project:null,revision:0};window.calls=[];
 window.hass={user:{id:'native-ai-admin',is_admin:true},auth:{accessToken:'${AUTH}'},fetchWithAuth:(url,options)=>fetch(url,{...options,headers:{...options.headers,Authorization:'Bearer ${AUTH}'}}),callWS:async data=>{calls.push(structuredClone(data));if(data.type.endsWith('entity_catalog'))return {floors:[],areas:[],entities:[]};if(data.type.endsWith('project_save')){saved={project:data.project,revision:saved.revision+1};}return {...saved,can_edit:true,editor_url:'/home-floorplan-studio/planner/index.html',capabilities:{authoring:true,ai:${ai}}};}};host.hass=hass;
 </script></body></html>`;
