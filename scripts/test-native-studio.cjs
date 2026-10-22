@@ -133,7 +133,7 @@ async function testDocumentFallback(context, origin, project, errors) {
   const timedAbort=timed.waitForEvent('requestfailed',request=>request.url()===origin+editorPath&&!request.isNavigationRequest());
   await timed.clock.fastForward(15001); await timedAbort;
   await timed.waitForFunction(()=>!window.host._editorFetchController);
-  assert.match(await timed.locator('#status').innerText(),/timed out/);
+  assert.match(await timed.locator('#status').innerText(),/timed out.*\(editor-timeout\)/);
   assert.equal(await timed.locator('#retry').isVisible(),true);
   assert.equal(await timed.locator('iframe').getAttribute('srcdoc'),null);
   assert.deepEqual(await timed.evaluate(()=>window.host._project),project);
@@ -169,15 +169,32 @@ async function testDocumentFallback(context, origin, project, errors) {
   // document is permitted to become an iframe document.
   const original=fs.readFileSync(path.join(root,'planner/index.html'),'utf8');
   const invalidResponses=[
-    ['wrong MIME',{status:200,contentType:'text/plain',body:original}],
-    ['redirect',null],
-    ['oversized document',{status:200,contentType:'text/html',body:original+' '.repeat(128*1024)}],
-    ['oversized stream','stream'],
-    ['foreign script',{status:200,contentType:'text/html',body:original.replace('./editor.js','https://untrusted.invalid/editor.js')}],
-    ['untrusted bootstrap',{status:200,contentType:'text/html',body:original.replace('</head>','<meta name="home-studio-bootstrap" content="untrusted"></head>')}],
+    ['HTTP failure',{status:503,contentType:'text/html',body:'PRIVATE_UPSTREAM_FAILURE'},'editor-http-503'],
+    ['wrong MIME',{status:200,contentType:'text/plain',body:original},'editor-type'],
+    ['redirect',null,'editor-redirect'],
+    ['oversized document',{status:200,contentType:'text/html',body:original+' '.repeat(128*1024)},'editor-size'],
+    ['oversized stream','stream','editor-size'],
+    ['invalid UTF-8',{status:200,contentType:'text/html',body:Buffer.from([0xff,0xfe,0xff])},'editor-decode'],
+    ['changed policy',{status:200,contentType:'text/html',body:original.replace("default-src 'none'","default-src *")},'editor-policy'],
+    ['foreign script',{status:200,contentType:'text/html',body:original.replace('./editor.js','https://untrusted.invalid/editor.js')},'editor-assets'],
+    ['untrusted bootstrap',{status:200,contentType:'text/html',body:original.replace('</head>','<meta name="home-studio-bootstrap" content="untrusted"></head>')},'editor-document'],
+    ['blocked document parsing',{status:200,contentType:'text/html',body:original},'editor-parse','parse'],
+    ['blocked document assignment',{status:200,contentType:'text/html',body:original},'editor-open','open'],
   ];
-  for(const [reason,response] of invalidResponses){
+  for(const [reason,response,code,blockedApi] of invalidResponses){
     const rejectedErrors=[]; const rejected=await makePage(rejectedErrors); let fetches=0, escaped=false;
+    if(blockedApi)await rejected.addInitScript(kind=>{
+      if(window.parent!==window)return;
+      if(kind==='parse'){
+        const original=DOMParser.prototype.parseFromString;
+        DOMParser.prototype.parseFromString=()=>{throw new TypeError('PRIVATE_BROWSER_FAILURE');};
+        window.restoreBlockedApi=()=>{DOMParser.prototype.parseFromString=original;};
+      }else{
+        const original=Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'srcdoc');
+        Object.defineProperty(HTMLIFrameElement.prototype,'srcdoc',{...original,set(){throw new TypeError('PRIVATE_BROWSER_FAILURE');}});
+        window.restoreBlockedApi=()=>Object.defineProperty(HTMLIFrameElement.prototype,'srcdoc',original);
+      }
+    },blockedApi);
     await rejected.route('**/unexpected-editor',route=>{escaped=true;return route.abort();});
     await rejected.route('**/planner/index.html*',route=>{
       if(route.request().isNavigationRequest())return route.abort();
@@ -194,9 +211,19 @@ async function testDocumentFallback(context, origin, project, errors) {
     assert.equal(await rejected.evaluate(()=>window.host._ready),false,reason);
     assert.equal(await rejected.locator('iframe').getAttribute('srcdoc'),null,reason);
     assert.equal(await rejected.locator('#retry').isVisible(),true,reason);
+    const diagnostic=await rejected.locator('#status').innerText();
+    assert(diagnostic.includes('('+code+')'),reason+': '+diagnostic);
+    assert.doesNotMatch(diagnostic,/PRIVATE_|https?:|127\.0\.0\.1|untrusted\.invalid/,'Diagnostics must never include upstream bodies, URLs, or exception text');
     assert.deepEqual(await rejected.evaluate(()=>window.host._project),project,reason);
     assert.equal(await rejected.evaluate(()=>window.calls.some(call=>/project_(save|publish)$/.test(call.type))),false,reason);
     await rejected.clock.fastForward(16000); assert.equal(fetches,1,'Rejected fallback must not retry automatically');
+    assert.equal(await rejected.locator('#status').innerText(),diagnostic,'The generic startup warning must not replace the specific failure code');
+    if(blockedApi){
+      await rejected.evaluate(()=>window.restoreBlockedApi());
+      await rejected.unroute('**/planner/index.html*');
+      await rejected.locator('#retry').click(); await rejected.waitForFunction(()=>window.host._ready);
+      assert.deepEqual(await rejected.evaluate(()=>window.host._project),project);
+    }
     // WebKit reports its deliberate redirect refusal as a page error as well
     // as a rejected fetch. Other script errors must still fail this scenario.
     if(reason==='redirect')for(const error of rejectedErrors)assert.match(error,/^Fetch API cannot load .*test-fallback-redirect due to access control checks\.$/);

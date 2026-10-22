@@ -14,6 +14,25 @@ const EDITOR_FETCH_TIMEOUT_MS = 15000;
 const MAX_EDITOR_HTML_BYTES = 128 * 1024;
 const EDITOR_PATH = '/home-floorplan-studio/planner/index.html';
 const EDITOR_CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+const EDITOR_LOAD_MESSAGES = Object.freeze({
+  http: 'Home Assistant returned an HTTP error for the local editor',
+  redirect: 'The local editor request was redirected',
+  address: 'The local editor responded from an unexpected address',
+  type: 'The local editor returned an unsupported file type',
+  size: 'The local editor response exceeded its size limit',
+  body: 'The local editor download was interrupted',
+  decode: 'The local editor text could not be decoded',
+  parse: 'The browser could not prepare the local editor document',
+  policy: 'The local editor security policy did not match this version',
+  document: 'The local editor document did not match this version',
+  assets: 'The local editor scripts or styles did not match this version',
+  open: 'The browser could not open the prepared editor document',
+  fetch: 'Could not fetch the local editor',
+  timeout: 'Loading the local drawing tools timed out',
+});
+function editorLoadError(code, status) {
+  return Object.assign(new Error(EDITOR_LOAD_MESSAGES[code]), { editorCode: code, status });
+}
 const THEME_COLORS = Object.freeze({ background: 'primary-background-color', surface: 'card-background-color',
   text: 'primary-text-color', muted: 'secondary-text-color', border: 'divider-color',
   accent: 'primary-color', accentText: 'text-primary-color', error: 'error-color' });
@@ -26,24 +45,32 @@ function projectBytes(project) {
   return raw;
 }
 async function editorDocument(response, url, channel) {
-  if (!response.ok || response.redirected || response.url !== url.href ||
-      !/^text\/html(?:\s*;|\s*$)/i.test(response.headers.get('Content-Type') || '') ||
-      Number(response.headers.get('Content-Length')) > MAX_EDITOR_HTML_BYTES) throw new Error('Unexpected editor response');
-  const reader = response.body.getReader(), chunks = []; let size = 0;
+  if (response.type === 'opaqueredirect' || response.redirected) throw editorLoadError('redirect');
+  if (!response.ok) throw editorLoadError('http', response.status);
+  if (response.url !== url.href) throw editorLoadError('address');
+  if (!/^text\/html(?:\s*;|\s*$)/i.test(response.headers.get('Content-Type') || '')) throw editorLoadError('type');
+  if (Number(response.headers.get('Content-Length')) > MAX_EDITOR_HTML_BYTES) throw editorLoadError('size');
+  const chunks = []; let reader, size = 0;
   try {
+    reader = response.body?.getReader(); if (!reader) throw editorLoadError('body');
     while (true) {
       const { done, value } = await reader.read(); if (done) break;
       size += value.byteLength;
-      if (size > MAX_EDITOR_HTML_BYTES) throw new Error('Editor response exceeds the limit');
+      if (size > MAX_EDITOR_HTML_BYTES) throw editorLoadError('size');
       chunks.push(value);
     }
-  } finally { await reader.cancel().catch(() => {}); }
+  } catch (error) { throw error?.editorCode ? error : editorLoadError('body'); }
+  finally { await reader?.cancel().catch(() => {}); }
   const bytes = new Uint8Array(size); let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  const document = new DOMParser().parseFromString(new TextDecoder('utf-8', { fatal: true }).decode(bytes), 'text/html');
+  let html, document;
+  try { html = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+  catch { throw editorLoadError('decode'); }
+  try { document = new DOMParser().parseFromString(html, 'text/html'); }
+  catch { throw editorLoadError('parse'); }
   const policy = document.querySelectorAll('meta[http-equiv="Content-Security-Policy"]');
-  if (policy.length !== 1 || policy[0].content !== EDITOR_CSP ||
-      document.querySelector('base, meta[http-equiv="refresh"], meta[name="home-studio-bootstrap"]')) throw new Error('Unexpected editor document');
+  if (policy.length !== 1 || policy[0].content !== EDITOR_CSP) throw editorLoadError('policy');
+  if (document.querySelector('base, meta[http-equiv="refresh"], meta[name="home-studio-bootstrap"]')) throw editorLoadError('document');
   // Firefox resolves srcdoc's 'self' to its opaque origin. Spell out the same
   // trusted origin allowed by the URL document, without widening its CSP scope.
   policy[0].content = EDITOR_CSP.replaceAll("'self'", url.origin);
@@ -54,7 +81,7 @@ async function editorDocument(response, url, channel) {
   for (const [selector, attribute, expected] of assets) {
     const elements = [...document.querySelectorAll(selector)];
     if (elements.length !== expected.length || elements.some((element, index) =>
-      element.getAttribute(attribute) !== expected[index] || (selector === 'script' && element.type !== 'module'))) throw new Error('Unexpected editor assets');
+      element.getAttribute(attribute) !== expected[index] || (selector === 'script' && element.type !== 'module'))) throw editorLoadError('assets');
     for (const element of elements) element.setAttribute(attribute, new URL(element.getAttribute(attribute), url).href);
   }
   const context = document.createElement('meta'); context.name = 'home-studio-bootstrap';
@@ -353,22 +380,32 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       this._generation === generation && !this._editorLoading && !this._ready;
     if (!current()) return;
     const controller = new AbortController(); this._editorFetchController = controller;
-    let timedOut = false;
+    let timedOut = false, stage = 'fetch';
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, EDITOR_FETCH_TIMEOUT_MS);
     this._editorFetchTimer = timer;
     try {
       // The parent fetch carries only this origin's normal cookies. Only this
       // fixed bundled HTML is loaded; no HA token enters the sandbox.
       const url = new URL(EDITOR_PATH, location.origin);
-      const response = await fetch(url, { credentials: 'same-origin', redirect: 'error', cache: 'no-store', signal: controller.signal });
+      // Manual redirects are never followed and can be reported separately
+      // from a network failure without exposing their destination.
+      const response = await fetch(url, { credentials: 'same-origin', redirect: 'manual', cache: 'no-store', signal: controller.signal });
+      stage = 'document';
       const html = await editorDocument(response, url, channel);
+      stage = 'open';
       if (current() && !controller.signal.aborted) frame.srcdoc = html;
-    } catch {
+    } catch (error) {
       if (current() && (timedOut || !controller.signal.aborted)) {
+        const code = timedOut ? 'timeout' : Object.hasOwn(EDITOR_LOAD_MESSAGES, error?.editorCode) ? error.editorCode : stage;
+        const status = code === 'http' && Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599 ? `-${error.status}` : '';
+        // Keep the fixed diagnostic visible instead of replacing it with the
+        // generic slow-start warning. Never display raw exception/response data.
+        this._clearStartup();
         this._startupFailed = true; this.$('retry').hidden = false;
-        this._status(timedOut ? 'Loading the local drawing tools timed out. Retry connection to try again.' : 'The drawing tools have not connected. You can keep waiting or retry.', true); this._buttons();
+        this._status(`${EDITOR_LOAD_MESSAGES[code]} (editor-${code}${status}). Retry connection to try again.`, true); this._buttons();
       }
     } finally {
+      controller.abort(); // Stop any unread body after a header/validation rejection.
       clearTimeout(timer); if (this._editorFetchTimer === timer) this._editorFetchTimer = null;
       if (this._editorFetchController === controller) this._editorFetchController = null;
     }

@@ -771,6 +771,8 @@ function freshPreviewHarness(view = 'preview') {
   const document = {hidden:false,get activeElement(){return currentFocus;},querySelector:()=>({getBoundingClientRect:()=>{layoutReads++;return rect;}})};
   const window = new EventTarget();
   context=vm.createContext({AbortController,console,document,window,devicePixelRatio:2,
+    // The isolated lifecycle fixture uses the normal, unthemed canvas palette.
+    planColors:{background:'#f2f4ed'},
     // This renderer-lifecycle fixture has no scenery; preserve its optional layer contract.
     createEnvironmentControls:()=>({refresh(){}}),createEnvironmentLayer:()=>({setActive(){},dispose(){}}),
     t:value=>value,floorBounds:()=>({minX:0,maxX:8,minZ:0,maxZ:10}),
