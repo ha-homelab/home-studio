@@ -370,7 +370,7 @@ const root = path.resolve(__dirname, '..');
       {id: 'B', polygon: [[4, 0], [10, 0], [10, 6], [4, 6]]},
     ]},
     xm: x => x, zm: z => z, $: id => id === 'homeStage' ? {getBoundingClientRect: () => rect} : {},
-    roomLighting: null, lowerFloorContext: null, assumedZones: null, presenceView: null, signalZone: '', showLowerFloor: true,
+    roomLighting: null, lowerFloorContext: null, assumedZones: null, presenceView: null, vacuumView: null, signalZone: '', showLowerFloor: true,
     labels: [label], points: [], roomCode: id => id, roomName: id => id,
     refreshSignalStatus() {}, drawScene() {}, positionMediaPreviews() {}, renderCount: 0,
   });

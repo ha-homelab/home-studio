@@ -125,7 +125,7 @@ vm.runInContext(source, code);
     planRadius:10,planBounds:true,xm:x=>x,zm:z=>z,
     model:{rooms,ceiling_height_m:3},points,labels:[],roomLighting:state.lighting,
     projectedPosition:new THREE.Vector3(),projectedForward:new THREE.Vector3(),
-    lowerFloorContext:null,showLowerFloor:true,assumedZones:null,presenceView:null,signalZone:'',renderCount:0,
+    lowerFloorContext:null,showLowerFloor:true,assumedZones:null,presenceView:null,vacuumView:null,signalZone:'',renderCount:0,
     $:id=>id==='homeStage'?{getBoundingClientRect:()=>rect}:{},isCover:()=>false,
     positionMediaPreviews(){},refreshSignalStatus(){points[0].light.intensity=statusIntensity;},
     drawScene(){if(!blocked)captures.push(flag.value);}
