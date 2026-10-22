@@ -311,7 +311,38 @@ const server = http.createServer((req, res) => {
   assert.equal(await page.evaluate(()=>window.retryHost.$('family').getAttribute('aria-disabled')),'false','An unavailable authoring connection must not disable viewer navigation');
   await page.evaluate(()=>window.retryHost.$('retry').click());
   await page.waitForFunction(()=>window.retryCalls===4);
-  // Script failures have a bounded wait and retry preserves the chosen recovery.
+  // Slow first-load assets survive the warning and finish without a forced reload.
+  const delayed=await context.newPage(); delayed.on('pageerror',e=>errors.push(String(e)));
+  await delayed.addInitScript(project=>{
+    if(window.parent!==window)return;
+    sessionStorage.setItem('fixture-server',JSON.stringify({project,revision:2,published_revision:2}));
+  },project);
+  await delayed.clock.install();
+  let requestedEditor;
+  const delayedRequest=new Promise((resolve,reject)=>{
+    const timeout=setTimeout(()=>reject(new Error('The delayed editor script was not requested')),15000);
+    requestedEditor=route=>{clearTimeout(timeout);resolve(route);};
+  });
+  await delayed.route('**/planner/editor.js',route=>requestedEditor(route));
+  await delayed.goto(origin+'/fixture',{waitUntil:'domcontentloaded'});
+  const delayedRoute=await delayedRequest;
+  await delayed.waitForFunction(()=>window.host._frame);
+  await delayed.evaluate(()=>{window.firstEditor=window.host._frame;window.firstChannel=window.host._channel;window.firstGeneration=window.host._generation;});
+  await delayed.clock.fastForward(15001);
+  assert.equal(await delayed.locator('#retry').isVisible(),true);
+  assert.match(await delayed.locator('#status').innerText(),/taking longer.*keep waiting/);
+  assert.equal(await delayed.evaluate(()=>window.host._frame===window.firstEditor&&window.host._channel===window.firstChannel&&window.host._generation===window.firstGeneration),true);
+  assert.equal(await delayed.evaluate(()=>window.host._ready),false);
+  await delayedRoute.continue();
+  await delayed.waitForFunction(()=>window.host._ready);
+  assert.equal(await delayed.evaluate(()=>window.host._frame===window.firstEditor&&window.host._channel===window.firstChannel&&window.host._generation===window.firstGeneration),true);
+  assert.equal(await delayed.locator('#retry').isVisible(),false);
+  assert.equal(await delayed.evaluate(()=>window.host._startupFailed),false);
+  assert.equal(await delayed.evaluate(()=>window.host._startupTimer),null);
+  assert.deepEqual(await delayed.evaluate(()=>window.host._project),project);
+  assert.equal(await delayed.evaluate(()=>window.calls.filter(call=>call.type.endsWith('project_get')).length),1);
+  await delayed.close();
+  // A stalled script offers explicit retry without discarding the chosen recovery.
   const startup=await context.newPage(); startup.on('pageerror',e=>errors.push(String(e)));
   const recovered={...project,title:'Recovery after loading failure'};
   await startup.addInitScript(({project,recovered})=>{
@@ -323,9 +354,11 @@ const server = http.createServer((req, res) => {
   await startup.route('**/planner/editor.js',route=>route.abort());
   await startup.goto(origin+'/fixture'); await startup.locator('#resume').click();
   await startup.waitForFunction(()=>window.host._frame);
+  await startup.evaluate(()=>window.stalledEditor=window.host._frame);
   await startup.clock.fastForward(15001);
   await startup.waitForFunction(()=>window.host._startupFailed);
-  assert.equal(await startup.locator('iframe').count(),0);
+  assert.equal(await startup.locator('iframe').count(),1);
+  assert.equal(await startup.evaluate(()=>window.host._frame===window.stalledEditor),true);
   assert.equal(await startup.locator('#retry').isVisible(),true);
   assert.equal(await startup.locator('#export').isEnabled(),true);
   assert.equal(await startup.evaluate(()=>window.host._startupTimer),null);
@@ -335,6 +368,7 @@ const server = http.createServer((req, res) => {
   assert.deepEqual(JSON.parse(fs.readFileSync(await (await recoveryExport).path(),'utf8')),recovered);
   await startup.unroute('**/planner/editor.js');
   await startup.locator('#retry').click(); await startup.waitForFunction(()=>window.host._ready);
+  assert.equal(await startup.evaluate(()=>window.host._frame!==window.stalledEditor),true);
   assert.equal(await startup.locator('iframe').count(),1);
   assert.equal(await startup.evaluate(()=>window.host._project.title),recovered.title);
   assert.equal(await startup.evaluate(()=>window.host._startupTimer),null);
@@ -490,7 +524,7 @@ const server = http.createServer((req, res) => {
   assert.deepEqual(await generated.evaluate(()=>window.server.published_project),await generatedFrame.evaluate(()=>planner.getProject()));
   assert.equal(await generated.evaluate(()=>window.host._unsaved()),false);
   await generated.close();
-  // A late HA response after the connection deadline cannot mount a stale frame.
+  // A late HA response clears the warning and still offers the original recovery.
   await page.clock.install();
   await page.evaluate(project=>{
     sessionStorage.setItem('home-studio.ha-tab-draft.v1:late-admin',JSON.stringify({project,revision:8}));
@@ -498,22 +532,29 @@ const server = http.createServer((req, res) => {
     lateHost.hass={user:{id:'late-admin',is_admin:true},callWS:data=>data.type.endsWith('entity_catalog')?Promise.resolve(window.catalog):new Promise(resolve=>window.lateResponse=resolve)};
     document.body.append(lateHost);
   },recovered);
+  await page.evaluate(()=>window.lateGeneration=window.lateHost._generation);
   await page.clock.fastForward(15001);
   assert.equal(await page.evaluate(()=>window.lateHost._startupFailed),true);
   assert.equal(await page.evaluate(()=>window.lateHost.$('export').disabled),false);
   assert.equal(await page.evaluate(()=>window.lateHost.$('family').getAttribute('aria-disabled')),'false','Unknown publication state after startup timeout must retain viewer navigation');
-  await page.evaluate(project=>window.lateResponse({project,revision:8,can_edit:true}),project);
-  assert.equal(await page.evaluate(()=>window.lateHost.shadowRoot.querySelectorAll('iframe').length),0);
   const originalRecovery=await page.evaluate(()=>sessionStorage.getItem(window.lateHost._key()));
   await page.evaluate(project=>{
     window.newRemote={...project,title:'Newer server drawing'};
+    window.lateResponse({project:window.newRemote,revision:9,published_revision:null,can_edit:true,capabilities:{authoring:true}});
+  },project);
+  await page.waitForFunction(()=>!window.lateHost.$('recovery').hidden);
+  assert.equal(await page.evaluate(()=>window.lateHost._startupFailed),false);
+  assert.equal(await page.evaluate(()=>window.lateHost.$('retry').hidden),true);
+  assert.equal(await page.evaluate(()=>window.lateHost._generation===window.lateGeneration),true);
+  assert.equal(await page.evaluate(()=>window.lateHost._startupTimer),null);
+  assert.equal(await page.evaluate(()=>window.lateHost.shadowRoot.querySelectorAll('iframe').length),0);
+  await page.evaluate(()=>{
     window.lateHost.hass={user:{id:'late-admin',is_admin:true},callWS:async data=>{
       if (data.type.endsWith('entity_catalog')) return window.catalog;
       if (data.type.endsWith('project_save')) throw {code:'conflict'};
       return {project:window.newRemote,revision:9,published_revision:null,can_edit:true,capabilities:{authoring:true}};
     }};
-    window.lateHost._retryStartup();
-  },project);
+  });
   await page.waitForFunction(()=>!window.lateHost.$('recovery').hidden);
   assert.equal(await page.evaluate(()=>window.lateHost._revision),9);
   assert.equal(await page.evaluate(()=>window.lateHost._project.title),recovered.title);

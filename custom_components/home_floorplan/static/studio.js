@@ -246,7 +246,15 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   _clearStartup() { clearTimeout(this._startupTimer); this._startupTimer = null; }
   _watchStartup(message) {
     this._clearStartup();
-    this._startupTimer = setTimeout(() => this._failStartup(message), STARTUP_TIMEOUT_MS);
+    this._startupTimer = setTimeout(() => {
+      this._startupTimer = null;
+      // Cold HA startup can outlast this warning. Keep the request and iframe
+      // alive so a late response can finish without losing its initialized state.
+      this._startupFailed = true;
+      if (!this._project && this._recovery) { this._project = clone(this._recovery.project); this._revision = this._recovery.revision; }
+      this.$('retry').hidden = !this._hass?.user?.is_admin;
+      this._status(message); this._buttons();
+    }, STARTUP_TIMEOUT_MS);
   }
   _failStartup(message, allowRetry = true, error = true) {
     this._disposeAi();
@@ -286,10 +294,10 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     try {
       if (!this._hass.user?.is_admin) throw new Error('An administrator account is required to edit this home.');
       this._recovery = this._readRecovery();
-      this._watchStartup('Home Assistant did not respond. Check the connection, then retry.');
+      this._watchStartup('Home Assistant is taking longer than expected. You can keep waiting or retry.');
       const [saved, catalog] = await Promise.all([this._hass.callWS({ type: 'home_floorplan/project_get' }), this._hass.callWS({ type: 'home_floorplan/entity_catalog' })]);
       if (generation !== this._generation || !this.isConnected) return;
-      this._clearStartup();
+      this._clearStartup(); this._startupFailed = false; this.$('retry').hidden = true;
       this._saved = saved; this._revision = saved.revision; this._publishedRevision = saved.published_revision;
       // The live home may still use generated assets while a local drawing is
       // editable. Only the server's authoring capability controls this editor.
@@ -334,7 +342,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     frame.referrerPolicy = 'no-referrer';
     const url = new URL(this._editorUrl); url.searchParams.set('embed', 'home-assistant'); url.hash = `ha-studio=${this._channel}`;
     frame.src = url.href; this.shadowRoot.append(frame); this.$('loading').hidden = true;
-    this._watchStartup('The drawing tools did not finish loading. Retry to reopen your preserved drawing.');
+    this._watchStartup('The drawing tools are taking longer than expected. You can keep waiting or retry.');
     this._status('Opening the drawing tools…'); this._buttons();
   }
   _send(type, payload = {}) {
@@ -365,7 +373,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       const raw = projectBytes(data.project);
       if (this._initializingBlank) { this._pristineRaw = raw; this._initializingBlank = false; }
       this._sequence = data.sequence; this._project = clone(data.project); this._ready = true;
-      this._clearStartup();
+      this._clearStartup(); this._startupFailed = false; this.$('retry').hidden = true;
       this._edits = { pending: data.edits?.pending === true, invalid: data.edits?.invalid === true, field: boundedText(data.edits?.field) };
       this._persist(); this._buttons();
       if (!this._busy) this._drawingStatus();
