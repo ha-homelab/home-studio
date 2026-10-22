@@ -210,19 +210,27 @@ function sizeRoom(room, width, depth, anchor = null) {
   const bounds = roomBounds(room), fixed = anchor || [bounds.minX, bounds.minZ];
   room.polygon = room.polygon.map(([x, z]) => [round(fixed[0] + (x - fixed[0]) * width / bounds.width), round(fixed[1] + (z - fixed[1]) * depth / bounds.depth)]);
 }
-function pointOnRoomEdge(point, room) {
-  return room.polygon.some((start, index) => projectOnWall(point, { start, end: room.polygon[(index + 1) % room.polygon.length] }).distance < .002);
+function segmentTouchesRoomBoundary(start, end, room) {
+  const wall = { start, end }, cross = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  return room.polygon.some((a, index) => {
+    const b = room.polygon[(index + 1) % room.polygon.length], edge = { start: a, end: b };
+    // Check both segments' endpoints: a neighboring room can share only the
+    // middle of a longer wall. Proper crossings also attach the two outlines.
+    return cross(start, end, a) * cross(start, end, b) < 0 && cross(a, b, start) * cross(a, b, end) < 0
+      || projectOnWall(start, edge).distance < .002 || projectOnWall(end, edge).distance < .002
+      || projectOnWall(a, wall).distance < .002 || projectOnWall(b, wall).distance < .002;
+  });
 }
 function resizeRoomWithOutline(target, room, width, depth, anchor = null) {
   const bounds = roomBounds(room), fixed = anchor || [bounds.minX, bounds.minZ];
   const transform = ([x, z]) => [round(fixed[0] + (x - fixed[0]) * width / bounds.width), round(fixed[1] + (z - fixed[1]) * depth / bounds.depth)];
-  const walls = target.walls.filter(wall => pointOnRoomEdge(wall.start, room) || pointOnRoomEdge(wall.end, room));
+  const walls = target.walls.filter(wall => segmentTouchesRoomBoundary(wall.start, wall.end, room));
   for (const wall of walls) {
     const boundary = room.polygon.some((start, index) => {
       const edge = { start, end: room.polygon[(index + 1) % room.polygon.length] };
       return projectOnWall(wall.start, edge).distance < .002 && projectOnWall(wall.end, edge).distance < .002;
     });
-    const shared = target.rooms.some(other => other.id !== room.id && (pointOnRoomEdge(wall.start, other) || pointOnRoomEdge(wall.end, other)));
+    const shared = target.rooms.some(other => other.id !== room.id && segmentTouchesRoomBoundary(wall.start, wall.end, other));
     if (!boundary || shared) throw new Error('This room has shared or attached walls. Adjust its polygon and wall endpoints separately to preserve the adjacent space.');
   }
   sizeRoom(room, width, depth, fixed);
