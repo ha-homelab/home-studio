@@ -284,7 +284,9 @@ class StudioAssetsView(HomeAssistantView):
         response = web.FileResponse(path)
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Cache-Control"] = "no-cache"
+        # These reviewed resources are validated by the sandbox loader. Proxy
+        # HTML/script injection would change the expected document and CSP.
+        response.headers["Cache-Control"] = "no-cache, no-transform"
         response.content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
         return response
 

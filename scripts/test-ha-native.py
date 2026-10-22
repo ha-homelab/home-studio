@@ -682,6 +682,8 @@ class PermissionTests(unittest.IsolatedAsyncioTestCase):
         response = await view.get(None, "planner/index.html")
         self.assertEqual(response.path, path)
         self.assertEqual(response.headers["Access-Control-Allow-Origin"], "*")
+        self.assertEqual(response.headers["Cache-Control"], "no-cache, no-transform")
+        self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
         for name in ("../../etc/passwd", "project.json", "assets/main/index.html", "%2e%2e/index.html"):
             with self.assertRaises(HTTPNotFound):
                 await view.get(None, name)

@@ -294,6 +294,13 @@ publish access tokens, cookies, client addresses, or full private logs in a repo
   or a script error; report that distinction with the browser version.
   **More options → Export drawing (JSON)** remains available when the host has
   a drawing, including after an editor load error.
+- **`editor-assets` appears only through a reverse proxy:** HTML rewriting can
+  change the reviewed script or stylesheet list. Bundled editor responses send
+  `Cache-Control: no-cache, no-transform`; preserve that header on
+  `/home-floorplan-studio/` so proxies leave the resources intact.
+  [Cloudflare documents that `no-transform` prevents JavaScript Detection injection](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/javascript-detections/#if-your-origin-sends-a-no-transform-header).
+  The error alone does not identify which proxy feature changed the response.
+  The editor keeps its existing CSP and exact asset allowlist.
 - **The external editor opens a different draft:** this is expected. Export
   and open the JSON file when you want to transfer a design.
 
