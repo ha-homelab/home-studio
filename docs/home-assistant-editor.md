@@ -99,6 +99,10 @@ In **Plan 2D**, choose **Select / move** and drag an item to change its position
 In **Preview 3D**, choose **Edit items**, then drag an item across the floor.
 Choose **Orbit** or **Pan** to move the view. Shift-drag also pans while editing.
 
+For an existing generated home, the **Published home** tab shows the installed
+view rather than the editable 3D preview. Move its items in **Plan 2D** and use
+the position and height fields; its original room geometry stays protected.
+
 **Snap 0.25 m** aligns item positions to the quarter-meter grid. Hold **Alt** while
 dragging, drawing, or placing an item to bypass the grid temporarily; release it
 to use snapping again. Uncheck Snap for continuous placement. Numeric fields
