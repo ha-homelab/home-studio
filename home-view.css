@@ -163,6 +163,11 @@ body.control-only>header,body.control-only>main,body.control-only #editLayout,bo
 
 /* Held occupancy uses a compact room-label badge, never a trail or inferred heartbeat. */
 .home-presence-layer{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;overflow:hidden}
+.home-vacuum-layer{position:absolute;inset:0;z-index:3;pointer-events:none}.home-vacuum-layer[hidden]{display:none}
+#homeView .home-vacuum-marker{position:absolute;transform:translate(-50%,-50%);width:32px;height:32px;min-height:32px;padding:0;border:1px solid #a8e2ef;border-radius:50%;background:#15343c;box-shadow:0 2px 7px #0009;color:#d4f5ff;pointer-events:auto;cursor:pointer}
+#homeView .home-vacuum-marker[hidden]{display:none}.home-vacuum-marker svg{display:block;width:30px;height:30px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round}
+#homeView .home-vacuum-marker[data-position-state="last_known"]{background:#333b3f;color:#c8cfd2;border-color:#a9b5b9;border-style:dashed}
+#homeView .home-vacuum-marker:focus-visible{outline:2px solid #fff;outline-offset:3px}.home-vacuum-caption{position:absolute;top:calc(100% + 4px);left:50%;transform:translateX(-50%);padding:3px 5px;border-radius:4px;background:#17242ce8;color:#dce4e8;font:10px/1.3 system-ui;white-space:nowrap;pointer-events:none}.home-vacuum-caption[hidden]{display:none}
 .home-presence-indicator{transition:none;pointer-events:none}
 .home-presence-indicator[data-state="quiet"]{transition:opacity 15s ease-out}
 #homeView [data-kind="presence"]{color:#95e9df;background:#213e40;border-color:#568a89}

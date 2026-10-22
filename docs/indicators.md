@@ -45,3 +45,8 @@ viewers against the updated shared core and supplying the reviewed model
 metadata. Adding missing physical items or detailed door geometry also requires
 a deliberate model/export rebuild; an HTML-only preservation check should
 continue to reject unreviewed geometry changes.
+
+## Vacuum locations
+
+See [Vacuum position overlays](vacuum-position.md) for advanced map registration,
+source timestamps, permission checks, and reported versus last-known positions.

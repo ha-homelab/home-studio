@@ -61,6 +61,59 @@ function projectRoomActivity(id, state, attributes, configured = false) {
   return {activity:{evidence}};
 }
 
+function vacuumSourceBindings(value, readable) {
+  if (!Array.isArray(value) || value.length > 64) return [];
+  const seen = new Set();
+  return value.filter(source => {
+    const vacuum = source?.entity_id, position = source?.position_entity_id;
+    if (typeof vacuum !== 'string' || !/^vacuum\.[a-z0-9_]{1,137}$/.test(vacuum) ||
+        typeof position !== 'string' || !/^sensor\.[a-z0-9_]{1,137}$/.test(position) ||
+        !readable?.has(vacuum) || !readable.has(position)) return false;
+    const key = vacuum + ':' + position;
+    if (seen.has(key)) return false;
+    seen.add(key);return true;
+  }).map(({entity_id,position_entity_id}) => ({entity_id,position_entity_id}));
+}
+
+function vacuumObservationTime(value) {
+  // Require a real calendar date with an explicit timezone; HA update times are
+  // not evidence that a map has supplied a new position.
+  if (typeof value !== 'string' || value.length > 35) return false;
+  const parts = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!parts) return false;
+  const [,year,month,day,hour,minute,second,zone] = parts;
+  const date = new Date(Date.UTC(+year,+month-1,+day));
+  return +year >= 1970 && date.getUTCFullYear() === +year && date.getUTCMonth() === +month-1 &&
+    date.getUTCDate() === +day && +hour < 24 && +minute < 60 && +second < 60 &&
+    (zone === 'Z' || (+zone.slice(1,3) <= 14 && +zone.slice(4) < 60 && (+zone.slice(1,3) < 14 || +zone.slice(4) === 0))) &&
+    Number.isFinite(Date.parse(value));
+}
+
+function projectVacuumPosition(state, attributes) {
+  const invalid = {vacuum_position:{valid:false}};
+  if (!['available','reported'].includes(state) || !attributes || attributes.restored ||
+      !Number.isFinite(attributes.x) || !Number.isFinite(attributes.y) ||
+      (attributes.valid !== undefined && attributes.valid !== true)) return invalid;
+  const mapId = attributes.map_id;
+  if (!(Number.isSafeInteger(mapId) && mapId >= 0) &&
+      !(typeof mapId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(mapId))) return invalid;
+  const position = {x:attributes.x,y:attributes.y,map_id:mapId,valid:true};
+  if (vacuumObservationTime(attributes.observed_at))
+    return {vacuum_position:{...position,observed_at:attributes.observed_at}};
+  // Some integrations return coordinates without their observation time. Keep
+  // retrieval freshness separate so the viewer can label this uncertainty.
+  if (attributes.observed_at === null && attributes.timestamp_quality === 'not_provided' &&
+      vacuumObservationTime(attributes.retrieved_at))
+    return {vacuum_position:{...position,observed_at:null,retrieved_at:attributes.retrieved_at,timestamp_quality:'not_provided'}};
+  return invalid;
+}
+
+function projectVacuumBattery(state, attributes) {
+  const level = attributes?.battery_level;
+  return typeof state === 'string' && !['','unknown','unavailable'].includes(state) && !attributes?.restored &&
+    Number.isFinite(level) && level >= 0 && level <= 100 ? {battery_level:level} : {};
+}
+
 // HA MediaPlayerEntityFeature bits; service payloads are constructed here, never by the iframe.
 const mediaCommandFeatures=Object.freeze({media_pause:1,volume_set:4,media_previous_track:16,media_next_track:32,media_stop:4096,media_play:16384});
 function mediaCommandAllowed(entity,action,value) {
@@ -385,7 +438,7 @@ class HomeFloorplanPanel extends HTMLElement {
   }
 
   resetModelConfig() {
-    this.tvFrames={};this.cameraEntities={};this.roomActivity=new Set();this.moduleEntities=new Set();this.assumedActivity=null;this.inventoryModel=null;this.modelConfigured=false;this.displayEntities=new Set();this.catalogSent=false;this.scopedStates=false;
+    this.tvFrames={};this.cameraEntities={};this.roomActivity=new Set();this.moduleEntities=new Set();this.assumedActivity=null;this.vacuumSources=[];this.inventoryModel=null;this.modelConfigured=false;this.displayEntities=new Set();this.catalogSent=false;this.scopedStates=false;
   }
   set hass(value) {
     if (this.localEdits && (this.localEdits.account !== value?.user?.id || value?.user?.is_admin === false)) this.discardLocalEdits();
@@ -559,6 +612,10 @@ class HomeFloorplanPanel extends HTMLElement {
   }
   publishEntityStates() {
     if (!this.port || !this._hass) return;
+    // Bindings come from the authenticated floor response, never model_config.
+    const vacuumSources = vacuumSourceBindings(this.vacuumSources, this.readableEntities);
+    const vacuumEntities = new Set(vacuumSources.map(source => source.entity_id));
+    const positionEntities = new Set(vacuumSources.map(source => source.position_entity_id));
     const mediaEntities=new Set(this.savedItems.map(item=>item.entity_id).filter(id=>typeof id==='string'&&/^media_player\.[a-z0-9_]{1,137}$/.test(id)));
     const validId=id=>typeof id==='string'&&/^[a-z_]+\.[a-z0-9_]{1,137}$/.test(id);
     // The picker needs names, not every device's raw state or unrelated attributes.
@@ -567,7 +624,7 @@ class HomeFloorplanPanel extends HTMLElement {
       this.port.postMessage({type:'entity_catalog',entities:Object.entries(this._hass.states).filter(([id])=>validId(id)).slice(0,20000).map(([id,entity])=>[id,String(entity.attributes?.friendly_name||id).slice(0,200)])});
       this.catalogSent=true;
     }
-    const needed=new Set(['sun.sun',...this.savedItems.map(item=>item.entity_id),...(this.displayEntities||[])].filter(validId));
+    const needed=new Set(['sun.sun',...this.savedItems.map(item=>item.entity_id),...(this.displayEntities||[]),...vacuumEntities,...positionEntities].filter(validId));
     for(const id of [...needed]){const guard=this.curtains?.profiles?.[id]?.guard;if(validId(guard))needed.add(guard);}
     // The host uses server-issued scope; a child cannot request unrelated states.
     const permitted = new Set([...needed].filter(id => this.readableEntities?.has(id)));
@@ -604,6 +661,8 @@ class HomeFloorplanPanel extends HTMLElement {
         }} : {}),
         ...projectRoomActivity(id, state, attributes, this.roomActivity?.has(id)),
         ...projectAssumedZoneActivity(id, state, attributes, this.assumedActivity),
+        ...(positionEntities.has(id) ? projectVacuumPosition(state, attributes) : {}),
+        ...(vacuumEntities.has(id) ? projectVacuumBattery(state, attributes) : {}),
         ...(this.moduleEntities?.has(id) ? {modules:{summary:typeof attributes.module_summary==='string'?attributes.module_summary.slice(0,200):'',details:typeof attributes.module_details==='string'?attributes.module_details.slice(0,16000):'',...Object.fromEntries(['expires_at_ms','snapshot_at_ms','fresh_count'].map(key=>[key,Number.isSafeInteger(attributes['module_'+key])&&attributes['module_'+key]>=(key==='fresh_count'?0:1)?attributes['module_'+key]:null]))}} : {}),
         ...(id === 'sun.sun' ? {sun:{elevation:attributes.elevation}} : {}),
         ...(cover ? {cover:{current_position:attributes.current_position,supported_features:attributes.supported_features,restored:attributes.restored,last_known:this.curtains.memory[id],position_checked_at:this.curtains.checks?.[id],guard:guardId,power_on_at:powerOnAt,boot_seconds:this.curtains.boot_seconds}} : {}),
@@ -815,6 +874,7 @@ class HomeFloorplanPanel extends HTMLElement {
       const bound = (result.items || []).map(item => item.entity_id).filter(id => typeof id === 'string');
       this.readableEntities = new Set(Array.isArray(result.readable_entities) ? result.readable_entities : bound);
       this.controllableEntities = new Set(Array.isArray(result.controllable_entities) ? result.controllable_entities : this._hass.user.is_admin === true ? bound : []);
+      this.vacuumSources = vacuumSourceBindings(result.vacuum_sources, this.readableEntities);
       this.floor = result.floor || floor || result.floors?.[0] || null;
       this.floors = result.floors || (this.floor ? [this.floor] : []);
       this.siteFeatures = result.site_features !== false;
@@ -965,7 +1025,8 @@ class HomeFloorplanPanel extends HTMLElement {
       if (this.floors.includes(message.floor)) this.loadFloor(message.floor);
     } else if (message.type === 'more_info') {
       const id=message.entity_id;
-      if(this.pending||this.failed||this._hass.connected===false||this.isConnected===false||typeof id!=='string' || !this.savedItems.some(item=>item.entity_id===id) || !this._hass.states[id])return;
+      const bound=this.savedItems.some(item=>item.entity_id===id)||vacuumSourceBindings(this.vacuumSources,this.readableEntities).some(source=>source.entity_id===id);
+      if(this.pending||this.failed||this._hass.connected===false||this.isConnected===false||typeof id!=='string' || !bound || !this._hass.states[id])return;
       this.dispatchEvent(new CustomEvent('hass-more-info',{detail:{entityId:id},bubbles:true,composed:true}));
     } else if (message.type === 'media_command') {
       this.handleMediaCommand(message,generation);

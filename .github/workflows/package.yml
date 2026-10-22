@@ -178,7 +178,7 @@ jobs:
         run: node --test scripts/test-tv-screen.cjs
       - name: Test linked media previews and bounded TV power commands
         run: |
-          node --test scripts/test-media-preview.cjs scripts/test-media-artwork-host.cjs scripts/test-media-command-host.cjs scripts/test-appliance-state.cjs scripts/test-presence-view.cjs
+          node --test scripts/test-media-preview.cjs scripts/test-media-artwork-host.cjs scripts/test-media-command-host.cjs scripts/test-appliance-state.cjs scripts/test-presence-view.cjs scripts/test-vacuum-state.cjs scripts/test-vacuum-view.cjs scripts/test-vacuum-position-host.cjs
           node --test scripts/test-dashboard-card.cjs
           for engine in chromium firefox webkit; do
             MEDIA_ARTWORK_ENGINE="$engine" node scripts/test-media-artwork-browser.cjs
@@ -192,6 +192,9 @@ jobs:
           done
       - name: Test muted lower-floor context and independent camera focus
         run: python3 scripts/test-floor-context.py && node --test scripts/test-floor-context.cjs
+      - name: Test read-only vacuum positions, freshness and render lifecycle
+        timeout-minutes: 3
+        run: node scripts/test-vacuum-browser.cjs
       - name: Test initial viewer mode and first-render fallback
         run: node scripts/test-viewer-startup.cjs
       - name: Test render budgets and page lifecycle
