@@ -141,7 +141,10 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this.$('family').setAttribute('aria-disabled', String(unpublished));
     this.$('family').title = unpublished ? 'Publish your first room to open the live plan' : 'Open the published plan and device controls';
     this.$('guide-room').disabled = disabled;
-    this.$('guide-room').textContent = rooms ? 'Add another room' : 'Add your first room';
+    const roomLabel = rooms ? 'Add another room' : 'Add your first room';
+    // A field can commit between pointerdown and click. Replacing this label
+    // then cancels the pending click in WebKit, even if its text is unchanged.
+    if (this.$('guide-room').textContent !== roomLabel) this.$('guide-room').textContent = roomLabel;
     this.$('guide-devices').disabled = disabled || !rooms;
     this.$('guide-preview').disabled = disabled || !rooms;
     this.$('guide-photos').hidden = this._saved?.capabilities?.ai !== true;

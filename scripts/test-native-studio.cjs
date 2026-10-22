@@ -435,6 +435,68 @@ const server = http.createServer((req, res) => {
   assert.equal(await incomplete.evaluate(()=>window.server.published_revision),1);
   assert.deepEqual(await incomplete.evaluate(()=>window.server.published_project),unlinkedProject,'The existing publication remains unchanged');
   await incomplete.close();
+  // Exercise rejected shortcuts and recovery on their own first-room draft.
+  {
+    const page=await context.newPage();page.setDefaultTimeout(15000);
+    page.on('pageerror',error=>errors.push(String(error)));
+    await page.goto(origin+'/fixture');await page.waitForFunction(()=>window.host?._ready);
+    const frame=page.frames().find(frame=>frame.url().includes('embed='));
+    await page.getByRole('button',{name:'Add your first room',exact:true}).click();
+    const starter=frame.getByRole('dialog',{name:'Create a room',exact:true});
+    await starter.getByLabel('Room name',{exact:true}).fill('Field recovery room');
+    await starter.getByRole('button',{name:'Create room',exact:true}).click();
+    await page.getByRole('button',{name:'Add another room',exact:true}).waitFor();
+    const originalProject=await frame.evaluate(()=>planner.getProject());
+    // Host shortcuts must not discard raw inspector text while changing context.
+    await frame.evaluate(()=>{
+      window.guideMessages=0;
+      window.addEventListener('message',event=>{
+        if(event.source===parent&&event.data?.type==='guide-action')window.guideMessages++;
+      });
+    });
+    async function assertGuideRetainsField(buttonName,field,raw) {
+      const before=await frame.evaluate(()=>({project:planner.getProject(),selection:planner.getSelection(),messages:window.guideMessages}));
+      await page.waitForFunction(()=>window.host._edits.pending);
+      await page.getByRole('button',{name:buttonName,exact:true}).click();
+      // Observe the real bridge event without requesting a snapshot that would
+      // itself validate the field and mask a missing shortcut guard.
+      await frame.waitForFunction(count=>window.guideMessages>count,before.messages);
+      assert.equal(await field.inputValue(),raw,`${buttonName} retains unfinished field text`);
+      assert.equal(await frame.evaluate(()=>document.hasFocus()),true,`${buttonName} returns keyboard focus to the editor`);
+      assert.equal(await field.evaluate(input=>input===document.activeElement),true,`${buttonName} returns focus to the unfinished field`);
+      assert.equal(await starter.isVisible(),false,`${buttonName} does not open a new room over unfinished text`);
+      assert.deepEqual(await frame.evaluate(()=>planner.getSelection()),before.selection);
+      assert.deepEqual(await frame.evaluate(()=>planner.getProject()),before.project);
+      assert.equal(await page.evaluate(()=>window.host._edits.pending),true);
+    }
+    const firstPolygon=frame.getByLabel('x, z coordinates (m)',{exact:true});
+    const originalPolygon=await firstPolygon.inputValue();
+    await firstPolygon.fill('unfinished corner');
+    await assertGuideRetainsField('Add another room',firstPolygon,'unfinished corner');
+    await assertGuideRetainsField('Add devices',firstPolygon,'unfinished corner');
+    await firstPolygon.fill(originalPolygon);await firstPolygon.press('Tab');
+    await page.getByRole('button',{name:'Save draft',exact:true}).click();
+    await page.waitForFunction(()=>window.server.revision===1&&!window.host._busy&&!window.host._edits.pending);
+    assert.deepEqual(await page.evaluate(()=>window.server.project),originalProject);
+    assert.equal(await page.evaluate(()=>window.server.published_revision),null);
+    const firstTitle=frame.locator('#project-title');
+    // Global fields need the same guard after keyboard focus has moved elsewhere.
+    await firstTitle.fill('');await firstTitle.press('Tab');
+    await assertGuideRetainsField('Add another room',firstTitle,'');
+    await firstTitle.fill('Recovered field edits');
+    await page.getByRole('button',{name:'Save draft',exact:true}).click();
+    await page.waitForFunction(()=>window.server.revision===2&&!window.host._busy&&!window.host._edits.pending);
+    assert.deepEqual(await page.evaluate(()=>window.server.project),{...originalProject,title:'Recovered field edits'});
+    assert.equal(await page.evaluate(()=>window.server.published_revision),null);
+    await page.getByRole('button',{name:'Add another room',exact:true}).click();
+    await starter.waitFor({state:'visible'});
+    await starter.getByRole('button',{name:'Close',exact:true}).click();
+    assert.equal(await frame.evaluate(()=>planner.getProject().floors[0].rooms.length),1);
+    await page.getByRole('button',{name:'Add devices',exact:true}).click();
+    await frame.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')==='Home Assistant area');
+    assert.equal(await page.evaluate(()=>window.host._unsaved()),false);
+    await page.close();
+  }
   // HA supplies a viewport meta tag. Exercise the actual narrow layout rather
   // than the 980px layout viewport that mobile browsers use without that tag.
   const mobileContext=await browser.newContext({viewport:{width:390,height:844},hasTouch:true,
@@ -479,6 +541,6 @@ const server = http.createServer((req, res) => {
   await mobileContext.close();
   assert.deepEqual(errors,[]);
   await context.close();
-  console.log(`Native studio passed (${engine}): production panel module route, repeated module loading, opaque sandbox, clean first visit, guided room/device/preview flow, separate save/publish, navigation and remount, incomplete-floor publication guard, JSON roundtrip, forged messages, local draft isolation, offline recovery, revision conflict, in-flight edits, pending/invalid fields, loading timeout and recovery retry.`);
+  console.log(`Native studio passed (${engine}): production panel module route, repeated module loading, opaque sandbox, clean first visit, guided room/device/preview flow, unfinished-field guard and recovery, separate save/publish, navigation and remount, incomplete-floor publication guard, JSON roundtrip, forged messages, local draft isolation, offline recovery, revision conflict, in-flight edits, pending/invalid fields, loading timeout and recovery retry.`);
  } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

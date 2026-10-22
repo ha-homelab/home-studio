@@ -1353,11 +1353,22 @@ installOnboarding({
 });
 if (!initialLocale.loaded) status(() => t('Language could not be loaded. English is shown instead.'), true);
 
+function focusUnfinishedGuideField() {
+  const unfinished = document.querySelector('[data-project-field][aria-invalid="true"]')
+    || [...document.querySelectorAll('[data-project-field]')].find(field => field.inspectorDraft);
+  if (!unfinished) return false;
+  status('Finish the highlighted field before choosing a room. Save draft above applies and saves your changes.');
+  unfinished.focus({ preventScroll: true }); unfinished.scrollIntoView({ block: 'center' }); return true;
+}
+
 function guideAction(action) {
   if (!haContext || !haCatalog) return;
+  // Firefox needs the iframe's browsing context focused after a host click.
+  window.focus();
   // Keep a form already being edited intact when a host shortcut is clicked.
   const modal = document.querySelector('dialog[open]');
   if (modal) { modal.focus(); return; }
+  if ((action === 'room' || action === 'devices') && focusUnfinishedGuideField()) return;
   if (action === 'room') { $('measured-room').click(); return; }
   if (action === 'preview') { setView('preview'); $('preview-tab').focus(); return; }
   if (action === 'photos') {
@@ -1369,14 +1380,6 @@ function guideAction(action) {
   const room = selection?.kind === 'rooms' ? selected()
     : floor().rooms.find(entry => entry.id === (selection?.kind === 'items' ? selected()?.room : null)) || floor().rooms[0];
   if (!room) { $('measured-room').click(); return; }
-  if (selection?.kind !== 'rooms' || selection.id !== room.id) {
-    const unfinished = $('inspector-body').querySelector('[data-project-field][aria-invalid="true"]')
-      || [...$('inspector-body').querySelectorAll('[data-project-field]')].find(field => field.inspectorDraft);
-    if (unfinished) {
-      status('Finish the highlighted field before choosing a room. Save draft above applies and saves your changes.');
-      unfinished.focus(); unfinished.scrollIntoView({ block: 'center' }); return;
-    }
-  }
   setView('plan'); setTool('select'); setSelection({ kind: 'rooms', id: room.id });
   const label = room.ha_area_id ? 'Add device to this room' : 'Home Assistant area';
   const chooser = [...$('inspector-body').querySelectorAll('select')].find(field => field.getAttribute('aria-label') === label);

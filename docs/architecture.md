@@ -26,6 +26,16 @@ source and session, and passes only project data and a bounded registry catalog.
 `planner/ha-bridge.js` gives the shared editor an explicit native mode. No HA
 token enters the sandbox, public website, exported project or generated viewer.
 
+The native first-room guide sends an allowlisted `guide-action` through this
+same bridge: `room`, `devices`, `preview`, or `photos`. These shortcuts open
+existing editor controls; they do not save, publish, operate a device, or
+start AI generation. The editor checks the parent window, origin and channel
+before handling them, and preserves unfinished fields before changing rooms.
+An untouched initial blank project is a comparison baseline, not a saved
+draft. It creates neither a recovery warning nor a publishable revision.
+Saving and publishing remain explicit host actions; client-side empty-floor
+checks explain the next step while the compiler remains authoritative.
+
 `native.py` stores the editable source with revisions using HA private storage.
 Saving permits unfinished floors; publishing requires the compiler's full
 validation. Compilation runs in an executor and creates an independent generation.
