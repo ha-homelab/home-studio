@@ -419,6 +419,9 @@ class HomeFloorplanPanel extends HTMLElement {
   connectionReadiness(state, ready) {
     if (state !== this.connectionState || !this.isConnected) return;
     if (state.ready !== ready) {
+      // A completed reconnect establishes a fresh authenticated session. Merely
+      // remounting the panel or receiving another ready update does not.
+      if (state.ready === false && ready) this.mediaArtworkAuthFailure = null;
       if (state.ready !== null) this.resetConnectionLoad();
       state.ready = ready;
       if (!ready) this.notice('Connection lost. Reconnecting to Home Assistant…', true);
@@ -632,6 +635,14 @@ class HomeFloorplanPanel extends HTMLElement {
     if (!this.port || !this._hass || this.isConnected===false || this._hass.connected===false || document.hidden) {
       this.clearMediaArtwork();return;
     }
+    const denied=this.mediaArtworkAuthFailure;
+    if (denied) {
+      // HA keeps Auth stable and exposes refreshed credentials via accessToken.
+      // Keep this comparison in the trusted host; never send or persist tokens.
+      if (denied.auth===this._hass.auth && denied.accessToken===this._hass.auth?.accessToken &&
+          denied.connection===this._hass.connection && denied.userId===this._hass.user?.id) return;
+      this.mediaArtworkAuthFailure=null;
+    }
     const wanted=new Map();
     let count=0;
     for (const item of this.savedItems) {
@@ -666,6 +677,7 @@ class HomeFloorplanPanel extends HTMLElement {
   }
   async fetchMediaArtwork(entry) {
     const port=this.port,generation=this.generation,controller=entry.controller=new AbortController();
+    const auth=this._hass.auth,connection=this._hass.connection,userId=this._hass.user?.id;
     entry.attempted=true;this.mediaArtworkRequests=(this.mediaArtworkRequests||0)+1;
     const timer=setTimeout(()=>controller.abort(),mediaArtworkLimits.timeout);
     try {
@@ -674,6 +686,17 @@ class HomeFloorplanPanel extends HTMLElement {
       const response=await awaitMediaArtworkResponse(this._hass.fetchWithAuth('/api/media_player_proxy/'+encodeURIComponent(entry.entity_id),
         {method:'GET',redirect:'error',cache:'no-store',signal:controller.signal,headers:{Accept:'image/jpeg, image/png, image/webp'}}),controller.signal);
       if (controller.signal.aborted) {await response.body?.cancel?.();return;}
+      if (response.status===401 || response.status===403) {
+        if (generation===this.generation && port===this.port && auth===this._hass.auth &&
+            connection===this._hass.connection && userId===this._hass.user?.id) {
+          // fetchWithAuth may renew an expired token before sending. Remember
+          // its current token on rejection so that renewal cannot bypass the
+          // pause. Abort the peer request and stop draining the pending queue.
+          this.mediaArtworkAuthFailure={auth,accessToken:auth?.accessToken,connection,userId};
+          this.clearMediaArtwork();
+        }
+        await response.body?.cancel?.();return;
+      }
       const source=await readMediaArtwork(response,controller.signal);
       const image=await normalizeMediaArtwork(source,controller.signal);
       if (!controller.signal.aborted && generation===this.generation && port===this.port &&
