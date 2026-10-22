@@ -958,6 +958,9 @@ function finishPointer(event, cancel = false) {
       try { validateProject(project); validateSourcePolicy(project); serializeProject(project); historyPush(current.original); previewDirty = true; status(current.kind === 'resize' ? 'Room and its wall outline resized. Items kept their positions.' : () => t('Object moved.')); save(); }
       catch (error) { project = current.original; status(() => t('Move cancelled: {error}', { error: formatValidationError(error, t) }), true); }
     }
+    // The host observes the first movement for dirty-state feedback. Publish
+    // the final commit or rollback once so its recovery copy matches the canvas.
+    if (current.moved) editorChanged();
     if (project !== current.original) {
       $('undo').disabled = history.length === 0; $('redo').disabled = future.length === 0;
       renderInspector();
@@ -1348,6 +1351,7 @@ function finishPreviewEdit(event, cancel = false) {
       historyPush(current.original); status(current.axis === 'height' ? 'Item height changed.' : 'Item moved.'); save();
     } catch (error) { project = current.original; status(`Move cancelled: ${formatValidationError(error, t)}`, true); }
   }
+  if (current.moved) editorChanged();
   previewDirty = true; updatePreviewNavigation(); renderUI(); requestCanvasRender();
 }
 const elevationHandle = $('preview-elevation-handle');
