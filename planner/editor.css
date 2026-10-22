@@ -135,3 +135,11 @@
 .ha-embedded .ai-preview-badge{background:var(--studio-selected);color:var(--studio-text);border-color:var(--studio-accent)}
 .ha-embedded .floor-navigator__floor[aria-current=true]{box-shadow:inset 3px 0 0 var(--studio-accent)}
 .ha-embedded .floor-navigator__floor:focus-visible,.ha-embedded .ai-panel :focus-visible{outline-color:var(--studio-accent)}
+
+/* A selected item exposes a screen-space height axis; camera controls retain
+   their gestures while the separate edit mode owns object manipulation. */
+#preview-edit{width:100%;min-height:36px}
+.preview-elevation-handle{position:absolute;z-index:5;display:flex;align-items:center;gap:6px;min-height:44px;padding:7px 10px;transform:translate(-50%,-100%);border:2px solid var(--studio-accent,#366e63);border-radius:9px;background:var(--studio-surface,#f6fff9);color:var(--studio-text,#28594f);cursor:ns-resize;touch-action:none;box-shadow:0 2px 8px #0002;font-size:12px}
+.preview-elevation-handle::after{content:'';position:absolute;top:100%;left:50%;height:20px;border-left:2px solid var(--studio-accent,#366e63)}
+.preview-elevation-handle output{white-space:nowrap;pointer-events:none}.preview-elevation-handle span{pointer-events:none;font-weight:700}
+.preview-elevation-handle:focus-visible{outline:3px solid var(--studio-accent,#366e63);outline-offset:3px}
