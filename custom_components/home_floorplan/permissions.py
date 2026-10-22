@@ -32,6 +32,26 @@ def model_references(models):
                              for floor, model in models.items()})
 
 
+def vacuum_source_bindings(model):
+    """Authorize only configured vacuum/position pairs, without copying metadata."""
+    sources = model.get("vacuum_sources", [])
+    if not isinstance(sources, list) or len(sources) > 64:
+        return []
+    result, seen = [], set()
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        vacuum, position = source.get("entity_id"), source.get("position_entity_id")
+        if not isinstance(vacuum, str) or not re.fullmatch(r"vacuum\.[a-z0-9_]{1,137}", vacuum):
+            continue
+        if not isinstance(position, str) or not re.fullmatch(r"sensor\.[a-z0-9_]{1,137}", position):
+            continue
+        if (vacuum, position) not in seen:
+            seen.add((vacuum, position))
+            result.append({"entity_id": vacuum, "position_entity_id": position})
+    return result
+
+
 def floor_entities(state, floor, profiles):
     # Models are immutable within an active generation. Placements and profile
     # guards remain live inputs, and authorization is never cached here.

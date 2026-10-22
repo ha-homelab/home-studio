@@ -422,6 +422,63 @@ class PermissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(connection.results[0]["controllable_entities"], [])
         self.assertIn("Private plan", connection.results[0]["html"])
 
+    async def test_vacuum_projection_bindings_require_both_entity_read_permissions(self):
+        model = self.state["models"]["main"]
+        model["vacuum_sources"] = [{"id": "fixture", "name": "Fixture vacuum",
+                                    "entity_id": "vacuum.fixture", "position_entity_id": "sensor.fixture_position",
+                                    "map_id": 0, "floor_id": "main", "transform": [1, 0, 0, 1, 0, 0],
+                                    "bounds": [0, 0, 10, 10], "max_age_seconds": 120,
+                                    "calibration": "approximate"}]
+        self.state["model_entities"] = integration.model_references(self.state["models"])
+        expected = {"light.secret", "vacuum.fixture", "sensor.fixture_position"}
+        self.assertEqual(self.state["model_entities"]["main"], expected)
+        for missing in ("vacuum.fixture", "sensor.fixture_position"):
+            connection = Connection(admin=False, read=expected - {missing})
+            await integration.ws_viewer(self.hass, connection, {"id": 1, "floor": "main"})
+            self.assertEqual(connection.errors[0][0], "unauthorized")
+            self.assertEqual(connection.results, [])
+        self.assertEqual(self.hass.executor_calls, [], "denied bindings cannot read the floor HTML")
+        connection = Connection(admin=False, read=expected)
+        await integration.ws_viewer(self.hass, connection, {"id": 2, "floor": "main"})
+        result = connection.results[-1]
+        self.assertEqual(result["vacuum_sources"], [{"entity_id": "vacuum.fixture", "position_entity_id": "sensor.fixture_position"}])
+        self.assertEqual(set(result["readable_entities"]), expected)
+        self.assertEqual(result["controllable_entities"], [], "position reads grant no device control")
+
+    async def test_vacuum_projection_authorization_is_bounded_and_copies_only_entity_pairs(self):
+        binding = {"entity_id": "vacuum.fixture", "position_entity_id": "sensor.fixture_position"}
+        source = {**binding, "name": "Fixture", "token": "not forwarded", "raw_map": {"private": True}}
+        self.assertEqual(integration.vacuum_source_bindings({"vacuum_sources": [source, source]}), [binding])
+        for invalid in (None, {}, "invalid", [source] * 65,
+                        [{**source, "entity_id": "sensor.fixture"}],
+                        [{**source, "position_entity_id": "vacuum.fixture"}],
+                        [{**source, "position_entity_id": "sensor." + "a" * 138}],
+                        [{**source, "entity_id": True}], [{**source, "position_entity_id": 42}]):
+            with self.subTest(invalid=type(invalid).__name__):
+                self.assertEqual(integration.vacuum_source_bindings({"vacuum_sources": invalid}), [])
+
+    async def test_vacuum_bindings_remain_with_the_pinned_floor_generation(self):
+        binding = {"entity_id": "vacuum.fixture", "position_entity_id": "sensor.fixture_position"}
+        self.state["models"]["main"]["vacuum_sources"] = [binding]
+        self.state["model_entities"] = integration.model_references(self.state["models"])
+        connection = Connection(admin=False, read={"light.secret", *binding.values()})
+        original = self.hass.async_add_executor_job
+
+        async def replace_after_read(function, *args):
+            result = await original(function, *args)
+            if function is integration._read_open_file:
+                models = {"main": {"rooms": [], "vacuum_sources": [
+                    {"entity_id": "vacuum.other", "position_entity_id": "sensor.other_position"}]}}
+                integration._apply_active(self.state, self.root, self.state["site"], models,
+                                          {"main": {"revision": 1, "items": []}}, integration.model_references(models))
+            return result
+
+        with patch.object(self.hass, "async_add_executor_job", side_effect=replace_after_read):
+            await integration.ws_viewer(self.hass, connection, {"id": 1, "floor": "main"})
+        self.assertEqual(connection.errors, [])
+        self.assertEqual(connection.results[-1]["vacuum_sources"], [binding])
+        self.assertEqual(set(connection.results[-1]["readable_entities"]), {"light.secret", *binding.values()})
+
     async def test_complete_model_index_is_immutable_and_never_rescanned_by_requests(self):
         class GuardedModel(dict):
             readable = True

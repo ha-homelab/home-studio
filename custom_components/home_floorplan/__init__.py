@@ -20,7 +20,7 @@ from .validation import validate_inventory
 from .site import load_site, prepare_inventory, repair_inventory
 from .curtains import async_setup_curtains, PROFILES, BOOT_SECONDS, is_motor_available, read_reported_position
 from .native import NativeError, NativeProject, StudioAssetsView, EDITOR_URL, studio_asset_files, load_models
-from .permissions import can_read, can_control, floor_entities, model_references
+from .permissions import can_read, can_control, floor_entities, model_references, vacuum_source_bindings
 
 DOMAIN = "home_floorplan"
 ROOT = Path(__file__).parent
@@ -364,6 +364,7 @@ async def ws_viewer(hass, connection, msg):
         path = state["assets"] / floor / "index.html"
         inventory = copy.deepcopy(state["data"][floor])
         site_features = state["site"]["site_features"]
+        vacuum_sources = vacuum_source_bindings(state["models"][floor])
         stream = await hass.async_add_executor_job(path.open, "r", -1, "utf-8")
     content = await hass.async_add_executor_job(_read_open_file, stream)
     if state.get("panels_unloaded") or any(not can_read(connection, entity_id) for entity_id in references):
@@ -375,7 +376,7 @@ async def ws_viewer(hass, connection, msg):
     capabilities = _capabilities(connection, references)
     content = content.replace("<head>", "<head><script>window.__HOME_FLOORPLAN_EMBED__=true;</script>", 1)
     connection.send_result(msg["id"], {**result, **inventory, **capabilities, "html": content, "floor": floor,
-                                     "site_features": site_features})
+                                     "site_features": site_features, "vacuum_sources": vacuum_sources})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "home_floorplan/save", vol.Required("floor"): str,
