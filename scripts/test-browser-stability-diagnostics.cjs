@@ -724,6 +724,7 @@ function freshPreviewHarness(view = 'preview') {
   const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
   const traces = [], canvases = [], renderers = [], scheduled = [], allocations = [];
   const error = {hidden:true}, rect = {width:774,height:724};
+  const elevationHandle = Object.assign(new EventTarget(), {hidden:true, style:{}});
   let context, activeCanvas, currentFocus, layoutReads = 0, fitCalls = 0, reusedRestores = 0;
   class Canvas extends EventTarget {
     constructor() { super(); this.id='preview-canvas';this.width=934;this.height=824;this.isConnected=true;this.attributes={tabindex:'0','aria-label':'Preview'};this.dataset={};this.style={};this.captured=new Set();canvases.push(this); }
@@ -778,7 +779,7 @@ function freshPreviewHarness(view = 'preview') {
     t:value=>value,floorBounds:()=>({minX:0,maxX:8,minZ:0,maxZ:10}),
     THREE:{WebGLRenderer:Renderer,Scene:Group,Group,Vector3:class {constructor(x,y,z){Object.assign(this,vector(),{x,y,z});}},HemisphereLight:Light,DirectionalLight:Light,
       PerspectiveCamera:class {constructor(){this.position=vector();}lookAt(){}updateProjectionMatrix(){} }},
-    $:id=>id==='preview-canvas'?activeCanvas:id==='preview-error'?error:null,translatedText(){},
+    $:id=>id==='preview-canvas'?activeCanvas:id==='preview-error'?error:id==='preview-elevation-handle'?elevationHandle:null,translatedText(){},
     fitPreview(){fitCalls++;},fitPlan(){},updateZoom(){},previewFloors:()=>[],
     cancelCanvasRender(){traces.push('cancel');},onSchedule:value=>scheduled.push(JSON.parse(JSON.stringify(value))),
     testMesh:()=>({traverse(callback){callback({geometry:resource('geometry'),material:[resource('material-a'),resource('material-b')]});}}),
@@ -786,7 +787,7 @@ function freshPreviewHarness(view = 'preview') {
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../planner/render-capacity.js'), 'utf8').replace('export function ', 'function '), context);
   vm.runInContext(`
-    let drag=null,previewDirty=true,canvasSuspended=false,spaceHeld=false,size={width:934,height:824},view=${JSON.stringify(view)};
+    let drag=null,previewEdit=null,selection=null,previewDirty=true,canvasSuspended=false,spaceHeld=false,size={width:934,height:824},view=${JSON.stringify(view)};
     let firstResize=false,planSize='old',map={x:0,y:0};
     const project={floors:[{elevation_m:0,walls:[],items:[{position_m:{x:7,z:9}}]}]};
     function displayedProject(){return project;}
