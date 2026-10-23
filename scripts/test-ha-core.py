@@ -24,6 +24,9 @@ from unittest.mock import AsyncMock, DEFAULT, patch
 from homeassistant import auth
 from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_READ_ONLY, GROUP_ID_USER
 from homeassistant.components import frontend
+from homeassistant.components.lovelace import LovelaceData
+from homeassistant.components.lovelace.dashboard import LovelaceStorage
+from homeassistant.components.lovelace.resources import ResourceStorageCollection, ResourceYAMLCollection
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry, device_registry, entity_registry, floor_registry
 from homeassistant.util.file import WriteError
@@ -91,6 +94,9 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
         self.admin = await self.hass.auth.async_create_user('Test admin', group_ids=[GROUP_ID_ADMIN])
         self.family = await self.hass.auth.async_create_user('Test family', group_ids=[GROUP_ID_USER])
         self.hass.http = HTTPRecorder()
+        self.resources = ResourceStorageCollection(self.hass, LovelaceStorage(self.hass, None))
+        self.hass.data['lovelace'] = LovelaceData(resource_mode='storage', dashboards={},
+                                               resources=self.resources, yaml_dashboards={})
         self.assertTrue(await self.integration.async_setup(self.hass, {}))
 
     async def asyncTearDown(self):
@@ -458,12 +464,64 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
     async def test_navigation_reload_keeps_storage_and_registration(self):
         state = self.hass.data['home_floorplan']
         count = len(self.hass.http.paths)
+        resources = copy.deepcopy(self.resources.async_items())
         self.assertTrue(await self.integration.async_unload_entry(self.hass, None))
         self.assertNotIn('home-studio', self.hass.data[frontend.DATA_PANELS])
+        self.assertEqual(self.resources.async_items(), resources)
+        with self.assertRaisesRegex(ValueError, 'not_loaded'):
+            await self.request('status')
         self.assertTrue(await self.integration.async_setup_entry(self.hass, None))
         self.assertIn('home-studio', self.hass.data[frontend.DATA_PANELS])
         self.assertIs(self.hass.data['home_floorplan'], state)
         self.assertEqual(len(self.hass.http.paths), count)
+        self.assertEqual(self.resources.async_items(), resources)
+
+    async def test_dashboard_resource_registration_is_idempotent_across_upgrade(self):
+        items = self.resources.async_items()
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['url'], '/home-floorplan-static/card.js')
+        self.assertEqual(items[0]['type'], 'module')
+        self.assertFalse(self.hass.http.paths[0].cache_headers)
+        await self.resources.async_create_item({'url': '/local/other.js?v=3', 'res_type': 'module'})
+        expected = copy.deepcopy(self.resources.async_items())
+        await self.resources.store.async_save({'items': expected})
+        # A new collection after a restart has not been loaded yet. Version
+        # upgrades must load it before checking for the existing registration.
+        reloaded = ResourceStorageCollection(self.hass, LovelaceStorage(self.hass, None))
+        self.hass.data['lovelace'].resources = reloaded
+        with patch.object(self.integration, 'VERSION', 'future-version'):
+            await asyncio.gather(*(self.integration.async_setup_entry(self.hass, None) for _ in range(3)))
+        self.assertTrue(reloaded.loaded)
+        self.assertEqual(reloaded.async_items(), expected)
+
+    async def test_dashboard_resource_preserves_manual_url_type_and_yaml(self):
+        for item in self.resources.async_items():
+            await self.resources.async_delete_item(item['id'])
+        manual = await self.resources.async_create_item(
+            {'url': '/home-floorplan-static/card.js?v=old-release#manual', 'res_type': 'module'})
+        await self.integration.async_setup_entry(self.hass, None)
+        self.assertEqual(self.resources.async_items(), [manual])
+        manual = await self.resources.async_update_item(manual['id'], {'res_type': 'js'})
+        with self.assertLogs(self.integration.__name__, level='WARNING') as log:
+            await self.integration.async_setup_entry(self.hass, None)
+        self.assertIn('must use type module', '\n'.join(log.output))
+        self.assertEqual(self.resources.async_items(), [manual])
+        yaml_items = [{'url': '/local/owner.js', 'type': 'module'}]
+        self.hass.data['lovelace'].resource_mode = 'yaml'
+        self.hass.data['lovelace'].resources = ResourceYAMLCollection(copy.deepcopy(yaml_items))
+        await self.integration.async_setup_entry(self.hass, None)
+        self.assertEqual(self.hass.data['lovelace'].resources.async_items(), yaml_items)
+
+    async def test_dashboard_resource_failure_does_not_disable_home_and_can_retry(self):
+        for item in self.resources.async_items():
+            await self.resources.async_delete_item(item['id'])
+        with patch.object(self.resources, 'async_get_info', side_effect=OSError('temporary storage error')), \
+             self.assertLogs(self.integration.__name__, level='WARNING'):
+            self.assertTrue(await self.integration.async_setup_entry(self.hass, None))
+        self.assertEqual(self.resources.async_items(), [])
+        self.assertIn('has_published', await self.request('status'))
+        self.assertTrue(await self.integration.async_setup_entry(self.hass, None))
+        self.assertEqual(len(self.resources.async_items()), 1)
 
 
 if __name__ == '__main__':

@@ -199,6 +199,27 @@ the host closes the viewer channel and releases its active resources. Backend
 administrator checks remain authoritative even though the card also explains
 that requirement before loading private content.
 
+The card's `getConfigElement()` exposes a visual editor for its seven supported
+options and preserves other Lovelace keys on `config-changed`. Named initial
+floor choices come from `home_floorplan/status`: `floor_options` is filtered
+using the same current read permissions as `floors`, against the same pinned
+publication snapshot. The editor never requests a private project or forwards
+the `hass` object or its authentication to a child frame. Account changes,
+reconnects, and removal invalidate outstanding catalog requests. Newly added
+visual cards lock layout editing; existing configuration defaults are unchanged.
+
+Because Home Assistant's frontend depends on Lovelace, integration setup can
+register `/home-floorplan-static/card.js` through the storage resource collection
+after the static route exists. It calls `async_get_info()` to load the collection
+before inspecting `async_items()`, and creates only a missing module with
+`async_create_item({"url": ..., "res_type": "module"})`. The stable URL is served
+without caching, so upgrades do not create another resource or change its ID.
+Existing matching URLs (including query strings) and resource types are never
+rewritten. YAML resources remain explicitly configured by their owner. Unload
+retains the shared resource while backend routes reject requests until reload;
+resource-registration failure leaves the home available and can be retried by
+reloading the integration.
+
 Media artwork is a separate generic display path from private TV screenshots.
 The trusted panel fetches the canonical Home Assistant media-player proxy only
 for saved bindings, using HA's authenticated fetch. It bounds response size,

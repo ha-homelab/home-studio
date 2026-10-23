@@ -546,10 +546,13 @@ class PermissionTests(unittest.IsolatedAsyncioTestCase):
             connection = Connection(admin=False, read=expected, control={"cover.blind"})
             integration.ws_status(self.hass, connection, {"id": 1})
             self.assertEqual(connection.results[-1]["floors"], ["main"])
+            self.assertEqual(connection.results[-1]["floor_options"], [{"id": "main", "name": "Main"}])
             await integration.ws_viewer(self.hass, connection, {"id": 2, "floor": "main"})
             self.assertEqual(set(connection.results[-1]["readable_entities"]), expected)
             self.assertEqual(connection.results[-1]["controllable_entities"], ["cover.blind"])
         denied = Connection(admin=False, read=expected - {"camera.mesh"})
+        integration.ws_status(self.hass, denied, {"id": 2})
+        self.assertEqual(denied.results[-1]["floor_options"], [])
         await integration.ws_viewer(self.hass, denied, {"id": 3, "floor": "main"})
         self.assertEqual(denied.errors[0][0], "unauthorized")
 
@@ -631,6 +634,8 @@ class PermissionTests(unittest.IsolatedAsyncioTestCase):
                     result = connection.results[-1]
                     self.assertEqual(result["can_edit"], grant)
                     self.assertEqual(result["floors"], ["main", "other"] if grant else ["main"])
+                    self.assertEqual(result["floor_options"], [{"id": "main", "name": "Main"}, {"id": "other", "name": "Other"}]
+                                     if grant else [{"id": "main", "name": "Main"}])
                     self.assertEqual(result["default_floor"], "other" if grant else "main")
                     self.assertEqual(result["readable_entities"], ["light.secret", "sun.sun"] if grant else ["light.secret"])
                     self.assertEqual(result["controllable_entities"], ["light.secret"] if grant else [])
