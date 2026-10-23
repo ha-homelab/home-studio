@@ -20,6 +20,7 @@ spec.loader.exec_module(safari)
 class TransportTests(unittest.TestCase):
     def setUp(self):
         self.requests = []
+        self.response_extra = {}
         self.value = {'sessionId': 'test-session', 'capabilities': {'browserName': 'Safari', 'browserVersion': '27.0'}}
         owner = self
         class Handler(BaseHTTPRequestHandler):
@@ -41,7 +42,7 @@ class TransportTests(unittest.TestCase):
                 self.send_response(500 if isinstance(owner.value, dict) and owner.value.get('error') else 200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
-                self.wfile.write(json.dumps({'value': owner.value}).encode())
+                self.wfile.write(json.dumps({'value': owner.value, **owner.response_extra}).encode())
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -77,6 +78,21 @@ class TransportTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'failed to draw'):
             self.client.execute('throw Error("failed to draw");')
 
+    def test_actual_http_startup_error_keeps_structured_recovery_identity(self):
+        self.value = {'error': 'session not created', 'message': safari.RWI_STARTUP_MESSAGE, 'stacktrace': ''}
+        with self.assertRaises(safari.WebDriverError) as caught:
+            self.client.start()
+        self.assertEqual(caught.exception.response,
+                         {'method': 'POST', 'route': '/session', 'status': 500, 'value': self.value})
+        self.assertTrue(caught.exception.is_known_cold_start())
+        self.assertIsNone(self.client.session_id)
+        self.assertEqual(len(self.requests), 1)
+        self.response_extra = {'sessionId': 'ambiguous'}
+        with self.assertRaises(safari.WebDriverError) as caught:
+            self.client.start()
+        self.assertFalse(caught.exception.is_known_cold_start())
+        self.assertEqual(caught.exception.response['sessionId'], 'ambiguous')
+
     def test_real_actions_use_the_standard_endpoint(self):
         self.client.start()
         self.value = None
@@ -101,24 +117,25 @@ class TransportTests(unittest.TestCase):
 
 class ColdSafariTransportTests(unittest.TestCase):
     def test_real_http_response_content_length_eof_and_remaining_body_timeout(self):
-        now = [0.0]
-        class Socket:
-            def __init__(self, payload): self.payload = payload; self.values = []
-            def makefile(self, _mode):
-                class Reader(io.BytesIO): pass
-                reader = Reader(self.payload); reader.raw = type('Raw', (), {'_sock':self})()
-                return reader
-            def settimeout(self, value): self.values.append(value)
-        body = b'{"value":true}'
-        sock = Socket(b'HTTP/1.1 200 OK\r\nContent-Length: '+str(len(body)).encode()+b'\r\n\r\n'+body)
-        response = http.client.HTTPResponse(sock); response.begin()
-        client = safari.SafariWebDriver('http://fixture'); client._cold_load_deadline = 60
-        def opened(_request, timeout):
-            self.assertEqual(timeout, 60); now[0] = 40; return response
-        with patch.object(safari.time, 'monotonic', side_effect=lambda:now[0]), patch.object(safari.urllib.request, 'urlopen', side_effect=opened):
-            self.assertTrue(client.request('GET', '/status'))
-        self.assertTrue(response.isclosed())
-        self.assertEqual(sock.values, [20])
+        for deadline_attr, initial_timeout in (('_cold_load_deadline', 60), ('_preparation_deadline', 30)):
+            now = [0.0]
+            class Socket:
+                def __init__(self, payload): self.payload = payload; self.values = []
+                def makefile(self, _mode):
+                    class Reader(io.BytesIO): pass
+                    reader = Reader(self.payload); reader.raw = type('Raw', (), {'_sock':self})()
+                    return reader
+                def settimeout(self, value): self.values.append(value)
+            body = b'{"value":true}'
+            sock = Socket(b'HTTP/1.1 200 OK\r\nContent-Length: '+str(len(body)).encode()+b'\r\n\r\n'+body)
+            response = http.client.HTTPResponse(sock); response.begin()
+            client = safari.SafariWebDriver('http://fixture'); setattr(client, deadline_attr, 60)
+            def opened(_request, timeout):
+                self.assertEqual(timeout, initial_timeout); now[0] = 40; return response
+            with patch.object(safari.time, 'monotonic', side_effect=lambda:now[0]), patch.object(safari.urllib.request, 'urlopen', side_effect=opened):
+                self.assertTrue(client.request('GET', '/status'))
+            self.assertTrue(response.isclosed())
+            self.assertEqual(sock.values, [20])
 
     def test_http_error_body_preserves_webdriver_error_with_bounded_transport(self):
         class Socket:
@@ -154,126 +171,6 @@ class ColdSafariTransportTests(unittest.TestCase):
 
 
 class SessionStartupTests(unittest.TestCase):
-    @unittest.skipUnless(safari.sys.platform == 'darwin', 'Requires the native macOS Objective-C bridge')
-    def test_native_objc_count_in_activation_guard(self):
-        # Exercise the actual script with Foundation arrays; replace activation
-        # with a stub so this probe never launches or focuses any application.
-        native_run = safari.subprocess.run
-        with patch.dict(safari.os.environ, {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted'}, clear=True), \
-             patch.object(safari.subprocess, 'run', return_value=Mock(stdout='{}')) as command:
-            safari.activate_hosted_safari(3)
-        source = command.call_args.args[0][-1]
-        self.assertEqual(source.count("$.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.Safari')"), 1)
-        self.assertEqual(source.count('var app = apps.objectAtIndex(0);'), 1)
-        for items, valid in (('[]', False), ('["fixture"]', True), ('["one","two"]', False)):
-            script = source.replace(
-                "$.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.Safari')",
-                '$.NSArray.arrayWithArray($(' + items + '))').replace(
-                'var app = apps.objectAtIndex(0);',
-                'var app = {activateWithOptions: function () { return true; }};')
-            result = native_run(['/usr/bin/osascript', '-l', 'JavaScript', '-e', script],
-                                capture_output=True, text=True, timeout=10)
-            self.assertEqual(result.returncode == 0, valid, result.stderr)
-            if valid:
-                self.assertEqual(json.loads(result.stdout), {'requested': True, 'accepted': True})
-
-    def test_activation_failure_retains_bounded_stderr(self):
-        for error in (safari.subprocess.CalledProcessError(1, 'osascript', stderr='x' * 5000),
-                      safari.subprocess.TimeoutExpired('osascript', 1, stderr=b'bridge timeout')):
-            client = safari.SafariWebDriver('http://fixture')
-            evidence = {'documentFocused': False, 'visibilityState': 'visible'}
-            with patch.object(safari, 'activate_hosted_safari', side_effect=error):
-                with self.assertRaises(type(error)):
-                    client.request_hosted_window_activation(evidence)
-            self.assertLessEqual(len(evidence['activationError']), 4096)
-            self.assertTrue(evidence['activationError'])
-            self.assertFalse(evidence['activationCommandCompleted'])
-            self.assertIsNone(client._window_activation_deadline)
-
-    def test_activation_and_focus_telemetry_share_one_bounded_request(self):
-        for outer, accepted, final_focus, finished in (
-                (4, True, True, 3), (4, True, False, 3), (4, False, False, 3),
-                (4, True, True, 4), (180, True, False, 9.999), (180, True, False, 10)):
-            with self.subTest(outer=outer, accepted=accepted, final_focus=final_focus, finished=finished):
-                now = [0.0]
-                client = safari.SafariWebDriver('http://fixture')
-                client._browser_deadline = outer
-                budget = min(10, outer)
-                evidence = {'documentFocused': False, 'visibilityState': 'visible'}
-                def activate(timeout):
-                    self.assertEqual(timeout, budget)
-                    now[0] = 2
-                    return {'requested': True, 'accepted': accepted}
-                def execute(_script):
-                    self.assertEqual(client.command_timeout(), budget - 2)
-                    now[0] = finished
-                    return {'documentFocused': final_focus, 'visibilityState': 'visible'}
-                with patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
-                     patch.object(safari, 'activate_hosted_safari', side_effect=activate) as activation, \
-                     patch.object(client, 'execute', side_effect=execute) as observation:
-                    if finished < budget:
-                        client.request_hosted_window_activation(evidence)
-                        self.assertTrue(evidence['activationCommandCompleted'])
-                    else:
-                        with self.assertRaises(TimeoutError):
-                            client.request_hosted_window_activation(evidence)
-                        self.assertFalse(evidence['activationCommandCompleted'])
-                self.assertEqual(activation.call_count, 1)
-                self.assertEqual(observation.call_count, 1)
-                self.assertEqual(evidence['documentFocused'], False)
-                self.assertEqual(evidence['afterActivation']['documentFocused'], final_focus)
-                self.assertNotIn('focusCompleted', evidence)
-                self.assertIsNone(client._window_activation_deadline)
-                self.assertEqual(evidence['activationBudgetMs'], budget * 1000)
-                del client._browser_deadline
-                self.assertEqual(client.command_timeout(), 30)
-
-    def test_activation_failure_propagates_regardless_of_blank_document_focus(self):
-        for focused in (True, False):
-            client = safari.SafariWebDriver('http://fixture')
-            with patch.object(safari, 'activate_hosted_safari', side_effect=RuntimeError('activation denied')) as activation:
-                evidence = {'documentFocused': focused, 'visibilityState': 'visible'}
-                with self.assertRaisesRegex(RuntimeError, 'activation denied'):
-                    client.request_hosted_window_activation(evidence)
-                activation.assert_called_once()
-                self.assertFalse(evidence['activationCommandCompleted'])
-                self.assertNotIn('focusCompleted', evidence)
-                self.assertIsNone(client._window_activation_deadline)
-
-    def test_expired_activation_budget_does_not_start_more_work(self):
-        for outer in (0, 4):
-            client = safari.SafariWebDriver('http://fixture')
-            client._browser_deadline = outer
-            now = [0.0]
-            evidence = {'documentFocused': False, 'visibilityState': 'visible'}
-            def activate(_timeout):
-                now[0] = outer
-                return {'requested': True, 'accepted': True}
-            with patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
-                 patch.object(safari, 'activate_hosted_safari', side_effect=activate) as activation, \
-                 patch.object(client, 'execute') as observation:
-                with self.assertRaises(TimeoutError):
-                    client.request_hosted_window_activation(evidence)
-            self.assertEqual(activation.call_count, int(outer > 0))
-            observation.assert_not_called()
-            self.assertFalse(evidence['activationCommandCompleted'])
-            self.assertIsNone(client._window_activation_deadline)
-
-    def test_activation_is_hosted_only_and_keeps_request_acknowledgment(self):
-        for environment in ({}, {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'self-hosted'}):
-            with self.subTest(environment=environment), patch.object(safari.sys, 'platform', 'darwin'), \
-                 patch.dict(safari.os.environ, environment, clear=True), patch.object(safari.subprocess, 'run') as command:
-                with self.assertRaisesRegex(AssertionError, 'GitHub-hosted'):
-                    safari.activate_hosted_safari(3)
-                command.assert_not_called()
-        with patch.object(safari.sys, 'platform', 'darwin'), \
-             patch.dict(safari.os.environ, {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted'}, clear=True), \
-             patch.object(safari.subprocess, 'run', return_value=Mock(stdout='{"requested":true,"accepted":false}')) as command:
-            self.assertEqual(safari.activate_hosted_safari(3), {'requested': True, 'accepted': False})
-        command.assert_called_once()
-        self.assertEqual(command.call_args.kwargs['timeout'], 3)
-        self.assertIn('activateWithOptions', command.call_args.args[0][-1])
-
     def test_selects_only_owned_window_and_keeps_actual_focus_evidence(self):
         client = safari.SafariWebDriver('http://fixture')
         client.session_id = 'owned'
@@ -460,17 +357,14 @@ class SessionStartupTests(unittest.TestCase):
                         stack.enter_context(patch.object(client, 'screenshot'))
                         stack.enter_context(patch.object(safari.native, 'stop'))
                         stack.enter_context(patch.object(safari.threading, 'Timer'))
-                        activation = stack.enter_context(patch.object(safari, 'activate_hosted_safari', return_value={'requested': True, 'accepted': True}))
                         viewer = stack.enter_context(patch.object(safari.native, 'viewer', side_effect=application))
                         planner = stack.enter_context(patch.object(safari.native, 'planner', side_effect=application))
-                        record = safari.run_case(Path(temp), name, '/test/safaridriver', hosted_activation=True)
-                    activation.assert_called_once()
+                        record = safari.run_case(Path(temp), name, '/test/safaridriver')
                     self.assertEqual(viewer.call_count, int(name.startswith('viewer')))
                     self.assertEqual(planner.call_count, int(name == 'planner-256'))
                     self.assertEqual(calls.count(('POST', '/session')), 1)
                     self.assertEqual(calls.count(('POST', '/session/owned/url')), 1)
                     self.assertFalse(record['windowFocus']['documentFocused'])
-                    self.assertFalse(record['windowFocus']['afterActivation']['documentFocused'])
                     self.assertNotIn('focusCompleted', record['windowFocus'])
                     self.assertEqual(record['status'], 'failed' if application_failure else 'passed')
                     self.assertEqual(record['phase'], 'application' if application_failure else 'completed')
@@ -509,8 +403,61 @@ class SessionStartupTests(unittest.TestCase):
 
 class HostedPreparationTests(unittest.TestCase):
     hosted = {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted'}
-    ready = {'bundleId': 'com.apple.Safari', 'running': True, 'finishedLaunching': True,
-             'active': False, 'terminated': False, 'processIdentifier': 123}
+
+    @staticmethod
+    def cold_start_error(**overrides):
+        value = {'error': 'session not created', 'message': safari.RWI_STARTUP_MESSAGE, 'stacktrace': ''}
+        value.update(overrides)
+        return safari.WebDriverError('POST', '/session', 500, value)
+
+    def run_preparation(self, outcomes, *, elapsed=None, url='about:blank', close_error=None,
+                        stop_error=None, blank_elapsed=0, close_elapsed=0):
+        now, clients, drivers, calls = [0.0], [], [], []
+        real_client = safari.SafariWebDriver
+        def make_driver(*args, **kwargs):
+            self.assertEqual(args[0][0], '/test/safaridriver')
+            self.assertEqual(args[0][1], '--port')
+            driver = Mock(); driver.poll.return_value = None
+            if stop_error:
+                driver.wait.side_effect = stop_error
+            drivers.append(driver)
+            return driver
+        def make_client(origin):
+            client = real_client(origin)
+            index = len(clients)
+            clients.append(client)
+            def request(method, route, data=None):
+                calls.append((index, method, route, client.command_timeout()))
+                if route == '/session' and method == 'POST':
+                    if elapsed:
+                        now[0] += elapsed[index]
+                    outcome = outcomes[index]
+                    if isinstance(outcome, Exception):
+                        raise outcome
+                    return {'sessionId': f'probe-{index}', 'capabilities': {'browserName': 'Safari'}}
+                if route.endswith('/execute/sync'):
+                    self.assertEqual(data['script'], 'return location.href;')
+                    now[0] += blank_elapsed
+                    return url
+                if method == 'DELETE':
+                    now[0] += close_elapsed
+                    if close_error:
+                        raise close_error
+                return None
+            client.request = Mock(side_effect=request)
+            return client
+        with tempfile.TemporaryDirectory() as temp, \
+             patch.object(safari.sys, 'platform', 'darwin'), \
+             patch.dict(safari.os.environ, self.hosted, clear=True), \
+             patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
+             patch.object(safari.subprocess, 'Popen', side_effect=make_driver), \
+             patch.object(safari.subprocess, 'run') as native_command, \
+             patch.object(safari, 'SafariWebDriver', side_effect=make_client):
+            result = safari.prepare_hosted_safari(Path(temp), '/test/safaridriver')
+            self.assertEqual(json.loads((Path(temp) / 'preparation.json').read_text()), result)
+            self.assertEqual(len(list(Path(temp).glob('preparation-driver-*.log'))), len(drivers))
+            native_command.assert_not_called()
+        return result, clients, drivers, calls
 
     def test_guard_rejects_local_self_hosted_and_other_platforms_before_launch(self):
         for platform, environment in (('darwin', {}), ('darwin', {'GITHUB_ACTIONS': 'true'}),
@@ -519,80 +466,97 @@ class HostedPreparationTests(unittest.TestCase):
             with self.subTest(platform=platform, environment=environment), tempfile.TemporaryDirectory() as temp:
                 with patch.object(safari.sys, 'platform', platform), \
                      patch.dict(safari.os.environ, environment, clear=True), \
-                     patch.object(safari.subprocess, 'run') as command:
+                     patch.object(safari.subprocess, 'Popen') as command:
                     result = safari.prepare_hosted_safari(Path(temp))
                 command.assert_not_called()
                 self.assertEqual(result['status'], 'failed')
                 self.assertEqual(result['phase'], 'hosted-runner-check')
-                self.assertEqual(json.loads((Path(temp) / 'preparation.json').read_text()), result)
+                self.assertEqual(result['attempts'], [])
 
-    def test_launch_and_readiness_share_one_deadline_without_webdriver_or_app_navigation(self):
-        now, commands = [0.0], []
-        def run(command, **kwargs):
-            commands.append((command, kwargs))
-            now[0] = 20 if len(commands) == 1 else 59.999
-            return Mock(stdout=json.dumps(self.ready), stderr=json.dumps(self.ready))
-        with tempfile.TemporaryDirectory() as temp, patch.object(safari.sys, 'platform', 'darwin'), \
-             patch.dict(safari.os.environ, self.hosted, clear=True), \
-             patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
-             patch.object(safari.subprocess, 'run', side_effect=run), \
-             patch.object(safari.SafariWebDriver, 'start') as session:
-            result = safari.prepare_hosted_safari(Path(temp))
-            saved = json.loads((Path(temp) / 'preparation.json').read_text())
-        self.assertEqual(result, saved)
+    def test_successful_probe_is_blank_closed_and_never_repeated(self):
+        result, clients, drivers, calls = self.run_preparation([True], elapsed=[2])
         self.assertEqual(result['status'], 'passed')
-        self.assertEqual(result['application'], self.ready)
-        self.assertEqual(result['lastApplication'], self.ready)
-        self.assertEqual(result['durationMs'], 59999)
-        self.assertEqual([kwargs['timeout'] for _, kwargs in commands], [60, 40])
-        self.assertEqual(commands[0][0], ['/usr/bin/open', '-b', 'com.apple.Safari', 'about:blank'])
-        self.assertEqual(commands[1][0], ['/usr/bin/osascript', '-l', 'JavaScript', '-e', safari.SAFARI_READY_SCRIPT])
-        self.assertTrue(all(kwargs['check'] for _, kwargs in commands))
-        session.assert_not_called()
+        self.assertEqual(len(clients), 1)
+        self.assertTrue(result['attempts'][0]['sessionClosed'])
+        self.assertEqual(result['attempts'][0]['url'], 'about:blank')
+        self.assertEqual([(method, route) for _, method, route, _ in calls],
+                         [('GET', '/status'), ('POST', '/session'),
+                          ('POST', '/session/probe-0/execute/sync'), ('DELETE', '/session/probe-0')])
+        drivers[0].terminate.assert_called_once()
+        drivers[0].wait.assert_called_once()
+        drivers[0].kill.assert_not_called()
 
-    def test_native_readiness_pumps_the_runloop_and_retains_timeout_states(self):
-        self.assertIn('$.NSRunLoop.mainRunLoop.runUntilDate(', safari.SAFARI_READY_SCRIPT)
-        self.assertNotIn('    delay(', safari.SAFARI_READY_SCRIPT)
-        waiting = {**self.ready, 'finishedLaunching': False}
-        diagnostic = json.dumps(waiting) + '\n'
-        for stderr in (diagnostic, diagnostic.encode()):
-            with self.subTest(stderr_type=type(stderr)), tempfile.TemporaryDirectory() as temp, \
-                 patch.object(safari.sys, 'platform', 'darwin'), \
-                 patch.dict(safari.os.environ, self.hosted, clear=True), \
-                 patch.object(safari.subprocess, 'run', side_effect=[Mock(),
-                     safari.subprocess.TimeoutExpired('osascript', 59, stderr=stderr)]) as command:
-                result = safari.prepare_hosted_safari(Path(temp))
+    def test_only_known_cold_start_can_recover_once_within_shared_budget(self):
+        error = self.cold_start_error()
+        result, clients, drivers, calls = self.run_preparation([error, True], elapsed=[30, 1])
+        self.assertEqual(result['status'], 'passed')
+        self.assertEqual(result['durationMs'], 31000)
+        self.assertEqual(len(clients), 2)
+        first, second = result['attempts']
+        self.assertEqual(first['status'], 'failed')
+        self.assertEqual(first['webdriverError'], error.response)
+        self.assertTrue(first['knownColdStartRecovery'])
+        self.assertFalse(first['sessionClosed'])
+        self.assertTrue(second['sessionClosed'])
+        self.assertEqual([timeout for _, method, route, timeout in calls if (method, route) == ('POST', '/session')], [60, 30])
+        for driver in drivers:
+            driver.terminate.assert_called_once()
+            driver.wait.assert_called_once()
+
+    def test_unknown_outcomes_never_retry(self):
+        valid = self.cold_start_error().response['value']
+        errors = [TimeoutError('HTTP timeout'), ValueError('invalid JSON'),
+                  RuntimeError(safari.RWI_STARTUP_MESSAGE), safari.urllib.error.URLError('transport failed'),
+                  self.cold_start_error(message=safari.RWI_STARTUP_MESSAGE + ' changed'),
+                  self.cold_start_error(error='unknown error'), self.cold_start_error(sessionId='maybe-owned'),
+                  safari.WebDriverError('POST', '/session', 200, valid),
+                  safari.WebDriverError('POST', '/session', 502, valid),
+                  safari.WebDriverError('GET', '/session', 500, valid),
+                  safari.WebDriverError('POST', '/session/owned/url', 500, valid)]
+        for error in errors:
+            with self.subTest(error=error):
+                result, clients, drivers, calls = self.run_preparation([error])
+                self.assertEqual(result['status'], 'failed')
+                self.assertEqual(len(clients), 1)
+                self.assertFalse(result['attempts'][0]['knownColdStartRecovery'])
+                self.assertEqual(len([1 for _, method, route, _ in calls if (method, route) == ('POST', '/session')]), 1)
+
+    def test_second_known_failure_stops_and_retains_both_attempts(self):
+        result, clients, drivers, calls = self.run_preparation([self.cold_start_error(), self.cold_start_error()], elapsed=[30, 20])
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(len(clients), 2)
+        self.assertTrue(result['attempts'][0]['knownColdStartRecovery'])
+        self.assertFalse(result['attempts'][1]['knownColdStartRecovery'])
+        self.assertEqual(result['attempts'][1]['status'], 'failed')
+
+    def test_nonblank_probe_and_cleanup_failures_stop_preparation(self):
+        for options in ({'url': 'http://unexpected/'}, {'close_error': RuntimeError('close failed')},
+                        {'stop_error': RuntimeError('stop failed')}):
+            with self.subTest(options=options):
+                result, clients, drivers, calls = self.run_preparation([True], **options)
+                self.assertEqual(result['status'], 'failed')
+                self.assertEqual(len(clients), 1)
+                self.assertIn((0, 'DELETE', '/session/probe-0'), [(i, method, route) for i, method, route, _ in calls])
+                drivers[0].terminate.assert_called_once()
+
+    def test_expired_shared_budget_never_retries_or_passes_late_success(self):
+        for outcome in (self.cold_start_error(), True):
+            with self.subTest(outcome=outcome):
+                result, clients, drivers, calls = self.run_preparation([outcome], elapsed=[60])
+                self.assertEqual(result['status'], 'failed')
+                self.assertEqual(len(clients), 1)
+                self.assertEqual(result['durationMs'], 60000)
+                self.assertTrue(result['timedOut'])
+                drivers[0].kill.assert_called_once()
+
+    def test_blank_observation_and_cleanup_cannot_complete_after_shared_deadline(self):
+        for options in ({'blank_elapsed': 60}, {'close_elapsed': 60}):
+            with self.subTest(options=options):
+                result, clients, drivers, calls = self.run_preparation([True], **options)
                 self.assertEqual(result['status'], 'failed')
                 self.assertTrue(result['timedOut'])
-                self.assertEqual(result['lastApplication'], waiting)
-                self.assertEqual(result['applicationStates'], [waiting])
-                self.assertEqual(json.loads((Path(temp) / 'preparation.json').read_text()), result)
-                self.assertEqual(command.call_count, 2)
-
-    def test_preparation_failure_and_late_completion_stay_failed_with_evidence(self):
-        for failure in ('launch-error', 'launch-timeout', 'readiness-timeout', 'invalid-json', 'not-ready', 'not-running', 'terminated', 'late'):
-            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
-                now, commands = [0.0], []
-                def run(command, **kwargs):
-                    commands.append(command)
-                    if failure == 'launch-error':
-                        raise safari.subprocess.CalledProcessError(1, command, stderr='launch failed')
-                    if failure == 'launch-timeout' or (failure == 'readiness-timeout' and len(commands) == 2):
-                        now[0] = 60
-                        raise safari.subprocess.TimeoutExpired(command, kwargs['timeout'])
-                    now[0] = 10 if len(commands) == 1 else 60 if failure == 'late' else 20
-                    return Mock(stdout='invalid' if failure == 'invalid-json' else
-                                json.dumps({**self.ready, 'finishedLaunching': failure != 'not-ready',
-                                            'running': failure != 'not-running', 'terminated': failure == 'terminated'}), stderr='')
-                with patch.object(safari.sys, 'platform', 'darwin'), \
-                     patch.dict(safari.os.environ, self.hosted, clear=True), \
-                     patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
-                     patch.object(safari.subprocess, 'run', side_effect=run):
-                    result = safari.prepare_hosted_safari(Path(temp))
-                self.assertEqual(result['status'], 'failed')
-                self.assertEqual(result['timedOut'], failure in ('launch-timeout', 'readiness-timeout', 'late'))
-                self.assertEqual(len(commands), 1 if failure.startswith('launch-') else 2)
-                self.assertEqual(json.loads((Path(temp) / 'preparation.json').read_text()), result)
+                self.assertEqual(len(clients), 1)
+                self.assertFalse(result['attempts'][0]['sessionClosed'])
 
     def test_cli_defaults_preserve_local_safari_and_failed_preparation_cannot_run_cases(self):
         for preparation in (None, 'failed', 'passed'):
@@ -601,7 +565,7 @@ class HostedPreparationTests(unittest.TestCase):
                 if preparation is not None:
                     argv.append('--prepare-hosted-safari')
                 def run_case(_output, name, _driver, **options):
-                    self.assertEqual(options, {'hosted_activation': True} if preparation == 'passed' else {})
+                    self.assertEqual(options, {})
                     return {'suite': name, 'status': 'failed' if name == 'viewer-6' else 'passed', 'durationMs': 1}
                 with patch.object(safari.sys, 'argv', argv), \
                      patch.object(safari, 'prepare_hosted_safari', return_value={'status': preparation}) as prepare, \

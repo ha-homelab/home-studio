@@ -4,7 +4,7 @@
 Enable automation on a disposable CI runner with ``sudo safaridriver --enable``.
 This runner never changes that setting or installs a browser. Local runs only
 use Apple's isolated automation sessions. The explicit hosted-runner preparation
-option may launch a blank ordinary Safari window on disposable GitHub hosts.
+option checks a blank WebDriver session without opening ordinary Safari windows.
 """
 import argparse
 import contextlib
@@ -31,63 +31,36 @@ native = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(native)
 SESSION_START_BUDGET_MS = 60000
 PREPARATION_BUDGET_MS = 60000
-WINDOW_ACTIVATION_BUDGET_MS = 10000
-
-# AppKit reports launch completion and activation without Apple Events,
-# accessibility access, or a WebDriver session. The subprocess timeout bounds
-# this readiness wait together with the preceding Launch Services call.
-SAFARI_READY_SCRIPT = '''
-ObjC.import('AppKit');
-var previousState = '';
-while (true) {
-    var apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.Safari');
-    var state = {bundleId: 'com.apple.Safari', running: Number(apps.count) > 0,
-                 finishedLaunching: false, active: false, terminated: false, processIdentifier: null};
-    if (Number(apps.count) > 0) {
-        var app = apps.objectAtIndex(0);
-        state.finishedLaunching = Boolean(app.isFinishedLaunching);
-        state.active = Boolean(app.isActive);
-        state.terminated = Boolean(app.isTerminated);
-        state.processIdentifier = Number(app.processIdentifier);
-    }
-    var serialized = JSON.stringify(state);
-    if (serialized !== previousState) {
-        console.log(serialized);
-        previousState = serialized;
-    }
-    if (state.running && state.finishedLaunching && !state.terminated) {
-        serialized;
-        break;
-    }
-    // NSRunningApplication caches mutable properties until the main run loop
-    // advances. JXA delay() sleeps without servicing its common-mode sources.
-    $.NSRunLoop.mainRunLoop.runUntilDate($.NSDate.dateWithTimeIntervalSinceNow(0.1));
-}
-'''
+RWI_STARTUP_MESSAGE = (
+    'Could not create a session: The session timed out while connecting to a Safari instance. '
+    'The following asynchronous operation timed out: Finding or launching a compatible local '
+    'Safari and waiting for its RWIApplication to appear and become ready.')
 
 
-def activate_hosted_safari(timeout):
-    """Request activation once after the automation window exists, never locally."""
-    native.require(sys.platform == 'darwin' and os.environ.get('GITHUB_ACTIONS') == 'true'
-                   and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted',
-                   'Safari activation requires a disposable GitHub-hosted macOS runner')
-    script = '''ObjC.import('AppKit');
-var apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.Safari');
-if (Number(apps.count) !== 1) throw Error('Expected one running Safari application');
-var app = apps.objectAtIndex(0);
-JSON.stringify({requested: true, accepted: Boolean(app.activateWithOptions($.NSApplicationActivateIgnoringOtherApps))});'''
-    result = subprocess.run(['/usr/bin/osascript', '-l', 'JavaScript', '-e', script],
-                            check=True, capture_output=True, text=True, timeout=timeout)
-    return json.loads(result.stdout)
+class WebDriverError(RuntimeError):
+    """Preserve the actual protocol response; recovery must not match traceback text."""
+    def __init__(self, method, route, status, value, session_id=None):
+        super().__init__(f'WebDriver {method} {route}: {value}')
+        self.response = {'method': method, 'route': route, 'status': status, 'value': value}
+        if session_id is not None:
+            self.response['sessionId'] = session_id
+
+    def is_known_cold_start(self):
+        value = self.response['value']
+        return (self.response['method'] == 'POST' and self.response['route'] == '/session'
+                and self.response['status'] == 500 and isinstance(value, dict)
+                and value.get('error') == 'session not created'
+                and value.get('message') == RWI_STARTUP_MESSAGE
+                and 'sessionId' not in value and 'sessionId' not in self.response)
 
 
-def prepare_hosted_safari(output):
-    """Launch Safari once before testing, only on an opted-in disposable host."""
+def prepare_hosted_safari(output, driver_path='/usr/bin/safaridriver'):
+    """Check a blank automation session, recovering only the known cold-launch error."""
     output.mkdir(parents=True, exist_ok=True)
     record = {'schema': 1, 'product': 'Safari', 'status': 'running',
               'sourceRevision': os.environ.get('GITHUB_SHA'),
               'phase': 'hosted-runner-check', 'budgetMs': PREPARATION_BUDGET_MS,
-              'durationMs': None, 'timedOut': False}
+              'durationMs': None, 'timedOut': False, 'attempts': []}
     started = time.monotonic()
     deadline = started + PREPARATION_BUDGET_MS / 1000
 
@@ -100,54 +73,97 @@ def prepare_hosted_safari(output):
             raise TimeoutError('Safari preparation exceeded its 60-second deadline')
         return value
 
-    def keep_readiness(stderr):
-        if not stderr:
-            return
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode('utf-8', errors='replace')
-        record['stderr'] = stderr[-16384:]
-        states = []
-        for line in record['stderr'].splitlines():
+    def stop_driver(driver):
+        if driver is not None and driver.poll() is None:
+            driver.terminate()
             try:
-                state = json.loads(line)
-                if isinstance(state, dict) and state.get('bundleId') == 'com.apple.Safari':
-                    states.append(state)
-            except ValueError:
-                pass
-        if states:
-            record['applicationStates'] = states[-32:]
-            record['lastApplication'] = states[-1]
+                driver.wait(timeout=min(5, remaining()))
+            except (TimeoutError, subprocess.TimeoutExpired):
+                driver.kill()
+                driver.wait(timeout=remaining())
 
     save()
     try:
         native.require(sys.platform == 'darwin' and os.environ.get('GITHUB_ACTIONS') == 'true'
                        and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted',
                        'Safari preparation requires a disposable GitHub-hosted macOS runner')
-        record['phase'] = 'launching-safari'
-        save()
-        # Complete native app launch before the strict automation session starts.
-        subprocess.run(['/usr/bin/open', '-b', 'com.apple.Safari', 'about:blank'],
-                       check=True, capture_output=True, text=True, timeout=remaining())
-        record['phase'] = 'waiting-for-application-ready'
-        save()
-        result = subprocess.run(['/usr/bin/osascript', '-l', 'JavaScript', '-e', SAFARI_READY_SCRIPT],
-                                check=True, capture_output=True, text=True, timeout=remaining())
-        keep_readiness(result.stderr)
-        remaining()  # A completed but late probe must not admit the test cases.
-        record['application'] = json.loads(result.stdout)
-        application = record['application']
-        native.require(application.get('bundleId') == 'com.apple.Safari'
-                       and application.get('running') is True
-                       and application.get('finishedLaunching') is True
-                       and application.get('terminated') is False
-                       and type(application.get('processIdentifier')) is int
-                       and application['processIdentifier'] > 0, 'Safari did not confirm launch completion')
-        record.update(status='passed', phase='completed')
+        for number in (1, 2):
+            remaining()
+            attempt = {'attempt': number, 'status': 'running', 'phase': 'driver-startup',
+                       'sessionClosed': False, 'cleanupErrors': []}
+            record['attempts'].append(attempt)
+            record['phase'] = 'blank-session-probe'
+            save()
+            attempt_started = time.monotonic()
+            driver = client = failure = None
+            retry = False
+            with (output / f'preparation-driver-{number}.log').open('w', encoding='utf-8') as log:
+                try:
+                    with socket.socket() as probe:
+                        probe.bind(('127.0.0.1', 0))
+                        port = probe.getsockname()[1]
+                    driver = subprocess.Popen([driver_path, '--port', str(port)], stdout=log, stderr=subprocess.STDOUT)
+                    client = SafariWebDriver(f'http://127.0.0.1:{port}')
+                    client._preparation_deadline = client._browser_deadline = deadline
+                    while True:
+                        remaining()
+                        native.require(driver.poll() is None, 'SafariDriver exited before the blank probe')
+                        try:
+                            client.request('GET', '/status')
+                            break
+                        except urllib.error.URLError as error:
+                            if not isinstance(error.reason, ConnectionRefusedError):
+                                raise
+                            time.sleep(min(.1, remaining()))
+                    attempt['phase'] = 'session-startup'
+                    attempt['sessionStartup'] = {}
+                    save()
+                    attempt['session'] = client.start(attempt['sessionStartup'])
+                    native.require(isinstance(client.session_id, str) and bool(client.session_id),
+                                   'Safari blank probe did not return a session ID')
+                    attempt['phase'] = 'blank-document'
+                    save()
+                    attempt['url'] = client.execute('return location.href;')
+                    remaining()
+                    native.require(attempt['url'] == 'about:blank', 'Safari probe must remain on its initial blank document')
+                    attempt['status'] = 'passed'
+                except Exception as error:
+                    failure = error
+                    attempt.update(status='failed', error=str(error), traceback=traceback.format_exc())
+                    if isinstance(error, WebDriverError):
+                        attempt['webdriverError'] = error.response
+                        retry = number == 1 and client.session_id is None and error.is_known_cold_start()
+                    attempt['knownColdStartRecovery'] = retry
+                finally:
+                    if client is not None and client.session_id is not None:
+                        try:
+                            client.close()
+                            remaining()
+                            attempt['sessionClosed'] = True
+                        except Exception as error:
+                            attempt['cleanupErrors'].append(str(error))
+                            failure = failure or error
+                    try:
+                        stop_driver(driver)
+                        remaining()
+                    except Exception as error:
+                        attempt['cleanupErrors'].append(str(error))
+                        failure = failure or error
+                    if attempt['cleanupErrors']:
+                        attempt['status'] = 'failed'
+                        retry = False
+                    attempt['knownColdStartRecovery'] = retry
+                    attempt['durationMs'] = (time.monotonic() - attempt_started) * 1000
+                    save()
+            if failure is None:
+                record.update(status='passed', phase='completed')
+                break
+            if not retry:
+                raise failure
     except Exception as error:
         record.update(status='failed', error=str(error), traceback=traceback.format_exc(),
-                      timedOut=isinstance(error, (TimeoutError, subprocess.TimeoutExpired)))
-        if isinstance(error, (subprocess.CalledProcessError, subprocess.TimeoutExpired)):
-            keep_readiness(error.stderr)
+                      timedOut=isinstance(error, (TimeoutError, subprocess.TimeoutExpired))
+                      or time.monotonic() >= deadline)
     finally:
         record['durationMs'] = (time.monotonic() - started) * 1000
         save()
@@ -162,14 +178,14 @@ class SafariWebDriver(native.Marionette):
         self.session_id = None
 
     def command_timeout(self):
-        activation_deadline = self.__dict__.get('_window_activation_deadline')
-        if activation_deadline is not None:
-            remaining = activation_deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError('Safari window activation and telemetry exceeded their deadline')
-            return min(remaining, super().command_timeout())
         deadline = self.__dict__.get('_session_start_deadline')
         if deadline is None:
+            preparation_deadline = self.__dict__.get('_preparation_deadline')
+            if preparation_deadline is not None:
+                remaining = preparation_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError('Safari preparation exceeded its 60-second deadline')
+                return min(remaining, super().command_timeout())
             return super().command_timeout()
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -187,7 +203,7 @@ class SafariWebDriver(native.Marionette):
         with response:
             if (self.__dict__.get('_cold_load_deadline') is None
                     and self.__dict__.get('_session_start_deadline') is None
-                    and self.__dict__.get('_window_activation_deadline') is None):
+                    and self.__dict__.get('_preparation_deadline') is None):
                 raw = response.read(64 * 1024 * 1024 + 1)
             else:
                 # Headers and body share the active setup or cold-load deadline.
@@ -209,7 +225,7 @@ class SafariWebDriver(native.Marionette):
             result = json.loads(raw)
             value = result.get('value')
             if response.status >= 400 or isinstance(value, dict) and value.get('error'):
-                raise RuntimeError(f'WebDriver {method} {route}: {value}')
+                raise WebDriverError(method, route, response.status, value, result.get('sessionId'))
         return value
 
     def start(self, timing=None):
@@ -255,32 +271,6 @@ class SafariWebDriver(native.Marionette):
         native.require(isinstance(handle, str) and bool(handle), 'Safari did not return its automation window')
         self.call('WebDriver:SwitchToWindow', {'handle': handle})
         return {'handle': handle, **self.execute('return {documentFocused:document.hasFocus(),visibilityState:document.visibilityState};')}
-
-    def request_hosted_window_activation(self, evidence):
-        """Activate once; blank-page focus is telemetry, not an input readiness test."""
-        started = time.monotonic()
-        deadline = min(started + WINDOW_ACTIVATION_BUDGET_MS / 1000,
-                       self.__dict__.get('_browser_deadline', float('inf')))
-        previous = self.__dict__.get('_window_activation_deadline')
-        self._window_activation_deadline = deadline
-        evidence.update(activationBudgetMs=max(0, (deadline - started) * 1000),
-                        activationCommandCompleted=False)
-        try:
-            try:
-                evidence['activation'] = activate_hosted_safari(self.command_timeout())
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-                stderr = error.stderr or ''
-                if isinstance(stderr, bytes):
-                    stderr = stderr.decode('utf-8', errors='replace')
-                evidence['activationError'] = stderr[-4096:]
-                raise
-            self.command_timeout()
-            evidence['afterActivation'] = self.execute('return {documentFocused:document.hasFocus(),visibilityState:document.visibilityState};')
-            self.command_timeout()  # A late response cannot satisfy the deadline.
-            evidence['activationCommandCompleted'] = True
-        finally:
-            evidence['activationDurationMs'] = (time.monotonic() - started) * 1000
-            self._window_activation_deadline = previous
 
     def call(self, name, data=None):
         native.require(self.session_id is not None, 'A Safari session is required')
@@ -339,7 +329,7 @@ def fixture_server(name, log):
         raise
 
 
-def run_case(output, name, driver_path, *, hosted_activation=False):
+def run_case(output, name, driver_path):
     output.mkdir(parents=True, exist_ok=True)
     record = {'schema': 1, 'suite': name, 'status': 'running', 'product': 'Safari',
               'output': str(output.resolve()),
@@ -392,8 +382,6 @@ def run_case(output, name, driver_path, *, hosted_activation=False):
             client.call('WebDriver:SetWindowRect', {'width': 1440, 'height': 1000})
             record['windowFocus'] = client.select_current_window()
             save()
-            if hosted_activation:
-                client.request_hosted_window_activation(record['windowFocus'])
             record['userAgent'] = client.execute('return navigator.userAgent;')
             record['phase'] = 'application'
             save()
@@ -432,13 +420,12 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--driver', default='/usr/bin/safaridriver')
     parser.add_argument('--prepare-hosted-safari', action='store_true',
-                        help='Launch blank Safari once, only on a disposable GitHub-hosted macOS runner')
+                        help='Check a blank WebDriver session on a disposable GitHub-hosted macOS runner')
     args = parser.parse_args()
-    preparation = prepare_hosted_safari(args.output.resolve()) if args.prepare_hosted_safari else None
+    preparation = prepare_hosted_safari(args.output.resolve(), args.driver) if args.prepare_hosted_safari else None
     results = []
     if preparation is None or preparation['status'] == 'passed':
-        options = {'hosted_activation': True} if args.prepare_hosted_safari else {}
-        results = [run_case(args.output.resolve() / name, name, args.driver, **options) for name in ('viewer-6', 'viewer-24', 'planner-256')]
+        results = [run_case(args.output.resolve() / name, name, args.driver) for name in ('viewer-6', 'viewer-24', 'planner-256')]
     summary = {'product': 'Safari', 'sourceRevision': os.environ.get('GITHUB_SHA'),
                'status': 'passed' if len(results) == 3 and all(r['status'] == 'passed' for r in results) else 'failed',
                'cases': [{'suite': r['suite'], 'status': r['status'], 'durationMs': r['durationMs']} for r in results]}

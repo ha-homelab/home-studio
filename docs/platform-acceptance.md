@@ -614,36 +614,30 @@ return after its boundary, but still fails admission. This is not a guarantee
 of preemption at exactly 60 seconds; the unchanged outer watchdog also remains
 in force.
 
-The disposable GitHub-hosted macOS job explicitly prepares Safari once before
-these cases: Launch Services opens `about:blank`, then AppKit must report that
-Safari is running, has finished launching, and has not terminated. The normal
-preparation window need not be active; activation is recorded as telemetry.
-Both operations share a separate 60-second preparation budget recorded in `preparation.json` and the
-summary. Preparation failure stops the run before any test case; it never creates or retries a
-WebDriver session or visits Home Studio. This addresses the observed first-launch
-SafariDriver timeout while preserving each case's single session request,
-180-second watchdog, fresh automation window, and application cold-load checks.
-The flag is rejected outside GitHub-hosted macOS, and local runs omit it so they
-do not open ordinary Safari tabs. Launch completion is only a prerequisite;
-the subsequent WebDriver session and every application assertion must still pass.
+The disposable GitHub-hosted macOS job checks a blank WebDriver session before
+these cases. SafariDriver alone launches Safari and creates its isolated
+automation window, following Apple's [WebDriver model](https://developer.apple.com/documentation/safari-developer-tools/webdriver).
+Preparation never opens an ordinary Safari window, activates the app externally,
+or navigates to Home Studio. It must verify the initial `about:blank` document,
+close its own session, and stop its driver before application testing begins.
 
-The AppKit readiness wait advances the main run loop: mutable
-[`NSRunningApplication` properties](https://developer.apple.com/documentation/appkit/nsrunningapplication)
-remain cached until that loop runs, so JXA `delay()` alone cannot reliably observe
-activation. Preparation retains state changes and the last observed launch,
-activation, termination and process flags even on timeout. Each WebDriver session
-then selects its own current window using `GET /window` and `POST /window` before
-application navigation. The report preserves the actual `document.hasFocus()`
-and visibility state after selection and on failure; selecting a window does not
-retry a session or grant acceptance credit to a missed pointer interaction.
-On hosted CI, the harness makes one native Safari activation request after
-selecting the automation window. The request and one follow-up focus observation
-share a 10-second budget, capped by the existing 180-second browser deadline.
-Command failures and timeouts fail configuration; the blank page's focus and
-visibility values are telemetry only. Neither those values nor an activation
-acknowledgment proves that the application will receive input. The application
-then loads normally and must pass every original pointer, rendering, and recovery
-assertion. Local runs do not request native activation.
+Preparation has one shared 60-second budget, including cleanup. At most one
+additional probe is allowed, only after HTTP 500 from `POST /session` with
+`session not created`, no returned session ID, and the exact observed message
+about finding or launching Safari and waiting for its `RWIApplication` to become
+ready. Transport timeouts, changed messages, other statuses, malformed responses,
+and cleanup failures stop preparation. A second failure also stops the run.
+`preparation.json` retains both attempts, the structured error, timings and cleanup
+results; separate driver logs are included in the existing artifact.
+
+This accommodates the observed cold-launch failure without granting acceptance
+credit to it. Every application case still gets one session attempt, its existing
+180-second watchdog, a fresh automation window, and unchanged cold-load, pointer,
+rendering, and recovery assertions. The preparation flag is rejected outside
+GitHub-hosted macOS; local runs omit it. Each application session selects its own
+current window using `GET /window` and `POST /window`. The report preserves focus
+and visibility as telemetry after selection and on failure; they do not determine
+whether application input works.
 
 Every viewer report and cycle sample records `loadBudgetMs: 60000`. Samples also
 record monotonic `loadMs` and `loadCompleted`; a pending or failed cold load is
