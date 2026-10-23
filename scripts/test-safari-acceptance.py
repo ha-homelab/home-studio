@@ -31,7 +31,7 @@ native = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(native)
 SESSION_START_BUDGET_MS = 60000
 PREPARATION_BUDGET_MS = 60000
-WINDOW_FOCUS_BUDGET_MS = 10000
+WINDOW_ACTIVATION_BUDGET_MS = 10000
 
 # AppKit reports launch completion and activation without Apple Events,
 # accessibility access, or a WebDriver session. The subprocess timeout bounds
@@ -162,11 +162,11 @@ class SafariWebDriver(native.Marionette):
         self.session_id = None
 
     def command_timeout(self):
-        focus_deadline = self.__dict__.get('_window_focus_deadline')
-        if focus_deadline is not None:
-            remaining = focus_deadline - time.monotonic()
+        activation_deadline = self.__dict__.get('_window_activation_deadline')
+        if activation_deadline is not None:
+            remaining = activation_deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError('Safari automation window did not acquire focus within its deadline')
+                raise TimeoutError('Safari window activation and telemetry exceeded their deadline')
             return min(remaining, super().command_timeout())
         deadline = self.__dict__.get('_session_start_deadline')
         if deadline is None:
@@ -187,11 +187,11 @@ class SafariWebDriver(native.Marionette):
         with response:
             if (self.__dict__.get('_cold_load_deadline') is None
                     and self.__dict__.get('_session_start_deadline') is None
-                    and self.__dict__.get('_window_focus_deadline') is None):
+                    and self.__dict__.get('_window_activation_deadline') is None):
                 raw = response.read(64 * 1024 * 1024 + 1)
             else:
-                # HTTP headers and body share one cold-load or session clock. Update
-                # each bounded read's socket timeout, rather than renewing 60s.
+                # Headers and body share the active setup or cold-load deadline.
+                # Update each bounded read's socket timeout without renewing it.
                 body_response = response.fp if isinstance(response, urllib.error.HTTPError) else response
                 chunks, size = [], 0
                 while size <= 64 * 1024 * 1024:
@@ -256,16 +256,15 @@ class SafariWebDriver(native.Marionette):
         self.call('WebDriver:SwitchToWindow', {'handle': handle})
         return {'handle': handle, **self.execute('return {documentFocused:document.hasFocus(),visibilityState:document.visibilityState};')}
 
-    def ensure_hosted_window_focus(self, evidence):
-        """Require real document focus; an activation acknowledgment is insufficient."""
-        if evidence.get('documentFocused') is True and evidence.get('visibilityState') == 'visible':
-            return
+    def request_hosted_window_activation(self, evidence):
+        """Activate once; blank-page focus is telemetry, not an input readiness test."""
         started = time.monotonic()
-        deadline = min(started + WINDOW_FOCUS_BUDGET_MS / 1000,
+        deadline = min(started + WINDOW_ACTIVATION_BUDGET_MS / 1000,
                        self.__dict__.get('_browser_deadline', float('inf')))
-        previous = self.__dict__.get('_window_focus_deadline')
-        self._window_focus_deadline = deadline
-        evidence.update(focusBudgetMs=max(0, (deadline - started) * 1000), focusCompleted=False)
+        previous = self.__dict__.get('_window_activation_deadline')
+        self._window_activation_deadline = deadline
+        evidence.update(activationBudgetMs=max(0, (deadline - started) * 1000),
+                        activationCommandCompleted=False)
         try:
             try:
                 evidence['activation'] = activate_hosted_safari(self.command_timeout())
@@ -275,17 +274,13 @@ class SafariWebDriver(native.Marionette):
                     stderr = stderr.decode('utf-8', errors='replace')
                 evidence['activationError'] = stderr[-4096:]
                 raise
-            while True:
-                self.command_timeout()
-                evidence.update(self.execute('return {documentFocused:document.hasFocus(),visibilityState:document.visibilityState};'))
-                self.command_timeout()  # A late response cannot satisfy the deadline.
-                if evidence.get('documentFocused') is True and evidence.get('visibilityState') == 'visible':
-                    evidence['focusCompleted'] = True
-                    return
-                time.sleep(min(.05, self.command_timeout()))
+            self.command_timeout()
+            evidence['afterActivation'] = self.execute('return {documentFocused:document.hasFocus(),visibilityState:document.visibilityState};')
+            self.command_timeout()  # A late response cannot satisfy the deadline.
+            evidence['activationCommandCompleted'] = True
         finally:
-            evidence['focusDurationMs'] = (time.monotonic() - started) * 1000
-            self._window_focus_deadline = previous
+            evidence['activationDurationMs'] = (time.monotonic() - started) * 1000
+            self._window_activation_deadline = previous
 
     def call(self, name, data=None):
         native.require(self.session_id is not None, 'A Safari session is required')
@@ -344,7 +339,7 @@ def fixture_server(name, log):
         raise
 
 
-def run_case(output, name, driver_path, *, hosted_focus=False):
+def run_case(output, name, driver_path, *, hosted_activation=False):
     output.mkdir(parents=True, exist_ok=True)
     record = {'schema': 1, 'suite': name, 'status': 'running', 'product': 'Safari',
               'output': str(output.resolve()),
@@ -397,8 +392,8 @@ def run_case(output, name, driver_path, *, hosted_focus=False):
             client.call('WebDriver:SetWindowRect', {'width': 1440, 'height': 1000})
             record['windowFocus'] = client.select_current_window()
             save()
-            if hosted_focus:
-                client.ensure_hosted_window_focus(record['windowFocus'])
+            if hosted_activation:
+                client.request_hosted_window_activation(record['windowFocus'])
             record['userAgent'] = client.execute('return navigator.userAgent;')
             record['phase'] = 'application'
             save()
@@ -442,7 +437,7 @@ def main():
     preparation = prepare_hosted_safari(args.output.resolve()) if args.prepare_hosted_safari else None
     results = []
     if preparation is None or preparation['status'] == 'passed':
-        options = {'hosted_focus': True} if args.prepare_hosted_safari else {}
+        options = {'hosted_activation': True} if args.prepare_hosted_safari else {}
         results = [run_case(args.output.resolve() / name, name, args.driver, **options) for name in ('viewer-6', 'viewer-24', 'planner-256')]
     summary = {'product': 'Safari', 'sourceRevision': os.environ.get('GITHUB_SHA'),
                'status': 'passed' if len(results) == 3 and all(r['status'] == 'passed' for r in results) else 'failed',

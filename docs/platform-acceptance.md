@@ -636,12 +636,14 @@ then selects its own current window using `GET /window` and `POST /window` befor
 application navigation. The report preserves the actual `document.hasFocus()`
 and visibility state after selection and on failure; selecting a window does not
 retry a session or grant acceptance credit to a missed pointer interaction.
-On hosted CI, if the selected automation document is not focused, the harness
-makes one native Safari activation request and requires the document to become
-focused and visible within 10 seconds, capped by the existing 180-second browser
-deadline. The request acknowledgment alone cannot pass this check. Local runs
-do not request native activation. This puts the focus requirement on the actual
-automation window instead of the earlier normal preparation window.
+On hosted CI, the harness makes one native Safari activation request after
+selecting the automation window. The request and one follow-up focus observation
+share a 10-second budget, capped by the existing 180-second browser deadline.
+Command failures and timeouts fail configuration; the blank page's focus and
+visibility values are telemetry only. Neither those values nor an activation
+acknowledgment proves that the application will receive input. The application
+then loads normally and must pass every original pointer, rendering, and recovery
+assertion. Local runs do not request native activation.
 
 Every viewer report and cycle sample records `loadBudgetMs: 60000`. Samples also
 record monotonic `loadMs` and `loadCompleted`; a pending or failed cold load is

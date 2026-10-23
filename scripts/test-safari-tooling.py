@@ -184,55 +184,80 @@ class SessionStartupTests(unittest.TestCase):
             evidence = {'documentFocused': False, 'visibilityState': 'visible'}
             with patch.object(safari, 'activate_hosted_safari', side_effect=error):
                 with self.assertRaises(type(error)):
-                    client.ensure_hosted_window_focus(evidence)
+                    client.request_hosted_window_activation(evidence)
             self.assertLessEqual(len(evidence['activationError']), 4096)
             self.assertTrue(evidence['activationError'])
-            self.assertFalse(evidence['focusCompleted'])
-            self.assertIsNone(client._window_focus_deadline)
+            self.assertFalse(evidence['activationCommandCompleted'])
+            self.assertIsNone(client._window_activation_deadline)
 
-    def test_hosted_focus_uses_one_activation_and_requires_timely_document_focus(self):
-        for accepted, final_focus, finished in ((True, True, 3), (True, False, 3), (False, False, 3), (True, True, 4)):
-            with self.subTest(accepted=accepted, final_focus=final_focus, finished=finished):
+    def test_activation_and_focus_telemetry_share_one_bounded_request(self):
+        for outer, accepted, final_focus, finished in (
+                (4, True, True, 3), (4, True, False, 3), (4, False, False, 3),
+                (4, True, True, 4), (180, True, False, 9.999), (180, True, False, 10)):
+            with self.subTest(outer=outer, accepted=accepted, final_focus=final_focus, finished=finished):
                 now = [0.0]
                 client = safari.SafariWebDriver('http://fixture')
-                client._browser_deadline = 4
+                client._browser_deadline = outer
+                budget = min(10, outer)
                 evidence = {'documentFocused': False, 'visibilityState': 'visible'}
                 def activate(timeout):
-                    self.assertEqual(timeout, 4)
+                    self.assertEqual(timeout, budget)
                     now[0] = 2
                     return {'requested': True, 'accepted': accepted}
                 def execute(_script):
-                    self.assertEqual(client.command_timeout(), 2 if now[0] == 2 else 1)
+                    self.assertEqual(client.command_timeout(), budget - 2)
                     now[0] = finished
                     return {'documentFocused': final_focus, 'visibilityState': 'visible'}
                 with patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
-                     patch.object(safari.time, 'sleep', side_effect=lambda _: now.__setitem__(0, 4)), \
                      patch.object(safari, 'activate_hosted_safari', side_effect=activate) as activation, \
-                     patch.object(client, 'execute', side_effect=execute):
-                    if final_focus and finished < 4:
-                        client.ensure_hosted_window_focus(evidence)
-                        self.assertTrue(evidence['focusCompleted'])
+                     patch.object(client, 'execute', side_effect=execute) as observation:
+                    if finished < budget:
+                        client.request_hosted_window_activation(evidence)
+                        self.assertTrue(evidence['activationCommandCompleted'])
                     else:
                         with self.assertRaises(TimeoutError):
-                            client.ensure_hosted_window_focus(evidence)
-                        self.assertFalse(evidence['focusCompleted'])
+                            client.request_hosted_window_activation(evidence)
+                        self.assertFalse(evidence['activationCommandCompleted'])
                 self.assertEqual(activation.call_count, 1)
-                self.assertIsNone(client._window_focus_deadline)
-                self.assertEqual(evidence['focusBudgetMs'], 4000)
+                self.assertEqual(observation.call_count, 1)
+                self.assertEqual(evidence['documentFocused'], False)
+                self.assertEqual(evidence['afterActivation']['documentFocused'], final_focus)
+                self.assertNotIn('focusCompleted', evidence)
+                self.assertIsNone(client._window_activation_deadline)
+                self.assertEqual(evidence['activationBudgetMs'], budget * 1000)
                 del client._browser_deadline
                 self.assertEqual(client.command_timeout(), 30)
 
-    def test_focused_window_needs_no_activation_and_activation_failure_propagates(self):
-        client = safari.SafariWebDriver('http://fixture')
-        with patch.object(safari, 'activate_hosted_safari', side_effect=RuntimeError('activation denied')) as activation:
-            client.ensure_hosted_window_focus({'documentFocused': True, 'visibilityState': 'visible'})
-            activation.assert_not_called()
+    def test_activation_failure_propagates_regardless_of_blank_document_focus(self):
+        for focused in (True, False):
+            client = safari.SafariWebDriver('http://fixture')
+            with patch.object(safari, 'activate_hosted_safari', side_effect=RuntimeError('activation denied')) as activation:
+                evidence = {'documentFocused': focused, 'visibilityState': 'visible'}
+                with self.assertRaisesRegex(RuntimeError, 'activation denied'):
+                    client.request_hosted_window_activation(evidence)
+                activation.assert_called_once()
+                self.assertFalse(evidence['activationCommandCompleted'])
+                self.assertNotIn('focusCompleted', evidence)
+                self.assertIsNone(client._window_activation_deadline)
+
+    def test_expired_activation_budget_does_not_start_more_work(self):
+        for outer in (0, 4):
+            client = safari.SafariWebDriver('http://fixture')
+            client._browser_deadline = outer
+            now = [0.0]
             evidence = {'documentFocused': False, 'visibilityState': 'visible'}
-            with self.assertRaisesRegex(RuntimeError, 'activation denied'):
-                client.ensure_hosted_window_focus(evidence)
-            activation.assert_called_once()
-            self.assertFalse(evidence['focusCompleted'])
-            self.assertIsNone(client._window_focus_deadline)
+            def activate(_timeout):
+                now[0] = outer
+                return {'requested': True, 'accepted': True}
+            with patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
+                 patch.object(safari, 'activate_hosted_safari', side_effect=activate) as activation, \
+                 patch.object(client, 'execute') as observation:
+                with self.assertRaises(TimeoutError):
+                    client.request_hosted_window_activation(evidence)
+            self.assertEqual(activation.call_count, int(outer > 0))
+            observation.assert_not_called()
+            self.assertFalse(evidence['activationCommandCompleted'])
+            self.assertIsNone(client._window_activation_deadline)
 
     def test_activation_is_hosted_only_and_keeps_request_acknowledgment(self):
         for environment in ({}, {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'self-hosted'}):
@@ -404,6 +429,55 @@ class SessionStartupTests(unittest.TestCase):
                     self.assertIn(('DELETE', '/session/owned', 30, None), calls)
                     self.assertEqual(json.loads((Path(temp) / 'report.json').read_text())['status'], record['status'])
 
+    def test_unfocused_blank_page_reaches_application_and_keeps_application_failures(self):
+        for name in ('viewer-6', 'planner-256'):
+            for application_failure in (False, True):
+                with self.subTest(name=name, application_failure=application_failure), tempfile.TemporaryDirectory() as temp:
+                    client = safari.SafariWebDriver('http://fixture')
+                    calls = []
+                    def request(method, route, data=None):
+                        calls.append((method, route))
+                        if route == '/session':
+                            return {'sessionId': 'owned', 'capabilities': {'browserName': 'Safari'}}
+                        if route == '/session/owned/window' and method == 'GET':
+                            return 'owned-window'
+                        if route.endswith('/execute/sync'):
+                            return {'documentFocused': False, 'visibilityState': 'visible'}
+                        return None
+                    def application(selected_client, origin, _project, _record, _save):
+                        self.assertIs(selected_client, client)
+                        client.call('WebDriver:Navigate', {'url': origin + '/application'})
+                        if application_failure:
+                            raise AssertionError('application pointer assertion failed')
+                    driver = Mock(); driver.poll.return_value = None
+                    with contextlib.ExitStack() as stack:
+                        stack.enter_context(patch.object(safari.sys, 'platform', 'darwin'))
+                        stack.enter_context(patch.object(safari.subprocess, 'check_output', return_value='Safari test'))
+                        stack.enter_context(patch.object(safari.subprocess, 'Popen', return_value=driver))
+                        stack.enter_context(patch.object(safari, 'fixture_server', return_value=(Mock(), {'origin':'http://fixture', 'sourceHash':'fixed'}, {})))
+                        stack.enter_context(patch.object(safari, 'SafariWebDriver', return_value=client))
+                        stack.enter_context(patch.object(client, 'request', side_effect=request))
+                        stack.enter_context(patch.object(client, 'screenshot'))
+                        stack.enter_context(patch.object(safari.native, 'stop'))
+                        stack.enter_context(patch.object(safari.threading, 'Timer'))
+                        activation = stack.enter_context(patch.object(safari, 'activate_hosted_safari', return_value={'requested': True, 'accepted': True}))
+                        viewer = stack.enter_context(patch.object(safari.native, 'viewer', side_effect=application))
+                        planner = stack.enter_context(patch.object(safari.native, 'planner', side_effect=application))
+                        record = safari.run_case(Path(temp), name, '/test/safaridriver', hosted_activation=True)
+                    activation.assert_called_once()
+                    self.assertEqual(viewer.call_count, int(name.startswith('viewer')))
+                    self.assertEqual(planner.call_count, int(name == 'planner-256'))
+                    self.assertEqual(calls.count(('POST', '/session')), 1)
+                    self.assertEqual(calls.count(('POST', '/session/owned/url')), 1)
+                    self.assertFalse(record['windowFocus']['documentFocused'])
+                    self.assertFalse(record['windowFocus']['afterActivation']['documentFocused'])
+                    self.assertNotIn('focusCompleted', record['windowFocus'])
+                    self.assertEqual(record['status'], 'failed' if application_failure else 'passed')
+                    self.assertEqual(record['phase'], 'application' if application_failure else 'completed')
+                    if application_failure:
+                        self.assertEqual(record['error'], 'application pointer assertion failed')
+                    self.assertEqual(json.loads((Path(temp) / 'report.json').read_text()), record)
+
     def test_session_http_error_uses_bounded_body_and_restores_scope(self):
         class Socket:
             def __init__(self, payload): self.payload = payload; self.values = []
@@ -527,7 +601,7 @@ class HostedPreparationTests(unittest.TestCase):
                 if preparation is not None:
                     argv.append('--prepare-hosted-safari')
                 def run_case(_output, name, _driver, **options):
-                    self.assertEqual(options, {'hosted_focus': True} if preparation == 'passed' else {})
+                    self.assertEqual(options, {'hosted_activation': True} if preparation == 'passed' else {})
                     return {'suite': name, 'status': 'failed' if name == 'viewer-6' else 'passed', 'durationMs': 1}
                 with patch.object(safari.sys, 'argv', argv), \
                      patch.object(safari, 'prepare_hosted_safari', return_value={'status': preparation}) as prepare, \
