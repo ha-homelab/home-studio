@@ -14,7 +14,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
-const {changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
+const {changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
 const {createStartupDiagnostics} = require('./browser-startup-diagnostics.cjs');
 
 const root = path.resolve(process.env.HOME_STUDIO_SOURCE_ROOT || path.join(__dirname, '..'));
@@ -312,12 +312,18 @@ async function run(browserName, origin, project, sourceHash) {
       const allOff = Object.fromEntries(Object.entries(states).map(([key,value])=>[key,{...value,state:'off'}]));
       const firstEntity = project.floors[0].items[0].entity_id;
       const oneOff = {...states,[firstEntity]:{...states[firstEntity],state:'off'}};
+      sample.stateDraws = [];
       for(const [next,onCount] of [[allOff,0],[oneOff,lights-1],[states,lights]]) {
         phases.start('light-state', {cycle, activeLights:onCount});
+        const beforeState = await snapshot();
         await page.evaluate(states => window.viewerPort.postMessage({type:'states',connected:true,states}),next);
-        await child.waitForFunction(expected => document.querySelectorAll('.home-marker[data-state="on"]').length===expected,onCount);
-        await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-        const value = await snapshot();
+        const value = await child.evaluate(waitForViewerLightState, {
+          beforeRenderCount:beforeState.renderCount, beforeSceneDraws:beforeState.scene.renderPasses.scene,
+          expectedLights:onCount, expectedSlots:lights,
+        });
+        sample.stateDraws.push({activeLights:onCount, waitMs:value.waitMs,
+          beforeRenderCount:beforeState.renderCount, renderCount:value.renderCount,
+          beforeSceneDraws:beforeState.scene.renderPasses.scene, sceneDraws:value.scene.renderPasses.scene});
         sample.statePrograms.push(value.linkedPrograms);
         check(value.scene.pointLights===lights, 'Light state changes retain stable shader slots');
         check(value.scene.activePointLights===onCount, 'Only lights whose live state is on contribute intensity');
