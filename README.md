@@ -57,7 +57,7 @@ AI is an optional starting point. Check its dimensions and placements before
 publishing; you can also draw everything yourself. Your saved draft stays
 separate from the view your household uses.
 
-The walkthrough uses [v0.10.1-beta.6](https://github.com/ha-homelab/home-studio/releases/tag/v0.10.1-beta.6). Enable pre-release versions in HACS to try this build.
+The walkthrough was recorded on [v0.10.1-beta.6](https://github.com/ha-homelab/home-studio/releases/tag/v0.10.1-beta.6). This native workflow is included in the 1.0 release line. Install the [latest stable release](https://github.com/ha-homelab/home-studio/releases/latest) through HACS; pre-release versions are optional.
 
 ## Make it your home
 

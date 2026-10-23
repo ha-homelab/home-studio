@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [1.0.0] - Home Studio in Home Assistant
+
+This is the first 1.x release of the native drawing and publishing workflow.
+It brings the improvements tested in the 0.10.1 previews to the stable channel.
+
+### Draw, refine, and publish
+
+- Start with a measured room directly in Home Assistant, use the local item
+  library, and publish a separate 3D Home view for everyday device control.
+  The editor follows the active Home Assistant theme and offers clear paths
+  between editing and the published view.
+- Optionally create a draft from room photos and instructions using your own
+  AI provider. Review the proposed dimensions and placements before applying
+  it. Manual drawing remains fully available without AI or an API key.
+- Recover from slow panel startup and reverse-proxy asset loading failures with
+  actionable feedback instead of an empty editor. Bound artwork authentication
+  retries so an unavailable image cannot flood the connection.
 - Refine rooms directly in the Home Assistant editor: move furniture in
   Preview 3D, raise or lower it with the Y handle or 5 cm buttons, and enter
   exact positions and dimensions. Hold Alt during a drag to temporarily
@@ -20,6 +37,38 @@
   last-known state, strict map/floor checks, and read-only inspection. A missing
   observation timestamp stays visibly unknown; retrieval time is never presented
   as observation time. The overlay adds no GPU resources or continuous rendering.
+
+### Upgrade
+
+- Use Home Assistant 2026.10 or newer. Back up HA and export the drawing JSON
+  before installing `home_floorplan.zip` through HACS or manually. Restart HA
+  after updating the integration, then reload the editor and 3D Home.
+- Existing native drawings, entity bindings, and saved publications remain
+  compatible; this release requires no drawing-format migration. Saving a draft
+  does not publish it, and a failed publication retains the previous view.
+- Existing generated homes retain their protected architecture and deployment
+  workflow. Importable placements can be edited inside HA, but this does not
+  turn arbitrary Python geometry into an unrestricted native drawing.
+- The 1.x compatibility scope covers documented native drawing import/export,
+  saved drafts, entity bindings, and the installation workflow. Internal Python
+  helpers and generated JavaScript are not a public extension API. Back up
+  before downgrading; older releases may not understand later drawing features.
+
+### Security
+
+- Public packages contain no household plans, credentials, or private adapters.
+  AI is opt-in: selected photos, instructions, and requests go to the provider
+  endpoint you configure. The API key is masked in the editor and demo, not
+  included in drawing exports. See [AI privacy and setup](ai-setup.html).
+- Supported browser and operating-system checks run in CI, including bounded
+  software-rendering and interaction tests. This is not a guarantee for every
+  GPU, driver, extension, or historical browser build. The Windows/Waterfox
+  reporter's confirmation remains pending; issue #25 stays open.
+- AI-generated dimensions need human review. Optional presence, appliance,
+  vacuum, and signal indicators report the available source data; they do not
+  establish safety, occupancy, or measured person positions.
+- The published video was recorded on 0.10.1-beta.6. Its native editing workflow
+  is included in 1.0.0; the original recording version remains disclosed.
 
 ## [0.10.1] - Safer editing and clearer device status
 

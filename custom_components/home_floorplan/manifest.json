@@ -1,7 +1,7 @@
 {
   "domain": "home_floorplan",
   "name": "Home Studio",
-  "version": "0.10.1",
+  "version": "1.0.0",
   "documentation": "https://ha-homelab.github.io/home-studio/",
   "issue_tracker": "https://github.com/ha-homelab/home-studio/issues",
   "codeowners": [
