@@ -697,4 +697,9 @@ export default {
   "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Decorative only. Motion pauses when hidden or reduced motion is preferred.",
   "Add garden area": "Add garden area",
   "Garden added. Place trees, paths or animals from the Item library.": "Garden added. Place trees, paths or animals from the Item library.",
+  "model.ceiling_fan": "Ventilador de techo de cuatro aspas",
+  "model.standing_fan": "Ventilador de pie",
+  "model.desk_fan": "Ventilador de mesa",
+  "model.wall_air_conditioner": "Aire acondicionado de pared",
+  "model.panel_heater": "Calefactor de panel",
 };

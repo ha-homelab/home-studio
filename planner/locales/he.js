@@ -697,4 +697,9 @@ export default {
   "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Decorative only. Motion pauses when hidden or reduced motion is preferred.",
   "Add garden area": "Add garden area",
   "Garden added. Place trees, paths or animals from the Item library.": "Garden added. Place trees, paths or animals from the Item library.",
+  "model.ceiling_fan": "מאוורר תקרה עם ארבעה להבים",
+  "model.standing_fan": "מאוורר עומד",
+  "model.desk_fan": "מאוורר שולחני",
+  "model.wall_air_conditioner": "מזגן קיר",
+  "model.panel_heater": "תנור חימום פנל",
 };

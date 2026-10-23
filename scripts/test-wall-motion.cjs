@@ -99,14 +99,15 @@ const cycle = harness();
 for (let i = 0; i <= 6000; i++) cycle.frame(i * 15);
 assert.ok(cycle.uniform.value < 1e-8 || Math.PI * 2 - cycle.uniform.value < 1e-8, 'Phase wraps after 90 seconds of active frames');
 
-// The shared draw helper covers the editor, direct Home renders and signal fades.
+// The shared draw helper covers the editor, direct Home renders, signal fades
+// and the bounded device rotor updates.
 const viewer = fs.readFileSync(path.join(root, 'viewer.js'), 'utf8');
 const home = fs.readFileSync(path.join(root, 'home-view.js'), 'utf8');
 const draw = viewer.split('\n').find(line => line.startsWith('function drawScene('));
 assert.ok(draw, 'The viewer defines one shared draw helper');
 assert.equal((viewer.match(/renderer\.render\(scene,camera\)/g) || []).length, 1);
 assert.equal((home.match(/renderer\.render\(/g) || []).length, 0);
-assert.equal((home.match(/drawScene\(camera\)/g) || []).length, 2);
+assert.equal((home.match(/drawScene\(camera\)/g) || []).length, 3, 'Full, signal and bounded rotor frames use the shared draw helper');
 const calls = [];
 const context = vm.createContext({
   scene: {},
@@ -125,4 +126,44 @@ context.renderProfile.diffuseLighting = true;
 context.coalesceMotion = true;
 assert.throws(() => context.drawScene({}), /GPU copy unavailable/);
 assert.deepEqual(calls, ['before', 'copy draw', 'after'], 'Timing also finishes when the bounded motion draw fails');
+
+// Execute the real rotor callback: it shares wall timing without scheduling a
+// second frame, and yields while camera movement already owns the next draw.
+let rotor;
+const failures = [], forbidden = () => assert.fail('A rotor draw must not schedule another frame');
+Object.assign(context, {
+  active: true, camera: {}, points: [], homeGesture: null, renderRequest: 0, renderDelay: 0,
+  failed3D: false, coalesceMotion: false, renderCount: 0,
+  roomLighting: {geometryMode: 'packed', update: () => calls.push('lighting')},
+  $: () => ({}), createDeviceEffects: (_three, _container, options) => { rotor = options; return {}; },
+  report3DError: error => failures.push(error.message),
+  requestAnimationFrame: forbidden, setTimeout: forbidden, setInterval: forbidden,
+});
+const rotorStart = home.indexOf('  const deviceEffects=createDeviceEffects(');
+const rotorEnd = home.indexOf('\n  function cancelHomeGesture', rotorStart);
+assert.ok(rotorStart >= 0 && rotorEnd > rotorStart, 'The real bounded rotor callback exists');
+vm.runInContext(home.slice(rotorStart, rotorEnd), context);
+assert.equal(rotor.canDraw(), true);
+assert.equal(rotor.allowRotor(), true);
+context.coalesceMotion = true;
+assert.equal(rotor.allowRotor(), false, 'Low-capacity renderers cannot start 3D rotor work');
+context.coalesceMotion = false;
+context.renderer.render = () => calls.push('draw');
+calls.length = 0;
+rotor.draw();
+assert.deepEqual(calls, ['lighting', 'before', 'draw', 'after'], 'Rotor rendering updates lighting and finishes wall timing once');
+assert.equal(context.renderCount, 1);
+for (const [key, value] of [['homeGesture', {moved: true}], ['renderRequest', 1], ['renderDelay', 1]]) {
+  const previous = context[key]; context[key] = value; calls.length = 0;
+  rotor.draw();
+  assert.deepEqual(calls, [], key + ' prevents duplicate rotor draw work');
+  assert.equal(context.renderCount, 1);
+  context[key] = previous;
+}
+calls.length = 0;
+context.renderer.render = () => { calls.push('draw'); throw Error('Rotor GPU unavailable'); };
+rotor.draw();
+assert.deepEqual(calls, ['lighting', 'before', 'draw', 'after'], 'A failed rotor frame still closes wall timing');
+assert.deepEqual(failures, ['Rotor GPU unavailable'], 'A rotor failure reaches the shared fatal-error handler');
+assert.equal(context.renderCount, 1, 'Failed rotor frames are not counted as rendered');
 console.log('PASS: Wall drift adds zero scheduled frames, bounds active time, and freezes for device, preference and slow-render fallbacks.');

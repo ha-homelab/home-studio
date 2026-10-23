@@ -103,6 +103,6 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
     const x=fixture(18,{},THREE.MeshLambertMaterial,configure);setup(x);assert.equal(mode(compile(x.m)),'10','Decay keeps its prior-hook rejection independently of transport');x.c.dispose();
   }
   const home=read('home-view.js');assert(home.includes('pointDecayTwo:true,pointTexture:true,runTexture:true,geometryTexture:true,signalTexture:true'));
-  assert.equal((home.match(/roomLighting(?:\?|)\.update\(points,camera\)/g)||[]).length,2,'Full and signal-only paths keep the same camera-aware proof');
+  assert.equal((home.match(/roomLighting(?:\?|)\.update\(points,camera\)/g)||[]).length,3,'Full, signal-only and bounded rotor paths keep the same camera-aware proof');
   console.log(JSON.stringify({status:'PASS',pinnedExpansions:expansions,transitionChecks:transitions,textureResources:3,scope:'CPU source, keys and uploader only; no GPU compilation, pixel or performance claim'}));
 })().catch(e=>{console.error(String(e.stack||e).replace(/data:text\/javascript;base64,[^\s)]+/g,'[pinned Three]'));process.exitCode=1;});

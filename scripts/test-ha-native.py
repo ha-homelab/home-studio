@@ -799,6 +799,8 @@ class PackagingTests(unittest.TestCase):
                 self.assertIn("config_flow.py", names)
                 self.assertIn("runtime/planner/project.py", names)
                 self.assertIn("runtime/viewer_locales.py", names)
+                for name in ("climate-state.js", "marker-motion.js", "device-effects.js"):
+                    self.assertEqual(zipped.read("runtime/" + name), (ROOT / name).read_bytes())
                 self.assertIn("static/studio.js", names)
                 self.assertIn("static/studio/planner/index.html", names)
                 self.assertIn("static/studio/ai/panel.js", names)
@@ -825,8 +827,26 @@ class PackagingTests(unittest.TestCase):
             package.__path__ = [str(component)]
             bundled = __import__("isolated_bundle.runtime.planner.project", fromlist=["compile_project"])
             old_paths = list(sys.path)
-            result = bundled.compile_project(sample(), Path(temporary) / "generated")
+            project = sample()
+            floor = project["floors"][0]
+            catalog = json.loads((component / "runtime/planner/catalog.json").read_text())
+            fixtures = [model for model in catalog["models"] if model.get("device_animation")]
+            self.assertEqual(len(fixtures), 5)
+            for model in fixtures:
+                floor["items"].append({"id": model["id"], "name": model["label"], "type": model["type"],
+                                       "room": floor["rooms"][0]["id"], "model_id": model["id"],
+                                       "position_m": {"x": 2, "y": model["elevation_m"], "z": 2},
+                                       "dimensions_m": model["dimensions_m"], "rotation_deg": 0,
+                                       "entity_id": "", "notes": ""})
+            generated = Path(temporary) / "generated"
+            result = bundled.compile_project(project, generated)
             self.assertEqual(result["floors"], [floor["id"] for floor in sample()["floors"]])
+            viewer = (generated / floor["id"] / "index.html").read_text()
+            for name in ("climate-state.js", "marker-motion.js", "device-effects.js"):
+                self.assertIn((ROOT / name).read_text(), viewer, "The isolated compiler inlines the full feedback runtime")
+            data = json.loads((generated / floor["id"] / "model-data.json").read_text())
+            for model in fixtures:
+                self.assertEqual(data["object_assets"][model["id"]]["device_animation"], model["device_animation"])
             self.assertEqual(sys.path, old_paths)
             self.assertTrue(native.studio_asset_files(component))
             with self.assertRaises(ValueError):

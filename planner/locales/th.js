@@ -698,4 +698,9 @@ export default {
   "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Decorative only. Motion pauses when hidden or reduced motion is preferred.",
   "Add garden area": "Add garden area",
   "Garden added. Place trees, paths or animals from the Item library.": "Garden added. Place trees, paths or animals from the Item library.",
+  "model.ceiling_fan": "พัดลมเพดานสี่ใบพัด",
+  "model.standing_fan": "พัดลมตั้งพื้น",
+  "model.desk_fan": "พัดลมตั้งโต๊ะ",
+  "model.wall_air_conditioner": "เครื่องปรับอากาศติดผนัง",
+  "model.panel_heater": "เครื่องทำความร้อนแบบแผง",
 };

@@ -173,3 +173,18 @@ body.control-only>header,body.control-only>main,body.control-only #editLayout,bo
 #homeView [data-kind="presence"]{color:#95e9df;background:#213e40;border-color:#568a89}
 #homeView [data-kind="presence"][data-state="on"]{color:#cefff8;background:#245650;border-color:#61e0cc;box-shadow:0 0 10px #36e7df55}
 @media(prefers-reduced-motion:reduce){.home-presence-indicator[data-state="quiet"]{transition:none}}
+
+/* Device feedback stays attached to geometry; only the control buttons ease. */
+.device-airflow{position:absolute;inset:0;pointer-events:none;color:#5de0ff;overflow:hidden}
+.device-airflow[data-effect="heat"]{color:#ffb266}
+.device-airflow svg{display:block;width:100%;height:100%;overflow:visible}
+.device-airflow path{fill:none;stroke:currentColor;stroke-width:4;stroke-linecap:round;stroke-opacity:.62;stroke-dasharray:12 20;animation:device-airflow 1.7s linear infinite}
+@keyframes device-airflow{to{stroke-dashoffset:-64}}
+#homeView .home-marker[data-kind="fan"],#homeView .home-marker[data-kind="climate"]{background:#243b48;color:#c2dce8;border-color:#7196a9;box-shadow:0 2px 7px #0006}
+#homeView [data-kind="fan"][data-running="true"],#homeView [data-kind="climate"][data-effect="cool"]{color:#6be3ff;border-color:#4dc9f0}
+#homeView [data-kind="climate"][data-effect="heat"]{color:#ffc181;border-color:#ed9d54}
+#homeView [data-kind="fan"][data-running="true"] .fan-blades{transform-origin:12px 12px;animation:device-fan var(--fan-period,1.8s) linear infinite}
+@keyframes device-fan{to{transform:rotate(360deg)}}
+.climate-reading{position:absolute;left:50%;bottom:calc(100% + 5px);transform:translateX(-50%);white-space:nowrap;padding:3px 6px;border-radius:7px;background:#152733ed;border:1px solid #658a9c80;font-size:11px;line-height:1.1;color:#e0f5ff;font-variant-numeric:tabular-nums;pointer-events:none}
+.climate-reading[data-source="target"],.climate-reading[data-source="range"]{border-style:dashed}
+@media(prefers-reduced-motion:reduce){.device-airflow path,#homeView [data-kind="fan"][data-running="true"] .fan-blades{animation:none}}

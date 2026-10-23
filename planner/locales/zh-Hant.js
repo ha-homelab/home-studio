@@ -698,4 +698,9 @@ export default {
   "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Decorative only. Motion pauses when hidden or reduced motion is preferred.",
   "Add garden area": "Add garden area",
   "Garden added. Place trees, paths or animals from the Item library.": "Garden added. Place trees, paths or animals from the Item library.",
+  "model.ceiling_fan": "四葉吊扇",
+  "model.standing_fan": "立扇",
+  "model.desk_fan": "桌扇",
+  "model.wall_air_conditioner": "壁掛式冷氣",
+  "model.panel_heater": "面板式暖氣機",
 };
