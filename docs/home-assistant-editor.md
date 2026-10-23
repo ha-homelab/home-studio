@@ -56,6 +56,25 @@ For manual installation, extract the contents of **home_floorplan.zip** into
 `config/custom_components/home_floorplan`, then follow steps 3–5. Do not put
 the source-toolkit ZIP there. Keep only one installed copy of the domain.
 
+## Open at home or away
+
+Open Home Studio and 3D Home inside your usual Home Assistant address and sign
+in with your HA account. Home Studio uses that connection; it does not need a
+separate cloud account, access token, or VPN of its own.
+
+By default, HA is reachable on your home network. Away from home, first connect
+using your existing HA remote-access setup, such as Home Assistant Cloud, a VPN,
+or a configured reverse proxy. These are alternatives, not requirements to use
+together. See [Home Assistant's remote-access guide](https://www.home-assistant.io/docs/configuration/remote/).
+The hosted drawing editor is separate and does not connect to your home.
+
+If remote access fails, first check whether another HA dashboard works using
+the same address. The editor shows a connection notice when HA disconnects.
+You can keep drawing and export JSON; Save, Publish, Load saved draft, and
+Export for Blender require the connection. Reconnecting does not replace your
+drawing or publish it automatically. If HA works but the drawing tools do not,
+follow the [panel troubleshooting steps](#troubleshooting) below.
+
 ## Your first working room
 
 For your first drawing, use a desktop browser with a mouse or trackpad. Start
@@ -194,6 +213,23 @@ The host indexes model entity references when loading or publishing a generation
 outside Home Assistant's event loop. Each request still checks current placements,
 curtain guards, and user permissions. A failed index build leaves the previous
 published generation active.
+
+## Export the current drawing for Blender
+
+Choose **Export for Blender** beside Save and Publish. The dialog starts with
+your current floor; choose another floor or **All floors**, then select **GLB
+(.glb)** or **OBJ + materials (.zip)** and choose **Download model**. Unzip an OBJ
+download and keep its OBJ and MTL files together when importing it.
+
+Export uses a fresh snapshot of the current drawing, including valid unsaved
+edits. It does not save or publish your draft. Correct any highlighted invalid
+field before exporting. Changes made while the file is being prepared are not
+included in that download; export again to include them. A failed download
+leaves the drawing available in this tab.
+
+A single-floor export starts at ground level; an all-floor export preserves
+floor elevations. GLB keeps furniture groups, while OBJ includes a material
+file. Keep **Export drawing (JSON)** for an editable Home Studio backup.
 
 ## Updates, backups, and concurrent editing
 

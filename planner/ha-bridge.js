@@ -31,7 +31,7 @@ export function memoryDraftOptions() {
     locks: { request: async (_name, operation) => operation() },
   };
 }
-export function connectHost(context, { initialize, snapshot, editState, subscribe, flush, failed, guideAction, theme }, win = window) {
+export function connectHost(context, { initialize, snapshot, currentFloor, editState, subscribe, flush, failed, guideAction, theme }, win = window) {
   const ai = createNativeAiTransport(context, win);
   let initialized = false, previous = '', previousState = '', sequence = 0;
   const send = (type, payload = {}) => win.parent.postMessage({ protocol: PROTOCOL, channel: context.channel, type, ...payload }, context.origin);
@@ -40,7 +40,8 @@ export function connectHost(context, { initialize, snapshot, editState, subscrib
     const project = snapshot(), raw = JSON.stringify(project), edits = editState(), state = JSON.stringify(edits);
     if (raw !== previous || state !== previousState || requestId) {
       previous = raw; previousState = state;
-      send('snapshot', { project, edits, sequence: ++sequence, requestId });
+      const floor = currentFloor?.();
+      send('snapshot', { project, edits, current_floor: typeof floor === 'string' && floor.length <= 128 ? floor : null, sequence: ++sequence, requestId });
     }
   };
   const receive = event => {
