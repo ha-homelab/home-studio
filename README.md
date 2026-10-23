@@ -43,10 +43,21 @@ build, YAML entry, or pasted access token**.
 [Full setup, updates, and troubleshooting](docs/home-assistant-editor.md) ·
 [Check device bindings with Dry run](docs/dry-run.md)
 
-[![Home Studio inside Home Assistant, with drawing tools and save and publish controls](docs/images/native-editor.png)](docs/home-assistant-editor.md)
+## Watch the Home Assistant workflow
 
-The screenshot uses the actual editor and host with a simulated HA connection
-and fictional devices. It contains no private home or credentials.
+[![Watch Home Studio: room photo, AI draft, manual editing, entity linking, and publishing inside Home Assistant](docs/media/native-ha-workflow-preview.gif)](https://ha-homelab.github.io/home-studio/#native-ha-demo)
+
+**[Watch the full video with English captions](https://ha-homelab.github.io/home-studio/#native-ha-demo).**
+Start with a room photo and measurements, review a real AI proposal, then refine
+it by hand: resize the room, drag items in 2D and 3D, use grid snapping or hold
+**Alt** for precise placement, and adjust height. Link Home Assistant entities,
+**Save draft**, and **Publish to 3D Home** without leaving HA.
+
+AI is an optional starting point. Check its dimensions and placements before
+publishing; you can also draw everything yourself. Your saved draft stays
+separate from the view your household uses.
+
+The walkthrough uses [v0.10.1-beta.6](https://github.com/ha-homelab/home-studio/releases/tag/v0.10.1-beta.6). Enable pre-release versions in HACS to try this build.
 
 ## Make it your home
 

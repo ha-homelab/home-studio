@@ -34,8 +34,15 @@ FUZZ_REPLAY_FILES = (
     *BINARY_REPLAY_SEEDS,
 )
 
+WEBSITE_MEDIA_FILES = (
+    'docs/media/native-ha-workflow.mp4',
+    'docs/media/native-ha-workflow-poster.jpg',
+    'docs/media/native-ha-workflow-preview.gif',
+    'docs/media/native-ha-workflow.en.vtt',
+)
 SITE_FILES = (
     'index.html', 'site.css', 'docs/images/native-editor.png', 'privacy.html', 'install.html', 'ai-setup.html', '404.html', '.nojekyll',
+    *WEBSITE_MEDIA_FILES,
     'planner/index.html', 'planner/editor.css', 'planner/editor.js', 'planner/floor-navigator.js', 'planner/floor-navigator.css', 'planner/render-capacity.js', 'planner/interaction-render.js', 'planner/environment.js',
     'planner/i18n.js', 'planner/validation.js', 'planner/locales/index.js',
     'planner/ha-bridge.js', 'planner/draft-storage.js', 'planner/inspector-dom.js', 'planner/onboarding.js', *(f'planner/examples/{name}.js' for name in ('practice', 'decor', 'patterns', 'garage')),
@@ -54,6 +61,9 @@ SITE_FILES = (
     'planner/guide-assets/12-ai-review.jpg',
     'vendor/three.module.min.js', 'vendor/THREE-LICENSE.txt',
 )
+# The HA host and loopback companion open planner/index.html directly. Keep
+# the website landing page and its promotional media out of both editor bundles.
+EDITOR_FILES = tuple(name for name in SITE_FILES if name not in ('index.html', *WEBSITE_MEDIA_FILES))
 REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'THIRD_PARTY_NOTICES.md',
               'docs/closed-build.md', '.closed-build-policy.json', 'requirements-closed-build.txt',
               '.github/workflows/closed-build.yml', 'docker/closed-worker.Dockerfile',
@@ -180,7 +190,7 @@ class Links(HTMLParser):
             if attrs['id'] in self.ids:
                 raise ValueError(f"Duplicate HTML id: {attrs['id']}")
             self.ids.add(attrs['id'])
-        for key in ('src', 'href'):
+        for key in ('src', 'href', 'poster'):
             if attrs.get(key):
                 self.links.append((tag, key, attrs[key]))
 
@@ -194,6 +204,21 @@ def regular_file(root, relative):
     return path
 
 
+def validate_website_media(path):
+    """Bound the reviewed demo files; video/image content still needs visual review."""
+    limits = {'.mp4': 90 * 1024 * 1024, '.gif': 12 * 1024 * 1024,
+              '.jpg': 2 * 1024 * 1024, '.vtt': 256 * 1024}
+    if not 0 < path.stat().st_size <= limits[path.suffix]:
+        raise ValueError(f'Website media exceeds its size bound: {path.name}')
+    with path.open('rb') as stream:
+        header = stream.read(32)
+    valid = {'.mp4': header[4:8] == b'ftyp', '.gif': header[:6] in (b'GIF87a', b'GIF89a'),
+             '.jpg': header[:3] == b'\xff\xd8\xff',
+             '.vtt': bool(re.match(rb'(?:\xef\xbb\xbf)?WEBVTT(?:[ \t].*)?\r?\n', header))}
+    if not valid[path.suffix]:
+        raise ValueError(f'Unexpected website media format: {path.name}')
+
+
 def validate(root):
     root = root.resolve()
     documents = {}
@@ -203,6 +228,10 @@ def validate(root):
             if path.read_bytes() != BINARY_REPLAY_SEEDS[relative]:
                 raise ValueError(f'Unexpected binary replay seed: {relative}')
             continue
+        if relative in WEBSITE_MEDIA_FILES:
+            validate_website_media(path)
+            if path.suffix != '.vtt':
+                continue
         if path.suffix == '.jpg' or relative in ('docs/images/dashboard-media-example.png', 'docs/images/native-editor.png', 'docs/images/garden-surroundings.png'):
             continue
         text = path.read_text(encoding='utf-8')
@@ -219,7 +248,7 @@ def validate(root):
                  'ai/photo-worker.js', 'ai/photo-processing.js', 'ai/draft.js', 'ai/json.js'}
     allowed = json.loads(regular_file(root, 'ai_companion/assets.json').read_text())
     if (not isinstance(allowed, list) or not all(isinstance(name, str) for name in allowed)
-            or len(allowed) != len(set(allowed)) or set(allowed) != set(SITE_FILES) | ai_assets):
+            or len(allowed) != len(set(allowed)) or set(allowed) != set(EDITOR_FILES) | ai_assets):
         raise ValueError('Companion asset allowlist must exactly match reviewed UI assets')
     if ai_assets & set(SITE_FILES):
         raise ValueError('AI network modules must not be published on the shared Pages origin')

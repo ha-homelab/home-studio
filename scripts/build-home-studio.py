@@ -57,7 +57,7 @@ def bundle_component(source_root, destination):
         copy_file(name, destination / "runtime" / name)
     for name in ("runtime/__init__.py", "runtime/planner/__init__.py", "runtime/scripts/__init__.py"):
         (destination / name).write_text('"""Build-time bundled public Home Studio runtime."""\n', encoding="utf-8")
-    public_files = tuple(sorted(set(inventory.SITE_FILES + AI_EDITOR_FILES)))
+    public_files = tuple(sorted(set(inventory.EDITOR_FILES + AI_EDITOR_FILES)))
     for name in public_files:
         copy_file(name, destination / "static/studio" / name)
     (destination / "studio-files.json").write_text(json.dumps(public_files) + "\n", encoding="utf-8")
