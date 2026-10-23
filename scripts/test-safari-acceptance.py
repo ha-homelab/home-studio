@@ -32,18 +32,18 @@ spec.loader.exec_module(native)
 SESSION_START_BUDGET_MS = 60000
 PREPARATION_BUDGET_MS = 60000
 
-# AppKit reports launch completion without Apple Events, accessibility access,
-# or a WebDriver session. The Python subprocess timeout bounds this readiness
-# wait together with the preceding Launch Services call.
+# AppKit reports launch completion and activation without Apple Events,
+# accessibility access, or a WebDriver session. The subprocess timeout bounds
+# this readiness wait together with the preceding Launch Services call.
 SAFARI_READY_SCRIPT = '''
 ObjC.import('AppKit');
 while (true) {
     var apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.Safari');
     if (apps.count) {
         var app = apps.objectAtIndex(0);
-        if (app.isFinishedLaunching && !app.isTerminated) {
+        if (app.isFinishedLaunching && app.isActive && !app.isTerminated) {
             JSON.stringify({bundleId: 'com.apple.Safari', finishedLaunching: true,
-                            processIdentifier: Number(app.processIdentifier)});
+                            active: true, processIdentifier: Number(app.processIdentifier)});
             break;
         }
     }
@@ -78,7 +78,8 @@ def prepare_hosted_safari(output):
                        'Safari preparation requires a disposable GitHub-hosted macOS runner')
         record['phase'] = 'launching-safari'
         save()
-        subprocess.run(['/usr/bin/open', '-g', '-b', 'com.apple.Safari', 'about:blank'],
+        # Native pointer actions need a foreground browser on the hosted desktop.
+        subprocess.run(['/usr/bin/open', '-b', 'com.apple.Safari', 'about:blank'],
                        check=True, capture_output=True, text=True, timeout=remaining())
         record['phase'] = 'waiting-for-application-ready'
         save()
@@ -89,8 +90,9 @@ def prepare_hosted_safari(output):
         application = record['application']
         native.require(application.get('bundleId') == 'com.apple.Safari'
                        and application.get('finishedLaunching') is True
+                       and application.get('active') is True
                        and type(application.get('processIdentifier')) is int
-                       and application['processIdentifier'] > 0, 'Safari did not confirm launch completion')
+                       and application['processIdentifier'] > 0, 'Safari did not confirm foreground launch completion')
         record.update(status='passed', phase='completed')
     except Exception as error:
         record.update(status='failed', error=str(error), traceback=traceback.format_exc(),

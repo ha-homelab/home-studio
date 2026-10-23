@@ -615,10 +615,12 @@ of preemption at exactly 60 seconds; the unchanged outer watchdog also remains
 in force.
 
 The disposable GitHub-hosted macOS job explicitly prepares Safari once before
-these cases: Launch Services opens `about:blank`, then AppKit must report that
-Safari has finished launching. Both operations share a separate 60-second
-preparation budget recorded in `preparation.json` and the summary. Preparation
-failure stops the run before any test case; it never creates or retries a
+these cases: Launch Services opens `about:blank` in the foreground, then AppKit
+must report that Safari has finished launching and is active. Background launch
+can leave native pointer input ineffective even though the page renders. The
+recorded application readiness includes `active: true`. Both operations share a
+separate 60-second preparation budget recorded in `preparation.json` and the
+summary. Preparation failure stops the run before any test case; it never creates or retries a
 WebDriver session or visits Home Studio. This addresses the observed first-launch
 SafariDriver timeout while preserving each case's single session request,
 180-second watchdog, fresh automation window, and application cold-load checks.

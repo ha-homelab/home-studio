@@ -319,7 +319,7 @@ class SessionStartupTests(unittest.TestCase):
 
 class HostedPreparationTests(unittest.TestCase):
     hosted = {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted'}
-    ready = {'bundleId': 'com.apple.Safari', 'finishedLaunching': True, 'processIdentifier': 123}
+    ready = {'bundleId': 'com.apple.Safari', 'finishedLaunching': True, 'active': True, 'processIdentifier': 123}
 
     def test_guard_rejects_local_self_hosted_and_other_platforms_before_launch(self):
         for platform, environment in (('darwin', {}), ('darwin', {'GITHUB_ACTIONS': 'true'}),
@@ -353,13 +353,13 @@ class HostedPreparationTests(unittest.TestCase):
         self.assertEqual(result['application'], self.ready)
         self.assertEqual(result['durationMs'], 59999)
         self.assertEqual([kwargs['timeout'] for _, kwargs in commands], [60, 40])
-        self.assertEqual(commands[0][0], ['/usr/bin/open', '-g', '-b', 'com.apple.Safari', 'about:blank'])
+        self.assertEqual(commands[0][0], ['/usr/bin/open', '-b', 'com.apple.Safari', 'about:blank'])
         self.assertEqual(commands[1][0], ['/usr/bin/osascript', '-l', 'JavaScript', '-e', safari.SAFARI_READY_SCRIPT])
         self.assertTrue(all(kwargs['check'] for _, kwargs in commands))
         session.assert_not_called()
 
     def test_preparation_failure_and_late_completion_stay_failed_with_evidence(self):
-        for failure in ('launch-error', 'launch-timeout', 'readiness-timeout', 'invalid-json', 'not-ready', 'late'):
+        for failure in ('launch-error', 'launch-timeout', 'readiness-timeout', 'invalid-json', 'not-ready', 'inactive', 'late'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
                 now, commands = [0.0], []
                 def run(command, **kwargs):
@@ -371,7 +371,8 @@ class HostedPreparationTests(unittest.TestCase):
                         raise safari.subprocess.TimeoutExpired(command, kwargs['timeout'])
                     now[0] = 10 if len(commands) == 1 else 60 if failure == 'late' else 20
                     return Mock(stdout='invalid' if failure == 'invalid-json' else
-                                json.dumps({**self.ready, 'finishedLaunching': failure != 'not-ready'}))
+                                json.dumps({**self.ready, 'finishedLaunching': failure != 'not-ready',
+                                            'active': failure != 'inactive'}))
                 with patch.object(safari.sys, 'platform', 'darwin'), \
                      patch.dict(safari.os.environ, self.hosted, clear=True), \
                      patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
