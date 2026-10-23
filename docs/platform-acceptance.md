@@ -628,6 +628,16 @@ The flag is rejected outside GitHub-hosted macOS, and local runs omit it so they
 do not open ordinary Safari tabs. Launch completion is only a prerequisite;
 the subsequent WebDriver session and every application assertion must still pass.
 
+The AppKit readiness wait advances the main run loop: mutable
+[`NSRunningApplication` properties](https://developer.apple.com/documentation/appkit/nsrunningapplication)
+remain cached until that loop runs, so JXA `delay()` alone cannot reliably observe
+activation. Preparation retains state changes and the last observed launch,
+activation, termination and process flags even on timeout. Each WebDriver session
+then selects its own current window using `GET /window` and `POST /window` before
+application navigation. The report preserves the actual `document.hasFocus()`
+and visibility state after selection and on failure; selecting a window does not
+retry a session or grant acceptance credit to a missed pointer interaction.
+
 Every viewer report and cycle sample records `loadBudgetMs: 60000`. Samples also
 record monotonic `loadMs` and `loadCompleted`; a pending or failed cold load is
 saved with `loadCompleted: false`, and detected expiry sets `loadTimedOut: true`.

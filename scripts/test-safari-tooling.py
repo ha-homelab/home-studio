@@ -154,6 +154,21 @@ class ColdSafariTransportTests(unittest.TestCase):
 
 
 class SessionStartupTests(unittest.TestCase):
+    def test_selects_only_owned_window_and_keeps_actual_focus_evidence(self):
+        client = safari.SafariWebDriver('http://fixture')
+        client.session_id = 'owned'
+        focus = {'documentFocused': False, 'visibilityState': 'visible'}
+        with patch.object(client, 'request', side_effect=['owned-window', None, focus]) as request:
+            self.assertEqual(client.select_current_window(), {'handle': 'owned-window', **focus})
+        self.assertEqual([(call.args[0], call.args[1]) for call in request.call_args_list],
+                         [('GET', '/session/owned/window'), ('POST', '/session/owned/window'),
+                          ('POST', '/session/owned/execute/sync')])
+        self.assertEqual(request.call_args_list[1].args[2], {'handle': 'owned-window'})
+        with patch.object(client, 'request', return_value=None) as request:
+            with self.assertRaisesRegex(AssertionError, 'automation window'):
+                client.select_current_window()
+        self.assertEqual(request.call_count, 1)
+
     def test_session_completion_boundary_outer_cap_and_single_attempt(self):
         for outer, elapsed, succeeds in ((180, 59.999, True), (180, 59.9999999, True),
                                           (180, 60, False),
@@ -254,6 +269,10 @@ class SessionStartupTests(unittest.TestCase):
                         if route == '/session':
                             now[0] = elapsed
                             return {'sessionId': 'owned', 'capabilities': {'browserName': 'Safari'}}
+                        if route == '/session/owned/window' and method == 'GET':
+                            return 'owned-window'
+                        if route.endswith('/execute/sync'):
+                            return {'documentFocused': True, 'visibilityState': 'visible'}
                         return None
                     driver = Mock(); driver.poll.return_value = None
                     with contextlib.ExitStack() as stack:
@@ -283,6 +302,8 @@ class SessionStartupTests(unittest.TestCase):
                     if elapsed < 60:
                         timeout_call = next(c for c in calls if c[1].endswith('/timeouts'))
                         self.assertEqual(timeout_call[2:], (30, {'script':30000, 'pageLoad':30000, 'implicit':0}))
+                        self.assertEqual(record['windowFocus'], {'handle': 'owned-window', 'documentFocused': True, 'visibilityState': 'visible'})
+                        self.assertEqual(sum(method == 'POST' and route == '/session/owned/window' for method, route, *_ in calls), 1)
                     else:
                         self.assertEqual(record['samples'], [])
                     self.assertIn(('DELETE', '/session/owned', 30, None), calls)
@@ -340,7 +361,7 @@ class HostedPreparationTests(unittest.TestCase):
         def run(command, **kwargs):
             commands.append((command, kwargs))
             now[0] = 20 if len(commands) == 1 else 59.999
-            return Mock(stdout=json.dumps(self.ready))
+            return Mock(stdout=json.dumps(self.ready), stderr=json.dumps(self.ready))
         with tempfile.TemporaryDirectory() as temp, patch.object(safari.sys, 'platform', 'darwin'), \
              patch.dict(safari.os.environ, self.hosted, clear=True), \
              patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
@@ -351,12 +372,32 @@ class HostedPreparationTests(unittest.TestCase):
         self.assertEqual(result, saved)
         self.assertEqual(result['status'], 'passed')
         self.assertEqual(result['application'], self.ready)
+        self.assertEqual(result['lastApplication'], self.ready)
         self.assertEqual(result['durationMs'], 59999)
         self.assertEqual([kwargs['timeout'] for _, kwargs in commands], [60, 40])
         self.assertEqual(commands[0][0], ['/usr/bin/open', '-b', 'com.apple.Safari', 'about:blank'])
         self.assertEqual(commands[1][0], ['/usr/bin/osascript', '-l', 'JavaScript', '-e', safari.SAFARI_READY_SCRIPT])
         self.assertTrue(all(kwargs['check'] for _, kwargs in commands))
         session.assert_not_called()
+
+    def test_native_readiness_pumps_the_runloop_and_retains_timeout_states(self):
+        self.assertIn('$.NSRunLoop.mainRunLoop.runUntilDate(', safari.SAFARI_READY_SCRIPT)
+        self.assertNotIn('    delay(', safari.SAFARI_READY_SCRIPT)
+        waiting = {**self.ready, 'active': False}
+        diagnostic = json.dumps(waiting) + '\n'
+        for stderr in (diagnostic, diagnostic.encode()):
+            with self.subTest(stderr_type=type(stderr)), tempfile.TemporaryDirectory() as temp, \
+                 patch.object(safari.sys, 'platform', 'darwin'), \
+                 patch.dict(safari.os.environ, self.hosted, clear=True), \
+                 patch.object(safari.subprocess, 'run', side_effect=[Mock(),
+                     safari.subprocess.TimeoutExpired('osascript', 59, stderr=stderr)]) as command:
+                result = safari.prepare_hosted_safari(Path(temp))
+                self.assertEqual(result['status'], 'failed')
+                self.assertTrue(result['timedOut'])
+                self.assertEqual(result['lastApplication'], waiting)
+                self.assertEqual(result['applicationStates'], [waiting])
+                self.assertEqual(json.loads((Path(temp) / 'preparation.json').read_text()), result)
+                self.assertEqual(command.call_count, 2)
 
     def test_preparation_failure_and_late_completion_stay_failed_with_evidence(self):
         for failure in ('launch-error', 'launch-timeout', 'readiness-timeout', 'invalid-json', 'not-ready', 'inactive', 'late'):
@@ -372,7 +413,7 @@ class HostedPreparationTests(unittest.TestCase):
                     now[0] = 10 if len(commands) == 1 else 60 if failure == 'late' else 20
                     return Mock(stdout='invalid' if failure == 'invalid-json' else
                                 json.dumps({**self.ready, 'finishedLaunching': failure != 'not-ready',
-                                            'active': failure != 'inactive'}))
+                                            'active': failure != 'inactive'}), stderr='')
                 with patch.object(safari.sys, 'platform', 'darwin'), \
                      patch.dict(safari.os.environ, self.hosted, clear=True), \
                      patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \

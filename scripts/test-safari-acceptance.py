@@ -37,17 +37,30 @@ PREPARATION_BUDGET_MS = 60000
 # this readiness wait together with the preceding Launch Services call.
 SAFARI_READY_SCRIPT = '''
 ObjC.import('AppKit');
+var previousState = '';
 while (true) {
     var apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.Safari');
+    var state = {bundleId: 'com.apple.Safari', running: Boolean(apps.count),
+                 finishedLaunching: false, active: false, terminated: false, processIdentifier: null};
     if (apps.count) {
         var app = apps.objectAtIndex(0);
-        if (app.isFinishedLaunching && app.isActive && !app.isTerminated) {
-            JSON.stringify({bundleId: 'com.apple.Safari', finishedLaunching: true,
-                            active: true, processIdentifier: Number(app.processIdentifier)});
-            break;
-        }
+        state.finishedLaunching = Boolean(app.isFinishedLaunching);
+        state.active = Boolean(app.isActive);
+        state.terminated = Boolean(app.isTerminated);
+        state.processIdentifier = Number(app.processIdentifier);
     }
-    delay(0.1);
+    var serialized = JSON.stringify(state);
+    if (serialized !== previousState) {
+        console.log(serialized);
+        previousState = serialized;
+    }
+    if (state.finishedLaunching && state.active && !state.terminated) {
+        serialized;
+        break;
+    }
+    // NSRunningApplication caches mutable properties until the main run loop
+    // advances. JXA delay() sleeps without servicing its common-mode sources.
+    $.NSRunLoop.mainRunLoop.runUntilDate($.NSDate.dateWithTimeIntervalSinceNow(0.1));
 }
 '''
 
@@ -71,6 +84,24 @@ def prepare_hosted_safari(output):
             raise TimeoutError('Safari preparation exceeded its 60-second deadline')
         return value
 
+    def keep_readiness(stderr):
+        if not stderr:
+            return
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode('utf-8', errors='replace')
+        record['stderr'] = stderr[-16384:]
+        states = []
+        for line in record['stderr'].splitlines():
+            try:
+                state = json.loads(line)
+                if isinstance(state, dict) and state.get('bundleId') == 'com.apple.Safari':
+                    states.append(state)
+            except ValueError:
+                pass
+        if states:
+            record['applicationStates'] = states[-32:]
+            record['lastApplication'] = states[-1]
+
     save()
     try:
         native.require(sys.platform == 'darwin' and os.environ.get('GITHUB_ACTIONS') == 'true'
@@ -85,6 +116,7 @@ def prepare_hosted_safari(output):
         save()
         result = subprocess.run(['/usr/bin/osascript', '-l', 'JavaScript', '-e', SAFARI_READY_SCRIPT],
                                 check=True, capture_output=True, text=True, timeout=remaining())
+        keep_readiness(result.stderr)
         remaining()  # A completed but late probe must not admit the test cases.
         record['application'] = json.loads(result.stdout)
         application = record['application']
@@ -97,8 +129,8 @@ def prepare_hosted_safari(output):
     except Exception as error:
         record.update(status='failed', error=str(error), traceback=traceback.format_exc(),
                       timedOut=isinstance(error, (TimeoutError, subprocess.TimeoutExpired)))
-        if isinstance(error, subprocess.CalledProcessError):
-            record['stderr'] = error.stderr[-4096:] if error.stderr else ''
+        if isinstance(error, (subprocess.CalledProcessError, subprocess.TimeoutExpired)):
+            keep_readiness(error.stderr)
     finally:
         record['durationMs'] = (time.monotonic() - started) * 1000
         save()
@@ -192,6 +224,14 @@ class SafariWebDriver(native.Marionette):
             self.request('DELETE', '/session/' + self.session_id)
             self.session_id = None
 
+    def select_current_window(self):
+        # Select only the automation session's current window. A normal Safari
+        # preparation window is outside this session and must not receive input.
+        handle = self.call('WebDriver:GetWindowHandle')
+        native.require(isinstance(handle, str) and bool(handle), 'Safari did not return its automation window')
+        self.call('WebDriver:SwitchToWindow', {'handle': handle})
+        return {'handle': handle, **self.execute('return {documentFocused:document.hasFocus(),visibilityState:document.visibilityState};')}
+
     def call(self, name, data=None):
         native.require(self.session_id is not None, 'A Safari session is required')
         routes = {
@@ -203,6 +243,8 @@ class SafariWebDriver(native.Marionette):
             'WebDriver:ExecuteAsyncScript': ('POST', '/execute/async'),
             'WebDriver:SetTimeouts': ('POST', '/timeouts'),
             'WebDriver:SetWindowRect': ('POST', '/window/rect'),
+            'WebDriver:GetWindowHandle': ('GET', '/window'),
+            'WebDriver:SwitchToWindow': ('POST', '/window'),
         }
         if name not in routes:
             raise ValueError(f'Unsupported shared WebDriver operation: {name}')
@@ -298,6 +340,7 @@ def run_case(output, name, driver_path):
             save()
             client.call('WebDriver:SetTimeouts', {'script': 30000, 'pageLoad': 30000, 'implicit': 0})
             client.call('WebDriver:SetWindowRect', {'width': 1440, 'height': 1000})
+            record['windowFocus'] = client.select_current_window()
             record['userAgent'] = client.execute('return navigator.userAgent;')
             record['phase'] = 'application'
             save()
@@ -310,7 +353,7 @@ def run_case(output, name, driver_path):
             record.update(status='failed', error=str(error), traceback=traceback.format_exc())
             if client and client.session_id:
                 try:
-                    record['failureState'] = client.execute('return {path:location.pathname,viewer:window.__browserStability||null,planner:window.__plannerStats||null};')
+                    record['failureState'] = client.execute('return {path:location.pathname,documentFocused:document.hasFocus(),visibilityState:document.visibilityState,viewer:window.__browserStability||null,planner:window.__plannerStats||null};')
                     client.screenshot(output / 'failure.png')
                 except Exception as capture_error:
                     record['captureError'] = str(capture_error)
