@@ -185,7 +185,7 @@ class ExportTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(self.state['export_busy'])
             finish.set()
             with self.assertRaises(asyncio.CancelledError):
-                await pending
+                await asyncio.wait_for(pending, timeout=5)
             self.assertFalse(self.state['export_busy'])
         entered.clear(); finish.clear()
         user = support.Connection()
@@ -194,7 +194,7 @@ class ExportTests(unittest.IsolatedAsyncioTestCase):
             await entered.wait()
             user.user.is_admin = False
             finish.set()
-            await pending
+            await asyncio.wait_for(pending, timeout=5)
         self.assertEqual(user.errors[0][0], 'unauthorized')
         self.assertFalse(user.results)
 
