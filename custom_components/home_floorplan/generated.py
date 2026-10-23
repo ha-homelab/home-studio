@@ -19,7 +19,7 @@ import shutil
 from types import MappingProxyType
 import uuid
 
-from .native import (GENERATION, MAX_NATIVE_TRIANGLES, NativeError, NativeProject,
+from .native import (GENERATION, MAX_NATIVE_TRIANGLES, MAX_GENERATED_BYTES, NativeError, NativeProject,
                      compiler, load_models, validate_draft)
 from .site import validate_floor_inventory
 from .validation import validate_inventory
@@ -459,6 +459,45 @@ class GeneratedProject(NativeProject):
         """Advance the import seed only after the legacy Store acknowledged it."""
         self.document = document
         self.baseline_project = copy.deepcopy(document["project"])
+
+    def _export_floors(self, runtime, project, floor_id):
+        _check_architecture(project, self.baseline_project)
+        floors = [floor for floor in project['floors'] if floor_id is None or floor['id'] == floor_id]
+        if not floors:
+            raise NativeError('invalid_floor', 'Choose a floor in the current drawing.')
+        # A saved baseline is immutable and survives later publications. Before
+        # the first save, verify the installed source without creating a draft.
+        if self.document['baseline'] is None:
+            assets = self.component_root / 'assets'
+            expected = self._source_hashes
+        else:
+            baseline = self.root / 'baselines' / self.document['baseline']
+            assets = baseline / 'assets'
+            expected = json.loads((baseline / 'source.json').read_text(encoding='utf-8'))['hashes']
+        files, source_bytes = 0, 0
+        for path in assets.rglob('*'):
+            if path.is_file():
+                files += 1
+                source_bytes += path.stat().st_size
+                if files > 4096 or source_bytes > MAX_GENERATED_BYTES:
+                    raise NativeError('invalid_export', 'The original model exceeds the export source size limit.')
+        if _hashes(assets) != expected:
+            raise NativeError('source_changed', 'The original home changed. Reload before exporting.')
+        originals = {floor['id']: floor for floor in self.baseline_project['floors']}
+        result = []
+        for floor in floors:
+            base = json.loads((assets / floor['id'] / 'model-data.json').read_text(encoding='utf-8'))
+            # Some commissioned homes keep richer render geometry in the
+            # embedded model than in their metadata JSON. That is the trusted
+            # geometry actually shown by the original viewer.
+            _, embedded = _embedded((assets / floor['id'] / 'index.html').read_text(encoding='utf-8'))
+            base = {**base, **embedded}
+            original = originals[floor['id']]
+            additions = _additions(runtime, project, floor, original)
+            model = _merge_model(base, floor, original, additions)
+            result.append(runtime.export_floor(model, floor, reference_items=base.get('inventory', original['items']),
+                                               elevated=floor_id is None))
+        return result
 
     def _build(self, project, generation):
         self._validate(project)
