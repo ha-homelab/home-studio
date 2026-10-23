@@ -28,6 +28,15 @@ const event = (x = 0, y = 0) => ({clientX: x, clientY: y, button: 0, pointerId: 
 const scheduler = section('let canvasFrame =', 'let startupMessage =');
 
 (async () => {
+  const snapControls = {snap: {checked: true}, 'snap-step': {value: '0.05'}};
+  const precision = vm.createContext({$: id => snapControls[id], round: value => Math.round(value * 1000) / 1000});
+  vm.runInContext(section('const snap =', '// Keep tap/click selection'), precision);
+  assert.equal(vm.runInContext('snap(.075)', precision), .1, 'Fine-grid midpoint rounds to the next 5 cm line');
+  assert.equal(vm.runInContext('snap(.123, true)', precision), .123, 'Alt bypass preserves millimetre precision');
+  snapControls.snap.checked = false;
+  assert.equal(vm.runInContext('snap(.123)', precision), .123, 'The legacy checkbox still disables snapping');
+  snapControls.snap.checked = true; snapControls['snap-step'].value = '0.25';
+  assert.equal(vm.runInContext('snap(.125)', precision), .25, 'The default quarter-metre grid is unchanged');
   let scheduledPlans = 0, scheduledPreviews = 0;
   const scheduling = vm.createContext({document: {hidden: false}, view: 'split',
     renderPlan() { scheduling.cancelCanvasRender(); scheduledPlans++; },
@@ -352,6 +361,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
 
   // Real pointer handlers: exact endpoint math, one clone per gesture, and undo/cancel.
   for (const kind of ['rooms', 'walls', 'items', 'openings']) {
+    const pointerEvent = (x, y) => event(x * 100, y * 100); // 100 screen pixels per metre.
     const original = model.clone(project), snapshot = JSON.stringify(original), plan = surface();
     const captures = new Set();
     plan.setPointerCapture = id => captures.add(id);
@@ -369,7 +379,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
       orbit: { pointers: new Map() }, project: original, activeFloorId: f.id, selection: null, connectedRoomMove: null, moveRoom, tool: 'select', view: 'plan', drag: null, previewEdit: null,
       planCanvas: plan, spaceHeld: false, previewDirty: false, map: {x: 0, y: 0},
       clone(value) { clones++; return model.clone(value); }, round: model.round, distance: model.distance,
-      snap: value => value, localPoint: e => [e.clientX, e.clientY], toWorld: point => point,
+      snap: value => value, localPoint: e => [e.clientX / 100, e.clientY / 100], toWorld: point => point,
       roomHandleAt: () => -1,
       hitTest: () => ({kind, id: original.floors[0][kind][0].id}),
       floor: () => p.project.floors[0], selected: () => p.selection && p.project.floors[0][p.selection.kind].find(o => o.id === p.selection.id),
@@ -378,18 +388,18 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
       renderPlan() { p.cancelCanvasRender(); planDraws++; paintedProject = model.clone(p.project); paintedSelection = model.clone(p.selection); },
       renderPreview() {}, updateFloorNavigator() { thumbnailUpdates++; }, status() {}, save() { saves++; }, t: x => x,
       validateProject: model.validateProject, serializeProject: JSON.stringify, historyPush: value => history.push(value),
-      document: {hidden: false}, zoomPlan() {}, history, future: [],
+      document: {hidden: false}, window: {devicePixelRatio: 1}, zoomPlan() {}, history, future: [],
     });
-    const gestureClock = frames(p); vm.runInContext(scheduler + section('const protectedRoom =', 'const snap =') + section('function applyRoomDrag(', 'function roomCorners(') + section('function setSelection(', 'function field(') + section("planCanvas.addEventListener('pointerdown'", '// On-demand 3D rendering.'), p);
-    plan.events.pointerdown(event(1, 1));
+    const gestureClock = frames(p); vm.runInContext(scheduler + section('function itemDragStart(', 'function applyRoomDrag(') + section('const protectedRoom =', 'const snap =') + section('function applyRoomDrag(', 'function roomCorners(') + section('function setSelection(', 'function field(') + section("planCanvas.addEventListener('pointerdown'", '// On-demand 3D rendering.'), p);
+    plan.events.pointerdown(pointerEvent(1, 1));
     assert.equal(uiDraws, 0, 'Selecting an existing object retains the floor and object list nodes');
     assert.equal(inspectorDraws, 1, 'A changed selection updates its inspector once');
     assert.deepEqual(buttons.map(b => b.attributes['aria-pressed']), buttons.map(b => String(b.dataset.objectKind === kind)), 'The retained list marks only the selected object');
-    for (let i = 1; i <= 100; i++) plan.events.pointermove(event(1 + i / 100, 1));
+    for (let i = 1; i <= 100; i++) plan.events.pointermove(pointerEvent(1 + i / 100, 1));
     const ownedDrag = p.drag;
-    plan.events.pointerdown({...event(30, 30), pointerId: 2, isPrimary: false});
-    plan.events.pointermove({...event(40, 40), pointerId: 2});
-    for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) plan.events[type]({...event(40, 40), pointerId: 2});
+    plan.events.pointerdown({...pointerEvent(30, 30), pointerId: 2, isPrimary: false});
+    plan.events.pointermove({...pointerEvent(40, 40), pointerId: 2});
+    for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) plan.events[type]({...pointerEvent(40, 40), pointerId: 2});
     assert.equal(p.drag, ownedDrag, 'A second pointer cannot replace or finish the owning drag');
     assert.equal(p.drag.original, original, 'A second touch cannot replace the immutable undo snapshot');
     assert.equal(saves, 0); assert.equal(history.length, 0);
@@ -403,7 +413,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     if (kind === 'openings') assert.equal(moved.offset_m, base.offset_m + 1);
     assert.equal(gestureClock.pending.size, 1);
     assert.equal(thumbnailUpdates, 0, 'Dragging keeps floor thumbnails cached until commit');
-    plan.events.pointerup(event(2, 1)); assert.equal(saves, 1, kind + ' movement commits once'); assert.equal(history[0], original);
+    plan.events.pointerup(pointerEvent(2, 1)); assert.equal(saves, 1, kind + ' movement commits once'); assert.equal(history[0], original);
     assert.equal(captures.size, 0, 'Successful commit releases pointer capture');
     assert.equal(thumbnailUpdates, 1, 'The committed geometry updates floor thumbnails once');
     assert.equal(uiDraws, 0, 'A move does not rebuild unchanged floor or object lists');
@@ -414,21 +424,21 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     assert.deepEqual(paintedProject, model.clone(p.project), 'A movement paint queued across pointerup uses the committed project');
     assert.deepEqual(paintedSelection, model.clone(p.selection), 'The final paint keeps the selected outline');
     const drawsBeforeClick = planDraws, inspectorBeforeClick = inspectorDraws;
-    plan.events.pointerdown(event(1, 1)); plan.events.pointerup(event(1, 1)); gestureClock.flush();
+    plan.events.pointerdown(pointerEvent(1, 1)); plan.events.pointerup(pointerEvent(1, 1)); gestureClock.flush();
     assert.equal(planDraws, drawsBeforeClick, 'Clicking the current selection needs no new paint');
     assert.equal(inspectorDraws, inspectorBeforeClick, 'Clicking the current selection retains the inspector');
     p.setSelection(null); gestureClock.flush();
     assert(buttons.every(b => b.attributes['aria-pressed'] === 'false'), 'Clearing selection clears the retained list markers');
     assert.equal(inspectorObject, null); assert.equal(paintedSelection, null, 'Clearing selection removes its painted outline');
     p.setSelection({kind, id: original.floors[0][kind][0].id}); gestureClock.flush();
-    const committed = p.project; plan.events.pointerdown(event(1, 1)); plan.events.pointermove(event(2, 1));
-    plan.events.pointercancel(event(2, 1)); assert.equal(p.project, committed); assert.equal(saves, 1, 'Cancel does not save or add undo history');
+    const committed = p.project; plan.events.pointerdown(pointerEvent(1, 1)); plan.events.pointermove(pointerEvent(2, 1));
+    plan.events.pointercancel(pointerEvent(2, 1)); assert.equal(p.project, committed); assert.equal(saves, 1, 'Cancel does not save or add undo history');
     assert.equal(history.length, 1);
     assert.equal(gestureClock.pending.size, 0, 'Cancellation replaces a pending moved paint with the restored project');
     assert.deepEqual(paintedProject, model.clone(committed)); assert.deepEqual(inspectorObject, model.clone(p.selected()));
-    plan.events.pointerdown(event(1, 1)); plan.events.pointermove(event(2, 1)); gestureClock.flush();
+    plan.events.pointerdown(pointerEvent(1, 1)); plan.events.pointermove(pointerEvent(2, 1)); gestureClock.flush();
     assert.notDeepEqual(paintedProject, model.clone(committed), 'The cancel fixture has already displayed its moved geometry');
-    plan.events.pointercancel(event(2, 1));
+    plan.events.pointercancel(pointerEvent(2, 1));
     assert.deepEqual(paintedProject, model.clone(committed), 'Cancellation also repaints after an intermediate movement was displayed');
     assert.deepEqual(paintedSelection, model.clone(p.selection)); assert.equal(saves, 1); assert.equal(history.length, 1);
     const lifecycle = {};
@@ -445,9 +455,9 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
       source.split('\n').find(line => line.startsWith("document.addEventListener('visibilitychange'")) +
       section("window.addEventListener('pagehide', event => {", "window.addEventListener('pageshow'"), p);
     for (const cancellation of ['lostpointercapture', 'buttons', 'blur', 'visibilitychange', 'pagehide', 'view']) {
-      plan.events.pointerdown(event(1, 1)); plan.events.pointermove(event(2, 1));
+      plan.events.pointerdown(pointerEvent(1, 1)); plan.events.pointermove(pointerEvent(2, 1));
       if (cancellation === 'lostpointercapture') plan.releasePointerCapture(1);
-      else if (cancellation === 'buttons') plan.events.pointermove({...event(2, 1), buttons: 0});
+      else if (cancellation === 'buttons') plan.events.pointermove({...pointerEvent(2, 1), buttons: 0});
       else if (cancellation === 'view') p.setView('preview');
       else {
         if (cancellation === 'visibilitychange') p.document.hidden = true;
@@ -456,21 +466,21 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
       assert.equal(p.project, committed, cancellation + ': restore the exact last committed project');
       assert.equal(p.drag, null); assert.equal(captures.size, 0);
       p.view = 'plan'; p.document.hidden = false; vm.runInContext('canvasSuspended=false;', p);
-      plan.events.pointermove(event(9, 9)); plan.events.pointerup(event(9, 9)); gestureClock.flush();
+      plan.events.pointermove(pointerEvent(9, 9)); plan.events.pointerup(pointerEvent(9, 9)); gestureClock.flush();
       assert.equal(p.project, committed, cancellation + ': later input cannot resume or commit a cancelled edit');
       assert.equal(saves, 1); assert.equal(history.length, 1);
     }
-    plan.events.pointerdown({...event(1, 1), pointerId: 2, isPrimary: false});
+    plan.events.pointerdown({...pointerEvent(1, 1), pointerId: 2, isPrimary: false});
     assert.equal(p.drag, null, 'A secondary contact already held elsewhere cannot start editing');
     vm.runInContext(section('function undo(', 'function renderUI('), p);
-    plan.events.pointerdown(event(1, 1)); plan.events.pointermove(event(2, 1));
+    plan.events.pointerdown(pointerEvent(1, 1)); plan.events.pointermove(pointerEvent(2, 1));
     p.undo(); assert.equal(p.project, original, 'Undo restores the exact original snapshot');
     assert.equal(captures.size, 0, 'Undo releases the cancelled drag');
-    plan.events.pointermove(event(9, 9)); plan.events.pointerup(event(9, 9));
+    plan.events.pointermove(pointerEvent(9, 9)); plan.events.pointerup(pointerEvent(9, 9));
     p.undo(true); assert.equal(p.project, committed, 'Redo restores the committed movement, not the interrupted drag');
     if (kind !== 'openings') {
       const savedBeforeInvalid = saves;
-      plan.events.pointerdown(event(1, 1)); plan.events.pointermove(event(301, 1)); plan.events.pointerup(event(301, 1));
+      plan.events.pointerdown(pointerEvent(1, 1)); plan.events.pointermove(pointerEvent(301, 1)); plan.events.pointerup(pointerEvent(301, 1));
       assert.equal(p.project, committed, 'Invalid movement rolls back without mutating the committed project');
       assert.equal(saves, savedBeforeInvalid);
       assert.deepEqual(paintedProject, model.clone(committed), 'Invalid movement paints the restored geometry');
@@ -484,15 +494,15 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     p.renderPreview = () => { throw Error('A hidden preview must not rebuild during a 2D drag'); };
     p.previewDirty = false;
     const beforeSnapped = p.project, savesBeforeSnapped = saves, historyBeforeSnapped = history.length;
-    plan.events.pointerdown(event(1, 1));
+    plan.events.pointerdown(pointerEvent(1, 1));
     gestureClock.flush();
     const drawsBeforeMoves = snappedDraws;
     for (let step = 1; step <= 12; step++) {
-      plan.events.pointermove(event(1 + step / 24, 1));
+      plan.events.pointermove(pointerEvent(1 + step / 24, 1));
       gestureClock.flush();
     }
     assert.equal(snappedDraws - drawsBeforeMoves, 2, kind + ' repaints only the two changed snap positions');
-    plan.events.pointerup(event(1.5, 1));
+    plan.events.pointerup(pointerEvent(1.5, 1));
     gestureClock.flush();
     assert.equal(snappedDraws - drawsBeforeMoves, 2, 'Pointerup does not redraw an already displayed endpoint');
     assert.equal(saves, savesBeforeSnapped + 1);
@@ -512,35 +522,35 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
       vm.runInContext(section('function transact(', 'async function replaceProject(') +
         section('function deleteSelection()', 'function setView('), p);
       const beforeDelete = p.project, deletedId = beforeDelete.floors[0].items[0].id;
-      plan.events.pointerdown(event(1, 1)); plan.events.pointermove(event(2, 1));
+      plan.events.pointerdown(pointerEvent(1, 1)); plan.events.pointermove(pointerEvent(2, 1));
       p.deleteSelection();
       assert.equal(p.drag, null); assert.equal(captures.size, 0, 'Deleting an item cancels its drag');
       assert.equal(history.at(-1), beforeDelete, 'Delete keeps the committed placement in undo');
       assert(!p.project.floors[0].items.some(item => item.id === deletedId));
       const afterDelete = p.project, savesAfterDelete = saves;
-      plan.events.pointermove(event(9, 9)); plan.events.pointerup(event(9, 9));
+      plan.events.pointermove(pointerEvent(9, 9)); plan.events.pointerup(pointerEvent(9, 9));
       assert.equal(p.project, afterDelete); assert.equal(saves, savesAfterDelete);
       p.undo(); assert.equal(p.project, beforeDelete, 'Undo deletion restores the original placement');
       for (const tool of ['wall', 'room']) {
         p.tool = tool; const collection = tool === 'wall' ? 'walls' : 'rooms';
         const count = p.project.floors[0][collection].length;
-        plan.events.pointerdown(event(10, 10));
-        plan.events.pointermove(event(11, 11)); plan.events.pointermove(event(12, 12));
-        plan.events.pointerup(event(12, 12));
+        plan.events.pointerdown(pointerEvent(10, 10));
+        plan.events.pointermove(pointerEvent(11, 11)); plan.events.pointermove(pointerEvent(12, 12));
+        plan.events.pointerup(pointerEvent(12, 12));
         const shape = p.project.floors[0][collection].at(-1);
         assert.equal(p.project.floors[0][collection].length, count + 1);
         assert.deepEqual(Array.from(tool === 'wall' ? shape.end : shape.polygon[2]), [12, 12],
           'Drawing commits the last pointer position even before its queued paint');
         p.tool = tool; const beforeCancel = p.project;
-        plan.events.pointerdown(event(20, 20)); plan.events.pointermove(event(22, 22)); plan.events.pointercancel(event(22, 22));
+        plan.events.pointerdown(pointerEvent(20, 20)); plan.events.pointermove(pointerEvent(22, 22)); plan.events.pointercancel(pointerEvent(22, 22));
         assert.equal(p.project, beforeCancel, 'Cancelling a new shape does not commit geometry');
         for (const nextTool of ['wall', 'door']) {
           p.tool = tool;
           const savesBeforeSwitch = saves;
-          plan.events.pointerdown(event(20, 20)); plan.events.pointermove(event(22, 22));
+          plan.events.pointerdown(pointerEvent(20, 20)); plan.events.pointermove(pointerEvent(22, 22));
           p.setTool(nextTool);
           assert.equal(p.drag, null); assert.equal(captures.size, 0);
-          plan.events.pointermove(event(24, 24)); plan.events.pointerup(event(24, 24));
+          plan.events.pointermove(pointerEvent(24, 24)); plan.events.pointerup(pointerEvent(24, 24));
           assert.equal(p.project, beforeCancel, 'Switching tools cannot turn the old gesture into a different shape');
           assert.equal(saves, savesBeforeSwitch);
         }

@@ -1,4 +1,16 @@
 export default {
+  "Snap": "Snap",
+  "Grid step": "Grid step",
+  "Uncheck Snap for free placement": "Uncheck Snap for free placement",
+  "25 cm": "25 cm",
+  "5 cm": "5 cm",
+  "Rotate view left": "Rotate view left",
+  "Rotate view right": "Rotate view right",
+  "Rotate item −90°": "Rotate item −90°",
+  "Rotate item +90°": "Rotate item +90°",
+  "Item rotated.": "Item rotated.",
+  "Appearance": "Appearance",
+
   "Widen the editor to use 2D + 3D.": "Poszerz edytor, aby używać 2D + 3D.",
   "Draw in 2D and inspect your changes in 3D.": "Rysuj w 2D i sprawdzaj zmiany w 3D.",
 
