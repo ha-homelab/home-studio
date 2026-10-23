@@ -1857,6 +1857,7 @@ if (haContext) {
       }
     },
     snapshot: () => clone(project),
+    currentFloor: () => activeFloorId,
     guideAction,
     editState() {
       const fields = [...document.querySelectorAll('[data-project-field]')].filter(field => field.inspectorDraft);
