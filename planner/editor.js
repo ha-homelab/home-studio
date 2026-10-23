@@ -937,6 +937,7 @@ planCanvas.addEventListener('pointermove', event => {
 });
 function finishPointer(event, cancel = false) {
   if (!drag || event && event.pointerId !== drag.pointerId) return;
+  try {
   const current = drag; drag = null; planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
   if (planCanvas.hasPointerCapture(current.pointerId)) planCanvas.releasePointerCapture(current.pointerId);
   if (current.kind === 'draw' && !cancel) {
@@ -968,11 +969,13 @@ function finishPointer(event, cancel = false) {
     // queued. Only a rollback needs another paint to restore the original.
     if (project === current.original && current.moved) renderPlan();
     updateFloorNavigator();
-    // Rebuild only after the 2D transaction settles, never for each pointer event.
-    if (view === 'split') requestCanvasRender();
     return;
   }
   renderPlan();
+  } finally {
+    // Refresh selection and geometry after every completed or cancelled gesture.
+    if (view === 'split') requestCanvasRender();
+  }
 }
 planCanvas.addEventListener('pointerup', e => finishPointer(e)); planCanvas.addEventListener('pointercancel', e => finishPointer(e, true));
 planCanvas.addEventListener('lostpointercapture', e => finishPointer(e, true));
@@ -1624,7 +1627,10 @@ function resizeCanvases(rect) {
   if (rect.width < 1 || rect.height < 1) return;
   $('split-tab').disabled = rect.width < 700;
   $('split-tab').title = rect.width < 700 ? t('Widen the editor to use 2D + 3D.') : t('Draw in 2D and inspect your changes in 3D.');
-  if (view === 'split' && rect.width < 700) { setView('plan'); return; }
+  if (view === 'split' && rect.width < 700) {
+    const moveFocus = $('preview-view').contains(document.activeElement) || document.activeElement === $('split-tab');
+    setView('plan'); if (moveFocus) planCanvas.focus({ preventScroll: true }); return;
+  }
   const width = view === 'split' ? rect.width / 2 : rect.width;
   if (width !== size.width || rect.height !== size.height) {
     if (drag) finishPointer(null, true);
