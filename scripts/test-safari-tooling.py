@@ -154,6 +154,65 @@ class ColdSafariTransportTests(unittest.TestCase):
 
 
 class SessionStartupTests(unittest.TestCase):
+    def test_hosted_focus_uses_one_activation_and_requires_timely_document_focus(self):
+        for accepted, final_focus, finished in ((True, True, 3), (True, False, 3), (False, False, 3), (True, True, 4)):
+            with self.subTest(accepted=accepted, final_focus=final_focus, finished=finished):
+                now = [0.0]
+                client = safari.SafariWebDriver('http://fixture')
+                client._browser_deadline = 4
+                evidence = {'documentFocused': False, 'visibilityState': 'visible'}
+                def activate(timeout):
+                    self.assertEqual(timeout, 4)
+                    now[0] = 2
+                    return {'requested': True, 'accepted': accepted}
+                def execute(_script):
+                    self.assertEqual(client.command_timeout(), 2 if now[0] == 2 else 1)
+                    now[0] = finished
+                    return {'documentFocused': final_focus, 'visibilityState': 'visible'}
+                with patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
+                     patch.object(safari.time, 'sleep', side_effect=lambda _: now.__setitem__(0, 4)), \
+                     patch.object(safari, 'activate_hosted_safari', side_effect=activate) as activation, \
+                     patch.object(client, 'execute', side_effect=execute):
+                    if final_focus and finished < 4:
+                        client.ensure_hosted_window_focus(evidence)
+                        self.assertTrue(evidence['focusCompleted'])
+                    else:
+                        with self.assertRaises(TimeoutError):
+                            client.ensure_hosted_window_focus(evidence)
+                        self.assertFalse(evidence['focusCompleted'])
+                self.assertEqual(activation.call_count, 1)
+                self.assertIsNone(client._window_focus_deadline)
+                self.assertEqual(evidence['focusBudgetMs'], 4000)
+                del client._browser_deadline
+                self.assertEqual(client.command_timeout(), 30)
+
+    def test_focused_window_needs_no_activation_and_activation_failure_propagates(self):
+        client = safari.SafariWebDriver('http://fixture')
+        with patch.object(safari, 'activate_hosted_safari', side_effect=RuntimeError('activation denied')) as activation:
+            client.ensure_hosted_window_focus({'documentFocused': True, 'visibilityState': 'visible'})
+            activation.assert_not_called()
+            evidence = {'documentFocused': False, 'visibilityState': 'visible'}
+            with self.assertRaisesRegex(RuntimeError, 'activation denied'):
+                client.ensure_hosted_window_focus(evidence)
+            activation.assert_called_once()
+            self.assertFalse(evidence['focusCompleted'])
+            self.assertIsNone(client._window_focus_deadline)
+
+    def test_activation_is_hosted_only_and_keeps_request_acknowledgment(self):
+        for environment in ({}, {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'self-hosted'}):
+            with self.subTest(environment=environment), patch.object(safari.sys, 'platform', 'darwin'), \
+                 patch.dict(safari.os.environ, environment, clear=True), patch.object(safari.subprocess, 'run') as command:
+                with self.assertRaisesRegex(AssertionError, 'GitHub-hosted'):
+                    safari.activate_hosted_safari(3)
+                command.assert_not_called()
+        with patch.object(safari.sys, 'platform', 'darwin'), \
+             patch.dict(safari.os.environ, {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted'}, clear=True), \
+             patch.object(safari.subprocess, 'run', return_value=Mock(stdout='{"requested":true,"accepted":false}')) as command:
+            self.assertEqual(safari.activate_hosted_safari(3), {'requested': True, 'accepted': False})
+        command.assert_called_once()
+        self.assertEqual(command.call_args.kwargs['timeout'], 3)
+        self.assertIn('activateWithOptions', command.call_args.args[0][-1])
+
     def test_selects_only_owned_window_and_keeps_actual_focus_evidence(self):
         client = safari.SafariWebDriver('http://fixture')
         client.session_id = 'owned'
@@ -340,7 +399,8 @@ class SessionStartupTests(unittest.TestCase):
 
 class HostedPreparationTests(unittest.TestCase):
     hosted = {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted'}
-    ready = {'bundleId': 'com.apple.Safari', 'finishedLaunching': True, 'active': True, 'processIdentifier': 123}
+    ready = {'bundleId': 'com.apple.Safari', 'running': True, 'finishedLaunching': True,
+             'active': False, 'terminated': False, 'processIdentifier': 123}
 
     def test_guard_rejects_local_self_hosted_and_other_platforms_before_launch(self):
         for platform, environment in (('darwin', {}), ('darwin', {'GITHUB_ACTIONS': 'true'}),
@@ -383,7 +443,7 @@ class HostedPreparationTests(unittest.TestCase):
     def test_native_readiness_pumps_the_runloop_and_retains_timeout_states(self):
         self.assertIn('$.NSRunLoop.mainRunLoop.runUntilDate(', safari.SAFARI_READY_SCRIPT)
         self.assertNotIn('    delay(', safari.SAFARI_READY_SCRIPT)
-        waiting = {**self.ready, 'active': False}
+        waiting = {**self.ready, 'finishedLaunching': False}
         diagnostic = json.dumps(waiting) + '\n'
         for stderr in (diagnostic, diagnostic.encode()):
             with self.subTest(stderr_type=type(stderr)), tempfile.TemporaryDirectory() as temp, \
@@ -400,7 +460,7 @@ class HostedPreparationTests(unittest.TestCase):
                 self.assertEqual(command.call_count, 2)
 
     def test_preparation_failure_and_late_completion_stay_failed_with_evidence(self):
-        for failure in ('launch-error', 'launch-timeout', 'readiness-timeout', 'invalid-json', 'not-ready', 'inactive', 'late'):
+        for failure in ('launch-error', 'launch-timeout', 'readiness-timeout', 'invalid-json', 'not-ready', 'not-running', 'terminated', 'late'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
                 now, commands = [0.0], []
                 def run(command, **kwargs):
@@ -413,7 +473,7 @@ class HostedPreparationTests(unittest.TestCase):
                     now[0] = 10 if len(commands) == 1 else 60 if failure == 'late' else 20
                     return Mock(stdout='invalid' if failure == 'invalid-json' else
                                 json.dumps({**self.ready, 'finishedLaunching': failure != 'not-ready',
-                                            'active': failure != 'inactive'}), stderr='')
+                                            'running': failure != 'not-running', 'terminated': failure == 'terminated'}), stderr='')
                 with patch.object(safari.sys, 'platform', 'darwin'), \
                      patch.dict(safari.os.environ, self.hosted, clear=True), \
                      patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
@@ -430,7 +490,8 @@ class HostedPreparationTests(unittest.TestCase):
                 argv = ['test-safari-acceptance.py', '--output', temp]
                 if preparation is not None:
                     argv.append('--prepare-hosted-safari')
-                def run_case(_output, name, _driver):
+                def run_case(_output, name, _driver, **options):
+                    self.assertEqual(options, {'hosted_focus': True} if preparation == 'passed' else {})
                     return {'suite': name, 'status': 'failed' if name == 'viewer-6' else 'passed', 'durationMs': 1}
                 with patch.object(safari.sys, 'argv', argv), \
                      patch.object(safari, 'prepare_hosted_safari', return_value={'status': preparation}) as prepare, \

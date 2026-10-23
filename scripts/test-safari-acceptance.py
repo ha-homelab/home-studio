@@ -31,6 +31,7 @@ native = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(native)
 SESSION_START_BUDGET_MS = 60000
 PREPARATION_BUDGET_MS = 60000
+WINDOW_FOCUS_BUDGET_MS = 10000
 
 # AppKit reports launch completion and activation without Apple Events,
 # accessibility access, or a WebDriver session. The subprocess timeout bounds
@@ -54,7 +55,7 @@ while (true) {
         console.log(serialized);
         previousState = serialized;
     }
-    if (state.finishedLaunching && state.active && !state.terminated) {
+    if (state.running && state.finishedLaunching && !state.terminated) {
         serialized;
         break;
     }
@@ -63,6 +64,21 @@ while (true) {
     $.NSRunLoop.mainRunLoop.runUntilDate($.NSDate.dateWithTimeIntervalSinceNow(0.1));
 }
 '''
+
+
+def activate_hosted_safari(timeout):
+    """Request activation once after the automation window exists, never locally."""
+    native.require(sys.platform == 'darwin' and os.environ.get('GITHUB_ACTIONS') == 'true'
+                   and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted',
+                   'Safari activation requires a disposable GitHub-hosted macOS runner')
+    script = '''ObjC.import('AppKit');
+var apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.Safari');
+if (apps.count !== 1) throw Error('Expected one running Safari application');
+var app = apps.objectAtIndex(0);
+JSON.stringify({requested: true, accepted: Boolean(app.activateWithOptions($.NSApplicationActivateIgnoringOtherApps))});'''
+    result = subprocess.run(['/usr/bin/osascript', '-l', 'JavaScript', '-e', script],
+                            check=True, capture_output=True, text=True, timeout=timeout)
+    return json.loads(result.stdout)
 
 
 def prepare_hosted_safari(output):
@@ -109,7 +125,7 @@ def prepare_hosted_safari(output):
                        'Safari preparation requires a disposable GitHub-hosted macOS runner')
         record['phase'] = 'launching-safari'
         save()
-        # Native pointer actions need a foreground browser on the hosted desktop.
+        # Complete native app launch before the strict automation session starts.
         subprocess.run(['/usr/bin/open', '-b', 'com.apple.Safari', 'about:blank'],
                        check=True, capture_output=True, text=True, timeout=remaining())
         record['phase'] = 'waiting-for-application-ready'
@@ -121,10 +137,11 @@ def prepare_hosted_safari(output):
         record['application'] = json.loads(result.stdout)
         application = record['application']
         native.require(application.get('bundleId') == 'com.apple.Safari'
+                       and application.get('running') is True
                        and application.get('finishedLaunching') is True
-                       and application.get('active') is True
+                       and application.get('terminated') is False
                        and type(application.get('processIdentifier')) is int
-                       and application['processIdentifier'] > 0, 'Safari did not confirm foreground launch completion')
+                       and application['processIdentifier'] > 0, 'Safari did not confirm launch completion')
         record.update(status='passed', phase='completed')
     except Exception as error:
         record.update(status='failed', error=str(error), traceback=traceback.format_exc(),
@@ -145,6 +162,12 @@ class SafariWebDriver(native.Marionette):
         self.session_id = None
 
     def command_timeout(self):
+        focus_deadline = self.__dict__.get('_window_focus_deadline')
+        if focus_deadline is not None:
+            remaining = focus_deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError('Safari automation window did not acquire focus within its deadline')
+            return min(remaining, super().command_timeout())
         deadline = self.__dict__.get('_session_start_deadline')
         if deadline is None:
             return super().command_timeout()
@@ -163,7 +186,8 @@ class SafariWebDriver(native.Marionette):
             response = error
         with response:
             if (self.__dict__.get('_cold_load_deadline') is None
-                    and self.__dict__.get('_session_start_deadline') is None):
+                    and self.__dict__.get('_session_start_deadline') is None
+                    and self.__dict__.get('_window_focus_deadline') is None):
                 raw = response.read(64 * 1024 * 1024 + 1)
             else:
                 # HTTP headers and body share one cold-load or session clock. Update
@@ -232,6 +256,30 @@ class SafariWebDriver(native.Marionette):
         self.call('WebDriver:SwitchToWindow', {'handle': handle})
         return {'handle': handle, **self.execute('return {documentFocused:document.hasFocus(),visibilityState:document.visibilityState};')}
 
+    def ensure_hosted_window_focus(self, evidence):
+        """Require real document focus; an activation acknowledgment is insufficient."""
+        if evidence.get('documentFocused') is True and evidence.get('visibilityState') == 'visible':
+            return
+        started = time.monotonic()
+        deadline = min(started + WINDOW_FOCUS_BUDGET_MS / 1000,
+                       self.__dict__.get('_browser_deadline', float('inf')))
+        previous = self.__dict__.get('_window_focus_deadline')
+        self._window_focus_deadline = deadline
+        evidence.update(focusBudgetMs=max(0, (deadline - started) * 1000), focusCompleted=False)
+        try:
+            evidence['activation'] = activate_hosted_safari(self.command_timeout())
+            while True:
+                self.command_timeout()
+                evidence.update(self.execute('return {documentFocused:document.hasFocus(),visibilityState:document.visibilityState};'))
+                self.command_timeout()  # A late response cannot satisfy the deadline.
+                if evidence.get('documentFocused') is True and evidence.get('visibilityState') == 'visible':
+                    evidence['focusCompleted'] = True
+                    return
+                time.sleep(min(.05, self.command_timeout()))
+        finally:
+            evidence['focusDurationMs'] = (time.monotonic() - started) * 1000
+            self._window_focus_deadline = previous
+
     def call(self, name, data=None):
         native.require(self.session_id is not None, 'A Safari session is required')
         routes = {
@@ -289,7 +337,7 @@ def fixture_server(name, log):
         raise
 
 
-def run_case(output, name, driver_path):
+def run_case(output, name, driver_path, *, hosted_focus=False):
     output.mkdir(parents=True, exist_ok=True)
     record = {'schema': 1, 'suite': name, 'status': 'running', 'product': 'Safari',
               'output': str(output.resolve()),
@@ -341,6 +389,9 @@ def run_case(output, name, driver_path):
             client.call('WebDriver:SetTimeouts', {'script': 30000, 'pageLoad': 30000, 'implicit': 0})
             client.call('WebDriver:SetWindowRect', {'width': 1440, 'height': 1000})
             record['windowFocus'] = client.select_current_window()
+            save()
+            if hosted_focus:
+                client.ensure_hosted_window_focus(record['windowFocus'])
             record['userAgent'] = client.execute('return navigator.userAgent;')
             record['phase'] = 'application'
             save()
@@ -384,7 +435,8 @@ def main():
     preparation = prepare_hosted_safari(args.output.resolve()) if args.prepare_hosted_safari else None
     results = []
     if preparation is None or preparation['status'] == 'passed':
-        results = [run_case(args.output.resolve() / name, name, args.driver) for name in ('viewer-6', 'viewer-24', 'planner-256')]
+        options = {'hosted_focus': True} if args.prepare_hosted_safari else {}
+        results = [run_case(args.output.resolve() / name, name, args.driver, **options) for name in ('viewer-6', 'viewer-24', 'planner-256')]
     summary = {'product': 'Safari', 'sourceRevision': os.environ.get('GITHUB_SHA'),
                'status': 'passed' if len(results) == 3 and all(r['status'] == 'passed' for r in results) else 'failed',
                'cases': [{'suite': r['suite'], 'status': r['status'], 'durationMs': r['durationMs']} for r in results]}

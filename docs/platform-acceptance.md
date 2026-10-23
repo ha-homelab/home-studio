@@ -615,11 +615,10 @@ of preemption at exactly 60 seconds; the unchanged outer watchdog also remains
 in force.
 
 The disposable GitHub-hosted macOS job explicitly prepares Safari once before
-these cases: Launch Services opens `about:blank` in the foreground, then AppKit
-must report that Safari has finished launching and is active. Background launch
-can leave native pointer input ineffective even though the page renders. The
-recorded application readiness includes `active: true`. Both operations share a
-separate 60-second preparation budget recorded in `preparation.json` and the
+these cases: Launch Services opens `about:blank`, then AppKit must report that
+Safari is running, has finished launching, and has not terminated. The normal
+preparation window need not be active; activation is recorded as telemetry.
+Both operations share a separate 60-second preparation budget recorded in `preparation.json` and the
 summary. Preparation failure stops the run before any test case; it never creates or retries a
 WebDriver session or visits Home Studio. This addresses the observed first-launch
 SafariDriver timeout while preserving each case's single session request,
@@ -637,6 +636,12 @@ then selects its own current window using `GET /window` and `POST /window` befor
 application navigation. The report preserves the actual `document.hasFocus()`
 and visibility state after selection and on failure; selecting a window does not
 retry a session or grant acceptance credit to a missed pointer interaction.
+On hosted CI, if the selected automation document is not focused, the harness
+makes one native Safari activation request and requires the document to become
+focused and visible within 10 seconds, capped by the existing 180-second browser
+deadline. The request acknowledgment alone cannot pass this check. Local runs
+do not request native activation. This puts the focus requirement on the actual
+automation window instead of the earlier normal preparation window.
 
 Every viewer report and cycle sample records `loadBudgetMs: 60000`. Samples also
 record monotonic `loadMs` and `loadCompleted`; a pending or failed cold load is
