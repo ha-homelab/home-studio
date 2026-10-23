@@ -96,6 +96,22 @@ and an idle plan stay still. See [wall rendering and resource limits](docs/round
 [How we test and release Home Studio](docs/quality-and-release.md) ·
 [Saving and recovery](docs/first-session.md)
 
+## Take your drawing into Blender
+
+The 1.1 beta line adds **Export for Blender** directly to the Home Assistant
+editor. Download the current floor or all floors as one GLB, or an OBJ + materials
+ZIP. Current edits are included without saving or publishing. GLB keeps each
+furniture item under a named parent so you can move the complete item in Blender.
+
+Use the 25 cm or 5 cm grid, Alt-drag for free positioning, and the dedicated
+item rotation buttons to refine the drawing first. A dropped HA connection
+leaves editing and a local JSON backup available.
+
+[Follow the illustrated Blender export guide](docs/blender-export.md).
+Exports contain geometry and material colors, not device controls or credentials.
+They still reveal the home's layout. Keep your drawing JSON: Blender edits do
+not currently round-trip into the Home Studio editor.
+
 ## Choose your language
 
 The drawing editor supports **24 languages**, including translated tools,

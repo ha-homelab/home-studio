@@ -39,6 +39,9 @@ WEBSITE_MEDIA_FILES = (
     'docs/media/native-ha-workflow-poster.jpg',
     'docs/media/native-ha-workflow-preview.gif',
     'docs/media/native-ha-workflow.en.vtt',
+    'docs/media/blender-workflow.gif',
+    'docs/media/blender-export-dialog.jpg',
+    'docs/media/blender-import.jpg',
 )
 SITE_FILES = (
     'index.html', 'site.css', 'docs/images/native-editor.png', 'privacy.html', 'install.html', 'ai-setup.html', '404.html', '.nojekyll',
@@ -98,7 +101,7 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'docs/rc-fuzzing.md', 'docs/release-workflow.md', '.gitignore', '.gitattributes', 'scripts/validate-site.py', '.github/workflows/pages.yml',
               '.github/workflows/package.yml', '.github/workflows/platform-acceptance.yml',
               '.github/actions/upload-acceptance-artifact/action.yml',
-              'docs/architecture.md', 'docs/first-session.md', 'docs/home-assistant-editor.md', 'docs/dashboard-and-media.md', 'docs/curtain-authoring.md', 'scripts/test-curtain-authoring.mjs', 'scripts/test-curtain-authoring.py', 'scripts/test-curtain-browser.cjs', 'docs/platform-acceptance.md',
+              'docs/architecture.md', 'docs/first-session.md', 'docs/home-assistant-editor.md', 'docs/blender-export.md', 'docs/dashboard-and-media.md', 'docs/curtain-authoring.md', 'scripts/test-curtain-authoring.mjs', 'scripts/test-curtain-authoring.py', 'scripts/test-curtain-browser.cjs', 'docs/platform-acceptance.md',
               'docs/quality-and-release.md', 'docs/VERSIONING.md',
               'docs/assets/quality/release-pipeline.svg',
               'docs/assets/quality/browser-coverage.svg',
@@ -161,7 +164,7 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'custom_components/home_floorplan/translations/en.json',
               'custom_components/home_floorplan/static/studio.js',
               'hacs.json', 'requirements-ha-test.txt',
-              'scripts/build-home-studio.py', 'scripts/test-ha-native.py',
+              'scripts/build-home-studio.py', 'scripts/test-ha-native.py', 'scripts/test-blender-export.py', 'scripts/test-blender-import.py',
               'scripts/test-ha-generated.py',
               'scripts/test-ha-project-metadata.py', 'scripts/test-ha-core.py', 'scripts/test-ha-ai.py',
               'scripts/test-native-studio.cjs', 'scripts/test-native-theme.cjs', 'scripts/test-native-ai.cjs', 'scripts/test-family-view.cjs',

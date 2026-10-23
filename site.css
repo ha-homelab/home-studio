@@ -6,7 +6,7 @@
 .demo-workflow { display: flex; flex-wrap: wrap; gap: .6rem 1.4rem; list-style: decimal-leading-zero; margin: 1.5rem 0; padding-left: 1.7rem; font-size: .85rem; }
 .demo-workflow li { margin: 0; padding-inline-start: .2rem; padding-inline-end: 1.2rem; }
 .demo-player { margin: 1.5rem 0 1rem; }
-.demo-player video { display: block; width: 100%; height: auto; background: #141a32; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 20px 60px #233c3410; }
+.demo-player video, .demo-player > img { display: block; width: 100%; height: auto; background: #141a32; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 20px 60px #233c3410; }
 .demo-player video:focus-visible { outline: 3px solid var(--accent); outline-offset: 5px; }
 .demo-player figcaption { display: block; max-width: 900px; font-size: .85rem; }
 .demo-links { display: flex; flex-wrap: wrap; gap: .6rem 1.5rem; font-size: .87rem; font-weight: 600; }

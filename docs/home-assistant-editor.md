@@ -134,11 +134,19 @@ For an existing generated home, the **Published home** tab shows the installed
 view rather than the editable 3D preview. Move its items in **Plan 2D** and use
 the position and height fields; its original room geometry stays protected.
 
-**Snap 0.25 m** aligns item positions to the quarter-meter grid. Hold **Alt** while
+Enable **Snap** and choose **Grid step: 25 cm** for broad placement or **5 cm**
+for finer adjustments. Hold **Alt** while
 dragging, drawing, or placing an item to bypass the grid temporarily; release it
 to use snapping again. Uncheck Snap for continuous placement. Numeric fields
 accept measurements independently of the grid. Select an item and enter
 **x (m)** and **z (m)** when you know its exact position.
+
+In Item details, **Rotate item −90°** and **Rotate item +90°** turn the selected
+furniture without changing the camera. **Rotate view** controls change your
+viewpoint instead. Position and size fields come before the collapsible
+Appearance section. On narrow screens, use the floating **Item details**
+shortcut to reach those fields. A tiny pointer wobble during selection leaves
+the item's position unchanged, including when it is already off the grid.
 
 To raise or lower an item, select it in 3D editing and drag its **↕ Y** handle.
 Use **Raise 5 cm**, **Lower 5 cm**, or **y (m)** in Item details for small or exact

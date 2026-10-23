@@ -78,6 +78,23 @@ update can replace code without deleting the drawing. `scripts/build-home-studio
 the native release ZIP from explicit shared-source allowlists. It contains no
 household source, state, credentials or runtime-generated assets.
 
+### Geometry export from the live editor
+
+The native host requests a fresh, validated snapshot from the sandbox through
+the existing authenticated message channel. `home_floorplan/export_model`
+requires an administrator and the current project revision. It never saves or
+publishes the snapshot. Server work runs in the executor, serializes against
+other project operations, and retains its concurrency slot until a cancelled
+worker has really finished. The result is bounded to 32 MiB and 200,000 triangles.
+
+Native drawings use the shared compiler. Generated homes use their verified
+baseline geometry with current placements, preserving custom architecture and
+object assets. Export serialization allowlists geometry, material colors, and
+generic labels; entity IDs, notes, credentials, and media are excluded. A GLB
+has floor parents and per-item transform parents. OBJ bakes transforms and
+bundles its MTL in the same ZIP. Neither format is an editable project backup.
+The [Blender guide](blender-export.md) explains the user workflow and limits.
+
 ### Optional fallback: separate browser and portable installation
 
 The [AI-assisted authoring workflow](ai-planning.md) adds an optional loopback
