@@ -41,9 +41,9 @@ ObjC.import('AppKit');
 var previousState = '';
 while (true) {
     var apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.Safari');
-    var state = {bundleId: 'com.apple.Safari', running: Boolean(apps.count),
+    var state = {bundleId: 'com.apple.Safari', running: Number(apps.count) > 0,
                  finishedLaunching: false, active: false, terminated: false, processIdentifier: null};
-    if (apps.count) {
+    if (Number(apps.count) > 0) {
         var app = apps.objectAtIndex(0);
         state.finishedLaunching = Boolean(app.isFinishedLaunching);
         state.active = Boolean(app.isActive);
@@ -73,7 +73,7 @@ def activate_hosted_safari(timeout):
                    'Safari activation requires a disposable GitHub-hosted macOS runner')
     script = '''ObjC.import('AppKit');
 var apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.Safari');
-if (apps.count !== 1) throw Error('Expected one running Safari application');
+if (Number(apps.count) !== 1) throw Error('Expected one running Safari application');
 var app = apps.objectAtIndex(0);
 JSON.stringify({requested: true, accepted: Boolean(app.activateWithOptions($.NSApplicationActivateIgnoringOtherApps))});'''
     result = subprocess.run(['/usr/bin/osascript', '-l', 'JavaScript', '-e', script],
@@ -267,7 +267,14 @@ class SafariWebDriver(native.Marionette):
         self._window_focus_deadline = deadline
         evidence.update(focusBudgetMs=max(0, (deadline - started) * 1000), focusCompleted=False)
         try:
-            evidence['activation'] = activate_hosted_safari(self.command_timeout())
+            try:
+                evidence['activation'] = activate_hosted_safari(self.command_timeout())
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+                stderr = error.stderr or ''
+                if isinstance(stderr, bytes):
+                    stderr = stderr.decode('utf-8', errors='replace')
+                evidence['activationError'] = stderr[-4096:]
+                raise
             while True:
                 self.command_timeout()
                 evidence.update(self.execute('return {documentFocused:document.hasFocus(),visibilityState:document.visibilityState};'))

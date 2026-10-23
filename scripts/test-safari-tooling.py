@@ -154,6 +154,42 @@ class ColdSafariTransportTests(unittest.TestCase):
 
 
 class SessionStartupTests(unittest.TestCase):
+    @unittest.skipUnless(safari.sys.platform == 'darwin', 'Requires the native macOS Objective-C bridge')
+    def test_native_objc_count_in_activation_guard(self):
+        # Exercise the actual script with Foundation arrays; replace activation
+        # with a stub so this probe never launches or focuses any application.
+        native_run = safari.subprocess.run
+        with patch.dict(safari.os.environ, {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted'}, clear=True), \
+             patch.object(safari.subprocess, 'run', return_value=Mock(stdout='{}')) as command:
+            safari.activate_hosted_safari(3)
+        source = command.call_args.args[0][-1]
+        self.assertEqual(source.count("$.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.Safari')"), 1)
+        self.assertEqual(source.count('var app = apps.objectAtIndex(0);'), 1)
+        for items, valid in (('[]', False), ('["fixture"]', True), ('["one","two"]', False)):
+            script = source.replace(
+                "$.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.Safari')",
+                '$.NSArray.arrayWithArray($(' + items + '))').replace(
+                'var app = apps.objectAtIndex(0);',
+                'var app = {activateWithOptions: function () { return true; }};')
+            result = native_run(['/usr/bin/osascript', '-l', 'JavaScript', '-e', script],
+                                capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode == 0, valid, result.stderr)
+            if valid:
+                self.assertEqual(json.loads(result.stdout), {'requested': True, 'accepted': True})
+
+    def test_activation_failure_retains_bounded_stderr(self):
+        for error in (safari.subprocess.CalledProcessError(1, 'osascript', stderr='x' * 5000),
+                      safari.subprocess.TimeoutExpired('osascript', 1, stderr=b'bridge timeout')):
+            client = safari.SafariWebDriver('http://fixture')
+            evidence = {'documentFocused': False, 'visibilityState': 'visible'}
+            with patch.object(safari, 'activate_hosted_safari', side_effect=error):
+                with self.assertRaises(type(error)):
+                    client.ensure_hosted_window_focus(evidence)
+            self.assertLessEqual(len(evidence['activationError']), 4096)
+            self.assertTrue(evidence['activationError'])
+            self.assertFalse(evidence['focusCompleted'])
+            self.assertIsNone(client._window_focus_deadline)
+
     def test_hosted_focus_uses_one_activation_and_requires_timely_document_focus(self):
         for accepted, final_focus, finished in ((True, True, 3), (True, False, 3), (False, False, 3), (True, True, 4)):
             with self.subTest(accepted=accepted, final_focus=final_focus, finished=finished):
