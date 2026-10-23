@@ -32,6 +32,9 @@
 
 ### Fixed
 
+- Fresh legacy-home installations retain their built-in furniture in the viewer,
+  editor, and model exports. Existing saved inventories and pending drafts stay
+  unchanged, including deliberately removed objects.
 - Reject stale compiled model downloads after placement changes. The new model
   export uses current validated edits without saving or publishing the drawing.
 - Tiny pointer movements while selecting furniture no longer snap it to a new
