@@ -259,6 +259,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this.$('connection-notice').hidden = ready || !this._hass;
     if (!ready) this._cancelExport?.(new Error('Home Assistant disconnected. Nothing was downloaded. Reconnect and try the export again.'));
     this._buttons();
+    if (this._ready && !this._busy) this._drawingStatus();
     // Reconnection never reloads an open draft or repeats a write/export.
     if (ready && this._hass && !this._started) void this._start();
   }
@@ -355,6 +356,14 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     return empty ? `Add a room to “${boundedText(empty.name || empty.id, 120)}” before publishing, or remove that unused floor.` : '';
   }
   _drawingStatus() {
+    // Snapshots may arrive after an operation's disconnect error. Keep their
+    // normal draft guidance truthful while server actions are unavailable.
+    if (!this._online()) {
+      const field = this._edits.invalid ? `Correct ${this._edits.field || 'the highlighted field'}. `
+        : this._edits.pending ? 'Your unfinished field edits are still here. ' : '';
+      this._status(`Home Assistant is disconnected. ${field}Keep this tab open to continue editing. More options → Export drawing (JSON) keeps a copy of the last valid drawing.`, this._edits.invalid);
+      return;
+    }
     if (this._edits.invalid) this._status(`Correct ${this._edits.field || 'the highlighted field'} before saving or publishing. Save draft will take you to the field.`, true);
     else if (this._edits.pending) this._status('Unsaved field edits · Save draft applies and saves your entered values.');
     else if (this._requiresInitialSave() && !this._dirty()) this._status('Save draft to create a private draft in Home Assistant. Your published home stays unchanged.');

@@ -213,12 +213,33 @@ async function testModelExportAndConnection(context, origin, project, errors) {
   await dialog.getByRole('button', { name: 'Download model', exact: true }).click();
   await page.waitForFunction(() => typeof window.releaseExport === 'function');
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  // Delay real iframe messages until the export cancellation has finished.
+  // This fixes the ordering of the cross-frame race seen on slower CI hosts.
+  await page.evaluate(() => {
+    const receive = host._onMessage.bind(host);
+    window.heldDraftSnapshots = [];
+    host._onMessage = event => {
+      if (event.source === host._frame.contentWindow && event.data?.type === 'snapshot') window.heldDraftSnapshots.push(event);
+      else receive(event);
+    };
+    window.releaseDraftSnapshots = () => {
+      host._onMessage = receive;
+      for (const event of window.heldDraftSnapshots) receive(event);
+      delete window.heldDraftSnapshots; delete window.releaseDraftSnapshots;
+    };
+  });
   await frame.locator('#project-title').fill('Newer than pending export');
   await frame.locator('#project-title').press('Tab');
+  await page.waitForFunction(() => heldDraftSnapshots.some(event => event.data.project.title === 'Newer than pending export' && !event.data.edits.pending));
   await page.evaluate(() => { connection.connected = false; connection.dispatchEvent(new Event('disconnected')); });
   await page.waitForFunction(() => !host._exportBusy);
   assert.equal(await page.locator('#connection-notice').isVisible(), true);
   assert.match(await page.locator('#status').innerText(), /disconnected/);
+  await page.evaluate(() => window.releaseDraftSnapshots());
+  assert.equal(await page.evaluate(() => host._project.title), 'Newer than pending export', 'A delayed snapshot still updates the preserved drawing');
+  assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem(host._key())).project.title), 'Newer than pending export');
+  assert.match(await page.locator('#status').innerText(), /disconnected/, 'A delayed draft snapshot must not replace offline guidance with an unavailable Save action');
+  assert.match(await page.locator('#model-export-status').innerText(), /Export failed:.*disconnected/, 'The detailed export failure stays available');
   for (const id of ['save', 'publish', 'model-export']) assert.equal(await page.locator('#' + id).isDisabled(), true);
   await openMoreOptions(page);
   assert.equal(await page.locator('#reload').isDisabled(), true);
@@ -226,7 +247,13 @@ async function testModelExportAndConnection(context, origin, project, errors) {
   const jsonEvent = page.waitForEvent('download'); await page.locator('#export').click();
   const json = await jsonEvent;
   assert.equal(JSON.parse(fs.readFileSync(await json.path(), 'utf8')).title, 'Newer than pending export');
+  await frame.locator('#project-title').fill(''); await frame.locator('#project-title').press('Tab');
+  await page.waitForFunction(() => host._edits.invalid);
+  assert.match(await page.locator('#status').innerText(), /disconnected/);
+  assert.match(await page.locator('#status').innerText(), /Correct/, 'Offline guidance retains invalid-field feedback');
   await frame.locator('#project-title').fill('Still editable offline'); await frame.locator('#project-title').press('Tab');
+  await page.waitForFunction(() => host._project.title === 'Still editable offline' && !host._edits.pending);
+  assert.match(await page.locator('#status').innerText(), /disconnected/);
   const beforeReconnect = await page.evaluate(() => calls.length);
   let lateDownloads = 0; page.on('download', () => lateDownloads++);
   await page.evaluate(async () => {
@@ -238,6 +265,7 @@ async function testModelExportAndConnection(context, origin, project, errors) {
   assert.equal(lateDownloads, 0, 'A cancelled request cannot download after reconnection');
   assert.equal(await page.locator('#connection-notice').isVisible(), false);
   assert.equal(await page.locator('#save').isEnabled(), true);
+  assert.match(await page.locator('#status').innerText(), /Unsaved changes/, 'Reconnection restores current drawing guidance without another edit');
   assert.equal(await frame.evaluate(() => planner.getProject().title), 'Still editable offline');
   assert.deepEqual(await page.evaluate(() => server.project), baseline);
   // A reload begun before connection loss cannot apply its stale response.
