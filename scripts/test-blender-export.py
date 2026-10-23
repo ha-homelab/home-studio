@@ -282,14 +282,23 @@ class ExportTests(unittest.IsolatedAsyncioTestCase):
         asset = compiler.build_furniture_asset(original)['meshes'][0]['vertices'][0]
         for actual, expected in zip(local, asset):
             self.assertAlmostEqual(actual, expected)
-        # Explicitly returning a catalog item to a basic shape must not reuse
-        # its obsolete detailed mesh, matching the live viewer's fallback.
-        model, _ = compiler.make_floor(source, source['floors'][0], None)
-        for key in ('model_id', 'style_id'):
-            item.pop(key, None)
-        floor = compiler.export_floor(model, source['floors'][0], [original])
-        self.assertEqual(len(floor['groups'][-1]['meshes']), 1)
-        self.assertEqual(len(floor['groups'][-1]['meshes'][0]['indices']), 36)
+
+    def test_returning_catalog_item_to_basic_shape_discards_old_detail(self):
+        # Both normalized assets and raw-only legacy models must follow the
+        # current basic shape instead of retaining obsolete catalog geometry.
+        for raw_only in (False, True):
+            with self.subTest(raw_only=raw_only):
+                source = copy.deepcopy(self.source)
+                item = source['floors'][0]['items'][0]
+                original = copy.deepcopy(item)
+                model, _ = compiler.make_floor(source, source['floors'][0], None)
+                if raw_only:
+                    model['object_assets'] = {}
+                for key in ('model_id', 'style_id'):
+                    item.pop(key, None)
+                floor = compiler.export_floor(model, source['floors'][0], [original])
+                self.assertEqual(len(floor['groups'][-1]['meshes']), 1)
+                self.assertEqual(len(floor['groups'][-1]['meshes'][0]['indices']), 36)
 
     def test_export_limits(self):
         floor = compiler.export_floor(compiler.make_floor(self.source, self.source['floors'][0], None)[0], self.source['floors'][0])

@@ -729,13 +729,14 @@ def export_floor(model, floor, reference_items=None, *, elevated=False):
                  'rotation': math.radians(item['rotation_deg']),
                  'scale': [dimensions[axis] for axis in ('width', 'height', 'depth')], 'meshes': []}
         asset = model.get('object_assets', {}).get(item['id'])
-        replaced_asset = bool(asset and asset.get('model_id') and asset['model_id'] != item.get('model_id'))
+        original = references.get(item['id'], item)
+        source_model_id = asset.get('model_id') if asset else original.get('model_id')
+        replaced_asset = bool(source_model_id and source_model_id != item.get('model_id'))
         if replaced_asset:
             asset = None
         if asset:
             group['meshes'] = [mesh_data(mesh) for mesh in asset['meshes']]
         else:
-            original = references.get(item['id'], item)
             original_position, size = original['position_m'], original['dimensions_m']
             cosine, sine = math.cos(math.radians(original['rotation_deg'])), math.sin(math.radians(original['rotation_deg']))
             for mesh in (() if replaced_asset else model['meshes']):
