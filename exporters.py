@@ -60,7 +60,8 @@ def export_models(data, ROOT, stem):
 
 
 # Interactive exports are independent of the historical on-disk export bundle.
-# Only geometry, colors and display labels cross this boundary; never model extras.
+# Only geometry, colors, validated embedded albedo and display labels cross this
+# boundary; never model extras or references to external image resources.
 MAX_EXPORT_TRIANGLES = 200_000
 MAX_EXPORT_BYTES = 32 * 1024 * 1024
 
@@ -70,16 +71,24 @@ def export_scene(floors, format):
 
     Each group contains local meshes plus translation, Y rotation (radians) and
     positive scale. GLB preserves those pivots; OBJ bakes them into one object per
-    group and travels with its material library in a two-file ZIP.
+    group and travels with its material library and optional PNGs in a ZIP.
     """
     import io
     import math
     import re
     import zipfile
+    if __package__:
+        from .material_textures import decode_material_texture, material_uv
+    else:
+        from material_textures import decode_material_texture, material_uv
 
     if format not in ('glb', 'obj'):
         raise ValueError('Choose GLB or OBJ for this export.')
     materials, colors, count, vertex_count, mesh_count = [], {}, 0, 0, 0
+    image_ids, image_bytes, material_maps = {}, [], []
+
+    def material_key(mesh):
+        return tuple(mesh['color']) + (mesh.get('texture', {}).get('data_uri'),)
 
     def label(value):
         # Entity references sometimes occur in commissioned mesh/display names.
@@ -112,9 +121,29 @@ def export_scene(floors, format):
                 color = tuple(mesh['color'])
                 if not finite(color, 4) or not all(0 <= value <= 1 for value in color):
                     raise ValueError('The installed model contains an invalid material.')
-                if color not in colors:
-                    colors[color] = len(materials)
+                image_index = None
+                if 'texture' in mesh:
+                    if color[3] != 1:
+                        raise ValueError('Albedo textures require an opaque material.')
+                    material_uv(mesh)
+                    if not isinstance(mesh['texture'], dict):
+                        raise ValueError('Invalid material texture.')
+                    uri = mesh['texture'].get('data_uri')
+                    if not isinstance(uri, str):
+                        raise ValueError('Invalid material texture URI.')
+                    if set(mesh['texture']) != {'data_uri', 'width', 'height', 'mime_type'} or mesh['texture']['width'] != 256 or mesh['texture']['height'] != 256 or mesh['texture']['mime_type'] != 'image/png':
+                        raise ValueError('Invalid material texture descriptor.')
+                    if uri not in image_ids:
+                        image_bytes.append(decode_material_texture(mesh['texture']))
+                        image_ids[uri] = len(image_bytes) - 1
+                        if len(image_bytes) > 8 or sum(map(len, image_bytes)) > 524288:
+                            raise ValueError('Export exceeds the material texture budget.')
+                    image_index = image_ids[uri]
+                key = material_key(mesh)
+                if key not in colors:
+                    colors[key] = len(materials)
                     materials.append(color)
+                    material_maps.append(image_index)
     if not count:
         raise ValueError('Add a room or object before exporting.')
 
@@ -132,15 +161,15 @@ def export_scene(floors, format):
             offset = len(blob)
             if vector:
                 for value in values:
-                    bounded_extend(blob, struct.pack('<3f', *value))
+                    bounded_extend(blob, struct.pack('<' + str(vector) + 'f', *value))
             else:
                 for value in values:
                     bounded_extend(blob, struct.pack('<I', value))
             views.append({'buffer': 0, 'byteOffset': offset, 'byteLength': len(blob) - offset,
                           'target': 34962 if vector else 34963})
             entry = {'bufferView': len(views) - 1, 'componentType': 5126 if vector else 5125,
-                     'count': len(values), 'type': 'VEC3' if vector else 'SCALAR'}
-            if vector:
+                     'count': len(values), 'type': 'VEC' + str(vector) if vector else 'SCALAR'}
+            if vector == 3:
                 entry.update(min=[min(row[axis] for row in values) for axis in range(3)],
                              max=[max(row[axis] for row in values) for axis in range(3)])
             accessors.append(entry)
@@ -157,20 +186,36 @@ def export_scene(floors, format):
                         'rotation': [0, math.sin(angle), 0, math.cos(angle)], 'scale': group['scale'], 'children': []}
                 nodes.append(node)
                 for part, mesh in enumerate(group['meshes']):
-                    position = accessor(mesh['vertices'], True)
-                    normal = accessor(mesh['normals'], True)
-                    indices = accessor(mesh['indices'], False)
+                    position = accessor(mesh['vertices'], 3)
+                    normal = accessor(mesh['normals'], 3)
+                    indices = accessor(mesh['indices'], 0)
+                    attributes = {'POSITION': position, 'NORMAL': normal}
+                    if 'texture' in mesh:
+                        # glTF's image origin is top-left; native Three maps and
+                        # OBJ use bottom-left UVs. Keep the same visual surface.
+                        attributes['TEXCOORD_0'] = accessor([[u, 1-v] for u, v in mesh['uv']], 2)
                     node['children'].append(len(nodes))
                     nodes.append({'name': label(group['name']) + ' / part ' + str(part + 1), 'mesh': len(meshes)})
-                    meshes.append({'primitives': [{'attributes': {'POSITION': position, 'NORMAL': normal},
-                                                   'indices': indices, 'material': colors[tuple(mesh['color'])]}]})
+                    meshes.append({'primitives': [{'attributes': attributes,
+                                                   'indices': indices, 'material': colors[material_key(mesh)]}]})
+        images = []
+        for raw in image_bytes:
+            blob.extend(b'\0' * (-len(blob) % 4))
+            views.append({'buffer': 0, 'byteOffset': len(blob), 'byteLength': len(raw)})
+            bounded_extend(blob, raw)
+            images.append({'bufferView': len(views)-1, 'mimeType': 'image/png'})
         document = {'asset': {'version': '2.0', 'generator': 'Home Studio geometry export'},
                     'scene': 0, 'scenes': [{'nodes': roots}], 'nodes': nodes, 'meshes': meshes,
                     'materials': [{'name': 'material_' + str(index), 'doubleSided': True,
                                    'alphaMode': 'BLEND' if color[3] < 1 else 'OPAQUE',
-                                   'pbrMetallicRoughness': {'baseColorFactor': color, 'metallicFactor': .05,
-                                                           'roughnessFactor': .72}} for index, color in enumerate(materials)],
+                                   'pbrMetallicRoughness': {'baseColorFactor': [1, 1, 1, 1] if material_maps[index] is not None else color,
+                                                           'metallicFactor': .05, 'roughnessFactor': .72,
+                                                           **({'baseColorTexture': {'index': material_maps[index]}} if material_maps[index] is not None else {})}}
+                                  for index, color in enumerate(materials)],
                     'buffers': [{'byteLength': len(blob)}], 'bufferViews': views, 'accessors': accessors}
+        if images:
+            document.update(images=images, samplers=[{'wrapS': 10497, 'wrapT': 10497, 'minFilter': 9987, 'magFilter': 9729}],
+                            textures=[{'source': index, 'sampler': 0} for index in range(len(images))])
         payload = json.dumps(document, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode()
         payload += b' ' * (-len(payload) % 4)
         blob.extend(b'\0' * (-len(blob) % 4))
@@ -180,7 +225,7 @@ def export_scene(floors, format):
         return (struct.pack('<III', 0x46546C67, 2, total) + struct.pack('<II', len(payload), 0x4E4F534A) +
                 payload + struct.pack('<II', len(blob), 0x004E4942) + blob)
 
-    obj, mtl, offset, ordinal = bytearray(), bytearray(), 1, 0
+    obj, mtl, offset, ordinal, uv_offset = bytearray(), bytearray(), 1, 0, 1
     def line(target, value):
         bounded_extend(target, (value + '\n').encode('utf-8'))
     line(obj, '# Home Studio; metres; Z up')
@@ -195,7 +240,7 @@ def export_scene(floors, format):
             sx, sy, sz = group['scale']
             tx, ty, tz = group['translation']
             for mesh in group['meshes']:
-                line(obj, 'usemtl material_' + str(colors[tuple(mesh['color'])]))
+                line(obj, 'usemtl material_' + str(colors[material_key(mesh)]))
                 for x, y, z in mesh['vertices']:
                     x, y, z = x * sx, y * sy, z * sz
                     x, y, z = tx + cosine * x + sine * z, ty + y + floor['elevation'], tz - sine * x + cosine * z
@@ -207,17 +252,29 @@ def export_scene(floors, format):
                     x, z = cosine * x + sine * z, -sine * x + cosine * z
                     length = math.hypot(x, y, z) or 1
                     line(obj, f'vn {x/length:.9g} {-z/length:.9g} {y/length:.9g}')
+                textured = 'texture' in mesh
+                if textured:
+                    for u, v in mesh['uv']:
+                        line(obj, f'vt {u:.9g} {v:.9g}')
                 for start in range(0, len(mesh['indices']), 3):
-                    line(obj, 'f ' + ' '.join(f'{offset + index}//{offset + index}' for index in mesh['indices'][start:start+3]))
+                    line(obj, 'f ' + ' '.join(f'{offset + index}/{uv_offset + index if textured else ""}/{offset + index}' for index in mesh['indices'][start:start+3]))
+                if textured:
+                    uv_offset += len(mesh['vertices'])
                 offset += len(mesh['vertices'])
     for index, color in enumerate(materials):
-        line(mtl, f'newmtl material_{index}\nKd {color[0]} {color[1]} {color[2]}\nd {color[3]}')
-    if len(obj) + len(mtl) > MAX_EXPORT_BYTES:
+        image_index = material_maps[index]
+        rgb = [1, 1, 1] if image_index is not None else color[:3]
+        line(mtl, f'newmtl material_{index}\nKd {rgb[0]} {rgb[1]} {rgb[2]}\nd {color[3]}')
+        if image_index is not None:
+            line(mtl, f'map_Kd textures/material_{image_index}.png')
+    if len(obj) + len(mtl) + sum(map(len, image_bytes)) > MAX_EXPORT_BYTES:
         raise ValueError('Export exceeds 32 MB. Export one floor or reduce detailed furniture.')
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('home.obj', obj)
         archive.writestr('materials.mtl', mtl)
+        for index, raw in enumerate(image_bytes):
+            archive.writestr(f'textures/material_{index}.png', raw)
     payload = output.getvalue()
     if len(payload) > MAX_EXPORT_BYTES:
         raise ValueError('Export exceeds 32 MB. Export one floor or reduce detailed furniture.')
