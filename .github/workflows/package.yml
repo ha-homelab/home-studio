@@ -67,6 +67,7 @@ jobs:
           python3 scripts/test-ha-project-metadata.py
           python3 scripts/test-ha-native.py
           python3 scripts/test-ha-generated.py
+          python3 scripts/test-curtain-authoring.py
       - name: Test archive validation, installation, backup and rollback
         run: python3 scripts/test-install-home-assistant.py
       - name: Test ephemeral Intel runner preparation without system commands
@@ -139,6 +140,8 @@ jobs:
           node scripts/test-onboarding.mjs
           node scripts/test-device-onboarding.mjs
           node scripts/test-room-transform.mjs
+          node scripts/test-curtain-authoring.mjs
+          node scripts/test-curtain-browser.cjs
           node scripts/test-draft-storage.mjs
           for engine in chromium firefox webkit; do
             PLANNER_EDITING_ENGINE="$engine" node scripts/test-planner-editing.cjs

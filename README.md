@@ -66,6 +66,18 @@ and preview in 3D. The editor supports **24 languages**. A desktop browser with
 a mouse or trackpad works best for drawing; the published plan is your everyday
 view for lights, media, covers, and other linked devices.
 
+Use **2D + 3D** on a wide workspace to keep the drawing and preview side by
+side. Moving a room carries its walls, openings, and furniture; an explicit
+connected-room option handles shared geometry. In Home Assistant you can also
+start from selected **HA areas** with dimensions you enter, then select the
+devices you want to place. TV and audio controls follow the device type, with
+an explicit choice when HA does not identify it.
+
+[Bind sliding curtains to windows](docs/curtain-authoring.md) to show their
+reported opening position, or add the published home to a dashboard using the
+[visual card editor](docs/dashboard-and-media.md). The integration registers its
+card resource automatically on storage-mode dashboards.
+
 Saved drafts and the published view are separate. An unfinished drawing or a
 failed publication leaves the last successful view available. Use
 **More options → Export drawing (JSON)** for an additional editable backup.

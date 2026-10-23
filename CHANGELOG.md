@@ -2,6 +2,48 @@
 
 ## [Unreleased]
 
+## [1.1.0] - Connected editing and easier device setup
+
+### Added
+
+- Side-by-side **2D + 3D** editing on wide workspaces. Both panes share one
+  document, undo history, and bounded WebGL renderer. The preview updates after
+  a completed 2D drag; narrow layouts return to the full-width drawing.
+- Start from selected Home Assistant areas using dimensions you enter, then
+  select multiple devices to place. Suggestions exclude diagnostic, hidden,
+  and already linked entities. Unknown media devices offer an explicit
+  audio/TV choice instead of silently becoming televisions.
+- A visual dashboard-card editor for floor, height, sidebar, room labels,
+  device filter, Dry run, and layout lock. Storage-mode dashboards register the
+  module automatically without replacing existing resources. YAML dashboards
+  retain the documented manual resource step.
+- Explicit window bindings for the two sliding-curtain designs, with paired,
+  left-gathered, or right-gathered fabric in the published home. Fabric follows
+  reported or valid remembered cover positions; rails remain fixed. This does
+  not add roller blinds or infer physical calibration.
+
+### Fixed
+
+- Moving a room now carries its owned walls, openings, and assigned items.
+  Shared geometry requires an explicit connected move. Resizing complete
+  shared rectangular sides preserves neighboring boundaries and measured
+  opening widths; unsupported junctions fail without partially changing the
+  drawing.
+- Cancel edits consistently when switching tools, changing views, losing a
+  pointer, or narrowing the layout. A graphics-context failure leaves the 2D
+  editor and export available.
+
+### Compatibility
+
+- Existing drawings and entity bindings remain valid. New curtain bindings
+  add optional authoring metadata; export a backup before downgrading to an
+  older editor that does not understand it. The editing preview retains the
+  catalog appearance; live positions appear in the published home.
+- HA area geometry and device positions are editable starting points, not
+  measured room shapes. Existing generated-home architecture remains protected.
+- Install prereleases explicitly through HACS for testing. Publication of a
+  package does not update or restart an existing Home Assistant installation.
+
 ## [1.0.0] - Home Studio in Home Assistant
 
 This is the first 1.x release of the native drawing and publishing workflow.

@@ -27,6 +27,18 @@ an installed Home Assistant integration.
 This screenshot uses the actual editor and trusted host with a simulated HA
 connection and fictional devices. No personal home or credentials are shown.
 
+## Draw and inspect together
+
+On a wide workspace, choose **2D + 3D** to keep the drawing at the left and its
+preview at the right. Draw or move objects in 2D, then release the pointer to
+refresh the preview. Orbit and zoom over the 3D pane, or choose **Edit items**
+to move an item and adjust its height there. Both panes use the same undo
+history. **Fit view** fits both; the bottom zoom buttons control the 2D pane.
+
+A narrower window returns to the full-width drawing. The feature adds no
+second 3D renderer. Existing generated homes keep their protected drawing and
+**Published home** preview instead of exposing an incomplete reconstruction.
+
 ## Install the native integration
 
 1. Back up Home Assistant. If you already use a generated or customized

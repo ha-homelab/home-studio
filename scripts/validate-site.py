@@ -98,7 +98,7 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'docs/rc-fuzzing.md', 'docs/release-workflow.md', '.gitignore', '.gitattributes', 'scripts/validate-site.py', '.github/workflows/pages.yml',
               '.github/workflows/package.yml', '.github/workflows/platform-acceptance.yml',
               '.github/actions/upload-acceptance-artifact/action.yml',
-              'docs/architecture.md', 'docs/first-session.md', 'docs/home-assistant-editor.md', 'docs/dashboard-and-media.md', 'docs/platform-acceptance.md',
+              'docs/architecture.md', 'docs/first-session.md', 'docs/home-assistant-editor.md', 'docs/dashboard-and-media.md', 'docs/curtain-authoring.md', 'scripts/test-curtain-authoring.mjs', 'scripts/test-curtain-authoring.py', 'scripts/test-curtain-browser.cjs', 'docs/platform-acceptance.md',
               'docs/quality-and-release.md', 'docs/VERSIONING.md',
               'docs/assets/quality/release-pipeline.svg',
               'docs/assets/quality/browser-coverage.svg',
