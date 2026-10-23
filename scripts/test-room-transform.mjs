@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { performance } from 'node:perf_hooks';
 import { newFloor, outlineRoom, validateProject } from '../planner/model.js';
 import { moveRoom, resizeRoom, roomMoveGroup } from '../planner/room-transform.js';
 
@@ -133,4 +134,57 @@ result = resizeRoom(precise, 'study', 5, 4);
 assert.deepEqual(result.rooms[1], precise.rooms[1], 'Unrelated imported precision is unchanged');
 assert.deepEqual(result.items[1], precise.items[1]);
 assert.deepEqual(result.walls.slice(4), untouchedWalls);
+
+// Dense floors expose repeated component scans, especially when the selected
+// room is last in registry order. Assert geometry rather than a machine-speed
+// threshold; report median CPU times so performance regressions are reviewable.
+function denseFloor(columns, rows) {
+  const floor = newFloor();
+  for (let z = 0; z < rows; z++) for (let x = 0; x < columns; x++) {
+    const value = room(`dense_${x}_${z}`, x * 3, z * 3, 3, 3);
+    floor.rooms.push(value); outlineRoom(floor, value);
+    floor.items.push(item(`device_${x}_${z}`, value.id, x * 3 + 1, z * 3 + 1));
+  }
+  floor.openings = floor.walls.filter((_, i) => i % 4 === 0).map(wall => opening(`door_${wall.id}`, wall.id, 1, .8));
+  valid(floor); return floor;
+}
+const timings = [];
+for (const [columns, rows] of [[6, 5], [8, 8]]) {
+  const dense = frozen(denseFloor(columns, rows)), last = `dense_${columns - 1}_${rows - 1}`;
+  for (const reordered of [dense, frozen({ ...clone(dense), rooms: clone(dense.rooms).reverse(), walls: clone(dense.walls).reverse() })]) {
+    assert.equal(roomMoveGroup(reordered, last).rooms.length, columns * rows);
+    const resized = resizeRoom(reordered, last, 3.2, 3.1);
+    for (const original of reordered.rooms) {
+      const actual = resized.rooms.find(value => value.id === original.id);
+      assert.deepEqual(actual.polygon, original.polygon.map(([x, z]) => [x === columns * 3 ? x + .2 : x, z === rows * 3 ? z + .1 : z]),
+        'Shared outer coordinates propagate independent of room ordering; other coordinates stay exact');
+    }
+    assert.deepEqual(resized.openings.map(value => value.width_m), reordered.openings.map(value => value.width_m));
+    const unchangedWalls = new Set(reordered.walls.filter(wall => wall.start[0] < (columns - 1) * 3 && wall.end[0] < (columns - 1) * 3
+      && wall.start[1] < (rows - 1) * 3 && wall.end[1] < (rows - 1) * 3).map(wall => wall.id));
+    assert.deepEqual(resized.openings.filter(value => unchangedWalls.has(value.wall_id)), reordered.openings.filter(value => unchangedWalls.has(value.wall_id)));
+    valid(resized);
+    const shifted = moveRoom(reordered, last, .25, -.25, { connected: true });
+    assert.deepEqual(shifted.openings, reordered.openings);
+    for (let index = 0; index < shifted.rooms.length; index++) assert.deepEqual(shifted.rooms[index].polygon,
+      reordered.rooms[index].polygon.map(([x, z]) => [x + .25, z - .25]));
+  }
+  const benchmarkFloor = clone(dense);
+  for (const [operation, run] of [['group', () => roomMoveGroup(benchmarkFloor, last)], ['move', () => moveRoom(benchmarkFloor, last, .25, .25, { connected: true })],
+    ['resize', () => resizeRoom(benchmarkFloor, last, 3.2, 3.1)]]) {
+    const elapsed = [];
+    for (let sample = 0; sample < 7; sample++) { const start = performance.now(); run(); if (sample > 1) elapsed.push(performance.now() - start); }
+    timings.push({ rooms: dense.rooms.length, operation, medianMs: Number(elapsed.sort((a, b) => a - b)[2].toFixed(2)) });
+  }
+}
+
+const mutable = fixture(true);
+assert.equal(roomMoveGroup(mutable, 'study').rooms.length, 2);
+mutable.walls = []; mutable.openings = [];
+mutable.rooms[1].polygon = mutable.rooms[1].polygon.map(([x, z]) => [x + 20, z]);
+assert.deepEqual(roomMoveGroup(mutable, 'study').rooms, ['study'], 'In-place geometry changes never reuse stale contact data');
+const almostTouching = newFloor();
+almostTouching.rooms = [room('first', 0, 0), room('second', 4 + .0000005, 0)];
+assert.equal(roomMoveGroup(almostTouching, 'first').rooms.length, 2, 'Broad-phase bounds preserve the existing contact tolerance');
+console.log('Dense room transform CPU medians:', JSON.stringify(timings));
 console.log('Room transforms passed: owned and connected moves, rectangular shared boundaries, four-room junctions, attachments, fixed opening widths, item placement, collision/inversion rejection, and immutable rollback.');

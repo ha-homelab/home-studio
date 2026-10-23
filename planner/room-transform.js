@@ -11,6 +11,12 @@ const interpolate = (wall, t) => wall.start.map((value, axis) => value + (wall.e
 const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
 
 function contacts(a, b) {
+  // Most pairs in a dense floor are far apart. Reject those before projecting
+  // four endpoints and allocating the intersection intermediates.
+  if (Math.max(a.start[0], a.end[0]) < Math.min(b.start[0], b.end[0]) - EPS
+    || Math.max(b.start[0], b.end[0]) < Math.min(a.start[0], a.end[0]) - EPS
+    || Math.max(a.start[1], a.end[1]) < Math.min(b.start[1], b.end[1]) - EPS
+    || Math.max(b.start[1], b.end[1]) < Math.min(a.start[1], a.end[1]) - EPS) return [];
   const points = [a.start, a.end].filter(p => on(p, b)).concat([b.start, b.end].filter(p => on(p, a)));
   if (points.length) return points;
   const u = a.end.map((v, i) => v - a.start[i]), v = b.end.map((n, i) => n - b.start[i]);
@@ -20,9 +26,11 @@ function contacts(a, b) {
   const t = cross(delta, v) / denominator, s = cross(delta, u) / denominator;
   return t >= 0 && t <= 1 && s >= 0 && s <= 1 ? [interpolate(a, t)] : [];
 }
-const roomsTouch = (a, b) => edges(a).some(x => edges(b).some(y => contacts(x, y).length));
-const wallTouchesRoom = (wall, room) => pointInPolygon(wall.start, room.polygon) || pointInPolygon(wall.end, room.polygon)
-  || edges(room).some(edge => contacts(wall, edge).length);
+const boundsOverlap = (a, b) => a.minX <= b.maxX + EPS && b.minX <= a.maxX + EPS && a.minZ <= b.maxZ + EPS && b.minZ <= a.maxZ + EPS;
+const roomsTouch = (a, b) => boundsOverlap(a.bounds, b.bounds) && a.edges.some(x => b.edges.some(y => contacts(x, y).length));
+const wallTouchesRoom = (wall, room) => boundsOverlap(wall.bounds, room.bounds)
+  && (pointInPolygon(wall.value.start, room.value.polygon) || pointInPolygon(wall.value.end, room.value.polygon)
+    || room.edges.some(edge => contacts(wall.value, edge).length));
 
 export function roomBounds(room) {
   const xs = room.polygon.map(p => p[0]), zs = room.polygon.map(p => p[1]);
@@ -42,16 +50,23 @@ function getRoom(floor, id) {
 
 export function roomMoveGroup(floor, id) {
   const selected = getRoom(floor, id), rooms = new Set([id]), walls = new Set();
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const room of floor.rooms) if (!rooms.has(room.id) && (floor.rooms.some(other => rooms.has(other.id) && roomsTouch(room, other))
-      || floor.walls.some(wall => walls.has(wall.id) && wallTouchesRoom(wall, room)))) {
-      rooms.add(room.id); changed = true;
+  const roomShapes = floor.rooms.map(value => ({ value, bounds: roomBounds(value), edges: edges(value) }));
+  const wallShapes = floor.walls.map(value => ({ value, bounds: {
+    minX: Math.min(value.start[0], value.end[0]), maxX: Math.max(value.start[0], value.end[0]),
+    minZ: Math.min(value.start[1], value.end[1]), maxZ: Math.max(value.start[1], value.end[1]),
+  } }));
+  // Local to this call: callers may mutate a floor between edits. A queue visits
+  // each discovered object once, independent of the registry/room order.
+  const pending = [roomShapes.find(room => room.value.id === id)];
+  for (let index = 0; index < pending.length; index++) {
+    const current = pending[index];
+    for (const room of roomShapes) if (!rooms.has(room.value.id)
+      && (current.edges ? roomsTouch(current, room) : wallTouchesRoom(current, room))) {
+      rooms.add(room.value.id); pending.push(room);
     }
-    for (const wall of floor.walls) if (!walls.has(wall.id) && (floor.rooms.some(room => rooms.has(room.id) && wallTouchesRoom(wall, room))
-      || floor.walls.some(other => walls.has(other.id) && contacts(wall, other).length))) {
-      walls.add(wall.id); changed = true;
+    for (const wall of wallShapes) if (!walls.has(wall.value.id)
+      && (current.edges ? wallTouchesRoom(wall, current) : boundsOverlap(wall.bounds, current.bounds) && contacts(wall.value, current.value).length)) {
+      walls.add(wall.value.id); pending.push(wall);
     }
   }
   // External attachments are not owned by this room even if no other room is
@@ -76,15 +91,14 @@ export function moveRoom(floor, id, dx, dz, { connected = false } = {}) {
   return checked(target);
 }
 
-function rectangular(room) {
+function rectangular(room, b = roomBounds(room)) {
   if (room.polygon.length !== 4) return false;
-  const b = roomBounds(room);
   return room.polygon.every(p => (near(p[0], b.minX) || near(p[0], b.maxX)) && (near(p[1], b.minZ) || near(p[1], b.maxZ)))
     && edges(room).every(e => near(e.start[0], e.end[0]) || near(e.start[1], e.end[1]));
 }
 function sharedSide(a, b) {
-  if (!rectangular(a) || !rectangular(b)) return null;
-  const x = roomBounds(a), y = roomBounds(b);
+  if (!a.rectangular || !b.rectangular) return null;
+  const x = a.bounds, y = b.bounds;
   for (const [lo, hi, lower, upper] of [['minX', 'maxX', 'minZ', 'maxZ'], ['minZ', 'maxZ', 'minX', 'maxX']]) {
     if (near(x[lower], y[lower]) && near(x[upper], y[upper])) {
       if (near(x[hi], y[lo])) return [[hi, lo], [lower, lower], [upper, upper]];
@@ -113,20 +127,19 @@ export function resizeRoom(floor, id, width, depth, anchor = null) {
   // Shared rectangular sides constrain the normal coordinate and both shared
   // corners. Propagation keeps neighboring rooms rectangular and outer bounds
   // fixed unless those bounds are themselves joined to a moving corner.
-  const component = new Set([id]), links = new Map();
+  const shapes = floor.rooms.map(value => {
+    const bounds = roomBounds(value);
+    return { value, bounds, edges: edges(value), rectangular: rectangular(value, bounds) };
+  });
+  const links = new Map();
   const link = (a, b) => { if (!links.has(a)) links.set(a, new Set()); links.get(a).add(b); };
-  let added = true;
-  while (added) {
-    added = false;
-    for (const a of floor.rooms) if (component.has(a.id)) for (const b of floor.rooms) {
-      if (a.id === b.id || !roomsTouch(a, b)) continue;
-      const sides = sharedSide(a, b);
-      // Corner-only contacts need no side constraint; the contact check below
-      // will still reject any resize that would separate their common vertex.
-      if (!sides) continue;
-      if (!component.has(b.id)) { component.add(b.id); added = true; }
-      for (const [x, y] of sides) { link(`${a.id}:${x}`, `${b.id}:${y}`); link(`${b.id}:${y}`, `${a.id}:${x}`); }
-    }
+  // Build each shared-side constraint once. Traversing from the selected room's
+  // four bounds below naturally ignores disconnected components. Corner-only
+  // contacts remain protected by the full contact checks after propagation.
+  for (let i = 0; i < shapes.length; i++) for (let j = i + 1; j < shapes.length; j++) {
+    const a = shapes[i], b = shapes[j], sides = sharedSide(a, b);
+    if (!sides) continue;
+    for (const [x, y] of sides) { link(`${a.value.id}:${x}`, `${b.value.id}:${y}`); link(`${b.value.id}:${y}`, `${a.value.id}:${x}`); }
   }
   const assigned = new Map();
   for (const bound of ['minX', 'maxX', 'minZ', 'maxZ']) {
@@ -138,18 +151,19 @@ export function resizeRoom(floor, id, width, depth, anchor = null) {
     }
   }
   const transforms = new Map();
-  for (const room of floor.rooms) {
-    const before = roomBounds(room), after = { ...before };
+  for (const shape of shapes) {
+    const room = shape.value, before = shape.bounds, after = { ...before };
     for (const bound of ['minX', 'maxX', 'minZ', 'maxZ']) if (assigned.has(`${room.id}:${bound}`)) after[bound] = assigned.get(`${room.id}:${bound}`);
     if (after.maxX - after.minX < .05 - EPS || after.maxZ - after.minZ < .05 - EPS) throw new Error('The resize would collapse or invert a neighboring room. Reduce the change.');
     transforms.set(room.id, affine(before, after));
   }
   // Preserve every existing room contact, including partial sides and corners.
   // An unsupported junction fails before any caller-owned object is modified.
-  for (let i = 0; i < floor.rooms.length; i++) for (let j = i + 1; j < floor.rooms.length; j++) {
-    const a = floor.rooms[i], b = floor.rooms[j];
-    for (const x of edges(a)) for (const y of edges(b)) for (const p of contacts(x, y)) {
-      if (distance(transforms.get(a.id)(p), transforms.get(b.id)(p)) > .002) throw attachmentError();
+  for (let i = 0; i < shapes.length; i++) for (let j = i + 1; j < shapes.length; j++) {
+    const a = shapes[i], b = shapes[j];
+    if (!boundsOverlap(a.bounds, b.bounds)) continue;
+    for (const x of a.edges) for (const y of b.edges) for (const p of contacts(x, y)) {
+      if (distance(transforms.get(a.value.id)(p), transforms.get(b.value.id)(p)) > .002) throw attachmentError();
     }
   }
   const target = clone(floor);
@@ -166,8 +180,8 @@ export function resizeRoom(floor, id, width, depth, anchor = null) {
   // junction may slide along a straight continuous wall without splitting it.
   for (let i = 0; i < floor.walls.length; i++) {
     const wall = floor.walls[i], moved = target.walls[i];
-    for (const room of floor.rooms) for (const edge of edges(room)) for (const p of contacts(wall, edge)) {
-      if (projectOnWall(transforms.get(room.id)(p), moved).distance > .002) throw attachmentError();
+    for (const shape of shapes) for (const edge of shape.edges) for (const p of contacts(wall, edge)) {
+      if (projectOnWall(transforms.get(shape.value.id)(p), moved).distance > .002) throw attachmentError();
     }
     for (let j = i + 1; j < floor.walls.length; j++) for (const p of contacts(wall, floor.walls[j])) {
       const other = floor.walls[j], nextOther = target.walls[j];
