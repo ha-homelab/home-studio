@@ -27,10 +27,12 @@ if __package__ and "." in __package__:
     from ..geometry import MATERIALS, create_geometry, floor_context
     from ..exporters import export_models
     from ..viewer_locales import load_viewer_i18n
+    from ..material_textures import validate_material_textures, material_uv
 else:
     from geometry import MATERIALS, create_geometry, floor_context
     from exporters import export_models
     from viewer_locales import load_viewer_i18n
+    from material_textures import validate_material_textures, material_uv
 from .furniture import build_furniture_asset, validate_furniture_appearance, supports_curtain, MODELS
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -527,6 +529,7 @@ def render_viewer(data, svg):
         "/*__ENVIRONMENT_JS__*/": (ROOT / "planner/environment.js").read_text(encoding="utf-8").replace("export ", ""),
         "__INTERACTION_RENDER_JS__": (ROOT / "planner/interaction-render.js").read_text(encoding="utf-8").replace("export function createInteractionRenderer", "function createInteractionRenderer"),
         "__ROOM_LIGHTING_JS__": (ROOT / "room-lighting.js").read_text(encoding="utf-8"),
+        "/*__MATERIAL_TEXTURES_JS__*/": (ROOT / "material-textures.js").read_text(encoding="utf-8"),
         "__THREE_B64__": base64.b64encode((ROOT / "vendor/three.module.min.js").read_bytes()).decode(),
         "__PLAN_MIME__": "image/svg+xml", "__PLAN_DATA__": base64.b64encode(viewer_plan.encode()).decode(),
         "__PLAN_WIDTH__": str(data["calibration"]["reference_size"][0]), "__PLAN_HEIGHT__": str(data["calibration"]["reference_size"][1]),
@@ -541,6 +544,7 @@ def render_viewer(data, svg):
     token = re.compile("|".join(map(re.escape, replacements)))
     while any(key in template for key in source_tokens):
         template = token.sub(lambda m: source_tokens.get(m.group(), m.group()), template)
+    validate_material_textures(data)
     viewer_data = runtime_model_data(data)
     replacements["__MODEL_JSON__"] = json_text(viewer_data).replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
     token = re.compile("|".join(map(re.escape, replacements)))
@@ -713,9 +717,14 @@ def export_floor(model, floor, reference_items=None, *, elevated=False):
     item_ids = set(references) | {item['id'] for item in floor['items']}
     groups = []
     materials = model['materials']
+    validate_material_textures(model)
 
-    def mesh_data(mesh):
-        return {key: mesh[key] for key in ('vertices', 'normals', 'indices')} | {'color': materials[mesh['material']]}
+    def mesh_data(mesh, dimensions=None):
+        result = {key: mesh[key] for key in ('vertices', 'normals', 'indices')} | {'color': materials[mesh['material']]}
+        if 'albedo_texture' in mesh:
+            result['uv'] = material_uv(mesh, dimensions)
+            result['texture'] = model['material_textures'][mesh['albedo_texture']]
+        return result
 
     for index, mesh in enumerate(model['meshes']):
         if mesh.get('kind') == 'inventory' and mesh.get('item_id') in item_ids:
@@ -735,7 +744,7 @@ def export_floor(model, floor, reference_items=None, *, elevated=False):
         if replaced_asset:
             asset = None
         if asset:
-            group['meshes'] = [mesh_data(mesh) for mesh in asset['meshes']]
+            group['meshes'] = [mesh_data(mesh, dimensions) for mesh in asset['meshes']]
         else:
             original_position, size = original['position_m'], original['dimensions_m']
             cosine, sine = math.cos(math.radians(original['rotation_deg'])), math.sin(math.radians(original['rotation_deg']))
