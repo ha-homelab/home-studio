@@ -29,6 +29,9 @@ _LOGGER = logging.getLogger(__name__)
 MODEL_BLOCK = re.compile(r'(<script\s+id=[\"\']modelData[\"\']\s+type=[\"\']application/json[\"\']\s*>)(.*?)(</script\s*>)', re.S | re.I)
 MODEL_ID = re.compile(r'<script\b[^>]*\bid\s*=\s*[\"\']modelData[\"\']', re.I)
 APPEARANCE = ("model_id", "style_id", "color", "pattern_id", "pattern_color", "curtain")
+# Legacy bundles also contain prebuilt downloads. Hash these for provenance,
+# while keeping the separate, smaller bound on model data parsed for export.
+MAX_EXPORT_SOURCE_BYTES = 256 * 1024 * 1024
 
 
 def _json(value):
@@ -352,7 +355,7 @@ class GeneratedProject(NativeProject):
         self._metadata(project, self.installed_models)
         return project
 
-    async def load(self):
+    async def load(self, *, legacy_missing_floors=()):
         saved = await self.store.async_load()
         if saved is None:
             self.document["project"] = await self.hass.async_add_executor_job(self._prepare)
@@ -367,11 +370,11 @@ class GeneratedProject(NativeProject):
                 (saved["generation"] is None) != (saved["published_revision"] is None)):
             raise NativeError("invalid_storage", "The saved generated-home draft needs its private backup restored.")
         self.document = saved
-        result = await self.hass.async_add_executor_job(self._restore)
+        result = await self.hass.async_add_executor_job(self._restore, frozenset(legacy_missing_floors))
         self.installed_models = None
         return result
 
-    def _restore(self):
+    def _restore(self, legacy_missing_floors=frozenset()):
         baseline = self.root / "baselines" / self.document["baseline"]
         metadata = json.loads((baseline / "source.json").read_text(encoding="utf-8"))
         if _hashes(baseline / "assets") != metadata["hashes"]:
@@ -383,8 +386,19 @@ class GeneratedProject(NativeProject):
         if self.document["generation"] is None:
             if self.installed_site != metadata["site"] or _hashes(self.component_root / "assets") != metadata["hashes"]:
                 raise NativeError("source_changed", "The installed home changed after this draft was saved. Restore its matching source before publishing.")
-            if self.installed_inventory != self.document["inventory"]:
+            installed_inventory = copy.deepcopy(self.installed_inventory)
+            # Older private installs projected an absent legacy floor as [].
+            # Retain that exact historical default for an existing draft, but
+            # never replace an explicit saved inventory or infer deletions.
+            if self.installed_site["site_id"] is None:
+                for floor in legacy_missing_floors:
+                    previous = self.document["inventory"].get(floor)
+                    if (floor in installed_inventory and previous == {"revision": 0, "items": []}
+                            and type(previous["revision"]) is int):
+                        installed_inventory[floor] = {"revision": 0, "items": []}
+            if installed_inventory != self.document["inventory"]:
                 raise NativeError("source_changed", "The published placements changed after this draft was saved. Its newer placements have been preserved.")
+            self.installed_inventory = installed_inventory
             self.references = _with_viewer_references(baseline / "assets", model_references(models))
             return None
         generation = self.document["generation"]
@@ -474,12 +488,16 @@ class GeneratedProject(NativeProject):
             baseline = self.root / 'baselines' / self.document['baseline']
             assets = baseline / 'assets'
             expected = json.loads((baseline / 'source.json').read_text(encoding='utf-8'))['hashes']
-        files, source_bytes = 0, 0
+        model_paths = {floor['id'] + '/' + name for floor in floors for name in ('model-data.json', 'index.html')}
+        files, source_bytes, model_bytes = 0, 0, 0
         for path in assets.rglob('*'):
             if path.is_file():
                 files += 1
-                source_bytes += path.stat().st_size
-                if files > 4096 or source_bytes > MAX_GENERATED_BYTES:
+                size = path.stat().st_size
+                source_bytes += size
+                if path.relative_to(assets).as_posix() in model_paths:
+                    model_bytes += size
+                if files > 4096 or source_bytes > MAX_EXPORT_SOURCE_BYTES or model_bytes > MAX_GENERATED_BYTES:
                     raise NativeError('invalid_export', 'The original model exceeds the export source size limit.')
         if _hashes(assets) != expected:
             raise NativeError('source_changed', 'The original home changed. Reload before exporting.')

@@ -713,6 +713,39 @@ function captureViewerFrames(renderer) {
   };
 }
 
+// Serialized into the viewer frame. Observe a completed application draw with
+// timers: an idle viewer need not deliver additional animation frames afterward.
+// The outer scenario deadline still owns the whole test; this retains the
+// ordinary 30-second operation limit without renewing it on each poll.
+async function waitForViewerLightState({beforeRenderCount, beforeSceneDraws, expectedLights, expectedSlots}) {
+  const started = performance.now(), deadline = started + 30000;
+  let latest = null;
+  while (performance.now() < deadline) {
+    const scene = window.__browserScene();
+    latest = {...window.__browserStability, scene, homeMode:window.floorplan.homeMode,
+      renderCount:window.floorplan.renderCount, renderedLights:window.__browserRenderedLights,
+      markerCount:document.querySelectorAll('.home-marker[data-state="on"]').length};
+    const passes = scene.renderPasses, now = performance.now();
+    if (now >= deadline) break;
+    if (latest.homeMode && latest.markerCount === expectedLights &&
+        latest.renderedLights === expectedLights && scene.activePointLights === expectedLights &&
+        scene.pointLights === expectedSlots && latest.renderCount > beforeRenderCount &&
+        passes.scene > beforeSceneDraws && passes.last === 'scene' && passes.sceneDrawCalls > 0 &&
+        scene.drawingBuffer.every(value => value > 0) &&
+        JSON.stringify(passes.sceneViewport) === JSON.stringify([0, 0, ...scene.drawingBuffer])) {
+      return {...latest, waitMs:now-started};
+    }
+    await new Promise(resolve => setTimeout(resolve, Math.min(25, Math.max(0, deadline-performance.now()))));
+  }
+  throw Error('Light state did not produce a fresh complete scene draw: ' + JSON.stringify({
+    elapsedMs:performance.now()-started, expectedLights, expectedSlots, beforeRenderCount, beforeSceneDraws,
+    renderCount:latest?.renderCount, renderedLights:latest?.renderedLights, markerCount:latest?.markerCount,
+    activePointLights:latest?.scene.activePointLights, pointLights:latest?.scene.pointLights,
+    renderPasses:latest?.scene.renderPasses, drawingBuffer:latest?.scene.drawingBuffer,
+    visibility:document.visibilityState, hidden:document.hidden, focused:document.hasFocus(),
+  }));
+}
+
 function assertViewerInteraction(before, after) {
   const scene = after.scene, passes = scene.renderPasses;
   assert.equal(passes.last, 'scene', 'Pointer release must finish with a full scene draw');
@@ -810,4 +843,4 @@ function assertViewerScenarioComplete(record) {
   record.viewerCompletion = {version: 1, cycles: 2, postRestoreModes: modes};
 }
 
-module.exports = {VIEWER_LOAD_BUDGET_MS, createViewerLoadDeadline, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction};
+module.exports = {VIEWER_LOAD_BUDGET_MS, createViewerLoadDeadline, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction};

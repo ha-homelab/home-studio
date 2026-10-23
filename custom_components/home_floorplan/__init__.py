@@ -76,7 +76,9 @@ async def async_setup(hass, config):
         else:
             data = {floor: value for floor, value in (saved or {}).items() if floor in FLOORS}
             for floor in FLOORS:
-                data.setdefault(floor, {"revision": 0, "items": []})
+                # Missing storage is a new view of the compiled home. An
+                # explicit saved list (including []) remains authoritative.
+                data.setdefault(floor, {"revision": 0, "items": copy.deepcopy(models[floor].get("inventory", []))})
                 validate_inventory(data[floor]["items"], rooms[floor])
             recovery = None
         state.update(store=store, recovery=recovery)
@@ -87,7 +89,8 @@ async def async_setup(hass, config):
         if editor_files and (ROOT / "runtime" / "planner" / "project.py").is_file() and not recovery:
             generated = GeneratedProject(hass, ROOT, SITE, models, data)
             try:
-                active = await generated.load()
+                active = await generated.load(
+                    legacy_missing_floors=set(FLOORS) - set(saved or {}) if SITE["site_id"] is None else ())
             except (NativeError, OSError, ValueError, KeyError, TypeError):
                 _LOGGER.exception("Generated home authoring could not be loaded; the installed viewer is unchanged")
                 state["source_error"] = "The installed home could not be opened for editing. Its existing view is preserved; check the integration log and restore its matching private source if needed."
@@ -97,7 +100,7 @@ async def async_setup(hass, config):
                     assets, site, models, references = active
                     _apply_active(state, assets, site, models, generated.document["inventory"], references)
                 else:
-                    _apply_active(state, ROOT / "assets", SITE, models, data, generated.references)
+                    _apply_active(state, ROOT / "assets", SITE, models, generated.installed_inventory, generated.references)
     else:
         native = NativeProject(hass)
         active = await native.load()

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
 import hashlib
 import importlib.util
 import json
 from pathlib import Path
 import re
+import struct
 import sys
 import tempfile
 import unittest
@@ -393,6 +395,164 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("sensor.synthetic_environment", restored["model_entities"]["upper"])
             self.assertEqual(restored["native"].document["project"], draft)
             self.assertTrue(integration._project_result(restored, support.Connection())["has_saved_draft"])
+
+    async def start_installed_home(self):
+        """Exercise real startup/storage resolution with a complete synthetic bundle."""
+        bundled = self.component / "static/studio/planner/index.html"
+        bundled.parent.mkdir(parents=True, exist_ok=True)
+        bundled.write_text("Synthetic bundled editor")
+        (self.component / "studio-files.json").write_text('["planner/index.html"]')
+        runtime = self.component / "runtime/planner/project.py"
+        runtime.parent.mkdir(parents=True, exist_ok=True)
+        runtime.write_text("# Synthetic availability marker; compiler is injected by this test")
+        self.hass.data.clear()
+        with patch.object(integration, "ROOT", self.component), patch.object(integration, "SITE", self.site), \
+                patch.object(integration, "FLOORS", {key: value["stem"] for key, value in self.site["floors"].items()}), \
+                patch.object(integration, "SITE_ADAPTER", support.types.SimpleNamespace(async_prepare=AsyncMock()), create=True), \
+                patch.object(integration, "_finish_setup", AsyncMock(return_value=True)):
+            await integration.async_setup(self.hass, {})
+        state = self.hass.data[integration.DOMAIN]
+        state["initialized"] = True
+        state["curtains"] = {"capture": lambda: None}
+        return state
+
+    async def export_current(self, state, floor=None):
+        connection = support.Connection()
+        project = state["native"]
+        await integration.ws_export_model(self.hass, connection, {
+            "id": 1, "revision": project.document["revision"], "project": project.document["project"],
+            "floor": floor, "format": "glb"})
+        self.assertEqual(connection.errors, [])
+        raw = base64.b64decode(connection.results[-1]["base64"])
+        length = struct.unpack_from("<I", raw, 12)[0]
+        return json.loads(raw[20:20 + length])
+
+    async def test_missing_legacy_store_or_floor_seeds_independent_compiled_inventory(self):
+        defaults = {floor: {"revision": 0, "items": copy.deepcopy(model["inventory"])}
+                    for floor, model in self.models.items()}
+        for saved in (None, {}, {"ground": self.inventory["ground"]}):
+            with self.subTest(saved=saved):
+                self.hass.saved.clear()
+                if saved is not None:
+                    self.hass.saved[integration.STORE_KEY] = copy.deepcopy(saved)
+                stored = copy.deepcopy(self.hass.saved)
+                state = await self.start_installed_home()
+                expected = {**defaults, **(saved or {})}
+                self.assertEqual(state["data"], expected)
+                self.assertEqual(state["native"].document["inventory"], expected)
+                for floor in state["native"].document["project"]["floors"]:
+                    self.assertEqual(floor["items"], expected[floor["id"]]["items"])
+                self.assertEqual(self.hass.saved, stored, "Defaulting must not write storage")
+                connection = support.Connection()
+                await integration.ws_export(self.hass, connection, {"id": 1, "floor": "upper", "format": "glb"})
+                self.assertEqual(connection.errors, [], "Fresh inventory matches the original model download")
+                exported = await self.export_current(state)
+                furniture = [node for node in exported["nodes"] if node["name"].startswith("Lamp ") and "children" in node]
+                self.assertEqual(len(furniture), 2, "Both commissioned objects must reach Blender")
+                self.assertTrue(all(node["translation"] == [1, 0, 1] for node in furniture))
+                state["data"]["upper"]["items"][0]["position_m"]["x"] = 99
+                self.assertEqual(state["models"]["upper"]["inventory"][0]["position_m"]["x"], 1)
+                self.assertEqual(state["native"].document["inventory"]["upper"]["items"][0]["position_m"]["x"], 1)
+
+    async def test_explicit_legacy_lists_remain_authoritative_including_revision_zero_empty(self):
+        edited = copy.deepcopy(self.inventory["upper"]["items"][0])
+        edited.update(name="Saved placement", room="room_a")
+        edited["position_m"]["x"] = 2
+        added = copy.deepcopy(edited)
+        added.update(id="added_lamp", name="Added placement")
+        for entry in ({"revision": 0, "items": []}, {"revision": 8, "items": []},
+                      {"revision": 9, "items": [edited, added]}, {"revision": 10, "items": [added]}):
+            with self.subTest(entry=entry):
+                self.hass.saved[integration.STORE_KEY] = {"upper": copy.deepcopy(entry)}
+                stored = copy.deepcopy(self.hass.saved)
+                state = await self.start_installed_home()
+                self.assertEqual(state["data"]["upper"], entry)
+                self.assertEqual(state["native"].document["project"]["floors"][0]["items"], entry["items"])
+                exported = await self.export_current(state, "upper")
+                self.assertEqual(len([node for node in exported["nodes"] if node["name"].startswith("Lamp ") and "children" in node]), len(entry["items"]))
+                self.assertEqual(self.hass.saved, stored)
+        self.hass.saved[integration.STORE_KEY] = {"upper": {"revision": 0, "items": [added, added]}}
+        with self.assertRaisesRegex(ValueError, "unique"):
+            await self.start_installed_home()
+
+    async def test_seeded_object_deletion_survives_legacy_save_publish_and_restarts(self):
+        state = await self.start_installed_home()
+        connection = support.Connection()
+        await integration.ws_save(self.hass, connection, {"id": 1, "floor": "upper", "revision": 0, "items": []})
+        self.assertEqual(connection.errors, [])
+        state = await self.start_installed_home()
+        self.assertEqual(state["data"]["upper"], {"revision": 1, "items": []})
+        self.assertEqual(state["native"].document["project"]["floors"][0]["items"], [])
+        await integration.ws_project_save(self.hass, connection, {
+            "id": 2, "revision": 0, "project": state["native"].document["project"]})
+        await integration.ws_project_publish(self.hass, connection, {"id": 3, "revision": 1})
+        self.assertEqual(connection.errors, [])
+        published = copy.deepcopy(state["native"].document)
+        for _ in range(2):
+            state = await self.start_installed_home()
+            self.assertEqual(state["native"].document, published)
+            self.assertEqual(state["data"]["upper"]["items"], [])
+            exported = await self.export_current(state, "upper")
+            self.assertFalse(any(node["name"].startswith("Lamp ") for node in exported["nodes"]), "Removed raw/custom geometry must not reappear")
+
+    async def test_pending_drafts_retain_historical_missing_floor_defaults_without_writes(self):
+        for old_defaults in (True, False):
+            with self.subTest(old_defaults=old_defaults):
+                self.hass.saved.clear()
+                inventory = {floor: {"revision": 0, "items": [] if old_defaults else copy.deepcopy(model["inventory"])}
+                             for floor, model in self.models.items()}
+                project = generated.GeneratedProject(self.hass, self.component, self.site, self.models, inventory)
+                await project.load()
+                draft = copy.deepcopy(project.document["project"])
+                draft["title"] = "Retain this pending draft"
+                await project.save(0, draft)
+                stored, document = copy.deepcopy(self.hass.saved), copy.deepcopy(project.document)
+                for _ in range(2):
+                    state = await self.start_installed_home()
+                    self.assertNotIn("source_error", state)
+                    self.assertEqual(state["native"].document, document)
+                    self.assertEqual(state["native"].installed_inventory, inventory)
+                    self.assertEqual(state["data"], inventory)
+                    self.assertEqual(self.hass.saved, stored)
+
+    async def test_pending_draft_fallback_is_limited_to_absent_historical_empty_floor(self):
+        inventory = {"upper": {"revision": 0, "items": []}, "ground": copy.deepcopy(self.inventory["ground"])}
+        self.hass.saved[integration.STORE_KEY] = {"ground": copy.deepcopy(self.inventory["ground"])}
+        project = generated.GeneratedProject(self.hass, self.component, self.site, self.models, inventory)
+        await project.load()
+        await project.save(0, copy.deepcopy(project.document["project"]))
+        stored = copy.deepcopy(self.hass.saved)
+        state = await self.start_installed_home()
+        self.assertEqual(state["data"], inventory)
+        self.assertEqual(self.hass.saved, stored)
+        # A present legacy floor never receives the compatibility exception.
+        self.hass.saved[integration.STORE_KEY]["upper"] = copy.deepcopy(self.inventory["upper"])
+        with self.assertLogs(integration._LOGGER, level="ERROR"):
+            state = await self.start_installed_home()
+        self.assertIn("source_error", state)
+        self.assertIsNone(state["native"])
+        self.assertEqual(state["data"]["upper"], self.inventory["upper"])
+        # Nor may an explicit empty legacy list be replaced by a stored full draft.
+        self.hass.saved = copy.deepcopy(stored)
+        self.hass.saved[integration.STORE_KEY]["upper"] = {"revision": 0, "items": []}
+        self.hass.saved[project.store.key]["inventory"]["upper"] = copy.deepcopy(self.inventory["upper"])
+        with self.assertLogs(integration._LOGGER, level="ERROR"):
+            state = await self.start_installed_home()
+        self.assertIn("source_error", state)
+        self.assertEqual(state["data"]["upper"], {"revision": 0, "items": []})
+        for incompatible in ({"revision": 1, "items": []}, {"revision": False, "items": []}, self.inventory["upper"]):
+            self.hass.saved = copy.deepcopy(stored)
+            self.hass.saved[project.store.key]["inventory"]["upper"] = copy.deepcopy(incompatible)
+            with self.assertLogs(integration._LOGGER, level="ERROR"):
+                state = await self.start_installed_home()
+            self.assertIn("source_error", state)
+            self.assertEqual(state["data"]["upper"]["items"], self.models["upper"]["inventory"])
+        self.hass.saved = copy.deepcopy(stored)
+        path = self.component / "assets/upper/index.html"
+        path.write_text(path.read_text() + "<!-- changed installed source -->")
+        with self.assertLogs(integration._LOGGER, level="ERROR"):
+            state = await self.start_installed_home()
+        self.assertIn("source_error", state, "Historical defaults cannot bypass source hash verification")
 
     async def test_native_draft_flag_changes_only_after_a_successful_save(self):
         project = native.NativeProject(self.hass)

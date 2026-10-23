@@ -6,7 +6,7 @@ const path = require('node:path');
 const {EventEmitter} = require('node:events');
 const vm = require('node:vm');
 const {test, after} = require('node:test');
-const {createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
+const {createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
 
 test('host phase timing closes sequential phases and preserves the timeout observation', () => {
   let now=100;
@@ -150,6 +150,96 @@ test('Viewer frame receipts advance only after the real draw succeeds', () => {
   fail = true;
   assert.throws(() => env.renderer.render({}, camera), /draw failed/);
   assert.equal(env.__browserRenderedLights, 0, 'A failed draw cannot certify new state');
+});
+
+async function lightStateMeasurement({drawAt=50, expectedLights=71, mutation, lateRead=false}={}) {
+  let now=0, serial=0, completed=false, result, error, measuring=false;
+  const timers=new Map(), state={renderCount:0, activeLights:72, markers:72, slots:72};
+  const camera={projectionMatrix:{toArray:()=>[1]},matrixWorld:{toArray:()=>[1]}};
+  const env={performance:{now:()=>now},
+    setTimeout(callback, delay){const id=++serial;timers.set(id,{at:now+delay,callback});return id;},
+    // Model a browser that never delivers additional idle RAF callbacks.
+    requestAnimationFrame(){throw Error('Light-state receipt must not request an idle animation frame');},
+    document:{querySelectorAll:()=>({length:state.markers}),visibilityState:'visible',hidden:false,hasFocus:()=>true},
+    floorplan:{homeMode:true,get renderCount(){return state.renderCount;}},__browserStability:{linkedPrograms:19},
+    renderer:{info:{render:{calls:8,triangles:12}},domElement:{width:920,height:622},
+      getViewport(value){return value.copy({x:0,y:0,z:920,w:622});},getPixelRatio:()=>1,
+      render(){state.renderCount++;}},
+    __browserScene(){
+      if(measuring&&lateRead)now=30000;
+      return {activePointLights:state.activeLights,pointLights:state.slots,
+        drawingBuffer:[920,622],renderPasses:env.__browserRenderPasses};
+    }};
+  env.window=env;
+  vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer);globalThis.wait=${waitForViewerLightState.toString()};`,env);
+  env.renderer.render({},camera);
+  const before={beforeRenderCount:state.renderCount,beforeSceneDraws:env.__browserRenderPasses.scene};
+  state.markers=state.activeLights=expectedLights;
+  const draw=()=>{
+    env.renderer.render(mutation==='copy'?{name:'interaction-copy'}:{},camera);
+    if(mutation==='markers')state.markers++;
+    if(mutation==='active')state.activeLights++;
+    if(mutation==='slots')state.slots++;
+    if(mutation==='rendered')env.__browserRenderedLights++;
+    if(mutation==='render-count')state.renderCount=before.beforeRenderCount;
+    if(mutation==='scene-count')env.__browserRenderPasses.scene=before.beforeSceneDraws;
+    if(mutation==='blank')env.__browserRenderPasses.sceneDrawCalls=0;
+    if(mutation==='viewport')env.__browserRenderPasses.sceneViewport=[0,0,460,311];
+  };
+  if(drawAt===0)draw();
+  else if(drawAt!==null)env.setTimeout(draw,drawAt);
+  measuring=true;
+  env.wait({...before,expectedLights,expectedSlots:72}).then(value=>{completed=true;result=value;},failure=>{completed=true;error=failure;});
+  for(let turn=0;!completed&&turn<1500;turn++) {
+    for(let microtask=0;microtask<6;microtask++)await Promise.resolve();
+    if(completed)break;
+    const next=[...timers].sort((a,b)=>a[1].at-b[1].at||a[0]-b[0])[0];
+    assert(next,'Receipt must make progress using a bounded timer');
+    timers.delete(next[0]);now=next[1].at;next[1].callback();
+  }
+  assert(completed,'Receipt must finish within its fixed operation deadline');
+  assert.equal(timers.size,0,'Receipt leaves no polling timers running');
+  return {result,error,now};
+}
+
+test('light-state receipt accepts a real draw without extra idle animation frames',async()=>{
+  for(const drawAt of [0,50])for(const expectedLights of [0,71,72]) {
+    const {result,error,now}=await lightStateMeasurement({drawAt,expectedLights});
+    assert.ifError(error);assert.equal(now,drawAt);assert.equal(result.waitMs,drawAt);
+    assert.equal(result.renderedLights,expectedLights);assert.equal(result.markerCount,expectedLights);
+    assert.equal(result.scene.activePointLights,expectedLights);
+    assert.equal(result.renderCount,2);assert.equal(result.scene.renderPasses.scene,2);
+  }
+});
+
+test('light-state receipt rejects missing draws, wrong counts, stale frames and copy-only output',async()=>{
+  for(const mutation of ['markers','active','slots','rendered','render-count','scene-count','copy','blank','viewport']) {
+    const {error,now}=await lightStateMeasurement({mutation});
+    assert.match(error.message,/Light state did not produce a fresh complete scene draw/);
+    assert.equal(now,30000);
+  }
+  for(const options of [{drawAt:null},{drawAt:null,expectedLights:72}]) {
+    const {error,now}=await lightStateMeasurement(options);
+    assert.match(error.message,/beforeSceneDraws/);assert.equal(now,30000);
+  }
+});
+
+test('light-state receipt rejects a fresh result observed at the deadline',async()=>{
+  const {error,now}=await lightStateMeasurement({drawAt:0,lateRead:true});
+  assert.match(error.message,/Light state did not produce/);assert.equal(now,30000);
+});
+
+test('real light-state loop captures a baseline before sending and retains state assertions',()=>{
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  const start=source.indexOf('for(const [next,onCount]'),end=source.indexOf("phases.start('state-checks'",start);
+  const block=source.slice(start,end);assert(start>0&&end>start);
+  assert(block.indexOf('const beforeState = await snapshot()')<block.indexOf('window.viewerPort.postMessage'));
+  assert(block.includes('child.evaluate(waitForViewerLightState'));
+  assert(block.includes('beforeSceneDraws:beforeState.scene.renderPasses.scene'));
+  assert(block.includes('expectedLights:onCount, expectedSlots:lights'));
+  assert(!/requestAnimationFrame|waitForFunction|renderModel\(/.test(block));
+  for(const assertion of ['value.scene.pointLights===lights','value.scene.activePointLights===onCount','value.renderedLights===onCount'])assert(block.includes(assertion));
+  assert(source.includes('reportOnly, deadlineMs: 180000'));
 });
 
 test('real software gestures require bounded scene and full copy passes before full-quality release', () => {
