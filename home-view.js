@@ -146,7 +146,7 @@ homeView = (() => {
   const lockStates=['locked','unlocked','locking','unlocking','jammed','open'];
   const lockIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path data-lock-shackle d="M8 10V6a4 4 0 0 1 8 0v4"/><path d="M12 14v3"/></svg>';
   const entityDomain=item=>item.entity_id?.split('.')[0]||'';
-  const isFan=item=>!applianceSpec(item)&&!presenceSpec(item)&&(entityDomain(item)==='fan'||(['switch','input_boolean'].includes(entityDomain(item))&&model.object_assets?.[item.id]?.device_animation?.kind==='fan'));
+  const isFan=item=>!applianceSpec(item)&&!presenceSpec(item)&&(entityDomain(item)==='fan'||(['switch','input_boolean'].includes(entityDomain(item))&&objectsById.get(item.id)?.userData.deviceAnimation?.kind==='fan'));
   const isClimate=item=>!applianceSpec(item)&&!presenceSpec(item)&&entityDomain(item)==='climate';
   const fanIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><g class="fan-blades"><path d="M12 10c-5-7 6-9 4-3l-2 4m0 1c8-2 5 9 1 5l-3-3m-1 0c-3 8-10 0-4-2l4-1"/></g><circle cx="12" cy="12" r="2"/></svg>';
   const isToggle=item=>!applianceSpec(item)&&!presenceSpec(item)&&['light','switch','input_boolean','fan'].includes(entityDomain(item));

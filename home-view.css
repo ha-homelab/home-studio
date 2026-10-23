@@ -186,5 +186,5 @@ body.control-only>header,body.control-only>main,body.control-only #editLayout,bo
 #homeView [data-kind="fan"][data-running="true"] .fan-blades{transform-origin:12px 12px;animation:device-fan var(--fan-period,1.8s) linear infinite}
 @keyframes device-fan{to{transform:rotate(360deg)}}
 .climate-reading{position:absolute;left:50%;bottom:calc(100% + 5px);transform:translateX(-50%);white-space:nowrap;padding:3px 6px;border-radius:7px;background:#152733ed;border:1px solid #658a9c80;font-size:11px;line-height:1.1;color:#e0f5ff;font-variant-numeric:tabular-nums;pointer-events:none}
-.climate-reading[data-source="target"]{border-style:dashed}
+.climate-reading[data-source="target"],.climate-reading[data-source="range"]{border-style:dashed}
 @media(prefers-reduced-motion:reduce){.device-airflow path,#homeView [data-kind="fan"][data-running="true"] .fan-blades{animation:none}}

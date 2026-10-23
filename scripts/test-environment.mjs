@@ -57,7 +57,7 @@ for (const palette of ['meadow', 'dusk', 'sage']) { layer.setSettings({ palette 
 const reportError = readFileSync(new URL('../viewer.js', import.meta.url), 'utf8').split('\n').find(line => line.startsWith('function report3DError('));
 assert(reportError);
 runInNewContext(reportError + '; report3DError(new Error("Synthetic render failure"));', {
-  environmentLayer: layer, failed3D: false, initialViewReady: true,
+  environmentLayer: layer, homeView: null, failed3D: false, initialViewReady: true,
   cancelRender() {}, $: () => ({ style: {} }), console: { error() {} },
 });
 assert.equal(timers.size, 0, 'A fatal viewer error stops decorative work as well as rendering');

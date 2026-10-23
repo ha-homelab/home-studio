@@ -40,8 +40,11 @@ const initialStates={
   // Read real geometry and capture final projection targets without adding a production debug API.
   const snapshotAnchor='window.floorplan={model,';
   assert.ok(html.includes(snapshotAnchor));
-  html=html.replace(snapshotAnchor,`window.__deviceFeedback=()=>({reducedRenderer:coalesceMotion,renderCount,
+  html=html.replace(snapshotAnchor,`window.__deviceFeedback=()=>({reducedRenderer:coalesceMotion,renderCount,failed3D,
    rotors:Object.fromEntries([...objectsById].map(([id,object])=>[id,(object.userData.deviceRotors||[]).map(rotor=>({axis:rotor.userData.axis,angle:rotor.rotation[rotor.userData.axis]}))]))});${snapshotAnchor}`);
+  const drawAnchor='function drawScene(camera){';
+  assert.ok(html.includes(drawAnchor),'the generated viewer includes the shared scene draw');
+  html=html.replace(drawAnchor,`${drawAnchor}if(window.__failDeviceFeedbackDraw){window.__deviceFeedbackFailedDraws=(window.__deviceFeedbackFailedDraws||0)+1;throw new Error('Synthetic device feedback draw failure');}`);
   const targetAnchor='function target(element,x,y){';
   assert.ok(html.includes(targetAnchor),'the generated viewer includes marker damping');
   html=html.replace(targetAnchor,`${targetAnchor}element.dataset.qaTargetX=String(x);element.dataset.qaTargetY=String(y);`);
@@ -215,6 +218,47 @@ const initialStates={
   assert.equal(await page.evaluate(()=>feedbackMessages.filter(message=>message.type==='toggle').length),1,'clicking the visible fan marker retains one deliberate toggle');
   await card('wall_air_conditioner').click();
   await page.waitForFunction(()=>feedbackMessages.some(message=>message.type==='more_info'&&message.entity_id==='climate.cooling'));
+
+  // Changing semantic type discards the compiled fan asset. Its original id
+  // must not make an unrelated replacement switch inherit fan presentation.
+  await frame.locator('#editLayout').click();
+  await frame.locator('li').filter({has:frame.locator('[data-details-for="desk_fan"]')}).getByRole('button',{name:'Edit',exact:true}).click();
+  await frame.locator('#kind').selectOption('outlet');
+  await frame.locator('#entity').fill('switch.kettle');
+  await frame.locator('#itemForm').evaluate(form=>form.requestSubmit());
+  const replacement=await view.evaluate(()=>window.floorplan.items.find(item=>item.id==='desk_fan'));
+  assert.equal(replacement.type,'outlet');assert.equal(replacement.entity_id,'switch.kettle');
+  assert.equal(Object.hasOwn(replacement,'model_id'),false,'changing kind removes the compiled fan appearance');
+  await frame.locator('#openHome').click();
+  await publish({'switch.kettle':{state:'on'}});
+  await card('desk_fan').filter({hasText:'On'}).waitFor();
+  assert.equal(await marker('desk_fan').getAttribute('data-kind'),'control','classification follows the accepted object, not stale fan metadata');
+  assert.equal(await marker('desk_fan').locator('.fan-blades').count(),0);
+  assert.equal(await card('desk_fan').locator('.fan-blades').count(),0);
+  assert.deepEqual(await view.evaluate(()=>window.__deviceFeedback().rotors.desk_fan),[],'the replacement object has no fan rotor');
+  assert.equal(await frame.locator('.device-airflow').count(),4,'the replacement switch creates no fan airflow overlay');
+
+  // A fatal scene draw must stop CSS feedback too, even when a low-capacity
+  // renderer has no rotor timer that could notice the failure on a later tick.
+  await page.emulateMedia({reducedMotion:'no-preference'});
+  for(const id of models.filter(id=>id!=='desk_fan'))await running(id,true);
+  assert.equal(await frame.locator('.device-airflow:not([hidden])').count(),4);
+  assert.ok((await frame.locator('[data-kind="fan"] .fan-blades').evaluateAll(nodes=>nodes.map(node=>getComputedStyle(node).animationName))).every(value=>value!=='none'),'fan badges animate before the injected failure');
+  assert.equal(await view.evaluate(()=>window.__deviceFeedback().failed3D),false);
+  await view.evaluate(()=>{window.__failDeviceFeedbackDraw=true;window.requestModelRender();});
+  await frame.locator('#loadError').waitFor({state:'visible'});
+  assert.equal(await view.evaluate(()=>window.__deviceFeedback().failed3D),true);
+  for(const id of models.filter(id=>id!=='desk_fan'))await running(id,false);
+  assert.equal(await frame.locator('.device-airflow:not([hidden])').count(),0,'fatal failure immediately hides all airflow');
+  assert.ok((await frame.locator('[data-kind="fan"] .fan-blades').evaluateAll(nodes=>nodes.map(node=>getComputedStyle(node).animationName))).every(value=>value==='none'),'fatal failure stops fan marker and card animations');
+  const failedCount=await settle();
+  await publish(initialStates);
+  await view.evaluate(()=>window.requestModelRender());
+  await page.waitForTimeout(300);
+  assert.equal(await view.evaluate(()=>window.floorplan.renderCount),failedCount,'state updates cannot restart a failed renderer');
+  assert.equal(await view.evaluate(()=>window.__deviceFeedbackFailedDraws),1,'the failed scene draw is not retried');
+  assert.equal(await frame.locator('.device-airflow:not([hidden])').count(),0,'live states cannot restart feedback after fatal failure');
+  for(const id of models.filter(id=>id!=='desk_fan'))await running(id,false);
   assert.deepEqual(external,[],'fixture never contacts external services');assert.deepEqual(errors,[]);
   console.log(`PASS: five catalog models, live fan/climate feedback, safe temperatures, visibility, reduced motion, marker hitbox and bounded settle (${engine}, ${first.reducedRenderer?'software':'hardware'} renderer)`);
  }catch(error){
