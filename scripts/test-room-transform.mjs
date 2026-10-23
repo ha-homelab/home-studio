@@ -186,5 +186,60 @@ assert.deepEqual(roomMoveGroup(mutable, 'study').rooms, ['study'], 'In-place geo
 const almostTouching = newFloor();
 almostTouching.rooms = [room('first', 0, 0), room('second', 4 + .0000005, 0)];
 assert.equal(roomMoveGroup(almostTouching, 'first').rooms.length, 2, 'Broad-phase bounds preserve the existing contact tolerance');
+
+function curtainFloor(reverse = false) {
+  const floor = newFloor(); floor.rooms.push(room('study', 0, 0, 5, 4)); outlineRoom(floor, floor.rooms[0]);
+  if (reverse) [floor.walls[0].start, floor.walls[0].end] = [floor.walls[0].end, floor.walls[0].start];
+  floor.openings.push({ ...opening('window', floor.walls[0].id, 0, 2), type: 'window', sill_m: .7, head_m: 2.3 });
+  floor.items.push({ id: 'curtain', name: 'Bound curtain', type: 'furniture', model_id: 'curtain_pair_closed', style_id: 'scandinavian',
+    room: 'study', position_m: { x: reverse ? 4 : 1, y: .03, z: .2 }, dimensions_m: { width: 2.2, depth: .18, height: 2.4 },
+    rotation_deg: reverse ? 180 : 0, entity_id: 'cover.fixture', notes: '', curtain: { opening_id: 'window', mode: 'pair' } });
+  valid(floor); return floor;
+}
+for (const reverse of [false, true]) {
+  const original = frozen(curtainFloor(reverse));
+  const narrowed = resizeRoom(original, 'study', 2, 4);
+  assert.equal(narrowed.openings[0].width_m, 2); assert.equal(narrowed.openings[0].offset_m, 0);
+  assert.deepEqual(narrowed.items[0].position_m, { x: 1, y: .03, z: .2 }, 'Curtain follows the clamped fixed-width window center');
+  const expanded = resizeRoom(original, 'study', 10, 40);
+  assert.deepEqual(expanded.items[0].position_m, { x: reverse ? 8 : 2, y: .03, z: .2 }, 'Wall clearance is a measured offset, not room-scaled depth');
+  assert.deepEqual(expanded.items[0].dimensions_m, original.items[0].dimensions_m);
+  assert.equal(expanded.items[0].rotation_deg, original.items[0].rotation_deg);
+}
+
+function frame(floor) {
+  const opening = floor.openings[0], wall = floor.walls.find(value => value.id === opening.wall_id);
+  const delta = [wall.end[0] - wall.start[0], wall.end[1] - wall.start[1]], length = Math.hypot(...delta), u = delta.map(value => value / length);
+  const center = wall.start.map((value, axis) => value + u[axis] * (opening.offset_m + opening.width_m / 2));
+  return { u, center, angle: Math.atan2(delta[1], delta[0]) * 180 / Math.PI };
+}
+const slanted = curtainFloor();
+slanted.rooms[0].polygon = [[0, 0], [4, 2], [4, 6], [0, 4]]; slanted.walls = [];
+outlineRoom(slanted, slanted.rooms[0]); slanted.openings[0].wall_id = slanted.walls[0].id;
+const beforeFrame = frame(slanted), along = .3, clearance = -.2;
+slanted.items[0].position_m.x = beforeFrame.center[0] + along * beforeFrame.u[0] - clearance * beforeFrame.u[1];
+slanted.items[0].position_m.z = beforeFrame.center[1] + along * beforeFrame.u[1] + clearance * beforeFrame.u[0];
+slanted.items[0].rotation_deg = 180 - beforeFrame.angle;
+const slantedResult = resizeRoom(frozen(slanted), 'study', 8, 6), afterFrame = frame(slantedResult), slantedItem = slantedResult.items[0];
+const delta = [slantedItem.position_m.x - afterFrame.center[0], slantedItem.position_m.z - afterFrame.center[1]];
+assert(Math.abs(delta[0] * afterFrame.u[0] + delta[1] * afterFrame.u[1] - along) < .001, 'Diagonal resize preserves the tangent offset');
+assert(Math.abs(-delta[0] * afterFrame.u[1] + delta[1] * afterFrame.u[0] - clearance) < .001, 'Diagonal resize preserves signed wall clearance');
+assert(Math.abs(slantedItem.rotation_deg - (180 - afterFrame.angle)) < .001, 'The authored reversed facing follows the wall turn');
+assert.equal(slantedItem.position_m.y, slanted.items[0].position_m.y);
+assert.deepEqual(slantedItem.dimensions_m, slanted.items[0].dimensions_m);
+
+const mismatchedRoom = curtainFloor();
+mismatchedRoom.rooms.push(room('distant', 20, 20)); outlineRoom(mismatchedRoom, mismatchedRoom.rooms[1]);
+mismatchedRoom.openings.push({ ...mismatchedRoom.openings[0], id: 'remote_window', wall_id: mismatchedRoom.walls[4].id });
+mismatchedRoom.items[0].room = 'distant';
+mismatchedRoom.items.push({ ...clone(mismatchedRoom.items[0]), id: 'remote_curtain', room: 'study',
+  curtain: { opening_id: 'remote_window', mode: 'left' }, position_m: { x: 21.12345, y: .03, z: 20.23456 }, rotation_deg: 13.12345 });
+const remoteBefore = clone(mismatchedRoom.items[1]);
+result = resizeRoom(frozen(mismatchedRoom), 'study', 10, 4);
+assert.equal(result.items[0].position_m.x, 2, 'The bound window takes precedence over a stationary assigned room');
+assert.deepEqual(result.items[1], remoteBefore, 'A stationary bound window prevents unrelated room scaling and precision loss');
+result = moveRoom(mismatchedRoom, 'study', 1, 1);
+assert.deepEqual(result.items[0].position_m, { x: 2, y: .03, z: 1.2 }, 'Rigid moves also follow the bound window across room assignments');
+assert.deepEqual(result.items[1], remoteBefore);
 console.log('Dense room transform CPU medians:', JSON.stringify(timings));
 console.log('Room transforms passed: owned and connected moves, rectangular shared boundaries, four-room junctions, attachments, fixed opening widths, item placement, collision/inversion rejection, and immutable rollback.');

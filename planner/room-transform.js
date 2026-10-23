@@ -48,6 +48,43 @@ function getRoom(floor, id) {
   return room;
 }
 
+function windowFrame(opening, wall) {
+  const length = distance(wall.start, wall.end), along = opening.offset_m + opening.width_m / 2;
+  const tangent = [(wall.end[0] - wall.start[0]) / length, (wall.end[1] - wall.start[1]) / length];
+  return { tangent, center: [wall.start[0] + tangent[0] * along, wall.start[1] + tangent[1] * along] };
+}
+
+function followCurtainWindows(before, after) {
+  let oldOpenings, newOpenings, oldWalls, newWalls;
+  return (item, original) => {
+    if (!original.curtain) return false;
+    if (!oldOpenings) {
+      oldOpenings = new Map(before.openings.map(value => [value.id, value])); newOpenings = new Map(after.openings.map(value => [value.id, value]));
+      oldWalls = new Map(before.walls.map(value => [value.id, value])); newWalls = new Map(after.walls.map(value => [value.id, value]));
+    }
+    const oldOpening = oldOpenings.get(original.curtain.opening_id), newOpening = newOpenings.get(original.curtain.opening_id);
+    const oldWall = oldWalls.get(oldOpening?.wall_id), newWall = newWalls.get(newOpening?.wall_id);
+    if (!oldOpening || !newOpening || !oldWall || !newWall) throw new Error('The bound curtain window is no longer available.');
+    const old = windowFrame(oldOpening, oldWall), next = windowFrame(newOpening, newWall);
+    // Binding wins over the assigned room. An unchanged window must keep even
+    // high-precision placements exact when a different room is being edited.
+    if (distance(old.center, next.center) < EPS && distance(old.tangent, next.tangent) < EPS) return true;
+    const offset = [original.position_m.x - old.center[0], original.position_m.z - old.center[1]];
+    const along = offset[0] * old.tangent[0] + offset[1] * old.tangent[1];
+    const clearance = -offset[0] * old.tangent[1] + offset[1] * old.tangent[0];
+    item.position_m.x = round(next.center[0] + along * next.tangent[0] - clearance * next.tangent[1]);
+    item.position_m.z = round(next.center[1] + along * next.tangent[1] + clearance * next.tangent[0]);
+    // A positive world-plane turn is a negative Three.js Y rotation. Preserve
+    // the authored facing (including reversed curtains) and measured offsets.
+    const delta = Math.atan2(cross(old.tangent, next.tangent), old.tangent[0] * next.tangent[0] + old.tangent[1] * next.tangent[1]);
+    if (Math.abs(delta) > EPS) {
+      item.rotation_deg = round(original.rotation_deg - delta * 180 / Math.PI);
+      if (Math.abs(item.rotation_deg) > 36000) item.rotation_deg %= 360;
+    }
+    return true;
+  };
+}
+
 export function roomMoveGroup(floor, id) {
   const selected = getRoom(floor, id), rooms = new Set([id]), walls = new Set();
   const roomShapes = floor.rooms.map(value => ({ value, bounds: roomBounds(value), edges: edges(value) }));
@@ -84,8 +121,10 @@ export function moveRoom(floor, id, dx, dz, { connected = false } = {}) {
   const target = clone(floor), transform = point => [round(point[0] + dx), round(point[1] + dz)];
   for (const room of target.rooms) if (group.rooms.includes(room.id)) room.polygon = room.polygon.map(transform);
   for (const wall of target.walls) if (group.walls.includes(wall.id)) { wall.start = transform(wall.start); wall.end = transform(wall.end); }
-  for (const item of target.items) if (group.rooms.includes(item.room)) {
-    [item.position_m.x, item.position_m.z] = transform([item.position_m.x, item.position_m.z]);
+  const followCurtain = followCurtainWindows(floor, target);
+  for (const [index, item] of target.items.entries()) {
+    if (followCurtain(item, floor.items[index])) continue;
+    if (group.rooms.includes(item.room)) [item.position_m.x, item.position_m.z] = transform([item.position_m.x, item.position_m.z]);
   }
   // Openings use offsets on their walls, so rigid movement preserves them exactly.
   return checked(target);
@@ -198,7 +237,9 @@ export function resizeRoom(floor, id, width, depth, anchor = null) {
       opening.offset_m = round(Math.max(0, Math.min(after - opening.width_m, (opening.offset_m + opening.width_m / 2) * after / before - opening.width_m / 2)));
     }
   }
-  for (const item of target.items) {
+  const followCurtain = followCurtainWindows(floor, target);
+  for (const [index, item] of target.items.entries()) {
+    if (followCurtain(item, floor.items[index])) continue;
     [item.position_m.x, item.position_m.z] = transforms.get(item.room)([item.position_m.x, item.position_m.z]);
   }
   return checked(target);

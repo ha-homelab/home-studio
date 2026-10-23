@@ -34,7 +34,17 @@ delete fixture.floors[0].items[0].curtain; fixture.floors[0].items[0].entity_id 
     assert.equal(bound.floors[0].items[0].dimensions_m.width, 2.2);
     assert.equal(bound.floors[0].items[0].position_m.z, .185, 'Binding aligns the curtain just inside the wall');
     await page.locator('#undo').click(); assert.deepEqual(await project(), fixture, 'Binding and alignment undo together');
-    await page.locator('#redo').click(); await page.locator('[data-object-kind="items"]').first().click();
+    await page.locator('#redo').click();
+    await page.locator('[data-object-kind="rooms"]').first().click();
+    await field('Depth (m)').fill('40'); await field('Depth (m)').press('Tab');
+    await field('Width (m)').fill('2'); await field('Width (m)').press('Tab');
+    const resized = (await project()).floors[0];
+    assert.equal(resized.openings[0].width_m, 2); assert.equal(resized.openings[0].offset_m, 0);
+    assert.deepEqual(resized.items[0].position_m, { x: 1, y: .03, z: .185 }, 'Bound curtain follows the clamped window and keeps its wall clearance');
+    assert.deepEqual(resized.items[0].dimensions_m, bound.floors[0].items[0].dimensions_m);
+    await page.locator('#undo').click(); await page.locator('#undo').click();
+    assert.deepEqual(await project(), bound, 'Window-relative curtain movement undoes with the room resize');
+    await page.locator('[data-object-kind="items"]').first().click();
     await field('Entity ID (optional)').fill('light.wrong'); await field('Entity ID (optional)').press('Tab');
     assert.equal(await field('Entity ID (optional)').getAttribute('aria-invalid'), 'true');
     await field('Entity ID (optional)').fill('cover.fixture'); await field('Entity ID (optional)').press('Tab');
