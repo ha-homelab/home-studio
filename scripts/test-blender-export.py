@@ -265,6 +265,53 @@ class ExportTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(response.results)
         self.assertFalse(self.state['export_busy'])
 
+    async def test_generated_export_bounds_hashed_bundle_separately_from_parsed_models(self):
+        component = self.root / 'component'
+        site, models, inventory = fixture.fixture(component)
+        assets = component / 'assets'
+        parsed = {floor: sum((assets / floor / name).stat().st_size for name in ('model-data.json', 'index.html'))
+                  for floor in models}
+        parsed_all = sum(parsed.values())
+        # Legacy GLB/OBJ/etc files are hashed but never parsed into this export.
+        unused = assets / 'upper/old-download.glb'
+        unused.write_bytes(b'x' * (parsed_all * 2))
+        total = sum(path.stat().st_size for path in assets.rglob('*') if path.is_file())
+        self.project = generated.GeneratedProject(self.hass, component, site, models, inventory)
+        await self.project.load()
+        self.state['native'] = self.project
+        source = self.project.document['project']
+        document_before, storage_before = copy.deepcopy(self.project.document), copy.deepcopy(self.hass.saved)
+        baseline = await self.request(source, floor=None)
+        self.assertFalse(baseline.errors)
+        with patch.object(generated, 'MAX_EXPORT_SOURCE_BYTES', total), \
+                patch.object(generated, 'MAX_GENERATED_BYTES', parsed_all):
+            at_boundary = await self.request(source, floor=None)
+            self.assertFalse(at_boundary.errors)
+            self.assertEqual(at_boundary.results, baseline.results)
+        # Each preflight rejects before hashing or parsing any source content.
+        for whole_limit, parse_limit, scope in ((total - 1, parsed_all, None),
+                                                (total, parsed_all - 1, None),
+                                                (total, parsed['upper'] - 1, 'upper')):
+            with self.subTest(whole_limit=whole_limit, parse_limit=parse_limit, scope=scope):
+                with patch.object(generated, 'MAX_EXPORT_SOURCE_BYTES', whole_limit), \
+                        patch.object(generated, 'MAX_GENERATED_BYTES', parse_limit), \
+                        patch.object(generated, '_hashes', side_effect=AssertionError('Preflight must reject before hashing')):
+                    rejected = await self.request(source, floor=scope)
+                self.assertEqual(rejected.errors[0][0], 'invalid_export')
+                self.assertFalse(rejected.results)
+                self.assertFalse(self.state['export_busy'])
+        with patch.object(generated, 'MAX_EXPORT_SOURCE_BYTES', total), \
+                patch.object(generated, 'MAX_GENERATED_BYTES', parsed['upper']):
+            selected = await self.request(source, floor='upper')
+            self.assertFalse(selected.errors, 'Other floors do not count against selected model parsing')
+        # Even unused legacy downloads remain protected by the original hashes.
+        unused.write_bytes(b'y' * unused.stat().st_size)
+        changed = await self.request(source, floor='upper')
+        self.assertEqual(changed.errors[0][0], 'source_changed')
+        self.assertFalse(changed.results)
+        self.assertEqual(self.project.document, document_before)
+        self.assertEqual(self.hass.saved, storage_before)
+
     def test_legacy_custom_mesh_is_moved_without_replacing_geometry(self):
         source = copy.deepcopy(self.source)
         item = source['floors'][0]['items'][0]

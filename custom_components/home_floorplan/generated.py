@@ -29,6 +29,9 @@ _LOGGER = logging.getLogger(__name__)
 MODEL_BLOCK = re.compile(r'(<script\s+id=[\"\']modelData[\"\']\s+type=[\"\']application/json[\"\']\s*>)(.*?)(</script\s*>)', re.S | re.I)
 MODEL_ID = re.compile(r'<script\b[^>]*\bid\s*=\s*[\"\']modelData[\"\']', re.I)
 APPEARANCE = ("model_id", "style_id", "color", "pattern_id", "pattern_color", "curtain")
+# Legacy bundles also contain prebuilt downloads. Hash these for provenance,
+# while keeping the separate, smaller bound on model data parsed for export.
+MAX_EXPORT_SOURCE_BYTES = 256 * 1024 * 1024
 
 
 def _json(value):
@@ -485,12 +488,16 @@ class GeneratedProject(NativeProject):
             baseline = self.root / 'baselines' / self.document['baseline']
             assets = baseline / 'assets'
             expected = json.loads((baseline / 'source.json').read_text(encoding='utf-8'))['hashes']
-        files, source_bytes = 0, 0
+        model_paths = {floor['id'] + '/' + name for floor in floors for name in ('model-data.json', 'index.html')}
+        files, source_bytes, model_bytes = 0, 0, 0
         for path in assets.rglob('*'):
             if path.is_file():
                 files += 1
-                source_bytes += path.stat().st_size
-                if files > 4096 or source_bytes > MAX_GENERATED_BYTES:
+                size = path.stat().st_size
+                source_bytes += size
+                if path.relative_to(assets).as_posix() in model_paths:
+                    model_bytes += size
+                if files > 4096 or source_bytes > MAX_EXPORT_SOURCE_BYTES or model_bytes > MAX_GENERATED_BYTES:
                     raise NativeError('invalid_export', 'The original model exceeds the export source size limit.')
         if _hashes(assets) != expected:
             raise NativeError('source_changed', 'The original home changed. Reload before exporting.')
