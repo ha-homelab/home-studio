@@ -346,7 +346,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     }));
     const controls = {'object-list': {children: buttons}, undo: {disabled: true}, redo: {disabled: true}, 'pointer-position': {textContent: ''}};
     const p = vm.createContext({previewEnvironment: null, haSourcePolicy: null, haPublishedPreview: null,
-      project: original, activeFloorId: f.id, selection: null, tool: 'select', view: 'plan', drag: null, previewEdit: null,
+      orbit: { pointers: new Map() }, project: original, activeFloorId: f.id, selection: null, tool: 'select', view: 'plan', drag: null, previewEdit: null,
       planCanvas: plan, spaceHeld: false, previewDirty: false, map: {x: 0, y: 0},
       clone(value) { clones++; return model.clone(value); }, round: model.round, distance: model.distance,
       snap: value => value, localPoint: e => [e.clientX, e.clientY], toWorld: point => point,
@@ -419,7 +419,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     p.previewHint = p.toolHint = () => '';
     p.previewLost = false;
     p.resizeCanvases = () => {};
-    p.document.querySelector = () => ({getBoundingClientRect: () => ({width: 800, height: 600})});
+    p.document.querySelector = () => ({classList: {toggle() {}}, getBoundingClientRect: () => ({width: 800, height: 600})});
     vm.runInContext(section('function setView(', 'function addOpening(') +
       source.split('\n').find(line => line.startsWith("window.addEventListener('blur'")) +
       source.split('\n').find(line => line.startsWith("document.addEventListener('visibilitychange'")) +

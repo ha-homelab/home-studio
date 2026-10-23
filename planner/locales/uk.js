@@ -1,4 +1,7 @@
 export default {
+  "Widen the editor to use 2D + 3D.": "Розширте редактор для режиму 2D + 3D.",
+  "Draw in 2D and inspect your changes in 3D.": "Малюйте у 2D та перевіряйте зміни у 3D.",
+
   "category.seating": "М’які меблі та стільці",
   "category.tables": "Столи та письмові столи",
   "category.beds": "Ліжка",

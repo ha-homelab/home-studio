@@ -1,5 +1,8 @@
 // Complete localized interface; project identifiers and user content remain unchanged.
 export default {
+  "Widen the editor to use 2D + 3D.": "ขยายความกว้างของตัวแก้ไขเพื่อใช้ 2D + 3D",
+  "Draw in 2D and inspect your changes in 3D.": "วาดในมุมมอง 2D และตรวจสอบการเปลี่ยนแปลงในมุมมอง 3D",
+
   "Furniture": "เฟอร์นิเจอร์",
   "Lamp": "โคมไฟ",
   "Ceiling light": "ไฟเพดาน",

@@ -1,4 +1,7 @@
 export default {
+  "Widen the editor to use 2D + 3D.": "2D + 3D ব্যবহার করতে সম্পাদকের প্রস্থ বাড়ান।",
+  "Draw in 2D and inspect your changes in 3D.": "2D-তে আঁকুন এবং পরিবর্তনগুলি 3D-তে দেখুন।",
+
   "Furniture": "আসবাব",
   "Lamp": "বাতি",
   "Ceiling light": "সিলিং লাইট",

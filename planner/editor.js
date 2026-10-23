@@ -124,7 +124,11 @@ const displayedFloor = () => displayedProject().floors.find(f => f.id === active
 function cancelCanvasRender() { if (canvasFrame) cancelAnimationFrame(canvasFrame); canvasFrame = 0; }
 function requestCanvasRender() {
   if (canvasFrame || canvasSuspended || document.hidden) return;
-  canvasFrame = requestAnimationFrame(() => { canvasFrame = 0; if (view === 'preview') renderPreview(); else renderPlan(); });
+  canvasFrame = requestAnimationFrame(() => {
+    canvasFrame = 0;
+    if (view !== 'preview') renderPlan();
+    if (view !== 'plan') renderPreview();
+  });
 }
 function canvasPixelRatio(width, height, pixels) {
   return Math.min(Number.isFinite(devicePixelRatio) && devicePixelRatio > 0 ? devicePixelRatio : 1, 2, Math.sqrt(pixels / Math.max(1, width * height)));
@@ -275,7 +279,7 @@ function toolHint() { return tool === 'item' ? t('Click inside a room to place: 
 function updatePlacement() {
   $('placement-summary').textContent = t('Ready to place: {item}', { item: placementName() });
   $('browse-items').title = t('Open item library. Ready to place: {item}', { item: placementName() });
-  if (view === 'plan') $('tool-hint').textContent = toolHint();
+  if (view !== 'preview') $('tool-hint').textContent = toolHint();
 }
 function modelDimensions(model, ceiling, elevation = model.elevation_m) {
   const dimensions = { ...model.dimensions_m, height: round(Math.min(model.dimensions_m.height, ceiling)) };
@@ -485,8 +489,8 @@ function renderUI() {
   $('object-count').textContent = String(count);
   if (!count) objectList.append(node('p', 'object-empty', t('Your rooms, walls, and items will appear here.')));
   reconcileInspector($('object-list'), objectList);
-  $('empty-state').hidden = count > 0 || tool !== 'select' || view !== 'plan';
-  renderInspector(); if (view === 'preview') renderPreview();
+  $('empty-state').hidden = count > 0 || tool !== 'select' || view === 'preview';
+  renderInspector(); if (view !== 'plan') renderPreview();
 }
 function setSelection(next) {
   if (selection?.kind === next?.kind && selection?.id === next?.id) return;
@@ -702,27 +706,35 @@ function deleteSelection() {
 }
 function setTool(next) {
   if (drag) finishPointer(null, true);
+  if (previewEdit) finishPreviewEdit(null, true);
   tool = next; document.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === tool)));
-  if (view === 'plan') $('tool-hint').textContent = toolHint();
+  if (view !== 'preview') $('tool-hint').textContent = toolHint();
   planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
-  if (tool !== 'select' && view !== 'plan') setView('plan');
-  $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || view !== 'plan';
+  if (tool !== 'select' && view === 'preview') setView('plan');
+  $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || view === 'preview';
 }
 function setView(next) {
   if (next === 'preview' && haPublishedPreview) { haPublishedPreview(); return; }
+  const rect = document.querySelector('.canvas-shell').getBoundingClientRect();
+  if (next === 'split' && (haSourcePolicy || rect.width < 700)) next = 'plan';
   if (drag) finishPointer(null, true);
   releasePreviewPointer();
   view = next;
-  previewEnvironment?.setActive(next === 'preview' && !previewLost && !canvasSuspended);
+  previewEnvironment?.setActive(next !== 'plan' && !previewLost && !canvasSuspended);
   if (!haSourcePolicy) {
-    $('plan-tab').setAttribute('aria-selected', String(next === 'plan')); $('preview-tab').setAttribute('aria-selected', String(next === 'preview'));
-    $('plan-tab').tabIndex = next === 'plan' ? 0 : -1; $('preview-tab').tabIndex = next === 'preview' ? 0 : -1;
+    for (const mode of ['plan', 'preview', 'split']) {
+      const tab = $(mode + '-tab');
+      tab.setAttribute('aria-selected', String(next === mode)); tab.tabIndex = next === mode ? 0 : -1;
+    }
   }
-  $('plan-view').hidden = next !== 'plan'; $('preview-view').hidden = next !== 'preview'; $('snap-label').hidden = false;
+  document.querySelector('.canvas-shell').classList.toggle('split-view', next === 'split');
+  $('plan-view').hidden = next === 'preview'; $('preview-view').hidden = next === 'plan'; $('snap-label').hidden = false;
+  $('plan-view').setAttribute('aria-labelledby', next === 'split' ? 'split-tab' : 'plan-tab');
+  $('preview-view').setAttribute('aria-labelledby', next === 'split' ? 'split-tab' : 'preview-tab');
   $('tool-hint').textContent = next === 'preview' ? previewHint() : toolHint();
   updatePreviewNavigation();
-  $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || next !== 'plan';
-  if (next === 'preview') renderPreview(); else renderPlan(); updateZoom();
+  $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || next === 'preview';
+  resizeCanvases(rect); updateZoom();
 }
 function addOpening(wall, offset, type, precise = false) {
   const len = distance(wall.start, wall.end), width = round(Math.min(type === 'window' ? 1.2 : .9, Math.max(.05, len - .1)));
@@ -757,7 +769,7 @@ function fitPlan() {
 function zoomPlan(factor, anchor = [size.width / 2, size.height / 2]) {
   const world = toWorld(anchor); map.scale = Math.max(4, Math.min(280, map.scale * factor)); map.x = anchor[0] - world[0] * map.scale; map.y = anchor[1] - world[1] * map.scale; requestCanvasRender(); updateZoom();
 }
-function updateZoom() { $('zoom-value').textContent = view === 'plan' ? `${Math.round(map.scale / 55 * 100)}%` : `${Math.round(orbit.baseRadius / orbit.radius * 100)}%`; }
+function updateZoom() { $('zoom-value').textContent = view !== 'preview' ? `${Math.round(map.scale / 55 * 100)}%` : `${Math.round(orbit.baseRadius / orbit.radius * 100)}%`; }
 function path(points, close = false) { ctx.beginPath(); points.forEach((p, i) => { const [x, y] = toScreen(p); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); if (close) ctx.closePath(); }
 function planShapePath(shape, width, depth) {
   let cached = planPathCache.get(shape);
@@ -772,7 +784,7 @@ function planShapePath(shape, width, depth) {
   return cached.outline;
 }
 function renderPlan() {
-  if (view !== 'plan' || canvasSuspended || document.hidden) return;
+  if (view === 'preview' || canvasSuspended || document.hidden) return;
   cancelCanvasRender();
   ctx.clearRect(0, 0, size.width, size.height); ctx.fillStyle = planColors.background; ctx.fillRect(0, 0, size.width, size.height);
   const top = toWorld([0, 0]), bottom = toWorld([size.width, size.height]), gridStep = map.scale > 22 ? 1 : 5;
@@ -880,7 +892,7 @@ function hitTest(point) {
 }
 planCanvas.addEventListener('pointerdown', event => {
   // One pointer owns both the working copy and its immutable undo snapshot.
-  if (drag || view !== 'plan' || canvasSuspended || document.hidden || event.isPrimary === false || event.button !== 0 && event.button !== 1) return;
+  if (drag || previewEdit || orbit.pointers.size || view === 'preview' || canvasSuspended || document.hidden || event.isPrimary === false || event.button !== 0 && event.button !== 1) return;
   event.preventDefault(); planCanvas.focus(); const screen = localPoint(event), world = toWorld(screen); planCanvas.setPointerCapture(event.pointerId);
   if (spaceHeld || event.shiftKey || event.button === 1) { drag = { kind: 'pan', pointerId: event.pointerId, screen, map: { ...map } }; planCanvas.style.cursor = 'grabbing'; return; }
   if (tool === 'room' || tool === 'wall') { const p = world.map(value => snap(value, event.altKey)); drag = { kind: 'draw', pointerId: event.pointerId, startWorld: p, endWorld: p, screen }; return; }
@@ -969,6 +981,8 @@ function finishPointer(event, cancel = false) {
     // queued. Only a rollback needs another paint to restore the original.
     if (project === current.original && current.moved) renderPlan();
     updateFloorNavigator();
+    // Rebuild only after the 2D transaction settles, never for each pointer event.
+    if (view === 'split') requestCanvasRender();
     return;
   }
   renderPlan();
@@ -1016,7 +1030,7 @@ function initPreview() {
     previewSun.shadow.autoUpdate = false; previewSun.shadow.needsUpdate = true;
     const fill = new THREE.DirectionalLight(0xdce9f2, .5); fill.position.set(12, 10, -10); scene.add(fill);
     worldGroup = new THREE.Group(); scene.add(worldGroup);
-    previewEnvironment = createEnvironmentLayer(THREE, { scene, ...environmentSite(), visibilityElement: previewCanvas, frameInterval: previewDiffuseLighting ? 750 : previewPixels <= 250000 ? 500 : 180, requestRender: requestCanvasRender, active: view === 'preview', settings: previewEnvironmentSettings });
+    previewEnvironment = createEnvironmentLayer(THREE, { scene, ...environmentSite(), visibilityElement: previewCanvas, frameInterval: previewDiffuseLighting ? 750 : previewPixels <= 250000 ? 500 : 180, requestRender: requestCanvasRender, active: view !== 'plan', settings: previewEnvironmentSettings });
     previewEnvironmentControls.refresh();
     if (!previewInitialized) { fitPreview(); previewInitialized = true; }
   } catch (error) { disposePreviewRenderer(); renderer?.forceContextLoss(); previewUnavailable = true; releasePreviewPointer(); updatePreviewNavigation(); $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
@@ -1030,7 +1044,7 @@ function fitPreview() {
   orbit.target.set((minX + maxX) / 2, (low + high) / 2, (minZ + maxZ) / 2);
   orbit.radius = Math.max(6, sphereRadius / Math.sin(Math.min(verticalFov, horizontalFov) / 2) * 1.12); orbit.baseRadius = orbit.radius;
   rebasePreviewGesture();
-  if (view === 'preview' && renderer) requestCanvasRender();
+  if (view !== 'plan' && renderer) requestCanvasRender();
 }
 function disposePreviewGeometry() {
   if (!worldGroup) return;
@@ -1174,7 +1188,7 @@ function rebuildPreview() {
   previewDirty = false;
 }
 function drawPreview() {
-  if (!renderer || previewLost || previewUnavailable || view !== 'preview' || canvasSuspended || document.hidden) return;
+  if (!renderer || previewLost || previewUnavailable || view === 'plan' || canvasSuspended || document.hidden) return;
   cancelCanvasRender();
   const width = size.width, height = size.height, ratio = canvasPixelRatio(width, height, previewPixels), nextSize = [width, height, ratio].join();
   // Setting canvas dimensions, even to the same values, resets its drawing buffer.
@@ -1191,7 +1205,7 @@ function drawPreview() {
   updateElevationHandle();
   updateZoom();
 }
-function renderPreview() { if (view !== 'preview' || canvasSuspended || document.hidden || previewLost) return; initPreview(); if (!renderer || previewUnavailable) return; if (previewDirty) rebuildPreview(); drawPreview(); }
+function renderPreview() { if (view === 'plan' || view === 'split' && drag || canvasSuspended || document.hidden || previewLost) return; initPreview(); if (!renderer || previewUnavailable) return; if (previewDirty) rebuildPreview(); drawPreview(); }
 function zoomPreview(factor) {
   if (!canNavigatePreview() || !Number.isFinite(factor) || factor <= 0) return;
   const radius = previewRadius(orbit.radius / factor);
@@ -1199,7 +1213,7 @@ function zoomPreview(factor) {
   orbit.radius = radius; rebasePreviewGesture(); requestCanvasRender();
 }
 let previewCanvas = $('preview-canvas'), previewEvents;
-function canNavigatePreview() { return view === 'preview' && !previewLost && !previewUnavailable && !canvasSuspended && !document.hidden; }
+function canNavigatePreview() { return view !== 'plan' && !drag && !previewLost && !previewUnavailable && !canvasSuspended && !document.hidden; }
 function previewRadius(value) { return Math.max(1, Math.min(600, value)); }
 function previewPitch(value) { return Math.max(.1, Math.min(Math.PI / 2 - .001, value)); }
 function previewYaw(value) {
@@ -1214,7 +1228,7 @@ function previewHint() {
 function updatePreviewNavigation() {
   const unavailable = previewLost || previewUnavailable;
   const navigation = $('preview-navigation');
-  if (navigation) navigation.hidden = view !== 'preview' || unavailable;
+  if (navigation) navigation.hidden = view === 'plan' || unavailable;
   for (const mode of ['orbit', 'pan', 'edit']) {
     const control = $(`preview-${mode}`);
     if (control) control.setAttribute('aria-pressed', String(orbit.mode === mode));
@@ -1226,7 +1240,7 @@ function updatePreviewNavigation() {
   previewCanvas.dataset.navigationMode = orbit.mode;
   previewCanvas.dataset.navigating = String(orbit.pointers.size > 0);
   previewCanvas.style.cursor = orbit.pointers.size || previewEdit ? 'grabbing' : orbit.mode === 'edit' ? 'default' : 'grab';
-  if (view !== 'preview' || unavailable || orbit.mode !== 'edit') $('preview-elevation-handle').hidden = true;
+  if (view === 'plan' || unavailable || orbit.mode !== 'edit') $('preview-elevation-handle').hidden = true;
 }
 function setPreviewMode(mode) {
   if (!canNavigatePreview()) return;
@@ -1573,11 +1587,22 @@ $('library-category').addEventListener('change', () => renderLibrary());
 $('library-more').addEventListener('click', () => renderLibrary(true));
 $('library-clear').addEventListener('click', () => { $('library-search').value = ''; $('library-category').value = ''; renderLibrary(); $('library-search').focus(); });
 $('undo').addEventListener('click', () => undo()); $('redo').addEventListener('click', () => undo(true));
-$('plan-tab').addEventListener('click', () => setView('plan')); $('preview-tab').addEventListener('click', () => setView('preview'));
-for (const tab of [$('plan-tab'), $('preview-tab')]) tab.addEventListener('keydown', e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); setView(view === 'plan' ? 'preview' : 'plan'); (view === 'plan' ? $('plan-tab') : $('preview-tab')).focus(); } });
+const viewModes = ['plan', 'preview', 'split'];
+for (const mode of viewModes) {
+  const tab = $(mode + '-tab');
+  tab.addEventListener('click', () => setView(mode));
+  tab.addEventListener('keydown', e => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault();
+    const available = viewModes.filter(value => !$(value + '-tab').disabled && !$(value + '-tab').hidden);
+    const index = available.indexOf(mode), direction = e.key === 'ArrowLeft' ? -1 : 1;
+    const next = e.key === 'Home' ? available[0] : e.key === 'End' ? available.at(-1) : available[(index + direction + available.length) % available.length];
+    setView(next); $(next + '-tab').focus();
+  });
+}
 $('all-floors').addEventListener('change', () => { previewDirty = true; fitPreview(); renderPreview(); });
-$('fit-view').addEventListener('click', () => { if (view === 'preview') resetPreview(); else { fitPlan(); renderPlan(); } });
-$('zoom-in').addEventListener('click', () => view === 'plan' ? zoomPlan(1.2) : zoomPreview(1.2)); $('zoom-out').addEventListener('click', () => view === 'plan' ? zoomPlan(1 / 1.2) : zoomPreview(1 / 1.2));
+$('fit-view').addEventListener('click', () => { if (view !== 'preview') { fitPlan(); renderPlan(); } if (view !== 'plan') resetPreview(); });
+$('zoom-in').addEventListener('click', () => view !== 'preview' ? zoomPlan(1.2) : zoomPreview(1.2)); $('zoom-out').addEventListener('click', () => view !== 'preview' ? zoomPlan(1 / 1.2) : zoomPreview(1 / 1.2));
 $('help-button').addEventListener('click', () => $('help-dialog').showModal());
 document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => $(b.dataset.close).close()));
 $('build-project').addEventListener('click', () => {
@@ -1591,7 +1616,7 @@ window.addEventListener('keydown', e => {
   if (e.defaultPrevented) return;
   if (e.target.closest('input, textarea, select') || document.querySelector('dialog[open]')) return;
   if (e.key === 'Escape') { finishPointer(null, true); releasePreviewPointer(); setSelection(null); setTool('select'); renderUI(); renderPlan(); return; }
-  if (e.code === 'Space' && (e.target === planCanvas || e.target === previewCanvas || e.target === document.body)) { e.preventDefault(); spaceHeld = true; if (view === 'plan') planCanvas.style.cursor = 'grab'; }
+  if (e.code === 'Space' && (e.target === planCanvas || e.target === previewCanvas || e.target === document.body)) { e.preventDefault(); spaceHeld = true; if (view !== 'preview') planCanvas.style.cursor = 'grab'; }
   if (e.ctrlKey || e.metaKey) {
     if (e.key.toLowerCase() === 'z') { e.preventDefault(); undo(e.shiftKey); }
     if (e.key.toLowerCase() === 'y') { e.preventDefault(); undo(true); }
@@ -1599,7 +1624,7 @@ window.addEventListener('keydown', e => {
   }
   if (e.key === 'Delete' || e.key === 'Backspace') { if (selection) { e.preventDefault(); deleteSelection(); } return; }
   const shortcuts = { v: 'select', r: 'room', w: 'wall', d: 'door', n: 'window', i: 'item' }; if (shortcuts[e.key.toLowerCase()]) setTool(shortcuts[e.key.toLowerCase()]);
-  if (view === 'plan' && e.target === planCanvas) {
+  if (view !== 'preview' && e.target === planCanvas) {
     if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomPlan(1.15); } if (e.key === '-') { e.preventDefault(); zoomPlan(1 / 1.15); }
     if (e.key.startsWith('Arrow')) { e.preventDefault(); map.x += e.key === 'ArrowLeft' ? 30 : e.key === 'ArrowRight' ? -30 : 0; map.y += e.key === 'ArrowUp' ? 30 : e.key === 'ArrowDown' ? -30 : 0; renderPlan(); }
   }
@@ -1610,8 +1635,15 @@ window.addEventListener('beforeunload', e => { if ((saveFailed || pendingSaves) 
 let firstResize = true, planSize = '';
 function resizeCanvases(rect) {
   if (rect.width < 1 || rect.height < 1) return;
-  if (previewEdit && (rect.width !== size.width || rect.height !== size.height)) finishPreviewEdit(null, true);
-  const old = { ...size }; size = { width: rect.width, height: rect.height };
+  $('split-tab').disabled = rect.width < 700;
+  $('split-tab').title = rect.width < 700 ? t('Widen the editor to use 2D + 3D.') : t('Draw in 2D and inspect your changes in 3D.');
+  if (view === 'split' && rect.width < 700) { setView('plan'); return; }
+  const width = view === 'split' ? rect.width / 2 : rect.width;
+  if (width !== size.width || rect.height !== size.height) {
+    if (drag) finishPointer(null, true);
+    if (previewEdit) finishPreviewEdit(null, true);
+  }
+  const old = { ...size }; size = { width, height: rect.height };
   const dpr = canvasPixelRatio(size.width, size.height, 4000000), nextSize = [size.width, size.height, dpr].join();
   if (!canvasSuspended && !document.hidden && nextSize !== planSize) {
     // Release the old bitmap before changing orientation: mixing old height
@@ -1620,7 +1652,7 @@ function resizeCanvases(rect) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); planSize = nextSize;
   }
   if (firstResize) { firstResize = false; fitPlan(); } else { map.x += (size.width - old.width) / 2; map.y += (size.height - old.height) / 2; }
-  if (view === 'preview') {
+  if (view !== 'plan') {
     const ratio = orbit.baseRadius / orbit.radius, target = orbit.target.clone();
     fitPreview(); orbit.radius = orbit.baseRadius / ratio;
     // Layout changes retain the user's framing. Continue a captured gesture
@@ -1778,6 +1810,7 @@ if (haContext) {
       const next = value || blankProject(); validateProject(next); serializeProject(next);
       installSourcePolicy(next, policy, hostActions);
       if (haSourcePolicy) {
+        $('split-tab').hidden = true;
         for (const id of ['plan-tab', 'preview-tab']) { $(id).setAttribute('role', 'button'); $(id).removeAttribute('aria-selected'); $(id).removeAttribute('aria-controls'); $(id).tabIndex = 0; }
         $('plan-tab').parentElement.setAttribute('role', 'group');
         $('plan-tab').parentElement.setAttribute('aria-label', 'Drawing and published home');

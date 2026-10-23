@@ -1,5 +1,8 @@
 // Canonical English UI strings. Saved project content and identifiers are never translated.
 export default {
+  "Widen the editor to use 2D + 3D.": "Widen the editor to use 2D + 3D.",
+  "Draw in 2D and inspect your changes in 3D.": "Draw in 2D and inspect your changes in 3D.",
+
   "Furniture": "Furniture",
   "Lamp": "Lamp",
   "Ceiling light": "Ceiling light",

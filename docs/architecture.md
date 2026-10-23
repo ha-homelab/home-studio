@@ -877,3 +877,9 @@ from unpublished draft changes. Returning removes that renderer before showing
 the editor, preventing two large WebGL scenes from staying live. Native projects
 continue to use their normal draft 3D preview. No external editor navigation is
 required from the HA interface.
+
+### Side-by-side drawing and preview
+
+The editor offers **2D + 3D** when its drawing workspace is at least 700 CSS pixels wide. Both panes use the same accepted project, selection, undo history, and save path. The left pane remains the drawing surface; the right pane retains orbit, pan, zoom, and item-height controls. **Fit view** fits both panes; the bottom zoom controls apply to the drawing, and scrolling over the preview zooms the camera. Narrowing the workspace returns to the full-width drawing without changing the project.
+
+There is still one bounded WebGL context. Both panes share the on-demand frame scheduler, and a completed 2D move or resize updates the 3D geometry once. The preview retains the previous committed geometry during a 2D drag; it does not rebuild on every pointer event. Orbiting does not create undo entries or save changes. A pointer gesture in one pane prevents a competing edit in the other. Existing generated-home architecture remains protected and uses its published preview instead of a misleading partial 3D reconstruction.
