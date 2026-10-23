@@ -87,6 +87,8 @@ jobs:
           python3 scripts/test-furniture.py
           python3 scripts/test-furniture-patterns.py
           node scripts/test-furniture-patterns.mjs
+          python3 scripts/test-fixture-animation.py
+          node scripts/test-fixture-animation.cjs
           python3 scripts/test-inventory-appearance.py
           node --test scripts/test-inventory-appearance.cjs
       - name: Check localized guides, wiki links and vector diagrams
@@ -185,7 +187,7 @@ jobs:
         run: node --test scripts/test-tv-screen.cjs
       - name: Test linked media previews and bounded TV power commands
         run: |
-          node --test scripts/test-media-preview.cjs scripts/test-media-artwork-host.cjs scripts/test-media-command-host.cjs scripts/test-appliance-state.cjs scripts/test-presence-view.cjs scripts/test-vacuum-state.cjs scripts/test-vacuum-view.cjs scripts/test-vacuum-position-host.cjs
+          node --test scripts/test-climate-state.cjs scripts/test-marker-motion.cjs scripts/test-device-effects.cjs scripts/test-media-preview.cjs scripts/test-media-artwork-host.cjs scripts/test-media-command-host.cjs scripts/test-appliance-state.cjs scripts/test-presence-view.cjs scripts/test-vacuum-state.cjs scripts/test-vacuum-view.cjs scripts/test-vacuum-position-host.cjs
           node --test scripts/test-dashboard-card.cjs
           for engine in chromium firefox webkit; do
             MEDIA_ARTWORK_ENGINE="$engine" node scripts/test-media-artwork-browser.cjs
@@ -194,6 +196,9 @@ jobs:
       - name: Test generic device bindings and native interaction
         run: |
           node scripts/test-generic-entities.cjs
+          for engine in chromium firefox webkit; do
+            DEVICE_FEEDBACK_ENGINE="$engine" node scripts/test-device-feedback.cjs
+          done
           for engine in chromium firefox webkit; do
             DEVICE_INTERACTIONS_ENGINE="$engine" DEVICE_INTERACTIONS_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-device-interactions.cjs
           done

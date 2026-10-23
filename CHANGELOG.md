@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- Five library fixtures: ceiling, standing and desk fans, a wall air conditioner,
+  and a panel heater. Published fans rotate when running; active cooling and
+  heating show blue or warm airflow with a current-temperature badge.
+- Smooth device-button motion during pan and orbit, with bounded lag and an
+  aligned clickable area. Reduced-motion and low-capacity rendering remain
+  supported; idle and offscreen views stop animation work.
+
+### Fixed
+
+- Climate devices no longer show a stale heating/cooling action while off.
+
 ## [1.1.0] - Connected editing and easier device setup
 
 ### Added

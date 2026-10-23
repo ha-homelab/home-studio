@@ -654,6 +654,9 @@ class HomeFloorplanPanel extends HTMLElement {
           ['volume_level',Number.isFinite(attributes.volume_level)&&attributes.volume_level>=0&&attributes.volume_level<=1?attributes.volume_level:null],
           ['is_volume_muted',typeof attributes.is_volume_muted==='boolean'?attributes.is_volume_muted:null],
         ]))} : {}),
+        ...(id.startsWith('fan.') ? {fan:{
+          percentage:Number.isFinite(attributes.percentage)&&attributes.percentage>=0&&attributes.percentage<=100?attributes.percentage:null,
+        }} : {}),
         ...(id.startsWith('climate.') ? {climate:{
           ...Object.fromEntries(['current_temperature','temperature','target_temp_low','target_temp_high'].map(key=>[key,Number.isFinite(attributes[key])?attributes[key]:null])),
           hvac_action:typeof attributes.hvac_action==='string'?attributes.hvac_action.slice(0,40):'',

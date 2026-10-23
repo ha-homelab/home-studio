@@ -697,4 +697,9 @@ export default {
   "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Только декорация. Движение приостанавливается на скрытой странице и при настройке уменьшенного движения.",
   "Add garden area": "Добавить участок сада",
   "Garden added. Place trees, paths or animals from the Item library.": "Сад добавлен. Разместите деревья, дорожки или животных из библиотеки предметов.",
+  "model.ceiling_fan": "Потолочный вентилятор с четырьмя лопастями",
+  "model.standing_fan": "Напольный вентилятор",
+  "model.desk_fan": "Настольный вентилятор",
+  "model.wall_air_conditioner": "Настенный кондиционер",
+  "model.panel_heater": "Панельный обогреватель",
 };

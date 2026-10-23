@@ -222,6 +222,7 @@ export function buildFurnitureAsset(item) {
     materials[material] = linearColor(color);
     const fabric = supportsCurtain(model) && ['body', 'accent'].includes(part.material);
     const tags = fabric ? { curtain_fabric: true, curtain_panel: part.center[0] < 0 ? 'left' : 'right' } : {};
+    if (part.fan_rotor === true && model.device_animation?.rotor) tags.fan_rotor = true;
     const mesh = { name: 'part_' + index, ...primitive(part), material, kind: 'inventory', ...tags };
     if (pattern && part.pattern_face) {
       // Replace precisely the original top (+Y) or front (+Z) two triangles.
@@ -243,5 +244,5 @@ export function buildFurnitureAsset(item) {
     if (patternedMesh.vertices.length) meshes.push(patternedMesh);
     for (const mesh of curtainPatterns) meshes.push({ ...mesh, material: patternedMesh.material });
   }
-  return { meshes, materials };
+  return { meshes, materials, ...(model.device_animation ? { device_animation: model.device_animation } : {}) };
 }

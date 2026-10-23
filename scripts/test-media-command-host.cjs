@@ -77,6 +77,48 @@ test('large HA catalog does not forward unrelated raw states; explicit display d
   assert.ok(JSON.stringify(snapshot).length<3000,'Only the bound and declared display states travel with each update');
 });
 
+test('fan projection forwards only bounded speed and retains stopped, restored and disconnected evidence',()=>{
+  const f=stateFixture(),p=f.panel,{resolveFanStatus}=require('../climate-state.js');
+  p._hass.states['fan.study']={state:'on',attributes:{percentage:65,percentage_step:1,unsafe:'PRIVATE'}};
+  p._hass.states['switch.fan']={state:'on',attributes:{percentage:65}};
+  for(const entity_id of ['fan.study','switch.fan']){p.savedItems.push({entity_id});p.readableEntities.add(entity_id);}
+  f.configure({state_entities:[]});
+  assert.deepEqual(f.snapshot().states['fan.study'].fan,{percentage:65});
+  assert.equal(f.snapshot().states['switch.fan'].fan,undefined,'speed belongs to the fan domain only');
+  assert.doesNotMatch(JSON.stringify(f.snapshot()),/PRIVATE|percentage_step|unsafe/);
+  for(const [percentage,expected,running] of [[0,0,false],[100,100,true],[.1,.1,true],
+    [null,null,true],[undefined,null,true],[-1,null,true],[101,null,true],['65',null,true],[NaN,null,true],[Infinity,null,true]]){
+    p._hass.states['fan.study'].attributes.percentage=percentage;p.publishEntityStates();
+    const reading=f.snapshot().states['fan.study'];
+    assert.deepEqual(reading.fan,{percentage:expected});
+    assert.equal(resolveFanStatus(reading).running,running,'explicit zero stops an otherwise on fan');
+  }
+  p._hass.states['fan.study']={state:'off',attributes:{percentage:65}};p.publishEntityStates();
+  assert.equal(resolveFanStatus(f.snapshot().states['fan.study']).running,false);
+  p._hass.states['fan.study']={state:'on',attributes:{percentage:65,restored:true}};p.publishEntityStates();
+  assert.equal(resolveFanStatus(f.snapshot().states['fan.study']).activity,'restored');
+  p._hass.connected=false;p.publishEntityStates();
+  assert.equal(resolveFanStatus(f.snapshot().states['fan.study'],f.snapshot().connected).activity,'disconnected');
+});
+
+test('climate projection preserves HVAC cycling without forwarding extra attributes',()=>{
+  const f=stateFixture(),p=f.panel,{resolveClimateStatus}=require('../climate-state.js');
+  p._hass.states['climate.study']={state:'cool',attributes:{hvac_action:'cooling',current_temperature:25,temperature:22,unsafe:'PRIVATE'}};
+  p._hass.config={unit_system:{temperature:'°C'}};
+  p.savedItems.push({entity_id:'climate.study'});p.readableEntities.add('climate.study');
+  f.configure({state_entities:[]});
+  let status=resolveClimateStatus(f.snapshot().states['climate.study']);
+  assert.equal(status.effect,'cool');assert.equal(status.temperatureText,'25 °C');
+  assert.doesNotMatch(JSON.stringify(f.snapshot()),/PRIVATE|unsafe/);
+  p._hass.states['climate.study'].attributes.hvac_action='idle';p.publishEntityStates();
+  status=resolveClimateStatus(f.snapshot().states['climate.study']);
+  assert.equal(status.powered,true);assert.equal(status.running,false);assert.equal(status.temperatureText,'25 °C');
+  delete p._hass.states['climate.study'].attributes.hvac_action;
+  p._hass.states['climate.study'].attributes.current_temperature='25';p.publishEntityStates();
+  status=resolveClimateStatus(f.snapshot().states['climate.study']);
+  assert.equal(status.running,false);assert.equal(status.currentTemperature,null);assert.equal(status.temperatureSource,'target');
+});
+
 // Include the real save path and its Blob limit without changing the command-only fixture.
 function stateFixture(){
   let Panel;const sent=[],writes=[];

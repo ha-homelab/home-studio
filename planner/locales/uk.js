@@ -697,4 +697,9 @@ export default {
   "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Decorative only. Motion pauses when hidden or reduced motion is preferred.",
   "Add garden area": "Add garden area",
   "Garden added. Place trees, paths or animals from the Item library.": "Garden added. Place trees, paths or animals from the Item library.",
+  "model.ceiling_fan": "Стельовий вентилятор із чотирма лопатями",
+  "model.standing_fan": "Підлоговий вентилятор",
+  "model.desk_fan": "Настільний вентилятор",
+  "model.wall_air_conditioner": "Настінний кондиціонер",
+  "model.panel_heater": "Панельний обігрівач",
 };

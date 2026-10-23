@@ -697,4 +697,9 @@ export default {
   "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Decorative only. Motion pauses when hidden or reduced motion is preferred.",
   "Add garden area": "Add garden area",
   "Garden added. Place trees, paths or animals from the Item library.": "Garden added. Place trees, paths or animals from the Item library.",
+  "model.ceiling_fan": "Stropní ventilátor se čtyřmi lopatkami",
+  "model.standing_fan": "Stojanový ventilátor",
+  "model.desk_fan": "Stolní ventilátor",
+  "model.wall_air_conditioner": "Nástěnná klimatizace",
+  "model.panel_heater": "Panelové topidlo",
 };

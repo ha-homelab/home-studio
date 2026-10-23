@@ -697,4 +697,9 @@ export default {
   "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Decorative only. Motion pauses when hidden or reduced motion is preferred.",
   "Add garden area": "Add garden area",
   "Garden added. Place trees, paths or animals from the Item library.": "Garden added. Place trees, paths or animals from the Item library.",
+  "model.ceiling_fan": "চার পাখার সিলিং ফ্যান",
+  "model.standing_fan": "স্ট্যান্ড ফ্যান",
+  "model.desk_fan": "টেবিল ফ্যান",
+  "model.wall_air_conditioner": "দেয়ালে লাগানো এয়ার কন্ডিশনার",
+  "model.panel_heater": "প্যানেল হিটার",
 };

@@ -698,4 +698,9 @@ export default {
   "Decorative only. Motion pauses when hidden or reduced motion is preferred.": "Decorative only. Motion pauses when hidden or reduced motion is preferred.",
   "Add garden area": "Add garden area",
   "Garden added. Place trees, paths or animals from the Item library.": "Garden added. Place trees, paths or animals from the Item library.",
+  "model.ceiling_fan": "Quạt trần bốn cánh",
+  "model.standing_fan": "Quạt đứng",
+  "model.desk_fan": "Quạt để bàn",
+  "model.wall_air_conditioner": "Máy điều hòa treo tường",
+  "model.panel_heater": "Máy sưởi dạng tấm",
 };

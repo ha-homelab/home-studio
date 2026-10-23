@@ -136,6 +136,35 @@ A role/account change tears down the old viewer and capabilities. An unpublished
 native source draft cannot be silently overwritten by a placement save from
 an older published viewer.
 
+## Device feedback and screen-space motion
+
+The catalog keeps optional `device_animation` metadata beside the five fan and
+HVAC models. Both furniture compilers preserve it; project inventory and saved
+entity bindings keep their existing schema. Published fan geometry separates
+only the rotating pieces into a material batch. An inverse-scale mount keeps
+blades rigid when the user changes the fixture's dimensions.
+
+`climate-state.js` converts the host's bounded fan percentage and climate
+projection into display state. Selected HVAC mode does not imply active
+heating or cooling: `hvac_action` is authoritative. Missing, restored and
+unavailable readings cannot start an effect. `device-effects.js` projects
+three SVG airflow paths from each fixture and manages a single adaptive rotor
+timer. It suspends on document/page visibility, viewport exit, rendering loss,
+inactive home view and reduced motion. Low-capacity rendering retains CSS/SVG
+indicators without continuous scene drawing.
+
+`marker-motion.js` is independent of Three.js. Camera renders supply final
+screen coordinates, including grouped-button spacing. It eases the whole DOM
+button, with a maximum 24 px lag and 320 ms settling deadline; it performs no
+layout reads, state requests or WebGL draws. An idle view has no marker RAF.
+View changes reset cached coordinates and disposal removes all listeners.
+
+CPU contract tests cover state, projection, timing and cleanup. A generated
+viewer browser test sends fictional MessageChannel readings through the same
+sandbox interface as HA, checks the actual clickable positions, and verifies
+software and hardware rendering paths. Package tests compile all five fixtures
+from an extracted HACS bundle so these modules cannot be silently omitted.
+
 ## Dashboard embedding and media artwork
 
 ### Device state and command boundaries

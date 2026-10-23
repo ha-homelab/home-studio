@@ -463,9 +463,37 @@ const li=document.createElement('li'),label=document.createElement('span');label
 if(objectGroup){
 const size=it.dimensions_m,candidate=model.object_assets?.[it.id],asset=candidate?.model_id&&candidate.model_id!==it.model_id?null:candidate;let o;
 if(asset){
-o=new THREE.Group();const batches={};
-for(const part of asset.meshes){const key=part.material+'|'+(part.curtain_fabric?part.curtain_panel:'fixed');const batch=batches[key]??={material:part.material,curtainFabric:part.curtain_fabric===true,curtainPanel:part.curtain_panel,vertices:[],normals:[],indices:[]};const offset=batch.vertices.length/3;batch.vertices.push(...part.vertices.flat());batch.normals.push(...part.normals.flat());batch.indices.push(...part.indices.map(i=>i+offset))}
-for(const batch of Object.values(batches)){const material=batch.material;const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(batch.vertices,3));geo.setAttribute('normal',new THREE.Float32BufferAttribute(batch.normals,3));geo.setIndex(batch.indices);const col=model.materials[material];const mat=createSceneMaterial({color:new THREE.Color(...col.slice(0,3)),roughness:.8,transparent:col[3]<1,opacity:col[3],depthWrite:col[3]===1,side:THREE.DoubleSide});const child=new THREE.Mesh(geo,mat);child.castShadow=col[3]===1;child.receiveShadow=true;child.userData.curtainFabric=!!model.cover_windows?.[it.id] && (batch.curtainFabric||/curtain|safety_mesh/.test(material));child.userData.curtainPanel=batch.curtainPanel;o.add(child)}
+o=new THREE.Group();const batches={},animation=asset.device_animation;
+// Dynamic pieces retain one material batch per rotor; all other parts stay merged.
+let rotor=null;
+if(animation){
+  o.userData.deviceAnimation=animation;o.userData.deviceRotors=[];
+  if(animation.rotor){
+    const mount=new THREE.Group();mount.position.fromArray(animation.rotor.pivot);
+    // Cancel the item's nonuniform scale before rotation to keep blades rigid.
+    mount.scale.set(1/size.width,1/size.height,1/size.depth);o.add(mount);
+    rotor=new THREE.Group();mount.add(rotor);
+    rotor.userData.axis=animation.rotor.axis;o.userData.deviceRotors.push(rotor);
+  }
+}
+for(const part of asset.meshes){
+  const fanRotor=!!rotor&&part.fan_rotor===true;
+  const key=part.material+'|'+(fanRotor?'fan_rotor':part.curtain_fabric?part.curtain_panel:'fixed');
+  const batch=batches[key]??={material:part.material,fanRotor,curtainFabric:part.curtain_fabric===true,curtainPanel:part.curtain_panel,vertices:[],normals:[],indices:[]};
+  const offset=batch.vertices.length/3;
+  if(fanRotor){
+    const pivot=animation.rotor.pivot,dimensions=[size.width,size.height,size.depth];
+    for(const vertex of part.vertices)batch.vertices.push(...vertex.map((v,axis)=>(v-pivot[axis])*dimensions[axis]));
+    for(const normal of part.normals){const scaled=normal.map((v,axis)=>v/dimensions[axis]),length=Math.hypot(...scaled);batch.normals.push(...scaled.map(v=>v/length));}
+  }else{batch.vertices.push(...part.vertices.flat());batch.normals.push(...part.normals.flat());}
+  batch.indices.push(...part.indices.map(i=>i+offset));
+}
+for(const batch of Object.values(batches)){
+  const material=batch.material,geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(batch.vertices,3));geo.setAttribute('normal',new THREE.Float32BufferAttribute(batch.normals,3));geo.setIndex(batch.indices);
+  const col=model.materials[material],mat=createSceneMaterial({color:new THREE.Color(...col.slice(0,3)),roughness:.8,transparent:col[3]<1,opacity:col[3],depthWrite:col[3]===1,side:THREE.DoubleSide});
+  const child=new THREE.Mesh(geo,mat);child.castShadow=col[3]===1;child.receiveShadow=true;child.userData.curtainFabric=!!model.cover_windows?.[it.id] && (batch.curtainFabric||/curtain|safety_mesh/.test(material));child.userData.curtainPanel=batch.curtainPanel;
+  (batch.fanRotor?rotor:o).add(child);
+}
 if(tvEntities[it.id]&&it.entity_id===tvEntities[it.id]){const screen=new THREE.Mesh(new THREE.PlaneGeometry(.968,.948),new THREE.MeshBasicMaterial({toneMapped:false}));screen.position.set(0,.515,.393);screen.visible=false;o.userData.screen=screen;o.add(screen)}
 o.scale.set(size.width,size.height,size.depth);o.position.set(it.position_m.x,it.position_m.y,it.position_m.z);
 }else{const geo=new THREE.BoxGeometry(size.width,size.height,size.depth);const mat=createSceneMaterial({color:it.type==='tv'?0x273239:0xb87637,roughness:.7});o=new THREE.Mesh(geo,mat);o.position.set(it.position_m.x,it.position_m.y+size.height/2,it.position_m.z);o.castShadow=true;o.receiveShadow=true;registerFallbackBoxProgram(THREE,o,renderProfile.diffuseLighting)}

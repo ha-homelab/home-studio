@@ -240,6 +240,8 @@ def build_furniture_asset(item):
         materials[material] = linear_color(color)
         fabric = supports_curtain(model) and part['material'] in ('body', 'accent')
         tags = {'curtain_fabric': True, 'curtain_panel': 'left' if part['center'][0] < 0 else 'right'} if fabric else {}
+        if part.get('fan_rotor') is True and model.get('device_animation', {}).get('rotor'):
+            tags['fan_rotor'] = True
         mesh = {'name': 'part_' + str(index), **primitive(part), 'material': material, 'kind': 'inventory', **tags}
         if pattern and part.get('pattern_face'):
             # Replace the original top (+Y) or front (+Z) two triangles.
@@ -261,4 +263,5 @@ def build_furniture_asset(item):
         if patterned_mesh['vertices']:
             meshes.append(patterned_mesh)
         meshes.extend({**mesh, 'material': patterned_mesh['material']} for mesh in curtain_patterns)
-    return {'meshes': meshes, 'materials': materials}
+    return {'meshes': meshes, 'materials': materials,
+            **({'device_animation': model['device_animation']} if 'device_animation' in model else {})}

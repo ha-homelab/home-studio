@@ -193,7 +193,9 @@ console.log(JSON.stringify({request_id:context.request_id,mode:context.mode,cont
                              capture_output=True, text=True, timeout=30, check=True)
         request = json.loads(run.stdout)
         original = copy.deepcopy(request)
-        self.assertEqual(len(request["context"]["catalog"]["models"]), 206)
+        catalog = json.loads((Path(__file__).resolve().parents[1] / "planner/catalog.json").read_text())
+        self.assertEqual({model["model_id"] for model in request["context"]["catalog"]["models"]},
+                         {model["id"] for model in catalog["models"]})
         for profile in providers.PROFILES.values():
             with self.subTest(profile=profile.id):
                 payload = providers.request_payload(profile, "fixture", request)
