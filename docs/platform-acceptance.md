@@ -614,6 +614,18 @@ return after its boundary, but still fails admission. This is not a guarantee
 of preemption at exactly 60 seconds; the unchanged outer watchdog also remains
 in force.
 
+The disposable GitHub-hosted macOS job explicitly prepares Safari once before
+these cases: Launch Services opens `about:blank`, then AppKit must report that
+Safari has finished launching. Both operations share a separate 60-second
+preparation budget recorded in `preparation.json` and the summary. Preparation
+failure stops the run before any test case; it never creates or retries a
+WebDriver session or visits Home Studio. This addresses the observed first-launch
+SafariDriver timeout while preserving each case's single session request,
+180-second watchdog, fresh automation window, and application cold-load checks.
+The flag is rejected outside GitHub-hosted macOS, and local runs omit it so they
+do not open ordinary Safari tabs. Launch completion is only a prerequisite;
+the subsequent WebDriver session and every application assertion must still pass.
+
 Every viewer report and cycle sample records `loadBudgetMs: 60000`. Samples also
 record monotonic `loadMs` and `loadCompleted`; a pending or failed cold load is
 saved with `loadCompleted: false`, and detected expiry sets `loadTimedOut: true`.

@@ -324,7 +324,7 @@ jobs:
       - name: Enable WebDriver on this disposable hosted runner
         run: sudo /usr/bin/safaridriver --enable
       - name: Test installed Safari with both viewers and the 256-item planner
-        run: python3 scripts/test-safari-acceptance.py --output acceptance-artifacts/safari
+        run: python3 scripts/test-safari-acceptance.py --prepare-hosted-safari --output acceptance-artifacts/safari
       - name: Preserve actual Safari identity and diagnostics
         if: ${{ always() }}
         uses: ./.github/actions/upload-acceptance-artifact

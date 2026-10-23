@@ -317,5 +317,94 @@ class SessionStartupTests(unittest.TestCase):
         self.assertFalse(timing['timedOut'])
 
 
+class HostedPreparationTests(unittest.TestCase):
+    hosted = {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted'}
+    ready = {'bundleId': 'com.apple.Safari', 'finishedLaunching': True, 'processIdentifier': 123}
+
+    def test_guard_rejects_local_self_hosted_and_other_platforms_before_launch(self):
+        for platform, environment in (('darwin', {}), ('darwin', {'GITHUB_ACTIONS': 'true'}),
+                                      ('darwin', {**self.hosted, 'RUNNER_ENVIRONMENT': 'self-hosted'}),
+                                      ('linux', self.hosted)):
+            with self.subTest(platform=platform, environment=environment), tempfile.TemporaryDirectory() as temp:
+                with patch.object(safari.sys, 'platform', platform), \
+                     patch.dict(safari.os.environ, environment, clear=True), \
+                     patch.object(safari.subprocess, 'run') as command:
+                    result = safari.prepare_hosted_safari(Path(temp))
+                command.assert_not_called()
+                self.assertEqual(result['status'], 'failed')
+                self.assertEqual(result['phase'], 'hosted-runner-check')
+                self.assertEqual(json.loads((Path(temp) / 'preparation.json').read_text()), result)
+
+    def test_launch_and_readiness_share_one_deadline_without_webdriver_or_app_navigation(self):
+        now, commands = [0.0], []
+        def run(command, **kwargs):
+            commands.append((command, kwargs))
+            now[0] = 20 if len(commands) == 1 else 59.999
+            return Mock(stdout=json.dumps(self.ready))
+        with tempfile.TemporaryDirectory() as temp, patch.object(safari.sys, 'platform', 'darwin'), \
+             patch.dict(safari.os.environ, self.hosted, clear=True), \
+             patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
+             patch.object(safari.subprocess, 'run', side_effect=run), \
+             patch.object(safari.SafariWebDriver, 'start') as session:
+            result = safari.prepare_hosted_safari(Path(temp))
+            saved = json.loads((Path(temp) / 'preparation.json').read_text())
+        self.assertEqual(result, saved)
+        self.assertEqual(result['status'], 'passed')
+        self.assertEqual(result['application'], self.ready)
+        self.assertEqual(result['durationMs'], 59999)
+        self.assertEqual([kwargs['timeout'] for _, kwargs in commands], [60, 40])
+        self.assertEqual(commands[0][0], ['/usr/bin/open', '-g', '-b', 'com.apple.Safari', 'about:blank'])
+        self.assertEqual(commands[1][0], ['/usr/bin/osascript', '-l', 'JavaScript', '-e', safari.SAFARI_READY_SCRIPT])
+        self.assertTrue(all(kwargs['check'] for _, kwargs in commands))
+        session.assert_not_called()
+
+    def test_preparation_failure_and_late_completion_stay_failed_with_evidence(self):
+        for failure in ('launch-error', 'launch-timeout', 'readiness-timeout', 'invalid-json', 'not-ready', 'late'):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
+                now, commands = [0.0], []
+                def run(command, **kwargs):
+                    commands.append(command)
+                    if failure == 'launch-error':
+                        raise safari.subprocess.CalledProcessError(1, command, stderr='launch failed')
+                    if failure == 'launch-timeout' or (failure == 'readiness-timeout' and len(commands) == 2):
+                        now[0] = 60
+                        raise safari.subprocess.TimeoutExpired(command, kwargs['timeout'])
+                    now[0] = 10 if len(commands) == 1 else 60 if failure == 'late' else 20
+                    return Mock(stdout='invalid' if failure == 'invalid-json' else
+                                json.dumps({**self.ready, 'finishedLaunching': failure != 'not-ready'}))
+                with patch.object(safari.sys, 'platform', 'darwin'), \
+                     patch.dict(safari.os.environ, self.hosted, clear=True), \
+                     patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
+                     patch.object(safari.subprocess, 'run', side_effect=run):
+                    result = safari.prepare_hosted_safari(Path(temp))
+                self.assertEqual(result['status'], 'failed')
+                self.assertEqual(result['timedOut'], failure in ('launch-timeout', 'readiness-timeout', 'late'))
+                self.assertEqual(len(commands), 1 if failure.startswith('launch-') else 2)
+                self.assertEqual(json.loads((Path(temp) / 'preparation.json').read_text()), result)
+
+    def test_cli_defaults_preserve_local_safari_and_failed_preparation_cannot_run_cases(self):
+        for preparation in (None, 'failed', 'passed'):
+            with self.subTest(preparation=preparation), tempfile.TemporaryDirectory() as temp:
+                argv = ['test-safari-acceptance.py', '--output', temp]
+                if preparation is not None:
+                    argv.append('--prepare-hosted-safari')
+                def run_case(_output, name, _driver):
+                    return {'suite': name, 'status': 'failed' if name == 'viewer-6' else 'passed', 'durationMs': 1}
+                with patch.object(safari.sys, 'argv', argv), \
+                     patch.object(safari, 'prepare_hosted_safari', return_value={'status': preparation}) as prepare, \
+                     patch.object(safari, 'run_case', side_effect=run_case) as cases:
+                    self.assertEqual(safari.main(), 1)
+                self.assertEqual(prepare.call_count, int(preparation is not None))
+                self.assertEqual(cases.call_count, 0 if preparation == 'failed' else 3)
+                if cases.call_count:
+                    self.assertEqual([call.args[1] for call in cases.call_args_list], ['viewer-6', 'viewer-24', 'planner-256'])
+                summary = json.loads((Path(temp) / 'summary.json').read_text())
+                self.assertEqual(summary['status'], 'failed')
+                if preparation == 'failed':
+                    self.assertEqual(summary['cases'], [])
+                else:
+                    self.assertEqual(summary['cases'][0]['status'], 'failed')
+
+
 if __name__ == '__main__':
     unittest.main()

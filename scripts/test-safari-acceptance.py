@@ -2,8 +2,9 @@
 """Exercise real macOS Safari through Apple's supported W3C WebDriver.
 
 Enable automation on a disposable CI runner with ``sudo safaridriver --enable``.
-This runner never changes that setting, installs a browser, or uses a personal
-Safari tab. Apple's automation session is separate from ordinary browsing.
+This runner never changes that setting or installs a browser. Local runs only
+use Apple's isolated automation sessions. The explicit hosted-runner preparation
+option may launch a blank ordinary Safari window on disposable GitHub hosts.
 """
 import argparse
 import contextlib
@@ -29,6 +30,78 @@ spec = importlib.util.spec_from_file_location('native_acceptance', SCRIPTS / 'te
 native = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(native)
 SESSION_START_BUDGET_MS = 60000
+PREPARATION_BUDGET_MS = 60000
+
+# AppKit reports launch completion without Apple Events, accessibility access,
+# or a WebDriver session. The Python subprocess timeout bounds this readiness
+# wait together with the preceding Launch Services call.
+SAFARI_READY_SCRIPT = '''
+ObjC.import('AppKit');
+while (true) {
+    var apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.Safari');
+    if (apps.count) {
+        var app = apps.objectAtIndex(0);
+        if (app.isFinishedLaunching && !app.isTerminated) {
+            JSON.stringify({bundleId: 'com.apple.Safari', finishedLaunching: true,
+                            processIdentifier: Number(app.processIdentifier)});
+            break;
+        }
+    }
+    delay(0.1);
+}
+'''
+
+
+def prepare_hosted_safari(output):
+    """Launch Safari once before testing, only on an opted-in disposable host."""
+    output.mkdir(parents=True, exist_ok=True)
+    record = {'schema': 1, 'product': 'Safari', 'status': 'running',
+              'sourceRevision': os.environ.get('GITHUB_SHA'),
+              'phase': 'hosted-runner-check', 'budgetMs': PREPARATION_BUDGET_MS,
+              'durationMs': None, 'timedOut': False}
+    started = time.monotonic()
+    deadline = started + PREPARATION_BUDGET_MS / 1000
+
+    def save():
+        (output / 'preparation.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
+
+    def remaining():
+        value = deadline - time.monotonic()
+        if value <= 0:
+            raise TimeoutError('Safari preparation exceeded its 60-second deadline')
+        return value
+
+    save()
+    try:
+        native.require(sys.platform == 'darwin' and os.environ.get('GITHUB_ACTIONS') == 'true'
+                       and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted',
+                       'Safari preparation requires a disposable GitHub-hosted macOS runner')
+        record['phase'] = 'launching-safari'
+        save()
+        subprocess.run(['/usr/bin/open', '-g', '-b', 'com.apple.Safari', 'about:blank'],
+                       check=True, capture_output=True, text=True, timeout=remaining())
+        record['phase'] = 'waiting-for-application-ready'
+        save()
+        result = subprocess.run(['/usr/bin/osascript', '-l', 'JavaScript', '-e', SAFARI_READY_SCRIPT],
+                                check=True, capture_output=True, text=True, timeout=remaining())
+        remaining()  # A completed but late probe must not admit the test cases.
+        record['application'] = json.loads(result.stdout)
+        application = record['application']
+        native.require(application.get('bundleId') == 'com.apple.Safari'
+                       and application.get('finishedLaunching') is True
+                       and type(application.get('processIdentifier')) is int
+                       and application['processIdentifier'] > 0, 'Safari did not confirm launch completion')
+        record.update(status='passed', phase='completed')
+    except Exception as error:
+        record.update(status='failed', error=str(error), traceback=traceback.format_exc(),
+                      timedOut=isinstance(error, (TimeoutError, subprocess.TimeoutExpired)))
+        if isinstance(error, subprocess.CalledProcessError):
+            record['stderr'] = error.stderr[-4096:] if error.stderr else ''
+    finally:
+        record['durationMs'] = (time.monotonic() - started) * 1000
+        save()
+    print(f'Safari hosted preparation: {record["status"]}', flush=True)
+    return record
 
 
 class SafariWebDriver(native.Marionette):
@@ -260,11 +333,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--driver', default='/usr/bin/safaridriver')
+    parser.add_argument('--prepare-hosted-safari', action='store_true',
+                        help='Launch blank Safari once, only on a disposable GitHub-hosted macOS runner')
     args = parser.parse_args()
-    results = [run_case(args.output.resolve() / name, name, args.driver) for name in ('viewer-6', 'viewer-24', 'planner-256')]
+    preparation = prepare_hosted_safari(args.output.resolve()) if args.prepare_hosted_safari else None
+    results = []
+    if preparation is None or preparation['status'] == 'passed':
+        results = [run_case(args.output.resolve() / name, name, args.driver) for name in ('viewer-6', 'viewer-24', 'planner-256')]
     summary = {'product': 'Safari', 'sourceRevision': os.environ.get('GITHUB_SHA'),
-               'status': 'passed' if all(r['status'] == 'passed' for r in results) else 'failed',
+               'status': 'passed' if len(results) == 3 and all(r['status'] == 'passed' for r in results) else 'failed',
                'cases': [{'suite': r['suite'], 'status': r['status'], 'durationMs': r['durationMs']} for r in results]}
+    if preparation is not None:
+        summary['preparation'] = preparation
     (args.output / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n', encoding='utf-8')
     return int(summary['status'] != 'passed')
 
