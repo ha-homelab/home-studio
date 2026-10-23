@@ -89,14 +89,16 @@ async function editorDocument(response, url, channel) {
   return '<!doctype html>\n' + document.documentElement.outerHTML;
 }
 function catalogForEditor(catalog = {}) {
-  // Copy an explicit allowlist. State attributes, integration settings, registry
+  // Copy an explicit allowlist. Raw state attributes, integration settings, registry
   // internals, and the authenticated hass object are never forwarded.
   const list = key => Array.isArray(catalog[key]) ? catalog[key].slice(0, 10000) : [];
   const floors = list('floors').map(item => ({ id: boundedText(item.id), name: boundedText(item.name, 120) }));
   const areas = list('areas').map(item => ({ id: boundedText(item.id), name: boundedText(item.name, 120), floor_id: boundedText(item.floor_id) }));
-  const entities = list('entities').filter(item => /^[a-z_]+\.[a-z0-9_]+$/.test(item.entity_id || '') && !item.disabled).map(item => ({
-    entity_id: boundedText(item.entity_id, 255), name: boundedText(item.name || item.entity_id, 100), domain: boundedText(item.domain, 40),
+  const entities = list('entities').filter(item => typeof item.entity_id === 'string' && item.entity_id.length <= 150 && /^[a-z_]+\.[a-z0-9_]+$/.test(item.entity_id) && !item.disabled).map(item => ({
+    entity_id: boundedText(item.entity_id, 150), name: boundedText(item.name || item.entity_id, 100), domain: item.entity_id.split('.')[0],
     area_id: boundedText(item.area_id), disabled: false, available: item.available !== false,
+    device_class: /^[a-z][a-z0-9_]{0,39}$/.test(item.device_class || '') ? item.device_class : '',
+    entity_category: ['config', 'diagnostic'].includes(item.entity_category) ? item.entity_category : '', hidden: item.hidden === true,
   }));
   return { floors, areas, entities };
 }

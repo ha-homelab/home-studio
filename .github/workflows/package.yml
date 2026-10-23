@@ -137,6 +137,7 @@ jobs:
         run: |
           python3 scripts/build-example-modules.py --check
           node scripts/test-onboarding.mjs
+          node scripts/test-device-onboarding.mjs
           node scripts/test-draft-storage.mjs
           for engine in chromium firefox webkit; do
             PLANNER_EDITING_ENGINE="$engine" node scripts/test-planner-editing.cjs

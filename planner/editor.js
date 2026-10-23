@@ -2,6 +2,8 @@ import './language-links.js';
 import { createEnvironmentLayer, createEnvironmentControls } from './environment.js';
 import { embeddedContext, memoryDraftOptions, connectHost } from './ha-bridge.js';
 import { addMeasuredRoom, installOnboarding } from './onboarding.js';
+import { addAreaRooms, addAreaDevices, areaDeviceChoices } from './device-onboarding.js';
+import { showAreaStarter, showDeviceChooser } from './device-onboarding-ui.js';
 import { createDraftStorage, DRAFT_KEY, PREVIOUS_KEY, DAMAGED_KEY } from './draft-storage.js';
 import { reconcileInspector } from './inspector-dom.js';
 import { createFloorNavigator } from './floor-navigator.js';
@@ -512,6 +514,7 @@ function buildInspector(parent) {
     $('inspector-title').textContent = t('Floor settings'); $('inspector-subtitle').textContent = t('A good plan starts with the basics.');
     if (haSourcePolicy) parent.append(node('p', 'callout', protectedArchitectureMessage));
     if (haCatalog) field(parent, 'Home Assistant floor', f.ha_floor_id || '', v => transact((_p, d) => { if (v) d.ha_floor_id = v; else delete d.ha_floor_id; }), { options: registryOptions(haCatalog.floors, f.ha_floor_id, 'No floor linked'), help: 'Links this drawing floor to your Home Assistant floor.' });
+    if (haCatalog) parent.append(button('Start rooms from HA areas', startRoomsFromAreas, 'quiet'));
     field(parent, t('Floor name'), f.name, v => transact((_p, d) => { d.name = v; }, () => t('Floor renamed.')));
     const dimensions = row(parent); field(dimensions, t('Elevation (m)'), f.elevation_m, haSourcePolicy ? null : v => transact((_p, d) => { d.elevation_m = v; }), { type: 'number', min: -100, max: 100, readOnly: !!haSourcePolicy });
     field(dimensions, t('Ceiling height (m)'), f.height_m, haSourcePolicy ? null : v => transact((_p, d) => { d.height_m = v; }), { type: 'number', min: .5, max: 20, readOnly: !!haSourcePolicy });
@@ -1804,6 +1807,10 @@ if (haContext) {
         helpPreview.parentElement.querySelector('p').textContent = 'Use Published home to inspect the current installed details. Changes to your drawing appear there only after Save draft and Publish to 3D Home. Back to editing returns to this drawing.';
       }
       haCatalog = catalog && Array.isArray(catalog.areas) && Array.isArray(catalog.entities) ? catalog : { floors: [], areas: [], entities: [] };
+      if (!$('start-ha-areas')) {
+        const start = button('Start rooms from HA areas', startRoomsFromAreas, 'text-button'); start.id = 'start-ha-areas'; start.setAttribute('aria-haspopup', 'dialog');
+        $('empty-note').before(start);
+      }
       installRecoveredProject(next); history = []; future = [];
       document.querySelector('.workspace').inert = false; document.querySelector('.app-header').inert = false; renderUI();
       translatedText('save-status', 'Draft in this tab · save in Home Assistant above');
@@ -1850,6 +1857,14 @@ function registryOptions(entries = [], current, empty) {
 function areaEntities(room) {
   return haCatalog.entities.filter(entity => !entity.disabled && (!room?.ha_area_id || entity.area_id === room.ha_area_id));
 }
+function startRoomsFromAreas() {
+  if (!haCatalog || focusUnfinishedGuideField()) return;
+  const floorId = floor().id;
+  showAreaStarter({ project, floor: floor(), areas: haCatalog.areas, commit(requests, walls) {
+    return transact(p => { const ids = addAreaRooms(p, floorId, haCatalog.areas, requests, walls); selection = { kind: 'rooms', id: ids[0] }; },
+      'Rooms created from your dimensions. Arrange the starter rooms to match your home, then save your draft.', { fit: true });
+  } });
+}
 function renderEntityPicker(parent, object, target) {
   const room = target.rooms.find(entry => entry.id === object.room);
   const entries = areaEntities(room);
@@ -1859,27 +1874,24 @@ function renderEntityPicker(parent, object, target) {
 }
 function renderAreaDevices(parent, room) {
   if (!room.ha_area_id) return;
-  const entities = areaEntities(room);
+  parent.append(button('Choose multiple devices…', () => {
+    if (focusUnfinishedGuideField()) return;
+    const floorId = floor().id;
+    showDeviceChooser({ project, room, entities: haCatalog.entities, commit(requests) {
+      return transact(p => { addAreaDevices(p, floorId, room.id, haCatalog.entities, requests); }, 'Selected devices added. Drag the markers to their real positions, then save your draft.');
+    } });
+  }, 'quiet'));
+  const entities = areaDeviceChoices(project, room, haCatalog.entities, '', true);
   const chooser = field(parent, 'Add device to this room', '', null, { options: [{ value: '', label: 'Choose an entity…' }, ...entities.map(entity => ({ value: entity.entity_id, label: `${entity.name} · ${entity.entity_id}${entity.available === false ? ' (unavailable)' : ''}` }))] });
+  const media = field(parent, 'New media player controls', 'auto', null, { options: [{ value: 'auto', label: 'Use HA type (generic media if unknown)' }, { value: 'audio', label: 'Speaker / audio' }, { value: 'tv', label: 'TV / display' }], help: 'Applies to media players only. HA speaker types use audio controls; unknown types start as generic media. Choose TV for an unclassified television.' });
   const add = button('Add linked item', () => {
     const value = [...$('inspector-body').querySelectorAll('select')].find(control => control.dataset.inspectorKey === chooser.dataset.inspectorKey)?.value;
     const entity = entities.find(entry => entry.entity_id === value);
     if (!entity) return status('Choose an entity to add to the room.', true);
-    transact((_p, target) => {
-      const source = target.rooms.find(entry => entry.id === room.id);
-      // A triangle fan centroid search also handles rooms whose bounding-box
-      // center falls outside a concave polygon.
-      let center = source.polygon.reduce((sum, p) => [sum[0] + p[0] / source.polygon.length, sum[1] + p[1] / source.polygon.length], [0, 0]);
-      if (!pointInPolygon(center, source.polygon)) {
-        for (let i = 1; i < source.polygon.length - 1; i++) {
-          const trial = [0, 1].map(axis => (source.polygon[0][axis] + source.polygon[i][axis] + source.polygon[i + 1][axis]) / 3);
-          if (pointInPolygon(trial, source.polygon)) { center = trial; break; }
-        }
-      }
-      const type = entity.domain === 'light' ? 'lamp' : entity.domain === 'media_player' ? 'tv' : entity.domain === 'switch' ? 'switch' : 'sensor';
-      const id = nextId(target, 'item');
-      target.items.push({ id, name: entity.name.slice(0, 100), type, room: source.id, entity_id: entity.entity_id, notes: '', position_m: { x: round(center[0]), y: 0, z: round(center[1]) }, dimensions_m: { width: .25, depth: .25, height: .3 }, rotation_deg: 0 });
-      selection = { kind: 'items', id };
+    const display = [...$('inspector-body').querySelectorAll('select')].find(control => control.dataset.inspectorKey === media.dataset.inspectorKey)?.value || 'auto';
+    transact((p, target) => {
+      const ids = addAreaDevices(p, target.id, room.id, haCatalog.entities, [{ entityId: entity.entity_id, display }]);
+      selection = { kind: 'items', id: ids[0] };
     }, 'Linked item added. Drag it into position, then save your draft.');
   });
   add.disabled = entities.length === 0; parent.append(add);

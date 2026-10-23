@@ -335,7 +335,7 @@ async def ws_project_publish(hass, connection, msg):
 @_when_active
 @websocket_api.require_admin
 def ws_entity_catalog(hass, connection, msg):
-    """Return names and relationships only, never entity attributes or credentials."""
+    """Return bounded names, relationships and display hints, never raw state data."""
     areas = area_registry.async_get(hass)
     devices = device_registry.async_get(hass)
     entities = entity_registry.async_get(hass)
@@ -348,6 +348,16 @@ def ws_entity_catalog(hass, connection, msg):
               "areas": [{"id": item.id, "name": item.name, "floor_id": item.floor_id} for item in areas.async_list_areas()],
               "devices": [{"id": item.id, "name": item.name_by_user or item.name or item.id, "area_id": item.area_id}
                           for item in devices.devices], "entities": []}
+    def display_hints(current, entity=None):
+        device_class = (getattr(entity, "device_class", None)
+                        or (current.attributes.get("device_class") if current else None)
+                        or getattr(entity, "original_device_class", None))
+        category = getattr(entity, "entity_category", None)
+        category = getattr(category, "value", category)
+        return {"device_class": device_class if isinstance(device_class, str) and len(device_class) <= 40 else None,
+                "entity_category": category if category in ("config", "diagnostic") else None,
+                "hidden": getattr(entity, "hidden_by", None) is not None}
+
     for entity in entities.entities.values():
         current = hass.states.get(entity.entity_id)
         device = devices.async_get(entity.device_id) if entity.device_id else None
@@ -356,13 +366,15 @@ def ws_entity_catalog(hass, connection, msg):
                                    "domain": entity.entity_id.split(".", 1)[0], "device_id": entity.device_id,
                                    "area_id": entity.area_id or (device.area_id if device else None),
                                    "disabled": entity.disabled_by is not None,
+                                   **display_hints(current, entity),
                                    "available": bool(current and current.state not in ("unavailable", "unknown"))})
     registered = {item["entity_id"] for item in result["entities"]}
     for current in current_states:
         if current.entity_id not in registered:
             result["entities"].append({"entity_id": current.entity_id, "name": current.name,
                                        "domain": current.entity_id.split(".", 1)[0], "device_id": None, "area_id": None,
-                                       "disabled": False, "available": current.state not in ("unavailable", "unknown")})
+                                       "disabled": False, **display_hints(current),
+                                       "available": current.state not in ("unavailable", "unknown")})
     connection.send_result(msg["id"], result)
 
 

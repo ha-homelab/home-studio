@@ -382,6 +382,43 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(self.project.root.iterdir()), [])
 
 
+class DeviceCatalogTests(unittest.TestCase):
+    def test_catalog_hints_are_bounded_and_private_state_is_not_forwarded(self):
+        hass = Hass(ROOT)
+        hass.data[integration.DOMAIN] = {"initialized": True}
+        states = {
+            "media_player.speaker": types.SimpleNamespace(entity_id="media_player.speaker", name="Speaker", state="playing",
+                attributes={"device_class": "speaker", "media_title": "PRIVATE_TRACK", "access_token": "PRIVATE_TOKEN"}),
+            "media_player.television": types.SimpleNamespace(entity_id="media_player.television", name="TV", state="idle", attributes={"device_class": "tv"}),
+            "sensor.battery": types.SimpleNamespace(entity_id="sensor.battery", name="Battery", state="88", attributes={"device_class": "battery"}),
+            "sensor.bad_class": types.SimpleNamespace(entity_id="sensor.bad_class", name="Bad class", state="0", attributes={"device_class": "x" * 41}),
+        }
+        hass.states = types.SimpleNamespace(get=states.get, async_all=lambda: list(states.values()))
+        registered = {key: types.SimpleNamespace(entity_id=key, name=None, original_name=None, device_id=None, area_id="living", disabled_by=None,
+                       hidden_by="user" if key == "sensor.battery" else None, device_class=None, original_device_class=None,
+                       entity_category=types.SimpleNamespace(value="diagnostic") if key == "sensor.battery" else None)
+                      for key in ("media_player.speaker", "sensor.battery")}
+        registries = [(integration.area_registry, types.SimpleNamespace(async_list_areas=lambda: [])),
+                      (integration.floor_registry, types.SimpleNamespace(async_list_floors=lambda: [])),
+                      (integration.device_registry, types.SimpleNamespace(devices=[], async_get=lambda _: None)),
+                      (integration.entity_registry, types.SimpleNamespace(entities=registered))]
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            for registry, value in registries:
+                stack.enter_context(patch.object(registry, "async_get", return_value=value, create=True))
+            connection = Connection()
+            integration.ws_entity_catalog(hass, connection, {"id": 1})
+        self.assertFalse(connection.errors)
+        catalog = {item["entity_id"]: item for item in connection.results[0]["entities"]}
+        self.assertEqual(catalog["media_player.speaker"]["device_class"], "speaker")
+        self.assertEqual(catalog["media_player.television"]["device_class"], "tv")
+        self.assertEqual(catalog["sensor.battery"]["entity_category"], "diagnostic")
+        self.assertTrue(catalog["sensor.battery"]["hidden"])
+        self.assertIsNone(catalog["sensor.bad_class"]["device_class"])
+        self.assertNotIn("PRIVATE", json.dumps(connection.results))
+        self.assertTrue(all("state" not in row and "attributes" not in row for row in catalog.values()))
+
+
 class PermissionTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temporary = tempfile.TemporaryDirectory()
