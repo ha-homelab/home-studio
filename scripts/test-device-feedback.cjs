@@ -52,7 +52,7 @@ const initialStates={
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const origin=`http://127.0.0.1:${server.address().port}`;
-  browser=await playwright[engine].launch(browserLaunchOptions(engine,true));
+  browser=await playwright[engine].launch(browserLaunchOptions(engine,process.env.DEVICE_FEEDBACK_HEADED!=='1'));
   page=await browser.newPage({viewport:{width:1440,height:1000}});
   page.setDefaultTimeout(15000);
   const errors=[],external=[];

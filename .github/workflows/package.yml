@@ -197,7 +197,7 @@ jobs:
         run: |
           node scripts/test-generic-entities.cjs
           for engine in chromium firefox webkit; do
-            DEVICE_FEEDBACK_ENGINE="$engine" node scripts/test-device-feedback.cjs
+            DEVICE_FEEDBACK_ENGINE="$engine" DEVICE_FEEDBACK_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-device-feedback.cjs
           done
           for engine in chromium firefox webkit; do
             DEVICE_INTERACTIONS_ENGINE="$engine" DEVICE_INTERACTIONS_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-device-interactions.cjs
