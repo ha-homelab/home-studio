@@ -53,6 +53,14 @@ path. Runtime placement messages keep their existing inventory schema; native
 placement saves preserve the source project's window binding. Protected
 imports retain the installed window binding in the published model.
 
+An older generated home's saved viewer may not support these new catalog
+bindings. Publication then reports `unsupported_curtain_runtime` and keeps the
+current published home intact. Choose **Decorative only** to publish the other
+edits, or update the generated viewer through that home's original build/update
+process. Updating the integration alone does not replace a customized viewer
+or its saved baseline. Existing commissioned curtain bindings continue using
+their original rendering behavior.
+
 Checks use fictional projects and never send device commands:
 
 ```sh

@@ -1,5 +1,6 @@
 """Synthetic curtain compiler and native persistence checks; no HA devices."""
 import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -25,6 +26,62 @@ def fixture():
 
 
 class CurtainTests(unittest.IsolatedAsyncioTestCase):
+    async def test_generated_publication_checks_saved_viewer_capabilities(self):
+        for missing in (None, "tags", "modes"):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                component = root / "component"
+                source = fixture()
+                original = copy.deepcopy(source)
+                original["floors"][0]["items"] = []
+                assets = component / "assets"
+                support.compiler.compile_project(original, assets)
+                path = assets / "ground/index.html"
+                html = path.read_text()
+                if missing == "tags":
+                    html = html.replace("child.userData.curtainPanel=batch.curtainPanel", "child.userData.legacyPanel=batch.curtainPanel")
+                elif missing == "modes":
+                    html = html.replace("if(spec.mode)return updateCatalogCurtainFabric(", "if(false)return updateCatalogCurtainFabric(")
+                # Inert model data and page text cannot claim a runtime capability.
+                html = html.replace("</body>", '<script type="application/json">' + json.dumps(
+                    "child.userData.curtainPanel=batch.curtainPanel; if(spec.mode)return updateCatalogCurtainFabric(") + '</script></body>')
+                path.write_text(html)
+                site = {"schema_version": 1, "site_id": None, "default_floor": "ground",
+                        "floors": {"ground": {"stem": "ground", "title": "Ground floor"}}}
+                models = {"ground": json.loads((assets / "ground/model-data.json").read_text())}
+                inventory = {"ground": {"revision": 1, "items": []}}
+                native = generated.GeneratedProject(support.Hass(root), component, site, models, inventory)
+                with patch.object(generated, "compiler", return_value=support.compiler), patch.object(support.native, "compiler", return_value=support.compiler):
+                    await native.load()
+                    # Updating an existing home without new bindings remains valid.
+                    await native.save(0, copy.deepcopy(native.document["project"]))
+                    published, *_ = await native.publish(1)
+                    hashes = lambda folder: {str(p.relative_to(folder)): hashlib.sha256(p.read_bytes()).hexdigest()
+                                             for p in folder.rglob("*") if p.is_file()}
+                    before = hashes(published)
+                    baseline = hashes(component)
+                    draft = copy.deepcopy(native.document["project"])
+                    for key in ("walls", "openings", "items"):
+                        draft["floors"][0][key] = copy.deepcopy(source["floors"][0][key])
+                    await native.save(1, draft)
+                    if missing:
+                        saved = copy.deepcopy(native.document)
+                        directories = set(native.root.iterdir())
+                        with self.assertRaises(support.native.NativeError) as error:
+                            await native.publish(2)
+                        self.assertEqual(error.exception.code, "unsupported_curtain_runtime")
+                        self.assertIn("original home build/update process", str(error.exception))
+                        self.assertEqual(native.document, saved)
+                        self.assertEqual(hashes(published), before)
+                        self.assertEqual(set(native.root.iterdir()), directories, "Rejected publication removes staging files")
+                        del draft["floors"][0]["items"][0]["curtain"]
+                        await native.save(2, draft)
+                        await native.publish(3)
+                    else:
+                        _, _, updated, _, _ = await native.publish(2)
+                        self.assertEqual(updated["ground"]["cover_windows"]["curtain"], {"openings": ["studio_window"], "mode": "pair"})
+                    self.assertEqual(hashes(component), baseline, "Original customized assets stay untouched")
+
     def test_validation_export_and_decorative_compatibility(self):
         project = fixture()
         validate_project(project)
