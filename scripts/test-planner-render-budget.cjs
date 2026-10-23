@@ -28,6 +28,25 @@ const event = (x = 0, y = 0) => ({clientX: x, clientY: y, button: 0, pointerId: 
 const scheduler = section('let canvasFrame =', 'let startupMessage =');
 
 (async () => {
+  let scheduledPlans = 0, scheduledPreviews = 0;
+  const scheduling = vm.createContext({document: {hidden: false}, view: 'split',
+    renderPlan() { scheduling.cancelCanvasRender(); scheduledPlans++; },
+    renderPreview() { scheduling.cancelCanvasRender(); scheduledPreviews++; }});
+  const scheduleClock = frames(scheduling);
+  vm.runInContext(scheduler, scheduling);
+  for (let i = 0; i < 20; i++) scheduling.requestPreviewRender();
+  assert.equal(scheduleClock.pending.size, 1, 'Camera bursts share one pending frame');
+  scheduleClock.flush();
+  assert.deepEqual([scheduledPlans, scheduledPreviews], [0, 1], 'Preview-only invalidation keeps 2D idle');
+  for (const requests of [['requestPreviewRender', 'requestCanvasRender'], ['requestCanvasRender', 'requestPreviewRender']]) {
+    for (const request of requests) scheduling[request]();
+    assert.equal(scheduleClock.pending.size, 1, 'Camera and document changes coalesce into one frame');
+    scheduleClock.flush();
+  }
+  assert.deepEqual([scheduledPlans, scheduledPreviews], [2, 3], 'Document changes win in either request order');
+  scheduling.requestCanvasRender(); scheduling.cancelCanvasRender(); scheduling.requestPreviewRender();
+  scheduleClock.flush();
+  assert.deepEqual([scheduledPlans, scheduledPreviews], [2, 4], 'Cancellation clears stale 2D work');
   let pathBuilds = 0;
   class Outline {
     constructor() { this.commands = []; pathBuilds++; }

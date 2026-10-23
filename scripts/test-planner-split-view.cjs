@@ -51,6 +51,12 @@ async function previewPoint(page, point) {
       localStorage.setItem('home-studio.project.v1', JSON.stringify(value));
       const original = HTMLCanvasElement.prototype.getContext;
       window.__contexts = new Set();
+      window.__planPaints = 0;
+      const clear = CanvasRenderingContext2D.prototype.clearRect;
+      CanvasRenderingContext2D.prototype.clearRect = function (...args) {
+        if (this.canvas.id === 'plan-canvas') window.__planPaints++;
+        return clear.apply(this, args);
+      };
       HTMLCanvasElement.prototype.getContext = function (name, ...args) {
         const result = original.call(this, name, ...args);
         if (/^webgl/.test(name) && result) window.__contexts.add(result);
@@ -68,11 +74,28 @@ async function previewPoint(page, point) {
     assert.equal(await page.evaluate(() => window.__contexts.size), 1, 'Only one WebGL context is created');
     const project = () => page.evaluate(() => window.planner.getProject());
     const before = await project();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const planPaints = await page.evaluate(() => window.__planPaints);
     const camera = await page.evaluate(() => window.planner.getPreviewMetadata().camera);
     await page.mouse.move(preview.x + preview.width * .5, preview.y + preview.height * .45);
     await page.mouse.down(); await page.mouse.move(preview.x + preview.width * .5 + 60, preview.y + preview.height * .45 + 30, { steps: 12 }); await page.mouse.up();
     await page.waitForFunction(yaw => window.planner.getPreviewMetadata().camera.yaw !== yaw, camera.yaw);
     assert.deepEqual(await project(), before, 'Orbit changes no plan data');
+    assert.equal(await page.evaluate(() => window.__planPaints), planPaints, 'Orbit redraws only 3D, keeping the 2D plan idle');
+    const radius = await page.evaluate(() => window.planner.getPreviewMetadata().camera.radius);
+    await page.locator('#preview-canvas').press('+');
+    await page.waitForFunction(radius => window.planner.getPreviewMetadata().camera.radius !== radius, radius);
+    assert.equal(await page.evaluate(() => window.__planPaints), planPaints, 'Camera keyboard zoom also leaves 2D idle');
+
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.locator('.environment-controls summary').click();
+    await page.locator('[data-environment="enabled"]').check();
+    await page.locator('[data-environment="motion"]').check();
+    await page.waitForFunction(() => window.planner.getPreviewMetadata().surroundings.elapsed > 0);
+    assert.equal(await page.evaluate(() => window.__planPaints), planPaints, 'Scenery setup and animation never repaint the unchanged plan');
+    await page.locator('[data-environment="motion"]').uncheck();
+    await page.locator('[data-environment="enabled"]').uncheck();
+    await page.locator('.environment-controls summary').click();
     await page.locator('[data-object-kind="items"]').first().click();
     const nodeBefore = await page.evaluate(() => window.__splitTest.item());
     const [x, y] = await page.evaluate(() => window.planner.worldToScreen([2, 2]));
@@ -81,6 +104,7 @@ async function previewPoint(page, point) {
     await page.waitForFunction(() => !window.__splitTest.dirty());
     const moved = await project();
     assert.notDeepEqual(moved.floors[0].items[0].position_m, before.floors[0].items[0].position_m, '2D drag edits the accepted item');
+    assert(await page.evaluate(() => window.__planPaints) > planPaints, 'Geometry changes still repaint 2D');
     assert.notDeepEqual(await page.evaluate(() => window.__splitTest.item()), nodeBefore, 'Committed 2D edit reaches the 3D mesh');
     await page.locator('#undo').click();
     await page.waitForFunction(expected => JSON.stringify(window.planner.getProject()) === expected, JSON.stringify(before));
@@ -155,6 +179,6 @@ async function previewPoint(page, point) {
     assert.deepEqual(await project(), before, '2D undo works after WebGL context loss');
     assert.equal(await page.evaluate(() => window.__contexts.size), 1, '2D fallback does not create replacement GL contexts');
     assert.deepEqual(errors, []);
-    console.log(`PASS: ${engine} split editing, cancellation, deselection, undo, orbit, context reuse, idle rendering, responsive focus and 2D editing after graphics loss.`);
+    console.log(`PASS: ${engine} split editing, cancellation, deselection, undo, isolated camera/scenery paints, context reuse, idle rendering, responsive focus and 2D editing after graphics loss.`);
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

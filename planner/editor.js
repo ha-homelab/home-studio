@@ -114,7 +114,7 @@ function applyHostTheme(theme) {
 const planCanvas = $('plan-canvas'), ctx = planCanvas.getContext('2d', { alpha: false });
 let project = blankProject(), activeFloorId, selection = null, tool = 'select', view = 'plan', history = [], future = [], drag = null, previewEdit = null;
 let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, spaceHeld = false, saveFailed = false, previewDirty = true;
-let canvasFrame = 0, canvasSuspended = false;
+let canvasFrame = 0, canvasSuspended = false, planFrameRequested = false;
 // Optional integrations render a detached candidate; project/history/storage always
 // retain the accepted document. The ordinary editor imports no AI code.
 let candidatePreview = null, editorRevision = 0;
@@ -125,12 +125,19 @@ function editorChanged() {
 }
 const displayedProject = () => candidatePreview || project;
 const displayedFloor = () => displayedProject().floors.find(f => f.id === activeFloorId) || displayedProject().floors[0];
-function cancelCanvasRender() { if (canvasFrame) cancelAnimationFrame(canvasFrame); canvasFrame = 0; }
-function requestCanvasRender() {
-  if (canvasFrame || canvasSuspended || document.hidden) return;
+function cancelCanvasRender() { if (canvasFrame) cancelAnimationFrame(canvasFrame); canvasFrame = 0; planFrameRequested = false; }
+function requestCanvasRender() { scheduleCanvasRender(true); }
+function requestPreviewRender() { scheduleCanvasRender(false); }
+function scheduleCanvasRender(needsPlan) {
+  if (canvasSuspended || document.hidden) return;
+  // Camera and scenery updates share the frame, but never demote a pending
+  // geometry/selection update that also needs the 2D pane.
+  planFrameRequested ||= needsPlan;
+  if (canvasFrame) return;
   canvasFrame = requestAnimationFrame(() => {
-    canvasFrame = 0;
-    if (view !== 'preview') renderPlan();
+    const paintPlan = planFrameRequested;
+    canvasFrame = 0; planFrameRequested = false;
+    if (paintPlan && view !== 'preview') renderPlan();
     if (view !== 'plan') renderPreview();
   });
 }
@@ -1040,7 +1047,7 @@ function initPreview() {
     previewSun.shadow.autoUpdate = false; previewSun.shadow.needsUpdate = true;
     const fill = new THREE.DirectionalLight(0xdce9f2, .5); fill.position.set(12, 10, -10); scene.add(fill);
     worldGroup = new THREE.Group(); scene.add(worldGroup);
-    previewEnvironment = createEnvironmentLayer(THREE, { scene, ...environmentSite(), visibilityElement: previewCanvas, frameInterval: previewDiffuseLighting ? 750 : previewPixels <= 250000 ? 500 : 180, requestRender: requestCanvasRender, active: view !== 'plan', settings: previewEnvironmentSettings });
+    previewEnvironment = createEnvironmentLayer(THREE, { scene, ...environmentSite(), visibilityElement: previewCanvas, frameInterval: previewDiffuseLighting ? 750 : previewPixels <= 250000 ? 500 : 180, requestRender: requestPreviewRender, active: view !== 'plan', settings: previewEnvironmentSettings });
     previewEnvironmentControls.refresh();
     if (!previewInitialized) { fitPreview(); previewInitialized = true; }
   } catch (error) { disposePreviewRenderer(); renderer?.forceContextLoss(); previewUnavailable = true; releasePreviewPointer(); updatePreviewNavigation(); $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
@@ -1054,7 +1061,7 @@ function fitPreview() {
   orbit.target.set((minX + maxX) / 2, (low + high) / 2, (minZ + maxZ) / 2);
   orbit.radius = Math.max(6, sphereRadius / Math.sin(Math.min(verticalFov, horizontalFov) / 2) * 1.12); orbit.baseRadius = orbit.radius;
   rebasePreviewGesture();
-  if (view !== 'plan' && renderer) requestCanvasRender();
+  if (view !== 'plan' && renderer) requestPreviewRender();
 }
 function disposePreviewGeometry() {
   if (!worldGroup) return;
@@ -1220,7 +1227,7 @@ function zoomPreview(factor) {
   if (!canNavigatePreview() || !Number.isFinite(factor) || factor <= 0) return;
   const radius = previewRadius(orbit.radius / factor);
   if (radius === orbit.radius) return;
-  orbit.radius = radius; rebasePreviewGesture(); requestCanvasRender();
+  orbit.radius = radius; rebasePreviewGesture(); requestPreviewRender();
 }
 let previewCanvas = $('preview-canvas'), previewEvents;
 function canNavigatePreview() { return view !== 'plan' && !drag && !previewLost && !previewUnavailable && !canvasSuspended && !document.hidden; }
@@ -1255,21 +1262,21 @@ function updatePreviewNavigation() {
 function setPreviewMode(mode) {
   if (!canNavigatePreview()) return;
   releasePreviewPointer(); orbit.mode = mode; updatePreviewNavigation();
-  previewDirty = true; requestCanvasRender();
+  previewDirty = true; requestPreviewRender();
   if (previewMetadata.camera) previewMetadata.camera.mode = mode;
   $('tool-hint').textContent = previewHint();
 }
 function resetPreview() {
   if (!canNavigatePreview()) return;
-  releasePreviewPointer(); orbit.yaw = -Math.PI / 3; orbit.pitch = .8; fitPreview(); requestCanvasRender();
+  releasePreviewPointer(); orbit.yaw = -Math.PI / 3; orbit.pitch = .8; fitPreview(); requestPreviewRender();
 }
 function topPreview() {
   if (!canNavigatePreview()) return;
-  releasePreviewPointer(); orbit.yaw = -Math.PI / 2; orbit.pitch = previewPitch(Math.PI / 2); requestCanvasRender();
+  releasePreviewPointer(); orbit.yaw = -Math.PI / 2; orbit.pitch = previewPitch(Math.PI / 2); requestPreviewRender();
 }
 function rotatePreview(angle) {
   if (!canNavigatePreview()) return;
-  releasePreviewPointer(); orbit.yaw = previewYaw(orbit.yaw + angle); requestCanvasRender();
+  releasePreviewPointer(); orbit.yaw = previewYaw(orbit.yaw + angle); requestPreviewRender();
 }
 function previewPointerCenter() {
   const points = [...orbit.pointers.values()], first = points[0], second = points[1];
@@ -1423,7 +1430,7 @@ function bindPreviewCanvas() {
     if (start.mode === 'pan') panPreview(dx, dy, start);
     else { orbit.yaw = previewYaw(start.yaw - dx * .007); orbit.pitch = previewPitch(start.pitch + dy * .007); }
     if (orbit.pointers.size === 2 && start.distance > 0 && center.distance > 0) orbit.radius = previewRadius(start.radius * start.distance / center.distance);
-    requestCanvasRender();
+    requestPreviewRender();
   }, options);
   canvas.addEventListener('pointerup', e => { if (previewEdit?.pointerId === e.pointerId) finishPreviewEdit(e); else releasePreviewPointer(e); }, options);
   canvas.addEventListener('lostpointercapture', releasePreviewPointer, options);
@@ -1451,7 +1458,7 @@ function bindPreviewCanvas() {
       if (key === 'arrowleft') orbit.yaw = previewYaw(orbit.yaw - .12); if (key === 'arrowright') orbit.yaw = previewYaw(orbit.yaw + .12);
       if (key === 'arrowup') orbit.pitch = previewPitch(orbit.pitch + .1); if (key === 'arrowdown') orbit.pitch = previewPitch(orbit.pitch - .1);
     }
-    requestCanvasRender();
+    requestPreviewRender();
   }, options);
   canvas.addEventListener('webglcontextlost', e => {
     e.preventDefault(); previewLost = true; previewEnvironment?.setActive(false); cancelCanvasRender(); releasePreviewPointer();
