@@ -15,7 +15,7 @@ import { t, LOCALES, initI18n, setLocale, getLocale, onLocaleChange, translateSt
 import * as THREE from '../vendor/three.module.min.js';
 import { LIMITS, ITEM_TYPES, clone, round, distance, signedArea, pointInPolygon, projectOnWall, nextId, newFloor, blankProject, outlineRoom, validateProject, wallPieces, floorBounds } from './model.js';
 import { CATALOG } from './catalog.js';
-import { getCatalogModel, getCatalogStyle, buildFurnitureAsset, PATTERNS, supportsFurniturePattern } from './furniture.js';
+import { getCatalogModel, getCatalogStyle, buildFurnitureAsset, PATTERNS, supportsFurniturePattern, supportsCurtain } from './furniture.js';
 
 const initialLocale = await initI18n();
 const $ = id => document.getElementById(id);
@@ -614,11 +614,12 @@ function buildInspector(parent) {
     field(parent, t('Item name'), object.name, v => editObject(o => { o.name = v; }));
     const model = object.model_id ? getCatalogModel(object.model_id) : null;
     field(parent, t('Design'), object.model_id || '', value => editObject(o => {
-      if (!value) { for (const key of ['model_id', 'style_id', 'color', 'pattern_id', 'pattern_color']) delete o[key]; return; }
+      if (!value) { for (const key of ['model_id', 'style_id', 'color', 'pattern_id', 'pattern_color', 'curtain']) delete o[key]; return; }
       const next = getCatalogModel(value), previous = o.model_id ? getCatalogModel(o.model_id) : null;
       if (o.name === previous?.label || o.name === LABELS[o.type]) o.name = next.label;
       o.model_id = next.id; o.type = next.type; o.style_id ||= next.default_style;
       if (!supportsFurniturePattern(next)) { delete o.pattern_id; delete o.pattern_color; }
+      if (!supportsCurtain(next)) delete o.curtain;
     }, () => t('Item design changed. Size and position kept.')), { options: [{ value: '', label: originalModel ? 'Original installed model' : t('Basic shape / device') }, ...CATALOG.models.map(entry => ({ value: entry.id, label: t(`model.${entry.id}`) }))], help: t('Changes the shape while keeping your size and placement.') });
     if (model) {
       const style = getCatalogStyle(object.style_id || model.default_style);
@@ -669,6 +670,25 @@ function buildInspector(parent) {
     section(parent, t('Home Assistant'));
     if (haCatalog) renderEntityPicker(parent, object, f);
     field(parent, t('Entity ID (optional)'), object.entity_id, v => editObject(o => { o.entity_id = v.trim(); }), { dir: 'ltr', help: haContext ? 'Bind an entity to this item. Publishing enables its controls in the family view.' : t('Example: light.living_room. Any Home Assistant entity can be linked. In the installed plan, lights, switches and fans have quick toggles; sensors show readings; media players show artwork and controls; Details opens native controls for other entities. This offline planner only stores the mapping and never controls devices.') });
+    if (supportsCurtain(model)) {
+      section(parent, 'Curtain movement');
+      field(parent, 'Window opening', object.curtain?.opening_id || '', value => editObject((item, target) => {
+        if (!value) { delete item.curtain; return; }
+        const opening = target.openings.find(entry => entry.id === value && entry.type === 'window');
+        if (!opening) throw new Error('Choose an existing window on this floor.');
+        const wall = target.walls.find(entry => entry.id === opening.wall_id), length = distance(wall.start, wall.end);
+        const ux = (wall.end[0] - wall.start[0]) / length, uz = (wall.end[1] - wall.start[1]) / length;
+        const center = [wall.start[0] + ux * (opening.offset_m + opening.width_m / 2), wall.start[1] + uz * (opening.offset_m + opening.width_m / 2)];
+        const room = target.rooms.find(entry => entry.id === item.room), inward = pointInPolygon([center[0] - uz * .05, center[1] + ux * .05], room.polygon) ? 1 : -1;
+        const clearance = wall.thickness_m / 2 + item.dimensions_m.depth / 2 + .02;
+        item.position_m = { x: round(center[0] - uz * clearance * inward), y: .03, z: round(center[1] + ux * clearance * inward) };
+        item.dimensions_m.width = round(opening.width_m + .2);
+        item.dimensions_m.height = round(Math.min(target.height_m, opening.head_m + .15) - item.position_m.y);
+        item.rotation_deg = round(-Math.atan2(uz, ux) * 180 / Math.PI + (inward < 0 ? 180 : 0));
+        item.curtain = { opening_id: value, mode: item.curtain?.mode || 'pair' };
+      }, 'Curtain aligned to the selected window.'), { options: [{ value: '', label: 'Decorative only — no window binding' }, ...f.openings.filter(entry => entry.type === 'window').map(entry => ({ value: entry.id, label: `${entry.id} · ${entry.width_m} m · ${entry.wall_id}` }))], help: 'Choose a window explicitly to align and size this curtain. Enter a cover entity above for reported movement in the published home.' });
+      if (object.curtain) field(parent, 'Opening direction', object.curtain.mode, value => editObject(item => { item.curtain.mode = value; }), { options: [{ value: 'pair', label: 'Two panels — open from center' }, { value: 'left', label: 'Gather to the left' }, { value: 'right', label: 'Gather to the right' }], help: 'Left and right are viewed from in front of the curtain. Rails stay fixed. Preview shows the design; the published home follows the reported or last known cover position.' });
+    }
     field(parent, t('Notes'), object.notes, v => editObject(o => { o.notes = v; }), { rows: 3 });
   }
   if (kind !== 'rooms' || !protectedRoom(f.id, object.id)) parent.append(button(t(`Delete ${kind === 'openings' ? 'opening' : kind.slice(0, -1)}`), deleteSelection, 'danger'));

@@ -226,7 +226,7 @@ class FurniturePatternTests(unittest.TestCase):
                 self.assertLess(result.total_bytes, installer.MAX_TOTAL_BYTES)
                 data = json.loads((result.target / 'assets' / floor['id'] / 'model-data.json').read_text())
                 self.assertEqual(data['inventory'], floor['items'])
-                self.assertTrue(all(asset['meshes'][-1]['name'] == 'pattern' for asset in data['object_assets'].values()))
+                self.assertTrue(all(asset['meshes'][-1]['name'].startswith('pattern') for asset in data['object_assets'].values()))
 
 
 if __name__ == '__main__':

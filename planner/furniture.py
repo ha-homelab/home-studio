@@ -11,6 +11,10 @@ PATTERNS = [{'id': name, 'label': name.capitalize()}
             for name in ('none', 'stripes', 'checks', 'diamonds', 'dots', 'herringbone', 'chevrons')]
 
 
+def supports_curtain(model):
+    return bool(model and model['id'] in ('curtain_pair_open', 'curtain_pair_closed'))
+
+
 def supports_furniture_pattern(model):
     return bool(model and any(part['shape'] == 'box' and part.get('pattern_face') in ('top', 'front')
                               for part in model['parts']))
@@ -227,14 +231,16 @@ def build_furniture_asset(item):
     if model is None:
         return None
     style = STYLES[item.get('style_id', model['default_style'])]
-    meshes, materials = [], {}
+    meshes, materials, curtain_patterns = [], {}, []
     pattern = item.get('pattern_id') if item.get('pattern_id') != 'none' else None
     patterned_mesh = {'name': 'pattern', 'vertices': [], 'normals': [], 'indices': [], 'kind': 'inventory'}
     for index, part in enumerate(model['parts']):
         color = (item['color'] if part['material'] == 'body' and item.get('color') else style['materials'].get(part['material'], part['material'])).lower()
         material = 'furniture_' + color[1:]
         materials[material] = linear_color(color)
-        mesh = {'name': 'part_' + str(index), **primitive(part), 'material': material, 'kind': 'inventory'}
+        fabric = supports_curtain(model) and part['material'] in ('body', 'accent')
+        tags = {'curtain_fabric': True, 'curtain_panel': 'left' if part['center'][0] < 0 else 'right'} if fabric else {}
+        mesh = {'name': 'part_' + str(index), **primitive(part), 'material': material, 'kind': 'inventory', **tags}
         if pattern and part.get('pattern_face'):
             # Replace the original top (+Y) or front (+Z) two triangles.
             offset = 6 if part['pattern_face'] == 'top' else 24
@@ -243,11 +249,16 @@ def build_furniture_asset(item):
             mesh['indices'] = list(range(len(mesh['vertices'])))
             background, accent = pattern_surface(part, pattern)
             append_mesh(mesh, background)
-            append_mesh(patterned_mesh, accent)
+            if fabric:
+                curtain_patterns.append({'name': 'pattern_' + str(index), **accent, 'kind': 'inventory', **tags})
+            else:
+                append_mesh(patterned_mesh, accent)
         meshes.append(mesh)
     if pattern:
         color = item.get('pattern_color', style['materials']['accent']).lower()
         patterned_mesh['material'] = 'furniture_' + color[1:]
         materials[patterned_mesh['material']] = linear_color(color)
-        meshes.append(patterned_mesh)
+        if patterned_mesh['vertices']:
+            meshes.append(patterned_mesh)
+        meshes.extend({**mesh, 'material': patterned_mesh['material']} for mesh in curtain_patterns)
     return {'meshes': meshes, 'materials': materials}

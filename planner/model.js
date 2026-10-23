@@ -1,5 +1,5 @@
 // Pure, metric project operations shared by the editor and its checks.
-import { validateFurnitureAppearance } from './furniture.js';
+import { validateFurnitureAppearance, supportsCurtain, getCatalogModel } from './furniture.js';
 import { ValidationError } from './validation.js';
 export const LIMITS = Object.freeze({ floors: 8, rooms: 64, walls: 256, openings: 256, items: 256, points: 64, bytes: 2_000_000 });
 const EPS = 1e-8;
@@ -169,7 +169,7 @@ export function validateProject(project, { complete = false } = {}) {
       if (a.wall_id === b.wall_id && Math.min(a.offset_m + a.width_m, b.offset_m + b.width_m) > Math.max(a.offset_m, b.offset_m) + EPS) fail('Openings on the same wall cannot overlap.', 'Openings on the same wall cannot overlap.');
     }
     for (const item of f.items) {
-      fields(item, ['id', 'name', 'type', 'room', 'position_m', 'dimensions_m', 'rotation_deg', 'entity_id', 'notes'], 'Item', ['model_id', 'style_id', 'color', 'pattern_id', 'pattern_color']); id(item.room, ID, 'Item room');
+      fields(item, ['id', 'name', 'type', 'room', 'position_m', 'dimensions_m', 'rotation_deg', 'entity_id', 'notes'], 'Item', ['model_id', 'style_id', 'color', 'pattern_id', 'pattern_color', 'curtain']); id(item.room, ID, 'Item room');
       string(item.name, 100, 'Item name'); if (!ITEM_TYPES.includes(item.type)) fail('Unknown item type.', 'Unknown item type.');
       validateFurnitureAppearance(item);
       if (!f.rooms.some(r => r.id === item.room)) fail(`${item.name}: choose a room on this floor.`, '{item}: choose a room on this floor.', { item: item.name });
@@ -179,6 +179,14 @@ export function validateProject(project, { complete = false } = {}) {
       if (item.position_m.y + item.dimensions_m.height > f.height_m + EPS) fail(`${item.name}: top of item is above the ceiling. Lower the item or reduce its height.`, '{item}: top of item is above the ceiling. Lower the item or reduce its height.', { item: item.name });
       number(item.rotation_deg, -36000, 36000, 'Item rotation', 'Rotation (degrees)'); string(item.entity_id, 150, 'Entity ID', true, false, 'Entity ID (optional)'); string(item.notes, 2000, 'Item notes', true, true, 'Notes');
       if (item.entity_id && !/^[a-z_]+\.[a-z0-9_]+$/.test(item.entity_id)) fail('Entity ID must look like light.living_room (lowercase domain.object_id).', 'Entity ID must look like light.living_room (lowercase domain.object_id).');
+      if (Object.hasOwn(item, 'curtain')) {
+        fields(item.curtain, ['opening_id', 'mode'], 'Curtain binding');
+        if (!supportsCurtain(getCatalogModel(item.model_id))) fail('A curtain binding requires a curtain design.');
+        if (!['left', 'right', 'pair'].includes(item.curtain.mode)) fail('Curtain opening mode must be left, right, or pair.');
+        id(item.curtain.opening_id, ID, 'Curtain window');
+        if (!f.openings.some(opening => opening.id === item.curtain.opening_id && opening.type === 'window')) fail('Choose an existing window on this floor for the curtain.');
+        if (item.entity_id && !item.entity_id.startsWith('cover.')) fail('A bound curtain must use a cover entity, or leave the entity empty.');
+      }
     }
   }
   return project;

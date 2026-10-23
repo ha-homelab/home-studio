@@ -12,7 +12,8 @@ function deriveCurtainStatus(entity, states, now=Date.now()) {
   // HA may retain current_position through reconnection; this is a reported
   // number, never proof of a fresh motor packet or physical calibration.
   const reported=ready&&Number.isFinite(current)&&current>=0&&current<=100;
-  const position=reported?current:cover.last_known?.position;
+  const remembered=cover.last_known?.position;
+  const position=reported?current:Number.isFinite(remembered)&&remembered>=0&&remembered<=100?remembered:null;
   const checked=Date.parse(cover.position_checked_at);
   const userChecked=!poweredOff&&Number.isFinite(checked)&&(!Number.isFinite(turnedOn)||checked>=turnedOn);
   return {position:Number.isFinite(position)?position:null,ready,seconds,poweredOff,remembered:!reported,
@@ -23,16 +24,49 @@ function deriveCurtainStatus(entity, states, now=Date.now()) {
     action:!ready?null:['opening','closing'].includes(entity.state)?'stop_cover':entity.state==='closed'||position===0?'open_cover':entity.state==='open'||position>0?'close_cover':null};
 }
 
+// Catalog fabric is tagged by panel, independently of palette or pattern.
+// Both single-direction and split curtains retain one fixed rail.
+function updateCatalogCurtainFabric(object,spec,position,lo,hi){
+  if(!['left','right','pair'].includes(spec.mode)||!Number.isFinite(lo)||!Number.isFinite(hi)||hi-lo<.001)return null;
+  const fabrics=object.children.filter(mesh=>mesh.isMesh&&mesh.userData.curtainFabric&&['left','right'].includes(mesh.userData.curtainPanel));
+  const bounds=object.userData.catalogCurtainBounds??=(()=>{
+    const result={left:[Infinity,-Infinity],right:[Infinity,-Infinity]};
+    for(const mesh of fabrics){
+      const source=mesh.userData.restVertices??=mesh.geometry.attributes.position.array.slice(),range=result[mesh.userData.curtainPanel];
+      for(let i=0;i<source.length;i+=3){range[0]=Math.min(range[0],source[i]);range[1]=Math.max(range[1],source[i]);}
+    }
+    return result;
+  })();
+  const span=hi-lo,openness=position/100,pack=span*(spec.mode==='pair'?.1:.18);
+  let anchor=null;
+  for(const mesh of fabrics){
+    const attribute=mesh.geometry.attributes.position,source=mesh.userData.restVertices,[a,b]=bounds[mesh.userData.curtainPanel];
+    if(!(b>a))continue;
+    const right=mesh.userData.curtainPanel==='right';
+    for(let i=0;i<source.length;i+=3){
+      const u=(source[i]-a)/(b-a),whole=(right?.5:0)+u*.5,closed=lo+whole*span;
+      const open=spec.mode==='pair'?(right?hi-pack+u*pack:lo+u*pack):(spec.mode==='right'?hi-pack:lo)+whole*pack;
+      attribute.array[i]=closed+(open-closed)*openness;
+    }
+    attribute.needsUpdate=true;mesh.geometry.computeBoundingBox();mesh.geometry.computeBoundingSphere();mesh.geometry.computeVertexNormals();
+    anchor=mesh.geometry.boundingBox.getCenter(new THREE.Vector3());
+  }
+  if(anchor){object.updateMatrixWorld(true);return object.localToWorld(anchor);}
+  return null;
+}
+
 // Deform fabric only. Rails remain fixed, even when the user has moved/rotated an object.
 function updateCurtainFabric(object, item, spec, position, openings, original) {
-  if(!object||!spec||position===null)return null;
+  if(!object||!spec||!Number.isFinite(position)||position<0||position>100)return null;
   const reference=original||item,angle=reference.rotation_deg*Math.PI/180;
   const xs=openings.filter(o=>spec.openings.includes(o.id)).flatMap(o=>{
     const [x0,z0,x1,z1]=o.rect;
-    return [[xm(x0),zm(z0)],[xm(x1),zm(z1)]].map(([x,z])=>(x-reference.position_m.x)*Math.cos(angle)-(z-reference.position_m.z)*Math.sin(angle));
+    const points=spec.mode&&o.start_m&&o.end_m?[o.start_m,o.end_m]:[[xm(x0),zm(z0)],[xm(x1),zm(z1)]];
+    return points.map(([x,z])=>(x-reference.position_m.x)*Math.cos(angle)-(z-reference.position_m.z)*Math.sin(angle));
   });
   if(!xs.length)return null;
   let lo=Math.min(...xs)/reference.dimensions_m.width,hi=Math.max(...xs)/reference.dimensions_m.width;
+  if(spec.mode)return updateCatalogCurtainFabric(object,spec,position,lo,hi);
   const split=spec.openings.length>1, pair=spec.paired===true;
   const gatheredRight=(lo+hi)<0;
   if(pair){if(gatheredRight)lo=(lo+hi)/2;else hi=(lo+hi)/2;}

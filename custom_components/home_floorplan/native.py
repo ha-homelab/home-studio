@@ -212,7 +212,12 @@ class NativeProject:
             raise NativeError("conflict", "This project has unpublished edits. Finish them in Home Studio before editing placements here.")
         project = copy.deepcopy(self.document["project"])
         for floor in project["floors"]:
+            # Runtime placements do not edit source-only window bindings.
+            curtains = {item["id"]: item["curtain"] for item in floor["items"] if "curtain" in item}
             floor["items"] = copy.deepcopy(inventory[floor["id"]]["items"])
+            for item in floor["items"]:
+                if item["id"] in curtains:
+                    item["curtain"] = copy.deepcopy(curtains[item["id"]])
         await self.hass.async_add_executor_job(validate_draft, project)
         revision = self.document["revision"] + 1
         updated = {**self.document, "inventory": inventory, "project": project,
