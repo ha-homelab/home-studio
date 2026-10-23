@@ -1,6 +1,7 @@
 import * as THREE from 'data:text/javascript;base64,__THREE_B64__';
 __LIGHT_STATE_JS__
 __ROOM_LIGHTING_JS__
+/*__MATERIAL_TEXTURES_JS__*/
 __RENDER_CAPACITY_JS__
 __INTERACTION_RENDER_JS__
 /*__ENVIRONMENT_JS__*/
@@ -8,6 +9,7 @@ __VIEWER_I18N_JS__
 const viewerI18n=createViewerI18n(__VIEWER_I18N_DATA__),vt=(key,params)=>viewerI18n.t(key,params);
 viewerI18n.init();
 const model=JSON.parse(document.getElementById('modelData').textContent),$=id=>document.getElementById(id);
+const inventoryTextures=createMaterialTextures(THREE,model.material_textures);
 // Display names can change without changing saved room IDs or device bindings.
 const roomCode=id=>model.room_display_ids?.[id]||id;
 const roomName=id=>model.room_display_names?.[id]||model.rooms.find(r=>r.id===id)?.name||id;
@@ -296,7 +298,7 @@ const roundedWalls=[];
 // Hidden scene objects and inactive wall variants still retain CPU geometry.
 function releaseViewerGeometryGPU(){const geometries=new Set();scene?.traverse(object=>{if(object.geometry)geometries.add(object.geometry)});for(const wall of roundedWalls)for(const geometry of wall.cache.values())geometries.add(geometry);for(const geometry of geometries)geometry.dispose()}
 // Shadow targets and loaded TV maps have the same per-context disposal ownership.
-function releaseViewerTextureGPU(){const targets=new Set(),textures=new Set();scene?.traverse(object=>{for(const target of [object.shadow?.map,object.shadow?.mapPass])if(target)targets.add(target)});for(const target of targets)target.dispose();for(const id of Object.keys(tvEntities)){const map=objectsById.get(id)?.userData.screen?.material.map;if(map)textures.add(map)}for(const texture of textures){texture.dispose();texture.needsUpdate=true}}
+function releaseViewerTextureGPU(){if(typeof inventoryTextures!=='undefined')inventoryTextures.releaseGPU();const targets=new Set(),textures=new Set();scene?.traverse(object=>{for(const target of [object.shadow?.map,object.shadow?.mapPass])if(target)targets.add(target)});for(const target of targets)target.dispose();for(const id of Object.keys(tvEntities)){const map=objectsById.get(id)?.userData.screen?.material.map;if(map)textures.add(map)}for(const texture of textures){texture.dispose();texture.needsUpdate=true}}
 function updateRoundedWallGeometry(limit){
   for(const wall of roundedWalls){
     const key=Math.min(wall.shape.top,limit);
@@ -428,7 +430,7 @@ function updateEditorCamera(){camera.position.set(target.x+radius*Math.sin(polar
 function render(){if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;const before=renderCount;updateWallOutlines();if(homeView?.active)homeView.render();else{updateEditorCamera();drawScene(camera);renderCount++}if(renderCount>before)cancelRender()}window.renderModel=render;window.requestModelRender=requestRender;
 let viewSize='';const resize=()=>{if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;if(renderDelay)requestRender();const b=$(homeView?.active?'homeStage':'view3d').getBoundingClientRect(),ratio=renderPixelRatio(b.width,b.height),size=[homeView?.active,b.width,b.height,ratio].join();if(b.width&&b.height&&size!==viewSize){viewSize=size;renderer.setDrawingBufferSize(b.width,b.height,ratio);camera.aspect=b.width/b.height;camera.updateProjectionMatrix();render()}};window.resizeModel=resize;const observer=new ResizeObserver(resize);observer.observe($('view3d'));observer.observe($('homeStage'));
 document.addEventListener('visibilitychange',()=>{if(document.hidden){interactionPointer=null;cancelRender()}else{const before=renderCount;resize();if(renderCount===before)requestRender()}});
-window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();interactionPointer=null;if(!event.persisted){environmentLayer?.dispose();observer.disconnect();interactionRenderer?.dispose();interactionRenderer=null;homeView?.dispose?.();disposeStaticGlassPasses();releaseWallOutlineMaterials(true);editorFloorMaterials?.dispose();renderer.dispose();renderer.forceContextLoss();}});
+window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();interactionPointer=null;if(!event.persisted){environmentLayer?.dispose();observer.disconnect();interactionRenderer?.dispose();interactionRenderer=null;homeView?.dispose?.();if(typeof inventoryTextures!=='undefined')inventoryTextures.dispose();disposeStaticGlassPasses();releaseWallOutlineMaterials(true);editorFloorMaterials?.dispose();renderer.dispose();renderer.forceContextLoss();}});
 // A resize can already paint the resumed state. Initial pageshow also needs
 // no extra frame after boot painted; leave any pending live-state request intact.
 window.addEventListener('pageshow',event=>{const resumed=renderSuspended||event.persisted,before=renderCount;renderSuspended=false;resize();if(renderCount===before&&(resumed||renderCount===0))requestRender()});
@@ -463,9 +465,8 @@ const li=document.createElement('li'),label=document.createElement('span');label
 if(objectGroup){
 const size=it.dimensions_m,candidate=model.object_assets?.[it.id],asset=candidate?.model_id&&candidate.model_id!==it.model_id?null:candidate;let o;
 if(asset){
-o=new THREE.Group();const batches={};
-for(const part of asset.meshes){const key=part.material+'|'+(part.curtain_fabric?part.curtain_panel:'fixed');const batch=batches[key]??={material:part.material,curtainFabric:part.curtain_fabric===true,curtainPanel:part.curtain_panel,vertices:[],normals:[],indices:[]};const offset=batch.vertices.length/3;batch.vertices.push(...part.vertices.flat());batch.normals.push(...part.normals.flat());batch.indices.push(...part.indices.map(i=>i+offset))}
-for(const batch of Object.values(batches)){const material=batch.material;const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(batch.vertices,3));geo.setAttribute('normal',new THREE.Float32BufferAttribute(batch.normals,3));geo.setIndex(batch.indices);const col=model.materials[material];const mat=createSceneMaterial({color:new THREE.Color(...col.slice(0,3)),roughness:.8,transparent:col[3]<1,opacity:col[3],depthWrite:col[3]===1,side:THREE.DoubleSide});const child=new THREE.Mesh(geo,mat);child.castShadow=col[3]===1;child.receiveShadow=true;child.userData.curtainFabric=!!model.cover_windows?.[it.id] && (batch.curtainFabric||/curtain|safety_mesh/.test(material));child.userData.curtainPanel=batch.curtainPanel;o.add(child)}
+o=new THREE.Group();const batches=inventoryMaterialBatches(asset,size,model.materials,inventoryTextures);
+for(const batch of batches){const material=batch.material;const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(batch.vertices,3));geo.setAttribute('normal',new THREE.Float32BufferAttribute(batch.normals,3));geo.setIndex(batch.indices);if(batch.texture)geo.setAttribute('uv',new THREE.Float32BufferAttribute(batch.uv,2));const col=model.materials[material];const mat=createSceneMaterial({color:new THREE.Color(...col.slice(0,3)),roughness:.8,transparent:col[3]<1,opacity:col[3],depthWrite:col[3]===1,side:THREE.DoubleSide});if(batch.texture){mat.map=batch.texture;mat.color.setRGB(1,1,1)}const child=new THREE.Mesh(geo,mat);child.castShadow=col[3]===1;child.receiveShadow=true;child.userData.curtainFabric=!!model.cover_windows?.[it.id] && (batch.curtainFabric||/curtain|safety_mesh/.test(material));child.userData.curtainPanel=batch.curtainPanel;o.add(child)}
 if(tvEntities[it.id]&&it.entity_id===tvEntities[it.id]){const screen=new THREE.Mesh(new THREE.PlaneGeometry(.968,.948),new THREE.MeshBasicMaterial({toneMapped:false}));screen.position.set(0,.515,.393);screen.visible=false;o.userData.screen=screen;o.add(screen)}
 o.scale.set(size.width,size.height,size.depth);o.position.set(it.position_m.x,it.position_m.y,it.position_m.z);
 }else{const geo=new THREE.BoxGeometry(size.width,size.height,size.depth);const mat=createSceneMaterial({color:it.type==='tv'?0x273239:0xb87637,roughness:.7});o=new THREE.Mesh(geo,mat);o.position.set(it.position_m.x,it.position_m.y+size.height/2,it.position_m.z);o.castShadow=true;o.receiveShadow=true;registerFallbackBoxProgram(THREE,o,renderProfile.diffuseLighting)}
@@ -559,4 +560,6 @@ document.querySelector('aside').inert=!canEdit;if(inventoryChanged)rebuildInvent
 });
 }
 refreshViewerLanguage(false);
+// Decode bounded local albedo before the first inventory build, without resetting live controls.
+await inventoryTextures.ready;
 rebuildInventoryView();if(embedded){homeView?.setActive(true);requestAnimationFrame(()=>{initialViewReady=!failed3D;try{window.resizeModel?.();}catch(e){report3DError(e);}});}else if(model.initial_room)focusRoom(model.initial_room);window.floorplan={model,get surroundings(){return environmentLayer?.stats},get canEdit(){return canEdit},get locale(){return viewerI18n.locale},get homeMode(){return homeView?.active??false},get illuminated(){return homeView?.illuminated??[]},get items(){return items},get renderCount(){return renderCount},get meshCount(){return root?.children.length||0},get objectCount(){return objectGroup?.children.length||0},get translucentObjectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh&&o.material.transparent&&o.material.opacity<1&&!o.material.depthWrite)n++});return n},get objectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh)n++});return n}};

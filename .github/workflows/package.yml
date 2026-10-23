@@ -90,6 +90,7 @@ jobs:
           node scripts/test-furniture-patterns.mjs
           python3 scripts/test-inventory-appearance.py
           node --test scripts/test-inventory-appearance.cjs
+          python3 scripts/test-material-textures.py
       - name: Check localized guides, wiki links and vector diagrams
         run: |
           python3 scripts/test-docs.py
@@ -122,6 +123,8 @@ jobs:
           node --test scripts/test-family-view.cjs
       - name: Test drawing, furnishing, export and installation through the editor
         run: npm run test:planner
+      - name: Test optional albedo surfaces in the compiled viewer
+        run: MATERIAL_TEXTURE_ENGINES=chromium,firefox,webkit LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-material-textures.cjs
       - name: Test optional garden surroundings and bounded decorative motion
         run: |
           node scripts/test-environment.mjs
