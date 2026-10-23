@@ -684,3 +684,91 @@ def compile_project(project, output=DEFAULT_OUTPUT, ha_package=False, project_pa
     finally:
         if stage.exists():
             shutil.rmtree(stage)
+
+
+def export_geometry_budget(floors, maximum=200_000):
+    """Bound mesh generation before allocating the export's triangle arrays."""
+    triangles = 0
+    for floor in floors:
+        triangles += len(floor['walls']) * 60 + len(floor['openings']) * 48
+        triangles += sum(len(room['polygon']) * 4 for room in floor['rooms'])
+        for item in floor['items']:
+            asset = build_furniture_asset(item)
+            triangles += sum(len(mesh['indices']) // 3 for mesh in asset['meshes']) if asset else 12
+            if triangles > maximum:
+                fail('export', 'Export exceeds 200,000 triangles. Export one floor or reduce detailed furniture.')
+        if triangles > maximum:
+            fail('export', 'Export exceeds 200,000 triangles. Export one floor or reduce detailed furniture.')
+
+
+def export_floor(model, floor, reference_items=None, *, elevated=False):
+    """Build a geometry-only scene preserving custom normalized object assets.
+
+    Raw legacy item meshes are converted back to their original local frame, so
+    current placements can be applied without losing their custom geometry.
+    Architecture is copied directly from the trusted model, never reconstructed
+    from a generated home's deliberately incomplete authoring projection.
+    """
+    references = {item['id']: item for item in (reference_items or floor['items'])}
+    item_ids = set(references) | {item['id'] for item in floor['items']}
+    groups = []
+    materials = model['materials']
+
+    def mesh_data(mesh):
+        return {key: mesh[key] for key in ('vertices', 'normals', 'indices')} | {'color': materials[mesh['material']]}
+
+    for index, mesh in enumerate(model['meshes']):
+        if mesh.get('kind') == 'inventory' and mesh.get('item_id') in item_ids:
+            continue
+        groups.append({'name': 'Architecture ' + str(index + 1), 'translation': [0, 0, 0],
+                       'rotation': 0, 'scale': [1, 1, 1], 'meshes': [mesh_data(mesh)]})
+    for item_number, item in enumerate(floor['items'], 1):
+        position, dimensions = item['position_m'], item['dimensions_m']
+        display_name = MODELS.get(item.get('model_id'), {}).get('label') or item['type'].replace('_', ' ').title()
+        group = {'name': display_name + ' ' + str(item_number), 'translation': [position[axis] for axis in ('x', 'y', 'z')],
+                 'rotation': math.radians(item['rotation_deg']),
+                 'scale': [dimensions[axis] for axis in ('width', 'height', 'depth')], 'meshes': []}
+        asset = model.get('object_assets', {}).get(item['id'])
+        original = references.get(item['id'], item)
+        source_model_id = asset.get('model_id') if asset else original.get('model_id')
+        replaced_asset = bool(source_model_id and source_model_id != item.get('model_id'))
+        if replaced_asset:
+            asset = None
+        if asset:
+            group['meshes'] = [mesh_data(mesh) for mesh in asset['meshes']]
+        else:
+            original_position, size = original['position_m'], original['dimensions_m']
+            cosine, sine = math.cos(math.radians(original['rotation_deg'])), math.sin(math.radians(original['rotation_deg']))
+            for mesh in (() if replaced_asset else model['meshes']):
+                if mesh.get('kind') != 'inventory' or mesh.get('item_id') != item['id']:
+                    continue
+                local = mesh_data(mesh)
+                vertices, normals = [], []
+                for x, y, z in mesh['vertices']:
+                    x, y, z = x-original_position['x'], y-original_position['y'], z-original_position['z']
+                    vertices.append([(cosine*x-sine*z)/size['width'], y/size['height'], (sine*x+cosine*z)/size['depth']])
+                for x, y, z in mesh['normals']:
+                    normal = [(cosine*x-sine*z)*size['width'], y*size['height'], (sine*x+cosine*z)*size['depth']]
+                    length = math.sqrt(sum(value*value for value in normal)) or 1
+                    normals.append([value/length for value in normal])
+                local.update(vertices=vertices, normals=normals)
+                group['meshes'].append(local)
+            if not group['meshes']:
+                # New simple objects have the same bottom-centred unit box as
+                # the native compiler and live viewer.
+                geometry = create_geometry([(0, 0), (1, 1)], [(0, 0), (1, 1)])
+                geometry.box_m('object', -.5, -.5, .5, .5, 0, 1)
+                color = MATERIALS['dark' if item['type'] == 'tv' else 'added']
+                group['meshes'] = [{key: mesh[key] for key in ('vertices', 'normals', 'indices')} | {'color': color}
+                                   for mesh in geometry.meshes]
+        groups.append(group)
+    return {'name': 'Floor', 'elevation': floor['elevation_m'] if elevated else 0, 'groups': groups}
+
+
+def render_model_export(floors, format):
+    # This relative import also works in the packaged HA runtime namespace.
+    if __package__ and '.' in __package__:
+        from ..exporters import export_scene
+    else:
+        from exporters import export_scene
+    return export_scene(floors, format)

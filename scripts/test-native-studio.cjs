@@ -25,7 +25,8 @@ window.server=saved;
 window.catalog={floors:[{id:'ground',name:'Ground floor'}],areas:[{id:'living',name:'Living room',floor_id:'ground'}],entities:[{entity_id:'light.ceiling',name:'Ceiling light',domain:'light',area_id:'living',available:true,attributes:{secret:'PRIVATE_ATTRIBUTE'}},{entity_id:'sensor.temperature',name:'Temperature',domain:'sensor',area_id:'living',available:true},{entity_id:'switch.disabled',name:'Disabled',domain:'switch',area_id:'living',disabled:true}],secrets:'PRIVATE_CATALOG'};
 window.host=document.querySelector('home-floorplan-studio-panel');
 if(window.catalogOverride)window.catalog=window.catalogOverride;
-window.host.hass={user:{id:'test-user',is_admin:true},auth:{accessToken:window.tokens},callWS:async data=>{window.calls.push(structuredClone(data));if(data.type.endsWith('entity_catalog'))return window.catalog;if(data.type==='home_floorplan/viewer')return {mode:saved.mode||'native',has_editor:true,can_edit:true,site_features:false,floor:'ground',floors:['ground'],revision:1,items:[],readable_entities:[],controllable_entities:[],html:'<html><head></head><body>Published synthetic home</body></html>'};if(data.type.endsWith('project_get')&&window.holdGet)await new Promise(resolve=>window.releaseGet=resolve);if(data.type.endsWith('project_save')){if(window.failSave)throw {code:'connection_error',message:'Offline'};if(data.revision!==saved.revision)throw {code:'conflict'};if(window.holdSave)await new Promise(resolve=>window.releaseSave=resolve);saved.project=data.project;saved.has_saved_draft=true;saved.revision++;sessionStorage.setItem('fixture-server',JSON.stringify(saved));}if(data.type.endsWith('project_publish')){if(data.revision!==saved.revision)throw {code:'conflict'};if(!saved.project?.floors?.length||saved.project.floors.some(floor=>!floor.rooms?.length))throw {code:'invalid_project',message:'Add at least one room to every floor before publishing.'};saved.published_revision=saved.revision;saved.published_project=structuredClone(saved.project);sessionStorage.setItem('fixture-server',JSON.stringify(saved));}return {...structuredClone(saved),can_edit:true,has_saved_draft:saved.has_saved_draft??!!saved.project,has_published:saved.has_published??Number.isInteger(saved.published_revision),editor_url:'/home-floorplan-studio/planner/index.html',capabilities:{authoring:true,...saved.capabilities}};}};
+window.connection=Object.assign(new EventTarget(),{connected:true});
+window.host.hass={connection:window.connection,user:{id:'test-user',is_admin:true},auth:{accessToken:window.tokens},callWS:async data=>{window.calls.push(structuredClone(data));if(data.type.endsWith('entity_catalog'))return window.catalog;if(data.type==='home_floorplan/viewer')return {mode:saved.mode||'native',has_editor:true,can_edit:true,site_features:false,floor:'ground',floors:['ground'],revision:1,items:[],readable_entities:[],controllable_entities:[],html:'<html><head></head><body>Published synthetic home</body></html>'};if(data.type.endsWith('project_get')&&window.holdGet)await new Promise(resolve=>window.releaseGet=resolve);if(data.type==='home_floorplan/export_model'){if(window.holdExport)await new Promise(resolve=>window.releaseExport=resolve);if(window.failExport)throw window.failExport;return window.modelExportResponse||{filename:'home-studio-'+(data.floor||'all-floors')+(data.format==='glb'?'.glb':'.zip'),base64:btoa(data.format==='glb'?'glTFsynthetic glb':'PK\\x03\\x04synthetic obj zip')};}if(data.type.endsWith('project_save')){if(window.failSave)throw {code:'connection_error',message:'Offline'};if(data.revision!==saved.revision)throw {code:'conflict'};if(window.holdSave)await new Promise(resolve=>window.releaseSave=resolve);saved.project=data.project;saved.has_saved_draft=true;saved.revision++;sessionStorage.setItem('fixture-server',JSON.stringify(saved));}if(data.type.endsWith('project_publish')){if(data.revision!==saved.revision)throw {code:'conflict'};if(!saved.project?.floors?.length||saved.project.floors.some(floor=>!floor.rooms?.length))throw {code:'invalid_project',message:'Add at least one room to every floor before publishing.'};saved.published_revision=saved.revision;saved.published_project=structuredClone(saved.project);sessionStorage.setItem('fixture-server',JSON.stringify(saved));}return {...structuredClone(saved),can_edit:true,has_saved_draft:saved.has_saved_draft??!!saved.project,has_published:saved.has_published??Number.isInteger(saved.published_revision),editor_url:'/home-floorplan-studio/planner/index.html',capabilities:{authoring:true,...saved.capabilities}};}};
 </script></body></html>`;
 // This destination checks the real navigation URL and saved publication source.
 // Rendering the generated family viewer is covered by separate acceptance tests.
@@ -128,6 +129,180 @@ async function testGestureRecovery(context, origin, errors) {
 async function openMoreOptions(page) {
   const details=page.locator('#more-options');
   if (await details.getAttribute('open')===null) await details.getByText('More options',{exact:true}).click();
+}
+async function testModelExportAndConnection(context, origin, project, errors) {
+  const page = await context.newPage(); page.setDefaultTimeout(15000);
+  page.on('pageerror', error => errors.push(String(error)));
+  page.on('dialog', dialog => dialog.accept());
+  const baseline = structuredClone(project);
+  baseline.floors.push({ ...structuredClone(baseline.floors[0]), id: 'upper', name: 'Upper floor', elevation_m: 3 });
+  await page.addInitScript(project => {
+    if (window.parent === window) sessionStorage.setItem('fixture-server', JSON.stringify({ project, revision: 3, published_revision: 3 }));
+  }, baseline);
+  await page.goto(origin + '/fixture'); await page.waitForFunction(() => window.host?._ready);
+  const frame = page.frames().find(value => value.url().includes('embed='));
+  await frame.locator('#floor-list button').filter({ hasText: 'Upper floor' }).click();
+  await frame.locator('#project-title').fill('Unsaved Blender drawing');
+  if (process.env.STUDIO_DOCS_OUTPUT) {
+    fs.mkdirSync(path.resolve(process.env.STUDIO_DOCS_OUTPUT), { recursive: true });
+    await frame.locator('#project-title').press('Tab');
+    await frame.locator('[data-object-kind="items"]').first().click();
+    await frame.locator('#split-tab').click();
+    await frame.waitForFunction(() => planner.getPreviewMetadata().renderCount > 0);
+    await page.screenshot({ path: path.join(process.env.STUDIO_DOCS_OUTPUT, 'native-editor-blender.png'), fullPage: true });
+  }
+  const button = page.getByRole('button', { name: 'Export for Blender', exact: true });
+  assert.equal(await button.isVisible(), true, 'Model export is visible beside the native save controls');
+  await button.click();
+  const dialog = page.getByRole('dialog', { name: 'Export for Blender', exact: true });
+  await dialog.waitFor({ state: 'visible' });
+  assert.equal(await dialog.getByLabel('Floors', { exact: true }).inputValue(), 'upper', 'Default scope follows the actual current floor');
+  assert.equal(await page.evaluate(() => host._currentFloor), 'upper');
+  if (process.env.STUDIO_DOCS_OUTPUT) await page.screenshot({ path: path.join(process.env.STUDIO_DOCS_OUTPUT, 'native-export-dialog.png'), fullPage: true });
+  const getCalls = () => page.evaluate(() => calls.filter(call => call.type === 'home_floorplan/export_model'));
+  const glbEvent = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download model', exact: true }).click();
+  const glb = await glbEvent;
+  assert.equal(glb.suggestedFilename(), 'home-studio-upper.glb');
+  assert.equal(fs.readFileSync(await glb.path(), 'utf8'), 'glTFsynthetic glb');
+  await page.waitForFunction(() => !host._exportBusy);
+  let requests = await getCalls();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].revision, 3);
+  assert.equal(requests[0].floor, 'upper');
+  assert.equal(requests[0].format, 'glb');
+  assert.equal(requests[0].project.title, 'Unsaved Blender drawing', 'Export snapshots the valid unsaved drawing');
+  await dialog.getByLabel('Floors', { exact: true }).selectOption('');
+  await dialog.getByLabel('Format', { exact: true }).selectOption('obj');
+  const objEvent = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download model', exact: true }).click();
+  const obj = await objEvent;
+  assert.equal(obj.suggestedFilename(), 'home-studio-all-floors.zip');
+  assert.equal(fs.readFileSync(await obj.path(), 'utf8'), 'PK\x03\x04synthetic obj zip');
+  await page.waitForFunction(() => !host._exportBusy);
+  requests = await getCalls();
+  assert.equal(requests[1].floor, null);
+  assert.equal(requests[1].format, 'obj');
+  assert.deepEqual(await page.evaluate(() => server.project), baseline);
+  assert.equal(await page.evaluate(() => server.published_revision), 3);
+  assert.equal(await page.evaluate(() => calls.some(call => /project_(save|publish)$/.test(call.type))), false, 'Export never saves or publishes');
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  // Invalid focused fields stay editable and never reach the export endpoint.
+  await frame.locator('#project-title').fill('');
+  await button.click(); await dialog.waitFor({ state: 'visible' });
+  await dialog.getByRole('button', { name: 'Download model', exact: true }).click();
+  await page.waitForFunction(() => !host._exportBusy);
+  assert.equal(await dialog.isVisible(), false);
+  assert.equal((await getCalls()).length, 2);
+  assert.equal(await frame.locator('#project-title').inputValue(), '');
+  await frame.locator('#project-title').fill('Preserved after failed export');
+  await frame.locator('#project-title').press('Tab');
+  // A malformed file cannot trigger a download or change the drawing.
+  await button.click(); await dialog.waitFor({ state: 'visible' });
+  await page.evaluate(() => { window.modelExportResponse = { filename: '../bad.glb', base64: btoa('glTFbad') }; });
+  await dialog.getByRole('button', { name: 'Download model', exact: true }).click();
+  await page.waitForFunction(() => !host._exportBusy);
+  assert.match(await page.locator('#model-export-status').innerText(), /invalid model file/);
+  await page.evaluate(() => { delete window.modelExportResponse; window.failExport = { code: 'conflict' }; });
+  await dialog.getByRole('button', { name: 'Download model', exact: true }).click();
+  await page.waitForFunction(() => !host._exportBusy);
+  assert.match(await page.locator('#model-export-status').innerText(), /changed in another session/);
+  assert.equal(await frame.evaluate(() => planner.getProject().title), 'Preserved after failed export');
+  // Disconnect during an export: ignore a late result and retain newer edits.
+  await page.evaluate(() => { delete window.failExport; window.holdExport = true; });
+  await dialog.getByRole('button', { name: 'Download model', exact: true }).click();
+  await page.waitForFunction(() => typeof window.releaseExport === 'function');
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  // Delay real iframe messages until the export cancellation has finished.
+  // This fixes the ordering of the cross-frame race seen on slower CI hosts.
+  await page.evaluate(() => {
+    const receive = host._onMessage.bind(host);
+    window.heldDraftSnapshots = [];
+    host._onMessage = event => {
+      if (event.source === host._frame.contentWindow && event.data?.type === 'snapshot') window.heldDraftSnapshots.push(event);
+      else receive(event);
+    };
+    window.releaseDraftSnapshots = () => {
+      host._onMessage = receive;
+      for (const event of window.heldDraftSnapshots) receive(event);
+      delete window.heldDraftSnapshots; delete window.releaseDraftSnapshots;
+    };
+  });
+  await frame.locator('#project-title').fill('Newer than pending export');
+  await frame.locator('#project-title').press('Tab');
+  await page.waitForFunction(() => heldDraftSnapshots.some(event => event.data.project.title === 'Newer than pending export' && !event.data.edits.pending));
+  await page.evaluate(() => { connection.connected = false; connection.dispatchEvent(new Event('disconnected')); });
+  await page.waitForFunction(() => !host._exportBusy);
+  assert.equal(await page.locator('#connection-notice').isVisible(), true);
+  assert.match(await page.locator('#status').innerText(), /disconnected/);
+  await page.evaluate(() => window.releaseDraftSnapshots());
+  assert.equal(await page.evaluate(() => host._project.title), 'Newer than pending export', 'A delayed snapshot still updates the preserved drawing');
+  assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem(host._key())).project.title), 'Newer than pending export');
+  assert.match(await page.locator('#status').innerText(), /disconnected/, 'A delayed draft snapshot must not replace offline guidance with an unavailable Save action');
+  assert.match(await page.locator('#model-export-status').innerText(), /Export failed:.*disconnected/, 'The detailed export failure stays available');
+  for (const id of ['save', 'publish', 'model-export']) assert.equal(await page.locator('#' + id).isDisabled(), true);
+  await openMoreOptions(page);
+  assert.equal(await page.locator('#reload').isDisabled(), true);
+  assert.equal(await page.locator('#export').isEnabled(), true);
+  const jsonEvent = page.waitForEvent('download'); await page.locator('#export').click();
+  const json = await jsonEvent;
+  assert.equal(JSON.parse(fs.readFileSync(await json.path(), 'utf8')).title, 'Newer than pending export');
+  await frame.locator('#project-title').fill(''); await frame.locator('#project-title').press('Tab');
+  await page.waitForFunction(() => host._edits.invalid);
+  assert.match(await page.locator('#status').innerText(), /disconnected/);
+  assert.match(await page.locator('#status').innerText(), /Correct/, 'Offline guidance retains invalid-field feedback');
+  await frame.locator('#project-title').fill('Still editable offline'); await frame.locator('#project-title').press('Tab');
+  await page.waitForFunction(() => host._project.title === 'Still editable offline' && !host._edits.pending);
+  assert.match(await page.locator('#status').innerText(), /disconnected/);
+  const beforeReconnect = await page.evaluate(() => calls.length);
+  let lateDownloads = 0; page.on('download', () => lateDownloads++);
+  await page.evaluate(async () => {
+    await Promise.all([host._save(), host._publish(), host._reload(), host._exportModel()]);
+    connection.connected = true; connection.dispatchEvent(new Event('ready'));
+    window.releaseExport(); await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  assert.equal(await page.evaluate(() => calls.length), beforeReconnect, 'Reconnect does not replay operations or replace the draft');
+  assert.equal(lateDownloads, 0, 'A cancelled request cannot download after reconnection');
+  assert.equal(await page.locator('#connection-notice').isVisible(), false);
+  assert.equal(await page.locator('#save').isEnabled(), true);
+  assert.match(await page.locator('#status').innerText(), /Unsaved changes/, 'Reconnection restores current drawing guidance without another edit');
+  assert.equal(await frame.evaluate(() => planner.getProject().title), 'Still editable offline');
+  assert.deepEqual(await page.evaluate(() => server.project), baseline);
+  // A reload begun before connection loss cannot apply its stale response.
+  await page.evaluate(() => { window.holdGet = true; });
+  await openMoreOptions(page); await page.locator('#reload').click();
+  await page.waitForFunction(() => typeof window.releaseGet === 'function');
+  await page.evaluate(() => {
+    connection.connected = false; connection.dispatchEvent(new Event('disconnected'));
+    connection.connected = true; connection.dispatchEvent(new Event('ready'));
+    window.releaseGet();
+  });
+  await page.waitForFunction(() => !host._busy);
+  assert.equal(await frame.evaluate(() => planner.getProject().title), 'Still editable offline');
+  assert.match(await page.locator('#status').innerText(), /connection changed/);
+  // Pagehide can enter the back/forward cache without detaching the panel.
+  await page.evaluate(() => { delete window.releaseExport; window.holdExport = true; });
+  await button.click(); await dialog.waitFor({ state: 'visible' });
+  await dialog.getByRole('button', { name: 'Download model', exact: true }).click();
+  await page.waitForFunction(() => typeof window.releaseExport === 'function');
+  await page.evaluate(async () => {
+    window.dispatchEvent(new Event('pagehide'));
+    window.releaseExport(); await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  assert.equal(await page.evaluate(() => host._exportBusy), false);
+  assert.equal(lateDownloads, 0, 'A response after pagehide cannot trigger a download');
+  assert.match(await page.locator('#model-export-status').innerText(), /cancelled when leaving/);
+  assert.equal(await frame.evaluate(() => planner.getProject().title), 'Still editable offline');
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  // The previous connection's events must not affect its replacement.
+  await page.evaluate(() => {
+    window.oldConnection = connection;
+    window.connection = Object.assign(new EventTarget(), { connected: true });
+    host.hass = { ...host._hass, connection };
+    oldConnection.dispatchEvent(new Event('disconnected'));
+  });
+  assert.equal(await page.locator('#connection-notice').isVisible(), false);
+  await page.close();
 }
 // Exercise the document-navigation fallback with real opaque frames and network
 // responses. The fallback must not change the editor's credential boundary.
@@ -258,8 +433,10 @@ async function testDocumentFallback(context, origin, project, errors) {
   // document is permitted to become an iframe document.
   const original=fs.readFileSync(path.join(root,'planner/index.html'),'utf8');
   const invalidResponses=[
+    ['access refused',{status:403,contentType:'text/html',body:'PRIVATE_LOGIN'},'editor-http-403'],
     ['HTTP failure',{status:503,contentType:'text/html',body:'PRIVATE_UPSTREAM_FAILURE'},'editor-http-503'],
     ['wrong MIME',{status:200,contentType:'text/plain',body:original},'editor-type'],
+    ['login HTML',{status:200,contentType:'text/html',body:'<!doctype html><title>PRIVATE_LOGIN</title><p>Sign in</p>'},'editor-policy'],
     ['redirect',null,'editor-redirect'],
     ['oversized document',{status:200,contentType:'text/html',body:original+' '.repeat(128*1024)},'editor-size'],
     ['oversized stream','stream','editor-size'],
@@ -302,6 +479,10 @@ async function testDocumentFallback(context, origin, project, errors) {
     assert.equal(await rejected.locator('#retry').isVisible(),true,reason);
     const diagnostic=await rejected.locator('#status').innerText();
     assert(diagnostic.includes('('+code+')'),reason+': '+diagnostic);
+    if (code === 'editor-http-403') assert.match(diagnostic, /check your login or proxy access policy/);
+    if (code === 'editor-redirect' || code === 'editor-type') assert.match(diagnostic, /login page or proxy response/);
+    if (code === 'editor-assets') assert.match(diagnostic, /without rewriting/);
+    if (code === 'editor-policy') assert.match(diagnostic, /proxy login page, rewritten response/);
     assert.doesNotMatch(diagnostic,/PRIVATE_|https?:|127\.0\.0\.1|untrusted\.invalid/,'Diagnostics must never include upstream bodies, URLs, or exception text');
     assert.deepEqual(await rejected.evaluate(()=>window.host._project),project,reason);
     assert.equal(await rejected.evaluate(()=>window.calls.some(call=>/project_(save|publish)$/.test(call.type))),false,reason);
@@ -343,7 +524,9 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, headers).end(body);
   } catch { res.writeHead(404).end(); }
 });
-(async()=>{
+// Reuse the exact synthetic native host when recording documentation examples.
+module.exports = { server, fixture, familyFixture, testModelExportAndConnection };
+if (require.main === module) (async()=>{
  let browser;
  try {
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -1015,9 +1198,10 @@ const server = http.createServer((req, res) => {
   await checkMobileWidths();
   await mobileContext.close();
   await testGestureRecovery(context, origin, errors);
+  await testModelExportAndConnection(context, origin, project, errors);
   await require('./device-onboarding-browser-check.cjs')(context, origin, errors);
   assert.deepEqual(errors,[]);
   await context.close();
-  console.log(`Native studio passed (${engine}): production panel module route, repeated module loading, opaque sandbox, clean first visit, guided room/device/preview flow, measured area batches and media device selection, unfinished-field guard and recovery, separate save/publish, generated protected editing and published preview, guarded navigation and remount, incomplete-floor publication guard, JSON roundtrip, forged messages, local draft isolation, offline recovery, revision conflict, in-flight edits, pending/invalid fields, bounded document fallback, loading timeout and recovery retry.`);
+  console.log(`Native studio passed (${engine}): production panel module route, repeated module loading, opaque sandbox, clean first visit, guided room/device/preview flow, measured area batches and media device selection, unfinished-field guard and recovery, separate save/publish, generated protected editing and published preview, guarded navigation and remount, incomplete-floor publication guard, JSON roundtrip, forged messages, local draft isolation, offline recovery, revision conflict, in-flight edits, pending/invalid fields, bounded document fallback, loading timeout and recovery retry, current/all-floor Blender downloads, failed and stale export suppression, offline editing and JSON recovery, reconnect without writes.`);
  } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

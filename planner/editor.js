@@ -214,7 +214,17 @@ function validateSourcePolicy(value) {
     }
   }
 }
-const snap = (value, precise = false) => $('snap').checked && !precise ? Math.round(value * 4) / 4 : round(value);
+const snap = (value, precise = false) => {
+  const intervals = $('snap-step')?.value === '0.05' ? 20 : 4;
+  return $('snap').checked && !precise ? round(Math.round(value * intervals) / intervals) : round(value);
+};
+// Keep tap/click selection separate from dragging, including off-grid items.
+// Capture the device-pixel ratio at pointerdown so zoom changes cannot arm a drag.
+function itemDragStart(event) { return { x: event.clientX, y: event.clientY, ratio: window.devicePixelRatio || 1, armed: false }; }
+function itemDragReady(start, event, vertical = false) {
+  if (!start.armed) start.armed = Math.hypot(vertical ? 0 : event.clientX - start.x, event.clientY - start.y) * start.ratio >= 6;
+  return start.armed;
+}
 function resizeRoomWithOutline(target, room, width, depth, anchor = null) {
   Object.assign(target, resizeRoom(target, room.id, width, depth, anchor));
 }
@@ -511,8 +521,13 @@ function inspectorValue(input) {
 function renderInspector() {
   const parent = $('inspector-body'), next = node('div');
   const scope = `${project.id || ''}:${activeFloorId}:${selection?.kind || ''}:${selection?.id || ''}`;
+  $('selected-item-details').hidden = selection?.kind !== 'items';
   buildInspector(next);
-  if (scope === inspectorScope) reconcileInspector(parent, next);
+  if (scope === inspectorScope) {
+    const previous = parent.querySelector('.item-appearance'), appearance = next.querySelector('.item-appearance');
+    if (previous && appearance) appearance.open = previous.open;
+    reconcileInspector(parent, next);
+  }
   else { parent.replaceChildren(...next.childNodes); inspectorScope = scope; }
 }
 function buildInspector(parent) {
@@ -620,7 +635,32 @@ function buildInspector(parent) {
     if (originalModel) parent.append(node('p', 'field-note', 'This item has an original installed model. Its detailed appearance is kept in the published home unless you choose a different design below. The 2D plan shows its footprint.'));
     field(parent, t('Item name'), object.name, v => editObject(o => { o.name = v; }));
     const model = object.model_id ? getCatalogModel(object.model_id) : null;
-    field(parent, t('Design'), object.model_id || '', value => editObject(o => {
+    field(parent, t('Room'), object.room, v => editObject(o => { o.room = v; }), { options: f.rooms.map(r => ({ value: r.id, label: r.name })) });
+    section(parent, t('Position')); const pos = row(parent, true); pos.dataset.itemPosition = '';
+    for (const axis of ['x', 'y', 'z']) field(pos, t(`${axis} (m)`), object.position_m[axis], v => editObject(o => { o.position_m[axis] = v; }), { type: 'number', min: axis === 'y' ? 0 : -100, max: axis === 'y' ? round(f.height_m - object.dimensions_m.height) : 100, step: '.01' });
+    parent.append(node('p', 'field-note', t('x/z locate the center. y is the bottom height above this floor.')));
+    const heightActions = row(parent);
+    for (const [label, delta] of [['Lower 5 cm', -.05], ['Raise 5 cm', .05]]) {
+      const control = button(label, () => editObject((o, target) => { o.position_m.y = round(Math.max(0, Math.min(target.height_m - o.dimensions_m.height, o.position_m.y + delta))); }, 'Item height changed.'));
+      control.disabled = delta < 0 ? object.position_m.y <= 0 : object.position_m.y >= f.height_m - object.dimensions_m.height;
+      heightActions.append(control);
+    }
+    parent.append(node('p', 'field-note', haSourcePolicy ? 'Drag this item in 2D; hold Alt to bypass the grid. Enter y above for an exact height. The Published home tab shows the installed view.' : 'In Preview 3D, choose Edit items, then drag the item or its ↕ Y handle. Hold Alt to bypass the grid. Enter y above for an exact height.'));
+    section(parent, t('Size & rotation')); const dims = row(parent, true);
+    for (const [axis, title] of [['width', 'Width'], ['depth', 'Depth'], ['height', 'Height']]) field(dims, t(`${title} (m)`), object.dimensions_m[axis], v => editObject(o => { o.dimensions_m[axis] = v; }), { type: 'number', min: .001, max: 100 });
+    if (model) parent.append(button(t('Use design’s original size'), () => editObject(o => {
+      const defaults = modelDimensions(model, f.height_m, o.position_m.y); o.dimensions_m = defaults.dimensions; o.position_m.y = defaults.elevation;
+    }, () => t('Original design size restored to fit this floor.'))));
+    field(parent, t('Rotation (degrees)'), object.rotation_deg, v => editObject(o => { o.rotation_deg = v; }), { type: 'number', min: -360, max: 360, step: '15' });
+    const rotationActions = row(parent);
+    for (const [label, delta] of [['Rotate item −90°', -90], ['Rotate item +90°', 90]]) {
+      rotationActions.append(button(t(label), () => editObject(o => {
+        o.rotation_deg = round(((o.rotation_deg + delta) % 360 + 360) % 360);
+      }, () => t('Item rotated.'))));
+    }
+    const appearance = node('details', 'item-appearance'); appearance.open = true;
+    appearance.append(node('summary', '', t('Appearance'))); parent.append(appearance);
+    field(appearance, t('Design'), object.model_id || '', value => editObject(o => {
       if (!value) { for (const key of ['model_id', 'style_id', 'color', 'pattern_id', 'pattern_color', 'curtain']) delete o[key]; return; }
       const next = getCatalogModel(value), previous = o.model_id ? getCatalogModel(o.model_id) : null;
       if (o.name === previous?.label || o.name === LABELS[o.type]) o.name = next.label;
@@ -630,50 +670,33 @@ function buildInspector(parent) {
     }, () => t('Item design changed. Size and position kept.')), { options: [{ value: '', label: originalModel ? 'Original installed model' : t('Basic shape / device') }, ...CATALOG.models.map(entry => ({ value: entry.id, label: t(`model.${entry.id}`) }))], help: t('Changes the shape while keeping your size and placement.') });
     if (model) {
       const style = getCatalogStyle(object.style_id || model.default_style);
-      field(parent, t('Color palette'), style.id, value => editObject(o => { o.style_id = value; delete o.color; delete o.pattern_color; }, () => t('Color palette applied.')), { options: CATALOG.styles.map(entry => ({ value: entry.id, label: t(`palette.${entry.id}`) })), help: t('Coordinated colors for the whole item. Changing palette resets custom colors and keeps your pattern.') });
+      field(appearance, t('Color palette'), style.id, value => editObject(o => { o.style_id = value; delete o.color; delete o.pattern_color; }, () => t('Color palette applied.')), { options: CATALOG.styles.map(entry => ({ value: entry.id, label: t(`palette.${entry.id}`) })), help: t('Coordinated colors for the whole item. Changing palette resets custom colors and keeps your pattern.') });
       const strip = node('div', 'palette-preview'); strip.setAttribute('aria-label', t('{palette} palette', { palette: t(`palette.${style.id}`) }));
       for (const role of ['body', 'accent', 'wood', 'metal']) { const swatch = node('span'); swatch.style.backgroundColor = style.materials[role]; swatch.title = t('{role}: {color}', { role: t(role), color: style.materials[role] }); strip.append(swatch); }
-      parent.append(strip);
-      field(parent, t('Custom body color'), object.color || style.materials.body, value => editObject(o => { o.color = value; }, () => t('Item color changed.')), { type: 'color', help: t('Recolors the main surface; legs and accents keep the selected palette.') });
+      appearance.append(strip);
+      field(appearance, t('Custom body color'), object.color || style.materials.body, value => editObject(o => { o.color = value; }, () => t('Item color changed.')), { type: 'color', help: t('Recolors the main surface; legs and accents keep the selected palette.') });
       const palette = node('div', 'color-palette'); palette.setAttribute('role', 'group'); palette.setAttribute('aria-label', t('Body color suggestions'));
       for (const [label, color] of [['Ivory', '#e6dfd1'], ['Sand', '#c9aa7d'], ['Terracotta', '#be785d'], ['Sage', '#899e82'], ['Forest', '#416c59'], ['Ocean', '#507b95'], ['Slate', '#757985'], ['Charcoal', '#363e43']]) {
         const swatch = button('', () => editObject(o => { o.color = color; }, () => t('{color} color applied.', { color: t(label) })), 'color-swatch');
         swatch.style.setProperty('--swatch', color); swatch.title = t(label); swatch.setAttribute('aria-label', t(label)); swatch.setAttribute('aria-pressed', String(object.color?.toLowerCase() === color)); palette.append(swatch);
       }
-      parent.append(palette);
-      const resetColor = button(t('Use palette color'), () => editObject(o => { delete o.color; }, () => t('Palette color restored.')), 'quiet small'); resetColor.disabled = !object.color; parent.append(resetColor);
+      appearance.append(palette);
+      const resetColor = button(t('Use palette color'), () => editObject(o => { delete o.color; }, () => t('Palette color restored.')), 'quiet small'); resetColor.disabled = !object.color; appearance.append(resetColor);
       if (supportsFurniturePattern(model)) {
-        field(parent, t('Surface pattern'), object.pattern_id || 'none', value => editObject(o => {
+        field(appearance, t('Surface pattern'), object.pattern_id || 'none', value => editObject(o => {
           if (value === 'none') { delete o.pattern_id; delete o.pattern_color; } else o.pattern_id = value;
         }, () => t('Surface pattern updated.')), { options: PATTERNS.map(entry => ({ value: entry.id, label: t(`pattern.${entry.id}`) })), help: t('Applies to this design’s fabric or decorative panels. Choose None for its original appearance.') });
         if (object.pattern_id && object.pattern_id !== 'none') {
-          field(parent, t('Pattern color'), object.pattern_color || style.materials.accent, value => editObject(o => { o.pattern_color = value; }, () => t('Pattern color changed.')), { type: 'color', help: t('Choose a contrasting color so the pattern is easy to see.') });
-          const resetPattern = button(t('Use palette pattern color'), () => editObject(o => { delete o.pattern_color; }, () => t('Pattern color restored.')), 'quiet small'); resetPattern.disabled = !object.pattern_color; parent.append(resetPattern);
+          field(appearance, t('Pattern color'), object.pattern_color || style.materials.accent, value => editObject(o => { o.pattern_color = value; }, () => t('Pattern color changed.')), { type: 'color', help: t('Choose a contrasting color so the pattern is easy to see.') });
+          const resetPattern = button(t('Use palette pattern color'), () => editObject(o => { delete o.pattern_color; }, () => t('Pattern color restored.')), 'quiet small'); resetPattern.disabled = !object.pattern_color; appearance.append(resetPattern);
         }
       }
       const preview = node('canvas', 'appearance-preview'); preview.width = 280; preview.height = 170;
       preview.setAttribute('aria-label', t('{name}: current color palette and pattern', { name: object.name }));
-      parent.append(preview); drawItemThumbnail(preview, model, object);
+      appearance.append(preview); drawItemThumbnail(preview, model, object);
     } else {
-      field(parent, t('Item type'), object.type, value => editObject(o => { o.type = value; }), { options: ITEM_TYPES.map(value => ({ value, label: t(LABELS[value]) })) });
+      field(appearance, t('Item type'), object.type, value => editObject(o => { o.type = value; }), { options: ITEM_TYPES.map(value => ({ value, label: t(LABELS[value]) })) });
     }
-    field(parent, t('Room'), object.room, v => editObject(o => { o.room = v; }), { options: f.rooms.map(r => ({ value: r.id, label: r.name })) });
-    section(parent, t('Position')); const pos = row(parent, true);
-    for (const axis of ['x', 'y', 'z']) field(pos, t(`${axis} (m)`), object.position_m[axis], v => editObject(o => { o.position_m[axis] = v; }), { type: 'number', min: axis === 'y' ? 0 : -100, max: axis === 'y' ? round(f.height_m - object.dimensions_m.height) : 100, step: '.01' });
-    parent.append(node('p', 'field-note', t('x/z locate the center. y is the bottom height above this floor.')));
-    const heightActions = row(parent);
-    for (const [label, delta] of [['Lower 5 cm', -.05], ['Raise 5 cm', .05]]) {
-      const control = button(label, () => editObject((o, target) => { o.position_m.y = round(Math.max(0, Math.min(target.height_m - o.dimensions_m.height, o.position_m.y + delta))); }, 'Item height changed.'));
-      control.disabled = delta < 0 ? object.position_m.y <= 0 : object.position_m.y >= f.height_m - object.dimensions_m.height;
-      heightActions.append(control);
-    }
-    parent.append(node('p', 'field-note', haSourcePolicy ? 'Drag this item in 2D; hold Alt to bypass the 0.25 m snap. Enter y above for an exact height. The Published home tab shows the installed view.' : 'In Preview 3D, choose Edit items, then drag the item or its ↕ Y handle. Hold Alt to bypass the 0.25 m snap. Enter y above for an exact height.'));
-    section(parent, t('Size & rotation')); const dims = row(parent, true);
-    for (const [axis, title] of [['width', 'Width'], ['depth', 'Depth'], ['height', 'Height']]) field(dims, t(`${title} (m)`), object.dimensions_m[axis], v => editObject(o => { o.dimensions_m[axis] = v; }), { type: 'number', min: .001, max: 100 });
-    if (model) parent.append(button(t('Use design’s original size'), () => editObject(o => {
-      const defaults = modelDimensions(model, f.height_m, o.position_m.y); o.dimensions_m = defaults.dimensions; o.position_m.y = defaults.elevation;
-    }, () => t('Original design size restored to fit this floor.'))));
-    field(parent, t('Rotation (degrees)'), object.rotation_deg, v => editObject(o => { o.rotation_deg = v; }), { type: 'number', min: -360, max: 360, step: '15' });
     section(parent, t('Home Assistant'));
     if (haCatalog) renderEntityPicker(parent, object, f);
     field(parent, t('Entity ID (optional)'), object.entity_id, v => editObject(o => { o.entity_id = v.trim(); }), { dir: 'ltr', help: haContext ? 'Bind an entity to this item. Publishing enables its controls in the family view.' : t('Example: light.living_room. Any Home Assistant entity can be linked. In the installed plan, lights, switches and fans have quick toggles; sensors show readings; media players show artwork and controls; Details opens native controls for other entities. This offline planner only stores the mapping and never controls devices.') });
@@ -915,7 +938,7 @@ planCanvas.addEventListener('pointerdown', event => {
   if (selection?.kind === 'rooms' && protectedRoom(activeFloorId, selection.id)) { status(protectedArchitectureMessage); return; }
   if (selection) {
     // Keep one immutable undo snapshot for the entire connected room edit.
-    drag = { kind: 'move', pointerId: event.pointerId, startWorld: world, original: project, selection: { ...selection }, connected: connectedRoomMove === `${activeFloorId}:${selection.id}`, moved: false, offset: [0, 0] };
+    drag = { kind: 'move', pointerId: event.pointerId, startWorld: world, original: project, selection: { ...selection }, connected: connectedRoomMove === `${activeFloorId}:${selection.id}`, itemStart: selection.kind === 'items' ? itemDragStart(event) : null, moved: false, offset: [0, 0] };
     project = clone(project);
   }
   else drag = { kind: 'pan', pointerId: event.pointerId, screen, map: { ...map } };
@@ -940,6 +963,7 @@ planCanvas.addEventListener('pointermove', event => {
     } catch (error) { drag.invalid = error.message; status(error.message, true); }
   }
   if (drag.kind === 'move') {
+    if (drag.itemStart && !itemDragReady(drag.itemStart, event)) return;
     const originalFloor = drag.original.floors.find(f => f.id === activeFloorId);
     const original = originalFloor[selection.kind].find(o => o.id === selection.id);
     const dx = selection.kind === 'items' ? round(snap(original.position_m.x + world[0] - drag.startWorld[0], event.altKey) - original.position_m.x) : snap(world[0] - drag.startWorld[0], event.altKey);
@@ -1344,13 +1368,14 @@ function beginPreviewEdit(event, axis, hit = null) {
   const item = selection?.kind === 'items' ? selected() : null; if (!item) return false;
   const target = axis === 'height' ? $('preview-elevation-handle') : previewCanvas;
   const position = new THREE.Vector3(item.position_m.x, floor().elevation_m + item.position_m.y, item.position_m.z);
-  previewEdit = { pointerId: event.pointerId, axis, target, id: item.id, original: project, startY: event.clientY, planeY: hit?.point.y, startPoint: hit?.point.clone(), metersPerPixel: 2 * position.distanceTo(camera.position) * Math.tan(20 * Math.PI / 180) / Math.max(1, size.height), moved: false };
+  previewEdit = { pointerId: event.pointerId, axis, target, id: item.id, original: project, itemStart: itemDragStart(event), startY: event.clientY, planeY: hit?.point.y, startPoint: hit?.point.clone(), metersPerPixel: 2 * position.distanceTo(camera.position) * Math.tan(20 * Math.PI / 180) / Math.max(1, size.height), moved: false };
   project = clone(project); target.setPointerCapture(event.pointerId); updatePreviewNavigation(); return true;
 }
 function movePreviewEdit(event) {
   const current = previewEdit; if (!current || event.pointerId !== current.pointerId) return;
   if (event.buttons === 0) { finishPreviewEdit(event, true); return; }
   event.preventDefault();
+  if (!itemDragReady(current.itemStart, event, current.axis === 'height')) return;
   const item = floor().items.find(item => item.id === current.id), origin = current.original.floors.find(f => f.id === activeFloorId).items.find(item => item.id === current.id);
   const next = { ...origin.position_m };
   if (current.axis === 'height') next.y = round(Math.max(0, Math.min(floor().height_m - item.dimensions_m.height, snap(origin.position_m.y + (current.startY - event.clientY) * current.metersPerPixel, event.altKey))));
@@ -1498,6 +1523,11 @@ $('preview-rotate-left')?.addEventListener('click', () => rotatePreview(-Math.PI
 $('preview-rotate-right')?.addEventListener('click', () => rotatePreview(Math.PI / 4));
 
 // Project actions and keyboard navigation.
+$('selected-item-details').addEventListener('click', () => {
+  if (selection?.kind !== 'items') return;
+  const position = $('inspector-body').querySelector('[data-item-position] input');
+  position?.focus({ preventScroll: true }); position?.scrollIntoView({ block: 'center', behavior: 'instant' });
+});
 function exportProject() {
   try { validateProject(project); const blob = new Blob([serializeProject(project)], { type: 'application/json' }), url = URL.createObjectURL(blob), a = node('a'); a.href = url; a.download = 'project.json'; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); status(() => t('project.json exported. Keep it as your portable, editable backup.')); }
   catch (error) { status(() => t('Could not export project: {error}', { error: formatValidationError(error, t) }), true); }
@@ -1857,6 +1887,7 @@ if (haContext) {
       }
     },
     snapshot: () => clone(project),
+    currentFloor: () => activeFloorId,
     guideAction,
     editState() {
       const fields = [...document.querySelectorAll('[data-project-field]')].filter(field => field.inspectorDraft);

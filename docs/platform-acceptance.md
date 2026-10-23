@@ -614,6 +614,31 @@ return after its boundary, but still fails admission. This is not a guarantee
 of preemption at exactly 60 seconds; the unchanged outer watchdog also remains
 in force.
 
+The disposable GitHub-hosted macOS job checks a blank WebDriver session before
+these cases. SafariDriver alone launches Safari and creates its isolated
+automation window, following Apple's [WebDriver model](https://developer.apple.com/documentation/safari-developer-tools/webdriver).
+Preparation never opens an ordinary Safari window, activates the app externally,
+or navigates to Home Studio. It must verify the initial `about:blank` document,
+close its own session, and stop its driver before application testing begins.
+
+Preparation has one shared 60-second budget, including cleanup. At most one
+additional probe is allowed, only after HTTP 500 from `POST /session` with
+`session not created`, no returned session ID, and the exact observed message
+about finding or launching Safari and waiting for its `RWIApplication` to become
+ready. Transport timeouts, changed messages, other statuses, malformed responses,
+and cleanup failures stop preparation. A second failure also stops the run.
+`preparation.json` retains both attempts, the structured error, timings and cleanup
+results; separate driver logs are included in the existing artifact.
+
+This accommodates the observed cold-launch failure without granting acceptance
+credit to it. Every application case still gets one session attempt, its existing
+180-second watchdog, a fresh automation window, and unchanged cold-load, pointer,
+rendering, and recovery assertions. The preparation flag is rejected outside
+GitHub-hosted macOS; local runs omit it. Each application session selects its own
+current window using `GET /window` and `POST /window`. The report preserves focus
+and visibility as telemetry after selection and on failure; they do not determine
+whether application input works.
+
 Every viewer report and cycle sample records `loadBudgetMs: 60000`. Samples also
 record monotonic `loadMs` and `loadCompleted`; a pending or failed cold load is
 saved with `loadCompleted: false`, and detected expiry sets `loadTimedOut: true`.

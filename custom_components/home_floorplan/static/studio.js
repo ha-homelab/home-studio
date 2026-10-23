@@ -12,6 +12,8 @@ const STARTUP_TIMEOUT_MS = 15000;
 const EDITOR_NAVIGATION_TIMEOUT_MS = 8000;
 const EDITOR_FETCH_TIMEOUT_MS = 15000;
 const MAX_EDITOR_HTML_BYTES = 128 * 1024;
+const MAX_MODEL_EXPORT_BYTES = 32 * 1024 * 1024;
+const MODEL_EXPORT_TIMEOUT_MS = 120000;
 const EDITOR_PATH = '/home-floorplan-studio/planner/index.html';
 const EDITOR_CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
 const EDITOR_LOAD_MESSAGES = Object.freeze({
@@ -32,6 +34,26 @@ const EDITOR_LOAD_MESSAGES = Object.freeze({
 });
 function editorLoadError(code, status) {
   return Object.assign(new Error(EDITOR_LOAD_MESSAGES[code]), { editorCode: code, status });
+}
+function editorLoadHelp(code, status) {
+  if (code === 'http' && [401, 403].includes(status)) return 'Open another Home Assistant dashboard using this same address and check your login or proxy access policy.';
+  if (code === 'redirect' || code === 'type') return 'A login page or proxy response may have replaced the editor. Check that the editor route returns the bundled file, then retry.';
+  if (code === 'policy') return 'A proxy login page, rewritten response, or files from a different release may have replaced the editor. Check your login and that the proxy returns the bundled editor unchanged.';
+  if (['assets', 'policy', 'document'].includes(code)) return 'Check that the installed files are from one release and that your proxy preserves editor resources without rewriting them.';
+  if (code === 'http' && status === 404) return 'Check the complete integration installation and any proxy cache for this route, then retry.';
+  if (['timeout', 'fetch', 'body'].includes(code)) return 'Check whether another Home Assistant dashboard works using this same address. Keep this tab open; retry when the connection is available.';
+  return 'Keep this tab open and retry. If the problem continues, report this error code with your browser and Home Studio versions.';
+}
+function modelExportFile(result, format) {
+  const extension = format === 'glb' ? 'glb' : 'zip';
+  if (typeof result?.filename !== 'string' || !/^home-studio-[a-zA-Z0-9_-]+\.(glb|zip)$/.test(result.filename) ||
+      result.filename.length > 180 || !result.filename.endsWith('.' + extension) || typeof result.base64 !== 'string' ||
+      !result.base64.length || result.base64.length > 4 * Math.ceil(MAX_MODEL_EXPORT_BYTES / 3) ||
+      result.base64.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(result.base64)) throw new Error('Home Assistant returned an invalid model file. Nothing was downloaded.');
+  const binary = atob(result.base64);
+  if (binary.length > MAX_MODEL_EXPORT_BYTES || (format === 'glb' ? binary.slice(0, 4) !== 'glTF' : binary.slice(0, 4) !== 'PK\x03\x04')) throw new Error('Home Assistant returned an invalid model file. Nothing was downloaded.');
+  return { filename: result.filename, blob: new Blob([Uint8Array.from(binary, character => character.charCodeAt(0))],
+    { type: format === 'glb' ? 'model/gltf-binary' : 'application/zip' }) };
 }
 const THEME_COLORS = Object.freeze({ background: 'primary-background-color', surface: 'card-background-color',
   text: 'primary-text-color', muted: 'secondary-text-color', border: 'divider-color',
@@ -123,14 +145,25 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this._savedRaw = null; this._pristineRaw = null; this._initializingBlank = false; this._revision = 0; this._publishedRevision = null;
     this._pending = new Map(); this._sequence = 0; this._request = 0; this._generation = 0;
     this._aiPending = new Map(); this._aiEpoch = 0; this._aiSequence = 0; this._aiSession = null; this._aiSessionPromise = null;
-    this._aiPagehide = () => this._disposeAi();
+    this._pagehide = () => {
+      this._disposeAi();
+      if (this._exportBusy) {
+        this._exportSequence++;
+        this._cancelExport?.(new Error('Export download cancelled when leaving the page.'));
+        this._cancelExport = null; this._exportBusy = false;
+        this._modelExportStatus('Export download cancelled when leaving the page. Your drawing remains in this tab.');
+        this._buttons();
+      }
+    };
     this._edits = {}; this._startupTimer = null; this._startupFailed = false;
+    this._exportBusy = false; this._exportSequence = 0; this._currentFloor = null; this._connectionEpoch = 0;
     this._receive = event => this._onMessage(event);
     this._beforeUnload = event => { if (this._unsaved() || this._busy) { event.preventDefault(); event.returnValue = ''; } };
     this.shadowRoot.innerHTML = `
       <style>
       :host{display:flex;flex-direction:column;height:100vh;height:100dvh;min-height:640px;overflow:auto;color:var(--primary-text-color,#263737);background:var(--primary-background-color,#f7f8f5);font:14px system-ui,sans-serif}
       *{box-sizing:border-box}header{padding:14px 20px 10px;border-bottom:1px solid var(--divider-color,#d9e0d9)}h1{font-size:22px;margin:0}p{line-height:1.5;margin:6px 0}.muted{color:var(--secondary-text-color,#5b6d67);font-size:13px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.actions{margin:12px 0 8px}button,a{font:inherit}button,summary{min-height:44px;padding:9px 14px;border:1px solid var(--divider-color,#becbc2);border-radius:7px;background:var(--card-background-color,#fff);color:inherit;cursor:pointer}button.primary{background:var(--primary-color,#326857);color:var(--home-studio-primary-foreground,var(--text-primary-color,#fff));border-color:var(--primary-color,#326857)}button:disabled,a[aria-disabled=true]{opacity:.5;cursor:default}a{color:var(--primary-color,#326857);text-underline-offset:3px}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var(--primary-text-color,#263737);outline-offset:3px}#family{margin-inline-start:auto;display:inline-flex;align-items:center;min-height:44px;padding:8px}#status{min-height:22px;overflow-wrap:anywhere}#status.error{color:var(--error-color,#a53d29)}#more-options{position:relative;margin-inline-start:auto}#more-options summary{list-style:revert}#more-options .options{position:absolute;inset-inline-end:0;top:100%;z-index:5;min-width:260px;max-width:90vw;display:grid;gap:8px;padding:12px;border:1px solid var(--divider-color,#becbc2);border-radius:8px;background:var(--card-background-color,#fff);box-shadow:var(--ha-card-box-shadow,0 8px 24px #0002)}#guide{border-bottom:1px solid var(--divider-color,#d9e0d9);padding:0 20px 10px}#guide summary{border:0;background:transparent;font-weight:600;padding-inline:0}.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.step{padding:10px 12px;border:1px solid var(--divider-color,#d9e0d9);border-radius:9px;background:var(--card-background-color,#fff)}.step h2{font-size:14px;margin:0 0 5px}.step p{font-size:12px;color:var(--secondary-text-color,#5b6d67)}.step button{font-size:12px;min-height:40px;padding:7px 10px}.step-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.step[data-current=true]{border-color:var(--primary-color,#398472);box-shadow:inset 3px 0 var(--primary-color,#398472)}#next-step{font-size:13px;margin:10px 0 0}#published-view{display:flex;flex:1;min-height:580px;flex-direction:column}.published-heading{padding:12px 20px;background:var(--card-background-color,#fff)}.published-heading h2{font-size:18px;margin:10px 0 4px}.published-heading p{font-size:13px}#published-canvas{display:flex;flex:1;min-height:460px}#published-canvas>home-floorplan-panel{width:100%;height:65vh;min-height:460px}#recovery{padding:14px 22px;background:var(--card-background-color,#fff0d5);color:var(--primary-text-color,#4c402c);border-bottom:1px solid var(--warning-color,var(--divider-color,#e2c996))}iframe{display:block;flex:1;width:100%;border:0;min-height:520px;background:var(--primary-background-color,#f6f6f1)}#loading{padding:24px}[hidden]{display:none!important}@media(max-width:700px){header{padding:12px}.actions{gap:6px}.actions button{padding:8px 10px;font-size:12px}#guide{padding-inline:12px}.steps{grid-template-columns:1fr}.step{padding:9px 12px}#family{font-size:13px}iframe{min-height:780px}}
+      #connection-notice{padding:8px 12px;border:1px solid var(--warning-color,#b18425);border-radius:7px}dialog{max-width:min(480px,calc(100vw - 32px));max-height:calc(100dvh - 32px);box-sizing:border-box;overflow:auto;border:1px solid var(--divider-color,#becbc2);border-radius:12px;padding:24px;color:inherit;background:var(--card-background-color,#fff)}dialog::backdrop{background:#0007}dialog h2{margin:0 0 12px;font-size:20px}dialog label{display:grid;gap:6px;margin:16px 0}dialog select{font:inherit;max-width:100%;min-height:44px;padding:8px;border:1px solid var(--divider-color,#becbc2);border-radius:6px;color:inherit;background:var(--card-background-color,#fff)}#model-export-status{overflow-wrap:anywhere;min-height:22px}#model-export-status.error{color:var(--error-color,#a53d29)}
       </style>
       <header>
         <div class="row"><button id="menu" aria-label="Open navigation menu">☰</button><h1>Home Studio</h1><a id="family" href="/home-floorplan">Open 3D Home</a></div>
@@ -138,13 +171,24 @@ class HomeFloorplanStudioPanel extends HTMLElement {
         <div class="row actions">
           <button id="save" class="primary" aria-describedby="status" disabled>Save draft</button>
           <button id="publish" aria-describedby="status next-step" disabled>Publish to 3D Home</button>
+          <button id="model-export" aria-haspopup="dialog" disabled>Export for Blender</button>
           <details id="more-options"><summary>More options</summary><div class="options">
             <button id="export" disabled>Export drawing (JSON)</button>
             <button id="reload" disabled>Load saved draft</button>
           </div></details>
         </div>
         <div id="status" role="status" aria-live="polite" aria-atomic="true">Opening your drawing…</div><button id="retry" aria-describedby="status" hidden>Retry connection</button>
+        <p id="connection-notice" role="status" aria-live="polite" hidden>Home Assistant is disconnected. Keep drawing or export JSON to keep a copy. Saving, publishing, and Blender export will be available after reconnection.</p>
       </header>
+      <dialog id="model-export-dialog" aria-labelledby="model-export-title" aria-describedby="model-export-help">
+        <h2 id="model-export-title">Export for Blender</h2>
+        <p id="model-export-help">Download your current drawing, including valid unsaved edits. This does not save or publish your home.</p>
+        <label for="model-export-floor">Floors</label><select id="model-export-floor"></select>
+        <label for="model-export-format">Format</label><select id="model-export-format"><option value="glb">GLB (.glb)</option><option value="obj">OBJ + materials (.zip)</option></select>
+        <p class="muted">A single floor starts at ground level. All floors keep their elevations. GLB keeps furniture groups; OBJ includes a material file.</p>
+        <p id="model-export-status" role="status" aria-live="polite"></p>
+        <div class="row"><button id="model-export-download" class="primary">Download model</button><button id="model-export-close">Close</button></div>
+      </dialog>
       <details id="guide" open hidden><summary>Getting started · one room is enough</summary>
         <div class="steps">
           <section class="step" id="step-room"><h2>1. Draw a room</h2><p>Name it and enter its width and depth. Walls are included. Approximate measurements are fine to start.</p><div class="step-actions"><button id="guide-room" disabled>Add your first room</button><button id="guide-photos" hidden disabled>Draft from photos (AI)</button></div></section>
@@ -167,6 +211,9 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this.$('save').onclick = () => this._save();
     this.$('publish').onclick = () => this._publish();
     this.$('export').onclick = () => this._exportCurrent();
+    this.$('model-export').onclick = () => this._openModelExport();
+    this.$('model-export-download').onclick = () => this._exportModel();
+    this.$('model-export-close').onclick = () => this.$('model-export-dialog').close();
     this.$('reload').onclick = () => this._reload();
     this.$('resume').onclick = () => this._resolveRecovery(true);
     this.$('discard').onclick = () => this._resolveRecovery(false);
@@ -179,11 +226,52 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this._identity = identity; this._hass = value;
     this._scheduleTheme();
     if (this._publishedPanel) this._publishedPanel.hass = value;
-    if (this.isConnected && !this._started && value) void this._start();
+    this._syncConnection();
+    if (this.isConnected && !this._started && this._online()) void this._start();
+  }
+  _online() { return !!this._hass && this._connectionState?.ready === true; }
+  _stopConnectionTracking() {
+    const state = this._connectionState; this._connectionState = null;
+    state?.connection?.removeEventListener?.('disconnected', state.disconnected);
+    state?.connection?.removeEventListener?.('ready', state.connected);
+  }
+  _syncConnection() {
+    if (!this.isConnected) return;
+    const connection = this._hass?.connection;
+    if (!this._connectionState || this._connectionState.connection !== connection) {
+      this._connectionEpoch++;
+      this._cancelExport?.(new Error('The Home Assistant connection changed. Nothing was downloaded. Try the export again.'));
+      this._stopConnectionTracking();
+      const state = this._connectionState = { connection, ready: null };
+      state.disconnected = () => this._connectionReadiness(state, false);
+      state.connected = () => this._connectionReadiness(state, true);
+      connection?.addEventListener?.('disconnected', state.disconnected);
+      connection?.addEventListener?.('ready', state.connected);
+    }
+    this._connectionReadiness(this._connectionState, !!this._hass &&
+      (typeof connection?.connected === 'boolean' ? connection.connected : this._hass.connected !== false));
+  }
+  _connectionReadiness(state, ready) {
+    if (state !== this._connectionState || !this.isConnected) return;
+    if (state.ready === ready) return;
+    this._connectionEpoch++;
+    state.ready = ready;
+    this.$('connection-notice').hidden = ready || !this._hass;
+    if (!ready) this._cancelExport?.(new Error('Home Assistant disconnected. Nothing was downloaded. Reconnect and try the export again.'));
+    this._buttons();
+    if (this._ready && !this._busy) this._drawingStatus();
+    // Reconnection never reloads an open draft or repeats a write/export.
+    if (ready && this._hass && !this._started) void this._start();
+  }
+  _requireConnection(epoch = this._connectionEpoch) {
+    if (!this._online() || epoch !== this._connectionEpoch) throw new Error('The Home Assistant connection changed. Keep this tab open and try again after reconnecting.');
   }
   _reset() {
     this._closePublishedHome(false);
     this._disposeAi();
+    this._stopConnectionTracking();
+    this._exportSequence++; this._cancelExport?.(new Error('Editor session changed')); this._cancelExport = null;
+    this._exportBusy = false; this._currentFloor = null; this.$('model-export-dialog').close();
     this._clearStartup(); this._clearEditorNavigation(); this._startupFailed = false; this._edits = {};
     cancelAnimationFrame(this._themeFrame); this._themeFrame = null;
     this._generation++; this._started = false; this._ready = false; this._busy = false;
@@ -193,13 +281,13 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this._pending.clear(); this.$('recovery').hidden = true; this.$('retry').hidden = true; this._buttons();
   }
   connectedCallback() {
-    window.addEventListener('pagehide', this._aiPagehide);
+    window.addEventListener('pagehide', this._pagehide);
     window.addEventListener('message', this._receive); window.addEventListener('beforeunload', this._beforeUnload);
     this._scheduleTheme();
-    if (this._hass && !this._started) void this._start();
+    this._syncConnection();
   }
   disconnectedCallback() {
-    window.removeEventListener('pagehide', this._aiPagehide);
+    window.removeEventListener('pagehide', this._pagehide);
     this._persist(); window.removeEventListener('message', this._receive); window.removeEventListener('beforeunload', this._beforeUnload);
     this._reset();
   }
@@ -268,6 +356,14 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     return empty ? `Add a room to “${boundedText(empty.name || empty.id, 120)}” before publishing, or remove that unused floor.` : '';
   }
   _drawingStatus() {
+    // Snapshots may arrive after an operation's disconnect error. Keep their
+    // normal draft guidance truthful while server actions are unavailable.
+    if (!this._online()) {
+      const field = this._edits.invalid ? `Correct ${this._edits.field || 'the highlighted field'}. `
+        : this._edits.pending ? 'Your unfinished field edits are still here. ' : '';
+      this._status(`Home Assistant is disconnected. ${field}Keep this tab open to continue editing. More options → Export drawing (JSON) keeps a copy of the last valid drawing.`, this._edits.invalid);
+      return;
+    }
     if (this._edits.invalid) this._status(`Correct ${this._edits.field || 'the highlighted field'} before saving or publishing. Save draft will take you to the field.`, true);
     else if (this._edits.pending) this._status('Unsaved field edits · Save draft applies and saves your entered values.');
     else if (this._requiresInitialSave() && !this._dirty()) this._status('Save draft to create a private draft in Home Assistant. Your published home stays unchanged.');
@@ -276,16 +372,22 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   }
   _buttons() {
     const disabled = !this._ready || this._busy || this._showingPublished;
+    const networkDisabled = disabled || !this._online() || this._exportBusy;
     const floors = Array.isArray(this._project?.floors) ? this._project.floors : [];
     const rooms = floors.reduce((count, floor) => count + (floor.rooms?.length || 0), 0);
     const issue = this._publicationIssue();
     const needsSave = this._unsaved() || this._requiresInitialSave();
-    this.$('save').disabled = disabled || !needsSave;
-    this.$('publish').disabled = disabled || needsSave || !this._savedRaw || !!issue;
+    this.$('save').disabled = networkDisabled || !needsSave;
+    this.$('publish').disabled = networkDisabled || needsSave || !this._savedRaw || !!issue;
+    this.$('model-export').disabled = networkDisabled || !rooms;
+    this.$('model-export-download').disabled = networkDisabled || !rooms;
+    this.$('model-export-floor').disabled = this._exportBusy;
+    this.$('model-export-format').disabled = this._exportBusy;
     this.$('publish').classList.toggle('primary', !this.$('publish').disabled && this._publishedRevision !== this._revision);
     this.$('save').classList.toggle('primary', needsSave);
-    this.$('export').disabled = !this._project || this._busy;
-    this.$('reload').disabled = disabled;
+    this.$('export').disabled = !this._project || (this._busy && this._online());
+    this.$('reload').disabled = networkDisabled;
+    this.$('retry').disabled = !this._online();
     // Unknown publication state must not block access to an existing live home.
     const unpublished = !!this._saved && !this._hasPublishedHome();
     this.$('family').setAttribute('aria-disabled', String(unpublished));
@@ -298,7 +400,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this.$('guide-devices').disabled = disabled || !rooms;
     this.$('guide-preview').disabled = disabled || !rooms;
     this.$('guide-photos').hidden = this._saved?.capabilities?.ai !== true;
-    this.$('guide-photos').disabled = disabled;
+    this.$('guide-photos').disabled = networkDisabled;
     this.$('step-room').dataset.current = String(!rooms);
     this.$('step-publish').dataset.current = String(!!rooms);
     this.$('next-step').textContent = !rooms ? 'Start with one room. Add the rest of your home whenever you are ready.'
@@ -404,7 +506,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
         // generic slow-start warning. Never display raw exception/response data.
         this._clearStartup();
         this._startupFailed = true; this.$('retry').hidden = false;
-        this._status(`${EDITOR_LOAD_MESSAGES[code]} (editor-${code}${status}). Retry connection to try again.`, true); this._buttons();
+        this._status(`${EDITOR_LOAD_MESSAGES[code]} (editor-${code}${status}). ${editorLoadHelp(code, error?.status)}`, true); this._buttons();
       }
     } finally {
       controller.abort(); // Stop any unread body after a header/validation rejection.
@@ -434,7 +536,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this._status(`${message}${this._project ? ' More options → Export drawing (JSON) is available for your preserved drawing.' : ''}`, error); this._buttons();
   }
   _retryStartup() {
-    if (!this._startupFailed || !this.isConnected) return;
+    if (!this._startupFailed || !this.isConnected || !this._online()) return;
     this._startupFailed = false;
     if (this._saved && this._catalog) this._openEditor(this._project);
     else { this._started = false; void this._start(); }
@@ -457,7 +559,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     } catch { return null; }
   }
   async _start() {
-    if (!this.isConnected || !this._hass) return;
+    if (!this.isConnected || !this._online()) return;
     this._started = true; this.$('retry').hidden = true; const generation = ++this._generation;
     try {
       if (!this._hass.user?.is_admin) throw new Error('An administrator account is required to edit this home.');
@@ -549,6 +651,8 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       const initializing = !this._ready;
       if (this._initializingBlank) { this._pristineRaw = raw; this._initializingBlank = false; }
       this._sequence = data.sequence; this._project = clone(data.project); this._ready = true;
+      this._currentFloor = typeof data.current_floor === 'string' && data.current_floor.length <= 128 &&
+        this._project.floors?.some(floor => floor.id === data.current_floor) ? data.current_floor : null;
       // A HA theme change may arrive while the child's initialize is in flight.
       if (initializing && this._theme) this._send('theme', { theme: this._theme });
       this._clearStartup(); this._startupFailed = false; this.$('retry').hidden = true;
@@ -665,11 +769,12 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     });
   }
   async _save() {
-    if (this._busy || !this._ready) return;
-    const generation = this._generation;
+    if (this._busy || this._exportBusy || !this._ready || !this._online()) return;
+    const generation = this._generation, connectionEpoch = this._connectionEpoch;
     this._busy = true; this._buttons(); this._status('Saving draft…');
     try {
       const project = await this._snapshot(); if (generation !== this._generation) return; const raw = projectBytes(project);
+      this._requireConnection(connectionEpoch);
       const saved = await this._hass.callWS({ type: 'home_floorplan/project_save', revision: this._revision, project });
       if (generation !== this._generation) return;
       this._revision = saved.revision; this._publishedRevision = saved.published_revision; this._savedRaw = raw;
@@ -679,15 +784,16 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     finally { if (generation === this._generation) { this._busy = false; this._buttons(); } }
   }
   async _publish() {
-    if (this._busy || !this._ready || this._dirty()) return;
+    if (this._busy || this._exportBusy || !this._ready || this._dirty() || !this._online()) return;
     if (this._requiresInitialSave()) { this._status('Save draft to create a private draft in Home Assistant before publishing.'); return; }
     if (this._publicationIssue()) { this._status(this._publicationIssue(), true); return; }
-    const generation = this._generation;
+    const generation = this._generation, connectionEpoch = this._connectionEpoch;
     this._busy = true; this._buttons();
     try {
       await this._snapshot(); if (generation !== this._generation) return;
       if (this._dirty() || !this._savedRaw || this._requiresInitialSave()) { this._status('Save your latest edits before publishing.'); return; }
       if (this._publicationIssue()) { this._status(this._publicationIssue(), true); return; }
+      this._requireConnection(connectionEpoch);
       this._status('Building and publishing the saved drawing…');
       const saved = await this._hass.callWS({ type: 'home_floorplan/project_publish', revision: this._revision });
       if (generation !== this._generation) return;
@@ -697,18 +803,21 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     finally { if (generation === this._generation) { this._busy = false; this._buttons(); } }
   }
   async _reload() {
-    if (this._busy || !this._ready) return;
-    const generation = this._generation;
+    if (this._busy || this._exportBusy || !this._ready || !this._online()) return;
+    const generation = this._generation, connectionEpoch = this._connectionEpoch;
     this._busy = true; this._buttons();
     try {
       await this._snapshot(true); if (generation !== this._generation) return;
       if (this._unsaved() && !window.confirm('Replace this tab’s edits, including any unfinished field text, with the current saved draft? Export your drawing (JSON) from More options first to keep a separate copy of the last valid drawing.')) return;
       const sequence = this._sequence;
+      this._requireConnection(connectionEpoch);
       const saved = await this._hass.callWS({ type: 'home_floorplan/project_get' });
       if (generation !== this._generation) return;
+      this._requireConnection(connectionEpoch);
       // Flush the editor after the network wait as well: an edit's message can
       // still be crossing the sandbox boundary when the HA response arrives.
       await this._snapshot(true); if (generation !== this._generation) return;
+      this._requireConnection(connectionEpoch);
       // The requested snapshot advances the sequence once even without changes.
       if (this._sequence !== sequence + 1) {
         this._persist();
@@ -720,9 +829,74 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     } catch (error) { if (generation !== this._generation) return; this._status(`Could not load the saved draft: ${error.message || 'check the connection'}`, true); }
     finally { if (generation === this._generation) { this._busy = false; this._buttons(); } }
   }
-  _download(project, name = 'project.json') {
-    const url = URL.createObjectURL(new Blob([projectBytes(project)], { type: 'application/json' }));
+  _downloadBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url; link.download = name; this.shadowRoot.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  _download(project, name = 'project.json') {
+    this._downloadBlob(new Blob([projectBytes(project)], { type: 'application/json' }), name);
+  }
+  _modelExportStatus(message, error = false) {
+    this.$('model-export-status').textContent = message;
+    this.$('model-export-status').classList.toggle('error', error);
+  }
+  async _openModelExport() {
+    if (this._busy || this._exportBusy || !this._ready || !this._online()) return;
+    const generation = this._generation, connectionEpoch = this._connectionEpoch;
+    this._busy = true; this._buttons();
+    try {
+      // Read the selected floor without committing unfinished input. The export
+      // itself requests a fresh, valid snapshot before sending anything to HA.
+      await this._snapshot(true, false);
+      if (generation !== this._generation) return;
+      this._requireConnection(connectionEpoch);
+      const select = this.$('model-export-floor');
+      select.replaceChildren(new Option('All floors', ''));
+      for (const floor of this._project.floors || []) {
+        select.append(new Option(`${floor.id === this._currentFloor ? 'Current floor · ' : ''}${floor.name || floor.id}`, floor.id));
+      }
+      select.value = this._currentFloor || this._project.floors?.[0]?.id || '';
+      this._modelExportStatus('Choose the floors and format to download.');
+      this.$('model-export-dialog').showModal(); select.focus();
+    } catch (error) { if (generation === this._generation) this._status(error.message || 'Could not open the export options. Your drawing is unchanged.', true); }
+    finally { if (generation === this._generation) { this._busy = false; this._buttons(); } }
+  }
+  async _exportModel() {
+    if (this._busy || this._exportBusy || !this._ready || !this._online()) return;
+    const generation = this._generation, sequence = ++this._exportSequence, connectionEpoch = this._connectionEpoch;
+    const floor = this.$('model-export-floor').value || null, format = this.$('model-export-format').value;
+    if (!['glb', 'obj'].includes(format)) return;
+    const current = () => generation === this._generation && sequence === this._exportSequence;
+    this._exportBusy = true; this._buttons(); this._modelExportStatus('Preparing your model… You can close this dialog and keep drawing.');
+    let timer;
+    try {
+      const project = await this._snapshot();
+      if (!current()) return;
+      this._requireConnection(connectionEpoch);
+      if (floor !== null && !project.floors.some(value => value.id === floor)) throw new Error('That floor is no longer in the drawing. Close this dialog and choose the floors again.');
+      const cancelled = new Promise((_, reject) => {
+        this._cancelExport = reject;
+        timer = setTimeout(() => reject(new Error('The export timed out. Nothing was downloaded. Your drawing is still available; try again.')), MODEL_EXPORT_TIMEOUT_MS);
+      });
+      const result = await Promise.race([this._hass.callWS({ type: 'home_floorplan/export_model', revision: this._revision, project, floor, format }), cancelled]);
+      if (!current()) return;
+      this._requireConnection(connectionEpoch);
+      const file = modelExportFile(result, format);
+      this._downloadBlob(file.blob, file.filename);
+      this._modelExportStatus(`Downloaded ${file.filename}. Changes made while preparing it are not included. Your draft has not been saved or published.`);
+      if (!this.$('model-export-dialog').open) this._status(`Downloaded ${file.filename}. Your draft has not been saved or published.`);
+    } catch (error) {
+      if (!current()) return;
+      const message = error.code === 'conflict' ? 'The saved draft changed in another session. Export your drawing as JSON before loading the current saved draft, then try again.'
+        : error.code === 'unknown_command' ? 'This Home Assistant installation does not support model export yet. Update the complete Home Studio integration.'
+        : boundedText(error.message, 400) || 'The model could not be exported. Check the drawing and connection, then try again.';
+      this._modelExportStatus(`Export failed: ${message} Your drawing remains in this tab.`, true);
+      if (!this.$('model-export-dialog').open) this._status(`Export failed: ${message} Your drawing remains in this tab.`, true);
+      if (error.code === 'invalid_fields') { this.$('model-export-dialog').close(); this._status(message, true); }
+    } finally {
+      clearTimeout(timer);
+      if (current()) { this._cancelExport = null; this._exportBusy = false; this._buttons(); }
+    }
   }
   async _exportCurrent() {
     const generation = this._generation;

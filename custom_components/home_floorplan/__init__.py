@@ -141,7 +141,7 @@ async def _finish_setup(hass, state):
             state["ai_registered"] = True
         if not state.get("ws_registered"):
             for handler in (ws_status, ws_viewer, ws_save, ws_recover, ws_export, ws_curtains, ws_curtain_command,
-                            ws_project_get, ws_project_save, ws_project_publish, ws_entity_catalog):
+                            ws_project_get, ws_project_save, ws_project_publish, ws_export_model, ws_entity_catalog):
                 websocket_api.async_register_command(hass, handler)
             state["ws_registered"] = True
         await _register_panels(hass, bool(asset_files))
@@ -367,6 +367,66 @@ async def ws_project_publish(hass, connection, msg):
         connection.send_error(msg["id"], "save_failed", "Publication could not be saved. The previous plan remains active.")
 
 
+@websocket_api.websocket_command({vol.Required("type"): "home_floorplan/export_model",
+                                 vol.Required("revision"): cv.positive_int, vol.Required("project"): dict,
+                                 vol.Required("floor"): object, vol.Required("format"): vol.In(("glb", "obj"))})
+@_when_active
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_export_model(hass, connection, msg):
+    """Export a revision-checked editor snapshot without publishing or saving it."""
+    state = hass.data[DOMAIN]
+    if not state['native']:
+        connection.send_error(msg['id'], 'unsupported', 'Install the complete Home Studio integration to export this drawing.')
+        return
+    if state.get('recovery'):
+        connection.send_error(msg['id'], 'recovery_required', 'Repair the saved project before exporting a model.')
+        return
+    if (msg['floor'] is not None and not isinstance(msg['floor'], str)) or msg['format'] not in ('glb', 'obj'):
+        connection.send_error(msg['id'], 'invalid_export', 'Choose a floor or all floors, and GLB or OBJ.')
+        return
+    # Reject a second expensive export instead of building a waiting queue.
+    if state.get('export_busy'):
+        connection.send_error(msg['id'], 'busy', 'A model export is already running. Wait for it to finish.')
+        return
+    state['export_busy'] = True
+    try:
+        async with state['lock']:
+            native = state['native']
+            native.check_revision(msg['revision'])
+            task = asyncio.ensure_future(hass.async_add_executor_job(native.export_model, msg['project'], msg['floor'], msg['format']))
+            try:
+                result = await asyncio.shield(task)
+            except asyncio.CancelledError:
+                # A cancelled connection cannot release the concurrency slot
+                # while its executor is still using memory/reading the source.
+                while not task.done():
+                    try:
+                        await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+                # Retrieve a failed task's exception even when the client left.
+                if not task.cancelled():
+                    task.exception()
+                raise
+            native.check_revision(msg['revision'])
+            if (not connection.user.is_admin or state.get('panels_unloaded') or
+                    hass.data.get(DOMAIN) is not state or state['native'] is not native):
+                connection.send_error(msg['id'], 'unauthorized', 'Your access changed while the model was exporting.')
+                return
+            connection.send_result(msg['id'], result)
+    except NativeError as error:
+        connection.send_error(msg['id'], error.code, str(error))
+    except (ValueError, TypeError, KeyError, OverflowError) as error:
+        connection.send_error(msg['id'], 'invalid_export', str(error)[:300])
+    except OSError:
+        connection.send_error(msg['id'], 'export_failed', 'The original model could not be read. Check the installation and try again.')
+    finally:
+        state['export_busy'] = False
+
+
 @websocket_api.websocket_command({vol.Required("type"): "home_floorplan/entity_catalog"})
 @_when_active
 @websocket_api.require_admin
@@ -536,6 +596,10 @@ async def ws_export(hass, connection, msg):
                 connection.send_error(msg["id"], "not_available", "The original model downloads do not include these Home Studio edits. Export the saved drawing or inventory JSON instead.")
                 return
             if not (floor := _floor(state, msg, connection)):
+                return
+            if state['data'][floor]['items'] != state['models'][floor].get('inventory', []):
+                connection.send_error(msg['id'], 'stale_export',
+                                      'These model files predate the saved placements. Use Export for Blender in Home Studio for the current drawing, or republish to refresh the model files.')
                 return
             filename = f"{state['site']['floors'][floor]['stem']}.{msg['format']}"
             path = state["assets"] / floor / filename

@@ -63,6 +63,7 @@ outlinedFixture.floors[0].openings = [{ id: 'window', wall_id: 'wall_0', type: '
       await page.waitForFunction(expected => JSON.stringify(window.planner.getProject()) === expected, JSON.stringify(value));
       await page.locator('#fit-view').click();
       await page.locator('#snap').check();
+      await page.locator('#snap-step').selectOption('0.25');
       await page.locator('[data-tool="select"]').click();
       await saved();
     };
@@ -91,6 +92,34 @@ outlinedFixture.floors[0].openings = [{ id: 'window', wall_id: 'wall_0', type: '
 
     await page.goto(origin + '/planner/');
     await page.waitForFunction(() => window.planner);
+    // A click with a small physical-screen wobble must select, not snap.
+    await load(fixture); await selectItem(); await change('x (m)', 3.13);
+    const offGrid = await project();
+    const wobble = async (target, x, y, alt = false) => {
+      const ratio = await page.evaluate(() => devicePixelRatio);
+      if (alt) await page.keyboard.down('Alt');
+      await page.mouse.move(x, y); await page.mouse.down();
+      await page.mouse.move(x + 1 / ratio, y + 1 / ratio);
+      await page.mouse.up();
+      if (alt) await page.keyboard.up('Alt');
+      assert.equal(await page.locator(target).evaluate(node => node.hasPointerCapture(window.__precisionPointerId)), false);
+    };
+    for (const alt of [false, true]) {
+      const point = await planPoint([3.13, 4.125]);
+      await wobble('#plan-canvas', point.x, point.y, alt);
+      assert.deepEqual(await project(), offGrid, 'A tiny 2D movement preserves off-grid coordinates with or without Alt');
+      assert.equal(await page.evaluate(() => planner.getSelection().id), 'box', 'Click-only selection is retained');
+    }
+    await undoTo(fixture); // The wobble added no undo entry above the numeric edit.
+
+    // A finer grid uses the same pointer path; numeric entries remain exact.
+    await selectItem(); await page.locator('#snap-step').selectOption('0.05');
+    await dragPlan([3.125, 4.125], [3.495, 4.535]);
+    assert.deepEqual((await item()).position_m, { x: 3.5, y: .4, z: 4.55 }, 'Fine snap uses the 5 cm grid');
+    await undoTo(fixture); await selectItem(); await change('x (m)', 3.13);
+    assert.equal((await item()).position_m.x, 3.13, 'Numeric coordinates bypass the selected grid');
+    await undoTo(fixture);
+
     await load(fixture);
     await dragPlan([3.125, 4.125], [3.495, 4.535]);
     assert.deepEqual((await item()).position_m, { x: 3.5, y: .4, z: 4.5 }, 'Default snap places an off-grid item on the 0.25 m grid on both axes');
@@ -282,6 +311,7 @@ outlinedFixture.floors[0].openings = [{ id: 'window', wall_id: 'wall_0', type: '
     // Build an independent camera from public view metadata. The ray/plane
     // calculation predicts real mouse movement without calling editor handlers.
     const previewDrag = async ({ alt = false, cancel = false, dx = 35, dy = 12 } = {}) => {
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const geometry = await page.evaluate(async ({ dx, dy }) => {
         const THREE = await import('/vendor/three.module.min.js');
         const state = planner.getPreviewMetadata().camera, canvas = document.getElementById('preview-canvas'), rect = canvas.getBoundingClientRect();
@@ -313,6 +343,38 @@ outlinedFixture.floors[0].openings = [{ id: 'window', wall_id: 'wall_0', type: '
       await page.mouse.up(); if (alt) await page.keyboard.up('Alt');
       return { before, provisional, ...geometry };
     };
+    await selectItem(); await change('x (m)', 3.13);
+    const beforeWobble3D = await project();
+    for (const alt of [false, true]) {
+      await previewDrag({ dx: 1, dy: 1, alt });
+      assert.deepEqual(await project(), beforeWobble3D, 'A tiny 3D movement cannot snap an off-grid item');
+      assert.equal(await page.evaluate(() => planner.getSelection().id), 'box');
+    }
+    await undoTo(fixture); await selectItem();
+    const cameraBeforeRotation = await page.evaluate(() => planner.getPreviewMetadata().camera);
+    await page.getByRole('button', { name: 'Rotate item +90°', exact: true }).click();
+    const rotated = await project();
+    assert.equal(rotated.floors[0].items[0].rotation_deg, 90);
+    assert.deepEqual(rotated.floors[0].items[0].position_m, fixture.floors[0].items[0].position_m);
+    assert.deepEqual(rotated.floors[0].items[0].dimensions_m, fixture.floors[0].items[0].dimensions_m);
+    assert.deepEqual(await page.evaluate(() => planner.getPreviewMetadata().camera), cameraBeforeRotation, 'Item rotation preserves the camera');
+    await undoTo(fixture); await selectItem();
+    await page.getByRole('button', { name: 'Rotate item −90°', exact: true }).click();
+    assert.equal((await item()).rotation_deg, 270, 'Left rotation wraps within one turn');
+    await undoTo(fixture); await selectItem();
+    const beforeViewRotation = await project();
+    await page.getByRole('button', { name: 'Rotate view left', exact: true }).click();
+    assert.deepEqual(await project(), beforeViewRotation, 'Clearly named camera controls preserve item geometry');
+    await page.getByRole('button', { name: 'Rotate view right', exact: true }).click();
+    await page.locator('#snap-step').selectOption('0.05');
+    let fineMove = await previewDrag();
+    close((await item()).position_m.x, Math.round((fineMove.before.floors[0].items[0].position_m.x + fineMove.offset.x) * 20) / 20, 'Fine 3D x', .001);
+    close((await item()).position_m.z, Math.round((fineMove.before.floors[0].items[0].position_m.z + fineMove.offset.z) * 20) / 20, 'Fine 3D z', .001);
+    await undoTo(fixture); await selectItem();
+    fineMove = await previewDrag({ alt: true });
+    close((await item()).position_m.x, fineMove.before.floors[0].items[0].position_m.x + fineMove.offset.x, 'Alt bypasses the fine grid');
+    await undoTo(fixture); await page.locator('#snap-step').selectOption('0.25');
+
     let move = await previewDrag();
     let position = (await item()).position_m;
     close(position.x, Math.round((move.before.floors[0].items[0].position_m.x + move.offset.x) * 4) / 4, '3D snapped x', .001);
@@ -345,7 +407,7 @@ outlinedFixture.floors[0].openings = [{ id: 'window', wall_id: 'wall_0', type: '
     assert.equal((await item()).position_m.y, .45, 'Elevation handle supports keyboard input');
     await page.keyboard.press('ArrowDown');
     assert.equal((await item()).position_m.y, .4);
-    const dragHeight = async ({ pixels = -35, alt = false, cancel = false } = {}) => {
+    const dragHeight = async ({ pixels = -35, dx = 0, alt = false, cancel = false } = {}) => {
       await selectItem(); await handle.waitFor({ state: 'visible' });
       const before = await project();
       const scale = await page.evaluate(() => {
@@ -357,12 +419,25 @@ outlinedFixture.floors[0].openings = [{ id: 'window', wall_id: 'wall_0', type: '
       const rect = await handle.boundingBox(); assert(rect && rect.width > 0, 'Height handle is rendered');
       const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
       if (alt) await page.keyboard.down('Alt');
-      await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x, y + pixels, { steps: 5 });
+      await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + dx, y + pixels, { steps: 5 });
       const provisional = await project();
       if (cancel) await page.keyboard.press('Escape');
       await page.mouse.up(); if (alt) await page.keyboard.up('Alt');
       return { before, provisional, delta: -pixels * scale };
     };
+    await change('y (m)', .413);
+    const beforeHeightWobble = await project();
+    for (const alt of [false, true]) {
+      await dragHeight({ pixels: -1, alt });
+      assert.deepEqual(await project(), beforeHeightWobble, 'Tiny height movements preserve off-grid elevation');
+    }
+    await dragHeight({ pixels: 0, dx: 20 });
+    assert.deepEqual(await project(), beforeHeightWobble, 'Sideways handle movement cannot snap the item vertically');
+    await undoTo(fixture); await selectItem();
+    await page.locator('#snap-step').selectOption('0.05');
+    const fineHeight = await dragHeight();
+    close((await item()).position_m.y, Math.round((.4 + fineHeight.delta) * 20) / 20, 'Fine height snap', .001);
+    await undoTo(fixture); await selectItem(); await page.locator('#snap-step').selectOption('0.25');
     let raised = await dragHeight();
     close((await item()).position_m.y, Math.round((.4 + raised.delta) * 4) / 4, 'Height handle snaps its resulting elevation', .001);
     await undoTo(raised.before);
@@ -382,8 +457,56 @@ outlinedFixture.floors[0].openings = [{ id: 'window', wall_id: 'wall_0', type: '
     assert.equal((await item()).position_m.y, 0, 'Height drag clamps to the current floor');
     assert.equal(await page.getByRole('button', { name: 'Lower 5 cm', exact: true }).isDisabled(), true);
     await saved();
+    // The existing inspector remains usable without a second panel or renderer.
+    await load(fixture); await selectItem();
+    assert(await field('x (m)').evaluate(input => Boolean(input.compareDocumentPosition(document.querySelector('.item-appearance')) & Node.DOCUMENT_POSITION_FOLLOWING)));
+    assert(await field('Rotation (degrees)').evaluate(input => Boolean(input.compareDocumentPosition(document.querySelector('.item-appearance')) & Node.DOCUMENT_POSITION_FOLLOWING)));
+    await page.locator('.item-appearance summary').click();
+    assert.equal(await page.locator('.item-appearance').evaluate(node => node.open), false);
+    await change('x (m)', 3.13);
+    assert.equal(await page.locator('.item-appearance').evaluate(node => node.open), false, 'Collapsed appearance survives inspector updates');
+    await selectRoom();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('#fit-view').click();
+    const canvasBeforeSelection = await page.locator('#plan-canvas').boundingBox();
+    const beforeMobileDrag = await project();
+    await dragPlan([3.13, 4.125], [3.63, 4.625]);
+    assert.notDeepEqual(await project(), beforeMobileDrag, 'The first narrow-screen drag selects and moves an item');
+    const canvasAfterSelection = await page.locator('#plan-canvas').boundingBox();
+    assert.equal(canvasAfterSelection.height, canvasBeforeSelection.height, 'Showing Item details does not resize the drawing or cancel its pointer');
+    const details = page.locator('#selected-item-details');
+    await details.scrollIntoViewIfNeeded(); assert(await details.isVisible()); await details.click();
+    assert.equal(await page.locator(':focus').getAttribute('aria-label'), 'x (m)');
+    const positionBox = await field('x (m)').boundingBox();
+    assert(positionBox.y >= 0 && positionBox.y + positionBox.height <= 844, 'Item details brings placement into the narrow viewport');
+    if (process.env.PLANNER_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.PLANNER_SCREENSHOT_DIR, 'placement-mobile.png') });
+    await page.setViewportSize({ width: 1500, height: 1000 });
+    assert.equal(await details.isVisible(), false, 'The shortcut adds no desktop toolbar clutter');
     assert.deepEqual(errors, [], 'No page errors'); assert.deepEqual(external, [], 'Fictional tests must not contact external services');
     await context.close();
-    console.log(`Planner precision passed (${engine}): 2D/3D snap and Alt movement, numeric and corner room dimensions, wall/opening consistency, connected room moves and shared-boundary resizing, elevation bounds and restored keyboard drafts, cancellation, Undo/redo and persisted coordinates.`);
+    if (engine === 'chromium') {
+      // Real touch input at DPR 2 covers the device-pixel threshold and capture.
+      const touchContext = await browser.newContext({ viewport: { width: 1200, height: 900 }, deviceScaleFactor: 2, hasTouch: true });
+      await touchContext.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: KEY, value: fixture });
+      const touchPage = await touchContext.newPage();
+      await touchPage.goto(origin + '/planner/'); await touchPage.waitForFunction(() => window.planner);
+      const session = await touchContext.newCDPSession(touchPage);
+      const point = await touchPage.evaluate(() => {
+        const [x, y] = planner.worldToScreen([3.125, 4.125]), rect = document.getElementById('plan-canvas').getBoundingClientRect();
+        return { x: rect.x + x, y: rect.y + y };
+      });
+      const touch = (type, dx = 0, dy = 0) => session.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' || type === 'touchCancel' ? [] : [{ x: point.x + dx, y: point.y + dy }] });
+      await touch('touchStart'); await touch('touchMove', 1, 1); await touch('touchEnd');
+      assert.deepEqual(await touchPage.evaluate(() => planner.getProject()), fixture, 'DPR 2 touch wobble preserves off-grid coordinates');
+      assert.equal(await touchPage.evaluate(() => planner.getSelection().id), 'box', 'A touch still selects the item');
+      assert.equal(await touchPage.locator('#undo').isDisabled(), true, 'Touch wobble adds no undo entry');
+      await touch('touchStart'); await touch('touchMove', 15, 15);
+      assert.notDeepEqual(await touchPage.evaluate(() => planner.getProject()), fixture, 'An intentional touch drag crosses the threshold');
+      await touch('touchCancel');
+      assert.deepEqual(await touchPage.evaluate(() => planner.getProject()), fixture, 'Touch cancellation restores the off-grid position');
+      assert.equal(await touchPage.locator('#undo').isDisabled(), true, 'Cancelled touch adds no undo entry');
+      await touchContext.close();
+    }
+    console.log(`Planner precision passed (${engine}): 25/5 cm snap, click/touch thresholds, item rotation, mobile details, 2D/3D Alt movement, numeric and corner room dimensions, wall/opening consistency, connected room moves and shared-boundary resizing, elevation bounds and restored keyboard drafts, cancellation, Undo/redo and persisted coordinates.`);
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

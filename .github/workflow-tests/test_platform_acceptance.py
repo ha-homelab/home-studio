@@ -656,7 +656,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
         runs = '\n'.join(step.get('run', '') for step in job['steps'])
         self.assertIn('sudo /usr/bin/safaridriver --enable', runs)
         self.assertIn('scripts/test-safari-tooling.py', runs)
-        self.assertIn('scripts/test-safari-acceptance.py --output acceptance-artifacts/safari', runs)
+        self.assertIn('scripts/test-safari-acceptance.py --prepare-hosted-safari --output acceptance-artifacts/safari', runs)
 
     def test_macos_gecko_backends_are_scoped_to_the_supported_versions(self):
         jobs = workflow('platform-acceptance.yml')['jobs']

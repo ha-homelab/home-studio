@@ -57,3 +57,168 @@ def export_models(data, ROOT, stem):
     dae+=['</library_geometries><library_visual_scenes><visual_scene id="Scene" name="Home floorplan">']
     for i,m in enumerate(meshes):dae.append(f'<node id="n{i}" name="{m["name"]}"><instance_geometry url="#g{i}"><bind_material><technique_common><instance_material symbol="mat" target="#{m["material"]}-mat"/></technique_common></bind_material></instance_geometry></node>')
     dae+=['</visual_scene></library_visual_scenes><scene><instance_visual_scene url="#Scene"/></scene></COLLADA>'];(ROOT/(stem+'.dae')).write_text('\n'.join(dae), encoding='utf-8')
+
+
+# Interactive exports are independent of the historical on-disk export bundle.
+# Only geometry, colors and display labels cross this boundary; never model extras.
+MAX_EXPORT_TRIANGLES = 200_000
+MAX_EXPORT_BYTES = 32 * 1024 * 1024
+
+
+def export_scene(floors, format):
+    """Serialize an allowlisted scene of floor/item groups, without writing files.
+
+    Each group contains local meshes plus translation, Y rotation (radians) and
+    positive scale. GLB preserves those pivots; OBJ bakes them into one object per
+    group and travels with its material library in a two-file ZIP.
+    """
+    import io
+    import math
+    import re
+    import zipfile
+
+    if format not in ('glb', 'obj'):
+        raise ValueError('Choose GLB or OBJ for this export.')
+    materials, colors, count, vertex_count, mesh_count = [], {}, 0, 0, 0
+
+    def label(value):
+        # Entity references sometimes occur in commissioned mesh/display names.
+        value = re.sub(r'\b[a-z_]+\.[a-z0-9_]+\b', 'object', str(value))
+        return ''.join(char for char in value if char.isprintable())[:120] or 'Object'
+
+    def finite(values, length):
+        return (isinstance(values, (list, tuple)) and len(values) == length and
+                all(type(value) in (int, float) and math.isfinite(value) for value in values))
+
+    for floor in floors:
+        if not math.isfinite(floor['elevation']):
+            raise ValueError('Invalid floor elevation.')
+        for group in floor['groups']:
+            if (not finite(group['translation'], 3) or not finite(group['scale'], 3) or
+                    min(group['scale']) <= 0 or not math.isfinite(group['rotation'])):
+                raise ValueError('Invalid object transform.')
+            for mesh in group['meshes']:
+                vertices, normals, indices = mesh['vertices'], mesh['normals'], mesh['indices']
+                count += len(indices) // 3
+                vertex_count += len(vertices)
+                mesh_count += 1
+                if count > MAX_EXPORT_TRIANGLES or vertex_count > MAX_EXPORT_TRIANGLES * 3 or mesh_count > 20_000:
+                    raise ValueError('Export exceeds 200,000 triangles. Export one floor or reduce detailed furniture.')
+                if (not vertices or len(normals) != len(vertices) or not indices or len(indices) % 3 or
+                        not all(finite(vertex, 3) for vertex in vertices) or
+                        not all(finite(normal, 3) for normal in normals) or
+                        not all(type(index) is int and 0 <= index < len(vertices) for index in indices)):
+                    raise ValueError('The installed model contains invalid export geometry.')
+                color = tuple(mesh['color'])
+                if not finite(color, 4) or not all(0 <= value <= 1 for value in color):
+                    raise ValueError('The installed model contains an invalid material.')
+                if color not in colors:
+                    colors[color] = len(materials)
+                    materials.append(color)
+    if not count:
+        raise ValueError('Add a room or object before exporting.')
+
+    def bounded_extend(target, data):
+        if len(target) + len(data) > MAX_EXPORT_BYTES:
+            raise ValueError('Export exceeds 32 MB. Export one floor or reduce detailed furniture.')
+        target.extend(data)
+
+    if format == 'glb':
+        blob, views, accessors, meshes, nodes, roots = bytearray(), [], [], [], [], []
+
+        def accessor(values, vector):
+            while len(blob) % 4:
+                blob.append(0)
+            offset = len(blob)
+            if vector:
+                for value in values:
+                    bounded_extend(blob, struct.pack('<3f', *value))
+            else:
+                for value in values:
+                    bounded_extend(blob, struct.pack('<I', value))
+            views.append({'buffer': 0, 'byteOffset': offset, 'byteLength': len(blob) - offset,
+                          'target': 34962 if vector else 34963})
+            entry = {'bufferView': len(views) - 1, 'componentType': 5126 if vector else 5125,
+                     'count': len(values), 'type': 'VEC3' if vector else 'SCALAR'}
+            if vector:
+                entry.update(min=[min(row[axis] for row in values) for axis in range(3)],
+                             max=[max(row[axis] for row in values) for axis in range(3)])
+            accessors.append(entry)
+            return len(accessors) - 1
+
+        for floor_number, floor in enumerate(floors, 1):
+            roots.append(len(nodes))
+            floor_node = {'name': 'Floor ' + str(floor_number), 'translation': [0, floor['elevation'], 0], 'children': []}
+            nodes.append(floor_node)
+            for group in floor['groups']:
+                floor_node['children'].append(len(nodes))
+                angle = group['rotation'] / 2
+                node = {'name': label(group['name']), 'translation': group['translation'],
+                        'rotation': [0, math.sin(angle), 0, math.cos(angle)], 'scale': group['scale'], 'children': []}
+                nodes.append(node)
+                for part, mesh in enumerate(group['meshes']):
+                    position = accessor(mesh['vertices'], True)
+                    normal = accessor(mesh['normals'], True)
+                    indices = accessor(mesh['indices'], False)
+                    node['children'].append(len(nodes))
+                    nodes.append({'name': label(group['name']) + ' / part ' + str(part + 1), 'mesh': len(meshes)})
+                    meshes.append({'primitives': [{'attributes': {'POSITION': position, 'NORMAL': normal},
+                                                   'indices': indices, 'material': colors[tuple(mesh['color'])]}]})
+        document = {'asset': {'version': '2.0', 'generator': 'Home Studio geometry export'},
+                    'scene': 0, 'scenes': [{'nodes': roots}], 'nodes': nodes, 'meshes': meshes,
+                    'materials': [{'name': 'material_' + str(index), 'doubleSided': True,
+                                   'alphaMode': 'BLEND' if color[3] < 1 else 'OPAQUE',
+                                   'pbrMetallicRoughness': {'baseColorFactor': color, 'metallicFactor': .05,
+                                                           'roughnessFactor': .72}} for index, color in enumerate(materials)],
+                    'buffers': [{'byteLength': len(blob)}], 'bufferViews': views, 'accessors': accessors}
+        payload = json.dumps(document, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode()
+        payload += b' ' * (-len(payload) % 4)
+        blob.extend(b'\0' * (-len(blob) % 4))
+        total = 28 + len(payload) + len(blob)
+        if total > MAX_EXPORT_BYTES:
+            raise ValueError('Export exceeds 32 MB. Export one floor or reduce detailed furniture.')
+        return (struct.pack('<III', 0x46546C67, 2, total) + struct.pack('<II', len(payload), 0x4E4F534A) +
+                payload + struct.pack('<II', len(blob), 0x004E4942) + blob)
+
+    obj, mtl, offset, ordinal = bytearray(), bytearray(), 1, 0
+    def line(target, value):
+        bounded_extend(target, (value + '\n').encode('utf-8'))
+    line(obj, '# Home Studio; metres; Z up')
+    line(obj, 'mtllib materials.mtl')
+    for floor in floors:
+        for group in floor['groups']:
+            ordinal += 1
+            # Leading ordinal makes duplicate user labels unambiguous to importers.
+            name = re.sub(r'[^\w -]', '_', label(floor['name']) + ' ' + label(group['name']))
+            line(obj, f'o {ordinal}_{name}')
+            cosine, sine = math.cos(group['rotation']), math.sin(group['rotation'])
+            sx, sy, sz = group['scale']
+            tx, ty, tz = group['translation']
+            for mesh in group['meshes']:
+                line(obj, 'usemtl material_' + str(colors[tuple(mesh['color'])]))
+                for x, y, z in mesh['vertices']:
+                    x, y, z = x * sx, y * sy, z * sz
+                    x, y, z = tx + cosine * x + sine * z, ty + y + floor['elevation'], tz - sine * x + cosine * z
+                    if not all(math.isfinite(value) for value in (x, y, z)):
+                        raise ValueError('The installed model contains invalid export coordinates.')
+                    line(obj, f'v {x:.9g} {-z:.9g} {y:.9g}')
+                for x, y, z in mesh['normals']:
+                    x, y, z = x / sx, y / sy, z / sz
+                    x, z = cosine * x + sine * z, -sine * x + cosine * z
+                    length = math.hypot(x, y, z) or 1
+                    line(obj, f'vn {x/length:.9g} {-z/length:.9g} {y/length:.9g}')
+                for start in range(0, len(mesh['indices']), 3):
+                    line(obj, 'f ' + ' '.join(f'{offset + index}//{offset + index}' for index in mesh['indices'][start:start+3]))
+                offset += len(mesh['vertices'])
+    for index, color in enumerate(materials):
+        line(mtl, f'newmtl material_{index}\nKd {color[0]} {color[1]} {color[2]}\nd {color[3]}')
+    if len(obj) + len(mtl) > MAX_EXPORT_BYTES:
+        raise ValueError('Export exceeds 32 MB. Export one floor or reduce detailed furniture.')
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('home.obj', obj)
+        archive.writestr('materials.mtl', mtl)
+    payload = output.getvalue()
+    if len(payload) > MAX_EXPORT_BYTES:
+        raise ValueError('Export exceeds 32 MB. Export one floor or reduce detailed furniture.')
+    return payload

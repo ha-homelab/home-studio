@@ -1,5 +1,17 @@
 // Complete localized interface; project identifiers and user content remain unchanged.
 export default {
+  "Snap": "Snap",
+  "Grid step": "Grid step",
+  "Uncheck Snap for free placement": "Uncheck Snap for free placement",
+  "25 cm": "25 cm",
+  "5 cm": "5 cm",
+  "Rotate view left": "Rotate view left",
+  "Rotate view right": "Rotate view right",
+  "Rotate item −90°": "Rotate item −90°",
+  "Rotate item +90°": "Rotate item +90°",
+  "Item rotated.": "Item rotated.",
+  "Appearance": "Appearance",
+
   "Widen the editor to use 2D + 3D.": "2D + 3D를 사용하려면 편집기 너비를 넓히세요.",
   "Draw in 2D and inspect your changes in 3D.": "2D로 그리고 3D로 변경 사항을 확인하세요.",
 

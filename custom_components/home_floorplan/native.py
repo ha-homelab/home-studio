@@ -1,6 +1,7 @@
 """Private project storage and executor-based compilation for Home Studio."""
 from __future__ import annotations
 
+import base64
 import copy
 import importlib
 import json
@@ -224,6 +225,25 @@ class NativeProject:
                    "revision": revision, "published_revision": revision}
         await self.store.async_save(updated)
         self.document = updated
+
+    def export_model(self, project, floor_id, format):
+        """Executor-only export of the supplied snapshot; never save or publish."""
+        bounded_project(project)
+        runtime = compiler()
+        project = runtime.validate_project(project)
+        floors = self._export_floors(runtime, project, floor_id)
+        payload = runtime.render_model_export(floors, format)
+        scope = floor_id if floor_id is not None else 'all-floors'
+        return {'filename': 'home-studio-' + scope + ('.glb' if format == 'glb' else '.zip'),
+                'base64': base64.b64encode(payload).decode('ascii')}
+
+    def _export_floors(self, runtime, project, floor_id):
+        floors = [floor for floor in project['floors'] if floor_id is None or floor['id'] == floor_id]
+        if not floors:
+            raise NativeError('invalid_floor', 'Choose a floor in the current drawing.')
+        runtime.export_geometry_budget(floors)
+        return [runtime.export_floor(runtime.make_floor(project, floor, None)[0], floor,
+                                     elevated=floor_id is None) for floor in floors]
 
     async def publish(self, revision):
         self.check_revision(revision)

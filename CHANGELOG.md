@@ -2,10 +2,18 @@
 
 ## [Unreleased]
 
-## [1.1.0] - Connected editing and easier device setup
+## [1.1.0] - Connected editing, easier setup and Blender export
 
 ### Added
 
+- Export the current Home Assistant editor snapshot to Blender as GLB or an
+  OBJ + MTL ZIP, for one floor or the complete home. GLB keeps item pivots,
+  grouped parts, materials, and whole-home floor elevations. Generated homes
+  retain their original architecture and custom item geometry.
+- Item rotation buttons, 5 cm or 25 cm grid steps, placement fields before
+  appearance, and a direct Item details shortcut on narrow screens.
+- A connection notice in the HA editor. Offline editing and JSON backup stay
+  available while actions requiring the server wait for reconnection.
 - Side-by-side **2D + 3D** editing on wide workspaces. Both panes share one
   document, undo history, and bounded WebGL renderer. The preview updates after
   a completed 2D drag; narrow layouts return to the full-width drawing.
@@ -24,6 +32,10 @@
 
 ### Fixed
 
+- Reject stale compiled model downloads after placement changes. The new model
+  export uses current validated edits without saving or publishing the drawing.
+- Tiny pointer movements while selecting furniture no longer snap it to a new
+  position. Deliberate dragging retains Alt bypass, cancellation, and Undo.
 - Moving a room now carries its owned walls, openings, and assigned items.
   Shared geometry requires an explicit connected move. Resizing complete
   shared rectangular sides preserves neighboring boundaries and measured
@@ -55,6 +67,9 @@
 
 ### Security
 
+- Model export requires an HA administrator, checks the source revision, omits
+  device identifiers and private labels, and bounds concurrent work and model
+  size. Public examples and guide images use fictional rooms only.
 - HA area/entity suggestions and card floor names remain scoped to the signed-in
   account. Administrative drawing and publication permissions are unchanged.
 - Dashboard resource registration preserves existing user entries. No household
