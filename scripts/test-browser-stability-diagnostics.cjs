@@ -48,6 +48,85 @@ test('viewer drag receipts preserve native phases and the existing two-frame com
   assert.match(source,/sample\.editorDragPhases = editorDrag\.phases/);
 });
 
+// Drive the exact function serialized into the real viewer with a virtual
+// clock. This exercises deadlines and draw receipts without real-time sleeps.
+async function wheelMeasurement({draws=[16],receipt=true,camera=true,idleRaf=false,sized=true,blank=false}={}) {
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  const start=source.indexOf('async function measureEditorWheelBurst()'),end=source.indexOf('\nasync function run(',start);
+  assert(start>=0&&end>start);
+  let now=0,nextId=1,wheels=0,demand=false,done=false,result,error;
+  const timers=new Map(),frames=new Map(),cancelled=[];
+  const state={renderCount:4,passes:4,camera:{projection:[1],world:[1]}};
+  const schedule=(callback,delay)=>{const id=nextId++;timers.set(id,{callback,at:now+delay});return id;};
+  const bounds={width:945,height:516.609375,top:190.390625,bottom:707};
+  const canvas={width:945,height:sized?516:1,getBoundingClientRect:()=>bounds,dispatchEvent(event){
+    assert.equal(event.type,'wheel');assert.deepEqual({...event.options},{deltaY:1,cancelable:true,bubbles:true});wheels++;
+    if(demand)return;
+    demand=true;
+    for(const pending of frames.values())pending.at=now+16;
+    for(const delay of draws)schedule(()=>{
+      state.renderCount++;
+      if(receipt)state.passes++;
+      if(receipt&&camera)state.camera={projection:[1],world:[2]};
+    },delay);
+  }};
+  const env={performance:{now:()=>now},setTimeout:schedule,clearTimeout:id=>timers.delete(id),
+    requestAnimationFrame(callback){const id=nextId++;frames.set(id,{callback,at:idleRaf||demand?now+16:Infinity});return id;},
+    cancelAnimationFrame(id){cancelled.push(id);frames.delete(id);},
+    WheelEvent:class{constructor(type,options){this.type=type;this.options=options;}},
+    matchMedia:()=>({matches:true}),document:{hidden:false,visibilityState:'visible',hasFocus:()=>true,
+      querySelector:selector=>selector==='#view3d canvas'?canvas:{getBoundingClientRect:()=>bounds}},
+    floorplan:{get renderCount(){return state.renderCount;},homeMode:false},
+    __browserScene:()=>({pixelRatio:1,camera:state.camera,renderPasses:{scene:state.passes,last:'scene',
+      sceneViewport:[0,0,945,516],sceneDrawCalls:blank?0:74}})};
+  env.window=env;
+  vm.runInNewContext(source.slice(start,end)+'\nglobalThis.measure=measureEditorWheelBurst;',env);
+  env.measure().then(value=>{done=true;result=value;},failure=>{done=true;error=failure;});
+  for(let turns=0;!done&&turns<5000;turns++) {
+    await Promise.resolve();await Promise.resolve();
+    if(done)break;
+    const queue=[...timers].map(([id,value])=>({id,...value,source:timers}))
+      .concat([...frames].map(([id,value])=>({id,...value,source:frames}))).sort((a,b)=>a.at-b.at||a.id-b.id);
+    assert(queue.length&&Number.isFinite(queue[0].at),'Measurement must not block on idle RAF');
+    const next=queue[0];now=next.at;next.source.delete(next.id);next.callback(now);
+  }
+  assert(done,'Measurement must finish under the existing deadline');
+  assert.equal(frames.size,0,'The diagnostic RAF heartbeat is cancelled');
+  assert(cancelled.length>0);
+  return {result,error,now,wheels};
+}
+
+test('wheel acceptance tolerates stopped idle RAF and requires a fresh demand draw',async()=>{
+  const {result,error,now,wheels}=await wheelMeasurement();
+  assert.ifError(error);assert.equal(wheels,40);
+  assert.equal(result.settled.lifecycle.raf.callbacks,0,'No idle animation callback is needed to settle');
+  assert.equal(result.settled.stableSamples,7);assert.equal(result.settled.waitMs,150);
+  assert.equal(result.lifecycle.visibility,'visible');assert.equal(result.lifecycle.focused,true);
+  assert(result.lifecycle.raf.callbacks>0,'Fresh demand can resume the observed heartbeat');
+  assert.equal(result.synchronousDraws,0);assert.equal(result.totalDraws,1);assert.equal(result.sceneDraws,1);
+  assert.equal(result.cameraChanged,true);assert(now<10000);
+});
+
+test('wheel acceptance rejects missing, stale, blank and excess real draws',async()=>{
+  for(const options of [{draws:[]},{draws:[9800]},{receipt:false},{camera:false},{blank:true}]) {
+    const {error,now,wheels}=await wheelMeasurement(options);
+    assert.match(error.message,/did not produce a fresh complete scene draw and changed camera/);
+    assert.match(error.message,/"visibility":"visible"/);assert.match(error.message,/"raf":/);
+    assert.equal(now,10000);assert.equal(wheels,40);
+  }
+  const excess=await wheelMeasurement({draws:[16,32,100]});
+  assert.match(excess.error.message,/exceeded two draws/);
+  assert(excess.now<10000);assert.equal(excess.wheels,40);
+});
+
+test('wheel acceptance preserves the sized idle deadline and accepts two bounded draws',async()=>{
+  const unsized=await wheelMeasurement({sized:false});
+  assert.match(unsized.error.message,/did not settle/);assert.equal(unsized.now,10000);assert.equal(unsized.wheels,0);
+  const twice=await wheelMeasurement({idleRaf:true,draws:[16,32]});
+  assert.ifError(twice.error);assert.equal(twice.result.totalDraws,2);assert.equal(twice.result.sceneDraws,2);
+  assert(twice.result.settled.lifecycle.raf.callbacks>0);
+});
+
 test('Viewer frame receipts advance only after the real draw succeeds', () => {
   let active = 18, fail = false;
   const env = {renderer: {info:{render:{calls:1,triangles:1}},domElement:{width:632,height:394},getViewport(v){return v.copy({x:0,y:0,z:632,w:394});},getPixelRatio(){return 1;},render() {if (fail) throw Error('draw failed'); return 42;}},
@@ -725,6 +804,7 @@ function freshPreviewHarness(view = 'preview') {
   const traces = [], canvases = [], renderers = [], scheduled = [], allocations = [];
   const error = {hidden:true}, rect = {width:774,height:724};
   const elevationHandle = Object.assign(new EventTarget(), {hidden:true, style:{}});
+  const splitTab = Object.assign(new EventTarget(), {id:'split-tab',hidden:false,disabled:false,title:'',tabIndex:-1});
   let context, activeCanvas, currentFocus, layoutReads = 0, fitCalls = 0, reusedRestores = 0;
   class Canvas extends EventTarget {
     constructor() { super(); this.id='preview-canvas';this.width=934;this.height=824;this.isConnected=true;this.attributes={tabindex:'0','aria-label':'Preview'};this.dataset={};this.style={};this.captured=new Set();canvases.push(this); }
@@ -779,7 +859,7 @@ function freshPreviewHarness(view = 'preview') {
     t:value=>value,floorBounds:()=>({minX:0,maxX:8,minZ:0,maxZ:10}),
     THREE:{WebGLRenderer:Renderer,Scene:Group,Group,Vector3:class {constructor(x,y,z){Object.assign(this,vector(),{x,y,z});}},HemisphereLight:Light,DirectionalLight:Light,
       PerspectiveCamera:class {constructor(){this.position=vector();}lookAt(){}updateProjectionMatrix(){} }},
-    $:id=>id==='preview-canvas'?activeCanvas:id==='preview-error'?error:id==='preview-elevation-handle'?elevationHandle:null,translatedText(){},
+    $:id=>id==='preview-canvas'?activeCanvas:id==='preview-error'?error:id==='preview-elevation-handle'?elevationHandle:id==='split-tab'?splitTab:null,translatedText(){},
     fitPreview(){fitCalls++;},fitPlan(){},updateZoom(){},previewFloors:()=>[],
     cancelCanvasRender(){traces.push('cancel');},onSchedule:value=>scheduled.push(JSON.parse(JSON.stringify(value))),
     testMesh:()=>({traverse(callback){callback({geometry:resource('geometry'),material:[resource('material-a'),resource('material-b')]});}}),
@@ -791,7 +871,10 @@ function freshPreviewHarness(view = 'preview') {
     let firstResize=false,planSize='old',map={x:0,y:0};
     const project={floors:[{elevation_m:0,walls:[],items:[{position_m:{x:7,z:9}}]}]};
     function displayedProject(){return project;}
+    // This lifecycle fixture records render requests; the real RAF coalescing
+    // and pane invalidation are exercised by test-planner-render-budget.cjs.
     function requestCanvasRender(){if(!canvasSuspended&&!document.hidden)onSchedule(size);}
+    function requestPreviewRender(){requestCanvasRender();}
     ${section('function canvasPixelRatio(', 'let startupMessage')}
     ${section('let renderer =', 'function previewFloors()')}
     ${section('function disposePreviewGeometry()', 'function rebuildPreview()')}
@@ -802,7 +885,7 @@ function freshPreviewHarness(view = 'preview') {
     initPreview();rebuildPreview();
   `,context);
   const evaluate = code => vm.runInContext(code,context);
-  return {traces,canvases,renderers,scheduled,allocations,error,rect,window,evaluate,
+  return {traces,canvases,renderers,scheduled,allocations,error,rect,splitTab,window,evaluate,
     get canvas(){return activeCanvas;},get layoutReads(){return layoutReads;},get fitCalls(){return fitCalls;},get reusedRestores(){return reusedRestores;},
     lose(){const renderer=renderers.at(-1);renderer.lost=true;return renderer.domElement.emit('webglcontextlost');},
     restore(){const renderer=renderers.at(-1);renderer.lost=false;renderer.domElement.emit('webglcontextrestored');},
@@ -1128,6 +1211,8 @@ test('the first replacement drawing buffer uses actual layout before ResizeObser
   for(const view of ['plan','preview']) {
     const h=freshPreviewHarness(view);h.lose();h.restore();
     assert.equal(h.layoutReads,1);
+    assert.equal(h.splitTab.disabled,false,'Recovered layout keeps the actual split-view control available');
+    assert.equal(h.splitTab.title,'Draw in 2D and inspect your changes in 3D.');
     assert.equal(h.allocations.length,0,'The context event only schedules rendering');
     assert(h.scheduled.length>0);
     assert(h.scheduled.every(layout=>layout.width===774&&layout.height===724));

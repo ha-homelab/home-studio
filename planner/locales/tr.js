@@ -1,4 +1,7 @@
 export default {
+  "Widen the editor to use 2D + 3D.": "2D + 3D kullanmak için düzenleyiciyi genişletin.",
+  "Draw in 2D and inspect your changes in 3D.": "2D olarak çizin ve değişikliklerinizi 3D olarak inceleyin.",
+
   "category.seating": "Oturma mobilyaları",
   "category.tables": "Masalar ve çalışma masaları",
   "category.beds": "Yataklar",

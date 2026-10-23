@@ -34,14 +34,18 @@ The ordinary **3D Home** sidebar panel remains available after this upgrade.
 
 1. Sign into Home Assistant as an administrator to configure the dashboard.
    Family accounts can use the published card without editing permission.
-2. Open **Settings → Dashboards → Resources**. Enable Advanced mode in your
-   profile if Resources is not visible. Add a **JavaScript module** resource:
+2. Reload the browser after installing or updating Home Studio. With the usual
+   storage-managed dashboard resources, the integration registers its card
+   module automatically. Existing resources are preserved.
+3. Edit a dashboard, choose **Add card**, and select **Home Studio**. Its visual
+   editor lets you choose a published floor by name, set the height, show room
+   names, filter devices, hide the sidebar initially, and control Dry run and
+   layout editing. New cards have **Lock layout editing** on.
+4. Enable **Preview only (Dry run)** while checking your home and device bindings.
+   Turn it off when you intend to use live controls. A remembered Dry run
+   preference may still block commands; the card shows the active mode.
 
-   ```text
-   /home-floorplan-static/card.js
-   ```
-
-3. Edit a dashboard and add the **Home Studio** custom card, or use a manual card:
+You can also configure the same options in the card's code editor:
 
    ```yaml
    type: custom:home-floorplan-card
@@ -53,26 +57,47 @@ The ordinary **3D Home** sidebar panel remains available after this upgrade.
    device_filter: all
    ```
 
-4. Verify the home and its bindings. `dry_run: true` keeps real device commands
-   blocked for this card. Remove it or set it to `false` when you intend to use
-   live controls. The existing remembered dry-run preference can still keep
-   commands blocked; the card's status tells you which mode is active.
-
 `edit_locked: true` hides layout-editing tools even for administrators.
 `room_labels` toggles room names; `device_filter: controls` hides passive sensor
 markers while `all` includes them. These display choices do not change device
 states, bindings, or account permissions.
 
-The optional `floor` field selects the initial floor by its **ID**, for example
-`floor: main`. Use the ID from your project JSON, not the display name. Omit it
-to open the project's default floor. You can still switch floors inside the card.
+Choose **Project default** in the visual editor to open the default floor, or
+choose a named floor. **Refresh floors** updates the choices after publication.
+Only published floors your account can read appear. If a selected floor becomes
+unavailable, the editor keeps its setting and explains that you should choose
+another floor. If the list cannot load, leave the fallback field empty for the
+default floor or enter a known floor ID. No project JSON is needed.
+
+For code-editor users, the optional `floor` field holds the floor **ID**, for
+example `floor: main`. Omitting it uses the project default. You can still
+switch floors inside the card.
 `height` is a number of pixels from 240 to 1600; the default is 600.
 `sidebar_collapsed` defaults to `true` to leave more room for the map.
+Existing cards keep their saved choices and existing defaults; only newly
+added visual cards start with layout editing locked.
 
-In YAML-managed dashboards, declare the same resource under the existing
-`lovelace.resources` list with `type: module`. Do not add a second top-level
-`lovelace` key. Resource registration is manual; installing the component does
-not rewrite your dashboards.
+If Home Assistant manages your **resources** in YAML, add the following entry
+to the existing `lovelace.resources` list in `configuration.yaml` and reload
+resources. This depends on resource mode, not on whether an individual
+dashboard uses YAML. Do not add a second top-level `lovelace` key:
+
+```yaml
+lovelace:
+  resource_mode: yaml
+  resources:
+    - url: /home-floorplan-static/card.js
+      type: module
+```
+
+If automatic registration fails in storage mode, open **Settings → Dashboards
+→ Resources** and add `/home-floorplan-static/card.js` as a **JavaScript module**.
+Enable Advanced mode in your profile if Resources is not visible. If that
+resource already exists, keep the existing entry and check its type rather
+than adding a duplicate. The integration preserves existing resource URLs,
+including version query strings, and retains its shared resource when unloaded.
+Reloading the browser after an update fetches the current module from the
+integration's noncached static route.
 
 Each visible card owns a viewer. Prefer one card per view on slower devices.
 Removing a card releases its viewer resources. The card reuses the existing

@@ -1,4 +1,7 @@
 export default {
+  "Widen the editor to use 2D + 3D.": "הרחיבו את העורך כדי להשתמש ב־2D + 3D.",
+  "Draw in 2D and inspect your changes in 3D.": "ציירו בדו־ממד ובדקו את השינויים בתלת־ממד.",
+
   "Furniture": "ריהוט",
   "Lamp": "מנורה",
   "Ceiling light": "תאורת תקרה",

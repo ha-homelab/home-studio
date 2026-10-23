@@ -1,5 +1,8 @@
 // Persian editor translations.
 export default {
+  "Widen the editor to use 2D + 3D.": "برای استفاده از 2D + 3D عرض ویرایشگر را بیشتر کنید.",
+  "Draw in 2D and inspect your changes in 3D.": "در نمای دوبعدی رسم کنید و تغییرات را در نمای سه‌بعدی بررسی کنید.",
+
   "Furniture": "مبلمان",
   "Lamp": "چراغ",
   "Ceiling light": "چراغ سقفی",

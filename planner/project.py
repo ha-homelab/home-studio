@@ -31,7 +31,7 @@ else:
     from geometry import MATERIALS, create_geometry, floor_context
     from exporters import export_models
     from viewer_locales import load_viewer_i18n
-from .furniture import build_furniture_asset, validate_furniture_appearance
+from .furniture import build_furniture_asset, validate_furniture_appearance, supports_curtain, MODELS
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "dist" / "planner-project"
@@ -276,7 +276,7 @@ def validate_project(project, *, complete=True):
         for ii, item in enumerate(floor["items"]):
             ip = f"{path}.items[{ii}]"
             fields(item, {"id", "name", "type", "room", "position_m", "dimensions_m", "rotation_deg", "entity_id", "notes"}, ip,
-                   {"model_id", "style_id", "color", "pattern_id", "pattern_color"})
+                   {"model_id", "style_id", "color", "pattern_id", "pattern_color", "curtain"})
             text(item["name"], ip + ".name", 100)
             text(item["type"], ip + ".type", 30)
             if item["type"] not in KINDS:
@@ -301,6 +301,18 @@ def validate_project(project, *, complete=True):
             if entity and not re.fullmatch(r"[a-z_]+\.[a-z0-9_]+", entity):
                 fail(ip + ".entity_id", "expected an empty string or Home Assistant domain.object_id")
             text(item["notes"], ip + ".notes", 2000, empty=True, multiline=True)
+            if "curtain" in item:
+                binding = item["curtain"]
+                fields(binding, {"opening_id", "mode"}, ip + ".curtain")
+                identifier(binding["opening_id"], ip + ".curtain.opening_id")
+                if not supports_curtain(MODELS.get(item.get("model_id"))):
+                    fail(ip + ".curtain", "a curtain binding requires a curtain design")
+                if binding["mode"] not in ("left", "right", "pair"):
+                    fail(ip + ".curtain.mode", "choose left, right, or pair")
+                if not any(opening["id"] == binding["opening_id"] and opening["type"] == "window" for opening in floor["openings"]):
+                    fail(ip + ".curtain.opening_id", "choose an existing window on this floor")
+                if entity and not entity.startswith("cover."):
+                    fail(ip + ".entity_id", "a bound curtain requires a cover entity or an empty entity ID")
     return copy.deepcopy(project)
 
 
@@ -440,10 +452,12 @@ def make_floor(project, floor, next_floor):
                 ceiling_height_m=floor["height_m"], elevation_m=floor["elevation_m"], origin="Floor-local metric coordinates; Y=0 at finished floor",
                 calibration=dict(reference_size=size, source_size=size, x_anchors=[[margin, minx], [margin + width * scale, maxx]], z_anchors=[[margin, minz], [margin + depth * scale, maxz]]),
                 dimensions_m=dict(width=width, depth=depth, height=floor["height_m"]), bounds_m=dict(min_x=minx, min_z=minz, max_x=maxx, max_z=maxz),
-                dimension_checks=[], rooms=rooms, materials=materials, meshes=g.meshes, openings=openings, inventory=floor["items"], object_assets=object_assets,
+                dimension_checks=[], rooms=rooms, materials=materials, meshes=g.meshes, openings=openings, inventory=[{key: value for key, value in item.items() if key != "curtain"} for item in floor["items"]], object_assets=object_assets,
                 initial_room=None, next_floor=next_floor, exterior_rooms=[r["id"] for r in floor["rooms"] if r["material"] == "deck"], exports=["glb", "obj", "mtl", "dae", "usda"])
     for name in ("room_activity", "receiver_activity", "motion_paths", "motion_sources", "motion_zones", "cover_windows", "control_anchors", "control_groups", "room_views", "room_display_names", "room_display_ids", "camera_entities", "tv_entities"):
         data[name] = {}
+    data["cover_windows"] = {item["id"]: {"openings": [item["curtain"]["opening_id"]], "mode": item["curtain"]["mode"]}
+                             for item in floor["items"] if "curtain" in item}
     svg = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size[0]} {size[1]}" width="{size[0]}" height="{size[1]}"><title>{html.escape(project["title"] + " — " + floor["name"])}</title><rect width="100%" height="100%" fill="#f7f5ef"/>']
     for room in rooms:
         color = {"floor": "#d8c7a4", "tile": "#c3d3cd", "deck": "#a8b8a3"}[room["material"]]

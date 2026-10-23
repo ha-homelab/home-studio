@@ -145,7 +145,8 @@ outlinedFixture.floors[0].openings = [{ id: 'window', wall_id: 'wall_0', type: '
     assert.deepEqual(floor.walls[1].start, [8.2, 2]); assert.deepEqual(floor.walls[1].end, [8.2, 7]);
     assert.equal(floor.openings[0].offset_m, 1.59, 'Opening center retains its proportional wall position');
     assert.equal(floor.openings[0].width_m, 1.5, 'Room dimensions preserve the measured opening width');
-    assert.deepEqual(floor.items, outlinedFixture.floors[0].items, 'Room dimensions do not displace furniture');
+    assert.deepEqual(floor.items[0].position_m, { x: 3.55, y: .4, z: 4.125 }, 'Furniture centers follow the resized room proportionally');
+    assert.deepEqual(floor.items[0].dimensions_m, outlinedFixture.floors[0].items[0].dimensions_m, 'Room resizing preserves furniture dimensions');
     await undoTo(outlinedFixture); await selectRoom();
     await change('Depth (m)', 5.6);
     assert.deepEqual((await project()).floors[0].rooms[0].polygon, [[1, 2], [7, 2], [7, 7.6], [1, 7.6]]);
@@ -165,14 +166,53 @@ outlinedFixture.floors[0].openings = [{ id: 'window', wall_id: 'wall_0', type: '
     assert.notDeepEqual(beforeCancel, outlinedFixture, 'Resize cancellation has a nonempty working copy');
     assert.deepEqual(await project(), outlinedFixture, 'Resize cancellation also restores walls and openings');
 
+    // A room carries the entire owned outline and assigned items in one undo.
+    await load(outlinedFixture); await selectRoom();
+    await dragPlan([2, 3], [2.5, 3.5]);
+    const movedRoom = await project();
+    assert.deepEqual(movedRoom.floors[0].walls[0].start, [1.5, 2.5]);
+    assert.deepEqual(movedRoom.floors[0].items[0].position_m, { x: 3.625, y: .4, z: 4.625 });
+    assert.deepEqual(movedRoom.floors[0].openings, outlinedFixture.floors[0].openings);
+    await saved(); await undoTo(outlinedFixture);
+    await page.locator('#redo').click(); assert.deepEqual(await project(), movedRoom);
+    await undoTo(outlinedFixture);
+    for (const cancel of ['Escape', 'blur', 'pointercancel']) {
+      await selectRoom();
+      const working = await dragPlan([2, 3], [2.5, 3.5], { cancel });
+      assert.notDeepEqual(working, outlinedFixture);
+      assert.deepEqual(await project(), outlinedFixture, `${cancel} restores walls, openings, and items with their room`);
+      await saved();
+    }
+
     const shared = clone(outlinedFixture);
     shared.floors[0].rooms.push({ id: 'neighbor', name: 'Neighbor', polygon: [[7, 2], [10, 2], [10, 7], [7, 7]], material: 'floor' });
     await load(shared); await selectRoom(); await change('Width (m)', 6.5);
-    assert.deepEqual(await project(), shared, 'Shared-wall dimension changes reject the whole transaction');
-    assert.equal(await field('Width (m)').getAttribute('aria-invalid'), 'true', 'Rejected shared-wall edit gives actionable field feedback');
-    await change('Width (m)', 6);
+    assert.deepEqual((await project()).floors[0].rooms[1].polygon, [[7.5, 2], [10, 2], [10, 7], [7.5, 7]], 'A numeric edit adjusts the neighbor sharing the moving side');
+    assert.equal(await field('Width (m)').getAttribute('aria-invalid'), null);
+    await undoTo(shared); await selectRoom();
     await dragPlan([7, 7], [7.5, 7.5]);
-    assert.deepEqual(await project(), shared, 'Shared-wall corner gestures cannot distort a neighboring room');
+    assert.deepEqual((await project()).floors[0].rooms[1].polygon, [[7.5, 2], [10, 2], [10, 7.5], [7.5, 7.5]], 'A shared corner stays joined to the rectangular neighbor');
+    await undoTo(shared); await selectRoom();
+    await dragPlan([7, 7], [10.5, 7]);
+    assert.deepEqual(await project(), shared, 'A gesture ending beyond the neighboring room rolls back all earlier valid frames');
+    await saved();
+    await dragPlan([2, 3], [2.5, 3.5]);
+    assert.deepEqual(await project(), shared, 'A shared room requires an explicit group move');
+    assert.match(await page.locator('#status').textContent(), /Move connected rooms together/);
+    const groupMove = page.getByRole('button', { name: 'Move connected rooms together', exact: true });
+    await groupMove.click(); assert.equal(await groupMove.getAttribute('aria-pressed'), 'true');
+    await dragPlan([2, 3], [2.5, 3.5]);
+    const movedGroup = await project();
+    assert.deepEqual(movedGroup.floors[0].rooms[1].polygon, [[7.5, 2.5], [10.5, 2.5], [10.5, 7.5], [7.5, 7.5]]);
+    assert.deepEqual(movedGroup.floors[0].walls[1].start, [7.5, 2.5]);
+    assert.deepEqual(movedGroup.floors[0].items[0].position_m, { x: 3.625, y: .4, z: 4.625 });
+    await saved(); await undoTo(shared);
+    await page.locator('#redo').click(); assert.deepEqual(await project(), movedGroup);
+    await undoTo(shared); await selectRoom();
+    await groupMove.click();
+    const provisionalGroup = await dragPlan([2, 3], [2.5, 3.5], { cancel: 'Escape' });
+    assert.notDeepEqual(provisionalGroup, shared); assert.deepEqual(await project(), shared);
+    await saved();
 
     // A neighbor can share only the middle of a longer wall. Neither wall
     // endpoint belongs to that neighbor, so endpoint-only guards miss it.
@@ -344,6 +384,6 @@ outlinedFixture.floors[0].openings = [{ id: 'window', wall_id: 'wall_0', type: '
     await saved();
     assert.deepEqual(errors, [], 'No page errors'); assert.deepEqual(external, [], 'Fictional tests must not contact external services');
     await context.close();
-    console.log(`Planner precision passed (${engine}): 2D/3D snap and Alt movement, numeric and corner room dimensions, wall/opening consistency, shared-wall rejection, elevation bounds and restored keyboard drafts, cancellation, Undo/redo and persisted coordinates.`);
+    console.log(`Planner precision passed (${engine}): 2D/3D snap and Alt movement, numeric and corner room dimensions, wall/opening consistency, connected room moves and shared-boundary resizing, elevation bounds and restored keyboard drafts, cancellation, Undo/redo and persisted coordinates.`);
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

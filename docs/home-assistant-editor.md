@@ -27,6 +27,18 @@ an installed Home Assistant integration.
 This screenshot uses the actual editor and trusted host with a simulated HA
 connection and fictional devices. No personal home or credentials are shown.
 
+## Draw and inspect together
+
+On a wide workspace, choose **2D + 3D** to keep the drawing at the left and its
+preview at the right. Draw or move objects in 2D, then release the pointer to
+refresh the preview. Orbit and zoom over the 3D pane, or choose **Edit items**
+to move an item and adjust its height there. Both panes use the same undo
+history. **Fit view** fits both; the bottom zoom buttons control the 2D pane.
+
+A narrower window returns to the full-width drawing. The feature adds no
+second 3D renderer. Existing generated homes keep their protected drawing and
+**Published home** preview instead of exposing an incomplete reconstruction.
+
 ## Install the native integration
 
 1. Back up Home Assistant. If you already use a generated or customized
@@ -117,17 +129,28 @@ between that floor and its ceiling.
 
 Select a room to edit **Width (m)** and **Depth (m)**, or drag one of its four
 corner handles in 2D. Numeric dimensions scale the room from its minimum x/z
-corner; dragging keeps the opposite corner fixed. Matching boundary walls and
-their openings follow the room when they belong only to that room. Doors and
-windows keep their measured widths while their positions adjust. Item
-positions stay where you placed them. If the walls are shared with another
-room or joined to other wall geometry, the change is rejected so you can edit
-the connected architecture deliberately. Original room shapes imported from
-generated homes remain protected; their inspector does not offer resizing.
+corner; dragging keeps the opposite corner fixed. The walls and their openings
+follow the room. Neighbors sharing a complete rectangular side adjust their
+shared corners together, keeping the rooms joined; a change that would collapse
+a neighbor or overlap another room is rejected. Doors and windows keep their
+measured widths while their centers adjust along the wall. Item centers follow
+the room proportionally, while their size, rotation, and height stay unchanged.
+Check furniture clearances after shrinking a room. Partial shared sides and
+irregular junctions that cannot stay joined require separate polygon and wall
+endpoint edits. Original room shapes imported from generated homes remain
+protected; their inspector does not offer resizing.
+
+Dragging inside a room moves its walls, openings, and assigned items together.
+If it touches another room or has external wall attachments, enable **Move
+connected rooms together** in Room details before dragging. The inspector
+lists the rooms that will move; their attached walls and items follow too.
+The option resets when selecting another object. A rejected move leaves the
+original plan intact, including when the final pointer position is invalid
+after earlier valid movement.
 
 Press **Escape** before releasing a drag to cancel it. Losing window focus also
 cancels an unfinished drag. **Undo** restores a completed move or resize in one
-step, including its wall and opening changes. After checking the result, choose
+step, including its rooms, walls, openings, and items. After checking the result, choose
 **Save draft**, then **Publish to 3D Home** when the household should see it.
 
 ## Match your Home Assistant theme

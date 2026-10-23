@@ -67,6 +67,7 @@ jobs:
           python3 scripts/test-ha-project-metadata.py
           python3 scripts/test-ha-native.py
           python3 scripts/test-ha-generated.py
+          python3 scripts/test-curtain-authoring.py
       - name: Test archive validation, installation, backup and rollback
         run: python3 scripts/test-install-home-assistant.py
       - name: Test ephemeral Intel runner preparation without system commands
@@ -137,10 +138,15 @@ jobs:
         run: |
           python3 scripts/build-example-modules.py --check
           node scripts/test-onboarding.mjs
+          node scripts/test-device-onboarding.mjs
+          node scripts/test-room-transform.mjs
+          node scripts/test-curtain-authoring.mjs
+          node scripts/test-curtain-browser.cjs
           node scripts/test-draft-storage.mjs
           for engine in chromium firefox webkit; do
             PLANNER_EDITING_ENGINE="$engine" node scripts/test-planner-editing.cjs
             PLANNER_PRECISION_ENGINE="$engine" PLANNER_PRECISION_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-planner-precision.cjs
+            PLANNER_SPLIT_ENGINE="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-planner-split-view.cjs
             ONBOARDING_ENGINE="$engine" ONBOARDING_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-onboarding-browser.cjs
           done
       - name: Test floor previews and camera navigation

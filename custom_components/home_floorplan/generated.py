@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+from html.parser import HTMLParser
 import json
 import logging
 import math
@@ -27,7 +28,7 @@ from .permissions import model_references, referenced_entities
 _LOGGER = logging.getLogger(__name__)
 MODEL_BLOCK = re.compile(r'(<script\s+id=[\"\']modelData[\"\']\s+type=[\"\']application/json[\"\']\s*>)(.*?)(</script\s*>)', re.S | re.I)
 MODEL_ID = re.compile(r'<script\b[^>]*\bid\s*=\s*[\"\']modelData[\"\']', re.I)
-APPEARANCE = ("model_id", "style_id", "color", "pattern_id", "pattern_color")
+APPEARANCE = ("model_id", "style_id", "color", "pattern_id", "pattern_color", "curtain")
 
 
 def _json(value):
@@ -72,6 +73,50 @@ def _embedded(html):
     except (ValueError, TypeError) as error:
         raise NativeError("unsupported_source", "The installed viewer's model data is invalid; its current files have been preserved.") from error
     return matches[0], model
+
+
+class _ViewerScripts(HTMLParser):
+    """Inspect trusted inline runtime code, excluding inert model/user data."""
+
+    def __init__(self):
+        super().__init__()
+        self.active = False
+        self.parts = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "script":
+            attrs = dict(attrs)
+            self.active = not attrs.get("src") and attrs.get("type", "").lower() in (
+                "", "module", "text/javascript", "application/javascript")
+
+    def handle_endtag(self, tag):
+        if tag == "script":
+            self.active = False
+
+    def handle_data(self, data):
+        if self.active:
+            self.parts.append(data)
+
+
+def _check_curtain_runtime(html, floor):
+    # Commissioned cover_windows remain supported by their original viewer.
+    # Only source-authored bindings need the newer catalog fabric/mode path.
+    if not any("curtain" in item for item in floor["items"]):
+        return
+    scripts = _ViewerScripts()
+    scripts.feed(html)
+    code = re.sub(r"\s+", "", "\n".join(scripts.parts))
+    # These are the shared runtime's tag propagation and mode dispatch, not
+    # arbitrary mentions in modelData or the rendered page's text.
+    required = ("curtainFabric:part.curtain_fabric===true", "curtainPanel:part.curtain_panel",
+                "child.userData.curtainPanel=batch.curtainPanel",
+                "functionupdateCatalogCurtainFabric(", "if(spec.mode)returnupdateCatalogCurtainFabric(")
+    if not all(fragment in code for fragment in required):
+        raise NativeError("unsupported_curtain_runtime",
+                          "This generated home's saved viewer does not support newly bound curtains. "
+                          "Update its generated viewer through the original home build/update process, "
+                          "or choose Decorative only for the new curtains before publishing. "
+                          "The current published home is unchanged.")
 
 
 def _hashes(root):
@@ -233,6 +278,17 @@ def _merge_model(base, floor, original, additions, runtime=False):
             # has no project lookup for these additive opening records.
             opening["id"] = "studio_" + opening["id"]
             model.setdefault("openings", []).append(opening)
+    # Authoring bindings address the additive windows by their runtime IDs.
+    # Preserve commissioned bindings unless an editable binding replaced them.
+    if any("curtain" in item for item in [*original["items"], *floor["items"]]):
+        model["cover_windows"] = dict(base.get("cover_windows", {}))
+        for item in original["items"]:
+            if "curtain" in item:
+                model["cover_windows"].pop(item["id"], None)
+        for item in floor["items"]:
+            if "curtain" in item:
+                model["cover_windows"][item["id"]] = {
+                    "openings": ["studio_" + item["curtain"]["opening_id"]], "mode": item["curtain"]["mode"]}
     if runtime:
         # The existing viewer uses model.inventory as the ORIGINAL reference
         # for curtain offsets, motion paths, and rebinding checks. Current
@@ -252,11 +308,19 @@ def _merge_model(base, floor, original, additions, runtime=False):
                     reference.pop(key, None)
                     if key in current_items[item["id"]]:
                         reference[key] = current_items[item["id"]][key]
+                if "curtain" in current_items[item["id"]]:
+                    # An explicitly selected new window defines a new fabric
+                    # reference, including the alignment made in the editor.
+                    for key in ("position_m", "dimensions_m", "rotation_deg"):
+                        reference[key] = copy.deepcopy(current_items[item["id"]][key])
             originals.append(reference)
         model["inventory"] = [*originals, *[copy.deepcopy(item) for item in floor["items"] if item["id"] not in baseline_ids]]
         # Inventory is rendered from placements and local object_assets. Old
         # transformed copies in a raw build must never appear at stale positions.
         model["meshes"] = [mesh for mesh in model["meshes"] if mesh.get("kind") != "inventory"]
+    # Window bindings belong to the source project and cover_windows. Runtime
+    # placement messages keep their existing inventory schema.
+    model["inventory"] = [{key: value for key, value in item.items() if key != "curtain"} for item in model["inventory"]]
     return model
 
 
@@ -425,6 +489,7 @@ class GeneratedProject(NativeProject):
                     model_path.write_text(_json(model), encoding="utf-8")
                 html_path = target / floor_id / "index.html"
                 html = html_path.read_text(encoding="utf-8")
+                _check_curtain_runtime(html, floor)
                 block, embedded = _embedded(html)
                 merged = _merge_model(embedded, floor, original, additions, runtime=True)
                 if project["title"] != self.baseline_project["title"]:

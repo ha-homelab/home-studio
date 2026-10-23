@@ -143,3 +143,12 @@
 .preview-elevation-handle::after{content:'';position:absolute;top:100%;left:50%;height:20px;border-left:2px solid var(--studio-accent,#366e63)}
 .preview-elevation-handle output{white-space:nowrap;pointer-events:none}.preview-elevation-handle span{pointer-events:none;font-weight:700}
 .preview-elevation-handle:focus-visible{outline:3px solid var(--studio-accent,#366e63);outline-offset:3px}
+
+/* Both panes share one document and one bounded WebGL context. */
+.split-view #plan-view{right:50%}
+.split-view #preview-view{left:50%;border-left:1px solid var(--studio-border,#d1d9cd)}
+.split-view .tool-hint{left:25%;max-width:calc(50% - 28px)}
+.split-view .canvas-bottom{right:calc(50% + 14px)}
+.split-view .canvas-caption{display:none}
+.split-view .empty-state{left:25%;max-width:calc(50% - 28px)}
+.split-view #preview-navigation{max-width:calc(100% - 24px)}

@@ -1,4 +1,7 @@
 export default {
+  "Widen the editor to use 2D + 3D.": "وسّع المحرر لاستخدام 2D + 3D.",
+  "Draw in 2D and inspect your changes in 3D.": "ارسم في العرض ثنائي الأبعاد وافحص تغييراتك في العرض ثلاثي الأبعاد.",
+
   "Furniture": "أثاث",
   "Lamp": "مصباح",
   "Ceiling light": "مصباح سقف",

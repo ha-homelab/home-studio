@@ -1,4 +1,7 @@
 export default {
+  "Widen the editor to use 2D + 3D.": "Rozšiřte editor pro režim 2D + 3D.",
+  "Draw in 2D and inspect your changes in 3D.": "Kreslete ve 2D a kontrolujte změny ve 3D.",
+
   "category.seating": "Sedací nábytek",
   "category.tables": "Stoly a psací stoly",
   "category.beds": "Postele",

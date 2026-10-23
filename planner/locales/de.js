@@ -1,4 +1,7 @@
 export default {
+  "Widen the editor to use 2D + 3D.": "Verbreitern Sie den Editor für 2D + 3D.",
+  "Draw in 2D and inspect your changes in 3D.": "Zeichnen Sie in 2D und prüfen Sie Änderungen in 3D.",
+
   "category.seating": "Sitzmöbel",
   "category.tables": "Tische & Schreibtische",
   "category.beds": "Betten",

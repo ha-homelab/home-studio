@@ -33,6 +33,41 @@ represents the user-facing device, rather than every diagnostic entity belonging
 to it. Multiple integrations can expose the same equipment; matching names alone
 do not prove that two entities are interchangeable.
 
+## Start with areas and choose several devices
+
+In the native editor, **Start rooms from HA areas** is available on the empty
+plan and in Floor settings. Select the areas you want, then enter each room's
+measured width and depth. Home Assistant supplies names and links, not geometry:
+the result is a set of separate rectangular starter rooms with optional wall
+outlines. Arrange and refine them to match the home. Existing linked areas are
+skipped across every floor; when a drawing floor is linked to an HA floor, only
+that floor's areas and areas without a floor are offered. Protected existing
+room shapes remain unchanged.
+
+Select a linked room and choose **Choose multiple devices…**. Nothing is selected
+automatically. Search by name or entity ID, check the desired rows, and choose
+**Add selected devices**. Search preserves earlier selections; the selection
+count includes rows outside the current search. Up to 80 matches appear at a
+time. Suggested devices omit hidden, configuration and diagnostic entities,
+and favor useful room readings and detections. **Include other entities** lets
+you deliberately select a helper or another omitted entity. The individual
+**Add linked item** action also remains available.
+
+Entities already bound anywhere in the home are skipped. Distinct entities for
+one physical device still appear separately: choose the one whose controls you
+want. Markers start at separate positions inside the room; their small size and
+positions are placeholders. Drag and resize them to match your devices. A batch
+that exceeds the room/item limits or cannot fit separate markers leaves the
+draft unchanged; select fewer devices or make space before retrying.
+
+Media players with HA's `tv` device class start as TV objects. A `speaker` class
+or missing class starts as an appliance with audio controls. Names are not used
+to guess a TV. Select **Speaker / audio** or **TV / display** in the chooser to
+override this; the individual flow has **New media player controls**. You can
+also change the resulting marker's **Item type** later. Existing bindings are
+not automatically reclassified. Save the draft and publish to use controls in
+3D Home.
+
 The drawing editor stays offline. It stores the chosen IDs, but cannot know which
 features your actual integrations expose until you open the installed plan in HA.
 
@@ -105,7 +140,9 @@ There is no new polling loop, history download or per-frame device request. New
 viewers declare their display dependencies, and the host sends live state only
 for those references, saved bindings and required curtain power switches.
 A separate name/ID catalog supports binding search without forwarding unrelated
-sensor values. Search displays at most 80 matches; type more of the name or ID to
+sensor values. The native editor also receives bounded device-class, category
+and hidden hints to classify suggestions; no playback metadata is included.
+Batch device search displays at most 80 matches; type more of the name or ID to
 narrow the list. Reload the saved plan after adding or renaming HA entities to
 refresh this catalog.
 

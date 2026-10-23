@@ -38,6 +38,100 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><but
   window.ready = true;
 </script></body></html>`;
 
+async function testVisualEditor(page) {
+  await page.evaluate(() => {
+    const Card = customElements.get('home-floorplan-card');
+    if (Card.getStubConfig().edit_locked !== true) throw Error('New cards must lock layout editing');
+    window.editor = Card.getConfigElement();
+    window.originalConfig = Object.freeze({type:'custom:home-floorplan-card',floor:'upper',height:600,
+      sidebar_collapsed:true,room_labels:false,dry_run:false,edit_locked:true,device_filter:'all',
+      visibility:[{condition:'user',users:['family']}],custom_option:{keep:'unchanged'}});
+    window.configChanges = []; window.statusRequests = [];
+    document.body.addEventListener('config-changed',event => configChanges.push(structuredClone(event.detail.config)));
+    editor.setConfig(originalConfig);
+    window.editorHass = {...makeHass(),auth:{accessToken:'NEVER_EXPOSE_EDITOR_TOKEN'},callWS:async message => {
+      statusRequests.push(message);
+      return {floors:['main','upper'],floor_options:[{id:'main',name:'Ground floor'},
+        {id:'upper',name:'Upper <loft>'}],default_floor:'main'};
+    }};
+    editor.hass = editorHass;
+    document.body.append(editor);
+  });
+  const editor = page.locator('home-floorplan-card-editor');
+  await editor.locator('#floor-select').waitFor({state:'visible'});
+  assert.deepEqual(await editor.locator('#floor-select option').allTextContents(),['Project default','Ground floor','Upper <loft>']);
+  assert.equal(await editor.getByLabel('Initial floor').inputValue(),'upper');
+  assert.equal(await editor.locator('img').count(),0,'floor labels are text, not HTML');
+  assert.deepEqual(await page.evaluate(() => statusRequests),[{type:'home_floorplan/status'}]);
+  assert.equal(await editor.textContent().then(text=>text.includes('NEVER_EXPOSE_EDITOR_TOKEN')),false);
+  await page.evaluate(() => {for (let i=0;i<10;i++) editor.hass = {...editorHass};});
+  assert.equal(await page.evaluate(() => statusRequests.length),1,'state updates do not reload the floor catalog');
+
+  await editor.getByLabel('Initial floor').selectOption('');
+  assert.equal(await page.evaluate(() => Object.hasOwn(configChanges.at(-1),'floor')),false);
+  await editor.getByLabel('Initial floor').selectOption('main');
+  const height = editor.getByLabel('Card height (pixels)');
+  await height.fill('239'); await height.press('Tab');
+  assert.equal(await page.evaluate(() => configChanges.length),2,'invalid height never emits a configuration');
+  assert.equal(await editor.locator('#error').isVisible(),true);
+  await height.fill('720'); await height.press('Tab');
+  assert.equal(await page.evaluate(() => configChanges.at(-1).height),720);
+  await height.fill(''); await height.press('Tab');
+  assert.equal(await page.evaluate(() => Object.hasOwn(configChanges.at(-1),'height')),false);
+  await editor.locator('#sidebar_collapsed').uncheck();
+  await editor.locator('#room_labels').check();
+  await editor.getByLabel('Devices to show').selectOption('controls');
+  await editor.locator('#dry_run').check();
+  await editor.locator('#edit_locked').uncheck();
+  const changed = await page.evaluate(() => configChanges.at(-1));
+  assert.deepEqual(changed,{type:'custom:home-floorplan-card',floor:'main',sidebar_collapsed:false,
+    room_labels:true,dry_run:true,edit_locked:false,device_filter:'controls',
+    visibility:[{condition:'user',users:['family']}],custom_option:{keep:'unchanged'}});
+  assert.deepEqual(await page.evaluate(() => [originalConfig.floor,originalConfig.height,originalConfig.edit_locked]),['upper',600,true]);
+  assert.equal(await page.evaluate(() => JSON.stringify(configChanges).includes('NEVER_EXPOSE_EDITOR_TOKEN')),false);
+
+  // The selected unavailable ID survives editing another option; no silent reset.
+  await page.evaluate(() => editor.setConfig({...editor._config,floor:'removed'}));
+  assert.match(await editor.locator('#floor-help').textContent(),/unavailable/);
+  await editor.locator('#room_labels').uncheck();
+  assert.equal(await page.evaluate(() => configChanges.at(-1).floor),'removed');
+  await page.evaluate(() => editor.hass = {...editorHass,user:{id:'slow',is_admin:true},
+    callWS:() => new Promise(resolve => window.resolveOldFloors = resolve)});
+  await editor.locator('#floor-input').waitFor({state:'visible'});
+  await page.evaluate(() => editor.hass = {...editorHass,user:{id:'family',is_admin:false},
+    callWS:async () => ({floors:['main'],floor_options:[{id:'main',name:'Ground floor'}]})});
+  await editor.locator('#floor-select').waitFor({state:'visible'});
+  await page.evaluate(async () => {resolveOldFloors({floors:['secret'],floor_options:[{id:'secret',name:'Private floor'}]});await Promise.resolve();});
+  assert.equal((await editor.textContent()).includes('Private floor'),false,'stale responses cannot reveal another account’s floor labels');
+  assert.deepEqual(await editor.locator('#floor-select option').allTextContents(),['Project default','Ground floor','removed (not currently available)']);
+
+  // Offline and older-backend fallbacks remain usable without project JSON.
+  await page.evaluate(() => editor.hass = {...editorHass,user:{id:'offline',is_admin:true},
+    callWS:async () => {throw Error('offline');}});
+  await page.waitForFunction(() => editor._floorState === 'error');
+  assert.match(await editor.locator('#floor-help').textContent(),/could not be loaded/);
+  const floorInput = editor.getByLabel('Initial floor');
+  const count = await page.evaluate(() => configChanges.length);
+  await floorInput.fill('../bad'); await floorInput.press('Tab');
+  assert.equal(await page.evaluate(() => configChanges.length),count);
+  await floorInput.fill(''); await floorInput.press('Tab');
+  assert.equal(await page.evaluate(() => Object.hasOwn(configChanges.at(-1),'floor')),false);
+  await page.evaluate(() => editor._hass.callWS = async () => ({floors:['old_floor']}));
+  await editor.getByRole('button',{name:'Refresh floors'}).click();
+  await editor.locator('#floor-select').waitFor({state:'visible'});
+  assert.deepEqual(await editor.locator('#floor-select option').allTextContents(),['Project default','old floor']);
+  await page.evaluate(() => editor._hass.callWS = async () => ({floors:[]}));
+  await editor.getByRole('button',{name:'Refresh floors'}).click();
+  await page.waitForFunction(() => editor._floorState === 'ready' && editor._floors.length === 0);
+  assert.match(await editor.locator('#floor-help').textContent(),/Publish your home/);
+
+  await page.evaluate(() => editor.hass = {...editorHass,user:null});
+  assert.equal(await editor.locator('#floor-select').isVisible(),false);
+  assert.equal(await editor.getByRole('button',{name:'Refresh floors'}).isDisabled(),true);
+  assert.equal(await editor.locator('iframe').count(),0,'configuration editor never loads private viewer documents');
+  await page.evaluate(() => editor.remove());
+}
+
 (async () => {
   const server = http.createServer((request,response) => {
     const filename = new URL(request.url,'http://localhost').pathname;
@@ -62,6 +156,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><but
     });
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await page.waitForFunction(() => window.ready);
+    await testVisualEditor(page);
     assert.deepEqual(await page.evaluate(() => {
       const card = document.createElement('home-floorplan-card');
       return [card.getCardSize(),card.getGridOptions(),customCards.filter(card => card.type === 'home-floorplan-card').length];
@@ -368,6 +463,6 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><but
     assert.equal(await page.locator('#studio').isVisible(),false,'portable builds do not link to an unavailable native editor');
     await page.evaluate(()=>legacy.remove());
     assert.deepEqual(errors,[]);
-    console.log('PASS: dashboard module, validation, sizing, floor selection, opaque sandbox, pinned dry run, live controls, admin gating, reconnect/remount edit recovery and stale-save rejection.');
+    console.log('PASS: visual card editor, permitted floor catalog, account-race isolation, dashboard module, validation, sizing, floor selection, opaque sandbox, pinned dry run, live controls, admin gating, reconnect/remount edit recovery and stale-save rejection.');
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

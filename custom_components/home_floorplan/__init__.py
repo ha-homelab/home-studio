@@ -7,6 +7,7 @@ import json
 import logging
 from functools import wraps
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import voluptuous as vol
 from homeassistant.components import frontend, panel_custom, websocket_api
@@ -144,6 +145,7 @@ async def _finish_setup(hass, state):
                 websocket_api.async_register_command(hass, handler)
             state["ws_registered"] = True
         await _register_panels(hass, bool(asset_files))
+        await _register_card_resource(hass, state)
         state["has_editor"] = bool(asset_files)
         state["initialized"] = True
         return True
@@ -163,11 +165,43 @@ async def _register_panels(hass, has_editor):
             require_admin=True)
 
 
+async def _register_card_resource(hass, state):
+    """Add the shared module through HA's collection; never rewrite user resources.
+
+    Frontend depends on Lovelace, so its collection exists in a normal setup.
+    async_get_info is the public collection API which also loads storage before
+    async_items is read. The static route disables caching; a stable URL avoids
+    changing resource IDs or leaving a second module behind on upgrades.
+    """
+    async with state.setdefault("resource_lock", asyncio.Lock()):
+        lovelace = hass.data.get("lovelace")
+        if not lovelace or lovelace.resource_mode != "storage":
+            if not state.get("resource_manual_notice"):
+                _LOGGER.info("Home Studio: add /home-floorplan-static/card.js as a module in Lovelace resources if using YAML-managed resources")
+                state["resource_manual_notice"] = True
+            return
+        resources = lovelace.resources
+        try:
+            await resources.async_get_info()
+            for resource in resources.async_items():
+                url = urlsplit(resource.get("url", ""))
+                if not url.scheme and not url.netloc and url.path == "/home-floorplan-static/card.js":
+                    # Respect manually configured query strings and resource types.
+                    # In particular, do not silently replace a user's resource.
+                    if resource.get("type") != "module":
+                        _LOGGER.warning("Home Studio: the existing /home-floorplan-static/card.js resource must use type module")
+                    return
+            await resources.async_create_item({"url": "/home-floorplan-static/card.js", "res_type": "module"})
+        except Exception:  # Optional dashboard setup must not disable the home.
+            _LOGGER.warning("Home Studio dashboard resource could not be registered; add /home-floorplan-static/card.js as a module in Lovelace resources", exc_info=True)
+
+
 async def async_setup_entry(hass, entry):
     if DOMAIN not in hass.data or not hass.data[DOMAIN].get("initialized"):
         return await async_setup(hass, {})
     if hass.data[DOMAIN].pop("panels_unloaded", False):
         await _register_panels(hass, hass.data[DOMAIN]["has_editor"])
+    await _register_card_resource(hass, hass.data[DOMAIN])
     return True
 
 
@@ -190,6 +224,7 @@ def _status_snapshot(state):
     snapshot = {"mode": getattr(native, "mode", "native") if native else "legacy",
                 "has_editor": bool(state.get("has_editor")),
                 "default_floor": state["site"]["default_floor"],
+                "floor_names": {floor: metadata["title"] for floor, metadata in state["site"]["floors"].items()},
                 "references": {floor: frozenset(floor_entities(state, floor, PROFILES))
                                for floor in state["site"]["floors"]}}
     if native:
@@ -207,7 +242,8 @@ def _status_from_snapshot(snapshot, connection):
         default_floor = floors[0] if floors else None
     result = {"mode": snapshot["mode"], "can_edit": admin,
               "has_editor": snapshot["has_editor"], "has_published": bool(floors),
-              "floors": floors, "default_floor": default_floor}
+              "floors": floors, "default_floor": default_floor,
+              "floor_options": [{"id": floor, "name": snapshot["floor_names"][floor]} for floor in floors]}
     if snapshot["mode"] in ("native", "generated") and admin:
         result.update(revision=snapshot["revision"], published_revision=snapshot["published_revision"])
     return result
@@ -335,7 +371,7 @@ async def ws_project_publish(hass, connection, msg):
 @_when_active
 @websocket_api.require_admin
 def ws_entity_catalog(hass, connection, msg):
-    """Return names and relationships only, never entity attributes or credentials."""
+    """Return bounded names, relationships and display hints, never raw state data."""
     areas = area_registry.async_get(hass)
     devices = device_registry.async_get(hass)
     entities = entity_registry.async_get(hass)
@@ -348,6 +384,16 @@ def ws_entity_catalog(hass, connection, msg):
               "areas": [{"id": item.id, "name": item.name, "floor_id": item.floor_id} for item in areas.async_list_areas()],
               "devices": [{"id": item.id, "name": item.name_by_user or item.name or item.id, "area_id": item.area_id}
                           for item in devices.devices], "entities": []}
+    def display_hints(current, entity=None):
+        device_class = (getattr(entity, "device_class", None)
+                        or (current.attributes.get("device_class") if current else None)
+                        or getattr(entity, "original_device_class", None))
+        category = getattr(entity, "entity_category", None)
+        category = getattr(category, "value", category)
+        return {"device_class": device_class if isinstance(device_class, str) and len(device_class) <= 40 else None,
+                "entity_category": category if category in ("config", "diagnostic") else None,
+                "hidden": getattr(entity, "hidden_by", None) is not None}
+
     for entity in entities.entities.values():
         current = hass.states.get(entity.entity_id)
         device = devices.async_get(entity.device_id) if entity.device_id else None
@@ -356,13 +402,15 @@ def ws_entity_catalog(hass, connection, msg):
                                    "domain": entity.entity_id.split(".", 1)[0], "device_id": entity.device_id,
                                    "area_id": entity.area_id or (device.area_id if device else None),
                                    "disabled": entity.disabled_by is not None,
+                                   **display_hints(current, entity),
                                    "available": bool(current and current.state not in ("unavailable", "unknown"))})
     registered = {item["entity_id"] for item in result["entities"]}
     for current in current_states:
         if current.entity_id not in registered:
             result["entities"].append({"entity_id": current.entity_id, "name": current.name,
                                        "domain": current.entity_id.split(".", 1)[0], "device_id": None, "area_id": None,
-                                       "disabled": False, "available": current.state not in ("unavailable", "unknown")})
+                                       "disabled": False, **display_hints(current),
+                                       "available": current.state not in ("unavailable", "unknown")})
     connection.send_result(msg["id"], result)
 
 

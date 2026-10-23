@@ -1,4 +1,7 @@
 export default {
+  "Widen the editor to use 2D + 3D.": "Расширьте редактор для режима 2D + 3D.",
+  "Draw in 2D and inspect your changes in 3D.": "Рисуйте в 2D и проверяйте изменения в 3D.",
+
   "category.seating": "Мягкая мебель и стулья",
   "category.tables": "Столы и письменные столы",
   "category.beds": "Кровати",

@@ -72,6 +72,87 @@ function instrumentation() {
   };
 }
 
+// Serialized into the viewer frame. Timer sampling observes an idle renderer
+// without making idle RAF delivery a prerequisite for testing fresh input.
+async function measureEditorWheelBurst() {
+  const canvas = document.querySelector('#view3d canvas'), stage = document.querySelector('#view3d');
+  // Settling and the demand receipt share one deadline; polling cannot renew it.
+  const started = performance.now(), deadline = started + 10000;
+  const heartbeat = {callbacks:0,lastAt:null};
+  let frame = 0, observing = true, previous = null, stableSince = started, stableSamples = 0, latest = null;
+  const tick = () => {
+    heartbeat.callbacks++; heartbeat.lastAt = performance.now()-started;
+    if (observing) frame = requestAnimationFrame(tick);
+  };
+  frame = requestAnimationFrame(tick);
+  const lifecycle = () => ({visibility:document.visibilityState,hidden:document.hidden,focused:document.hasFocus(),
+    raf:{...heartbeat,quietMs:performance.now()-started-(heartbeat.lastAt??0)}});
+  const read = () => {
+    const viewport = stage.getBoundingClientRect(), bounds = canvas.getBoundingClientRect(), scene = window.__browserScene();
+    return {homeMode:window.floorplan.homeMode,renderCount:window.floorplan.renderCount,
+      sceneDraws:scene.renderPasses.scene,lastPass:scene.renderPasses.last,sceneViewport:scene.renderPasses.sceneViewport,
+      drawCalls:scene.renderPasses.sceneDrawCalls,camera:scene.camera,
+      viewport:[viewport.width,viewport.height],canvas:[bounds.width,bounds.height],
+      drawingBuffer:[canvas.width,canvas.height],pixelRatio:scene.pixelRatio};
+  };
+  const sized = state => !state.homeMode && !document.hidden && state.viewport.every(value=>value>0) &&
+    state.canvas.every((value,index)=>value===state.viewport[index]) &&
+    state.drawingBuffer.every((value,index)=>value===Math.floor(state.viewport[index]*state.pixelRatio));
+  const fail = message => { throw new Error(`${message}: ${JSON.stringify({elapsedMs:performance.now()-started,lifecycle:lifecycle(),latest})}`); };
+  const poll = () => new Promise(resolve=>setTimeout(resolve,Math.min(25,Math.max(0,deadline-performance.now()))));
+  try {
+    let settled = null;
+    while (performance.now()<deadline) {
+      latest = read();
+      const now = performance.now(), key = JSON.stringify(latest);
+      if (now>=deadline) break;
+      if (sized(latest) && key===previous) stableSamples++;
+      else {stableSamples=1;stableSince=now;}
+      previous=key;
+      if (sized(latest) && stableSamples>=3 && now-stableSince>=150) {
+        settled={...latest,waitMs:now-started,stableSamples,lifecycle:lifecycle()};break;
+      }
+      await poll();
+    }
+    if (!settled) fail('Editor did not settle before wheel measurement');
+    const before = read(), cameraBefore = JSON.stringify(before.camera), demandStarted = performance.now();
+    for(let i=0;i<40;i++)canvas.dispatchEvent(new WheelEvent('wheel',{deltaY:1,cancelable:true,bubbles:true}));
+    const synchronousDraws = window.floorplan.renderCount-before.renderCount;
+    if (synchronousDraws>1) fail('Wheel burst drew synchronously more than once');
+    let drawAt = null, quietSince = null, lastReceipt = null;
+    while (performance.now()<deadline) {
+      latest = read();
+      const totalDraws = latest.renderCount-before.renderCount, sceneDraws = latest.sceneDraws-before.sceneDraws;
+      if (totalDraws>2 || sceneDraws>2) fail('Wheel burst exceeded two draws');
+      const cameraChanged = Boolean(before.camera && latest.camera && JSON.stringify(latest.camera)!==cameraBefore);
+      const fresh = totalDraws>0 && sceneDraws>0 && latest.lastPass==='scene' && latest.drawCalls>0 && cameraChanged && sized(latest) &&
+        JSON.stringify(latest.sceneViewport)===JSON.stringify([0,0,...latest.drawingBuffer]);
+      const receipt = JSON.stringify(latest), now = performance.now();
+      if (now>=deadline) break;
+      if (fresh) {
+        if (drawAt===null) drawAt=now;
+        if (quietSince===null || receipt!==lastReceipt) quietSince=now;
+        // Retain a quiet window so a late duplicate draw still fails the budget.
+        if (quietSince!==null && now-quietSince>=150) {
+          const bounds = selector => {
+            const rect = document.querySelector(selector).getBoundingClientRect();
+            return {top:rect.top,bottom:rect.bottom,height:rect.height};
+          };
+          return {synchronousDraws,totalDraws,sceneDraws,cameraChanged,drawLatencyMs:drawAt-demandStarted,
+            observationMs:now-demandStarted,settled,lifecycle:lifecycle(),
+            layout:{desktop:matchMedia('(min-width:851px)').matches,main:bounds('main'),stage:bounds('main > .stage'),
+              view:bounds('#view3d'),footer:bounds('.stage > .measure')}};
+        }
+      } else quietSince=null;
+      lastReceipt=receipt;
+      await poll();
+    }
+    fail('Wheel burst did not produce a fresh complete scene draw and changed camera');
+  } finally {
+    observing=false;cancelAnimationFrame(frame);
+  }
+}
+
 async function run(browserName, origin, project, sourceHash) {
   const profile = browserProfile(browserName, {viewport: {width: 1280, height: 800}});
   const inputDiagnostics = viewerInputOptions(browserName, profile);
@@ -200,56 +281,9 @@ async function run(browserName, origin, project, sourceHash) {
       // Exercise a burst of editor wheel events in a single task, as high-frequency
       // trackpad input must not perform an unbounded number of synchronous draws.
       phases.start('editor-settle-and-wheel', {cycle});
-      const burst = await child.evaluate(async () => {
-        const canvas = document.querySelector('#view3d canvas');
-        const stage = document.querySelector('#view3d');
-        const settleStarted = performance.now();
-        let previous = null, stableSince = settleStarted, stableFrames = 0, settled = null;
-        // Switching modes queues both a frame and ResizeObserver work. Keep
-        // those draws outside the input baseline, without hiding a busy renderer.
-        while (performance.now()-settleStarted < 10000) {
-          await new Promise((resolve,reject) => {
-            const timer = setTimeout(() => {
-              cancelAnimationFrame(frame);
-              reject(new Error(`Editor frames stopped before wheel measurement: ${previous}`));
-            }, Math.max(1,10000-(performance.now()-settleStarted)));
-            const frame = requestAnimationFrame(() => {clearTimeout(timer);resolve();});
-          });
-          const now = performance.now(), viewport = stage.getBoundingClientRect();
-          if (now-settleStarted >= 10000) break;
-          const canvasBounds = canvas.getBoundingClientRect(), scene = window.__browserScene();
-          const state = {
-            homeMode: window.floorplan.homeMode, renderCount: window.floorplan.renderCount,
-            viewport: [viewport.width,viewport.height], canvas: [canvasBounds.width,canvasBounds.height],
-            drawingBuffer: [canvas.width,canvas.height], pixelRatio: scene.pixelRatio,
-          };
-          const sized = !state.homeMode && viewport.width > 0 && viewport.height > 0 &&
-            canvas.width === Math.floor(viewport.width*scene.pixelRatio) &&
-            canvas.height === Math.floor(viewport.height*scene.pixelRatio);
-          const key = JSON.stringify(state);
-          if (sized && key === previous) stableFrames++;
-          else { stableFrames = 1; stableSince = now; }
-          previous = key;
-          if (sized && stableFrames >= 3 && now-stableSince >= 150) {
-            settled = {...state,waitMs:now-settleStarted,stableFrames};
-            break;
-          }
-        }
-        if (!settled) throw new Error(`Editor did not settle before wheel measurement: ${previous}`);
-        const before = window.floorplan.renderCount;
-        for(let i=0;i<40;i++)canvas.dispatchEvent(new WheelEvent('wheel',{deltaY:1,cancelable:true,bubbles:true}));
-        const synchronousDraws = window.floorplan.renderCount-before;
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        const bounds = selector => {
-          const rect = document.querySelector(selector).getBoundingClientRect();
-          return {top:rect.top,bottom:rect.bottom,height:rect.height};
-        };
-        const layout = {desktop:matchMedia('(min-width:851px)').matches,
-          main:bounds('main'),stage:bounds('main > .stage'),view:bounds('#view3d'),footer:bounds('.stage > .measure')};
-        return {synchronousDraws,totalDraws:window.floorplan.renderCount-before,settled,layout};
-      });
+      const burst = await child.evaluate(measureEditorWheelBurst);
       sample.burst = burst;
-      check(burst.synchronousDraws<=1 && burst.totalDraws>0 && burst.totalDraws<=2, 'Wheel bursts coalesce into at most one scheduled scene draw');
+      check(burst.synchronousDraws<=1 && burst.totalDraws>0 && burst.totalDraws<=2 && burst.sceneDraws>0 && burst.sceneDraws<=2 && burst.cameraChanged, 'Wheel bursts coalesce into at most two complete scene draws and change the rendered camera');
       if (burst.layout.desktop) {
         const {main,stage,view,footer} = burst.layout;
         check(stage.top>=main.top-1 && stage.bottom<=main.bottom+1 && view.bottom<=footer.top+1 && footer.bottom<=main.bottom+1,

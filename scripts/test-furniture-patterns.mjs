@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { CATALOG, PATTERNS, buildFurnitureAsset, getCatalogModel, primitive, supportsFurniturePattern, validateFurnitureAppearance } from '../planner/furniture.js';
+import { CATALOG, PATTERNS, buildFurnitureAsset, getCatalogModel, primitive, supportsFurniturePattern, supportsCurtain, validateFurnitureAppearance } from '../planner/furniture.js';
 
 const model = getCatalogModel('rug');
 const item = { type: model.type, model_id: model.id };
@@ -111,7 +111,7 @@ if (process.argv.includes('--fixtures')) {
     }
     if (supportsFurniturePattern(catalogModel)) for (const pattern of PATTERNS.slice(1)) {
       const asset = buildFurnitureAsset({ ...choice,pattern_id: pattern.id });
-      assert.equal(asset.meshes.length,catalogModel.parts.length+1);
+      assert.equal(asset.meshes.length,catalogModel.parts.length+(supportsCurtain(catalogModel)?catalogModel.parts.filter(part=>part.pattern_face).length:1));
       const expectedBounds = bounds(plain.meshes), actualBounds = bounds(asset.meshes);
       actualBounds.forEach((values,axis) => values.forEach((value,side) => close(value,expectedBounds[axis][side],'catalog bounds')));
     }

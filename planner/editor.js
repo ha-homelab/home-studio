@@ -2,17 +2,20 @@ import './language-links.js';
 import { createEnvironmentLayer, createEnvironmentControls } from './environment.js';
 import { embeddedContext, memoryDraftOptions, connectHost } from './ha-bridge.js';
 import { addMeasuredRoom, installOnboarding } from './onboarding.js';
+import { addAreaRooms, addAreaDevices, areaDeviceChoices } from './device-onboarding.js';
+import { showAreaStarter, showDeviceChooser } from './device-onboarding-ui.js';
 import { createDraftStorage, DRAFT_KEY, PREVIOUS_KEY, DAMAGED_KEY } from './draft-storage.js';
 import { reconcileInspector } from './inspector-dom.js';
 import { createFloorNavigator } from './floor-navigator.js';
 import { getRenderCapacity } from './render-capacity.js';
 import { formatValidationError } from './validation.js';
+import { roomBounds, roomMoveGroup, moveRoom, resizeRoom } from './room-transform.js';
 import { t, LOCALES, initI18n, setLocale, getLocale, onLocaleChange, translateStatic } from './i18n.js';
 
 import * as THREE from '../vendor/three.module.min.js';
 import { LIMITS, ITEM_TYPES, clone, round, distance, signedArea, pointInPolygon, projectOnWall, nextId, newFloor, blankProject, outlineRoom, validateProject, wallPieces, floorBounds } from './model.js';
 import { CATALOG } from './catalog.js';
-import { getCatalogModel, getCatalogStyle, buildFurnitureAsset, PATTERNS, supportsFurniturePattern } from './furniture.js';
+import { getCatalogModel, getCatalogStyle, buildFurnitureAsset, PATTERNS, supportsFurniturePattern, supportsCurtain } from './furniture.js';
 
 const initialLocale = await initI18n();
 const $ = id => document.getElementById(id);
@@ -36,6 +39,7 @@ if (haContext) {
 const draftStorage = createDraftStorage({ validate: validateProject, maxBytes: LIMITS.bytes, ...(haContext ? memoryDraftOptions() : {}) });
 let recoverySnapshot = null, recoveryBusy = false, saveSequence = 0, pendingSaves = 0;
 let committingField = null, inspectorScope = '', fieldEditRevision = 0;
+let connectedRoomMove = null;
 const BUILD_COMMAND = 'python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package';
 const LABELS = { furniture: 'Furniture', lamp: 'Lamp', chandelier: 'Ceiling light', tv: 'TV / display', appliance: 'Appliance', switch: 'Switch', outlet: 'Outlet', sensor: 'Sensor' };
 const COLORS = { floor: '#e7dac2', tile: '#e0e8df', deck: '#d8dfbe', furniture: '#96aca6', lamp: '#d9ae68', chandelier: '#d9ae68', tv: '#677d89', appliance: '#a1abb0', switch: '#b4c39d', outlet: '#b4c39d', sensor: '#c4b09a' };
@@ -110,7 +114,7 @@ function applyHostTheme(theme) {
 const planCanvas = $('plan-canvas'), ctx = planCanvas.getContext('2d', { alpha: false });
 let project = blankProject(), activeFloorId, selection = null, tool = 'select', view = 'plan', history = [], future = [], drag = null, previewEdit = null;
 let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, spaceHeld = false, saveFailed = false, previewDirty = true;
-let canvasFrame = 0, canvasSuspended = false;
+let canvasFrame = 0, canvasSuspended = false, planFrameRequested = false;
 // Optional integrations render a detached candidate; project/history/storage always
 // retain the accepted document. The ordinary editor imports no AI code.
 let candidatePreview = null, editorRevision = 0;
@@ -121,10 +125,21 @@ function editorChanged() {
 }
 const displayedProject = () => candidatePreview || project;
 const displayedFloor = () => displayedProject().floors.find(f => f.id === activeFloorId) || displayedProject().floors[0];
-function cancelCanvasRender() { if (canvasFrame) cancelAnimationFrame(canvasFrame); canvasFrame = 0; }
-function requestCanvasRender() {
-  if (canvasFrame || canvasSuspended || document.hidden) return;
-  canvasFrame = requestAnimationFrame(() => { canvasFrame = 0; if (view === 'preview') renderPreview(); else renderPlan(); });
+function cancelCanvasRender() { if (canvasFrame) cancelAnimationFrame(canvasFrame); canvasFrame = 0; planFrameRequested = false; }
+function requestCanvasRender() { scheduleCanvasRender(true); }
+function requestPreviewRender() { scheduleCanvasRender(false); }
+function scheduleCanvasRender(needsPlan) {
+  if (canvasSuspended || document.hidden) return;
+  // Camera and scenery updates share the frame, but never demote a pending
+  // geometry/selection update that also needs the 2D pane.
+  planFrameRequested ||= needsPlan;
+  if (canvasFrame) return;
+  canvasFrame = requestAnimationFrame(() => {
+    const paintPlan = planFrameRequested;
+    canvasFrame = 0; planFrameRequested = false;
+    if (paintPlan && view !== 'preview') renderPlan();
+    if (view !== 'plan') renderPreview();
+  });
 }
 function canvasPixelRatio(width, height, pixels) {
   return Math.min(Number.isFinite(devicePixelRatio) && devicePixelRatio > 0 ? devicePixelRatio : 1, 2, Math.sqrt(pixels / Math.max(1, width * height)));
@@ -200,49 +215,14 @@ function validateSourcePolicy(value) {
   }
 }
 const snap = (value, precise = false) => $('snap').checked && !precise ? Math.round(value * 4) / 4 : round(value);
-function roomBounds(room) {
-  const xs = room.polygon.map(point => point[0]), zs = room.polygon.map(point => point[1]);
-  const minX = Math.min(...xs), minZ = Math.min(...zs), maxX = Math.max(...xs), maxZ = Math.max(...zs);
-  return { minX, minZ, maxX, maxZ, width: round(maxX - minX), depth: round(maxZ - minZ) };
-}
-function sizeRoom(room, width, depth, anchor = null) {
-  if (!Number.isFinite(width) || !Number.isFinite(depth) || width < .05 || depth < .05) throw new Error('Room width and depth must be at least 0.05 m.');
-  const bounds = roomBounds(room), fixed = anchor || [bounds.minX, bounds.minZ];
-  room.polygon = room.polygon.map(([x, z]) => [round(fixed[0] + (x - fixed[0]) * width / bounds.width), round(fixed[1] + (z - fixed[1]) * depth / bounds.depth)]);
-}
-function segmentTouchesRoomBoundary(start, end, room) {
-  const wall = { start, end }, cross = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-  return room.polygon.some((a, index) => {
-    const b = room.polygon[(index + 1) % room.polygon.length], edge = { start: a, end: b };
-    // Check both segments' endpoints: a neighboring room can share only the
-    // middle of a longer wall. Proper crossings also attach the two outlines.
-    return cross(start, end, a) * cross(start, end, b) < 0 && cross(a, b, start) * cross(a, b, end) < 0
-      || projectOnWall(start, edge).distance < .002 || projectOnWall(end, edge).distance < .002
-      || projectOnWall(a, wall).distance < .002 || projectOnWall(b, wall).distance < .002;
-  });
-}
 function resizeRoomWithOutline(target, room, width, depth, anchor = null) {
-  const bounds = roomBounds(room), fixed = anchor || [bounds.minX, bounds.minZ];
-  const transform = ([x, z]) => [round(fixed[0] + (x - fixed[0]) * width / bounds.width), round(fixed[1] + (z - fixed[1]) * depth / bounds.depth)];
-  const walls = target.walls.filter(wall => segmentTouchesRoomBoundary(wall.start, wall.end, room));
-  for (const wall of walls) {
-    const boundary = room.polygon.some((start, index) => {
-      const edge = { start, end: room.polygon[(index + 1) % room.polygon.length] };
-      return projectOnWall(wall.start, edge).distance < .002 && projectOnWall(wall.end, edge).distance < .002;
-    });
-    const shared = target.rooms.some(other => other.id !== room.id && segmentTouchesRoomBoundary(wall.start, wall.end, other));
-    if (!boundary || shared) throw new Error('This room has shared or attached walls. Adjust its polygon and wall endpoints separately to preserve the adjacent space.');
-  }
-  sizeRoom(room, width, depth, fixed);
-  for (const wall of walls) {
-    const oldLength = distance(wall.start, wall.end);
-    wall.start = transform(wall.start); wall.end = transform(wall.end);
-    const newLength = distance(wall.start, wall.end), scale = newLength / oldLength;
-    for (const opening of target.openings.filter(entry => entry.wall_id === wall.id)) {
-      if (opening.width_m > newLength) throw new Error('The resized wall is too short for its door or window. Increase the room dimension or edit the opening first.');
-      opening.offset_m = round(Math.max(0, Math.min(newLength - opening.width_m, (opening.offset_m + opening.width_m / 2) * scale - opening.width_m / 2)));
-    }
-  }
+  Object.assign(target, resizeRoom(target, room.id, width, depth, anchor));
+}
+function applyRoomDrag(target) {
+  const candidate = { ...project, floors: project.floors.map(f => f.id === activeFloorId ? target : f) };
+  validateSourcePolicy(candidate);
+  project = candidate; drag.invalid = null;
+  if (!drag.moved) editorChanged(); drag.moved = true;
 }
 function roomCorners(room) {
   const b = roomBounds(room); return [[b.minX, b.minZ], [b.maxX, b.minZ], [b.maxX, b.maxZ], [b.minX, b.maxZ]];
@@ -275,7 +255,7 @@ function toolHint() { return tool === 'item' ? t('Click inside a room to place: 
 function updatePlacement() {
   $('placement-summary').textContent = t('Ready to place: {item}', { item: placementName() });
   $('browse-items').title = t('Open item library. Ready to place: {item}', { item: placementName() });
-  if (view === 'plan') $('tool-hint').textContent = toolHint();
+  if (view !== 'preview') $('tool-hint').textContent = toolHint();
 }
 function modelDimensions(model, ceiling, elevation = model.elevation_m) {
   const dimensions = { ...model.dimensions_m, height: round(Math.min(model.dimensions_m.height, ceiling)) };
@@ -446,7 +426,7 @@ async function replaceProject(next, message) {
 function installRecoveredProject(next) {
   $('project-title').inspectorDraft = false; $('project-title').removeAttribute('aria-invalid');
   historyPush(project); project = clone(next); activeFloorId = project.floors[0].id;
-  selection = null; drag = null; previewDirty = true; inspectorScope = '';
+  selection = null; connectedRoomMove = null; drag = null; previewDirty = true; inspectorScope = '';
   editorChanged(); setView('plan'); setTool('select'); renderUI(); fitPlan(); fitPreview(); renderPlan();
 }
 function undo(redo = false) {
@@ -454,7 +434,7 @@ function undo(redo = false) {
   if (previewEdit) finishPreviewEdit(null, true);
   const source = redo ? future : history, destination = redo ? history : future; if (!source.length) return;
   destination.push(project); project = source.pop(); if (!project.floors.some(f => f.id === activeFloorId)) activeFloorId = project.floors[0].id;
-  selection = null; drag = null; previewDirty = true; editorChanged(); renderUI(); renderPlan(); status(() => redo ? t('Change restored.') : t('Change undone.')); save();
+  selection = null; connectedRoomMove = null; drag = null; previewDirty = true; editorChanged(); renderUI(); renderPlan(); status(() => redo ? t('Change restored.') : t('Change undone.')); save();
 }
 function renderUI() {
   if (!$('project-title').inspectorDraft) $('project-title').value = project.title;
@@ -485,13 +465,13 @@ function renderUI() {
   $('object-count').textContent = String(count);
   if (!count) objectList.append(node('p', 'object-empty', t('Your rooms, walls, and items will appear here.')));
   reconcileInspector($('object-list'), objectList);
-  $('empty-state').hidden = count > 0 || tool !== 'select' || view !== 'plan';
-  renderInspector(); if (view === 'preview') renderPreview();
+  $('empty-state').hidden = count > 0 || tool !== 'select' || view === 'preview';
+  renderInspector(); if (view !== 'plan') renderPreview();
 }
 function setSelection(next) {
   if (selection?.kind === next?.kind && selection?.id === next?.id) return;
   if (previewEdit) finishPreviewEdit(null, true);
-  selection = next; editorChanged();
+  selection = next; connectedRoomMove = null; editorChanged();
   // Selection changes do not alter floor names, object labels, or their order.
   for (const b of $('object-list').children) if (b.dataset.objectId) {
     b.setAttribute('aria-pressed', String(b.dataset.objectKind === selection?.kind && b.dataset.objectId === selection?.id));
@@ -541,6 +521,7 @@ function buildInspector(parent) {
     $('inspector-title').textContent = t('Floor settings'); $('inspector-subtitle').textContent = t('A good plan starts with the basics.');
     if (haSourcePolicy) parent.append(node('p', 'callout', protectedArchitectureMessage));
     if (haCatalog) field(parent, 'Home Assistant floor', f.ha_floor_id || '', v => transact((_p, d) => { if (v) d.ha_floor_id = v; else delete d.ha_floor_id; }), { options: registryOptions(haCatalog.floors, f.ha_floor_id, 'No floor linked'), help: 'Links this drawing floor to your Home Assistant floor.' });
+    if (haCatalog) parent.append(button('Start rooms from HA areas', startRoomsFromAreas, 'quiet'));
     field(parent, t('Floor name'), f.name, v => transact((_p, d) => { d.name = v; }, () => t('Floor renamed.')));
     const dimensions = row(parent); field(dimensions, t('Elevation (m)'), f.elevation_m, haSourcePolicy ? null : v => transact((_p, d) => { d.elevation_m = v; }), { type: 'number', min: -100, max: 100, readOnly: !!haSourcePolicy });
     field(dimensions, t('Ceiling height (m)'), f.height_m, haSourcePolicy ? null : v => transact((_p, d) => { d.height_m = v; }), { type: 'number', min: .5, max: 20, readOnly: !!haSourcePolicy });
@@ -564,14 +545,14 @@ function buildInspector(parent) {
         selection = { kind: 'rooms', id };
       }, () => t('Garden added. Place trees, paths or animals from the Item library.'), { fit: true });
     }));
-    parent.append(node('p', 'callout', t('Rooms are floor areas. Draw walls yourself, or select a room and build its wall outline. Moving a room will not move its walls.')));
+    parent.append(node('p', 'callout', t('Rooms are floor areas. Build a wall outline in Room details. Moving a room carries its walls, openings, and items; connected rooms can move together.')));
     if (!haSourcePolicy) parent.append(button(t('Clear this floor'), () => { if (confirm(t('Clear every room, wall, opening, and item on {floor}? You can undo this.', { floor: f.name }))) transact((_p, target) => { for (const key of ['rooms', 'walls', 'openings', 'items']) target[key] = []; selection = null; }, () => t('Floor cleared.')); }, 'danger'));
     if (!haSourcePolicy && project.floors.length > 1) parent.append(button(t('Delete this floor'), () => { if (confirm(t('Delete {floor} and everything on it? You can undo this.', { floor: f.name }))) transact(p => { p.floors = p.floors.filter(item => item.id !== activeFloorId); selection = null; }, () => t('Floor deleted.'), { fit: true }); }, 'danger'));
     parent.append(node('p', 'property-id', t('Floor ID: {id}', { id: f.id }))); return;
   }
   const kind = selection.kind;
   $('inspector-title').textContent = ({ rooms: t('Room details'), walls: t('Wall details'), openings: t('Opening details'), items: t('Item details') })[kind];
-  $('inspector-subtitle').textContent = ({ rooms: haContext ? 'Shape the space. Walls are edited separately.' : t('Shape the space. Then add its walls.'), walls: t('A physical segment with real thickness.'), openings: t('A true cutout in the selected wall.'), items: t('Give every object a place and a purpose.') })[kind];
+  $('inspector-subtitle').textContent = ({ rooms: 'Move and resize the space with its walls and items.', walls: t('A physical segment with real thickness.'), openings: t('A true cutout in the selected wall.'), items: t('Give every object a place and a purpose.') })[kind];
   if (kind === 'rooms') {
     const locked = protectedRoom(f.id, object.id);
     if (locked) { $('inspector-subtitle').textContent = 'Existing room shape protected. Rename it, add items, or link devices.'; parent.append(node('p', 'field-note', 'The original walls and details remain in the published home. New rooms and walls can be drawn separately.')); }
@@ -587,9 +568,20 @@ function buildInspector(parent) {
       const bounds = roomBounds(object), dimensions = row(parent);
       field(dimensions, t('Width (m)'), bounds.width, value => editObject((o, target) => resizeRoomWithOutline(target, o, value, roomBounds(o).depth)), { type: 'number', min: .05, max: 200, step: '.01' });
       field(dimensions, t('Depth (m)'), bounds.depth, value => editObject((o, target) => resizeRoomWithOutline(target, o, roomBounds(o).width, value)), { type: 'number', min: .05, max: 200, step: '.01' });
-      parent.append(node('p', 'field-note', 'Drag a corner in 2D or enter dimensions. The room and its exclusive wall outline resize together. Doors and windows keep their widths and follow the wall; items keep their positions. Shared or attached walls require separate endpoint edits.'));
+      parent.append(node('p', 'field-note', 'Drag a corner in 2D or enter dimensions. Rooms sharing complete rectangular sides resize together. Walls follow their rooms, openings keep their widths, and item centers follow proportionally without changing size.'));
+      const group = roomMoveGroup(f, object.id);
+      if (group.requiresConnected) {
+        const key = `${f.id}:${object.id}`;
+        const moveTogether = button('Move connected rooms together', () => {
+          connectedRoomMove = connectedRoomMove === key ? null : key;
+          renderInspector();
+        });
+        moveTogether.setAttribute('aria-pressed', String(connectedRoomMove === key));
+        parent.append(moveTogether);
+        parent.append(node('p', 'field-note', `Enable to drag this connected group: ${f.rooms.filter(room => group.rooms.includes(room.id)).map(room => room.name).join(', ')}. Its walls, openings, and items move together. Turn off to prevent a group move.`));
+      }
       parent.append(button(t('Build wall outline'), () => { let n = 0; const ok = transact((_p, d) => { n = outlineRoom(d, d.rooms.find(r => r.id === object.id)); }, () => t('Wall outline added. Exact shared walls are reused.')); if (ok) status(() => n ? t('{count} wall segments added. Exact shared walls were reused.', { count: n }) : t('This room already has a complete wall outline.')); }, 'primary'));
-      parent.append(node('p', 'field-note', 'Outlines use 0.15 m walls. Room resizing follows an exclusive outline; moving the room leaves walls in place.'));
+      parent.append(node('p', 'field-note', 'Outlines use 0.15 m walls. Moving a room carries its outline, openings, and assigned items. Unsupported junction changes are rejected without changing the plan.'));
     }
     parent.append(button(t('Place item at room center'), () => {
       const center = object.polygon.reduce((sum, p) => [sum[0] + p[0] / object.polygon.length, sum[1] + p[1] / object.polygon.length], [0, 0]);
@@ -629,11 +621,12 @@ function buildInspector(parent) {
     field(parent, t('Item name'), object.name, v => editObject(o => { o.name = v; }));
     const model = object.model_id ? getCatalogModel(object.model_id) : null;
     field(parent, t('Design'), object.model_id || '', value => editObject(o => {
-      if (!value) { for (const key of ['model_id', 'style_id', 'color', 'pattern_id', 'pattern_color']) delete o[key]; return; }
+      if (!value) { for (const key of ['model_id', 'style_id', 'color', 'pattern_id', 'pattern_color', 'curtain']) delete o[key]; return; }
       const next = getCatalogModel(value), previous = o.model_id ? getCatalogModel(o.model_id) : null;
       if (o.name === previous?.label || o.name === LABELS[o.type]) o.name = next.label;
       o.model_id = next.id; o.type = next.type; o.style_id ||= next.default_style;
       if (!supportsFurniturePattern(next)) { delete o.pattern_id; delete o.pattern_color; }
+      if (!supportsCurtain(next)) delete o.curtain;
     }, () => t('Item design changed. Size and position kept.')), { options: [{ value: '', label: originalModel ? 'Original installed model' : t('Basic shape / device') }, ...CATALOG.models.map(entry => ({ value: entry.id, label: t(`model.${entry.id}`) }))], help: t('Changes the shape while keeping your size and placement.') });
     if (model) {
       const style = getCatalogStyle(object.style_id || model.default_style);
@@ -684,6 +677,25 @@ function buildInspector(parent) {
     section(parent, t('Home Assistant'));
     if (haCatalog) renderEntityPicker(parent, object, f);
     field(parent, t('Entity ID (optional)'), object.entity_id, v => editObject(o => { o.entity_id = v.trim(); }), { dir: 'ltr', help: haContext ? 'Bind an entity to this item. Publishing enables its controls in the family view.' : t('Example: light.living_room. Any Home Assistant entity can be linked. In the installed plan, lights, switches and fans have quick toggles; sensors show readings; media players show artwork and controls; Details opens native controls for other entities. This offline planner only stores the mapping and never controls devices.') });
+    if (supportsCurtain(model)) {
+      section(parent, 'Curtain movement');
+      field(parent, 'Window opening', object.curtain?.opening_id || '', value => editObject((item, target) => {
+        if (!value) { delete item.curtain; return; }
+        const opening = target.openings.find(entry => entry.id === value && entry.type === 'window');
+        if (!opening) throw new Error('Choose an existing window on this floor.');
+        const wall = target.walls.find(entry => entry.id === opening.wall_id), length = distance(wall.start, wall.end);
+        const ux = (wall.end[0] - wall.start[0]) / length, uz = (wall.end[1] - wall.start[1]) / length;
+        const center = [wall.start[0] + ux * (opening.offset_m + opening.width_m / 2), wall.start[1] + uz * (opening.offset_m + opening.width_m / 2)];
+        const room = target.rooms.find(entry => entry.id === item.room), inward = pointInPolygon([center[0] - uz * .05, center[1] + ux * .05], room.polygon) ? 1 : -1;
+        const clearance = wall.thickness_m / 2 + item.dimensions_m.depth / 2 + .02;
+        item.position_m = { x: round(center[0] - uz * clearance * inward), y: .03, z: round(center[1] + ux * clearance * inward) };
+        item.dimensions_m.width = round(opening.width_m + .2);
+        item.dimensions_m.height = round(Math.min(target.height_m, opening.head_m + .15) - item.position_m.y);
+        item.rotation_deg = round(-Math.atan2(uz, ux) * 180 / Math.PI + (inward < 0 ? 180 : 0));
+        item.curtain = { opening_id: value, mode: item.curtain?.mode || 'pair' };
+      }, 'Curtain aligned to the selected window.'), { options: [{ value: '', label: 'Decorative only — no window binding' }, ...f.openings.filter(entry => entry.type === 'window').map(entry => ({ value: entry.id, label: `${entry.id} · ${entry.width_m} m · ${entry.wall_id}` }))], help: 'Choose a window explicitly to align and size this curtain. Enter a cover entity above for reported movement in the published home.' });
+      if (object.curtain) field(parent, 'Opening direction', object.curtain.mode, value => editObject(item => { item.curtain.mode = value; }), { options: [{ value: 'pair', label: 'Two panels — open from center' }, { value: 'left', label: 'Gather to the left' }, { value: 'right', label: 'Gather to the right' }], help: 'Left and right are viewed from in front of the curtain. Rails stay fixed. Preview shows the design; the published home follows the reported or last known cover position.' });
+    }
     field(parent, t('Notes'), object.notes, v => editObject(o => { o.notes = v; }), { rows: 3 });
   }
   if (kind !== 'rooms' || !protectedRoom(f.id, object.id)) parent.append(button(t(`Delete ${kind === 'openings' ? 'opening' : kind.slice(0, -1)}`), deleteSelection, 'danger'));
@@ -702,27 +714,35 @@ function deleteSelection() {
 }
 function setTool(next) {
   if (drag) finishPointer(null, true);
+  if (previewEdit) finishPreviewEdit(null, true);
   tool = next; document.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === tool)));
-  if (view === 'plan') $('tool-hint').textContent = toolHint();
+  if (view !== 'preview') $('tool-hint').textContent = toolHint();
   planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
-  if (tool !== 'select' && view !== 'plan') setView('plan');
-  $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || view !== 'plan';
+  if (tool !== 'select' && view === 'preview') setView('plan');
+  $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || view === 'preview';
 }
 function setView(next) {
   if (next === 'preview' && haPublishedPreview) { haPublishedPreview(); return; }
+  const rect = document.querySelector('.canvas-shell').getBoundingClientRect();
+  if (next === 'split' && (haSourcePolicy || rect.width < 700)) next = 'plan';
   if (drag) finishPointer(null, true);
   releasePreviewPointer();
   view = next;
-  previewEnvironment?.setActive(next === 'preview' && !previewLost && !canvasSuspended);
+  previewEnvironment?.setActive(next !== 'plan' && !previewLost && !canvasSuspended);
   if (!haSourcePolicy) {
-    $('plan-tab').setAttribute('aria-selected', String(next === 'plan')); $('preview-tab').setAttribute('aria-selected', String(next === 'preview'));
-    $('plan-tab').tabIndex = next === 'plan' ? 0 : -1; $('preview-tab').tabIndex = next === 'preview' ? 0 : -1;
+    for (const mode of ['plan', 'preview', 'split']) {
+      const tab = $(mode + '-tab');
+      tab.setAttribute('aria-selected', String(next === mode)); tab.tabIndex = next === mode ? 0 : -1;
+    }
   }
-  $('plan-view').hidden = next !== 'plan'; $('preview-view').hidden = next !== 'preview'; $('snap-label').hidden = false;
+  document.querySelector('.canvas-shell').classList.toggle('split-view', next === 'split');
+  $('plan-view').hidden = next === 'preview'; $('preview-view').hidden = next === 'plan'; $('snap-label').hidden = false;
+  $('plan-view').setAttribute('aria-labelledby', next === 'split' ? 'split-tab' : 'plan-tab');
+  $('preview-view').setAttribute('aria-labelledby', next === 'split' ? 'split-tab' : 'preview-tab');
   $('tool-hint').textContent = next === 'preview' ? previewHint() : toolHint();
   updatePreviewNavigation();
-  $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || next !== 'plan';
-  if (next === 'preview') renderPreview(); else renderPlan(); updateZoom();
+  $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || next === 'preview';
+  resizeCanvases(rect); updateZoom();
 }
 function addOpening(wall, offset, type, precise = false) {
   const len = distance(wall.start, wall.end), width = round(Math.min(type === 'window' ? 1.2 : .9, Math.max(.05, len - .1)));
@@ -757,7 +777,7 @@ function fitPlan() {
 function zoomPlan(factor, anchor = [size.width / 2, size.height / 2]) {
   const world = toWorld(anchor); map.scale = Math.max(4, Math.min(280, map.scale * factor)); map.x = anchor[0] - world[0] * map.scale; map.y = anchor[1] - world[1] * map.scale; requestCanvasRender(); updateZoom();
 }
-function updateZoom() { $('zoom-value').textContent = view === 'plan' ? `${Math.round(map.scale / 55 * 100)}%` : `${Math.round(orbit.baseRadius / orbit.radius * 100)}%`; }
+function updateZoom() { $('zoom-value').textContent = view !== 'preview' ? `${Math.round(map.scale / 55 * 100)}%` : `${Math.round(orbit.baseRadius / orbit.radius * 100)}%`; }
 function path(points, close = false) { ctx.beginPath(); points.forEach((p, i) => { const [x, y] = toScreen(p); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); if (close) ctx.closePath(); }
 function planShapePath(shape, width, depth) {
   let cached = planPathCache.get(shape);
@@ -772,7 +792,7 @@ function planShapePath(shape, width, depth) {
   return cached.outline;
 }
 function renderPlan() {
-  if (view !== 'plan' || canvasSuspended || document.hidden) return;
+  if (view === 'preview' || canvasSuspended || document.hidden) return;
   cancelCanvasRender();
   ctx.clearRect(0, 0, size.width, size.height); ctx.fillStyle = planColors.background; ctx.fillRect(0, 0, size.width, size.height);
   const top = toWorld([0, 0]), bottom = toWorld([size.width, size.height]), gridStep = map.scale > 22 ? 1 : 5;
@@ -880,7 +900,7 @@ function hitTest(point) {
 }
 planCanvas.addEventListener('pointerdown', event => {
   // One pointer owns both the working copy and its immutable undo snapshot.
-  if (drag || view !== 'plan' || canvasSuspended || document.hidden || event.isPrimary === false || event.button !== 0 && event.button !== 1) return;
+  if (drag || previewEdit || orbit.pointers.size || view === 'preview' || canvasSuspended || document.hidden || event.isPrimary === false || event.button !== 0 && event.button !== 1) return;
   event.preventDefault(); planCanvas.focus(); const screen = localPoint(event), world = toWorld(screen); planCanvas.setPointerCapture(event.pointerId);
   if (spaceHeld || event.shiftKey || event.button === 1) { drag = { kind: 'pan', pointerId: event.pointerId, screen, map: { ...map } }; planCanvas.style.cursor = 'grabbing'; return; }
   if (tool === 'room' || tool === 'wall') { const p = world.map(value => snap(value, event.altKey)); drag = { kind: 'draw', pointerId: event.pointerId, startWorld: p, endWorld: p, screen }; return; }
@@ -894,8 +914,8 @@ planCanvas.addEventListener('pointerdown', event => {
   setSelection(hitTest(world));
   if (selection?.kind === 'rooms' && protectedRoom(activeFloorId, selection.id)) { status(protectedArchitectureMessage); return; }
   if (selection) {
-    // Keep one immutable undo snapshot; only the selected object changes while dragging.
-    drag = { kind: 'move', pointerId: event.pointerId, startWorld: world, original: project, selection: { ...selection }, moved: false, offset: [0, 0] };
+    // Keep one immutable undo snapshot for the entire connected room edit.
+    drag = { kind: 'move', pointerId: event.pointerId, startWorld: world, original: project, selection: { ...selection }, connected: connectedRoomMove === `${activeFloorId}:${selection.id}`, moved: false, offset: [0, 0] };
     project = clone(project);
   }
   else drag = { kind: 'pan', pointerId: event.pointerId, screen, map: { ...map } };
@@ -913,26 +933,29 @@ planCanvas.addEventListener('pointermove', event => {
     const dx = round(snap(corner[0] + world[0] - drag.startWorld[0], event.altKey) - corner[0]), dz = round(snap(corner[1] + world[1] - drag.startWorld[1], event.altKey) - corner[1]);
     if (dx === drag.offset[0] && dz === drag.offset[1]) return;
     drag.offset = [dx, dz];
-    const width = Math.max(.05, (corner[0] + dx - anchor[0]) * (corner[0] > anchor[0] ? 1 : -1));
-    const depth = Math.max(.05, (corner[1] + dz - anchor[1]) * (corner[1] > anchor[1] ? 1 : -1));
-    const target = { ...originalFloor, rooms: originalFloor.rooms.map(room => room.id === original.id ? clone(room) : room), walls: clone(originalFloor.walls), openings: clone(originalFloor.openings) };
+    const width = (corner[0] + dx - anchor[0]) * (corner[0] > anchor[0] ? 1 : -1);
+    const depth = (corner[1] + dz - anchor[1]) * (corner[1] > anchor[1] ? 1 : -1);
     try {
-      resizeRoomWithOutline(target, target.rooms.find(room => room.id === drag.selection.id), width, depth, anchor);
-      project.floors[project.floors.findIndex(f => f.id === activeFloorId)] = target;
-      if (!drag.moved) editorChanged(); drag.moved = true;
-    } catch (error) { status(error.message, true); }
+      applyRoomDrag(resizeRoom(originalFloor, original.id, width, depth, anchor));
+    } catch (error) { drag.invalid = error.message; status(error.message, true); }
   }
   if (drag.kind === 'move') {
-    const original = drag.original.floors.find(f => f.id === activeFloorId)[selection.kind].find(o => o.id === selection.id);
+    const originalFloor = drag.original.floors.find(f => f.id === activeFloorId);
+    const original = originalFloor[selection.kind].find(o => o.id === selection.id);
     const dx = selection.kind === 'items' ? round(snap(original.position_m.x + world[0] - drag.startWorld[0], event.altKey) - original.position_m.x) : snap(world[0] - drag.startWorld[0], event.altKey);
     const dz = selection.kind === 'items' ? round(snap(original.position_m.z + world[1] - drag.startWorld[1], event.altKey) - original.position_m.z) : snap(world[1] - drag.startWorld[1], event.altKey);
     // Pointer events within one snap cell do not change the plan. Avoid repainting
     // every catalog surface until the object's visible position actually changes.
     if (dx === drag.offset[0] && dz === drag.offset[1]) return;
     drag.offset = [dx, dz];
-    if (!drag.moved && (dx || dz)) editorChanged();
-    if (dx || dz) drag.moved = true; const object = selected();
-    if (selection.kind === 'rooms') object.polygon = original.polygon.map(p => [round(p[0] + dx), round(p[1] + dz)]);
+    if (selection.kind === 'rooms') {
+      try { applyRoomDrag(moveRoom(originalFloor, original.id, dx, dz, { connected: drag.connected })); }
+      catch (error) { drag.invalid = error.message; status(error.message, true); }
+    } else {
+      if (!drag.moved && (dx || dz)) editorChanged();
+      if (dx || dz) drag.moved = true;
+    }
+    const object = selected();
     if (selection.kind === 'walls') { object.start = [round(original.start[0] + dx), round(original.start[1] + dz)]; object.end = [round(original.end[0] + dx), round(original.end[1] + dz)]; }
     if (selection.kind === 'items') { object.position_m.x = round(original.position_m.x + dx); object.position_m.z = round(original.position_m.z + dz); }
     if (selection.kind === 'openings') { const wall = floor().walls.find(w => w.id === object.wall_id), len = distance(wall.start, wall.end); const along = (dx * (wall.end[0] - wall.start[0]) + dz * (wall.end[1] - wall.start[1])) / len; object.offset_m = round(Math.max(0, Math.min(len - object.width_m, original.offset_m + along))); }
@@ -941,6 +964,7 @@ planCanvas.addEventListener('pointermove', event => {
 });
 function finishPointer(event, cancel = false) {
   if (!drag || event && event.pointerId !== drag.pointerId) return;
+  try {
   const current = drag; drag = null; planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
   if (planCanvas.hasPointerCapture(current.pointerId)) planCanvas.releasePointerCapture(current.pointerId);
   if (current.kind === 'draw' && !cancel) {
@@ -953,9 +977,12 @@ function finishPointer(event, cancel = false) {
     setTool('select');
   }
   if (current.kind === 'move' || current.kind === 'resize') {
-    if (cancel || !current.moved || JSON.stringify(project) === JSON.stringify(current.original)) project = current.original;
+    if (cancel || current.invalid || !current.moved || JSON.stringify(project) === JSON.stringify(current.original)) {
+      project = current.original;
+      if (current.invalid && !cancel) status(`Room edit cancelled: ${current.invalid}`, true);
+    }
     else {
-      try { validateProject(project); validateSourcePolicy(project); serializeProject(project); historyPush(current.original); previewDirty = true; status(current.kind === 'resize' ? 'Room and its wall outline resized. Items kept their positions.' : () => t('Object moved.')); save(); }
+      try { validateProject(project); validateSourcePolicy(project); serializeProject(project); historyPush(current.original); previewDirty = true; status(current.kind === 'resize' ? 'Connected room geometry resized. Items followed their rooms; opening widths were preserved.' : current.selection.kind === 'rooms' ? 'Room geometry and assigned items moved together.' : () => t('Object moved.')); save(); }
       catch (error) { project = current.original; status(() => t('Move cancelled: {error}', { error: formatValidationError(error, t) }), true); }
     }
     // The host observes the first movement for dirty-state feedback. Publish
@@ -972,6 +999,10 @@ function finishPointer(event, cancel = false) {
     return;
   }
   renderPlan();
+  } finally {
+    // Refresh selection and geometry after every completed or cancelled gesture.
+    if (view === 'split') requestCanvasRender();
+  }
 }
 planCanvas.addEventListener('pointerup', e => finishPointer(e)); planCanvas.addEventListener('pointercancel', e => finishPointer(e, true));
 planCanvas.addEventListener('lostpointercapture', e => finishPointer(e, true));
@@ -1016,7 +1047,7 @@ function initPreview() {
     previewSun.shadow.autoUpdate = false; previewSun.shadow.needsUpdate = true;
     const fill = new THREE.DirectionalLight(0xdce9f2, .5); fill.position.set(12, 10, -10); scene.add(fill);
     worldGroup = new THREE.Group(); scene.add(worldGroup);
-    previewEnvironment = createEnvironmentLayer(THREE, { scene, ...environmentSite(), visibilityElement: previewCanvas, frameInterval: previewDiffuseLighting ? 750 : previewPixels <= 250000 ? 500 : 180, requestRender: requestCanvasRender, active: view === 'preview', settings: previewEnvironmentSettings });
+    previewEnvironment = createEnvironmentLayer(THREE, { scene, ...environmentSite(), visibilityElement: previewCanvas, frameInterval: previewDiffuseLighting ? 750 : previewPixels <= 250000 ? 500 : 180, requestRender: requestPreviewRender, active: view !== 'plan', settings: previewEnvironmentSettings });
     previewEnvironmentControls.refresh();
     if (!previewInitialized) { fitPreview(); previewInitialized = true; }
   } catch (error) { disposePreviewRenderer(); renderer?.forceContextLoss(); previewUnavailable = true; releasePreviewPointer(); updatePreviewNavigation(); $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
@@ -1030,7 +1061,7 @@ function fitPreview() {
   orbit.target.set((minX + maxX) / 2, (low + high) / 2, (minZ + maxZ) / 2);
   orbit.radius = Math.max(6, sphereRadius / Math.sin(Math.min(verticalFov, horizontalFov) / 2) * 1.12); orbit.baseRadius = orbit.radius;
   rebasePreviewGesture();
-  if (view === 'preview' && renderer) requestCanvasRender();
+  if (view !== 'plan' && renderer) requestPreviewRender();
 }
 function disposePreviewGeometry() {
   if (!worldGroup) return;
@@ -1174,7 +1205,7 @@ function rebuildPreview() {
   previewDirty = false;
 }
 function drawPreview() {
-  if (!renderer || previewLost || previewUnavailable || view !== 'preview' || canvasSuspended || document.hidden) return;
+  if (!renderer || previewLost || previewUnavailable || view === 'plan' || canvasSuspended || document.hidden) return;
   cancelCanvasRender();
   const width = size.width, height = size.height, ratio = canvasPixelRatio(width, height, previewPixels), nextSize = [width, height, ratio].join();
   // Setting canvas dimensions, even to the same values, resets its drawing buffer.
@@ -1191,15 +1222,15 @@ function drawPreview() {
   updateElevationHandle();
   updateZoom();
 }
-function renderPreview() { if (view !== 'preview' || canvasSuspended || document.hidden || previewLost) return; initPreview(); if (!renderer || previewUnavailable) return; if (previewDirty) rebuildPreview(); drawPreview(); }
+function renderPreview() { if (view === 'plan' || view === 'split' && drag || canvasSuspended || document.hidden || previewLost) return; initPreview(); if (!renderer || previewUnavailable) return; if (previewDirty) rebuildPreview(); drawPreview(); }
 function zoomPreview(factor) {
   if (!canNavigatePreview() || !Number.isFinite(factor) || factor <= 0) return;
   const radius = previewRadius(orbit.radius / factor);
   if (radius === orbit.radius) return;
-  orbit.radius = radius; rebasePreviewGesture(); requestCanvasRender();
+  orbit.radius = radius; rebasePreviewGesture(); requestPreviewRender();
 }
 let previewCanvas = $('preview-canvas'), previewEvents;
-function canNavigatePreview() { return view === 'preview' && !previewLost && !previewUnavailable && !canvasSuspended && !document.hidden; }
+function canNavigatePreview() { return view !== 'plan' && !drag && !previewLost && !previewUnavailable && !canvasSuspended && !document.hidden; }
 function previewRadius(value) { return Math.max(1, Math.min(600, value)); }
 function previewPitch(value) { return Math.max(.1, Math.min(Math.PI / 2 - .001, value)); }
 function previewYaw(value) {
@@ -1214,7 +1245,7 @@ function previewHint() {
 function updatePreviewNavigation() {
   const unavailable = previewLost || previewUnavailable;
   const navigation = $('preview-navigation');
-  if (navigation) navigation.hidden = view !== 'preview' || unavailable;
+  if (navigation) navigation.hidden = view === 'plan' || unavailable;
   for (const mode of ['orbit', 'pan', 'edit']) {
     const control = $(`preview-${mode}`);
     if (control) control.setAttribute('aria-pressed', String(orbit.mode === mode));
@@ -1226,26 +1257,26 @@ function updatePreviewNavigation() {
   previewCanvas.dataset.navigationMode = orbit.mode;
   previewCanvas.dataset.navigating = String(orbit.pointers.size > 0);
   previewCanvas.style.cursor = orbit.pointers.size || previewEdit ? 'grabbing' : orbit.mode === 'edit' ? 'default' : 'grab';
-  if (view !== 'preview' || unavailable || orbit.mode !== 'edit') $('preview-elevation-handle').hidden = true;
+  if (view === 'plan' || unavailable || orbit.mode !== 'edit') $('preview-elevation-handle').hidden = true;
 }
 function setPreviewMode(mode) {
   if (!canNavigatePreview()) return;
   releasePreviewPointer(); orbit.mode = mode; updatePreviewNavigation();
-  previewDirty = true; requestCanvasRender();
+  previewDirty = true; requestPreviewRender();
   if (previewMetadata.camera) previewMetadata.camera.mode = mode;
   $('tool-hint').textContent = previewHint();
 }
 function resetPreview() {
   if (!canNavigatePreview()) return;
-  releasePreviewPointer(); orbit.yaw = -Math.PI / 3; orbit.pitch = .8; fitPreview(); requestCanvasRender();
+  releasePreviewPointer(); orbit.yaw = -Math.PI / 3; orbit.pitch = .8; fitPreview(); requestPreviewRender();
 }
 function topPreview() {
   if (!canNavigatePreview()) return;
-  releasePreviewPointer(); orbit.yaw = -Math.PI / 2; orbit.pitch = previewPitch(Math.PI / 2); requestCanvasRender();
+  releasePreviewPointer(); orbit.yaw = -Math.PI / 2; orbit.pitch = previewPitch(Math.PI / 2); requestPreviewRender();
 }
 function rotatePreview(angle) {
   if (!canNavigatePreview()) return;
-  releasePreviewPointer(); orbit.yaw = previewYaw(orbit.yaw + angle); requestCanvasRender();
+  releasePreviewPointer(); orbit.yaw = previewYaw(orbit.yaw + angle); requestPreviewRender();
 }
 function previewPointerCenter() {
   const points = [...orbit.pointers.values()], first = points[0], second = points[1];
@@ -1399,7 +1430,7 @@ function bindPreviewCanvas() {
     if (start.mode === 'pan') panPreview(dx, dy, start);
     else { orbit.yaw = previewYaw(start.yaw - dx * .007); orbit.pitch = previewPitch(start.pitch + dy * .007); }
     if (orbit.pointers.size === 2 && start.distance > 0 && center.distance > 0) orbit.radius = previewRadius(start.radius * start.distance / center.distance);
-    requestCanvasRender();
+    requestPreviewRender();
   }, options);
   canvas.addEventListener('pointerup', e => { if (previewEdit?.pointerId === e.pointerId) finishPreviewEdit(e); else releasePreviewPointer(e); }, options);
   canvas.addEventListener('lostpointercapture', releasePreviewPointer, options);
@@ -1427,7 +1458,7 @@ function bindPreviewCanvas() {
       if (key === 'arrowleft') orbit.yaw = previewYaw(orbit.yaw - .12); if (key === 'arrowright') orbit.yaw = previewYaw(orbit.yaw + .12);
       if (key === 'arrowup') orbit.pitch = previewPitch(orbit.pitch + .1); if (key === 'arrowdown') orbit.pitch = previewPitch(orbit.pitch - .1);
     }
-    requestCanvasRender();
+    requestPreviewRender();
   }, options);
   canvas.addEventListener('webglcontextlost', e => {
     e.preventDefault(); previewLost = true; previewEnvironment?.setActive(false); cancelCanvasRender(); releasePreviewPointer();
@@ -1573,11 +1604,22 @@ $('library-category').addEventListener('change', () => renderLibrary());
 $('library-more').addEventListener('click', () => renderLibrary(true));
 $('library-clear').addEventListener('click', () => { $('library-search').value = ''; $('library-category').value = ''; renderLibrary(); $('library-search').focus(); });
 $('undo').addEventListener('click', () => undo()); $('redo').addEventListener('click', () => undo(true));
-$('plan-tab').addEventListener('click', () => setView('plan')); $('preview-tab').addEventListener('click', () => setView('preview'));
-for (const tab of [$('plan-tab'), $('preview-tab')]) tab.addEventListener('keydown', e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); setView(view === 'plan' ? 'preview' : 'plan'); (view === 'plan' ? $('plan-tab') : $('preview-tab')).focus(); } });
+const viewModes = ['plan', 'preview', 'split'];
+for (const mode of viewModes) {
+  const tab = $(mode + '-tab');
+  tab.addEventListener('click', () => setView(mode));
+  tab.addEventListener('keydown', e => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault();
+    const available = viewModes.filter(value => !$(value + '-tab').disabled && !$(value + '-tab').hidden);
+    const index = available.indexOf(mode), direction = e.key === 'ArrowLeft' ? -1 : 1;
+    const next = e.key === 'Home' ? available[0] : e.key === 'End' ? available.at(-1) : available[(index + direction + available.length) % available.length];
+    setView(next); $(next + '-tab').focus();
+  });
+}
 $('all-floors').addEventListener('change', () => { previewDirty = true; fitPreview(); renderPreview(); });
-$('fit-view').addEventListener('click', () => { if (view === 'preview') resetPreview(); else { fitPlan(); renderPlan(); } });
-$('zoom-in').addEventListener('click', () => view === 'plan' ? zoomPlan(1.2) : zoomPreview(1.2)); $('zoom-out').addEventListener('click', () => view === 'plan' ? zoomPlan(1 / 1.2) : zoomPreview(1 / 1.2));
+$('fit-view').addEventListener('click', () => { if (view !== 'preview') { fitPlan(); renderPlan(); } if (view !== 'plan') resetPreview(); });
+$('zoom-in').addEventListener('click', () => view !== 'preview' ? zoomPlan(1.2) : zoomPreview(1.2)); $('zoom-out').addEventListener('click', () => view !== 'preview' ? zoomPlan(1 / 1.2) : zoomPreview(1 / 1.2));
 $('help-button').addEventListener('click', () => $('help-dialog').showModal());
 document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => $(b.dataset.close).close()));
 $('build-project').addEventListener('click', () => {
@@ -1591,7 +1633,7 @@ window.addEventListener('keydown', e => {
   if (e.defaultPrevented) return;
   if (e.target.closest('input, textarea, select') || document.querySelector('dialog[open]')) return;
   if (e.key === 'Escape') { finishPointer(null, true); releasePreviewPointer(); setSelection(null); setTool('select'); renderUI(); renderPlan(); return; }
-  if (e.code === 'Space' && (e.target === planCanvas || e.target === previewCanvas || e.target === document.body)) { e.preventDefault(); spaceHeld = true; if (view === 'plan') planCanvas.style.cursor = 'grab'; }
+  if (e.code === 'Space' && (e.target === planCanvas || e.target === previewCanvas || e.target === document.body)) { e.preventDefault(); spaceHeld = true; if (view !== 'preview') planCanvas.style.cursor = 'grab'; }
   if (e.ctrlKey || e.metaKey) {
     if (e.key.toLowerCase() === 'z') { e.preventDefault(); undo(e.shiftKey); }
     if (e.key.toLowerCase() === 'y') { e.preventDefault(); undo(true); }
@@ -1599,7 +1641,7 @@ window.addEventListener('keydown', e => {
   }
   if (e.key === 'Delete' || e.key === 'Backspace') { if (selection) { e.preventDefault(); deleteSelection(); } return; }
   const shortcuts = { v: 'select', r: 'room', w: 'wall', d: 'door', n: 'window', i: 'item' }; if (shortcuts[e.key.toLowerCase()]) setTool(shortcuts[e.key.toLowerCase()]);
-  if (view === 'plan' && e.target === planCanvas) {
+  if (view !== 'preview' && e.target === planCanvas) {
     if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomPlan(1.15); } if (e.key === '-') { e.preventDefault(); zoomPlan(1 / 1.15); }
     if (e.key.startsWith('Arrow')) { e.preventDefault(); map.x += e.key === 'ArrowLeft' ? 30 : e.key === 'ArrowRight' ? -30 : 0; map.y += e.key === 'ArrowUp' ? 30 : e.key === 'ArrowDown' ? -30 : 0; renderPlan(); }
   }
@@ -1610,8 +1652,18 @@ window.addEventListener('beforeunload', e => { if ((saveFailed || pendingSaves) 
 let firstResize = true, planSize = '';
 function resizeCanvases(rect) {
   if (rect.width < 1 || rect.height < 1) return;
-  if (previewEdit && (rect.width !== size.width || rect.height !== size.height)) finishPreviewEdit(null, true);
-  const old = { ...size }; size = { width: rect.width, height: rect.height };
+  $('split-tab').disabled = rect.width < 700;
+  $('split-tab').title = rect.width < 700 ? t('Widen the editor to use 2D + 3D.') : t('Draw in 2D and inspect your changes in 3D.');
+  if (view === 'split' && rect.width < 700) {
+    const moveFocus = $('preview-view').contains(document.activeElement) || document.activeElement === $('split-tab');
+    setView('plan'); if (moveFocus) planCanvas.focus({ preventScroll: true }); return;
+  }
+  const width = view === 'split' ? rect.width / 2 : rect.width;
+  if (width !== size.width || rect.height !== size.height) {
+    if (drag) finishPointer(null, true);
+    if (previewEdit) finishPreviewEdit(null, true);
+  }
+  const old = { ...size }; size = { width, height: rect.height };
   const dpr = canvasPixelRatio(size.width, size.height, 4000000), nextSize = [size.width, size.height, dpr].join();
   if (!canvasSuspended && !document.hidden && nextSize !== planSize) {
     // Release the old bitmap before changing orientation: mixing old height
@@ -1620,7 +1672,7 @@ function resizeCanvases(rect) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); planSize = nextSize;
   }
   if (firstResize) { firstResize = false; fitPlan(); } else { map.x += (size.width - old.width) / 2; map.y += (size.height - old.height) / 2; }
-  if (view === 'preview') {
+  if (view !== 'plan') {
     const ratio = orbit.baseRadius / orbit.radius, target = orbit.target.clone();
     fitPreview(); orbit.radius = orbit.baseRadius / ratio;
     // Layout changes retain the user's framing. Continue a captured gesture
@@ -1778,6 +1830,7 @@ if (haContext) {
       const next = value || blankProject(); validateProject(next); serializeProject(next);
       installSourcePolicy(next, policy, hostActions);
       if (haSourcePolicy) {
+        $('split-tab').hidden = true;
         for (const id of ['plan-tab', 'preview-tab']) { $(id).setAttribute('role', 'button'); $(id).removeAttribute('aria-selected'); $(id).removeAttribute('aria-controls'); $(id).tabIndex = 0; }
         $('plan-tab').parentElement.setAttribute('role', 'group');
         $('plan-tab').parentElement.setAttribute('aria-label', 'Drawing and published home');
@@ -1787,6 +1840,10 @@ if (haContext) {
         helpPreview.parentElement.querySelector('p').textContent = 'Use Published home to inspect the current installed details. Changes to your drawing appear there only after Save draft and Publish to 3D Home. Back to editing returns to this drawing.';
       }
       haCatalog = catalog && Array.isArray(catalog.areas) && Array.isArray(catalog.entities) ? catalog : { floors: [], areas: [], entities: [] };
+      if (!$('start-ha-areas')) {
+        const start = button('Start rooms from HA areas', startRoomsFromAreas, 'text-button'); start.id = 'start-ha-areas'; start.setAttribute('aria-haspopup', 'dialog');
+        $('empty-note').before(start);
+      }
       installRecoveredProject(next); history = []; future = [];
       document.querySelector('.workspace').inert = false; document.querySelector('.app-header').inert = false; renderUI();
       translatedText('save-status', 'Draft in this tab · save in Home Assistant above');
@@ -1833,6 +1890,14 @@ function registryOptions(entries = [], current, empty) {
 function areaEntities(room) {
   return haCatalog.entities.filter(entity => !entity.disabled && (!room?.ha_area_id || entity.area_id === room.ha_area_id));
 }
+function startRoomsFromAreas() {
+  if (!haCatalog || focusUnfinishedGuideField()) return;
+  const floorId = floor().id;
+  showAreaStarter({ project, floor: floor(), areas: haCatalog.areas, commit(requests, walls) {
+    return transact(p => { const ids = addAreaRooms(p, floorId, haCatalog.areas, requests, walls); selection = { kind: 'rooms', id: ids[0] }; },
+      'Rooms created from your dimensions. Arrange the starter rooms to match your home, then save your draft.', { fit: true });
+  } });
+}
 function renderEntityPicker(parent, object, target) {
   const room = target.rooms.find(entry => entry.id === object.room);
   const entries = areaEntities(room);
@@ -1842,27 +1907,24 @@ function renderEntityPicker(parent, object, target) {
 }
 function renderAreaDevices(parent, room) {
   if (!room.ha_area_id) return;
-  const entities = areaEntities(room);
+  parent.append(button('Choose multiple devices…', () => {
+    if (focusUnfinishedGuideField()) return;
+    const floorId = floor().id;
+    showDeviceChooser({ project, room, entities: haCatalog.entities, commit(requests) {
+      return transact(p => { addAreaDevices(p, floorId, room.id, haCatalog.entities, requests); }, 'Selected devices added. Drag the markers to their real positions, then save your draft.');
+    } });
+  }, 'quiet'));
+  const entities = areaDeviceChoices(project, room, haCatalog.entities, '', true);
   const chooser = field(parent, 'Add device to this room', '', null, { options: [{ value: '', label: 'Choose an entity…' }, ...entities.map(entity => ({ value: entity.entity_id, label: `${entity.name} · ${entity.entity_id}${entity.available === false ? ' (unavailable)' : ''}` }))] });
+  const media = field(parent, 'New media player controls', 'auto', null, { options: [{ value: 'auto', label: 'Use HA type (generic media if unknown)' }, { value: 'audio', label: 'Speaker / audio' }, { value: 'tv', label: 'TV / display' }], help: 'Applies to media players only. HA speaker types use audio controls; unknown types start as generic media. Choose TV for an unclassified television.' });
   const add = button('Add linked item', () => {
     const value = [...$('inspector-body').querySelectorAll('select')].find(control => control.dataset.inspectorKey === chooser.dataset.inspectorKey)?.value;
     const entity = entities.find(entry => entry.entity_id === value);
     if (!entity) return status('Choose an entity to add to the room.', true);
-    transact((_p, target) => {
-      const source = target.rooms.find(entry => entry.id === room.id);
-      // A triangle fan centroid search also handles rooms whose bounding-box
-      // center falls outside a concave polygon.
-      let center = source.polygon.reduce((sum, p) => [sum[0] + p[0] / source.polygon.length, sum[1] + p[1] / source.polygon.length], [0, 0]);
-      if (!pointInPolygon(center, source.polygon)) {
-        for (let i = 1; i < source.polygon.length - 1; i++) {
-          const trial = [0, 1].map(axis => (source.polygon[0][axis] + source.polygon[i][axis] + source.polygon[i + 1][axis]) / 3);
-          if (pointInPolygon(trial, source.polygon)) { center = trial; break; }
-        }
-      }
-      const type = entity.domain === 'light' ? 'lamp' : entity.domain === 'media_player' ? 'tv' : entity.domain === 'switch' ? 'switch' : 'sensor';
-      const id = nextId(target, 'item');
-      target.items.push({ id, name: entity.name.slice(0, 100), type, room: source.id, entity_id: entity.entity_id, notes: '', position_m: { x: round(center[0]), y: 0, z: round(center[1]) }, dimensions_m: { width: .25, depth: .25, height: .3 }, rotation_deg: 0 });
-      selection = { kind: 'items', id };
+    const display = [...$('inspector-body').querySelectorAll('select')].find(control => control.dataset.inspectorKey === media.dataset.inspectorKey)?.value || 'auto';
+    transact((p, target) => {
+      const ids = addAreaDevices(p, target.id, room.id, haCatalog.entities, [{ entityId: entity.entity_id, display }]);
+      selection = { kind: 'items', id: ids[0] };
     }, 'Linked item added. Drag it into position, then save your draft.');
   });
   add.disabled = entities.length === 0; parent.append(add);

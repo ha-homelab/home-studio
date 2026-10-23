@@ -8,6 +8,7 @@ const COLOR = /^#[0-9a-fA-F]{6}$/;
 export const PATTERNS = ['none', 'stripes', 'checks', 'diamonds', 'dots', 'herringbone', 'chevrons'].map(id => ({ id, label: id[0].toUpperCase() + id.slice(1) }));
 export const getCatalogModel = id => models.get(id) || null;
 export const getCatalogStyle = id => styles.get(id) || null;
+export const supportsCurtain = model => ['curtain_pair_open', 'curtain_pair_closed'].includes(model?.id);
 export const supportsFurniturePattern = model => !!model?.parts.some(part => part.shape === 'box' && ['top', 'front'].includes(part.pattern_face));
 
 export function validateFurnitureAppearance(item) {
@@ -214,11 +215,14 @@ export function buildFurnitureAsset(item) {
   const style = getCatalogStyle(item.style_id ?? model.default_style), materials = {};
   const pattern = item.pattern_id && item.pattern_id !== 'none' ? item.pattern_id : null;
   const patternedMesh = { name: 'pattern', vertices: [], normals: [], indices: [], kind: 'inventory' };
+  const curtainPatterns = [];
   const meshes = model.parts.map((part, index) => {
     const color = (part.material === 'body' && item.color ? item.color : style.materials[part.material] || part.material).toLowerCase();
     const material = 'furniture_' + color.slice(1);
     materials[material] = linearColor(color);
-    const mesh = { name: 'part_' + index, ...primitive(part), material, kind: 'inventory' };
+    const fabric = supportsCurtain(model) && ['body', 'accent'].includes(part.material);
+    const tags = fabric ? { curtain_fabric: true, curtain_panel: part.center[0] < 0 ? 'left' : 'right' } : {};
+    const mesh = { name: 'part_' + index, ...primitive(part), material, kind: 'inventory', ...tags };
     if (pattern && part.pattern_face) {
       // Replace precisely the original top (+Y) or front (+Z) two triangles.
       const offset = part.pattern_face === 'top' ? 6 : 24;
@@ -227,7 +231,8 @@ export function buildFurnitureAsset(item) {
       mesh.indices = mesh.vertices.map((_, index) => index);
       const [background, accent] = patternSurface(part, pattern);
       appendMesh(mesh, background);
-      appendMesh(patternedMesh, accent);
+      if (fabric) curtainPatterns.push({ name: 'pattern_' + index, ...accent, kind: 'inventory', ...tags });
+      else appendMesh(patternedMesh, accent);
     }
     return mesh;
   });
@@ -235,7 +240,8 @@ export function buildFurnitureAsset(item) {
     const color = (item.pattern_color || style.materials.accent).toLowerCase();
     patternedMesh.material = 'furniture_' + color.slice(1);
     materials[patternedMesh.material] = linearColor(color);
-    meshes.push(patternedMesh);
+    if (patternedMesh.vertices.length) meshes.push(patternedMesh);
+    for (const mesh of curtainPatterns) meshes.push({ ...mesh, material: patternedMesh.material });
   }
   return { meshes, materials };
 }

@@ -199,6 +199,27 @@ the host closes the viewer channel and releases its active resources. Backend
 administrator checks remain authoritative even though the card also explains
 that requirement before loading private content.
 
+The card's `getConfigElement()` exposes a visual editor for its seven supported
+options and preserves other Lovelace keys on `config-changed`. Named initial
+floor choices come from `home_floorplan/status`: `floor_options` is filtered
+using the same current read permissions as `floors`, against the same pinned
+publication snapshot. The editor never requests a private project or forwards
+the `hass` object or its authentication to a child frame. Account changes,
+reconnects, and removal invalidate outstanding catalog requests. Newly added
+visual cards lock layout editing; existing configuration defaults are unchanged.
+
+Because Home Assistant's frontend depends on Lovelace, integration setup can
+register `/home-floorplan-static/card.js` through the storage resource collection
+after the static route exists. It calls `async_get_info()` to load the collection
+before inspecting `async_items()`, and creates only a missing module with
+`async_create_item({"url": ..., "res_type": "module"})`. The stable URL is served
+without caching, so upgrades do not create another resource or change its ID.
+Existing matching URLs (including query strings) and resource types are never
+rewritten. YAML resources remain explicitly configured by their owner. Unload
+retains the shared resource while backend routes reject requests until reload;
+resource-registration failure leaves the home available and can be retried by
+reloading the integration.
+
 Media artwork is a separate generic display path from private TV screenshots.
 The trusted panel fetches the canonical Home Assistant media-player proxy only
 for saved bindings, using HA's authenticated fetch. It bounds response size,
@@ -877,3 +898,9 @@ from unpublished draft changes. Returning removes that renderer before showing
 the editor, preventing two large WebGL scenes from staying live. Native projects
 continue to use their normal draft 3D preview. No external editor navigation is
 required from the HA interface.
+
+### Side-by-side drawing and preview
+
+The editor offers **2D + 3D** when its drawing workspace is at least 700 CSS pixels wide. Both panes use the same accepted project, selection, undo history, and save path. The left pane remains the drawing surface; the right pane retains orbit, pan, zoom, and item-height controls. **Fit view** fits both panes; the bottom zoom controls apply to the drawing, and scrolling over the preview zooms the camera. Narrowing the workspace returns to the full-width drawing without changing the project.
+
+There is still one bounded WebGL context. Both panes share the on-demand frame scheduler, and a completed 2D move or resize updates the 3D geometry once. The preview retains the previous committed geometry during a 2D drag; it does not rebuild on every pointer event. Orbiting does not create undo entries or save changes. A pointer gesture in one pane prevents a competing edit in the other. Existing generated-home architecture remains protected and uses its published preview instead of a misleading partial 3D reconstruction.

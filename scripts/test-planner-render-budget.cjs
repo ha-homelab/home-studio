@@ -28,6 +28,25 @@ const event = (x = 0, y = 0) => ({clientX: x, clientY: y, button: 0, pointerId: 
 const scheduler = section('let canvasFrame =', 'let startupMessage =');
 
 (async () => {
+  let scheduledPlans = 0, scheduledPreviews = 0;
+  const scheduling = vm.createContext({document: {hidden: false}, view: 'split',
+    renderPlan() { scheduling.cancelCanvasRender(); scheduledPlans++; },
+    renderPreview() { scheduling.cancelCanvasRender(); scheduledPreviews++; }});
+  const scheduleClock = frames(scheduling);
+  vm.runInContext(scheduler, scheduling);
+  for (let i = 0; i < 20; i++) scheduling.requestPreviewRender();
+  assert.equal(scheduleClock.pending.size, 1, 'Camera bursts share one pending frame');
+  scheduleClock.flush();
+  assert.deepEqual([scheduledPlans, scheduledPreviews], [0, 1], 'Preview-only invalidation keeps 2D idle');
+  for (const requests of [['requestPreviewRender', 'requestCanvasRender'], ['requestCanvasRender', 'requestPreviewRender']]) {
+    for (const request of requests) scheduling[request]();
+    assert.equal(scheduleClock.pending.size, 1, 'Camera and document changes coalesce into one frame');
+    scheduleClock.flush();
+  }
+  assert.deepEqual([scheduledPlans, scheduledPreviews], [2, 3], 'Document changes win in either request order');
+  scheduling.requestCanvasRender(); scheduling.cancelCanvasRender(); scheduling.requestPreviewRender();
+  scheduleClock.flush();
+  assert.deepEqual([scheduledPlans, scheduledPreviews], [2, 4], 'Cancellation clears stale 2D work');
   let pathBuilds = 0;
   class Outline {
     constructor() { this.commands = []; pathBuilds++; }
@@ -50,6 +69,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   assert.notEqual(paths.planShapePath({points: shape.points}, 80, 30), outline, 'A new appearance owns a separate outline');
   const THREE = await import('data:text/javascript;base64,' + fs.readFileSync(path.join(root, 'vendor/three.module.min.js')).toString('base64'));
   const model = await import('../planner/model.js');
+  const { moveRoom } = await import('../planner/room-transform.js');
   const { createEnvironmentLayer } = await import('../planner/environment.js');
   const project = model.blankProject(), f = project.floors[0];
   f.rooms.push({id: 'room', name: 'Room', polygon: [[0, 0], [8, 0], [8, 6], [0, 6]], material: 'floor'});
@@ -346,7 +366,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     }));
     const controls = {'object-list': {children: buttons}, undo: {disabled: true}, redo: {disabled: true}, 'pointer-position': {textContent: ''}};
     const p = vm.createContext({previewEnvironment: null, haSourcePolicy: null, haPublishedPreview: null,
-      project: original, activeFloorId: f.id, selection: null, tool: 'select', view: 'plan', drag: null, previewEdit: null,
+      orbit: { pointers: new Map() }, project: original, activeFloorId: f.id, selection: null, connectedRoomMove: null, moveRoom, tool: 'select', view: 'plan', drag: null, previewEdit: null,
       planCanvas: plan, spaceHeld: false, previewDirty: false, map: {x: 0, y: 0},
       clone(value) { clones++; return model.clone(value); }, round: model.round, distance: model.distance,
       snap: value => value, localPoint: e => [e.clientX, e.clientY], toWorld: point => point,
@@ -360,7 +380,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
       validateProject: model.validateProject, serializeProject: JSON.stringify, historyPush: value => history.push(value),
       document: {hidden: false}, zoomPlan() {}, history, future: [],
     });
-    const gestureClock = frames(p); vm.runInContext(scheduler + section('const protectedRoom =', 'const snap =') + section('function setSelection(', 'function field(') + section("planCanvas.addEventListener('pointerdown'", '// On-demand 3D rendering.'), p);
+    const gestureClock = frames(p); vm.runInContext(scheduler + section('const protectedRoom =', 'const snap =') + section('function applyRoomDrag(', 'function roomCorners(') + section('function setSelection(', 'function field(') + section("planCanvas.addEventListener('pointerdown'", '// On-demand 3D rendering.'), p);
     plan.events.pointerdown(event(1, 1));
     assert.equal(uiDraws, 0, 'Selecting an existing object retains the floor and object list nodes');
     assert.equal(inspectorDraws, 1, 'A changed selection updates its inspector once');
@@ -419,7 +439,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     p.previewHint = p.toolHint = () => '';
     p.previewLost = false;
     p.resizeCanvases = () => {};
-    p.document.querySelector = () => ({getBoundingClientRect: () => ({width: 800, height: 600})});
+    p.document.querySelector = () => ({classList: {toggle() {}}, getBoundingClientRect: () => ({width: 800, height: 600})});
     vm.runInContext(section('function setView(', 'function addOpening(') +
       source.split('\n').find(line => line.startsWith("window.addEventListener('blur'")) +
       source.split('\n').find(line => line.startsWith("document.addEventListener('visibilitychange'")) +

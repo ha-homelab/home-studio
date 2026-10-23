@@ -1,5 +1,8 @@
 // Complete localized interface; project identifiers and user content remain unchanged.
 export default {
+  "Widen the editor to use 2D + 3D.": "Perlebar editor untuk menggunakan 2D + 3D.",
+  "Draw in 2D and inspect your changes in 3D.": "Gambar dalam 2D dan periksa perubahan dalam 3D.",
+
   "Furniture": "Perabot",
   "Lamp": "Lampu",
   "Ceiling light": "Lampu plafon",
