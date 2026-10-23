@@ -38,7 +38,11 @@
   pointer, or narrowing the layout. A graphics-context failure leaves the 2D
   editor and export available.
 
-### Compatibility
+### Upgrade
+
+- Requires Home Assistant 2026.10 or newer. Back up HA and export the drawing
+  JSON, install the new integration package through HACS or replace the
+  component folder, then restart HA and reload the browser.
 
 - Existing drawings and entity bindings remain valid. New curtain bindings
   add optional authoring metadata; export a backup before downgrading to an
@@ -48,6 +52,15 @@
   measured room shapes. Existing generated-home architecture remains protected.
 - Install prereleases explicitly through HACS for testing. Publication of a
   package does not update or restart an existing Home Assistant installation.
+
+### Security
+
+- HA area/entity suggestions and card floor names remain scoped to the signed-in
+  account. Administrative drawing and publication permissions are unchanged.
+- Dashboard resource registration preserves existing user entries. No household
+  data, credentials, or private build inputs are included in public packages.
+- Curtain position rendering sends no device commands. Use Dry run to inspect
+  new entity bindings before enabling real control.
 
 ## [1.0.0] - Home Studio in Home Assistant
 
