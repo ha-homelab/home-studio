@@ -13,7 +13,10 @@ const spec = JSON.parse(python(['--spec']));
   const made = [], loads = [];
   class TestTexture extends THREE.Texture { constructor(image) { super(image); made.push(this); this.released=0; this.addEventListener('dispose',()=>this.released++); } }
   class Image { constructor() { loads.push(this); this.naturalWidth=this.naturalHeight=256; } set src(value) { this.url=value; } }
-  const context = vm.createContext({Image, atob, btoa}); vm.runInContext(source, context);
+  const deadlines=new Map();let nextDeadline=0;
+  const context = vm.createContext({Image, atob, btoa,
+    setTimeout(callback,delay){const id=++nextDeadline;deadlines.set(id,{callback,delay});return id;},
+    clearTimeout(id){deadlines.delete(id);}}); vm.runInContext(source, context);
   const engine = {...THREE, Texture:TestTexture};
   const part = {material:'wood',vertices:[[0,1,0],[1,1,0],[0,1,1]],normals:[[0,1,0],[0,1,0],[0,1,0]],indices:[0,1,2],
     albedo_texture:'fabric',uv:[[0,0],[4,0],[0,4]],uv_dimensions:['width','depth']};
@@ -56,6 +59,15 @@ const spec = JSON.parse(python(['--spec']));
   assert.equal(await owner.ready,false);assert.equal(raced.released,1,'onload-to-promise disposal race releases ownership');
   owner=context.createMaterialTextures(engine,{fabric:spec});loads.at(-1).onerror();assert.equal(await owner.ready,false);
   owner=context.createMaterialTextures(engine,{fabric:spec});owner.dispose();assert.equal(await owner.ready,false);
+  assert.equal(deadlines.size,0,'load, error and dispose clear every decode deadline');
+  owner=context.createMaterialTextures(engine,{fabric:spec,same:spec});
+  assert.equal(deadlines.size,1,'shared images have one deadline, not one per binding');
+  const stalled=loads.at(-1),lateLoad=stalled.onload,lateError=stalled.onerror,created=made.length;
+  const deadline=[...deadlines.values()][0];assert.equal(deadline.delay,5000);deadline.callback();
+  assert.equal(await owner.ready,false);assert.equal(owner.count,0);assert.equal(stalled.url,'');
+  assert.equal(deadlines.size,0);assert.equal(context.inventoryMaterialBatches(asset,size,materials,owner).length,1);
+  lateLoad();lateError();assert.equal(made.length,created,'late callbacks cannot create a map after fallback');
+  owner.dispose();assert.equal(deadlines.size,0);
   console.log('Material ownership, UV scaling, fallback, room-lighting and disposal tests passed.');
 
   const temp=fs.mkdtempSync(path.join(os.tmpdir(),'home-studio-materials-'));

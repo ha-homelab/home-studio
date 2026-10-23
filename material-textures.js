@@ -33,9 +33,17 @@ function createMaterialTextures(THREE, definitions) {
   const ready = Promise.all(specs.map(([id, uri]) => {
     if (!unique.has(uri)) unique.set(uri, new Promise(resolve => {
       const image = new Image(); images.add(image);
-      const finish = value => { image.onload = image.onerror = null; resolve(value); };
+      let settled = false;
+      const finish = value => {
+        if (settled) return;
+        settled = true; clearTimeout(deadline);
+        image.onload = image.onerror = null; resolve(value);
+      };
+      // Optional color detail must not hold the initial inventory indefinitely.
+      const deadline = setTimeout(() => { finish(null); image.src = ''; }, 5000);
       image.onerror = () => finish(null);
       image.onload = () => {
+        if (settled) return;
         if (disposed || image.naturalWidth !== 256 || image.naturalHeight !== 256) return finish(null);
         const texture = new THREE.Texture(image);
         owned.add(texture);

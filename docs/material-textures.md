@@ -71,8 +71,10 @@ marks textures for upload after GPU release, and disposes owned maps/images on
 final page teardown. BFCache suspension keeps the owner alive. The initial
 inventory build awaits the bounded local decodes, so completion does not rebuild
 active controls a second time. Existing demand-render guards prevent drawing
-while suspended.
-There is no new timer, animation loop or renderer.
+while suspended. Each unique image has a one-shot five-second decode deadline;
+expiry continues startup with the original material batches. Success, failure
+and disposal clear the deadline, and late callbacks cannot install a map.
+There is no recurring timer, new animation loop or renderer.
 
 ## Exports and packaging
 
