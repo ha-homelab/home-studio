@@ -15,6 +15,18 @@ const fixture = {
       position_m: { x: 2, y: .4, z: 2 }, dimensions_m: { width: .8, depth: .7, height: .5 },
       rotation_deg: 0, entity_id: '', notes: '' }] }],
 };
+async function previewPoint(page, point) {
+  return page.evaluate(async point => {
+    const THREE = await import('/vendor/three.module.min.js');
+    const state = planner.getPreviewMetadata().camera, rect = document.getElementById('preview-canvas').getBoundingClientRect();
+    const camera = new THREE.PerspectiveCamera(40, rect.width / rect.height, .02, 1500), horizontal = Math.cos(state.pitch) * state.radius;
+    camera.position.set(state.target.x + Math.cos(state.yaw) * horizontal,
+      state.target.y + Math.sin(state.pitch) * state.radius, state.target.z + Math.sin(state.yaw) * horizontal);
+    camera.lookAt(new THREE.Vector3(state.target.x, state.target.y, state.target.z)); camera.updateMatrixWorld();
+    const projected = new THREE.Vector3(...point).project(camera);
+    return { x: rect.x + (projected.x + 1) * rect.width / 2, y: rect.y + (1 - projected.y) * rect.height / 2 };
+  }, point);
+}
 (async () => {
   const server = http.createServer((req, res) => {
     const route = new URL(req.url, 'http://localhost').pathname;
@@ -74,6 +86,37 @@ const fixture = {
     await page.waitForFunction(expected => JSON.stringify(window.planner.getProject()) === expected, JSON.stringify(before));
     await page.waitForFunction(() => !window.__splitTest.dirty());
     assert.deepEqual(await page.evaluate(() => window.__splitTest.item()), nodeBefore, 'Undo updates both panes');
+
+    // A tool change must roll back the active 3D transaction, even though the
+    // left drawing pane stays visible and the selected workspace does not change.
+    await page.locator('[data-object-kind="items"]').first().click();
+    await page.locator('#preview-edit').click();
+    await page.waitForFunction(() => !window.__splitTest.dirty());
+    const item = before.floors[0].items[0];
+    const editPoint = await previewPoint(page, [item.position_m.x, item.position_m.y + item.dimensions_m.height / 2, item.position_m.z]);
+    await page.mouse.move(editPoint.x, editPoint.y); await page.mouse.down();
+    await page.mouse.move(editPoint.x + 40, editPoint.y + 20, { steps: 6 });
+    assert.notDeepEqual(await project(), before, 'The real 3D drag changed the working copy');
+    await page.keyboard.press('r');
+    assert.deepEqual(await project(), before, 'Changing drawing tools cancels the 3D move');
+    await page.mouse.up();
+    assert.deepEqual(await project(), before, 'The released 3D pointer cannot commit a cancelled move');
+    assert.equal(await page.evaluate(() => window.planner.getView()), 'split');
+    assert.equal(await page.locator('[data-tool="room"]').getAttribute('aria-pressed'), 'true');
+    await page.waitForFunction(() => !window.__splitTest.dirty());
+    assert.deepEqual(await page.evaluate(() => window.__splitTest.item()), nodeBefore, 'Cancellation restores the 3D mesh');
+    assert.equal(await page.locator('#undo').isDisabled(), true, 'A cancelled move adds no undo entry');
+
+    // Clearing selection takes the pan path through finishPointer. That path
+    // must refresh the other pane even without a geometry change.
+    await page.locator('[data-tool="select"]').click();
+    await page.locator('#preview-elevation-handle').waitFor({ state: 'visible' });
+    await page.mouse.click(plan.x + 5, plan.y + plan.height * .5);
+    assert.equal(await page.evaluate(() => window.planner.getSelection()), null);
+    await page.waitForFunction(() => !window.__splitTest.dirty());
+    assert.equal(await page.locator('#preview-elevation-handle').isVisible(), false, 'Deselecting in 2D clears the 3D edit handle');
+    assert.deepEqual(await project(), before, 'Deselecting changes no geometry');
+
     // Drawing tools remain available without throwing the user out of split view.
     await page.locator('[data-tool="room"]').click();
     assert.equal(await page.evaluate(() => window.planner.getView()), 'split');
@@ -83,11 +126,35 @@ const fixture = {
     assert.equal(await page.evaluate(() => window.__splitTest.rendered()), renders, 'Idle split view does not animate');
     await page.locator('#preview-tab').click(); await page.locator('#split-tab').click();
     assert.equal(await page.evaluate(() => window.__contexts.size), 1, 'Switching views reuses the renderer');
-    await page.setViewportSize({ width: 950, height: 900 });
-    await page.waitForFunction(() => window.planner.getView() === 'plan');
-    assert(await page.locator('#split-tab').isDisabled(), 'Small viewports keep usable full-width drawing');
-    assert.deepEqual(await project(), before, 'Resizing changes no accepted geometry');
+    for (const focus of ['#preview-canvas', '#split-tab']) {
+      await page.locator(focus).focus();
+      await page.setViewportSize({ width: 950, height: 900 });
+      await page.waitForFunction(() => window.planner.getView() === 'plan');
+      assert(await page.locator('#split-tab').isDisabled(), 'Small viewports keep usable full-width drawing');
+      assert.equal(await page.evaluate(() => document.activeElement.id), 'plan-canvas', `${focus} focus follows the surviving pane`);
+      assert.deepEqual(await project(), before, 'Resizing changes no accepted geometry');
+      await page.setViewportSize({ width: 1800, height: 1050 });
+      await page.locator('#split-tab').click();
+      await page.waitForFunction(() => window.planner.getView() === 'split');
+    }
+
+    // Losing WebGL must leave the independent 2D editor and its undo usable.
+    await page.evaluate(() => {
+      const extension = document.getElementById('preview-canvas').getContext('webgl2').getExtension('WEBGL_lose_context');
+      if (!extension) throw Error('WEBGL_lose_context is required for the graphics-loss regression');
+      extension.loseContext();
+    });
+    await page.locator('#preview-error').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#plan-canvas').isVisible(), true);
+    const lostPlan = await page.locator('#plan-canvas').boundingBox();
+    const [lostX, lostY] = await page.evaluate(() => window.planner.worldToScreen([2, 2]));
+    await page.mouse.move(lostPlan.x + lostX, lostPlan.y + lostY); await page.mouse.down();
+    await page.mouse.move(lostPlan.x + lostX + 35, lostPlan.y + lostY + 25, { steps: 6 }); await page.mouse.up();
+    assert.notDeepEqual(await project(), before, '2D editing commits after WebGL context loss');
+    await page.locator('#undo').click();
+    assert.deepEqual(await project(), before, '2D undo works after WebGL context loss');
+    assert.equal(await page.evaluate(() => window.__contexts.size), 1, '2D fallback does not create replacement GL contexts');
     assert.deepEqual(errors, []);
-    console.log(`PASS: ${engine} split 2D + 3D editing, undo, orbit, context reuse, idle rendering and narrow-layout fallback.`);
+    console.log(`PASS: ${engine} split editing, cancellation, deselection, undo, orbit, context reuse, idle rendering, responsive focus and 2D editing after graphics loss.`);
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

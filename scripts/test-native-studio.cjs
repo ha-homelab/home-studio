@@ -747,6 +747,11 @@ const server = http.createServer((req, res) => {
   assert.equal(await generated.getByRole('button',{name:'Publish to 3D Home',exact:true}).isDisabled(),false);
   let generatedFrame=generated.frames().find(frame=>frame.url().includes('embed='));
   assert.deepEqual(await generatedFrame.evaluate(()=>planner.getProject()),generatedProject);
+  assert.equal(await generatedFrame.locator('#split-tab').isVisible(),false,'Protected generated source does not offer a split preview');
+  await generatedFrame.locator('#split-tab').evaluate(button=>button.click());
+  assert.equal(await generatedFrame.evaluate(()=>planner.getView()),'plan','The split handler also refuses protected source');
+  assert.equal(await generatedFrame.locator('#preview-view').isVisible(),false);
+  assert.deepEqual(await generatedFrame.evaluate(()=>planner.getProject()),generatedProject,'Refusing split mode preserves the protected project');
   assert.equal(await generated.getByRole('link',{name:'Open 3D Home',exact:true}).getAttribute('aria-disabled'),'false');
   assert.equal(await generated.getByRole('link',{name:/browser editor/i}).count(),0);
   assert.equal(await generatedFrame.getByRole('button',{name:'Add floor',exact:true}).isDisabled(),true);
