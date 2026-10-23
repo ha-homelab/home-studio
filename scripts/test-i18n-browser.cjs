@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
 const load = file => import(pathToFileURL(path.join(root, file)).href);
 const served = new Map([
   ['/home-studio/planner/', ['planner/index.html', 'text/html']],
-  ...['editor', 'model', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity', 'interaction-render', 'environment', 'onboarding', 'draft-storage', 'inspector-dom', 'floor-navigator', 'ha-bridge'].map(name => [`/home-studio/planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
+  ...['editor', 'model', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity', 'interaction-render', 'environment', 'onboarding', 'device-onboarding', 'device-onboarding-ui', 'room-transform', 'draft-storage', 'inspector-dom', 'floor-navigator', 'ha-bridge'].map(name => [`/home-studio/planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
   ...fs.readdirSync(path.join(root, 'planner/locales')).filter(name => name.endsWith('.js')).map(name => [`/home-studio/planner/locales/${name}`, [`planner/locales/${name}`, 'text/javascript']]),
   ['/home-studio/planner/editor.css', ['planner/editor.css', 'text/css']],
   ['/home-studio/planner/floor-navigator.css', ['planner/floor-navigator.css', 'text/css']],
