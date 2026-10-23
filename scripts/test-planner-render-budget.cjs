@@ -50,6 +50,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   assert.notEqual(paths.planShapePath({points: shape.points}, 80, 30), outline, 'A new appearance owns a separate outline');
   const THREE = await import('data:text/javascript;base64,' + fs.readFileSync(path.join(root, 'vendor/three.module.min.js')).toString('base64'));
   const model = await import('../planner/model.js');
+  const { moveRoom } = await import('../planner/room-transform.js');
   const { createEnvironmentLayer } = await import('../planner/environment.js');
   const project = model.blankProject(), f = project.floors[0];
   f.rooms.push({id: 'room', name: 'Room', polygon: [[0, 0], [8, 0], [8, 6], [0, 6]], material: 'floor'});
@@ -346,7 +347,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
     }));
     const controls = {'object-list': {children: buttons}, undo: {disabled: true}, redo: {disabled: true}, 'pointer-position': {textContent: ''}};
     const p = vm.createContext({previewEnvironment: null, haSourcePolicy: null, haPublishedPreview: null,
-      orbit: { pointers: new Map() }, project: original, activeFloorId: f.id, selection: null, tool: 'select', view: 'plan', drag: null, previewEdit: null,
+      orbit: { pointers: new Map() }, project: original, activeFloorId: f.id, selection: null, connectedRoomMove: null, moveRoom, tool: 'select', view: 'plan', drag: null, previewEdit: null,
       planCanvas: plan, spaceHeld: false, previewDirty: false, map: {x: 0, y: 0},
       clone(value) { clones++; return model.clone(value); }, round: model.round, distance: model.distance,
       snap: value => value, localPoint: e => [e.clientX, e.clientY], toWorld: point => point,
@@ -360,7 +361,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
       validateProject: model.validateProject, serializeProject: JSON.stringify, historyPush: value => history.push(value),
       document: {hidden: false}, zoomPlan() {}, history, future: [],
     });
-    const gestureClock = frames(p); vm.runInContext(scheduler + section('const protectedRoom =', 'const snap =') + section('function setSelection(', 'function field(') + section("planCanvas.addEventListener('pointerdown'", '// On-demand 3D rendering.'), p);
+    const gestureClock = frames(p); vm.runInContext(scheduler + section('const protectedRoom =', 'const snap =') + section('function applyRoomDrag(', 'function roomCorners(') + section('function setSelection(', 'function field(') + section("planCanvas.addEventListener('pointerdown'", '// On-demand 3D rendering.'), p);
     plan.events.pointerdown(event(1, 1));
     assert.equal(uiDraws, 0, 'Selecting an existing object retains the floor and object list nodes');
     assert.equal(inspectorDraws, 1, 'A changed selection updates its inspector once');

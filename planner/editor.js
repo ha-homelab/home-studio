@@ -7,6 +7,7 @@ import { reconcileInspector } from './inspector-dom.js';
 import { createFloorNavigator } from './floor-navigator.js';
 import { getRenderCapacity } from './render-capacity.js';
 import { formatValidationError } from './validation.js';
+import { roomBounds, roomMoveGroup, moveRoom, resizeRoom } from './room-transform.js';
 import { t, LOCALES, initI18n, setLocale, getLocale, onLocaleChange, translateStatic } from './i18n.js';
 
 import * as THREE from '../vendor/three.module.min.js';
@@ -36,6 +37,7 @@ if (haContext) {
 const draftStorage = createDraftStorage({ validate: validateProject, maxBytes: LIMITS.bytes, ...(haContext ? memoryDraftOptions() : {}) });
 let recoverySnapshot = null, recoveryBusy = false, saveSequence = 0, pendingSaves = 0;
 let committingField = null, inspectorScope = '', fieldEditRevision = 0;
+let connectedRoomMove = null;
 const BUILD_COMMAND = 'python3 scripts/build-planner-project.py --project /path/to/project.json --output dist/my-home --ha-package';
 const LABELS = { furniture: 'Furniture', lamp: 'Lamp', chandelier: 'Ceiling light', tv: 'TV / display', appliance: 'Appliance', switch: 'Switch', outlet: 'Outlet', sensor: 'Sensor' };
 const COLORS = { floor: '#e7dac2', tile: '#e0e8df', deck: '#d8dfbe', furniture: '#96aca6', lamp: '#d9ae68', chandelier: '#d9ae68', tv: '#677d89', appliance: '#a1abb0', switch: '#b4c39d', outlet: '#b4c39d', sensor: '#c4b09a' };
@@ -204,49 +206,14 @@ function validateSourcePolicy(value) {
   }
 }
 const snap = (value, precise = false) => $('snap').checked && !precise ? Math.round(value * 4) / 4 : round(value);
-function roomBounds(room) {
-  const xs = room.polygon.map(point => point[0]), zs = room.polygon.map(point => point[1]);
-  const minX = Math.min(...xs), minZ = Math.min(...zs), maxX = Math.max(...xs), maxZ = Math.max(...zs);
-  return { minX, minZ, maxX, maxZ, width: round(maxX - minX), depth: round(maxZ - minZ) };
-}
-function sizeRoom(room, width, depth, anchor = null) {
-  if (!Number.isFinite(width) || !Number.isFinite(depth) || width < .05 || depth < .05) throw new Error('Room width and depth must be at least 0.05 m.');
-  const bounds = roomBounds(room), fixed = anchor || [bounds.minX, bounds.minZ];
-  room.polygon = room.polygon.map(([x, z]) => [round(fixed[0] + (x - fixed[0]) * width / bounds.width), round(fixed[1] + (z - fixed[1]) * depth / bounds.depth)]);
-}
-function segmentTouchesRoomBoundary(start, end, room) {
-  const wall = { start, end }, cross = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-  return room.polygon.some((a, index) => {
-    const b = room.polygon[(index + 1) % room.polygon.length], edge = { start: a, end: b };
-    // Check both segments' endpoints: a neighboring room can share only the
-    // middle of a longer wall. Proper crossings also attach the two outlines.
-    return cross(start, end, a) * cross(start, end, b) < 0 && cross(a, b, start) * cross(a, b, end) < 0
-      || projectOnWall(start, edge).distance < .002 || projectOnWall(end, edge).distance < .002
-      || projectOnWall(a, wall).distance < .002 || projectOnWall(b, wall).distance < .002;
-  });
-}
 function resizeRoomWithOutline(target, room, width, depth, anchor = null) {
-  const bounds = roomBounds(room), fixed = anchor || [bounds.minX, bounds.minZ];
-  const transform = ([x, z]) => [round(fixed[0] + (x - fixed[0]) * width / bounds.width), round(fixed[1] + (z - fixed[1]) * depth / bounds.depth)];
-  const walls = target.walls.filter(wall => segmentTouchesRoomBoundary(wall.start, wall.end, room));
-  for (const wall of walls) {
-    const boundary = room.polygon.some((start, index) => {
-      const edge = { start, end: room.polygon[(index + 1) % room.polygon.length] };
-      return projectOnWall(wall.start, edge).distance < .002 && projectOnWall(wall.end, edge).distance < .002;
-    });
-    const shared = target.rooms.some(other => other.id !== room.id && segmentTouchesRoomBoundary(wall.start, wall.end, other));
-    if (!boundary || shared) throw new Error('This room has shared or attached walls. Adjust its polygon and wall endpoints separately to preserve the adjacent space.');
-  }
-  sizeRoom(room, width, depth, fixed);
-  for (const wall of walls) {
-    const oldLength = distance(wall.start, wall.end);
-    wall.start = transform(wall.start); wall.end = transform(wall.end);
-    const newLength = distance(wall.start, wall.end), scale = newLength / oldLength;
-    for (const opening of target.openings.filter(entry => entry.wall_id === wall.id)) {
-      if (opening.width_m > newLength) throw new Error('The resized wall is too short for its door or window. Increase the room dimension or edit the opening first.');
-      opening.offset_m = round(Math.max(0, Math.min(newLength - opening.width_m, (opening.offset_m + opening.width_m / 2) * scale - opening.width_m / 2)));
-    }
-  }
+  Object.assign(target, resizeRoom(target, room.id, width, depth, anchor));
+}
+function applyRoomDrag(target) {
+  const candidate = { ...project, floors: project.floors.map(f => f.id === activeFloorId ? target : f) };
+  validateSourcePolicy(candidate);
+  project = candidate; drag.invalid = null;
+  if (!drag.moved) editorChanged(); drag.moved = true;
 }
 function roomCorners(room) {
   const b = roomBounds(room); return [[b.minX, b.minZ], [b.maxX, b.minZ], [b.maxX, b.maxZ], [b.minX, b.maxZ]];
@@ -450,7 +417,7 @@ async function replaceProject(next, message) {
 function installRecoveredProject(next) {
   $('project-title').inspectorDraft = false; $('project-title').removeAttribute('aria-invalid');
   historyPush(project); project = clone(next); activeFloorId = project.floors[0].id;
-  selection = null; drag = null; previewDirty = true; inspectorScope = '';
+  selection = null; connectedRoomMove = null; drag = null; previewDirty = true; inspectorScope = '';
   editorChanged(); setView('plan'); setTool('select'); renderUI(); fitPlan(); fitPreview(); renderPlan();
 }
 function undo(redo = false) {
@@ -458,7 +425,7 @@ function undo(redo = false) {
   if (previewEdit) finishPreviewEdit(null, true);
   const source = redo ? future : history, destination = redo ? history : future; if (!source.length) return;
   destination.push(project); project = source.pop(); if (!project.floors.some(f => f.id === activeFloorId)) activeFloorId = project.floors[0].id;
-  selection = null; drag = null; previewDirty = true; editorChanged(); renderUI(); renderPlan(); status(() => redo ? t('Change restored.') : t('Change undone.')); save();
+  selection = null; connectedRoomMove = null; drag = null; previewDirty = true; editorChanged(); renderUI(); renderPlan(); status(() => redo ? t('Change restored.') : t('Change undone.')); save();
 }
 function renderUI() {
   if (!$('project-title').inspectorDraft) $('project-title').value = project.title;
@@ -495,7 +462,7 @@ function renderUI() {
 function setSelection(next) {
   if (selection?.kind === next?.kind && selection?.id === next?.id) return;
   if (previewEdit) finishPreviewEdit(null, true);
-  selection = next; editorChanged();
+  selection = next; connectedRoomMove = null; editorChanged();
   // Selection changes do not alter floor names, object labels, or their order.
   for (const b of $('object-list').children) if (b.dataset.objectId) {
     b.setAttribute('aria-pressed', String(b.dataset.objectKind === selection?.kind && b.dataset.objectId === selection?.id));
@@ -568,14 +535,14 @@ function buildInspector(parent) {
         selection = { kind: 'rooms', id };
       }, () => t('Garden added. Place trees, paths or animals from the Item library.'), { fit: true });
     }));
-    parent.append(node('p', 'callout', t('Rooms are floor areas. Draw walls yourself, or select a room and build its wall outline. Moving a room will not move its walls.')));
+    parent.append(node('p', 'callout', t('Rooms are floor areas. Build a wall outline in Room details. Moving a room carries its walls, openings, and items; connected rooms can move together.')));
     if (!haSourcePolicy) parent.append(button(t('Clear this floor'), () => { if (confirm(t('Clear every room, wall, opening, and item on {floor}? You can undo this.', { floor: f.name }))) transact((_p, target) => { for (const key of ['rooms', 'walls', 'openings', 'items']) target[key] = []; selection = null; }, () => t('Floor cleared.')); }, 'danger'));
     if (!haSourcePolicy && project.floors.length > 1) parent.append(button(t('Delete this floor'), () => { if (confirm(t('Delete {floor} and everything on it? You can undo this.', { floor: f.name }))) transact(p => { p.floors = p.floors.filter(item => item.id !== activeFloorId); selection = null; }, () => t('Floor deleted.'), { fit: true }); }, 'danger'));
     parent.append(node('p', 'property-id', t('Floor ID: {id}', { id: f.id }))); return;
   }
   const kind = selection.kind;
   $('inspector-title').textContent = ({ rooms: t('Room details'), walls: t('Wall details'), openings: t('Opening details'), items: t('Item details') })[kind];
-  $('inspector-subtitle').textContent = ({ rooms: haContext ? 'Shape the space. Walls are edited separately.' : t('Shape the space. Then add its walls.'), walls: t('A physical segment with real thickness.'), openings: t('A true cutout in the selected wall.'), items: t('Give every object a place and a purpose.') })[kind];
+  $('inspector-subtitle').textContent = ({ rooms: 'Move and resize the space with its walls and items.', walls: t('A physical segment with real thickness.'), openings: t('A true cutout in the selected wall.'), items: t('Give every object a place and a purpose.') })[kind];
   if (kind === 'rooms') {
     const locked = protectedRoom(f.id, object.id);
     if (locked) { $('inspector-subtitle').textContent = 'Existing room shape protected. Rename it, add items, or link devices.'; parent.append(node('p', 'field-note', 'The original walls and details remain in the published home. New rooms and walls can be drawn separately.')); }
@@ -591,9 +558,20 @@ function buildInspector(parent) {
       const bounds = roomBounds(object), dimensions = row(parent);
       field(dimensions, t('Width (m)'), bounds.width, value => editObject((o, target) => resizeRoomWithOutline(target, o, value, roomBounds(o).depth)), { type: 'number', min: .05, max: 200, step: '.01' });
       field(dimensions, t('Depth (m)'), bounds.depth, value => editObject((o, target) => resizeRoomWithOutline(target, o, roomBounds(o).width, value)), { type: 'number', min: .05, max: 200, step: '.01' });
-      parent.append(node('p', 'field-note', 'Drag a corner in 2D or enter dimensions. The room and its exclusive wall outline resize together. Doors and windows keep their widths and follow the wall; items keep their positions. Shared or attached walls require separate endpoint edits.'));
+      parent.append(node('p', 'field-note', 'Drag a corner in 2D or enter dimensions. Rooms sharing complete rectangular sides resize together. Walls follow their rooms, openings keep their widths, and item centers follow proportionally without changing size.'));
+      const group = roomMoveGroup(f, object.id);
+      if (group.requiresConnected) {
+        const key = `${f.id}:${object.id}`;
+        const moveTogether = button('Move connected rooms together', () => {
+          connectedRoomMove = connectedRoomMove === key ? null : key;
+          renderInspector();
+        });
+        moveTogether.setAttribute('aria-pressed', String(connectedRoomMove === key));
+        parent.append(moveTogether);
+        parent.append(node('p', 'field-note', `Enable to drag this connected group: ${f.rooms.filter(room => group.rooms.includes(room.id)).map(room => room.name).join(', ')}. Its walls, openings, and items move together. Turn off to prevent a group move.`));
+      }
       parent.append(button(t('Build wall outline'), () => { let n = 0; const ok = transact((_p, d) => { n = outlineRoom(d, d.rooms.find(r => r.id === object.id)); }, () => t('Wall outline added. Exact shared walls are reused.')); if (ok) status(() => n ? t('{count} wall segments added. Exact shared walls were reused.', { count: n }) : t('This room already has a complete wall outline.')); }, 'primary'));
-      parent.append(node('p', 'field-note', 'Outlines use 0.15 m walls. Room resizing follows an exclusive outline; moving the room leaves walls in place.'));
+      parent.append(node('p', 'field-note', 'Outlines use 0.15 m walls. Moving a room carries its outline, openings, and assigned items. Unsupported junction changes are rejected without changing the plan.'));
     }
     parent.append(button(t('Place item at room center'), () => {
       const center = object.polygon.reduce((sum, p) => [sum[0] + p[0] / object.polygon.length, sum[1] + p[1] / object.polygon.length], [0, 0]);
@@ -906,8 +884,8 @@ planCanvas.addEventListener('pointerdown', event => {
   setSelection(hitTest(world));
   if (selection?.kind === 'rooms' && protectedRoom(activeFloorId, selection.id)) { status(protectedArchitectureMessage); return; }
   if (selection) {
-    // Keep one immutable undo snapshot; only the selected object changes while dragging.
-    drag = { kind: 'move', pointerId: event.pointerId, startWorld: world, original: project, selection: { ...selection }, moved: false, offset: [0, 0] };
+    // Keep one immutable undo snapshot for the entire connected room edit.
+    drag = { kind: 'move', pointerId: event.pointerId, startWorld: world, original: project, selection: { ...selection }, connected: connectedRoomMove === `${activeFloorId}:${selection.id}`, moved: false, offset: [0, 0] };
     project = clone(project);
   }
   else drag = { kind: 'pan', pointerId: event.pointerId, screen, map: { ...map } };
@@ -925,26 +903,29 @@ planCanvas.addEventListener('pointermove', event => {
     const dx = round(snap(corner[0] + world[0] - drag.startWorld[0], event.altKey) - corner[0]), dz = round(snap(corner[1] + world[1] - drag.startWorld[1], event.altKey) - corner[1]);
     if (dx === drag.offset[0] && dz === drag.offset[1]) return;
     drag.offset = [dx, dz];
-    const width = Math.max(.05, (corner[0] + dx - anchor[0]) * (corner[0] > anchor[0] ? 1 : -1));
-    const depth = Math.max(.05, (corner[1] + dz - anchor[1]) * (corner[1] > anchor[1] ? 1 : -1));
-    const target = { ...originalFloor, rooms: originalFloor.rooms.map(room => room.id === original.id ? clone(room) : room), walls: clone(originalFloor.walls), openings: clone(originalFloor.openings) };
+    const width = (corner[0] + dx - anchor[0]) * (corner[0] > anchor[0] ? 1 : -1);
+    const depth = (corner[1] + dz - anchor[1]) * (corner[1] > anchor[1] ? 1 : -1);
     try {
-      resizeRoomWithOutline(target, target.rooms.find(room => room.id === drag.selection.id), width, depth, anchor);
-      project.floors[project.floors.findIndex(f => f.id === activeFloorId)] = target;
-      if (!drag.moved) editorChanged(); drag.moved = true;
-    } catch (error) { status(error.message, true); }
+      applyRoomDrag(resizeRoom(originalFloor, original.id, width, depth, anchor));
+    } catch (error) { drag.invalid = error.message; status(error.message, true); }
   }
   if (drag.kind === 'move') {
-    const original = drag.original.floors.find(f => f.id === activeFloorId)[selection.kind].find(o => o.id === selection.id);
+    const originalFloor = drag.original.floors.find(f => f.id === activeFloorId);
+    const original = originalFloor[selection.kind].find(o => o.id === selection.id);
     const dx = selection.kind === 'items' ? round(snap(original.position_m.x + world[0] - drag.startWorld[0], event.altKey) - original.position_m.x) : snap(world[0] - drag.startWorld[0], event.altKey);
     const dz = selection.kind === 'items' ? round(snap(original.position_m.z + world[1] - drag.startWorld[1], event.altKey) - original.position_m.z) : snap(world[1] - drag.startWorld[1], event.altKey);
     // Pointer events within one snap cell do not change the plan. Avoid repainting
     // every catalog surface until the object's visible position actually changes.
     if (dx === drag.offset[0] && dz === drag.offset[1]) return;
     drag.offset = [dx, dz];
-    if (!drag.moved && (dx || dz)) editorChanged();
-    if (dx || dz) drag.moved = true; const object = selected();
-    if (selection.kind === 'rooms') object.polygon = original.polygon.map(p => [round(p[0] + dx), round(p[1] + dz)]);
+    if (selection.kind === 'rooms') {
+      try { applyRoomDrag(moveRoom(originalFloor, original.id, dx, dz, { connected: drag.connected })); }
+      catch (error) { drag.invalid = error.message; status(error.message, true); }
+    } else {
+      if (!drag.moved && (dx || dz)) editorChanged();
+      if (dx || dz) drag.moved = true;
+    }
+    const object = selected();
     if (selection.kind === 'walls') { object.start = [round(original.start[0] + dx), round(original.start[1] + dz)]; object.end = [round(original.end[0] + dx), round(original.end[1] + dz)]; }
     if (selection.kind === 'items') { object.position_m.x = round(original.position_m.x + dx); object.position_m.z = round(original.position_m.z + dz); }
     if (selection.kind === 'openings') { const wall = floor().walls.find(w => w.id === object.wall_id), len = distance(wall.start, wall.end); const along = (dx * (wall.end[0] - wall.start[0]) + dz * (wall.end[1] - wall.start[1])) / len; object.offset_m = round(Math.max(0, Math.min(len - object.width_m, original.offset_m + along))); }
@@ -965,9 +946,12 @@ function finishPointer(event, cancel = false) {
     setTool('select');
   }
   if (current.kind === 'move' || current.kind === 'resize') {
-    if (cancel || !current.moved || JSON.stringify(project) === JSON.stringify(current.original)) project = current.original;
+    if (cancel || current.invalid || !current.moved || JSON.stringify(project) === JSON.stringify(current.original)) {
+      project = current.original;
+      if (current.invalid && !cancel) status(`Room edit cancelled: ${current.invalid}`, true);
+    }
     else {
-      try { validateProject(project); validateSourcePolicy(project); serializeProject(project); historyPush(current.original); previewDirty = true; status(current.kind === 'resize' ? 'Room and its wall outline resized. Items kept their positions.' : () => t('Object moved.')); save(); }
+      try { validateProject(project); validateSourcePolicy(project); serializeProject(project); historyPush(current.original); previewDirty = true; status(current.kind === 'resize' ? 'Connected room geometry resized. Items followed their rooms; opening widths were preserved.' : current.selection.kind === 'rooms' ? 'Room geometry and assigned items moved together.' : () => t('Object moved.')); save(); }
       catch (error) { project = current.original; status(() => t('Move cancelled: {error}', { error: formatValidationError(error, t) }), true); }
     }
     // The host observes the first movement for dirty-state feedback. Publish
