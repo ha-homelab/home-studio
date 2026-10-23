@@ -29,6 +29,11 @@
   shared rectangular sides preserves neighboring boundaries and measured
   opening widths; unsupported junctions fail without partially changing the
   drawing.
+- Keep bound curtains aligned with their windows when rooms move or resize.
+  A preserved generated viewer without the new curtain renderer rejects new
+  bindings clearly and retains the previously published home.
+- Bound room-connectivity checks on dense plans and avoid repainting 2D during
+  camera/scenery-only updates. No additional renderer or dependency is added.
 - Cancel edits consistently when switching tools, changing views, losing a
   pointer, or narrowing the layout. A graphics-context failure leaves the 2D
   editor and export available.
