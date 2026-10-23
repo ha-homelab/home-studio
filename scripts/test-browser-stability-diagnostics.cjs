@@ -725,6 +725,7 @@ function freshPreviewHarness(view = 'preview') {
   const traces = [], canvases = [], renderers = [], scheduled = [], allocations = [];
   const error = {hidden:true}, rect = {width:774,height:724};
   const elevationHandle = Object.assign(new EventTarget(), {hidden:true, style:{}});
+  const splitTab = Object.assign(new EventTarget(), {id:'split-tab',hidden:false,disabled:false,title:'',tabIndex:-1});
   let context, activeCanvas, currentFocus, layoutReads = 0, fitCalls = 0, reusedRestores = 0;
   class Canvas extends EventTarget {
     constructor() { super(); this.id='preview-canvas';this.width=934;this.height=824;this.isConnected=true;this.attributes={tabindex:'0','aria-label':'Preview'};this.dataset={};this.style={};this.captured=new Set();canvases.push(this); }
@@ -779,7 +780,7 @@ function freshPreviewHarness(view = 'preview') {
     t:value=>value,floorBounds:()=>({minX:0,maxX:8,minZ:0,maxZ:10}),
     THREE:{WebGLRenderer:Renderer,Scene:Group,Group,Vector3:class {constructor(x,y,z){Object.assign(this,vector(),{x,y,z});}},HemisphereLight:Light,DirectionalLight:Light,
       PerspectiveCamera:class {constructor(){this.position=vector();}lookAt(){}updateProjectionMatrix(){} }},
-    $:id=>id==='preview-canvas'?activeCanvas:id==='preview-error'?error:id==='preview-elevation-handle'?elevationHandle:null,translatedText(){},
+    $:id=>id==='preview-canvas'?activeCanvas:id==='preview-error'?error:id==='preview-elevation-handle'?elevationHandle:id==='split-tab'?splitTab:null,translatedText(){},
     fitPreview(){fitCalls++;},fitPlan(){},updateZoom(){},previewFloors:()=>[],
     cancelCanvasRender(){traces.push('cancel');},onSchedule:value=>scheduled.push(JSON.parse(JSON.stringify(value))),
     testMesh:()=>({traverse(callback){callback({geometry:resource('geometry'),material:[resource('material-a'),resource('material-b')]});}}),
@@ -791,7 +792,10 @@ function freshPreviewHarness(view = 'preview') {
     let firstResize=false,planSize='old',map={x:0,y:0};
     const project={floors:[{elevation_m:0,walls:[],items:[{position_m:{x:7,z:9}}]}]};
     function displayedProject(){return project;}
+    // This lifecycle fixture records render requests; the real RAF coalescing
+    // and pane invalidation are exercised by test-planner-render-budget.cjs.
     function requestCanvasRender(){if(!canvasSuspended&&!document.hidden)onSchedule(size);}
+    function requestPreviewRender(){requestCanvasRender();}
     ${section('function canvasPixelRatio(', 'let startupMessage')}
     ${section('let renderer =', 'function previewFloors()')}
     ${section('function disposePreviewGeometry()', 'function rebuildPreview()')}
@@ -802,7 +806,7 @@ function freshPreviewHarness(view = 'preview') {
     initPreview();rebuildPreview();
   `,context);
   const evaluate = code => vm.runInContext(code,context);
-  return {traces,canvases,renderers,scheduled,allocations,error,rect,window,evaluate,
+  return {traces,canvases,renderers,scheduled,allocations,error,rect,splitTab,window,evaluate,
     get canvas(){return activeCanvas;},get layoutReads(){return layoutReads;},get fitCalls(){return fitCalls;},get reusedRestores(){return reusedRestores;},
     lose(){const renderer=renderers.at(-1);renderer.lost=true;return renderer.domElement.emit('webglcontextlost');},
     restore(){const renderer=renderers.at(-1);renderer.lost=false;renderer.domElement.emit('webglcontextrestored');},
@@ -1128,6 +1132,8 @@ test('the first replacement drawing buffer uses actual layout before ResizeObser
   for(const view of ['plan','preview']) {
     const h=freshPreviewHarness(view);h.lose();h.restore();
     assert.equal(h.layoutReads,1);
+    assert.equal(h.splitTab.disabled,false,'Recovered layout keeps the actual split-view control available');
+    assert.equal(h.splitTab.title,'Draw in 2D and inspect your changes in 3D.');
     assert.equal(h.allocations.length,0,'The context event only schedules rendering');
     assert(h.scheduled.length>0);
     assert(h.scheduled.every(layout=>layout.width===774&&layout.height===724));
