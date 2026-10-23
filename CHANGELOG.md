@@ -38,8 +38,7 @@ It brings the improvements tested in the 0.10.1 previews to the stable channel.
   observation timestamp stays visibly unknown; retrieval time is never presented
   as observation time. The overlay adds no GPU resources or continuous rendering.
 
-
-### Upgrade and compatibility
+### Upgrade
 
 - Use Home Assistant 2026.10 or newer. Back up HA and export the drawing JSON
   before installing `home_floorplan.zip` through HACS or manually. Restart HA
@@ -55,7 +54,7 @@ It brings the improvements tested in the 0.10.1 previews to the stable channel.
   helpers and generated JavaScript are not a public extension API. Back up
   before downgrading; older releases may not understand later drawing features.
 
-### Privacy and limitations
+### Security
 
 - Public packages contain no household plans, credentials, or private adapters.
   AI is opt-in: selected photos, instructions, and requests go to the provider
