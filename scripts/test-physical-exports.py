@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """CPU interchange tests for explicit PBR bundle exports."""
-import base64
 import copy
 import hashlib
 import json

@@ -16,7 +16,7 @@ from unittest.mock import patch
 import zipfile
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from pbr_materials import DETAIL_PROFILES, detail_pixels, png_spec, rgb_pixels, export_material_fields, color_profile, color_luminance
-from material_textures import validate_material_textures, decode_material_texture
+from material_textures import validate_material_textures
 from exporters import export_scene, _obj_number
 spec=importlib.util.spec_from_file_location('legacy',ROOT/'scripts/test-material-textures.py');legacy=importlib.util.module_from_spec(spec);spec.loader.exec_module(legacy)
 
