@@ -100,6 +100,7 @@ const spec = JSON.parse(python(['--spec']));
         await page.setContent(rendered);await page.waitForFunction(()=>window.__materialTest?.owner.count===1&&window.__materialTest.stats().mapped===1);
         const before=await page.evaluate(()=>__materialTest.stats());assert.equal(before.triangles,36);assert.equal(before.objects,4);
         assert(before.types.every(type=>type===(diffuse?'MeshLambertMaterial':'MeshStandardMaterial')));
+        if(!diffuse)assert.deepEqual(await page.evaluate(()=>__materialTest.objectsById.get('textured').children.map(o=>o.material.roughness).sort()),[.48,.92],'per-part finishes reach native materials');
         await page.evaluate(()=>{const t=__materialTest;t.items[0].dimensions_m.width=2;t.rebuildInventoryView()});
         const u=await page.evaluate(()=>{const mesh=__materialTest.objectsById.get('textured').children.find(m=>m.material.map);return Math.max(...Array.from(mesh.geometry.attributes.uv.array).filter((_,i)=>i%2===0))});assert.equal(u,8);
         for(const active of [true,false,true,false]) {
@@ -118,10 +119,10 @@ const spec = JSON.parse(python(['--spec']));
         }
         const pixels=await page.evaluate(()=>{window.renderModel();return __materialTest.renderer.domElement.toDataURL()});
         await page.evaluate(()=>{__materialTest.owner.dispose();__materialTest.rebuildInventoryView();window.renderModel()});
-        const fallback=await page.evaluate(()=>__materialTest.stats());assert.equal(fallback.mapped,0);assert.equal(fallback.objects,3);assert.equal(fallback.triangles,36);
+        const fallback=await page.evaluate(()=>__materialTest.stats());assert.equal(fallback.mapped,0);assert.equal(fallback.objects,4,'different surface finishes remain separate without textures');assert.equal(fallback.triangles,36);
         assert.notEqual(await page.evaluate(()=>__materialTest.renderer.domElement.toDataURL()),pixels,'map affects real pixels');
         assert.deepEqual(errors,[]);assert.deepEqual(network,[]);
-        console.log(name+' '+(diffuse?'Lambert':'Standard')+': compiled viewer pixels, bound lamp, resize, Home/Editor, two recoveries and original batching passed.');
+        console.log(name+' '+(diffuse?'Lambert':'Standard')+': compiled viewer pixels, bound lamp, resize, Home/Editor, two recoveries and finish-aware batching passed.');
       } finally {await browser.close()}
     }
   } finally {fs.rmSync(temp,{recursive:true,force:true})}

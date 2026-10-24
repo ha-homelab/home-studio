@@ -92,7 +92,7 @@ def export_scene(floors, format):
     image_ids, image_bytes, material_maps, material_profiles = {}, [], [], []
 
     def material_key(mesh):
-        profile = material_surface_profile(mesh.get('material_name'))
+        profile = material_surface_profile(mesh.get('material_name'), mesh.get('surface_finish'))
         return tuple(mesh['color']) + (mesh.get('texture', {}).get('data_uri'), profile['roughness'], profile['metalness'])
 
     def label(value):
@@ -149,7 +149,7 @@ def export_scene(floors, format):
                     colors[key] = len(materials)
                     materials.append(color)
                     material_maps.append(image_index)
-                    material_profiles.append(material_surface_profile(mesh.get("material_name")))
+                    material_profiles.append(material_surface_profile(mesh.get("material_name"), mesh.get("surface_finish")))
     if not count:
         raise ValueError('Add a room or object before exporting.')
 

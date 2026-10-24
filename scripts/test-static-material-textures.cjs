@@ -26,6 +26,7 @@ const root=path.resolve(__dirname,'..');
         const baseline=await page.evaluate(()=>__staticTest.inspect());
         assert(baseline.some(o=>o.type===(diffuse?'MeshBasicMaterial':'MeshStandardMaterial')));
         assert(baseline.every(o=>o.count===o.uvCount&&o.finite&&o.cast&&o.receive));
+        if(!diffuse)assert(baseline.every(o=>o.roughness===.24),'explicit static ceramic overrides wood/wall palette names');
         for(const height of [1.1,2.1,20,1.1]) {
           const rows=await page.evaluate(height=>{const t=__staticTest;t.clipping.constant=height;t.updateRoundedWallGeometry(height);window.renderModel();return t.inspect()},height);
           assert.deepEqual(rows.map(o=>o.map),baseline.map(o=>o.map),'cutaway keeps the same decoded maps');

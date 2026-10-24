@@ -1,3 +1,12 @@
+// Explicit per-part semantics override legacy palette names; never infer from RGB.
+// Artistic starting values, not measured material properties.
+const MATERIAL_SURFACE_PROFILES = Object.freeze({"fabric":[0.92,0],"leather":[0.5,0],"plastic":[0.48,0],"painted":[0.48,0],"wood":[0.58,0],"ceramic":[0.24,0],"glass":[0.12,0],"rubber":[0.95,0],"stone":[0.88,0],"metal":[0.3,0.75],"brushed_metal":[0.4,0.75],"matte_metal":[0.5,0.75],"polished_metal":[0.3,0.9],"mirror":[0.06,0.9],"matte_paint":[0.85,0],"rough_wood":[0.85,0],"polished_stone":[0.35,0],"paper":[0.85,0],"foliage":[0.75,0],"soil":[1,0],"car_paint":[0.25,0.15],"solar_cell":[0.25,0.25],"light_diffuser":[0.4,0]});
+const MATERIAL_SURFACE_FINISHES = Object.freeze(Object.keys(MATERIAL_SURFACE_PROFILES));
+function materialSurfaceFinish(value) {
+  if (value !== undefined && !MATERIAL_SURFACE_FINISHES.includes(value)) throw Error("Invalid material surface finish");
+  return value;
+}
+
 // Optional, build-validated albedo only. No URLs, material cloning or render loop.
 // The host owns materials; this owner retains decoded pixels across GPU loss.
 function createMaterialTextures(THREE, definitions) {
@@ -128,10 +137,11 @@ function inventoryMaterialBatches(asset, dimensions, materials, textures) {
   const batches = new Map();
   for (const part of asset.meshes) {
     const mapped = materials[part.material]?.[3] === 1 ? textures.get(part, dimensions) : null;
-    const key = part.material + '|' + (part.curtain_fabric ? part.curtain_panel : 'fixed') + '|' + (mapped?.texture.uuid || '');
+    const surfaceFinish = materialSurfaceFinish(part.surface_finish);
+    const key = (surfaceFinish || '') + '|' + part.material + '|' + (part.curtain_fabric ? part.curtain_panel : 'fixed') + '|' + (mapped?.texture.uuid || '');
     let batch = batches.get(key);
     if (!batch) {
-      batch = {material:part.material, curtainFabric:part.curtain_fabric === true, curtainPanel:part.curtain_panel,
+      batch = {material:part.material, surfaceFinish, curtainFabric:part.curtain_fabric === true, curtainPanel:part.curtain_panel,
         vertices:[], normals:[], indices:[], uv:[], texture:mapped?.texture};
       batches.set(key, batch);
     }

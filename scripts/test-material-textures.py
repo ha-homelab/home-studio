@@ -46,7 +46,7 @@ def fixture(static=False):
     selected = [i for i, normal in enumerate(box['normals']) if normal == [0, 1, 0]]
     parts = []
     for name, indices in [('body', [i for i in range(36) if i not in selected]), ('top', selected)]:
-        part = dict(box, name=name, vertices=[box['vertices'][i] for i in indices],
+        part = dict(box, name=name, surface_finish='fabric' if name == 'top' else 'plastic', vertices=[box['vertices'][i] for i in indices],
                     normals=[box['normals'][i] for i in indices], indices=list(range(len(indices))))
         if name == 'top':
             part.update(albedo_texture='fabric', uv=[[(x + .5) / .25, (.5 - z) / .25] for x, _, z in part['vertices']],
@@ -58,7 +58,7 @@ def fixture(static=False):
     if static:
         for mesh in model['meshes']:
             if mesh['kind'] in ('floors', 'walls') and model['materials'][mesh['material']][3] == 1:
-                mesh.update(albedo_texture='fabric', uv=[[x / .25, (y if mesh['kind'] == 'walls' else z) / .25] for x, y, z in mesh['vertices']])
+                mesh.update(surface_finish='ceramic', albedo_texture='fabric', uv=[[x / .25, (y if mesh['kind'] == 'walls' else z) / .25] for x, y, z in mesh['vertices']])
     return model, svg, floor
 
 
@@ -134,6 +134,33 @@ class MaterialTextureTests(unittest.TestCase):
             actual = material['pbrMetallicRoughness']
             self.assertEqual(actual['roughnessFactor'], profile['roughness'])
             self.assertEqual(actual['metallicFactor'], profile['metalness'])
+
+    def test_explicit_surface_finish_validation_and_export(self):
+        model, _, floor = fixture(static=True)
+        static = model['meshes'][0]
+        static['surface_finish'] = 'ceramic'
+        parts = model['object_assets']['textured']['meshes']
+        parts[0]['surface_finish'] = 'plastic'
+        parts[1]['surface_finish'] = 'fabric'
+        self.assertTrue(validate_material_textures(model))
+        scene = export_floor(model, floor)
+        finishes = {m.get('surface_finish') for g in scene['groups'] for m in g['meshes']}
+        self.assertTrue({'ceramic', 'plastic', 'fabric'} <= finishes)
+        # One overloaded palette ID with identical color and geometry still needs
+        # distinct materials when its housing and fabric have explicit semantics.
+        base = {'vertices': [[0,0,0],[1,0,0],[0,0,1]], 'normals': [[0,1,0]]*3,
+                'indices': [0,1,2], 'color': [.4,.4,.4,1], 'material_name': 'upholstery_black'}
+        group = {'name': 'Synthetic shared palette', 'translation': [0,0,0], 'scale': [1,1,1], 'rotation': 0,
+                 'meshes': [base | {'surface_finish': f} for f in ['fabric', 'plastic']]}
+        raw = export_scene([{'name': 'Test', 'elevation': 0, 'groups': [group]}], 'glb')
+        length = struct.unpack_from('<I', raw, 12)[0]
+        materials = json.loads(raw[20:20+length])['materials']
+        self.assertEqual([m['pbrMetallicRoughness']['roughnessFactor'] for m in materials], [.92, .48])
+        for invalid in [None, '', 'FABRIC', 'unknown', {}, 'x'*65]:
+            for mesh in [static, parts[0]]:
+                old = mesh['surface_finish'];mesh['surface_finish'] = invalid
+                with self.assertRaises(ValueError): validate_material_textures(model)
+                mesh['surface_finish'] = old
 
     def test_explicit_uv_selection_and_current_dimensions(self):
         model, _, floor = fixture()

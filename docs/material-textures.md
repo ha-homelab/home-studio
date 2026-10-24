@@ -133,3 +133,21 @@ claiming geometric photorealism. Albedo is not reused as a bump/normal map.
 Run `node scripts/test-material-profiles.cjs` for finish selection and fallback
 contracts, and `node scripts/test-static-material-textures.cjs` for actual
 Standard/Lambert/Basic static maps, cutaway UVs and shadows in Chromium.
+
+
+### Explicit part finishes
+
+Palette IDs can be reused for unrelated surfaces. A static mesh or an
+`object_assets` mesh may therefore include `surface_finish` independently of an
+albedo map. This does not change its palette color, transparency, emissive state,
+geometry, or controls. It overrides palette-name finish inference and prevents
+inventory batching from merging different finishes. GLB uses the same response.
+
+Allowed values are `fabric`, `leather`, `plastic`, `painted`, `wood`, `ceramic`,
+`glass`, `rubber`, `stone`, `metal`, `brushed_metal`, `matte_metal`,
+`polished_metal`, `mirror`, `matte_paint`, `rough_wood`, `polished_stone`, `paper`,
+`foliage`, `soil`, `car_paint`, `solar_cell`, and `light_diffuser`. Omit the field
+when the surface is unknown; null and unrecognized values are rejected. These
+are conservative artistic starting values, not measured physical properties.
+The complete explicit response table and legacy inference table are compared
+between Python/GLB and JavaScript/HA by `scripts/test-material-profiles.cjs`.
