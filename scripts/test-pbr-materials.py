@@ -15,7 +15,7 @@ import unittest
 from unittest.mock import patch
 import zipfile
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
-from pbr_materials import DETAIL_PROFILES, detail_pixels, png_spec, rgb_pixels, export_material_fields
+from pbr_materials import DETAIL_PROFILES, detail_pixels, png_spec, rgb_pixels, export_material_fields, color_profile, color_luminance
 from material_textures import validate_material_textures, decode_material_texture
 from exporters import export_scene, _obj_number
 spec=importlib.util.spec_from_file_location('legacy',ROOT/'scripts/test-material-textures.py');legacy=importlib.util.module_from_spec(spec);spec.loader.exec_module(legacy)
@@ -34,6 +34,21 @@ def document(raw):
 
 
 class PBRTests(unittest.TestCase):
+    def test_compact_color_carrier_preserves_original_source_pixels(self):
+        # Frozen hashes were measured before replacing the RGB carrier. They
+        # guard exact detail and contrast, not merely Python/JS agreement.
+        expected = {
+            'wood': ('3f3e744abb4ae7e3201bee60003edd2423400ccdadf6df9b121c70e30f2c3d65', 'eb7f667099e4ea6073c676746d8c9cdbc5cb4ceb2423f7a9b1167cb92f375857'),
+            'fabric': ('23d4a8a031676651bd74908b7acc8603acd00dc219fe6bb90501e6ef9bbe604a', '2339e80eeefac6d2fb2359f433b732cdae1e2461bc1ba286372d1736c58c3321'),
+        }
+        for family, (luma_hash, albedo_hash) in expected.items():
+            profile = color_profile(family)
+            luma = bytes(color_luminance(profile))
+            self.assertEqual(len(luma), 128 * 128)
+            self.assertEqual(hashlib.sha256(luma).hexdigest(), luma_hash)
+            self.assertEqual(hashlib.sha256(detail_pixels(family)[2]).hexdigest(), albedo_hash)
+        self.assertEqual(detail_pixels('wood')[2], detail_pixels('rough_wood')[2])
+
     def test_obj_numeric_precision_has_explicit_metric_and_angular_bounds(self):
         rng=random.Random(207)
         for value in [0.,-0.,.000004999,-.000004999,12.999995,-12.999995]+[rng.uniform(-4096,4096) for _ in range(2000)]:

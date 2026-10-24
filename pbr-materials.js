@@ -16,8 +16,9 @@ function pbrDetailPixels(family, size=128, colors={}) {
   }
   const result={normal_texture:normal,roughness_texture:roughness},color=colors[family==='rough_wood'?'wood':family];
   if(color){
-    const bytes=atob(color.rgb),luma=[],rgb=new Uint8Array(bytes.length);
-    for(let i=0;i<bytes.length;i+=3)luma.push((54*bytes.charCodeAt(i)+183*bytes.charCodeAt(i+1)+19*bytes.charCodeAt(i+2))>>8);
+    const bytes=atob(color.luma_rice),luma=[],rgb=new Uint8Array(color.size*color.size*3);let bit=0,previous=0;
+    const read=()=>bytes.charCodeAt(bit>>3)>>(bit++&7)&1;
+    for(let i=0;i<color.size*color.size;i++){let quotient=0;while(read())quotient++;let value=quotient<<color.rice_k;for(let j=0;j<color.rice_k;j++)value|=read()<<j;previous+=(value&1)?-(value+1)/2:value/2;luma.push(previous)}
     const ordered=[...luma].sort((a,b)=>a-b),low=ordered[Math.floor(ordered.length/50)],high=ordered[Math.floor(ordered.length*49/50)];
     for(let i=0;i<luma.length;i++){const linear=Math.max(1-color.contrast,Math.min(1,1-color.contrast+(luma[i]-low)/Math.max(1,high-low)*color.contrast));rgb.fill(byte(255*(1.055*linear**(1/2.4)-.055)),i*3,i*3+3)}
     result.albedo_texture=rgb;

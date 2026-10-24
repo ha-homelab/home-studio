@@ -39,6 +39,28 @@ def color_profile(family):
     return color_data().get('wood' if family == 'rough_wood' else family)
 
 
+def color_luminance(color):
+    """Decode exact integer luminance samples, without color or detail loss."""
+    packed = base64.b64decode(color['luma_rice'])
+    bit = previous = 0
+    def read():
+        nonlocal bit
+        value = (packed[bit >> 3] >> (bit & 7)) & 1
+        bit += 1
+        return value
+    luma = []
+    for _ in range(color['size'] ** 2):
+        quotient = 0
+        while read():
+            quotient += 1
+        value = quotient << color['rice_k']
+        for shift in range(color['rice_k']):
+            value |= read() << shift
+        previous += -(value + 1) // 2 if value & 1 else value // 2
+        luma.append(previous)
+    return luma
+
+
 def validate_pbr_fields(mesh, families):
     if 'material_family' in mesh and mesh['material_family'] not in families:
         raise ValueError('Invalid material family')
@@ -75,8 +97,7 @@ def detail_pixels(family, size=128):
     result = (bytes(normal), bytes(roughness))
     color = color_profile(family)
     if color:
-        rgb = base64.b64decode(color['rgb'])
-        luma = [(54*rgb[i]+183*rgb[i+1]+19*rgb[i+2]) >> 8 for i in range(0,len(rgb),3)]
+        luma = color_luminance(color)
         ordered = sorted(luma)
         low, high = ordered[len(ordered)//50], ordered[len(ordered)*49//50]
         neutral = []
