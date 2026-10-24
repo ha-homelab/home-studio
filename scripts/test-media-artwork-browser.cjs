@@ -61,7 +61,7 @@ const html=`<!doctype html><html><head><meta charset="utf-8"><style>
 </style></head><body><main><h1>Fictional music cottage</h1><p>Local dashboard fixture · synthetic cover art · no real Home Assistant connection</p><home-floorplan-card></home-floorplan-card></main><script type="module">
 import '/home-floorplan-static/card.js';
 window.card=document.querySelector('home-floorplan-card');
-window.calls=[];window.artRequests=[];window.deferred=[];window.subscriptions=0;window.track='a';window.holdNext=false;
+window.calls=[];window.mapReads=[];window.artRequests=[];window.deferred=[];window.subscriptions=0;window.track='a';window.holdNext=false;
 window.hostMessages=[];const send=MessagePort.prototype.postMessage;
 MessagePort.prototype.postMessage=function(message,...options){hostMessages.push(message);return send.call(this,message,...options);};
 window.haConnection={subscribeMessage:async()=>{subscriptions++;return()=>subscriptions--;}};
@@ -69,7 +69,8 @@ window.media={state:'playing',attributes:{friendly_name:'Study speaker',entity_p
   media_content_id:'a',media_title:'Golden hour',media_artist:'Example ensemble',media_album_name:'Fictional sessions'}};
 window.makeHass=()=>({user:{id:'local-fixture-admin',is_admin:true},connected:true,locale:{language:'en'},connection:haConnection,
   states:{'media_player.study':media,'media_player.private_tv':{state:'playing',attributes:{source:'Fixture',entity_picture:'https://untrusted.invalid/private?token=PRIVATE_TV_TOKEN',media_title:'Private source'}}},
-  callWS:async message=>{calls.push(message);if(message.type==='home_floorplan/viewer')return {html:${js(viewer)},can_edit:true,readable_entities:['media_player.study','media_player.private_tv'],controllable_entities:['media_player.study','media_player.private_tv'],floor:'main',floors:['main'],site_features:true,revision:0,items:${js(model.inventory)}};
+  callWS:async message=>{if(message.type==='home_floorplan/map_get'){mapReads.push(message);return {revision:0,configured:false,config:null,reference:{latitude:0,longitude:0}};}
+    calls.push(message);if(message.type==='home_floorplan/viewer')return {html:${js(viewer)},can_edit:true,readable_entities:['media_player.study','media_player.private_tv'],controllable_entities:['media_player.study','media_player.private_tv'],floor:'main',floors:['main'],site_features:true,revision:0,items:${js(model.inventory)}};
     if(message.type==='home_floorplan/tv_frame')return {image:null};throw Error('Unexpected fixture command: '+message.type);},
   fetchWithAuth:async(url,options)=>{
     const entry={url,options,track,held:holdNext};holdNext=false;artRequests.push(entry);
@@ -112,6 +113,10 @@ card.setConfig({floor:'main',height:850,dry_run:true});publish();window.ready=tr
     assert.equal(await page.evaluate(()=>card._panel.inventoryModel),'main','generated viewer sends its inventory model ID');
     const frame=page.frames().find(frame=>frame.parentFrame());
     assert.equal(await frame.evaluate(()=>typeof window.applyMediaArtwork),'function','compiled viewer exposes its artwork bridge');
+    await page.waitForFunction(()=>hostMessages.some(message=>message.type==='map_result'&&message.success));
+    await frame.waitForFunction(()=>document.querySelector('#homeMapStatus').textContent==='');
+    assert.equal(await frame.locator('#homeMapStatus').textContent(),'','an unset map is not a map loading error');
+    assert.equal(await frame.locator('#homeMapOverview').isVisible(),false);
     const image=frame.locator('[data-tv-preview="speaker"] img');
     const status=frame.locator('[data-tv-preview="speaker"] .tv-preview-status');
     await frame.waitForFunction(()=>document.querySelector('[data-tv-preview="speaker"] img')?.getAttribute('src')?.startsWith('data:image/jpeg;base64,'));
@@ -162,6 +167,7 @@ card.setConfig({floor:'main',height:850,dry_run:true});publish();window.ready=tr
     await page.evaluate(()=>deferred[1].release());
     await page.waitForFunction(()=>detachedPanel.mediaArtworkRequests===0);
     assert.equal(await page.evaluate(()=>detachedPanel.mediaArtwork.size),0);
+    assert.deepEqual(await page.evaluate(()=>mapReads),[{type:'home_floorplan/map_get'}],'the viewer reads its unset map configuration exactly once');
     assert.equal(incoming.length,4);assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
     console.log(`PASS (${engine}): real generated viewer/card, authenticated canonical proxy, native PNG/JPEG decode, private TV isolation, literal metadata, no progress polling, stale replies, off and removal cleanup. Screenshot: ${path.join(artifacts,engine+'-media-artwork.png')}`);
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}

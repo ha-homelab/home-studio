@@ -142,6 +142,8 @@ async def _finish_setup(hass, state):
                 state["ai"] = NativeAI(hass)
             hass.http.register_view(NativeAIView(state["ai"]))
             state["ai_registered"] = True
+        from .map import async_setup_map
+        await async_setup_map(hass, state)
         if not state.get("ws_registered"):
             for handler in (ws_status, ws_viewer, ws_save, ws_recover, ws_export, ws_curtains, ws_curtain_command,
                             ws_project_get, ws_project_save, ws_project_publish, ws_export_model, ws_entity_catalog):

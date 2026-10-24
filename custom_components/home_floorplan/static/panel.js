@@ -268,11 +268,49 @@ function planLoadError(error) {
   return typeof message === 'string' && message.trim() ? message.slice(0, 500) : 'Home Assistant could not load the plan. Try reloading the saved plan.';
 }
 
+// The opaque viewer never receives HA credentials or arbitrary fetch/WS access.
+const mapBridgeLimits = Object.freeze({tiles:4, settings:1, queued:64, tileCharacters:699074});
+const mapNumber = (value, min, max) => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
+function mapConfig(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.enabled !== 'boolean' ||
+      !mapNumber(value.latitude,-85,85) || !mapNumber(value.longitude,-180,180) ||
+      !mapNumber(value.model_x,-10000,10000) || !mapNumber(value.model_z,-10000,10000) ||
+      !mapNumber(value.north_deg,0,360)) return null;
+  const {enabled,latitude,longitude,model_x,model_z,north_deg}=value;
+  return {enabled,latitude,longitude,model_x,model_z,north_deg};
+}
+function mapNavigation(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !['model','map'].includes(value.mode) ||
+      !mapNumber(value.zoom,.00005,3) || !mapNumber(value.rotation,-2*Math.PI,2*Math.PI) ||
+      !mapNumber(value.tilt,-.45,.6) || !mapNumber(value.pan_x,-2000000,2000000) || !mapNumber(value.pan_y,-2000000,2000000)) return null;
+  const {mode,zoom,rotation,tilt,pan_x,pan_y}=value;
+  const view={mode,zoom,rotation,tilt,pan_x,pan_y};
+  if (!['target_x','target_z','span_m'].some(key=>Object.hasOwn(value,key))) return view;
+  if (mode!=='map' || !mapNumber(value.target_x,-2000000,2000000) || !mapNumber(value.target_z,-2000000,2000000) ||
+      !mapNumber(value.span_m,.01,40000000)) return null;
+  return {...view,target_x:value.target_x,target_z:value.target_z,span_m:value.span_m};
+}
+function mapSnapshot(value) {
+  const config=mapConfig(value?.config);
+  if (!value || !Number.isSafeInteger(value.revision) || value.revision<0 || typeof value.configured!=='boolean' ||
+      (value.configured ? !config : value.config!==null) ||
+      !mapNumber(value.reference?.latitude,-90,90) || !mapNumber(value.reference?.longitude,-180,180)) return null;
+  return {revision:value.revision,configured:value.configured,config,
+    reference:{latitude:value.reference.latitude,longitude:value.reference.longitude}};
+}
+function mapTileResult(value) {
+  if (typeof value?.data_url!=='string' || value.data_url.length>mapBridgeLimits.tileCharacters ||
+      !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value.data_url)) return null;
+  const body=value.data_url.slice(22),bytes=body.length/4*3-(body.endsWith('==')?2:body.endsWith('=')?1:0);
+  if (body.length%4!==0 || bytes>524288) return null;
+  return {data_url:value.data_url,attribution:'© OpenStreetMap contributors',attribution_url:'https://www.openstreetmap.org/copyright'};
+}
+
 class HomeFloorplanPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({mode: 'open'});
-    this.shadowRoot.innerHTML = `<style>:host{display:flex;flex-direction:column;height:100dvh;min-height:0;background:#11191f}header{flex-shrink:0;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;font:14px system-ui;color:#b8c8d0}button{padding:8px 10px;cursor:pointer;background:#202d35;color:#e9eeef;border:1px solid #44515a;border-radius:7px;min-height:40px}#notice{flex:1;min-width:160px;overflow-wrap:anywhere}#dry-run[aria-pressed="true"]{border-color:#e8c56c;color:#ffe6a2}iframe{border:0;flex:1;width:100%;min-height:0}.error{color:#ffd19b}#recovery,#local-recovery{padding:20px;color:#e9eeef;font:14px/1.5 system-ui;overflow:auto}#recovery-details{white-space:pre-wrap;overflow-wrap:anywhere}button:disabled{opacity:.5}#studio{display:inline-flex;align-items:center;min-height:44px;box-sizing:border-box;color:#a9e0ee;padding:8px 12px;border:1px solid #44515a;border-radius:7px;text-decoration:none}#studio:focus-visible{outline:3px solid #e8c56c;outline-offset:3px}[hidden]{display:none!important}</style><header><button id="menu" aria-label="Open sidebar">☰</button><span id="notice" role="status">Connecting to Home Assistant…</span><button id="dry-run" type="button" aria-pressed="false">Dry run: Off</button><button id="retry">Reload saved plan</button><a id="studio" href="/home-studio" lang="en" hidden>Edit home</a></header><section id="local-recovery" hidden><h2>Unsaved layout edits</h2><p>The latest layout submitted by this card is retained in memory. Export it before reloading the saved plan. Keep this card open until you have saved the file.</p><button id="local-export">Export unsaved inventory JSON</button></section><section id="recovery" hidden><h2>Saved placements need repair</h2><p>Nothing has been overwritten. Export the original inventory, keep it as a backup, and edit a copy using the current floor and room IDs below. Importing the repaired copy replaces all saved floors only after validation.</p><pre id="recovery-details"></pre><button id="recovery-export">Export original inventory</button> <button id="recovery-import">Import repaired inventory</button><input id="recovery-file" type="file" accept="application/json,.json" hidden></section><iframe title="Private home floorplan" sandbox="allow-scripts allow-downloads allow-forms"></iframe>`;
+    this.shadowRoot.innerHTML = `<style>:host{display:flex;flex-direction:column;height:100dvh;min-height:0;background:#11191f}header{flex-shrink:0;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;font:14px system-ui;color:#b8c8d0}button{padding:8px 10px;cursor:pointer;background:#202d35;color:#e9eeef;border:1px solid #44515a;border-radius:7px;min-height:40px}#notice{flex:1;min-width:160px;overflow-wrap:anywhere}#dry-run[aria-pressed="true"]{border-color:#e8c56c;color:#ffe6a2}iframe{border:0;flex:1;width:100%;min-height:0}.error{color:#ffd19b}#recovery,#local-recovery{padding:20px;color:#e9eeef;font:14px/1.5 system-ui;overflow:auto}#recovery-details{white-space:pre-wrap;overflow-wrap:anywhere}button:disabled{opacity:.5}#studio{display:inline-flex;align-items:center;min-height:44px;box-sizing:border-box;color:#a9e0ee;padding:8px 12px;border:1px solid #44515a;border-radius:7px;text-decoration:none}#studio:focus-visible,#map-attribution:focus-visible{outline:3px solid #e8c56c;outline-offset:3px}#map-attribution{color:#a9e0ee;font-size:12px;padding:8px 0}[hidden]{display:none!important}</style><header><button id="menu" aria-label="Open sidebar">☰</button><span id="notice" role="status">Connecting to Home Assistant…</span><button id="dry-run" type="button" aria-pressed="false">Dry run: Off</button><button id="retry">Reload saved plan</button><a id="studio" href="/home-studio" lang="en" hidden>Edit home</a><a id="map-attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" hidden>© OpenStreetMap contributors</a></header><section id="local-recovery" hidden><h2>Unsaved layout edits</h2><p>The latest layout submitted by this card is retained in memory. Export it before reloading the saved plan. Keep this card open until you have saved the file.</p><button id="local-export">Export unsaved inventory JSON</button></section><section id="recovery" hidden><h2>Saved placements need repair</h2><p>Nothing has been overwritten. Export the original inventory, keep it as a backup, and edit a copy using the current floor and room IDs below. Importing the repaired copy replaces all saved floors only after validation.</p><pre id="recovery-details"></pre><button id="recovery-export">Export original inventory</button> <button id="recovery-import">Import repaired inventory</button><input id="recovery-file" type="file" accept="application/json,.json" hidden></section><iframe title="Private home floorplan" sandbox="allow-scripts allow-downloads allow-forms"></iframe>`;
     this.serverCanEdit = false;
     this.editLocked = false;
     this.readableEntities = new Set();
@@ -281,6 +319,8 @@ class HomeFloorplanPanel extends HTMLElement {
     this.requestedFloor = null;
     this.floors = [];
     this.siteFeatures = false;
+    this.mapView = null;
+    this.mapAttributionLink=this.$('map-attribution');
     this.recovery = null;
     this.savedItems = [];
     this.tvFrameCache = Object.create(null);
@@ -447,6 +487,7 @@ class HomeFloorplanPanel extends HTMLElement {
     if (changedAccount) {
       this.discardLocalEdits();this.serverCanEdit=false;this.recovery=null;this.savedItems=[];
       this.readableEntities=new Set();this.controllableEntities=new Set();
+      this.mapView=null;
       this.disconnectedCallback();this.$('recovery').hidden=true;
     }
     this._hass = value;
@@ -521,6 +562,8 @@ class HomeFloorplanPanel extends HTMLElement {
   }
   invalidateViewerLoad() {
     this.generation = (this.generation || 0) + 1;
+    this.clearMapRequests();
+    this.showMapAttribution(false);
     this.cancelViewerRequest?.(); this.cancelViewerRequest = null;
     this.clearMediaArtwork();
     this.clearViewerLoad();
@@ -542,6 +585,7 @@ class HomeFloorplanPanel extends HTMLElement {
     this.overlayDocument?.removeEventListener('pointerdown',this.onOverlayPointer,true);
     this.overlayDocument=null;
     this.stopTrackingConnection();
+    this.mapView=null;
     this.invalidateViewerLoad(); this.started = false;
     const iframe=this.$('iframe',false);
     iframe.onload=null;iframe.removeAttribute('src');iframe.removeAttribute('srcdoc');
@@ -831,6 +875,86 @@ class HomeFloorplanPanel extends HTMLElement {
     removeEventListener('message', this.viewerNavigation);
     this.viewerNavigation = null;
   }
+  showMapAttribution(visible) {
+    if (this.mapAttributionLink) this.mapAttributionLink.hidden=!visible;
+  }
+  clearMapRequests() {
+    const bridge=this.mapBridge;
+    if (!bridge) return;
+    // HA owns in-flight WS cancellation. Retain their active slots until they
+    // settle, so changing floors cannot multiply work on the same connection.
+    bridge.queue=[];bridge.pending.clear();
+  }
+  handleMapRequest(message,generation) {
+    const id=message.request_id,port=this.port,hass=this._hass;
+    if (typeof id!=='string' || !/^[A-Za-z0-9_-]{1,64}$/.test(id) || !port) return;
+    const account=hass.user.id,connection=hass.connection;
+    const current=()=>generation===this.generation && port===this.port && this.isConnected!==false &&
+      account===this._hass?.user?.id && connection===this._hass?.connection && this._hass?.connected!==false && connection?.connected!==false;
+    const reply=(success,result,error)=>{
+      if (current()) port.postMessage({type:'map_result',request_id:id,success,...(success?{result}:{error})});
+    };
+    if (!current()) return;
+    let bridge=this.mapBridge;
+    if (!bridge || bridge.connection!==connection || bridge.account!==account) {
+      this.clearMapRequests();
+      bridge=this.mapBridge={connection,account,queue:[],pending:new Map(),tiles:0,settings:0};
+    }
+    // A repeated pending ID cannot cause a second operation or ambiguous reply.
+    if (bridge.pending.has(id)) return;
+    let request,kind='settings';
+    if (message.action==='get') request={type:'home_floorplan/map_get'};
+    else if (message.action==='save') {
+      if (!this.canEdit) {reply(false,null,'Administrator access is required to change map settings.');return;}
+      const config=mapConfig(message.config);
+      if (!config || !Number.isSafeInteger(message.revision) || message.revision<0) {reply(false,null,'Invalid map settings.');return;}
+      request={type:'home_floorplan/map_save',revision:message.revision,config};
+    } else if (message.action==='tile') {
+      const {z,x,y}=message;
+      if (!Number.isInteger(z) || z<0 || z>19 || !Number.isInteger(x) || !Number.isInteger(y) ||
+          x<0 || y<0 || x>=2**z || y>=2**z) {reply(false,null,'Invalid map tile.');return;}
+      request={type:'home_floorplan/map_tile',z,x,y};kind='tiles';
+    } else {reply(false,null,'Unsupported map request.');return;}
+    if (bridge.queue.length>=mapBridgeLimits.queued) {reply(false,null,'Map request queue is full. Try again after navigation stops.');return;}
+    const job={id,kind,request,current,reply,hass,action:message.action};
+    bridge.pending.set(id,job);bridge.queue.push(job);this.drainMapRequests(bridge);
+  }
+  drainMapRequests(bridge) {
+    if (bridge!==this.mapBridge) return;
+    for (let index=0;index<bridge.queue.length;) {
+      const job=bridge.queue[index];
+      if (!job.current()) {bridge.queue.splice(index,1);bridge.pending.delete(job.id);continue;}
+      if (bridge[job.kind]>=mapBridgeLimits[job.kind]) {index++;continue;}
+      bridge.queue.splice(index,1);
+      if (job.action==='save' && !this.canEdit) {bridge.pending.delete(job.id);job.reply(false,null,'Administrator access is required to change map settings.');continue;}
+      bridge[job.kind]++;
+      Promise.resolve().then(()=>{
+        if (!job.current()) return null;
+        if (job.action==='save' && !this.canEdit) throw {code:'unauthorized'};
+        return job.hass.callWS(job.request);
+      }).then(value=>{
+        if (!job.current()) return;
+        const result=job.action==='tile'?mapTileResult(value):mapSnapshot(value);
+        if (result) {
+          this.showMapAttribution(job.action==='tile' || result.config?.enabled===true);
+          job.reply(true,result);
+        }
+        else job.reply(false,null,'Home Assistant returned an invalid map response.');
+      }).catch(error=>{
+        // Raw transport errors can contain URLs, tokens or location values.
+        const code=error?.code || error?.error?.code;
+        const text=code==='conflict'?'Map settings changed. Reload settings before saving again.':
+          code==='map_disabled'?'Enable the map in settings before requesting tiles.':
+          code==='unauthorized' || code==='forbidden'?'Home Assistant denied access to the map.':
+          'The map request failed. Check the Home Assistant connection and try again.';
+        job.reply(false,null,text);
+      }).finally(()=>{
+        bridge[job.kind]--;
+        if (bridge.pending.get(job.id)===job) bridge.pending.delete(job.id);
+        this.drainMapRequests(bridge);
+      });
+    }
+  }
   async loadFloor(floor = this.initialFloor) {
     if (!this._hass?.user?.id) return;
     if (this.suspendedEdits && this.localEdits) {this.showLocalEditRecovery();return;}
@@ -905,10 +1029,10 @@ class HomeFloorplanPanel extends HTMLElement {
         loaded = true;
         this.clearViewerLoad();
         const channel = new MessageChannel();
-        this.port = channel.port1;
-        this.port.onmessage = event => this.handleViewerMessage(event.data, generation);
+        const port=this.port=channel.port1;
+        port.onmessage = event => {if (port===this.port) this.handleViewerMessage(event.data, generation);};
         // An opaque sandbox has origin "null"; verify the parent in the viewer.
-        iframe.contentWindow.postMessage({type:'home-floorplan:init', items:result.items,can_edit:this.canEdit,preferences:this.viewPreferences}, '*', [channel.port2]);
+        iframe.contentWindow.postMessage({type:'home-floorplan:init', items:result.items,can_edit:this.canEdit,preferences:this.viewPreferences,map_view:this.mapView}, '*', [channel.port2]);
         this.publishEntityStates(); this.canEdit ? this.noticeKey('Connected · placements are saved in Home Assistant') : this.notice('Home controls · layout locked');
         this.tvVisibility ||= () => {this.refreshTVFrame();this.refreshCameraFrames();this.refreshMediaArtwork();};
         document.addEventListener('visibilitychange',this.tvVisibility);
@@ -945,9 +1069,14 @@ class HomeFloorplanPanel extends HTMLElement {
     // Only non-device messages pass in dry run. This also blocks native HA
     // more-info dialogs, which expose controls outside the sandbox, and future
     // command types until their behavior has been explicitly classified.
-    if (!['model_config','view_preferences','save','floor','export'].includes(message.type) &&
+    if (!['model_config','view_preferences','map_request','map_view','save','floor','export'].includes(message.type) &&
         this.blockDeviceCommand(message)) return;
-    if (message.type === 'model_config') {
+    if (message.type === 'map_request') {
+      this.handleMapRequest(message,generation);
+    } else if (message.type === 'map_view') {
+      if (message.view===null) this.mapView=null;
+      else {const view=mapNavigation(message.view);if (view) this.mapView=view;}
+    } else if (message.type === 'model_config') {
       if(this.modelConfigured)return;
       this.modelConfigured=true;
       this.scopedStates=!this.canEdit || Array.isArray(message.state_entities);

@@ -41,7 +41,12 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   const frame=page.frameLocator('iframe');
   await frame.locator('#homeRoom').waitFor();
   await page.evaluate(items=>{
-   const channel=new MessageChannel();window.messages=[];window.channel=channel.port1;channel.port1.onmessage=event=>messages.push(event.data);
+   const channel=new MessageChannel();window.messages=[];window.channel=channel.port1;channel.port1.onmessage=event=>{
+    if(event.data.type==='map_request'&&event.data.action==='get'){
+     channel.port1.postMessage({type:'map_result',request_id:event.data.request_id,success:true,result:{revision:0,configured:false,config:null,reference:null}});return;
+    }
+    messages.push(event.data);
+   };
    document.querySelector('iframe').contentWindow.postMessage({type:'home-floorplan:init',can_edit:true,items},'*',[channel.port2]);
    window.states={
     'binary_sensor.cooktop':{state:'off'},'sensor.oven':{state:'ready'},'binary_sensor.smoke':{state:'off',device_class:'smoke'},'sensor.smoke_battery':{state:'0',unit:'%'},'binary_sensor.presence':{state:'off',device_class:'occupancy'},

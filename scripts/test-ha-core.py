@@ -14,12 +14,14 @@ import errno
 import importlib.util
 import json
 from pathlib import Path
+import struct
 import sys
 import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, DEFAULT, patch
+import zlib
 
 from homeassistant import auth
 from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_READ_ONLY, GROUP_ID_USER
@@ -133,6 +135,91 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
         project = await self.request('project_get')
         self.assertTrue(project['capabilities']['ai'])
         self.assertEqual(sum(view.name == 'api:home_floorplan:ai' for view in self.hass.http.views), 1)
+
+    async def test_map_real_permissions_and_separate_private_storage(self):
+        config = {'enabled': True, 'latitude': 37.1234567, 'longitude': -122.1234567,
+                  'model_x': 1.005, 'model_z': -2.001, 'north_deg': 25.005}
+        initial = await self.request('map_get', user=self.family)
+        self.assertFalse(initial['configured'])
+        self.assertIsNone(initial['config'])
+        project = await self.request('project_get')
+        reference = (self.hass.config.latitude, self.hass.config.longitude)
+        with self.assertRaisesRegex(ValueError, 'unauthorized'):
+            await self.request('map_save', user=self.family, revision=0, config=config)
+        saved = await self.request('map_save', revision=0, config=config)
+        self.assertEqual(saved['revision'], 1)
+        self.assertEqual((await self.request('map_get', user=self.family))['config'], config)
+        self.assertTrue((Path(self.temp.name) / '.storage/home_floorplan.map').is_file())
+        manager = self.hass.data['home_floorplan']['map']
+        reopened = type(manager)(self.hass)
+        await reopened.load()
+        self.assertEqual(reopened.document, manager.document)
+        self.assertEqual(await self.request('project_get'), project)
+        self.assertEqual((self.hass.config.latitude, self.hass.config.longitude), reference)
+        with self.assertRaisesRegex(ValueError, 'conflict'):
+            await self.request('map_save', revision=0, config=config)
+        with self.assertRaisesRegex(ValueError, 'invalid_map'):
+            await self.request('map_save', revision=True, config=config)
+
+    async def test_map_real_write_error_does_not_acknowledge_or_mutate(self):
+        config = {'enabled': True, 'latitude': 0, 'longitude': 0,
+                  'model_x': 0, 'model_z': 0, 'north_deg': 0}
+        await self.request('map_save', revision=0, config=config)
+        manager = self.hass.data['home_floorplan']['map']
+        previous = copy.deepcopy(manager.document)
+        store_path = Path(manager.store.path)
+        previous_bytes = store_path.read_bytes()
+        failure = WriteError(OSError(errno.ENOSPC, 'No space left on device'))
+        with patch.object(manager.store, '_write_prepared_data', side_effect=failure):
+            with self.assertRaisesRegex(ValueError, 'save_failed'):
+                await self.request('map_save', revision=1, config={**config, 'north_deg': 90})
+        self.assertEqual(manager.document, previous)
+        self.assertEqual(store_path.read_bytes(), previous_bytes)
+
+    async def test_map_real_async_transport_boundary_and_cache(self):
+        def png_chunk(kind, data):
+            return (struct.pack('>I', len(data)) + kind + data
+                    + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff))
+
+        png = (b'\x89PNG\r\n\x1a\n'
+               + png_chunk(b'IHDR', struct.pack('>IIBBBBB', 256, 256, 8, 6, 0, 0, 0))
+               + png_chunk(b'IDAT', zlib.compress((b'\x00' + b'\x00\x00\x00\xff' * 256) * 256))
+               + png_chunk(b'IEND', b''))
+
+        class Response:
+            status = 200
+            headers = {'Content-Type': 'image/png', 'Cache-Control': 'max-age=600'}
+            content_length = len(png)
+
+            def __init__(self):
+                self.content = self
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def iter_chunked(self, size):
+                yield png
+
+        session = SimpleNamespace(get=lambda *args, **kwargs: Response())
+        with patch.object(session, 'get', wraps=session.get) as fetch, patch(
+                'homeassistant.helpers.aiohttp_client.async_get_clientsession', return_value=session):
+            with self.assertRaisesRegex(ValueError, 'map_disabled'):
+                await self.request('map_tile', user=self.family, z=0, x=0, y=0)
+            preview = await self.request('map_tile', z=0, x=0, y=0)
+            self.assertEqual(base64.b64decode(preview['data_url'].split(',')[1]), png)
+            await self.request('map_save', revision=0, config={
+                'enabled': True, 'latitude': 0, 'longitude': 0,
+                'model_x': 0, 'model_z': 0, 'north_deg': 0})
+            await self.request('map_tile', user=self.family, z=0, x=0, y=0)
+            fetch.assert_called_once()
+            self.assertEqual(fetch.call_args.args, ('https://tile.openstreetmap.org/0/0/0.png',))
+            self.assertFalse(fetch.call_args.kwargs['allow_redirects'])
+            self.assertFalse(fetch.call_args.kwargs['auto_decompress'])
+            self.assertEqual(fetch.call_args.kwargs['timeout'].total, 10)
+            self.assertIn('HomeStudioMap/', fetch.call_args.kwargs['headers']['User-Agent'])
 
     async def test_save_publish_reopen_and_conflict(self):
         project = json.loads((ROOT / 'planner/guide-assets/practice-home.json').read_text())

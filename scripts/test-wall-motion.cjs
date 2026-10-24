@@ -106,7 +106,6 @@ const draw = viewer.split('\n').find(line => line.startsWith('function drawScene
 assert.ok(draw, 'The viewer defines one shared draw helper');
 assert.equal((viewer.match(/renderer\.render\(scene,camera\)/g) || []).length, 1);
 assert.equal((home.match(/renderer\.render\(/g) || []).length, 0);
-assert.equal((home.match(/drawScene\(camera\)/g) || []).length, 2);
 const calls = [];
 const context = vm.createContext({
   scene: {},
@@ -125,4 +124,47 @@ context.renderProfile.diffuseLighting = true;
 context.coalesceMotion = true;
 assert.throws(() => context.drawScene({}), /GPU copy unavailable/);
 assert.deepEqual(calls, ['before', 'copy draw', 'after'], 'Timing also finishes when the bounded motion draw fails');
-console.log('PASS: Wall drift adds zero scheduled frames, bounds active time, and freezes for device, preference and slow-render fallbacks.');
+async function testHomeDrawPaths() {
+  const THREE = await import('data:text/javascript;base64,' + fs.readFileSync(path.join(root, 'vendor/three.module.min.js')).toString('base64'));
+  const mapObject = {visible:true}, house = {visible:true}, hiddenHouse = {visible:false}, light = {visible:true,isLight:true};
+  const children = [mapObject,house,hiddenHouse,light], visibility = () => children.map(object => object.visible);
+  const stage = {dataset:{},getBoundingClientRect:() => ({width:1200,height:700})};
+  const trace = [], masks = [];
+  const c = vm.createContext({
+    THREE, active:true, camera:undefined, cameraFit:undefined, projectedPosition:new THREE.Vector3(),
+    selected:'', planRadius:10, planBounds:true, zoom:1, panX:0, panY:0, homeRotation:0, homeTilt:0,
+    model:{ceiling_height_m:3,rooms:[{id:'A',polygon:[[0,0],[4,0],[4,4],[0,4]]}]},
+    xm:x => x, zm:z => z, $:id => id==='homeStage' ? stage : {firstElementChild:{style:{}}},
+    mapLayer:{object:mapObject,config:{enabled:true,north_deg:0},render() {}}, mapDraft:null, mapFraming:null, mapCoarseState:false,
+    environmentLayer:null, roomLighting:null, lowerFloorContext:null, assumedZones:null, presenceView:null, vacuumView:null,
+    roomLabels:true, signalZone:'', showLowerFloor:true, labels:[], points:[], refreshSignalStatus() {}, positionMediaPreviews() {},
+    scene:{children}, renderCount:0, renderSuspended:false, renderLost:false, document:{hidden:false},
+    coalesceMotion:false, interactionPointer:null,
+    wallSheenMotion:{beforeRender:() => trace.push('before'),afterRender:() => trace.push('after')},
+    renderer:{render:() => {trace.push('draw');masks.push(visibility());}},
+  });
+  c.mapCoarse = () => c.zoom < .22;
+  const signalStart = home.indexOf('  function drawSignalFrame('), renderStart = home.indexOf('  function render() {');
+  const renderEnd = home.indexOf('  function clearTrail(', renderStart);
+  assert(signalStart>=0 && renderStart>signalStart && renderEnd>renderStart, 'Exercise the actual Home draw functions');
+  vm.runInContext(draw + '\n' + home.slice(signalStart,renderEnd), c);
+  const expectDraw = (action,mask) => {
+    trace.length=0;const before=c.renderCount;action();
+    assert.deepEqual(trace,['before','draw','after'],'Every Home draw runs through wall-sheen timing');
+    assert.deepEqual(masks.at(-1),mask);assert.equal(c.renderCount,before+1);
+  };
+  expectDraw(() => c.render(),[true,true,false,true]);
+  expectDraw(() => c.drawSignalFrame(true),[true,true,false,true]);
+  trace.length=0;c.drawSignalFrame(false);assert.deepEqual(trace,[],'A status-only signal update does not draw');
+  c.zoom=.1;
+  expectDraw(() => c.render(),[true,false,false,true]);
+  assert.deepEqual(visibility(),[true,true,false,true],'Coarse-map drawing restores every original visibility');
+  trace.length=0;c.drawSignalFrame(true);assert.deepEqual(trace,[],'Coarse maps suppress house-only signal redraws');
+  c.renderer.render = () => {trace.push('draw');throw Error('Map draw failed');};
+  const before=c.renderCount;
+  assert.throws(() => c.render(),/Map draw failed/);
+  assert.deepEqual(trace,['before','draw','after'],'A failed coarse-map draw still completes sheen timing');
+  assert.equal(c.renderCount,before);assert.deepEqual(visibility(),[true,true,false,true],'A failed map draw also restores visibility');
+}
+testHomeDrawPaths().then(() => console.log('PASS: Wall drift adds zero scheduled frames, bounds active time, freezes for device/preference/slow-render fallbacks, and wraps Home, signal and coarse-map draws.'))
+  .catch(error => {console.error(error);process.exitCode=1;});

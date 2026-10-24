@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline tests for pinned downloads and stock Gecko transport validation."""
 import contextlib
+import ast
 import copy
 import inspect
 import textwrap
@@ -47,6 +48,57 @@ def replacement_stats():
 
 
 class ViewerColdLoadTests(unittest.TestCase):
+    def test_native_fixture_answers_real_map_request_and_clears_its_timeout(self):
+        source = inspect.getsource(acceptance.viewer)
+        bootstrap = next(node.value for node in ast.walk(ast.parse(source))
+                         if isinstance(node, ast.Constant) and isinstance(node.value, str)
+                         and node.value.startswith('const [items,states,diagnostics,frameDiagnostics]'))
+        viewer = Path(__file__).resolve().parents[1].joinpath('viewer.js').read_text()
+        requests = viewer[viewer.index('const mapRequests='):viewer.index('__HOME_JS__')]
+        response_start = viewer.index("  if(message?.type==='map_result'){")
+        response = viewer[response_start:viewer.index("  if(message?.type==='dismiss_overlays')", response_start)]
+        result = subprocess.run(['node', '-e', r'''
+          const assert=require('node:assert/strict'),vm=require('node:vm');
+          const {bootstrap,requests,response}=JSON.parse(require('node:fs').readFileSync(0,'utf8'));
+          const timers=new Map(),replies=[];let timerId=0,frame,context;
+          context=vm.createContext({crypto:{randomUUID:()=> 'fixture-token'},
+            fetch:async()=>({text:async()=>'<head></head><script></script></body>'}),
+            document:{createElement:()=>({style:{},contentWindow:{postMessage(){}}}),body:{append(value){frame=value;queueMicrotask(()=>frame.onload());}}},
+            MessageChannel:class{constructor(){this.port2={};this.port1={postMessage(message){replies.push(message);context.receiveMapResult?.(message);}};}},
+            setTimeout(callback,delay){const id=++timerId;timers.set(id,{callback,delay});return id;},
+            clearTimeout:id=>timers.delete(id),embedded:true,addEventListener(){}});
+          context.window=context;
+          vm.runInContext('(function(){'+bootstrap+'})',context)([],{fixture:{state:'on'}},'','');
+          (async()=>{
+            await new Promise(setImmediate);
+            context.viewerPort.onmessage({data:{type:'model_config'}});
+            assert.equal(replies[0].type,'states');assert.equal(replies[0].connected,true);
+            context.bridge={postMessage:message=>context.viewerPort.onmessage({data:message})};
+            vm.runInContext(requests+'\nthis.receiveMapResult=message=>{'+response+'};',context);
+            const request=context.homeMapRequest('get');
+            assert.equal(timers.size,0,'The fixture must answer before the map timeout remains pending');
+            const value=await request;
+            assert.deepEqual(JSON.parse(JSON.stringify(value)),{revision:0,configured:false,config:null,reference:{latitude:0,longitude:0}});
+            assert.equal(context.viewerMapRequests.length,1);assert.equal(context.viewerMapRequests[0].request_id,'map-1');
+            assert.equal(timers.size,0);assert.equal(vm.runInContext('mapRequests.size',context),0);
+            for(const type of ['view_preferences','map_view'])context.viewerPort.onmessage({data:{type}});
+            assert.equal(context.viewerCommands.length,0,'Valid fixture messages are not commands');
+            for(const action of ['save','tile','unknown']){
+              if(action==='unknown')context.viewerPort.onmessage({data:{type:'map_request',action,request_id:action}});
+              else await assert.rejects(context.homeMapRequest(action),/Unsupported map request/);
+              assert.equal(context.viewerCommands.at(-1).action,action);
+              assert.equal(replies.at(-1).success,false);
+            }
+            for(const type of ['save','export','toggle','tv_power','curtain_command','media_command','more_info','floor','unexpected']){
+              context.viewerPort.onmessage({data:{type}});assert.equal(context.viewerCommands.at(-1).type,type);
+            }
+            assert.equal(timers.size,0);assert.equal(vm.runInContext('mapRequests.size',context),0);
+          })().catch(error=>{console.error(error);process.exitCode=1;});
+        '''], input=json.dumps({'bootstrap': bootstrap, 'requests': requests, 'response': response}),
+            text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("document.querySelector('#homeMapAlign')?.hidden===false", source)
+
     def test_boundary_and_late_calls_preserve_failure_receipts_and_reset(self):
         for elapsed, passed in [(59.999, True), (60, False), (61, False)]:
             now = [0.0]; client = Mock(); sample = {}

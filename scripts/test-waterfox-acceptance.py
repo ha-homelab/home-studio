@@ -549,13 +549,22 @@ def viewer(client, origin, project, record, save):
             const iframe=document.createElement('iframe');
             iframe.id='viewer';iframe.sandbox='allow-scripts allow-downloads allow-forms';
             iframe.style.cssText='width:100%;height:740px;border:0';
-            iframe.onload=()=>{window.nativeViewer=iframe.contentWindow;const channel=new MessageChannel();window.viewerPort=channel.port1;
-              channel.port1.onmessage=e=>{if(e.data.type==='model_config')channel.port1.postMessage({type:'states',connected:true,states});};
+            iframe.onload=()=>{window.nativeViewer=iframe.contentWindow;const channel=new MessageChannel();window.viewerPort=channel.port1;window.viewerMapRequests=[];window.viewerCommands=[];
+              channel.port1.onmessage=e=>{
+                if(e.data.type==='model_config')channel.port1.postMessage({type:'states',connected:true,states});
+                if(e.data.type==='map_request'){
+                  window.viewerMapRequests.push(e.data);
+                  if(e.data.action!=='get')window.viewerCommands.push(e.data);
+                  channel.port1.postMessage({type:'map_result',request_id:e.data.request_id,
+                    ...(e.data.action==='get'?{success:true,result:{revision:0,configured:false,config:null,reference:{latitude:0,longitude:0}}}:
+                      {success:false,error:'Unsupported map request in the native fixture.'})});
+                }else if(!['model_config','view_preferences','map_view'].includes(e.data.type))window.viewerCommands.push(e.data);
+              };
               iframe.contentWindow.postMessage({type:'home-floorplan:init',items,preferences:{},can_edit:true},'*',[channel.port2]);window.fixtureLoaded=true;};
             iframe.srcdoc=html;document.body.append(iframe);}); return true;''', items, states, NATIVE_VIEWER_PROGRAM_DIAGNOSTICS + NATIVE_GL_DIAGNOSTICS, NATIVE_VIEWER_FRAME_DIAGNOSTICS))
                 load.wait('window.fixtureLoaded')
                 load.run(lambda: client.call('WebDriver:SwitchToFrame', {'id': 0}))
-                load.wait(f"window.floorplan?.renderCount>0 && window.floorplan.canEdit===true && document.querySelector('#homeConnection')?.dataset.connected==='true' && window.__nativeRenderedLights==={len(items)}")
+                load.wait(f"window.floorplan?.renderCount>0 && window.floorplan.canEdit===true && document.querySelector('#homeConnection')?.dataset.connected==='true' && document.querySelector('#homeMapAlign')?.hidden===false && window.__nativeRenderedLights==={len(items)}")
                 load.complete()
         finally:
             save()
@@ -613,6 +622,9 @@ def viewer(client, origin, project, record, save):
         require(sample['final']['contextLosses'] == cycle, 'No unexpected WebGL context loss')
         save()
         client.call('WebDriver:SwitchToFrame', {'id': None})
+        sample['viewerCommands'] = client.execute('return window.viewerCommands;')
+        save()
+        require(sample['viewerCommands'] == [], 'Viewer navigation never issues a device, write, or unsupported command')
         client.screenshot(Path(record['output']) / f'viewer-cycle-{cycle + 1}.png')
         client.execute("window.viewerPort.close();document.querySelector('#viewer').remove();return true;")
         require(client.execute('return document.querySelectorAll("iframe").length===0 && 6*7===42;'), 'Dashboard remains responsive after closing viewer')

@@ -168,7 +168,8 @@ class PlatformAcceptanceTests(unittest.TestCase):
         self.assertEqual(python_setup[0]['with']['python-version'], '3.14')
         runs = [step['run'] for step in steps if 'run' in step]
         self.assertEqual(runs, ['python -m pip install -r requirements-ha-test.txt',
-                                'python scripts/test-ha-core.py', 'python scripts/test-ha-ai.py'])
+                                'python scripts/test-ha-core.py', 'python scripts/test-ha-map.py',
+                                'python scripts/test-ha-ai.py'])
         self.assertEqual((ROOT / 'requirements-ha-test.txt').read_text().splitlines()[-1],
                          'homeassistant==2026.10.2')
         for step in steps:

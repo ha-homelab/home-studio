@@ -27,6 +27,38 @@ test('host phase timing closes sequential phases and preserves the timeout obser
   idle.freezeTimeout();assert.deepEqual(empty.timeoutPhase,{elapsedMs:0,activePhase:null});
 });
 
+test('viewer host rejects unsupported map actions and records every unexpected command', () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  const start=source.indexOf('            channel.port1.onmessage = event => {');
+  const end=source.indexOf('\n            };',start)+'\n            };'.length;
+  assert(start>0&&end>start);
+  const replies=[],env={states:{},viewerCommands:[],viewerMapRequests:[],deferMapReply:false,
+    channel:{port1:{postMessage:message=>replies.push(JSON.parse(JSON.stringify(message)))}}};
+  env.window=env;vm.runInNewContext(source.slice(start,end),env);
+  const send=data=>env.channel.port1.onmessage({data});
+  for(const type of ['model_config','view_preferences','map_view'])send({type});
+  assert.deepEqual(env.viewerCommands,[]);assert.equal(replies[0].type,'states');
+  send({type:'map_request',action:'get',request_id:'initial'});
+  assert.deepEqual(replies.at(-1),{type:'map_result',request_id:'initial',success:true,result:{revision:0,configured:false,config:null,reference:null}});
+  env.deferMapReply=true;const count=replies.length;
+  send({type:'map_request',action:'get',request_id:'deferred'});
+  assert.equal(replies.length,count,'Only the intended delayed get is held');
+  for(const action of ['save','tile','unknown']) {
+    const message={type:'map_request',action,request_id:action};send(message);
+    assert.equal(replies.at(-1).success,false);assert.equal(replies.at(-1).request_id,action);
+    assert.equal(env.viewerCommands.at(-1),message,'Rejected map actions remain visible to no-command assertions');
+  }
+  for(const type of ['save','export','toggle','tv_power','curtain_command','media_command','more_info','floor','unexpected']) {
+    const message={type};send(message);assert.equal(env.viewerCommands.at(-1),message);
+  }
+  const checkStart=source.indexOf('      sample.viewerCommands = await page.evaluate');
+  const checkEnd=source.indexOf('\n      save();',checkStart);
+  const code='(async()=>{'+source.slice(checkStart,checkEnd)+'})()';
+  assert(checkStart>0&&checkEnd>checkStart);
+  return assert.rejects(vm.runInNewContext(code,{sample:{},page:{evaluate:async()=>env.viewerCommands},check:assert}),
+    /Viewer navigation never issues a device, write, or unsupported command/);
+});
+
 test('viewer drag receipts preserve native phases and the existing two-frame completion wait', async () => {
   const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
   const start=source.indexOf('const dragCanvas = async'),end=source.indexOf("    phases.start('dashboard-navigation');",start);
@@ -46,6 +78,35 @@ test('viewer drag receipts preserve native phases and the existing two-frame com
   assert.equal(drags,2);assert.equal(frames,2,'Failed native input cannot be replaced by another action');
   assert.match(source,/sample\.homeDragPhases = homeDrag\.phases/);
   assert.match(source,/sample\.editorDragPhases = editorDrag\.phases/);
+});
+
+test('Home viewport waits for the observer frame and rejects stale or incomplete restoration receipts', async () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  const start=source.indexOf('async function waitForHomeViewport('),end=source.indexOf('\nasync function run(',start);
+  assert(start>0&&end>start);
+  for(const defect of [null,'stale-buffer','stale-scene','partial-viewport','stale-css','hidden-caption']) {
+    let now=0, repaired=false;
+    const state={renderCount:11,sceneDraws:defect==='stale-scene'?10:11};
+    const bounds=height=>({width:740,height});
+    const env={performance:{now:()=>now},setTimeout(callback,delay){now+=delay;if(now>=50)repaired=true;callback();},
+      document:{hidden:false,querySelector:selector=>selector==='#homeMapCaption'?{hidden:defect==='hidden-caption'}:
+        {getBoundingClientRect:()=>bounds(selector.endsWith('canvas')&&(!repaired||defect==='stale-css')?622:582)}},
+      floorplan:{homeMode:true,get renderCount(){return state.renderCount+(repaired?1:0);}},
+      __browserScene:()=>({pixelRatio:1,drawingBuffer:[740,repaired&&defect!=='stale-buffer'?582:622],
+        renderPasses:{scene:state.sceneDraws+(repaired&&defect!=='stale-scene'?1:0),last:'scene',sceneDrawCalls:284,
+          sceneViewport:[0,0,740,repaired&&defect!=='partial-viewport'?582:622]}})};
+    env.window=env;
+    vm.runInNewContext(source.slice(start,end)+'\nglobalThis.wait=waitForHomeViewport;',env);
+    const pending=env.wait({beforeRenderCount:10,beforeSceneDraws:10,captionVisible:true});
+    if(defect) {
+      await assert.rejects(pending,/Home viewport did not receive a fresh complete scene draw/);
+      assert.equal(now,30000,'An incomplete viewport cannot renew the fixed deadline');
+    } else {
+      const result=await pending;
+      assert.equal(now,50,'The old frame cannot satisfy the changed DOM size');
+      assert.deepEqual(Array.from(result.actual),[740,582]);assert.equal(result.sceneDraws,12);
+    }
+  }
 });
 
 // Drive the exact function serialized into the real viewer with a virtual

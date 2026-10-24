@@ -2,7 +2,7 @@
 homeView = (() => {
   let active = false, camera, overlayGroup, roomLighting, selected = '', bindings = [], points = [], labels = [];
   let homeGesture=null, roomLabels=false, deviceFilter='all';
-  function cancelHomeGesture(){const previous=homeGesture;homeGesture=null;if(previous&&renderer.domElement.hasPointerCapture(previous.id))renderer.domElement.releasePointerCapture(previous.id);}
+  function cancelHomeGesture(){const previous=homeGesture;homeGesture=null;if(previous)for(const id of previous.contacts?.keys()||[previous.id])if(renderer.domElement.hasPointerCapture(id))renderer.domElement.releasePointerCapture(id);}
   let assumedZones, signalZone='', cameraFit;
   const projectedPosition = new THREE.Vector3(), projectedForward = new THREE.Vector3();
   let showLowerFloor=true;
@@ -27,7 +27,7 @@ homeView = (() => {
   const commandError=message=>typeof message.error_key==='string' ? {key:message.error_key,params:message.error_params || {}} : message.error || {key:'The command could not be sent.'};
   let countdownTimer, moduleItem;
   let sequence = 0, zoom = 1, panX = 0, panY = 0, controlsCollapsed = false;
-  let navigationMode='rotate', homeRotation=0, homeTilt=0;
+  let navigationMode='rotate', homeRotation=0, homeTilt=0, mapLayer=null, mapConfig=null, mapDraft=null, mapReference=null, mapRevision=0, mapLoaded=false, mapLoading=false, mapSaving=false, mapBeforeEdit=null, pendingMapNavigation=null, mapFraming=null, mapBeforeRoom='', mapCoarseState=false;
   const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6m-5 3h4M8.5 14.5a6 6 0 1 1 7 0L15 16H9z"/></svg>';
   const motionIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="14" cy="4" r="2"/><path d="m10 22 2-7-4-3 3-5 4 5 4 1M5 11l3-4 3-1M5 21l3-6"/></svg>';
   const tvIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>';
@@ -213,31 +213,152 @@ homeView = (() => {
   $('editLayout').onclick = () => setActive(false);
   $('openHome').onclick = () => setActive(true);
 
-  function resetZoom(){zoom=1;panX=panY=0;updateZoom();}
+  function resetZoom(){mapFraming=null;zoom=1;panX=panY=0;updateZoom();}
+  function mapAvailable(){return !!mapLayer?.config?.enabled;}
+  function mapCoarse(){return mapAvailable()&&(zoom<.22||!!mapDraft);}
+  function minimumZoom(){return mapAvailable()?.00005:.65;}
+  function exportNavigationState(){
+    const state={mode:mapAvailable()&&zoom<.65?'map':'model',zoom,rotation:homeRotation,tilt:homeTilt,pan_x:panX,pan_y:panY};
+    if(state.mode==='map'&&camera&&active){
+      render(true);const center=mapLayer.pointAt(camera,0,0),span=camera.top-camera.bottom;
+      if(center&&Math.abs(center.x)<=2e6&&Math.abs(center.z)<=2e6&&span>0&&span<=4e7)Object.assign(state,{target_x:center.x,target_z:center.z,span_m:span});
+    }
+    return state;
+  }
+  function notifyMapNavigation(){if(!mapDraft)window.homeMapNavigationChanged?.(exportNavigationState());}
+  function applyNavigationState(value){
+    if(!value||!['map','model'].includes(value.mode))return;
+    for(const key of ['zoom','rotation','tilt','pan_x','pan_y'])if(!Number.isFinite(value[key]))return;
+    if(value.mode==='map'&&!mapAvailable()){pendingMapNavigation={...value};return;}
+    zoom=Math.max(minimumZoom(),Math.min(3,value.zoom));homeRotation=Math.max(-Math.PI*2,Math.min(Math.PI*2,value.rotation));homeTilt=Math.max(-.45,Math.min(.6,value.tilt));
+    panX=Math.max(-2e6,Math.min(2e6,value.pan_x));panY=Math.max(-2e6,Math.min(2e6,value.pan_y));mapFraming=null;
+    if(value.mode==='map'&&Number.isFinite(value.target_x)&&Math.abs(value.target_x)<=2e6&&Number.isFinite(value.target_z)&&Math.abs(value.target_z)<=2e6&&Number.isFinite(value.span_m)&&value.span_m>=.01&&value.span_m<=4e7){
+      selected='';$('homeRoom').value='';mapFraming={zoom,span:value.span_m};render(true);
+      const center=camera&&mapLayer.pointAt(camera,0,0);
+      if(center){const delta=new THREE.Vector3(value.target_x-center.x,0,value.target_z-center.z),right=new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld,0),up=new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld,1);panX+=delta.dot(right);panY+=delta.dot(up);}
+    }
+    updateZoom(false);
+  }
+  function refreshMapControls(){
+    const available=mapAvailable();
+    $('homeMapHome').hidden=$('homeMapOverview').hidden=!available;
+    $('homeMapOverview').setAttribute('aria-pressed',String(available&&zoom<.65));
+    $('homeMapAlign').hidden=!canEdit||!mapLoaded;
+    $('homeMapAlign').setAttribute('aria-expanded',String(!!mapDraft));
+    $('homeMapCaption').hidden=!available;$('homeMapCompass').hidden=!available;
+    $('homeMapEditor').hidden=!mapDraft;$('homeRoom').disabled=!!mapDraft;
+  }
+  function configureMap(result){
+    if(!result||!Number.isSafeInteger(result.revision)||result.revision<mapRevision||typeof homeMapMath==='undefined')return;
+    const config=homeMapMath.validConfig(result.config);
+    mapRevision=result.revision;mapConfig=config;mapLoaded=true;
+    if(Number.isFinite(result.reference?.latitude)&&Math.abs(result.reference.latitude)<=90&&Number.isFinite(result.reference?.longitude)&&Math.abs(result.reference.longitude)<=180)mapReference={latitude:Math.max(-85,Math.min(85,result.reference.latitude)),longitude:result.reference.longitude};
+    if(!mapLayer&&renderer&&typeof createHomeMapLayer==='function')mapLayer=createHomeMapLayer(THREE,scene,{
+      elevation:-(model.elevation_m||0)-.08,polygons:model.rooms.map(room=>room.polygon.map(([x,z])=>[xm(x),zm(z)])),
+      requestTile:payload=>window.homeMapRequest('tile',payload),onChange:()=>window.requestModelRender?.(),
+      onStatus:(text,retry)=>{$('homeMapStatus').textContent=text;$('homeMapRetry').hidden=!retry;}
+    });
+    if(!mapDraft)mapLayer?.setConfig(config);
+    if(pendingMapNavigation&&mapAvailable()){const state=pendingMapNavigation;pendingMapNavigation=null;applyNavigationState(state);}
+    else if(!mapAvailable()){mapFraming=null;zoom=Math.max(.65,zoom);panX=panY=0;}
+    refreshMapControls();updateZoom(false);
+  }
+  async function loadMap(){
+    if(mapLoading||typeof window.homeMapRequest!=='function')return;
+    mapLoading=true;
+    try{configureMap(await window.homeMapRequest('get',{}));}
+    catch(error){$('homeMapCaption').hidden=false;$('homeMapStatus').textContent='Map settings unavailable. Home controls are still available.';$('homeMapRetry').hidden=false;}
+    finally{mapLoading=false;}
+  }
+  const mapFields={latitude:'homeMapLatitude',longitude:'homeMapLongitude',model_x:'homeMapX',model_z:'homeMapZ',north_deg:'homeMapNorth'};
+  function fillMapForm(){
+    if(!mapDraft)return;
+    $('homeMapEnabled').checked=mapDraft.enabled;
+    for(const [key,id] of Object.entries(mapFields))$(id).value=String(Number(mapDraft[key].toFixed(key==='latitude'||key==='longitude'?7:3)));
+    $('homeMapReference').disabled=!mapReference;
+  }
+  function previewMapForm(){
+    if(!canEdit||!mapDraft||mapSaving)return;
+    const value={enabled:$('homeMapEnabled').checked};
+    for(const [key,id] of Object.entries(mapFields)){if($(id).value.trim()==='')return;value[key]=Number($(id).value);}
+    const valid=homeMapMath.validConfig(value);if(!valid)return;
+    mapDraft=valid;mapLayer?.setConfig({...valid,enabled:true});window.requestModelRender?.();
+  }
+  function cancelMapEdit(){
+    if(mapSaving)return;
+    mapDraft=null;mapLayer?.setConfig(mapConfig);selected=mapBeforeRoom;$('homeRoom').value=selected;refreshMapControls();refreshControls();
+    if(mapBeforeEdit){const state=mapBeforeEdit;mapBeforeEdit=null;applyNavigationState(state);}else updateZoom(false);
+    window.resizeModel?.();
+  }
+  function beginMapEdit(){
+    if(!canEdit||!mapLoaded||!mapLayer||mapSaving)return;
+    if(mapDraft){cancelMapEdit();return;}
+    const vertices=model.rooms.flatMap(room=>room.polygon.map(([x,z])=>[xm(x),zm(z)]));
+    mapBeforeEdit=exportNavigationState();mapBeforeRoom=selected;mapFraming=null;
+    mapDraft=mapConfig?{...mapConfig}:{enabled:true,latitude:mapReference?.latitude??0,longitude:mapReference?.longitude??0,model_x:(Math.min(...vertices.map(v=>v[0]))+Math.max(...vertices.map(v=>v[0])))/2,model_z:(Math.min(...vertices.map(v=>v[1]))+Math.max(...vertices.map(v=>v[1])))/2,north_deg:0};
+    mapLayer.setConfig({...mapDraft,enabled:true});selected='';$('homeRoom').value='';zoom=.12;panX=panY=0;homeRotation=homeTilt=0;
+    $('homeMapEditorStatus').textContent=mapConfig?'':mapReference?'Started at Home Assistant’s location. Adjust the footprint before saving.':'Enter latitude and longitude to place this home.';
+    fillMapForm();refreshMapControls();dismissOverlays();updateZoom(false);window.resizeModel?.();
+  }
+  $('homeMapAlign').onclick=beginMapEdit;
+  $('homeMapHome').onclick=()=>{selected='';$('homeRoom').value='';refreshControls();resetHomeView();};
+  $('homeMapOverview').onclick=()=>{if(!mapAvailable())return;mapFraming=null;selected='';$('homeRoom').value='';zoom=.035;panX=panY=0;homeRotation=homeTilt=0;dismissOverlays();refreshControls();updateZoom();};
+  $('homeMapCancel').onclick=cancelMapEdit;
+  $('homeMapReference').onclick=()=>{if(mapDraft&&mapReference&&!mapSaving){Object.assign(mapDraft,mapReference);fillMapForm();previewMapForm();}};
+  $('homeMapRetry').onclick=()=>{mapLayer?.clearFailures();loadMap();window.requestModelRender?.();};
+  for(const id of ['homeMapEnabled',...Object.values(mapFields)])$(id).onchange=previewMapForm;
+  $('homeMapForm').onsubmit=async event=>{
+    event.preventDefault();if(!canEdit||!mapDraft||mapSaving)return;
+    previewMapForm();if(!$('homeMapForm').reportValidity())return;
+    mapSaving=true;$('homeMapSave').disabled=$('homeMapCancel').disabled=true;$('homeMapEditorStatus').textContent='Saving alignment…';
+    try{
+      const result=await window.homeMapRequest('save',{revision:mapRevision,config:{...mapDraft}});
+      mapDraft=null;mapBeforeEdit=null;configureMap(result);$('homeMapEditorStatus').textContent='';notifyMapNavigation();window.resizeModel?.();
+    }catch(error){$('homeMapEditorStatus').textContent='Alignment was not saved. Your draft is kept. Cancel and reload the page if another administrator changed the settings.';}
+    finally{mapSaving=false;$('homeMapSave').disabled=$('homeMapCancel').disabled=false;}
+  };
   function resetHomeView(){cancelHomeGesture();homeRotation=homeTilt=0;resetZoom();}
   function navigateHome(dx,dy,move){
-    if(move){
+    if(move||mapCoarse()){
       const rect=renderer.domElement.getBoundingClientRect();
-      panX-=dx*(camera.right-camera.left)/rect.width;panY+=dy*(camera.top-camera.bottom)/rect.height;
+      if(mapDraft&&!mapSaving&&camera){
+        const before=mapLayer.pointAt(camera,0,0),after=mapLayer.pointAt(camera,dx/rect.width*2,-dy/rect.height*2);
+        if(before&&after){
+          const transform=homeMapMath.transform(mapDraft),geo=homeMapMath.unproject(...transform.toMap(mapDraft.model_x-(after.x-before.x),mapDraft.model_z-(after.z-before.z)));
+          mapDraft={...mapDraft,...geo};fillMapForm();mapLayer.setConfig({...mapDraft,enabled:true});
+        }
+      }else{panX-=dx*(camera.right-camera.left)/rect.width;panY+=dy*(camera.top-camera.bottom)/rect.height;panX=Math.max(-2e6,Math.min(2e6,panX));panY=Math.max(-2e6,Math.min(2e6,panY));}
     }else{
       homeRotation=(homeRotation-dx*.006)%(Math.PI*2);
       homeTilt=Math.max(-.45,Math.min(.6,homeTilt+dy*.006));
     }
-    window.requestModelRender?.(true);
+    notifyMapNavigation();window.requestModelRender?.(true);
   }
   for(const mode of ['rotate','move'])$('home'+(mode==='rotate'?'Rotate':'Move')).onclick=()=>{
     cancelHomeGesture();navigationMode=mode;
     $('homeRotate').setAttribute('aria-pressed',String(mode==='rotate'));
     $('homeMove').setAttribute('aria-pressed',String(mode==='move'));
   };
-  function updateZoom(){
+  function updateZoom(notify=true){
     previewTV(null);
-    $('homeZoomReset').textContent=Math.round(zoom*100)+'%';
-    $('homeZoomOut').disabled=zoom<=.65;$('homeZoomIn').disabled=zoom>=3;
-    window.renderModel?.();
+    $('homeZoomReset').textContent=zoom<.1?(zoom*100).toFixed(2)+'%':Math.round(zoom*100)+'%';
+    $('homeZoomOut').disabled=zoom<=minimumZoom();$('homeZoomIn').disabled=zoom>=3;
+    if(mapLoaded)refreshMapControls();
+    if(notify)notifyMapNavigation();window.renderModel?.();
+  }
+  function zoomAt(next,clientX,clientY){
+    if(!camera)return;
+    const rect=renderer.domElement.getBoundingClientRect(),x=(clientX-rect.left)/rect.width*2-1,y=1-(clientY-rect.top)/rect.height*2;
+    const point=mapLayer?.pointAt(camera,x,y);
+    zoom=Math.max(minimumZoom(),Math.min(3,next));
+    if(point&&mapAvailable()){
+      render(true);const after=mapLayer.pointAt(camera,x,y);
+      if(after){const delta=point.sub(after),right=new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld,0),up=new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld,1);panX+=delta.dot(right);panY+=delta.dot(up);}
+    }
+    updateZoom();
   }
   $('homeZoomIn').onclick=()=>{zoom=Math.min(3,zoom*1.25);updateZoom()};
-  $('homeZoomOut').onclick=()=>{zoom=Math.max(.65,zoom/1.25);updateZoom()};
+  $('homeZoomOut').onclick=()=>{zoom=Math.max(minimumZoom(),zoom/1.25);updateZoom()};
   $('homeZoomReset').onclick=resetHomeView;
   function applyViewPreferences(value){
     viewerI18n.applyPreferences(value);
@@ -276,7 +397,8 @@ homeView = (() => {
     if(!value&&!canEdit)return;
     cancelHomeGesture();cancelEditorGesture();
     hideMediaControls();cancelNativePress();
-    active = value;previewTV(null);
+    active = value;previewTV(null);if(typeof mapLayer!=='undefined')mapLayer?.setActive(value);
+    if(typeof mapLoaded!=='undefined'&&mapLoaded)refreshMapControls();
     environmentLayer?.setActive(!renderLost&&!renderSuspended);
     if(lowerFloorContext)lowerFloorContext.visible=value&&showLowerFloor&&!selected;
     document.body.classList.toggle('home-mode', value); $('homeView').hidden = !value;
@@ -481,8 +603,9 @@ homeView = (() => {
   }
 
   function refreshControls() {
+    if(mapLoaded)refreshMapControls();
     if(model.assumed_activity){
-      assumedZones?.setVisible(active&&$('homeSignalToggle').checked,$('homeSignals').open);
+      assumedZones?.setVisible(active&&!mapCoarse()&&$('homeSignalToggle').checked,$('homeSignals').open);
       assumedZones?.update(haStates[model.assumed_activity.sensor],haConnected);
       refreshSignalStatus();
     }
@@ -584,8 +707,8 @@ homeView = (() => {
       label.el.title=roomName(label.room)+(label.power?' · '+label.power:'')+' · '+(activityText[value]||activityText.unknown);
       label.el.setAttribute('aria-description',label.el.title);
     }
-    presenceView?.update(items,haStates,haConnected,active&&roomLabels&&!document.hidden,selected);
-    vacuumView?.update(haStates,haConnected,active);
+    presenceView?.update(items,haStates,haConnected,active&&!mapCoarse()&&roomLabels&&!document.hidden,selected);
+    vacuumView?.update(haStates,haConnected,active&&!mapCoarse());
     $('homeSummary').textContent=vt('{on} on · {total} linked · {motion} active sensors · {unavailable} unavailable',{on,total,motion,unavailable});
     $('homeEmpty').hidden=total>0;
     $('homeFeedback').textContent=errorText([...errors.values()].at(-1))||(!renderer ? vt('The 3D view is unavailable in this browser. Use the device cards to control your lights.') : '');
@@ -603,6 +726,7 @@ homeView = (() => {
       details:()=>openEntityDetails(item),power:()=>activateDevice(item,false,true)})));
   }
   function activateDevice(item,quick=true,tvPower=false) {
+    if(mapDraft||homeGesture?.pinch)return;
     if(applianceSpec(item)||presenceSpec(item))return;
     const state=deviceDisplayState(item);
     if(!tvPower&&isAudio(item)){const anchor=points.find(point=>point.item.id===item.id)?.marker;if(showMediaControls(item.id,anchor,{focus:true}))return;}
@@ -727,6 +851,7 @@ homeView = (() => {
   function drawSignalFrame(redraw){
     if(!active||!camera||!renderer)return;
     refreshSignalStatus();
+    if(redraw&&typeof mapCoarse==='function'&&mapCoarse())return;
     if(redraw){
       // A state update can change lights before its scheduled full frame.
       if(roomLighting?.geometryMode==='packed')roomLighting.update(points,camera);
@@ -734,12 +859,16 @@ homeView = (() => {
     }
   }
   function render() {
+    const cameraOnly=arguments[0]===true;
     if(!active || !renderer)return;
     const rect=$('homeStage').getBoundingClientRect(); if(!rect.width || !rect.height)return;
     camera ??= new THREE.OrthographicCamera(-1,1,1,-1,.1,Math.max(150,planRadius*5));
     // Room geometry is fixed for this viewer. Panning, live states and media
     // frames reuse its fit instead of allocating/projecting every vertex again.
     const landscape=rect.width>rect.height*1.2;
+    const mapOn=typeof mapLayer!=='undefined'&&!!mapLayer?.config?.enabled;
+    const mapProgress=mapOn?(mapDraft?1:Math.max(0,Math.min(1,(.65-zoom)/.57))):0;
+    const mapBlend=mapProgress*mapProgress*(3-2*mapProgress);
     if (!cameraFit || cameraFit.room!==selected || cameraFit.landscape!==landscape) {
       const rooms=selected ? model.rooms.filter(r=>r.id===selected) : model.rooms;
       const vertices=rooms.flatMap(r=>r.polygon.map(([x,z])=>new THREE.Vector3(xm(x),0,zm(z))));
@@ -750,23 +879,48 @@ homeView = (() => {
       cameraFit={room:selected,landscape,center,offset:new THREE.Spherical().setFromVector3(offset),
         vertices:vertices.flatMap(v=>[v,v.clone().setY(model.ceiling_height_m)])};
     }
-    if(cameraFit.rotation!==homeRotation||cameraFit.tilt!==homeTilt){
+    if(cameraFit.rotation!==homeRotation||cameraFit.tilt!==homeTilt||cameraFit.mapBlend!==mapBlend){
       const {center,offset,vertices}=cameraFit;
-      camera.position.setFromSphericalCoords(offset.radius,offset.phi+homeTilt,offset.theta+homeRotation).add(center);
+      camera.position.setFromSphericalCoords(offset.radius,(offset.phi+homeTilt)*(1-mapBlend)+.001*mapBlend,offset.theta+homeRotation).add(center);
       camera.up.set(0,1,0);camera.lookAt(center);camera.updateMatrixWorld();
       const bounds=new THREE.Box3();
       for(const vertex of vertices)bounds.expandByPoint(projectedPosition.copy(vertex).applyMatrix4(camera.matrixWorldInverse));
-      Object.assign(cameraFit,{rotation:homeRotation,tilt:homeTilt,width:bounds.max.x-bounds.min.x,height:bounds.max.y-bounds.min.y,
+      Object.assign(cameraFit,{rotation:homeRotation,tilt:homeTilt,mapBlend,width:bounds.max.x-bounds.min.x,height:bounds.max.y-bounds.min.y,
         x:(bounds.min.x+bounds.max.x)/2,y:(bounds.min.y+bounds.max.y)/2});
     }
     const aspect=rect.width/rect.height;
-    const half=Math.max(cameraFit.height/2,cameraFit.width/aspect/2)*1.15/zoom;
+    const half=mapOn&&typeof mapFraming!=='undefined'&&mapFraming?mapFraming.span*mapFraming.zoom/zoom/2:Math.max(cameraFit.height/2,cameraFit.width/aspect/2)*1.15/zoom;
     const cx=cameraFit.x+panX, cy=cameraFit.y+panY;
     camera.left=cx-half*aspect;camera.right=cx+half*aspect;camera.top=cy+half;camera.bottom=cy-half;camera.updateProjectionMatrix();
-    if(lowerFloorContext)lowerFloorContext.visible=showLowerFloor&&!selected;
+    if(mapOn){
+      const {center,offset}=cameraFit,distance=Math.max(offset.radius,half*.1);
+      camera.position.setFromSphericalCoords(distance,(offset.phi+homeTilt)*(1-mapBlend)+.001*mapBlend,offset.theta+homeRotation).add(center);
+      camera.far=Math.max(150,planRadius*5,distance+half*4);camera.lookAt(center);camera.updateMatrixWorld();camera.updateProjectionMatrix();
+    }
+    if(cameraOnly)return;
+    const coarse=mapOn&&(zoom<.22||!!mapDraft);
+    if(typeof mapLayer!=='undefined'){
+      $('homeStage').dataset.mapCoarse=String(coarse);$('homeStage').dataset.mapEditing=String(!!mapDraft);
+      if(coarse||mapCoarseState!==coarse)environmentLayer?.setActive(!coarse&&!renderLost&&!renderSuspended);
+      if(mapCoarseState!==coarse){
+        mapCoarseState=coarse;
+        assumedZones?.setVisible(active&&!coarse&&$('homeSignalToggle').checked,$('homeSignals').open);
+        presenceView?.update(items,haStates,haConnected,active&&!coarse&&roomLabels&&!document.hidden,selected);
+        vacuumView?.update(haStates,haConnected,active&&!coarse);
+      }
+      mapLayer?.render(camera,rect,{visible:active,coarse,editing:!!mapDraft});
+      if(mapOn){const angle=mapLayer.config.north_deg*Math.PI/180,north=projectedPosition.set(-Math.sin(angle),0,-Math.cos(angle)).transformDirection(camera.matrixWorldInverse);$('homeMapCompass').firstElementChild.style.transform=`rotate(${Math.atan2(north.x,north.y)*180/Math.PI}deg)`;}
+    }
+    if(lowerFloorContext)lowerFloorContext.visible=showLowerFloor&&!selected&&!coarse;
     $('homeFloorContext').disabled=!!selected;
-    assumedZones?.render(selected,signalZone);refreshSignalStatus();
-    roomLighting?.update(points,camera);
+    refreshSignalStatus();
+    if(coarse){
+      const hidden=scene.children.filter(object=>object!==mapLayer.object&&!object.isLight),visibility=hidden.map(object=>object.visible);
+      hidden.forEach(object=>object.visible=false);
+      try{drawScene(camera);renderCount++;}finally{hidden.forEach((object,index)=>object.visible=visibility[index]);}
+      return;
+    }
+    assumedZones?.render(selected,signalZone);roomLighting?.update(points,camera);
     drawScene(camera);renderCount++;
     for(const label of labels) label.el.textContent=(rect.width<600 ? roomCode(label.room) : roomName(label.room))+(label.power?' · '+label.power:'');
     for(const point of [...labels,...points.map(p=>({el:p.marker,position:p.anchor||(!isCover(p.item)&&model.control_groups?.[p.item.id]?p.position.clone().setY(p.item.position_m.y+p.item.dimensions_m.height):p.position)}))]) {
@@ -820,7 +974,7 @@ homeView = (() => {
   const tvId=el=>el?.dataset.homeItem||el?.dataset.homeDevice;
   const hoverRay=new THREE.Raycaster();
   $('homeView').addEventListener('pointermove',e=>{
-    if(!active||e.pointerType!=='mouse'||e.buttons){previewTV(null);return;}
+    if(!active||mapCoarse()||e.pointerType!=='mouse'||e.buttons){previewTV(null);return;}
     let id=tvControl?tvId(e.target.closest(tvControl)):null;
     if(!id&&e.target===renderer?.domElement&&camera){
       const r=renderer.domElement.getBoundingClientRect();
@@ -851,22 +1005,46 @@ homeView = (() => {
     });
     renderer.domElement.addEventListener('pointerdown',e=>{if(!active||![0,2].includes(e.button)||renderLost||renderSuspended||document.hidden)return;
       // A second contact never owns this gesture, and invalidates its device tap.
-      if(homeGesture){if(homeGesture.id!==e.pointerId)homeGesture.tapAllowed=false;return;}
+      if(homeGesture){
+        homeGesture.tapAllowed=false;
+        if(mapAvailable()&&e.pointerType==='touch'&&!homeGesture.contacts?.has(e.pointerId)&&homeGesture.contacts?.size===1){
+          homeGesture.contacts.set(e.pointerId,{x:e.clientX,y:e.clientY});homeGesture.pinch=true;
+          const contacts=[...homeGesture.contacts.values()];homeGesture.distance=Math.hypot(contacts[1].x-contacts[0].x,contacts[1].y-contacts[0].y);homeGesture.midpoint={x:(contacts[0].x+contacts[1].x)/2,y:(contacts[0].y+contacts[1].y)/2};
+          renderer.domElement.setPointerCapture(e.pointerId);cancelNativePress();
+        }
+        return;
+      }
       if(e.isPrimary===false)return;
       const move=e.button===2||e.shiftKey||navigationMode==='move';
-      homeGesture={id:e.pointerId,x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,move,tapAllowed:e.button===0&&!e.shiftKey};
+      homeGesture={id:e.pointerId,x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,move,tapAllowed:e.button===0&&!e.shiftKey,contacts:new Map([[e.pointerId,{x:e.clientX,y:e.clientY}]])};
       renderer.domElement.focus({preventScroll:true});renderer.domElement.setPointerCapture(e.pointerId);});
-    renderer.domElement.addEventListener('pointermove',e=>{const start=homeGesture;if(!start||start.id!==e.pointerId||!active||!camera)return;
+    renderer.domElement.addEventListener('pointermove',e=>{const start=homeGesture;if(!start||!active||!camera)return;
+      if(start.pinch){
+        if(!start.contacts.has(e.pointerId))return;
+        start.contacts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+        const contacts=[...start.contacts.values()],distance=Math.hypot(contacts[1].x-contacts[0].x,contacts[1].y-contacts[0].y),midpoint={x:(contacts[0].x+contacts[1].x)/2,y:(contacts[0].y+contacts[1].y)/2};
+        if(start.distance>2&&distance>2)zoomAt(zoom*distance/start.distance,midpoint.x,midpoint.y);
+        if(!mapDraft)navigateHome(midpoint.x-start.midpoint.x,midpoint.y-start.midpoint.y,true);
+        start.distance=distance;start.midpoint=midpoint;return;
+      }
+      if(start.id!==e.pointerId)return;
       if(e.buttons===0){cancelHomeGesture();return;}
       if(Math.hypot(e.clientX-start.x,e.clientY-start.y)>6)start.moved=true;
       if(start.moved)navigateHome(e.clientX-start.lastX,e.clientY-start.lastY,start.move);
       start.lastX=e.clientX;start.lastY=e.clientY;});
-    for(const type of ['pointercancel','lostpointercapture'])renderer.domElement.addEventListener(type,e=>{if(homeGesture?.id===e.pointerId)cancelHomeGesture();});
+    for(const type of ['pointercancel','lostpointercapture'])renderer.domElement.addEventListener(type,e=>{if(homeGesture?.contacts?.has(e.pointerId)||homeGesture?.id===e.pointerId)cancelHomeGesture();});
     renderer.domElement.addEventListener('webglcontextlost',()=>cancelHomeGesture());
+    renderer.domElement.addEventListener('wheel',event=>{
+      if(!active||!camera||renderLost||renderSuspended||document.hidden)return;
+      event.preventDefault();cancelHomeGesture();dismissOverlays();
+      const delta=event.deltaY*(event.deltaMode===1?16:event.deltaMode===2?500:1);
+      zoomAt(zoom*Math.exp(-Math.max(-250,Math.min(250,delta))*.003),event.clientX,event.clientY);
+    },{passive:false});
     renderer.domElement.addEventListener('pointerup',e=>{
+      if(homeGesture?.pinch&&homeGesture.contacts.has(e.pointerId)){cancelHomeGesture();return;}
       if(homeGesture?.id!==e.pointerId)return;
       const previous=homeGesture;cancelHomeGesture();
-      if(!active || !camera || !previous.tapAllowed || previous.moved || Math.hypot(e.clientX-previous.x,e.clientY-previous.y)>6)return;
+      if(!active || !camera || mapCoarse() || !previous.tapAllowed || previous.moved || Math.hypot(e.clientX-previous.x,e.clientY-previous.y)>6)return;
       const rect=renderer.domElement.getBoundingClientRect(),ray=new THREE.Raycaster();
       ray.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,1-(e.clientY-rect.top)/rect.height*2),camera);
       const hit=ray.intersectObjects(objectGroup.children,true)[0];let object=hit?.object;
@@ -932,7 +1110,7 @@ homeView = (() => {
       row.append(button,meter,detail);signalRegions.set(zone.zone_id,{row,button,meter,detail});$('homeSignalRegions').append(row);
     }
     $('homeSignalAll').onclick=()=>selectHomeRoom('');
-    $('homeSignals').ontoggle=()=>{assumedZones?.setVisible(active&&$('homeSignalToggle').checked,$('homeSignals').open);refreshSignalStatus();};
+    $('homeSignals').ontoggle=()=>{assumedZones?.setVisible(active&&!mapCoarse()&&$('homeSignalToggle').checked,$('homeSignals').open);refreshSignalStatus();};
     $('homeSignalToggle').onchange=()=>{refreshControls();window.renderModel?.();};
     window.addEventListener('pagehide',event=>{if(!event.persisted)assumedZones?.dispose();});
   }
@@ -940,6 +1118,6 @@ homeView = (() => {
     $('homeToggleControls').textContent=vt(controlsCollapsed?'Show controls':'Hide controls');
     for(const label of labels)label.el.setAttribute('aria-label',vt('Focus room')+': '+roomName(label.room));
   }
-  return {get active(){return active},releaseGPU(){roomLighting?.releaseGPU();},dispose(){cancelNativePress();roomLighting?.dispose();presenceView?.dispose();vacuumView?.dispose();},dismissOverlays,refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
+  return {get active(){return active},get mapStats(){return mapLayer?.stats;},configureMap,loadMap,exportNavigationState,applyNavigationState,releaseGPU(){roomLighting?.releaseGPU();mapLayer?.releaseGPU();},dispose(){cancelNativePress();roomLighting?.dispose();presenceView?.dispose();vacuumView?.dispose();mapLayer?.dispose();},dismissOverlays,refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
     get illuminated(){return points.filter(p=>p.overlay?.visible && active).map(p=>p.item.id)}};
 })();

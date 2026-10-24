@@ -29,7 +29,12 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
    await page.evaluate(html=>{const frame=document.createElement('iframe');frame.sandbox='allow-scripts';frame.srcdoc=html;document.body.append(frame);},embedded);
    const frame=page.frameLocator('iframe');await frame.locator('#homeRoom').waitFor();
    await page.evaluate(({items,canEdit})=>{
-    const channel=new MessageChannel();window.messages=[];window.channel=channel.port1;channel.port1.onmessage=event=>messages.push(event.data);
+    const channel=new MessageChannel();window.messages=[];window.channel=channel.port1;channel.port1.onmessage=event=>{
+     if(event.data.type==='map_request'&&event.data.action==='get'){
+      channel.port1.postMessage({type:'map_result',request_id:event.data.request_id,success:true,result:{revision:0,configured:false,config:null,reference:null}});return;
+     }
+     messages.push(event.data);
+    };
     document.querySelector('iframe').contentWindow.postMessage({type:'home-floorplan:init',can_edit:canEdit,items},'*',[channel.port2]);
    },{items:project.floors[0].items,canEdit});
    await page.waitForFunction(()=>messages.some(message=>message.type==='model_config'));

@@ -72,6 +72,9 @@ assert(['chromium','firefox','webkit'].includes(engine));
     document.addEventListener('keydown',event=>{if(event.key==='Escape'){parentDismissals.push('escape');channel.port1.postMessage({type:'dismiss_overlays'});}});
     document.addEventListener('pointerdown',event=>{if(!event.composedPath().includes(document.querySelector('iframe'))){parentDismissals.push('pointer');channel.port1.postMessage({type:'dismiss_overlays'});}});
     channel.port1.onmessage=event=>{
+     if(event.data.type==='map_request'&&event.data.action==='get'){
+      channel.port1.postMessage({type:'map_result',request_id:event.data.request_id,success:true,result:{revision:0,configured:false,config:null,reference:null}});return;
+     }
      const message=event.data;messages.push({...message,received_at:Date.now()});
      if(message.type==='more_info')document.querySelector('#native').showModal();
      if(message.type==='media_command')channel.port1.postMessage({type:'command_result',entity_id:message.entity_id,request_id:message.request_id,ok:true});

@@ -40,14 +40,19 @@ assert(['chromium','firefox','webkit'].includes(engine));
     await frame.locator('#homeRoom').waitFor();
     await page.evaluate(()=>{
       const channel=new MessageChannel();window.messages=[];window.port=channel.port1;
-      channel.port1.onmessage=event=>messages.push(event.data);
+      channel.port1.onmessage=event=>{
+       if(event.data.type==='map_request'&&event.data.action==='get'){
+        channel.port1.postMessage({type:'map_result',request_id:event.data.request_id,success:true,result:{revision:0,configured:false,config:null,reference:null}});return;
+       }
+       messages.push(event.data);
+      };
       document.querySelector('iframe').contentWindow.postMessage({type:'home-floorplan:init',can_edit:true,items:[]},'*',[channel.port2]);
       window.states={'vacuum.fictional':{state:'cleaning',battery_level:75},'sensor.fictional_position':{state:'reported',vacuum_position:{valid:false}}};
       window.publish=(connected=true)=>port.postMessage({type:'states',states,connected});
     });
     await page.waitForFunction(()=>messages.some(message=>message.type==='model_config'));
     const view=await(await page.locator('iframe').elementHandle()).contentFrame();
-    await view.waitForFunction(()=>window.floorplan?.renderCount>0);
+    await view.waitForFunction(()=>window.floorplan?.renderCount>0&&document.querySelector('#homeMapAlign')?.hidden===false);
     await page.clock.pauseAt(new Date(await page.evaluate(()=>Date.now()+1000)));
     const settle=()=>page.clock.runFor(50);
     await page.evaluate(()=>publish());await settle();
@@ -69,6 +74,7 @@ assert(['chromium','firefox','webkit'].includes(engine));
     assert.equal(await frame.locator('.home-vacuum-marker').count(),1,'updates reuse the marker');
     const count=await view.evaluate(()=>window.floorplan.renderCount);
     await page.clock.fastForward(121000);
+    assert.equal(await frame.locator('#homeMapCaption').evaluate(node=>node.hidden),true,'the answered map request cannot time out and alter the viewport');
     assert.equal(await marker.getAttribute('data-position-state'),'last_known');
     assert.match(await marker.locator('.home-vacuum-caption').textContent(),/^Last known · retrieved 2m ago$/);
     assert.equal(await view.evaluate(()=>window.floorplan.renderCount),count,'expiry and age updates do not schedule WebGL rendering');

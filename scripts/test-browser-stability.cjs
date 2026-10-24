@@ -153,6 +153,30 @@ async function measureEditorWheelBurst() {
   }
 }
 
+// A DOM change may follow the first restored draw but precede ResizeObserver.
+// Require a fresh full scene at the current layout, within one fixed deadline.
+async function waitForHomeViewport({beforeRenderCount,beforeSceneDraws,captionVisible}) {
+  const started=performance.now(),deadline=started+30000;
+  let latest;
+  while(performance.now()<deadline) {
+    const stage=document.querySelector('#homeStage').getBoundingClientRect();
+    const canvas=document.querySelector('#homeStage canvas').getBoundingClientRect(),scene=window.__browserScene(),passes=scene.renderPasses;
+    latest={renderCount:window.floorplan.renderCount,sceneDraws:passes.scene,viewport:[stage.width,stage.height],
+      canvas:[canvas.width,canvas.height],actual:scene.drawingBuffer,
+      expected:[Math.floor(stage.width*scene.pixelRatio),Math.floor(stage.height*scene.pixelRatio)],
+      lastPass:passes.last,sceneViewport:passes.sceneViewport,drawCalls:passes.sceneDrawCalls,
+      captionVisible:!document.querySelector('#homeMapCaption').hidden};
+    const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+    if(performance.now()<deadline && !document.hidden && window.floorplan.homeMode &&
+      latest.renderCount>beforeRenderCount && latest.sceneDraws>beforeSceneDraws && latest.drawCalls>0 && latest.lastPass==='scene' &&
+      latest.viewport.every(value=>value>0) && same(latest.canvas,latest.viewport) && same(latest.actual,latest.expected) &&
+      same(latest.sceneViewport,[0,0,...latest.actual]) && (captionVisible===undefined || latest.captionVisible===captionVisible))
+      return {...latest,waitMs:performance.now()-started};
+    await new Promise(resolve=>setTimeout(resolve,Math.min(25,Math.max(0,deadline-performance.now()))));
+  }
+  throw Error('Home viewport did not receive a fresh complete scene draw: '+JSON.stringify(latest));
+}
+
 async function run(browserName, origin, project, sourceHash) {
   const profile = browserProfile(browserName, {viewport: {width: 1280, height: 800}});
   const inputDiagnostics = viewerInputOptions(browserName, profile);
@@ -201,10 +225,16 @@ async function run(browserName, origin, project, sourceHash) {
           iframe.id = 'viewer';iframe.sandbox = 'allow-scripts allow-downloads allow-forms';
           iframe.style.cssText = `width:100%;height:${height}px;border:0`;
           iframe.onload = () => {
-            const channel = new MessageChannel();window.viewerPort = channel.port1;window.viewerCommands=[];
+            const channel = new MessageChannel();window.viewerPort = channel.port1;window.viewerCommands=[];window.viewerMapRequests=[];window.deferMapReply=false;
             channel.port1.onmessage = event => {
               if(event.data.type==='model_config') channel.port1.postMessage({type:'states',connected:true,states});
-              if(['toggle','tv_power','curtain_command','media_command','more_info'].includes(event.data.type)) window.viewerCommands.push(event.data);
+              if(event.data.type==='map_request') {
+                window.viewerMapRequests.push(event.data);
+                if(event.data.action!=='get') window.viewerCommands.push(event.data);
+                if(event.data.action!=='get'||!window.deferMapReply) channel.port1.postMessage({type:'map_result',request_id:event.data.request_id,
+                  ...(event.data.action==='get'?{success:true,result:{revision:0,configured:false,config:null,reference:null}}:
+                    {success:false,error:'Unsupported map request in the viewer fixture.'})});
+              } else if(!['model_config','view_preferences','map_view'].includes(event.data.type)) window.viewerCommands.push(event.data);
             };
             iframe.contentWindow.postMessage({type:'home-floorplan:init',can_edit:true,items,preferences:{}},'*',[channel.port2]);
           };
@@ -214,7 +244,7 @@ async function run(browserName, origin, project, sourceHash) {
         frame = await load.run(() => page.locator('#viewer').contentFrame());
         // FrameLocator supports locators, but evaluate uses the actual child Frame.
         child = page.frames().find(value => value !== page.mainFrame());
-        await load.run(() => child.waitForFunction(expected => window.floorplan?.renderCount > 0 && document.querySelector('#homeConnection')?.dataset.connected === 'true' && window.__browserRenderedLights === expected, project.floors[0].items.length, {timeout: load.remainingMs()}));
+        await load.run(() => child.waitForFunction(expected => window.floorplan?.renderCount > 0 && document.querySelector('#homeConnection')?.dataset.connected === 'true' && document.querySelector('#homeMapAlign')?.hidden === false && window.__browserRenderedLights === expected, project.floors[0].items.length, {timeout: load.remainingMs()}));
         load.complete();
       } finally { load.close(); save(); }
       const loadMs = sample.loadMs;
@@ -226,6 +256,7 @@ async function run(browserName, origin, project, sourceHash) {
       Object.assign(sample, initial);
       save();
       sample.initialPrograms = initial.linkedPrograms;
+      assert.deepEqual(await page.evaluate(() => window.viewerMapRequests.map(request=>request.action)), ['get'], 'The fixture answers initial map settings without leaving a timeout pending');
       check(initial.contexts===1, 'One WebGL context is created per viewer');
       check(initial.shaderErrors.length===0, 'All actual WebGL programs link successfully');
       check(initial.scene.pointLights===project.floors[0].items.length, 'Every fixture retains a shader light slot');
@@ -267,7 +298,7 @@ async function run(browserName, origin, project, sourceHash) {
       check(afterHomeDrag.renderCount>idleBefore, 'Dragging Home updates the rendered scene');
       check(sample.homeCameraChanged, 'Dragging Home changes the camera used to draw the scene');
       check(sample.homeCameraRotated, 'Dragging Home rotates the rendered camera, rather than only panning its projection');
-      check(sample.homeDragCommands.length===0, 'A real Home orbit never issues a device command or opens native details');
+      check(sample.homeDragCommands.length===0, 'A real Home orbit never issues a device or write command, or opens native details');
       await page.waitForTimeout(200);
       const orbitIdle = await snapshot();
       await page.waitForTimeout(350);
@@ -354,15 +385,43 @@ async function run(browserName, origin, project, sourceHash) {
         check((await snapshot()).renderCount===beforeLoss, 'Lost WebGL contexts suppress pending and explicit draws');
         phases.start('context-restore', {cycle});
         await child.evaluate(() => window.__restoreContext());
-        await child.waitForFunction(before => window.floorplan.renderCount>before,beforeLoss);
+        const restored = await child.evaluate(waitForHomeViewport, {beforeRenderCount:beforeLoss,beforeSceneDraws:initial.scene.renderPasses.scene});
         phases.start('restored-checks', {cycle});
         check((await snapshot()).shaderErrors.length===0, 'Restored WebGL contexts rebuild valid programs');
-        const restored = await child.evaluate(() => {
-          const size = document.querySelector('#homeStage').getBoundingClientRect(), scene = window.__browserScene();
-          return {actual:scene.drawingBuffer,expected:[Math.floor(size.width*scene.pixelRatio),Math.floor(size.height*scene.pixelRatio)]};
-        });
         assert.deepEqual(restored.actual,restored.expected, 'Context restoration applies viewport changes made while the context was lost');
         recovery = {before:beforeLoss,after:(await snapshot()).renderCount,contextLosses:(await snapshot()).contextLosses,drawingBuffer:restored.actual};
+        // A delayed map failure changes the in-flow footer after restoration.
+        // Desktop gives it stage space; narrow layouts retain their fixed stage.
+        phases.start('post-restore-map-layout', {cycle});
+        const captureMapLayout = () => child.evaluate(() => ({
+          narrow:matchMedia('(max-width:950px)').matches,
+          sectionHeight:document.querySelector('.home-map').getBoundingClientRect().height,
+          captionHeight:document.querySelector('#homeMapCaption').getBoundingClientRect().height,
+        }));
+        const layoutBefore = await captureMapLayout();
+        await page.evaluate(() => {window.deferMapReply=true;});
+        await child.evaluate(() => document.querySelector('#homeMapRetry').click());
+        await page.waitForFunction(() => window.viewerMapRequests.length===2);
+        await page.evaluate(() => window.viewerPort.postMessage({type:'map_result',request_id:window.viewerMapRequests[1].request_id,success:false,error:'Simulated delayed map failure'}));
+        const mapLayout = await child.evaluate(waitForHomeViewport, {beforeRenderCount:restored.renderCount,beforeSceneDraws:restored.sceneDraws,captionVisible:true});
+        const layoutAfter = await captureMapLayout();
+        sample.mapLayoutRecovery = {before:restored,after:mapLayout,layoutBefore,layoutAfter};save();
+        assert.equal(layoutAfter.narrow,layoutBefore.narrow, 'A map status change must preserve the responsive layout');
+        assert(layoutAfter.captionHeight>0, 'The delayed map error occupies visible layout space');
+        assert.deepEqual(mapLayout.actual,mapLayout.expected, 'The restored canvas fits its stage after a late map error');
+        if(layoutBefore.narrow) {
+          assert.deepEqual(mapLayout.viewport,restored.viewport, 'A narrow layout preserves its fixed Home stage when the map caption appears');
+          assert(Math.abs(layoutAfter.sectionHeight-layoutBefore.sectionHeight-layoutAfter.captionHeight)<1,
+            'A narrow map section grows by the visible error caption height');
+          // Exercise ResizeObserver separately where the caption cannot resize
+          // the stage. No explicit render or resize API may satisfy this demand.
+          const viewport=page.viewportSize();
+          await page.setViewportSize({...viewport,width:viewport.width-20});
+          const resized = await child.evaluate(waitForHomeViewport, {beforeRenderCount:mapLayout.renderCount,beforeSceneDraws:mapLayout.sceneDraws,captionVisible:true});
+          sample.mapLayoutRecovery.resized=resized;save();
+          assert.notDeepEqual(resized.viewport,mapLayout.viewport, 'The real narrow viewport change must resize the Home stage');
+          assert.deepEqual(resized.actual,resized.expected, 'ResizeObserver redraws the narrow restored canvas at the new viewport');
+        } else assert(mapLayout.viewport[1]<restored.viewport[1], 'The delayed map error must shrink the real desktop Home stage');
         // Disposing outlines and revisiting cached wall geometry after restoration
         // must not delete handles from the lost generation. Keep the same case
         // deadline and existing per-operation limits; no screenshots or link queries.
@@ -407,6 +466,9 @@ async function run(browserName, origin, project, sourceHash) {
       // Browser teardown and Playwright's frame registry update asynchronously.
       // Subscribe before removing the iframe so even a fast detach is observed.
       phases.start('viewer-detach', {cycle});
+      sample.viewerCommands = await page.evaluate(() => window.viewerCommands);
+      check(sample.viewerCommands.length===0, 'Viewer navigation never issues a device, write, or unsupported command');
+      save();
       const detachStarted = Date.now();
       await Promise.all([
         page.waitForEvent('framedetached',{predicate:detached=>detached===child,timeout:30000}),
