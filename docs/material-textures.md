@@ -32,7 +32,14 @@ Scope is the mesh entry, not every material with the same name. A producer
 wanting only a tabletop textured must split its original top triangles into a
 separate entry and leave other triangles unchanged. The viewer does not infer
 surfaces or author UVs. Normalized geometry, indices and normals are preserved.
-Albedo applies only to opaque Standard/Lambert inventory materials. The mapped
+Albedo applies to source-opaque inventory and static materials. Static
+`model.meshes` entries use the same fields and explicit world-space UVs, without
+`uv_dimensions` (or unit scale). The viewer preserves UVs when rounded/cutaway
+walls add display vertices by projecting onto the nearest facing source
+triangle. Original wall geometry remains authoritative for shadow passes.
+The existing translucent architectural-wall presentation is retained; the
+source color/texture must still be opaque. Standard/Lambert materials and the
+software unlit wall fallback all retain their own lighting behavior. The mapped
 material uses white base color because the image contains the full color;
 unmapped surfaces retain their original palette.
 
@@ -40,7 +47,7 @@ unmapped surfaces retain their original palette.
 
 The producer prepares and visually reviews tiles offline, including periodic
 joins, color space and any changes from source imagery. The compiler validates
-at most eight images, 96 KiB per PNG and 512 KiB combined. Inputs must be 256²,
+at most 64 images, 256 KiB per PNG and 8 MiB combined. Inputs must be 256²,
 8-bit, noninterlaced, metadata-free opaque RGB or indexed PNGs. Only IHDR,
 PLTE, IDAT and IEND chunks are accepted; CRC, decompressed bounds and scanline
 filters are checked. Alpha, animation, profiles and external URLs are rejected.
@@ -54,11 +61,19 @@ Unready/failed maps do not split material batches. A successful map may add a
 draw for a selected surface but never adds a triangle. Identical data URIs
 share one decode and one texture. One 256² RGBA8 map with full mip levels needs
 349,524 GPU bytes plus roughly 256 KiB of decoded CPU pixels; driver and browser
-overhead are additional. No normal, roughness or displacement maps are loaded.
+overhead are additional. The 64-map count caps full mip storage at about
+21.3 MiB and decoded CPU pixels at 16 MiB. The 256 KiB per-image allowance
+accepts detailed, non-indexed 256² RGB swatches without forcing destructive
+quantization; the 8 MiB aggregate guard still limits a complete collection
+and also applies to current-drawing exports. The existing
+32 MiB export-file guard remains in force. No normal, roughness or displacement
+maps are loaded.
 
 ## Rendering and lifecycle
 
-The inventory rebuild adds UVs and the map to each newly created material
+The viewer awaits the bounded local decodes before creating static materials,
+so lighting registration sees the final map from the beginning. The inventory
+rebuild adds UVs and the map to each newly created material
 before existing Home room-lighting registration. There are no material clones
 or copied callbacks; the lighting owner's original material identities and
 state remain intact. Home/Editor transitions retain their normal registration.
@@ -103,3 +118,36 @@ lighting callbacks and the actual compiled viewer. Set
 The package workflow runs these alongside existing export/lifecycle tests and
 the required platform-acceptance matrix. Local software rendering does not
 replace physical Android/Mac or full release-matrix acceptance.
+
+## Material finish response
+
+The hardware Standard-material path selects conservative roughness/metalness
+from explicit finish names: textiles and rubber are rough dielectrics, wood
+is moderately rough, ceramics/glass are smoother, and named bare metals are
+metallic. Paint/plastic take precedence over a metal word. Colors or the
+presence of a texture do not imply fabric. Unknown finishes retain a neutral
+rough dielectric response. Alpha, emissive values, shadow ownership and
+Lambert/Basic fallbacks are unchanged. This improves material response without
+claiming geometric photorealism. Albedo is not reused as a bump/normal map.
+
+Run `node scripts/test-material-profiles.cjs` for finish selection and fallback
+contracts, and `node scripts/test-static-material-textures.cjs` for actual
+Standard/Lambert/Basic static maps, cutaway UVs and shadows in Chromium.
+
+
+### Explicit part finishes
+
+Palette IDs can be reused for unrelated surfaces. A static mesh or an
+`object_assets` mesh may therefore include `surface_finish` independently of an
+albedo map. This does not change its palette color, transparency, emissive state,
+geometry, or controls. It overrides palette-name finish inference and prevents
+inventory batching from merging different finishes. GLB uses the same response.
+
+Allowed values are `fabric`, `leather`, `plastic`, `painted`, `wood`, `ceramic`,
+`glass`, `rubber`, `stone`, `metal`, `brushed_metal`, `matte_metal`,
+`polished_metal`, `mirror`, `matte_paint`, `rough_wood`, `polished_stone`, `paper`,
+`foliage`, `soil`, `car_paint`, `solar_cell`, and `light_diffuser`. Omit the field
+when the surface is unknown; null and unrecognized values are rejected. These
+are conservative artistic starting values, not measured physical properties.
+The complete explicit response table and legacy inference table are compared
+between Python/GLB and JavaScript/HA by `scripts/test-material-profiles.cjs`.

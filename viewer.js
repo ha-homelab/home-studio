@@ -102,7 +102,26 @@ let renderProfile={pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSi
 // surfaces, with matte highlights and unfiltered shadows on reduced diffuse paths.
 // On the existing Apple software profile, wall fill is an unlit diagram tint.
 // Geometry, transparency, cutaway and cast shadows remain unchanged.
-function createSceneMaterial(options,kind){if(!renderProfile.diffuseLighting)return new THREE.MeshStandardMaterial(options);const {roughness,metalness,...shared}=options;if(kind==='walls'){const {emissive,emissiveIntensity,...unlit}=shared;return new THREE.MeshBasicMaterial(unlit)}return new THREE.MeshLambertMaterial(shared)}
+// Explicit per-mesh semantics take priority over legacy palette-name guesses.
+// Never infer metal or fabric from RGB, object category, or a color texture.
+// Opaque/transparent state, lighting ownership and Lambert fallback stay intact.
+function createSceneMaterial(options,kind,materialName,surfaceFinish){if(surfaceFinish!==undefined)materialName=materialSurfaceFinish(surfaceFinish);if(!renderProfile.diffuseLighting){if(materialName!==undefined){const rules=[["(?:^|[_ -])(mirror)(?:$|[_ -])",0.06,0.9],["glass|glazing",0.12,0],["ceramic|porcelain|glaze|enamel",0.24,0],["rubber|foam",0.95,0],["leather",0.5,0],["fabric|upholstery|curtain|linen|cloth|textile|carpet|rug|velvet|felt|canvas|safety_mesh",0.92,0],["paint|powder.?coat|plastic|vinyl|acrylic",0.48,0],["^(?=.*(?:steel|alumin|chrome|brass|copper|bronze|metal|iron))(?=.*(?:matte|satin))(?=.*(?:chrome|polished))",0.5,0.9],["^(?=.*(?:steel|alumin|chrome|brass|copper|bronze|metal|iron))(?=.*(?:matte|satin))",0.5,0.75],["^(?=.*(?:steel|alumin|chrome|brass|copper|bronze|metal|iron))(?=.*(?:brushed))(?=.*(?:chrome|polished))",0.4,0.9],["^(?=.*(?:steel|alumin|chrome|brass|copper|bronze|metal|iron))(?=.*(?:brushed))",0.4,0.75],["^(?=.*(?:steel|alumin|chrome|brass|copper|bronze|metal|iron))(?=.*(?:chrome|polished))",0.3,0.9],["^(?=.*(?:steel|alumin|chrome|brass|copper|bronze|metal|iron))",0.3,0.75],["wood|walnut|oak|maple|pine|espresso|veneer|bamboo",0.58,0],["stone|concrete|plaster|brick|soil|earth",0.88,0]];const name=String(materialName).toLowerCase(),match=surfaceFinish!==undefined?[null,...MATERIAL_SURFACE_PROFILES[surfaceFinish]]:rules.find(([pattern])=>new RegExp(pattern).test(name));options={...options,roughness:match?.[1]??.7,metalness:match?.[2]??0}}return new THREE.MeshStandardMaterial(options)}const {roughness,metalness,...shared}=options;if(kind==='walls'){const {emissive,emissiveIntensity,...unlit}=shared;return new THREE.MeshBasicMaterial(unlit)}return new THREE.MeshLambertMaterial(shared)}
+// Home uses authored wall/frame colors; Editor keeps its diagnostic treatment.
+// Mutate only display uniforms, retaining materials, maps, alpha and callbacks.
+function createHomeArchitectureMaterials(THREE, group, model) {
+  const sources=new Map(model.meshes.filter(m=>['walls','frames'].includes(m.kind)).map(m=>[m.name,m]));
+  const entries=[],white=new THREE.Color(1,1,1),black=new THREE.Color(0,0,0);
+  for(const mesh of group.children){
+    const source=sources.get(mesh.name),material=mesh.material;
+    if(!source||!material?.color)continue;
+    entries.push({material,color:material.color.clone(),emissive:material.emissive?.clone(),
+      authored:new THREE.Color(...model.materials[source.material].slice(0,3))});
+  }
+  return {setHomeActive(active){for(const entry of entries){
+    entry.material.color.copy(active?(entry.material.map?white:entry.authored):entry.color);
+    if(entry.emissive)entry.material.emissive.copy(active?black:entry.emissive);
+  }}};
+}
 // The software Editor is a layout diagram. Keep the original Home materials
 // and lazily retain one unlit mate for each supported static floor/background.
 function createEditorFloorMaterials(THREE, group, ground, profile) {
@@ -180,7 +199,7 @@ function selectRenderProfile(gl){const capacity=getRenderCapacity(gl);const prof
 let renderRequest=0,renderDelay=0,renderSuspended=false,renderLost=false;
 let interactionRenderer=null,interactionPointer=null,coalesceMotion=false;
 let cancelEditorGesture=()=>{};
-let editorFloorMaterials=null;
+let editorFloorMaterials=null,homeArchitectureMaterials=null;
 function cancelRender(){if(renderRequest)cancelAnimationFrame(renderRequest);if(renderDelay)clearTimeout(renderDelay);renderRequest=renderDelay=0}
 // Paint the first moved-pointer frame immediately. Subsequent software frames
 // share a fixed deadline; further input never postpones it. Software motion
@@ -291,6 +310,7 @@ function wallDisplayGeometry(source,shape,limit){
   geometry.userData.wallShadowCount=source.indices.length;
   geometry.userData.wallDisplayCount=display.indices.length;
   geometry.setDrawRange(source.indices.length,display.indices.length);
+  if(source.albedo_texture){const mapped=inventoryTextures.get(source,{width:1,height:1,depth:1});if(mapped){const uv=staticMaterialUV(source,geometry,mapped.uv);if(uv)geometry.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2))}}
   return geometry;
 }
 const roundedWalls=[];
@@ -345,10 +365,18 @@ function wallBoundarySegments(meshes,limit,atBase=false){
   }
   return [...segments.values()];
 }
-let wallOutlines,wallOutlineHeight;
+let wallOutlines,wallOutlineHeight,wallOutlineHome=false;
 // The four contour materials have fixed roles. Keep their programs when only
 // cutaway geometry changes; fresh objects retain the original transparent order.
 const wallOutlineMaterials=[];
+function setWallOutlineAppearance(home){
+  wallOutlineHome=home;
+  for(let i=0;i<wallOutlineMaterials.length;i++){
+    const material=wallOutlineMaterials[i];if(!material)continue;
+    material.color.setHex(home?0x6a716c:i<2?0x387bff:0x81fff0);
+    material.opacity=home?(i%2?.32:0):(i%2?1:i<2?.22:.42);
+  }
+}
 function releaseWallOutlineMaterials(dispose=false){for(const material of wallOutlineMaterials)material?.dispose();if(dispose)wallOutlineMaterials.length=0}
 let lowerFloorContext;
 function buildLowerFloorContext(){
@@ -384,7 +412,7 @@ function updateWallOutlines(){
     const line=new THREE.LineSegments(geometry(edges),wallOutlineMaterials[slot+1]??=new THREE.LineBasicMaterial({color,transparent:true,opacity:1,depthWrite:false,toneMapped:false}));
     line.renderOrder=1;wallOutlines.add(line);
   }
-  root.add(wallOutlines);
+  root.add(wallOutlines);setWallOutlineAppearance(wallOutlineHome);
 }
 const wallSheenMotion=createWallSheenMotion();
 function drawScene(camera){if(renderSuspended||renderLost||document.hidden)return;wallSheenMotion.beforeRender();try{const pointer=interactionPointer,started=coalesceMotion&&pointer?.moved?performance.now():null;if(coalesceMotion){interactionRenderer??=createInteractionRenderer(THREE,renderer,renderProfile.diffuseLighting?31250:62500);interactionRenderer.draw(scene,camera,pointer?.moved===true)}else renderer.render(scene,camera);if(pointer?.moved&&interactionPointer===pointer){pointer.painted=true;if(started!==null){const elapsed=performance.now()-started;pointer.frameDelay=Number.isFinite(elapsed)?Math.min(250,Math.max(64,elapsed)):64}}}finally{wallSheenMotion.afterRender()}}
@@ -392,6 +420,9 @@ function drawScene(camera){if(renderSuspended||renderLost||document.hidden)retur
 // paused until reload; editing or saving the 2D plan must not retry that draw.
 function report3DError(e){failed3D=true;initialViewReady=false;environmentLayer?.dispose();cancelRender();$('loadError').style.display='block';$('mode3d').disabled=true;$('openHome').disabled=true;console.error(e)}
 $('recoverPlan').onclick=()=>{if(!canEdit)return;homeView?.setActive(false);showMode(true);$('loadError').style.display='none';setEditorStatus('3D view could not start. Plan editing and JSON export are still available.');$('modePlan').focus();};
+// Decode before material creation so static and inventory lighting owners see
+// the final map from their first registration. Failures retain palette colors.
+await inventoryTextures.ready;
 try{
 scene=new THREE.Scene();scene.background=new THREE.Color('#e7e8df');camera=new THREE.PerspectiveCamera(42,1,.1,Math.max(150,planRadius*5));
 renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.localClippingEnabled=true;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.95;$('view3d').prepend(renderer.domElement);
@@ -410,7 +441,7 @@ const candidate=wallPrism(m,wallAxes.get(m.wall_id));
 const shape=candidate&&(m.wall_id||candidate.length>=candidate.depth*1.25)?candidate:null;
 const geometry=shape?wallDisplayGeometry(m,shape,clipping.constant):new THREE.BufferGeometry();
 if(!shape){geometry.setAttribute('position',new THREE.Float32BufferAttribute(m.vertices.flat(),3));geometry.setAttribute('normal',new THREE.Float32BufferAttribute(m.normals.flat(),3));geometry.setIndex(m.indices)}
-const col=model.materials[m.material];const mat=createSceneMaterial({color:m.kind==='walls'?0xb2d8d2:m.kind==='frames'?0x9abfcb:new THREE.Color(...col.slice(0,3)),roughness:.8,emissive:m.kind==='walls'?0x315d59:m.kind==='frames'?0x18333d:m.kind==='vehicles'?0x10181b:0,metalness:m.material==='steel'||m.kind==='vehicles'?.35:0,transparent:m.kind==='walls'||col[3]<1,opacity:m.kind==='walls'?.16:col[3],depthWrite:m.kind!=='walls',forceSinglePass:m.kind==='walls',side:THREE.DoubleSide},m.kind);if(m.kind==='walls'&&!mat.isMeshBasicMaterial)mat.onBeforeCompile=applyWallSheen;applyStaticMeshClipping(m,mat);const mesh=new THREE.Mesh(geometry,mat);mesh.name=m.name;mesh.userData.category=m.kind;mesh.castShadow=col[3]===1;mesh.receiveShadow=true;
+const col=model.materials[m.material];const mat=createSceneMaterial({color:m.kind==='walls'?0xb2d8d2:m.kind==='frames'?0x9abfcb:new THREE.Color(...col.slice(0,3)),roughness:.8,emissive:m.kind==='walls'?0x315d59:m.kind==='frames'?0x18333d:m.kind==='vehicles'?0x10181b:0,metalness:m.material==='steel'||m.kind==='vehicles'?.35:0,transparent:m.kind==='walls'||col[3]<1,opacity:m.kind==='walls'?.16:col[3],depthWrite:m.kind!=='walls',forceSinglePass:m.kind==='walls',side:THREE.DoubleSide},m.kind,m.material,m.surface_finish);const mapped=col[3]===1&&m.albedo_texture?inventoryTextures.get(m,{width:1,height:1,depth:1}):null;if(mapped){const uv=staticMaterialUV(m,geometry,mapped.uv);if(uv){geometry.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));mat.map=mapped.texture;mat.color.setRGB(1,1,1)}}if(m.kind==='walls'&&!mat.isMeshBasicMaterial)mat.onBeforeCompile=applyWallSheen;applyStaticMeshClipping(m,mat);const mesh=new THREE.Mesh(geometry,mat);mesh.name=m.name;mesh.userData.category=m.kind;mesh.castShadow=col[3]===1;mesh.receiveShadow=true;
 if(shape){
   // The same draw uses the exact original 12 triangles for all shadow passes.
   // Three reads drawRange after onBeforeShadow; no buffers or materials change.
@@ -423,6 +454,7 @@ ground=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(60,planRadius*2),Math.max
 const environmentConfig=model.environment||{},environmentBox=environmentConfig.bounds?null:new THREE.Box3().setFromObject(root);
 environmentLayer=createEnvironmentLayer(THREE,{scene,visibilityElement:renderer.domElement,frameInterval:environmentConfig.frame_interval_ms??(renderProfile.diffuseLighting?750:renderProfile.pixels<=250000?500:180),bounds:environmentConfig.bounds||{minX:environmentBox.min.x,maxX:environmentBox.max.x,minZ:environmentBox.min.z,maxZ:environmentBox.max.z},elevation:environmentConfig.elevation??-(model.elevation_m||0),settings:environmentConfig,requestRender});
 for(const container of [document.querySelector('.toolbar'),document.querySelector('.home-map-tools')])if(container)environmentControls.push(createEnvironmentControls(container,{getLayer:()=>environmentLayer,t:vt,onChange:()=>environmentControls.forEach(control=>control.refresh())}));
+homeArchitectureMaterials=createHomeArchitectureMaterials(THREE,root,model);
 editorFloorMaterials=createEditorFloorMaterials(THREE,root,ground,renderProfile);editorFloorMaterials.setHomeActive(embedded);
 renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;environmentLayer?.setActive(false);cancelRender();releaseViewerGeometryGPU();releaseViewerTextureGPU();releaseWallOutlineMaterials();editorFloorMaterials?.releaseGPU();interactionPointer=null;interactionRenderer?.dispose();interactionRenderer=null;releaseStaticGlassPasses();homeView?.releaseGPU?.();});
 renderer.domElement.addEventListener('webglcontextrestored',()=>{renderLost=false;environmentLayer?.setActive(homeView?.active||$('view3d').style.display!=='none');invalidateShadows();const before=renderCount;window.resizeModel?.();if(renderCount===before)requestRender()});
@@ -466,7 +498,7 @@ if(objectGroup){
 const size=it.dimensions_m,candidate=model.object_assets?.[it.id],asset=candidate?.model_id&&candidate.model_id!==it.model_id?null:candidate;let o;
 if(asset){
 o=new THREE.Group();const batches=inventoryMaterialBatches(asset,size,model.materials,inventoryTextures);
-for(const batch of batches){const material=batch.material;const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(batch.vertices,3));geo.setAttribute('normal',new THREE.Float32BufferAttribute(batch.normals,3));geo.setIndex(batch.indices);if(batch.texture)geo.setAttribute('uv',new THREE.Float32BufferAttribute(batch.uv,2));const col=model.materials[material];const mat=createSceneMaterial({color:new THREE.Color(...col.slice(0,3)),roughness:.8,transparent:col[3]<1,opacity:col[3],depthWrite:col[3]===1,side:THREE.DoubleSide});if(batch.texture){mat.map=batch.texture;mat.color.setRGB(1,1,1)}const child=new THREE.Mesh(geo,mat);child.castShadow=col[3]===1;child.receiveShadow=true;child.userData.curtainFabric=!!model.cover_windows?.[it.id] && (batch.curtainFabric||/curtain|safety_mesh/.test(material));child.userData.curtainPanel=batch.curtainPanel;o.add(child)}
+for(const batch of batches){const material=batch.material;const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(batch.vertices,3));geo.setAttribute('normal',new THREE.Float32BufferAttribute(batch.normals,3));geo.setIndex(batch.indices);if(batch.texture)geo.setAttribute('uv',new THREE.Float32BufferAttribute(batch.uv,2));const col=model.materials[material];const mat=createSceneMaterial({color:new THREE.Color(...col.slice(0,3)),roughness:.8,transparent:col[3]<1,opacity:col[3],depthWrite:col[3]===1,side:THREE.DoubleSide},undefined,material,batch.surfaceFinish);if(batch.texture){mat.map=batch.texture;mat.color.setRGB(1,1,1)}const child=new THREE.Mesh(geo,mat);child.castShadow=col[3]===1;child.receiveShadow=true;child.userData.curtainFabric=!!model.cover_windows?.[it.id] && (batch.curtainFabric||/curtain|safety_mesh/.test(material));child.userData.curtainPanel=batch.curtainPanel;o.add(child)}
 if(tvEntities[it.id]&&it.entity_id===tvEntities[it.id]){const screen=new THREE.Mesh(new THREE.PlaneGeometry(.968,.948),new THREE.MeshBasicMaterial({toneMapped:false}));screen.position.set(0,.515,.393);screen.visible=false;o.userData.screen=screen;o.add(screen)}
 o.scale.set(size.width,size.height,size.depth);o.position.set(it.position_m.x,it.position_m.y,it.position_m.z);
 }else{const geo=new THREE.BoxGeometry(size.width,size.height,size.depth);const mat=createSceneMaterial({color:it.type==='tv'?0x273239:0xb87637,roughness:.7});o=new THREE.Mesh(geo,mat);o.position.set(it.position_m.x,it.position_m.y+size.height/2,it.position_m.z);o.castShadow=true;o.receiveShadow=true;registerFallbackBoxProgram(THREE,o,renderProfile.diffuseLighting)}
@@ -560,6 +592,5 @@ document.querySelector('aside').inert=!canEdit;if(inventoryChanged)rebuildInvent
 });
 }
 refreshViewerLanguage(false);
-// Decode bounded local albedo before the first inventory build, without resetting live controls.
-await inventoryTextures.ready;
+// Static maps were decoded before scene setup; build controls only once.
 rebuildInventoryView();if(embedded){homeView?.setActive(true);requestAnimationFrame(()=>{initialViewReady=!failed3D;try{window.resizeModel?.();}catch(e){report3DError(e);}});}else if(model.initial_room)focusRoom(model.initial_room);window.floorplan={model,get surroundings(){return environmentLayer?.stats},get canEdit(){return canEdit},get locale(){return viewerI18n.locale},get homeMode(){return homeView?.active??false},get illuminated(){return homeView?.illuminated??[]},get items(){return items},get renderCount(){return renderCount},get meshCount(){return root?.children.length||0},get objectCount(){return objectGroup?.children.length||0},get translucentObjectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh&&o.material.transparent&&o.material.opacity<1&&!o.material.depthWrite)n++});return n},get objectMeshCount(){let n=0;objectGroup?.traverse(o=>{if(o.isMesh)n++});return n}};

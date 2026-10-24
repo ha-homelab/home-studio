@@ -101,6 +101,10 @@ an explanation and leaves the drawing and installed home unchanged.
 - Large homes may exceed the bounded export budget. Try Current floor, or
   simplify overly detailed custom geometry. Only one build/export operation
   runs at a time, so let an existing operation finish before trying again.
+  Exports allow up to 500,000 triangles and 32 MiB; for OBJ, the size limit also
+  applies to the unpacked geometry, material library and PNGs together. Exact
+  attribute reuse preserves surface seams, hard normals and material groups.
+  The native drawing and added-geometry budget remains 200,000 triangles.
 - If the connection drops, continue editing and export drawing JSON locally
   as a backup. Save, publish, reload, and model export need a live connection.
   Reconnection does not automatically publish or replace your working drawing.

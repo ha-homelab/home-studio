@@ -11,19 +11,54 @@ import struct
 import zlib
 
 
+# Per-model limits; fixed dimensions also bound decoded CPU/GPU storage.
+MAX_MATERIAL_TEXTURES = 64
+MAX_MATERIAL_TEXTURE_BYTES = 8 * 1024 * 1024
+MAX_MATERIAL_PNG_BYTES = 256 * 1024
+MAX_MATERIAL_BASE64_CHARS = 4 * ((MAX_MATERIAL_PNG_BYTES + 2) // 3)
+
+
+# Artistic starting values, not measured material properties.
+MATERIAL_SURFACE_PROFILES = {'fabric': [0.92, 0], 'leather': [0.5, 0], 'plastic': [0.48, 0], 'painted': [0.48, 0], 'wood': [0.58, 0], 'ceramic': [0.24, 0], 'glass': [0.12, 0], 'rubber': [0.95, 0], 'stone': [0.88, 0], 'metal': [0.3, 0.75], 'brushed_metal': [0.4, 0.75], 'matte_metal': [0.5, 0.75], 'polished_metal': [0.3, 0.9], 'mirror': [0.06, 0.9], 'matte_paint': [0.85, 0], 'rough_wood': [0.85, 0], 'polished_stone': [0.35, 0], 'paper': [0.85, 0], 'foliage': [0.75, 0], 'soil': [1, 0], 'car_paint': [0.25, 0.15], 'solar_cell': [0.25, 0.25], 'light_diffuser': [0.4, 0]}
+MATERIAL_SURFACE_FINISHES = tuple(MATERIAL_SURFACE_PROFILES)
+
+
+def validate_surface_finish(value):
+    if not isinstance(value, str) or value not in MATERIAL_SURFACE_FINISHES:
+        raise ValueError("Invalid material surface finish")
+    return value
+
+
+# Ordered finish rules are mirrored in createSceneMaterial. The parity test
+# compares the complete serialized table, not only representative outcomes.
+MATERIAL_FINISH_RULES = [['(?:^|[_ -])(mirror)(?:$|[_ -])', 0.06, 0.9], ['glass|glazing', 0.12, 0], ['ceramic|porcelain|glaze|enamel', 0.24, 0], ['rubber|foam', 0.95, 0], ['leather', 0.5, 0], ['fabric|upholstery|curtain|linen|cloth|textile|carpet|rug|velvet|felt|canvas|safety_mesh', 0.92, 0], ['paint|powder.?coat|plastic|vinyl|acrylic', 0.48, 0], ['^(?=.*(?:steel|alumin|chrome|brass|copper|bronze|metal|iron))(?=.*(?:matte|satin))(?=.*(?:chrome|polished))', 0.5, 0.9], ['^(?=.*(?:steel|alumin|chrome|brass|copper|bronze|metal|iron))(?=.*(?:matte|satin))', 0.5, 0.75], ['^(?=.*(?:steel|alumin|chrome|brass|copper|bronze|metal|iron))(?=.*(?:brushed))(?=.*(?:chrome|polished))', 0.4, 0.9], ['^(?=.*(?:steel|alumin|chrome|brass|copper|bronze|metal|iron))(?=.*(?:brushed))', 0.4, 0.75], ['^(?=.*(?:steel|alumin|chrome|brass|copper|bronze|metal|iron))(?=.*(?:chrome|polished))', 0.3, 0.9], ['^(?=.*(?:steel|alumin|chrome|brass|copper|bronze|metal|iron))', 0.3, 0.75], ['wood|walnut|oak|maple|pine|espresso|veneer|bamboo', 0.58, 0], ['stone|concrete|plaster|brick|soil|earth', 0.88, 0]]
+
+
+def material_surface_profile(name=None, surface_finish=None):
+    """Conservative PBR response from a finish name, never from RGB or object type."""
+    if surface_finish is not None:
+        roughness, metalness = MATERIAL_SURFACE_PROFILES[validate_surface_finish(surface_finish)]
+        return {'roughness': roughness, 'metalness': metalness}
+    name = str(name or '').lower()
+    for pattern, roughness, metalness in MATERIAL_FINISH_RULES:
+        if re.search(pattern, name):
+            return {'roughness': roughness, 'metalness': metalness}
+    return {'roughness': .7, 'metalness': 0}
+
+
 def decode_material_texture(spec):
     if (not isinstance(spec, dict) or set(spec) != {'mime_type', 'width', 'height', 'data_uri'}
             or spec['mime_type'] != 'image/png' or spec['width'] != 256 or spec['height'] != 256):
         raise ValueError('Material textures must be 256-pixel PNG swatches')
     uri = spec['data_uri']
     prefix = 'data:image/png;base64,'
-    if not isinstance(uri, str) or not uri.startswith(prefix) or len(uri) > len(prefix) + 131072:
+    if not isinstance(uri, str) or not uri.startswith(prefix) or len(uri) > len(prefix) + MAX_MATERIAL_BASE64_CHARS:
         raise ValueError('Material textures require bounded embedded PNG data')
     try:
         raw = base64.b64decode(uri[len(prefix):], validate=True)
     except (ValueError, binascii.Error) as error:
         raise ValueError('Invalid material texture encoding') from error
-    if len(raw) > 98304 or base64.b64encode(raw).decode() != uri[len(prefix):] or raw[:8] != b'\x89PNG\r\n\x1a\n':
+    if len(raw) > MAX_MATERIAL_PNG_BYTES or base64.b64encode(raw).decode() != uri[len(prefix):] or raw[:8] != b'\x89PNG\r\n\x1a\n':
         raise ValueError('Invalid material PNG')
     position, kinds, compressed, palette, channels = 8, [], bytearray(), False, 0
     while position < len(raw):
@@ -94,19 +129,22 @@ def material_uv(mesh, dimensions=None):
 
 def validate_material_textures(model):
     definitions = model.get('material_textures', {})
-    if not isinstance(definitions, dict) or len(definitions) > 8:
-        raise ValueError('At most eight material textures are supported')
+    if not isinstance(definitions, dict) or len(definitions) > MAX_MATERIAL_TEXTURES:
+        raise ValueError('At most 64 material textures are supported')
     result = {}
     for key, spec in definitions.items():
         if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}', key):
             raise ValueError('Invalid material texture identifier')
         result[key] = decode_material_texture(spec)
-    if sum(map(len, result.values())) > 524288:
-        raise ValueError('Material textures exceed the 512 KiB total budget')
-    for asset in model.get('object_assets', {}).values():
-        for mesh in asset['meshes']:
-            if 'albedo_texture' in mesh:
-                if not isinstance(mesh['albedo_texture'], str) or mesh['albedo_texture'] not in result or model['materials'][mesh['material']][3] != 1:
-                    raise ValueError('Material texture requires a known opaque surface')
-                material_uv(mesh)
+    if sum(map(len, result.values())) > MAX_MATERIAL_TEXTURE_BYTES:
+        raise ValueError('Material textures exceed the 8 MiB total budget')
+    meshes = list(model.get('meshes', []))
+    meshes.extend(mesh for asset in model.get('object_assets', {}).values() for mesh in asset['meshes'])
+    for mesh in meshes:
+        if 'surface_finish' in mesh:
+            validate_surface_finish(mesh['surface_finish'])
+        if 'albedo_texture' in mesh:
+            if not isinstance(mesh['albedo_texture'], str) or mesh['albedo_texture'] not in result or model['materials'][mesh['material']][3] != 1:
+                raise ValueError('Material texture requires a known opaque surface')
+            material_uv(mesh)
     return result

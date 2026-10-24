@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Render explicit per-part surface finishes with distinct responses for fabric,
+  wood, plastic, ceramic, glass and metal. A shared palette color no longer
+  determines the surface type; software-rendering fallbacks remain available.
+- Support bounded, embedded albedo tiles on selected furniture and architectural
+  surfaces, preserving physical repeat scale after furniture resizing and
+  retaining UVs through wall cutaways. Current-drawing GLB and OBJ exports include
+  the validated textures and surface data.
+- Refine optional surrounding trees and vehicles with smoother, more detailed
+  geometry while preserving existing traffic paths and animation timing.
+- Keep detailed GLB and OBJ exports compact through exact vertex, normal and
+  UV reuse. Exports allow up to 500,000 triangles while retaining the 32 MiB
+  size limit; native drawing and added-geometry limits remain unchanged.
+
 ## [1.1.0] - Connected editing, easier setup and Blender export
 
 ### Added

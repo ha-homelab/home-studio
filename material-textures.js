@@ -1,3 +1,12 @@
+// Explicit per-part semantics override legacy palette names; never infer from RGB.
+// Artistic starting values, not measured material properties.
+const MATERIAL_SURFACE_PROFILES = Object.freeze({"fabric":[0.92,0],"leather":[0.5,0],"plastic":[0.48,0],"painted":[0.48,0],"wood":[0.58,0],"ceramic":[0.24,0],"glass":[0.12,0],"rubber":[0.95,0],"stone":[0.88,0],"metal":[0.3,0.75],"brushed_metal":[0.4,0.75],"matte_metal":[0.5,0.75],"polished_metal":[0.3,0.9],"mirror":[0.06,0.9],"matte_paint":[0.85,0],"rough_wood":[0.85,0],"polished_stone":[0.35,0],"paper":[0.85,0],"foliage":[0.75,0],"soil":[1,0],"car_paint":[0.25,0.15],"solar_cell":[0.25,0.25],"light_diffuser":[0.4,0]});
+const MATERIAL_SURFACE_FINISHES = Object.freeze(Object.keys(MATERIAL_SURFACE_PROFILES));
+function materialSurfaceFinish(value) {
+  if (value !== undefined && !MATERIAL_SURFACE_FINISHES.includes(value)) throw Error("Invalid material surface finish");
+  return value;
+}
+
 // Optional, build-validated albedo only. No URLs, material cloning or render loop.
 // The host owns materials; this owner retains decoded pixels across GPU loss.
 function createMaterialTextures(THREE, definitions) {
@@ -8,19 +17,19 @@ function createMaterialTextures(THREE, definitions) {
     if (definitions !== undefined) {
       if (!definitions || Array.isArray(definitions) || typeof definitions !== 'object') throw Error('Invalid textures');
       const entries = Object.entries(definitions);
-      if (entries.length > 8) throw Error('Too many textures');
+      if (entries.length > 64) throw Error('Too many textures');
       let total = 0;
       for (const [id, spec] of entries) {
         if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(id) || !spec ||
             Object.keys(spec).sort().join() !== 'data_uri,height,mime_type,width' ||
             spec.mime_type !== 'image/png' || spec.width !== 256 || spec.height !== 256) throw Error('Invalid texture');
         const uri = spec.data_uri, prefix = 'data:image/png;base64,';
-        if (typeof uri !== 'string' || !uri.startsWith(prefix) || uri.length > prefix.length + 131072) throw Error('Invalid texture URI');
+        if (typeof uri !== 'string' || !uri.startsWith(prefix) || uri.length > prefix.length + 349528) throw Error('Invalid texture URI');
         const encoded = uri.slice(prefix.length);
         if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) throw Error('Invalid base64');
         const bytes = atob(encoded);
         total += bytes.length;
-        if (bytes.length < 45 || bytes.length > 98304 || total > 524288 || btoa(bytes) !== encoded ||
+        if (bytes.length < 45 || bytes.length > 262144 || total > 8388608 || btoa(bytes) !== encoded ||
             bytes.slice(0, 8) !== '\x89PNG\r\n\x1a\n' || bytes.slice(12, 16) !== 'IHDR') throw Error('Invalid PNG');
         const integer = offset => ((bytes.charCodeAt(offset) * 16777216) + (bytes.charCodeAt(offset + 1) << 16) +
           (bytes.charCodeAt(offset + 2) << 8) + bytes.charCodeAt(offset + 3));
@@ -90,14 +99,49 @@ function createMaterialTextures(THREE, definitions) {
   };
 }
 
+// Preserve explicit producer UVs when a rounded/cutaway wall adds vertices.
+// Each added vertex uses the affine UV plane of the nearest facing source
+// triangle. Original shadow vertices retain their exact UVs. No new texture,
+// shader, render loop or geometry displacement is created here.
+function staticMaterialUV(source, geometry, uv) {
+  const positions = geometry.getAttribute('position'), normals = geometry.getAttribute('normal');
+  if (positions.count === source.vertices.length) return uv;
+  if (positions.count < source.vertices.length || !normals || normals.count !== positions.count) return null;
+  const sub = (a,b) => a.map((v,i)=>v-b[i]), dot = (a,b) => a.reduce((sum,v,i)=>sum+v*b[i],0);
+  const triangles = [];
+  for (let i=0;i<source.indices.length;i+=3) {
+    const ids=source.indices.slice(i,i+3),a=source.vertices[ids[0]],u=sub(source.vertices[ids[1]],a),v=sub(source.vertices[ids[2]],a);
+    const uu=dot(u,u),uvv=dot(u,v),vv=dot(v,v),det=uu*vv-uvv*uvv;
+    if (det<=1e-16) continue;
+    const n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]],length=Math.sqrt(dot(n,n));
+    const authored=source.normals[ids[0]],sign=dot(n,authored)<0?-1:1;
+    triangles.push({ids,a,u,v,uu,uvv,vv,det,n:n.map(x=>x*sign/length)});
+  }
+  const result=uv.slice();
+  for(let i=source.vertices.length;i<positions.count;i++) {
+    const p=[positions.getX(i),positions.getY(i),positions.getZ(i)],n=[normals.getX(i),normals.getY(i),normals.getZ(i)];
+    let best=Infinity,pair=null;
+    for(const t of triangles) {
+      const d=sub(p,t.a),du=dot(d,t.u),dv=dot(d,t.v),s=(du*t.vv-dv*t.uvv)/t.det,r=(dv*t.uu-du*t.uvv)/t.det;
+      const outside=Math.max(0,-s)+Math.max(0,-r)+Math.max(0,s+r-1),distance=dot(d,t.n);
+      const score=(1-dot(n,t.n))*1000+outside*outside+distance*distance;
+      if(score<best) {best=score;pair=[0,1].map(axis=>uv[t.ids[0]*2+axis]*(1-s-r)+uv[t.ids[1]*2+axis]*s+uv[t.ids[2]*2+axis]*r)}
+    }
+    if(!pair||pair.some(value=>!Number.isFinite(value)||Math.abs(value)>4096)) return null;
+    result.push(...pair);
+  }
+  return result;
+}
+
 function inventoryMaterialBatches(asset, dimensions, materials, textures) {
   const batches = new Map();
   for (const part of asset.meshes) {
     const mapped = materials[part.material]?.[3] === 1 ? textures.get(part, dimensions) : null;
-    const key = part.material + '|' + (part.curtain_fabric ? part.curtain_panel : 'fixed') + '|' + (mapped?.texture.uuid || '');
+    const surfaceFinish = materialSurfaceFinish(part.surface_finish);
+    const key = (surfaceFinish || '') + '|' + part.material + '|' + (part.curtain_fabric ? part.curtain_panel : 'fixed') + '|' + (mapped?.texture.uuid || '');
     let batch = batches.get(key);
     if (!batch) {
-      batch = {material:part.material, curtainFabric:part.curtain_fabric === true, curtainPanel:part.curtain_panel,
+      batch = {material:part.material, surfaceFinish, curtainFabric:part.curtain_fabric === true, curtainPanel:part.curtain_panel,
         vertices:[], normals:[], indices:[], uv:[], texture:mapped?.texture};
       batches.set(key, batch);
     }

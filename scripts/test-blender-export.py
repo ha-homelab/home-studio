@@ -14,6 +14,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
+import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -35,7 +36,11 @@ def positions(document, raw, binary, node):
     accessor = document['accessors'][primitive['attributes']['POSITION']]
     view = document['bufferViews'][accessor['bufferView']]
     values = struct.unpack_from('<' + 'f' * (accessor['count'] * 3), raw, binary + view['byteOffset'])
-    return [values[index:index + 3] for index in range(0, len(values), 3)]
+    points = [values[index:index + 3] for index in range(0, len(values), 3)]
+    indices = document['accessors'][primitive['indices']]
+    index_view = document['bufferViews'][indices['bufferView']]
+    order = struct.unpack_from('<' + 'I' * indices['count'], raw, binary + index_view['byteOffset'])
+    return [points[index] for index in order]
 
 
 class ExportTests(unittest.IsolatedAsyncioTestCase):
@@ -84,7 +89,9 @@ class ExportTests(unittest.IsolatedAsyncioTestCase):
         angle = math.radians(item['rotation_deg'])
         for child, expected_part in zip(desk['children'], expected_parts):
             points = positions(document, raw, binary, document['nodes'][child])
-            for (x, y, z), want in zip(points, expected_part['vertices']):
+            wanted = [expected_part['vertices'][index] for index in expected_part['indices']]
+            self.assertEqual(len(points), len(wanted))
+            for (x, y, z), want in zip(points, wanted):
                 x, y, z = x*1.7, y*.8, z*.6
                 actual = [6.5+math.cos(angle)*x+math.sin(angle)*z, .2+y, 2-math.sin(angle)*x+math.cos(angle)*z]
                 for a, b in zip(actual, want):
@@ -359,6 +366,125 @@ class ExportTests(unittest.IsolatedAsyncioTestCase):
         floor['groups'][0]['meshes'][0]['vertices'][0][0] = float('inf')
         with self.assertRaisesRegex(ValueError, 'invalid export geometry'):
             export_scene([floor], 'glb')
+
+
+class CompactExportTests(unittest.TestCase):
+    def scene(self):
+        def chunk(kind, data):
+            return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+        png = (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 256, 256, 8, 2, 0, 0, 0))
+               + chunk(b'IDAT', zlib.compress((b'\0' + b'\x80\x80\x80' * 256) * 256)) + chunk(b'IEND', b''))
+        triangle = [[-.25, 0, -.5], [.5, 0, -.5], [-.25, 0, .5]]
+        mesh = {'vertices': triangle * 3 + [[99, 99, 99]], 'normals': [[0, 1, 0]] * 10,
+                'indices': list(range(9)), 'color': [.2, .3, .4, 1], 'material_name': 'cloth',
+                'surface_finish': 'fabric', 'uv': [[0, 0], [1, 0], [0, 1]] * 3 + [[99, 99]],
+                'texture': {'mime_type': 'image/png', 'width': 256, 'height': 256,
+                            'data_uri': 'data:image/png;base64,' + base64.b64encode(png).decode()}}
+        # Coincident positions must keep distinct normal and UV seams.
+        mesh['normals'][6] = [0, 0, 1]
+        mesh['uv'][7] = [2, 0]
+        plain = {key: copy.deepcopy(value) for key, value in mesh.items() if key not in ('uv', 'texture')}
+        plain.update(color=[.8, .1, .2, 1], material_name='paint', surface_finish='painted')
+        groups = [{'name': 'Fixture', 'translation': [-3, .25, -2], 'rotation': math.pi / 2,
+                   'scale': [2, .5, 3], 'meshes': [mesh, plain]},
+                  {'name': 'Other', 'translation': [1, -1, 2], 'rotation': -math.pi / 2,
+                   'scale': [.5, 2, 1], 'meshes': [copy.deepcopy(mesh)]}]
+        return [{'name': 'Floor', 'elevation': -2, 'groups': groups}]
+
+    def test_glb_reuses_only_exact_attributes_and_preserves_each_corner(self):
+        scene = self.scene(); before = copy.deepcopy(scene)
+        raw = export_scene(scene, 'glb')
+        size = struct.unpack_from('<I', raw, 12)[0]
+        doc = json.loads(raw[20:20 + size]); binary = 28 + size
+        def accessor(index):
+            acc = doc['accessors'][index]; width = {'VEC3': 3, 'VEC2': 2, 'SCALAR': 1}[acc['type']]
+            view = doc['bufferViews'][acc['bufferView']]
+            values = struct.unpack_from('<' + ('I' if acc['componentType'] == 5125 else 'f') * (acc['count'] * width), raw, binary + view['byteOffset'])
+            return [values[i:i + width] for i in range(0, len(values), width)]
+        f32 = lambda values: struct.unpack('<' + 'f' * len(values), struct.pack('<' + 'f' * len(values), *values))
+        root = doc['nodes'][doc['scenes'][0]['nodes'][0]]
+        self.assertEqual(root['translation'], [0, -2, 0])
+        materials = []
+        for group, node_index in zip(scene[0]['groups'], root['children']):
+            node = doc['nodes'][node_index]
+            self.assertEqual(node['translation'], group['translation'])
+            self.assertEqual(node['scale'], group['scale'])
+            self.assertEqual(node['rotation'], [0, math.sin(group['rotation'] / 2), 0, math.cos(group['rotation'] / 2)])
+            for source, child in zip(group['meshes'], node['children']):
+                primitive = doc['meshes'][doc['nodes'][child]['mesh']]['primitives'][0]
+                arrays = {key: accessor(index) for key, index in primitive['attributes'].items()}
+                order = [value[0] for value in accessor(primitive['indices'])]
+                expected = [(f32(source['vertices'][i]), f32(source['normals'][i]),
+                             f32([source['uv'][i][0], 1 - source['uv'][i][1]]) if 'texture' in source else None)
+                            for i in source['indices']]
+                actual = [(arrays['POSITION'][i], arrays['NORMAL'][i], arrays.get('TEXCOORD_0', [None] * len(arrays['POSITION']))[i]) for i in order]
+                self.assertEqual(actual, expected)
+                self.assertLess(len(arrays['POSITION']), len(source['vertices']))
+                self.assertEqual(len(arrays['POSITION']), 5 if 'texture' in source else 4)
+                materials.append(primitive['material'])
+        self.assertEqual(materials, [0, 1, 0])
+        self.assertEqual(doc['materials'][1]['pbrMetallicRoughness']['baseColorFactor'], [.8, .1, .2, 1])
+        self.assertEqual(scene, before)
+
+    def test_obj_independent_indices_preserve_transformed_corners_and_materials(self):
+        scene = self.scene()
+        scene[0]['groups'][0]['meshes'] *= 12
+        # Separate objects grow the position index beyond two digits, so the
+        # compact relative form and shared normal/UV arrays are both exercised.
+        for index in range(80):
+            group = copy.deepcopy(scene[0]['groups'][1])
+            group.update(name=f'Repeat {index}', translation=[-20 - index, -1, 2])
+            scene[0]['groups'].append(group)
+        before = copy.deepcopy(scene)
+        with zipfile.ZipFile(io.BytesIO(export_scene(scene, 'obj'))) as archive:
+            obj = archive.read('home.obj').decode()
+            self.assertIn('map_Kd textures/material_0.png', archive.read('materials.mtl').decode())
+        arrays = {'v': [], 'vn': [], 'vt': []}; actual = []; group = material = None
+        for line in obj.splitlines():
+            kind, *parts = line.split()
+            if kind in arrays:
+                arrays[kind].append(tuple(map(float, parts)))
+            elif kind == 'o': group = ' '.join(parts)
+            elif kind == 'usemtl': material = parts[0]
+            elif kind == 'f':
+                for corner in parts:
+                    position, uv, normal = corner.split('/')
+                    def resolve(kind, index):
+                        if not index: return None
+                        value = int(index)
+                        return arrays[kind][value - 1 if value > 0 else value]
+                    actual.append((group, material, resolve('v', position), resolve('vn', normal), resolve('vt', uv)))
+        expected = []
+        rounded = lambda values: tuple(float(f'{value:.9g}') for value in values)
+        for ordinal, group in enumerate(scene[0]['groups'], 1):
+            c, s = math.cos(group['rotation']), math.sin(group['rotation'])
+            sx, sy, sz = group['scale']; tx, ty, tz = group['translation']
+            for mesh in group['meshes']:
+                for index in mesh['indices']:
+                    x, y, z = [v * scale for v, scale in zip(mesh['vertices'][index], group['scale'])]
+                    position = rounded((tx + c*x + s*z, -(tz - s*x + c*z), ty + y + scene[0]['elevation']))
+                    x, y, z = [v / scale for v, scale in zip(mesh['normals'][index], group['scale'])]
+                    x, z = c*x + s*z, -s*x + c*z
+                    length = math.hypot(x, y, z) or 1
+                    normal = rounded((x / length, -z / length, y / length))
+                    expected.append((f'{ordinal}_Floor {group["name"]}', 'material_0' if 'texture' in mesh else 'material_1',
+                                     position, normal, rounded(mesh['uv'][index]) if 'texture' in mesh else None))
+        self.assertEqual(actual, expected)
+        self.assertTrue(any(part.startswith('-') for line in obj.splitlines() if line.startswith('f ')
+                            for part in line.split()[1:]))
+        self.assertLess(len(arrays['vn']), 10)
+        self.assertEqual(scene, before)
+
+    def test_half_million_triangle_boundary_keeps_byte_and_native_limits(self):
+        mesh = {'vertices': [[0, 0, 0], [1, 0, 0], [0, 0, 1]], 'normals': [[0, 1, 0]] * 3,
+                'indices': [0, 1, 2] * 500_000, 'color': [.4, .4, .4, 1]}
+        scene = [{'name': 'Floor', 'elevation': 0, 'groups': [{'name': 'Object', 'translation': [0, 0, 0],
+                  'rotation': 0, 'scale': [1, 1, 1], 'meshes': [mesh]}]}]
+        self.assertLess(len(export_scene(scene, 'glb')), 32 * 1024 * 1024)
+        self.assertEqual(native.MAX_NATIVE_TRIANGLES, 200_000)
+        mesh['indices'].extend([0, 1, 2])
+        with self.assertRaisesRegex(ValueError, '500,000 triangles'):
+            export_scene(scene, 'glb')
 
 
 if __name__ == '__main__':

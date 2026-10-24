@@ -1,5 +1,9 @@
 """glTF, USD, OBJ and COLLADA exports from the same metric triangle meshes."""
 import json, struct
+if __package__:
+    from .material_textures import material_surface_profile
+else:
+    from material_textures import material_surface_profile
 
 def export_models(data, ROOT, stem):
     meshes=data['meshes'];MATS=data['materials'];H=data['ceiling_height_m']
@@ -19,7 +23,7 @@ def export_models(data, ROOT, stem):
             nodes.append(dict(name=m['name'],mesh=len(gm)-1,extras=dict(category=m['kind'],estimated=m.get('estimated',False))))
         gl=dict(asset=dict(version='2.0',generator=data['title']+' dimension-constrained reconstruction'),scene=0,
            scenes=[dict(name=stem+'_ceiling_2_7m',nodes=list(range(len(nodes))))],nodes=nodes,meshes=gm,
-           materials=[dict(name=k,pbrMetallicRoughness=dict(baseColorFactor=v,metallicFactor=.05,roughnessFactor=.72),doubleSided=True,alphaMode='BLEND' if v[3]<1 else 'OPAQUE') for k,v in MATS.items()],
+           materials=[dict(name=k,pbrMetallicRoughness=dict(baseColorFactor=v,metallicFactor=material_surface_profile(k)["metalness"],roughnessFactor=material_surface_profile(k)["roughness"]),doubleSided=True,alphaMode='BLEND' if v[3]<1 else 'OPAQUE') for k,v in MATS.items()],
            buffers=[dict(byteLength=len(blob))],bufferViews=views,accessors=accessors,
            extras=dict(units='metres',ceiling_height=H,status='provisional reconstruction; see README.md'))
         jj=json.dumps(gl,separators=(',',':')).encode();jj+=b' '*((-len(jj))%4);blob+=b'\0'*((-len(blob))%4)
@@ -62,8 +66,32 @@ def export_models(data, ROOT, stem):
 # Interactive exports are independent of the historical on-disk export bundle.
 # Only geometry, colors, validated embedded albedo and display labels cross this
 # boundary; never model extras or references to external image resources.
-MAX_EXPORT_TRIANGLES = 200_000
+MAX_EXPORT_TRIANGLES = 500_000
 MAX_EXPORT_BYTES = 32 * 1024 * 1024
+
+
+def _compact_export_mesh(mesh):
+    """Reuse exact corner attributes without changing normal or UV seams."""
+    used = set(mesh['indices'])
+    textured = 'texture' in mesh
+    vertices, normals, uv, remap, unique = [], [], [], {}, {}
+    for index, vertex in enumerate(mesh['vertices']):
+        if index not in used:
+            continue
+        key = (tuple(vertex), tuple(mesh['normals'][index]),
+               tuple(mesh['uv'][index]) if textured else None)
+        if key not in unique:
+            unique[key] = len(vertices)
+            vertices.append(vertex)
+            normals.append(mesh['normals'][index])
+            if textured:
+                uv.append(mesh['uv'][index])
+        remap[index] = unique[key]
+    result = {**mesh, 'vertices': vertices, 'normals': normals,
+              'indices': [remap[index] for index in mesh['indices']]}
+    if textured:
+        result['uv'] = uv
+    return result
 
 
 def export_scene(floors, format):
@@ -78,17 +106,18 @@ def export_scene(floors, format):
     import re
     import zipfile
     if __package__:
-        from .material_textures import decode_material_texture, material_uv
+        from .material_textures import decode_material_texture, material_uv, MAX_MATERIAL_TEXTURES, MAX_MATERIAL_TEXTURE_BYTES
     else:
-        from material_textures import decode_material_texture, material_uv
+        from material_textures import decode_material_texture, material_uv, MAX_MATERIAL_TEXTURES, MAX_MATERIAL_TEXTURE_BYTES
 
     if format not in ('glb', 'obj'):
         raise ValueError('Choose GLB or OBJ for this export.')
     materials, colors, count, vertex_count, mesh_count = [], {}, 0, 0, 0
-    image_ids, image_bytes, material_maps = {}, [], []
+    image_ids, image_bytes, material_maps, material_profiles = {}, [], [], []
 
     def material_key(mesh):
-        return tuple(mesh['color']) + (mesh.get('texture', {}).get('data_uri'),)
+        profile = material_surface_profile(mesh.get('material_name'), mesh.get('surface_finish'))
+        return tuple(mesh['color']) + (mesh.get('texture', {}).get('data_uri'), profile['roughness'], profile['metalness'])
 
     def label(value):
         # Entity references sometimes occur in commissioned mesh/display names.
@@ -112,7 +141,7 @@ def export_scene(floors, format):
                 vertex_count += len(vertices)
                 mesh_count += 1
                 if count > MAX_EXPORT_TRIANGLES or vertex_count > MAX_EXPORT_TRIANGLES * 3 or mesh_count > 20_000:
-                    raise ValueError('Export exceeds 200,000 triangles. Export one floor or reduce detailed furniture.')
+                    raise ValueError('Export exceeds 500,000 triangles. Export one floor or reduce detailed furniture.')
                 if (not vertices or len(normals) != len(vertices) or not indices or len(indices) % 3 or
                         not all(finite(vertex, 3) for vertex in vertices) or
                         not all(finite(normal, 3) for normal in normals) or
@@ -136,7 +165,7 @@ def export_scene(floors, format):
                     if uri not in image_ids:
                         image_bytes.append(decode_material_texture(mesh['texture']))
                         image_ids[uri] = len(image_bytes) - 1
-                        if len(image_bytes) > 8 or sum(map(len, image_bytes)) > 524288:
+                        if len(image_bytes) > MAX_MATERIAL_TEXTURES or sum(map(len, image_bytes)) > MAX_MATERIAL_TEXTURE_BYTES:
                             raise ValueError('Export exceeds the material texture budget.')
                     image_index = image_ids[uri]
                 key = material_key(mesh)
@@ -144,6 +173,7 @@ def export_scene(floors, format):
                     colors[key] = len(materials)
                     materials.append(color)
                     material_maps.append(image_index)
+                    material_profiles.append(material_surface_profile(mesh.get("material_name"), mesh.get("surface_finish")))
     if not count:
         raise ValueError('Add a room or object before exporting.')
 
@@ -186,6 +216,7 @@ def export_scene(floors, format):
                         'rotation': [0, math.sin(angle), 0, math.cos(angle)], 'scale': group['scale'], 'children': []}
                 nodes.append(node)
                 for part, mesh in enumerate(group['meshes']):
+                    mesh = _compact_export_mesh(mesh)
                     position = accessor(mesh['vertices'], 3)
                     normal = accessor(mesh['normals'], 3)
                     indices = accessor(mesh['indices'], 0)
@@ -209,7 +240,7 @@ def export_scene(floors, format):
                     'materials': [{'name': 'material_' + str(index), 'doubleSided': True,
                                    'alphaMode': 'BLEND' if color[3] < 1 else 'OPAQUE',
                                    'pbrMetallicRoughness': {'baseColorFactor': [1, 1, 1, 1] if material_maps[index] is not None else color,
-                                                           'metallicFactor': .05, 'roughnessFactor': .72,
+                                                           'metallicFactor': material_profiles[index]['metalness'], 'roughnessFactor': material_profiles[index]['roughness'],
                                                            **({'baseColorTexture': {'index': material_maps[index]}} if material_maps[index] is not None else {})}}
                                   for index, color in enumerate(materials)],
                     'buffers': [{'byteLength': len(blob)}], 'bufferViews': views, 'accessors': accessors}
@@ -225,9 +256,21 @@ def export_scene(floors, format):
         return (struct.pack('<III', 0x46546C67, 2, total) + struct.pack('<II', len(payload), 0x4E4F534A) +
                 payload + struct.pack('<II', len(blob), 0x004E4942) + blob)
 
-    obj, mtl, offset, ordinal, uv_offset = bytearray(), bytearray(), 1, 0, 1
+    obj, mtl, ordinal = bytearray(), bytearray(), 0
+    position_ids, normal_ids, uv_ids = {}, {}, {}
     def line(target, value):
         bounded_extend(target, (value + '\n').encode('utf-8'))
+    def attribute(pool, kind, values):
+        key = tuple(values)
+        if key not in pool:
+            pool[key] = len(pool) + 1
+            line(obj, kind + ' ' + ' '.join(f'{value:.9g}' for value in key))
+        return pool[key]
+    def reference(index, pool):
+        # OBJ permits indices relative to the latest attribute declaration.
+        # Either spelling resolves to the same corner; choose the shorter one.
+        absolute, relative = str(index), str(index - len(pool) - 1)
+        return relative if len(relative) < len(absolute) else absolute
     line(obj, '# Home Studio; metres; Z up')
     line(obj, 'mtllib materials.mtl')
     for floor in floors:
@@ -240,27 +283,29 @@ def export_scene(floors, format):
             sx, sy, sz = group['scale']
             tx, ty, tz = group['translation']
             for mesh in group['meshes']:
+                mesh = _compact_export_mesh(mesh)
                 line(obj, 'usemtl material_' + str(colors[material_key(mesh)]))
+                positions, normals, uvs = [], [], []
                 for x, y, z in mesh['vertices']:
                     x, y, z = x * sx, y * sy, z * sz
                     x, y, z = tx + cosine * x + sine * z, ty + y + floor['elevation'], tz - sine * x + cosine * z
                     if not all(math.isfinite(value) for value in (x, y, z)):
                         raise ValueError('The installed model contains invalid export coordinates.')
-                    line(obj, f'v {x:.9g} {-z:.9g} {y:.9g}')
+                    positions.append(attribute(position_ids, 'v', (x, -z, y)))
                 for x, y, z in mesh['normals']:
                     x, y, z = x / sx, y / sy, z / sz
                     x, z = cosine * x + sine * z, -sine * x + cosine * z
                     length = math.hypot(x, y, z) or 1
-                    line(obj, f'vn {x/length:.9g} {-z/length:.9g} {y/length:.9g}')
+                    normals.append(attribute(normal_ids, 'vn', (x/length, -z/length, y/length)))
                 textured = 'texture' in mesh
                 if textured:
                     for u, v in mesh['uv']:
-                        line(obj, f'vt {u:.9g} {v:.9g}')
+                        uvs.append(attribute(uv_ids, 'vt', (u, v)))
                 for start in range(0, len(mesh['indices']), 3):
-                    line(obj, 'f ' + ' '.join(f'{offset + index}/{uv_offset + index if textured else ""}/{offset + index}' for index in mesh['indices'][start:start+3]))
-                if textured:
-                    uv_offset += len(mesh['vertices'])
-                offset += len(mesh['vertices'])
+                    line(obj, 'f ' + ' '.join(f'{reference(positions[index], position_ids)}/'
+                                             f'{reference(uvs[index], uv_ids) if textured else ""}/'
+                                             f'{reference(normals[index], normal_ids)}'
+                                             for index in mesh['indices'][start:start+3]))
     for index, color in enumerate(materials):
         image_index = material_maps[index]
         rgb = [1, 1, 1] if image_index is not None else color[:3]
