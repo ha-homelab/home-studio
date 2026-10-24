@@ -466,7 +466,7 @@ homeView = (() => {
     });
     // Keep the night/unknown base, with directional form cues in known daylight.
     // Fixture and curtain/window illumination still use the room-aware shader.
-    if(active){hemisphere.intensity=.16+.24*daylight;sun.intensity=.18+.72*daylight;}
+    if(active&&hemisphere&&sun){hemisphere.intensity=.16+.24*daylight;sun.intensity=.18+.72*daylight;}
     roomLighting?.environment(daylight,transmission);
   }
 

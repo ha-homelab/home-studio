@@ -48,6 +48,17 @@ const root=path.resolve(__dirname,'..'),viewer=fs.readFileSync(path.join(root,'v
   levels.haConnected=false;levels.updateDaylight();assert.equal(levels.daylight,0);
   levels.active=false;levels.hemisphere.intensity=1.8;levels.sun.intensity=2.3;levels.updateDaylight();
   assert.equal(levels.hemisphere.intensity,1.8);assert.equal(levels.sun.intensity,2.3);
+  // Home preferences and language refresh still run when WebGL initialization
+  // fails before either light exists. They must leave the 2D recovery usable.
+  for(const [hemisphere,sun] of [[undefined,undefined],[undefined,{intensity:2.3}],[{intensity:1.8},undefined]]){
+    const recovery=vm.createContext({active:true,haConnected:false,haStates:{},daylightWindows:[],bindings:[],hemisphere,sun,roomLighting:undefined});
+    vm.runInContext(updateDaylight,recovery);
+    assert.doesNotThrow(()=>recovery.updateDaylight(),'Home refresh tolerates missing or partially initialized lights');
+    recovery.active=false;
+    assert.doesNotThrow(()=>recovery.updateDaylight(),'Plan recovery tolerates missing lights');
+    if(hemisphere)assert.equal(hemisphere.intensity,1.8);
+    if(sun)assert.equal(sun.intensity,2.3);
+  }
   lighting.dispose();group.children.forEach(m=>{m.geometry.dispose();m.material.map?.dispose();m.material.dispose()});
   console.log('Home architecture: authored color, map/alpha/callback identity, Editor restoration and neutral shader passed.');
 })().catch(error=>{console.error(error);process.exitCode=1});
