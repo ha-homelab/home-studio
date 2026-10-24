@@ -45,6 +45,8 @@ Path(sys.argv[1]).write_text(render_viewer(data,svg))`,output],{cwd:root,encodin
     },{html,items});
     const frame=page.frameLocator('iframe'),marker=frame.locator('[data-home-item="studio_table"]'),card=frame.locator('[data-home-device="studio_table"]');
     await marker.waitFor();
+    await card.click();await page.waitForTimeout(750);
+    assert.deepEqual(await page.evaluate(()=>inspected),[],'short lock clicks and hover do not open native properties');
     const states={locked:'Locked',unlocked:'Unlocked',locking:'Locking',unlocking:'Unlocking',jammed:'Jammed',open:'Open',unknown:'Unavailable',unavailable:'Unavailable',on:'Unavailable'};
     for(const [state,label] of Object.entries(states)){
       await page.evaluate(state=>changeLock(state),state);
@@ -57,16 +59,19 @@ Path(sys.argv[1]).write_text(render_viewer(data,svg))`,output],{cwd:root,encodin
       assert.match(await marker.getAttribute('aria-label'),new RegExp(label));
       const shackle=await marker.locator('[data-lock-shackle]').getAttribute('d');
       assert.equal(shackle.endsWith('v4'),!['unlocked','unlocking','open'].includes(state));
-      await card.click();
+      await frame.locator('[data-home-details="studio_table"]').click();
     }
     await page.evaluate(()=>changeLock('locked'));
     await frame.locator('[data-home-item="studio_table"][data-state="locked"]').waitFor();
-    await marker.click();
+    await marker.hover();await page.mouse.down();
     await page.waitForFunction(()=>inspected.length===10);
+    await page.mouse.up();
     assert.equal((await page.evaluate(()=>inspected)).length,10);
     assert.deepEqual(await page.evaluate(()=>calls),[],'inspection must not operate the lock or any other device');
     await frame.locator('#homeLanguage').selectOption('ru');
     assert.match(await marker.getAttribute('aria-label'),/Заперт/);
+    assert.deepEqual(errors,[],'language switching must finish without a viewer error');
+    await page.waitForFunction(()=>document.querySelector('home-floorplan-panel').viewPreferences.language==='ru');
     await page.evaluate(()=>changeLock('locked',false));
     await frame.locator('[data-home-item="studio_table"][data-state="disconnected"]').waitFor();
     assert.equal(await marker.isDisabled(),true);
@@ -84,7 +89,7 @@ Path(sys.argv[1]).write_text(render_viewer(data,svg))`,output],{cwd:root,encodin
     await frame.locator('[data-home-item="studio_table"][data-state="locked"]').waitFor();
     await page.locator('home-floorplan-panel #dry-run').click();
     assert.equal(await page.locator('home-floorplan-panel #dry-run').getAttribute('aria-pressed'),'true');
-    await card.click();
+    await frame.locator('[data-home-details="studio_table"]').click();
     await page.waitForFunction(()=>document.querySelector('home-floorplan-panel').shadowRoot.querySelector('#notice').textContent.includes('команда не отправлена'));
     assert.equal(await page.evaluate(()=>inspected.length),before,'Dry run cannot open native lock controls');
     const light=frame.locator('[data-home-device="living_light"]');

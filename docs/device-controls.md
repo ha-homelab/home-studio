@@ -17,11 +17,11 @@ and publish. Existing portable deployments can rebuild and reinstall instead.
 
 | What you want to see or do | Bind this entity | What happens on the plan |
 | --- | --- | --- |
-| Brightness, light color or white temperature | `light.example` | Click for the existing quick toggle; pause the mouse over the marker or select **Details** for HA's full light controls. |
+| Brightness, light color or white temperature | `light.example` | Click for the existing quick toggle; press and hold the marker or select **Details** for HA's full light controls. |
 | Switches and fan speed | `switch.example`, `fan.example` | Quick toggle remains available; **Details** opens the controls supplied by that integration. |
 | Music, volume and track navigation | `media_player.speaker` on an appliance/furniture object | Hover, keyboard-focus or tap the marker for a compact audio remote. A separate button opens HA's full controls. |
-| A television | `media_player.television` on a TV object | Hover for HA's native media dialog. Existing artwork and configured screenshot previews remain available. |
-| Blinds, shutters and curtains | `cover.example` | Existing click controls and remembered-position support remain; hover opens the native HA dialog. |
+| A television | `media_player.television` on a TV object | Press and hold for HA's native media dialog. Existing artwork and configured screenshot previews remain available. |
+| Blinds, shutters and curtains | `cover.example` | Existing click controls and remembered-position support remain; press and hold opens the native HA dialog. |
 | Room temperature or thermostat | `sensor.temperature`, `climate.example` | Show the reading, or current/target temperature and HVAC activity. Native thermostat settings open in HA. |
 | Humidity, power, energy, air quality or battery | `sensor.example` | Show the reported value and unit on the device card. Negative measurements remain valid. |
 | Door, window, leak, smoke or equipment problem | `binary_sensor.example` | Show a device-class-specific state such as Open/Closed, Wet/Dry or Detected/Clear. |
@@ -91,15 +91,18 @@ or move the plan. Escape, clicking outside, or leaving the button and remote
 dismisses it. On touch screens, tap the button and use the close button or tap
 outside.
 
-For TVs and other devices, leaving the mouse over a marker for about two-thirds
-of a second opens HA's native details dialog. Briefly crossing a marker does not.
-Closing an overlay does not open another device that happens to be underneath
-the pointer. Move the mouse to the desired marker to start a new hover.
+Hovering a device never opens HA's native entity dialog. To open it from a
+non-audio marker or device card, press and hold the primary mouse button or your
+finger for about two-thirds of a second. Moving away, dragging, releasing early
+or switching views cancels the hold. A completed hold opens the dialog once;
+releasing afterward does not also toggle the light or move the curtain.
+A short click keeps the device's quick action, where available. Devices without
+a quick action, such as a TV or lock, require a hold or the **Details** button.
 The dialog is HA's own interface: its contents depend on your integration and
 version of HA. This feature does not install a separate remote-control dashboard
 or promise buttons the device does not support.
 
-Keyboard and touch users can select the device card or its **Details** button.
+Keyboard and touch users can select the explicit **Details** button.
 Audio controls also have an explicit **Controls** button in the artwork preview.
 Escape or a click outside dismisses the compact audio remote. Full HA dialogs use
 HA's normal close behavior. Quick toggles remain deliberate clicks.

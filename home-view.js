@@ -57,7 +57,7 @@ homeView = (() => {
   function restoreActivityFocus(container){
     if(container.contains(document.activeElement))(activityRooms.get(selected)||$('homeToggleActivity')).focus();
   }
-  function selectHomeRoom(room,zone=''){hideMediaControls();cancelNativeHover(true);clearActivityLocation();selected=room;signalZone=zone;$('homeRoom').value=room;refreshControls();resetZoom();}
+  function selectHomeRoom(room,zone=''){hideMediaControls();cancelNativePress();clearActivityLocation();selected=room;signalZone=zone;$('homeRoom').value=room;refreshControls();resetZoom();}
   function locateActivitySource(item){
     if(!item)return;
     selectHomeRoom(item.room);
@@ -184,7 +184,7 @@ homeView = (() => {
   }
   function openEntityDetails(item){
     if(isSupportedControl(item)&&bridge&&haConnected&&haStates[item.entity_id]){
-      cancelNativeHover();nativeHoverId=item.id;
+      cancelNativePress();
       bridge.postMessage({type:'more_info',entity_id:item.entity_id});
     }
   }
@@ -275,7 +275,7 @@ homeView = (() => {
   function setActive(value) {
     if(!value&&!canEdit)return;
     cancelHomeGesture();cancelEditorGesture();
-    hideMediaControls();cancelNativeHover(true);
+    hideMediaControls();cancelNativePress();
     active = value;previewTV(null);
     environmentLayer?.setActive(!renderLost&&!renderSuspended);
     if(lowerFloorContext)lowerFloorContext.visible=value&&showLowerFloor&&!selected;
@@ -303,35 +303,75 @@ homeView = (() => {
     requestAnimationFrame(()=>{window.resizeModel?.();if(window.floorplan?.renderCount===before)window.requestModelRender?.()});
   }
 
-  let nativeHoverTimer=null,nativeHoverId=null,nativePointerX=null,nativePointerY=null;
-  function cancelNativeHover(reset=false){clearTimeout(nativeHoverTimer);nativeHoverTimer=null;if(reset)nativeHoverId=null;}
-  function bindNativeHover(item,element){
-    const move=event=>{
-      if(event.pointerType!=='mouse'||event.buttons){cancelNativeHover();return;}
-      // Closing an overlay can synthesize pointerenter without any mouse movement.
-      if(event.clientX===nativePointerX&&event.clientY===nativePointerY||nativeHoverId===item.id||nativeHoverTimer!==null)return;
-      nativeHoverTimer=setTimeout(()=>{
-        nativeHoverTimer=null;
-        if(!active||element.disabled||!element.isConnected||!element.matches(':hover')||!bridge||!haConnected)return;
-        openEntityDetails(item);
+  let nativePressTimer=null,nativePress=null;
+  const nativePressPointers=new Set(),nativePointerKey=event=>event.pointerType+':'+event.pointerId;
+  function cancelNativePress(suppressClick=true){
+    clearTimeout(nativePressTimer);nativePressTimer=null;
+    if(nativePress&&suppressClick)nativePress.suppressClick=true;
+    nativePress=null;
+  }
+  function nativePressReady(press){
+    const current=items.find(item=>item.id===press.item.id);
+    return active&&!document.hidden&&!renderLost&&!renderSuspended&&bridge&&haConnected&&
+      current===press.item&&current.entity_id===press.entityId&&current.room===press.room&&haStates[press.entityId]&&
+      press.element.isConnected&&!press.element.disabled&&!press.element.hidden&&press.element.getClientRects().length>0;
+  }
+  function bindNativePress(item,element){
+    let gesture=null;
+    const down=event=>{
+      // Do not replace the canceled first gesture with another finger or mouse.
+      // Both release clicks belong to the interrupted interaction.
+      if(nativePressPointers.size>1){
+        if(!gesture)gesture={suppressClick:true};
+        gesture.suppressClick=true;return;
+      }
+      gesture=null;
+      if(event.button!==0||event.buttons!==1||event.isPrimary===false||!['mouse','touch','pen'].includes(event.pointerType))return;
+      gesture={item,element,entityId:item.entity_id,room:item.room,id:event.pointerId,key:nativePointerKey(event),x:event.clientX,y:event.clientY,suppressClick:false};
+      if(!nativePressReady(gesture)){gesture=null;return;}
+      nativePress=gesture;
+      nativePressTimer=setTimeout(()=>{
+        nativePressTimer=null;
+        if(nativePress!==gesture)return;
+        if(!nativePressReady(gesture)){cancelNativePress();return;}
+        // The following release must not also toggle a device or open quick controls.
+        gesture.suppressClick=true;openEntityDetails(item);
       },650);
     };
-    const leave=()=>cancelNativeHover();
-    element.addEventListener('pointermove',move);element.addEventListener('pointerleave',leave);element.addEventListener('pointerdown',leave);
-    return ()=>{element.removeEventListener('pointermove',move);element.removeEventListener('pointerleave',leave);element.removeEventListener('pointerdown',leave);};
+    const leave=event=>{if(nativePress?.element===element&&nativePress.key===nativePointerKey(event))cancelNativePress();};
+    const click=event=>{
+      if(gesture?.suppressClick&&event.detail!==0){event.preventDefault();event.stopImmediatePropagation();}
+      // Keep suppression for every release in an overlapping-pointer gesture.
+      if(!gesture?.suppressClick)gesture=null;
+    };
+    const context=event=>{if(gesture&&(nativePress===gesture||gesture.suppressClick))event.preventDefault();};
+    element.addEventListener('pointerdown',down);element.addEventListener('pointerleave',leave);
+    element.addEventListener('click',click,true);element.addEventListener('contextmenu',context);
+    return ()=>{
+      if(nativePress?.element===element)cancelNativePress();
+      element.removeEventListener('pointerdown',down);element.removeEventListener('pointerleave',leave);
+      element.removeEventListener('click',click,true);element.removeEventListener('contextmenu',context);
+    };
   }
-  // A dialog closing over the same marker must not immediately reopen it.
+  // A second contact or a release outside the original button cancels its hold.
+  document.addEventListener('pointerdown',event=>{cancelNativePress();nativePressPointers.add(nativePointerKey(event));},true);
   document.addEventListener('pointermove',event=>{
-    if(event.pointerType!=='mouse'||event.clientX===nativePointerX&&event.clientY===nativePointerY)return;
-    nativePointerX=event.clientX;nativePointerY=event.clientY;
-    const target=event.target.closest?.('[data-home-item],[data-home-device],[data-home-details]');
-    const id=target?.dataset.homeItem||target?.dataset.homeDevice||target?.dataset.homeDetails;
-    if(id!==nativeHoverId)nativeHoverId=null;
-  });
-  window.addEventListener('pagehide',()=>{cancelHomeGesture();cancelNativeHover(true);discardMediaControls();});
-  document.addEventListener('visibilitychange',()=>{if(document.hidden)cancelHomeGesture();refreshControls();});
+    if(event.buttons===0)nativePressPointers.delete(nativePointerKey(event));
+    if(nativePress?.key===nativePointerKey(event)&&(event.buttons!==1||Math.hypot(event.clientX-nativePress.x,event.clientY-nativePress.y)>6))cancelNativePress();
+  },true);
+  document.addEventListener('pointerup',event=>{
+    nativePressPointers.delete(nativePointerKey(event));
+    if(nativePress?.key===nativePointerKey(event))cancelNativePress(Math.hypot(event.clientX-nativePress.x,event.clientY-nativePress.y)>6);
+  },true);
+  for(const type of ['pointercancel','lostpointercapture'])document.addEventListener(type,event=>{
+    if(type==='pointercancel')nativePressPointers.delete(nativePointerKey(event));
+    if(nativePress?.key===nativePointerKey(event))cancelNativePress();
+  },true);
+  window.addEventListener('blur',()=>{cancelNativePress();nativePressPointers.clear();});
+  window.addEventListener('pagehide',()=>{cancelHomeGesture();cancelNativePress();nativePressPointers.clear();discardMediaControls();});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelHomeGesture();cancelNativePress();nativePressPointers.clear();}refreshControls();});
   function rebuildControls() {
-    hideMediaControls();cancelNativeHover(true);
+    hideMediaControls();cancelNativePress();
     for(const point of points)for(const cleanup of point.controlCleanup||[])cleanup();
     applyCameraFrames();
     previewTV(null);
@@ -360,7 +400,7 @@ homeView = (() => {
       name.className = 'home-device-name'; name.textContent = item.name; detail.className = 'home-device-detail'; text.append(name,detail); card.append(symbol,text);
       if(!isAudio(item)){marker.onclick = () => activateDevice(item);card.onclick = () => activateDevice(item,false);}
       let details;
-      if(isToggle(item)){
+      if(!isAudio(item)){
         const row=document.createElement('div');row.className='home-device-row';
         details=document.createElement('button');details.className='home-device-details';details.dataset.homeDetails=item.id;
         details.onclick=()=>openEntityDetails(item);row.append(card,details);$('homeDeviceList').append(row);
@@ -377,7 +417,7 @@ homeView = (() => {
           if(appliance.oven_entity_id){point.oven=document.createElement('span');point.oven.className='oven-glow';point.oven.hidden=true;point.oven.setAttribute('aria-hidden','true');point.oven.append(document.createElement('span'));$('homeMarkers').append(point.oven);}
         }
       }
-      point.controlCleanup=[marker,card].map(element=>isAudio(item)?bindMediaControlTrigger(item.id,element):bindNativeHover(item,element));
+      point.controlCleanup=[marker,card].map(element=>isAudio(item)?bindMediaControlTrigger(item.id,element):bindNativePress(item,element));
       const anchor=objectsById.get(model.control_anchors?.[item.id]);
       if(anchor)point.anchor=anchor.localToWorld(new THREE.Vector3(0,.5,.5));
       else if(isMotion(item))point.anchor=position.clone().setY(.12);
@@ -526,6 +566,7 @@ homeView = (() => {
       }
       if (visible && !counted.has(item.entity_id)) { counted.add(item.entity_id);total++; if(state==='on'){if(isMotion(item)||presenceSpec(item))motion++;else on++;} if(!enabled)unavailable++; }
     }
+    if(nativePress&&!nativePressReady(nativePress))cancelNativePress();
     refreshTVPreviews();
     updateTelemetryPreviews(haStates,haConnected);
     updateDaylight();
@@ -558,13 +599,12 @@ homeView = (() => {
       details:()=>openEntityDetails(item),power:()=>activateDevice(item,false,true)})));
   }
   function activateDevice(item,quick=true,tvPower=false) {
-    if(applianceSpec(item)||presenceSpec(item)){openEntityDetails(item);return;}
+    if(applianceSpec(item)||presenceSpec(item))return;
     const state=deviceDisplayState(item);
     if(!tvPower&&isAudio(item)){const anchor=points.find(point=>point.item.id===item.id)?.marker;if(showMediaControls(item.id,anchor,{focus:true}))return;}
     if(receiverSpec(item)&&bridge&&haConnected){inspectActivitySource(item);return;}
     if(isCover(item)&&bridge&&haConnected){curtainItem=item;curtainDirty=false;curtainCheckCycle=null;curtainError=null;$('curtainChecked').checked=false;$('curtainError').hidden=true;updateCurtainDialog();$('curtainDialog').showModal();const action=curtainStateFor(item).action;if(quick&&action)curtainCommand(action);return;}
-    // Locks always use HA's explicit lock/unlock controls, never a toggle.
-    if(bridge && haConnected && haStates[item.entity_id] && !tvPower && (isGeneric(item)||isTV(item)||isMotion(item)||isLock(item))){openEntityDetails(item);return;}
+    // Native properties require a deliberate hold or the explicit Details button.
     if ((!tvPower&&!isToggle(item)) || !bridge || !haConnected || !['on','off'].includes(state) || pending.has(item.entity_id)) return;
     if(haStates[item.entity_id]?.can_control===false)return;
     errors.delete(item.entity_id);
@@ -790,10 +830,10 @@ homeView = (() => {
   });
   for(const event of ['pointerleave','pointerdown','focusout'])$('homeView').addEventListener(event,()=>previewTV(null));
   $('homeView').addEventListener('focusin',e=>{if(tvControl&&e.target.matches(tvControl)){const r=e.target.getBoundingClientRect();previewTV({id:tvId(e.target),x:r.left,y:r.bottom});}});
-  function dismissOverlays(){hideMediaControls();previewTV(null);cancelNativeHover();}
+  function dismissOverlays(){hideMediaControls();previewTV(null);cancelNativePress();}
   document.addEventListener('keydown',e=>{if(e.key==='Escape')dismissOverlays();});
-  document.addEventListener('scroll',()=>previewTV(null),true);
-  window.addEventListener('resize',()=>previewTV(null));
+  document.addEventListener('scroll',()=>{previewTV(null);cancelNativePress();},true);
+  window.addEventListener('resize',()=>{previewTV(null);cancelNativePress();});
   if(renderer) {
     renderer.domElement.tabIndex=0;
     renderer.domElement.dataset.viewerI18nAttrs=JSON.stringify({'aria-label':'Interactive floor plan'});
@@ -896,6 +936,6 @@ homeView = (() => {
     $('homeToggleControls').textContent=vt(controlsCollapsed?'Show controls':'Hide controls');
     for(const label of labels)label.el.setAttribute('aria-label',vt('Focus room')+': '+roomName(label.room));
   }
-  return {get active(){return active},releaseGPU(){roomLighting?.releaseGPU();},dispose(){roomLighting?.dispose();presenceView?.dispose();vacuumView?.dispose();},dismissOverlays,refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
+  return {get active(){return active},releaseGPU(){roomLighting?.releaseGPU();},dispose(){cancelNativePress();roomLighting?.dispose();presenceView?.dispose();vacuumView?.dispose();},dismissOverlays,refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
     get illuminated(){return points.filter(p=>p.overlay?.visible && active).map(p=>p.item.id)}};
 })();
