@@ -1,15 +1,16 @@
-const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),vm=require('node:vm'),crypto=require('node:crypto'),{spawnSync}=require('node:child_process');
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{pathToFileURL}=require('node:url'),vm=require('node:vm'),crypto=require('node:crypto'),{spawnSync}=require('node:child_process');
 const root=path.resolve(__dirname,'..'),out=process.env.PBR_TEST_OUTPUT||fs.mkdtempSync(path.join(os.tmpdir(),'home-studio-pbr-tests-'));fs.mkdirSync(out,{recursive:true,mode:0o700});
 if(!fs.lstatSync(out).isDirectory()||fs.lstatSync(out).isSymbolicLink())throw Error('PBR output must be a real directory');
 const writeOutput=(name,data)=>fs.writeFileSync(path.join(out,name),data,{flag:'wx',mode:0o600});
 const python=(args)=>{const result=spawnSync(process.env.PYTHON||'python3',args,{cwd:root,encoding:'utf8',maxBuffer:16*1024*1024});if(result.status!==0)throw Error(result.error?.message||result.stderr||result.stdout.slice(-1000));return result.stdout};
 (async()=>{
   const THREE=await import('data:text/javascript;base64,'+fs.readFileSync(path.join(root,'vendor/three.module.min.js')).toString('base64'));
-  // Browser imports use native ES modules even though Node test scripts are CommonJS.
-  const modules={};for(const name of ['pbr-color-data.js','pbr-materials.js','material-textures.js','environment-lighting.js'])modules[name]=await import('data:text/javascript;base64,'+fs.readFileSync(path.join(root,name)).toString('base64'));
+  // Explicit exports load as ES modules; legacy state helpers retain their CommonJS API.
+  const modules={};for(const name of ['pbr-color-data.js','pbr-materials.js','material-textures.js','environment-lighting.js'])modules[name]=await import(pathToFileURL(path.join(root,name)).href);
   for(const name of ['createPBRDetails','applyMaterialPBR','installInstanceMaterialUV'])assert.equal(typeof modules['pbr-materials.js'][name],'function',name+' is exported to the editor');
   for(const name of ['createReflectionEnvironment','createContactShading'])assert.equal(typeof modules['environment-lighting.js'][name],'function',name+' is exported to the editor');
   assert(Array.isArray(modules['material-textures.js'].MATERIAL_SURFACE_PROFILES.fabric));
+  for(const [name,key] of [['light-state.js',null],['motion-state.js','resolveMotionState'],['appliance-state.js','resolveApplianceStatus'],['vacuum-state.js','resolveVacuumPosition'],['vacuum-view.js','createVacuumView'],['presence-view.js','presenceState'],['curtain-state.js','deriveCurtainStatus']]){const legacy=require(path.join(root,name));assert.equal(typeof(key?legacy[key]:legacy),'function',name+' retains its CommonJS API');}
   const imported=modules['pbr-materials.js'].createPBRDetails(THREE,modules['pbr-color-data.js'].PBR_COLOR_DATA);assert(imported.get('wood').albedo_texture);imported.dispose();
   const context=vm.createContext({Uint8Array,Map,Set,atob});vm.runInContext(['pbr-color-data.js','pbr-materials.js'].map(p=>fs.readFileSync(path.join(root,p),'utf8')).join('\n').replaceAll('export ',''),context);
   const expected=JSON.parse(python(['scripts/test-pbr-materials.py','--hashes']));

@@ -121,7 +121,14 @@ class AuthoredProfiles(unittest.TestCase):
                 self.assertEqual(len(glass),1)
                 self.assertIn('geometry_shells',glass[0])
                 actual=build_furniture_asset(item)
-                self.assertEqual(actual['materials'],other['materials'])
+                self.assertEqual(actual['materials'].keys(),other['materials'].keys())
+                for name,rgba in actual['materials'].items():
+                    other_rgba=other['materials'][name]
+                    self.assertEqual(len(rgba),4);self.assertEqual(len(other_rgba),4)
+                    self.assertTrue(all(math.isfinite(v) for v in [*rgba,*other_rgba]))
+                    self.assertEqual(rgba[3],other_rgba[3])
+                    # sRGB power functions can differ in their last double bits by platform.
+                    for a,b in zip(rgba[:3],other_rgba[:3]):self.assertAlmostEqual(a,b,places=12)
                 for a,b in zip(actual['meshes'],other['meshes']):
                     self.assertEqual(len(a['indices']),len(b['indices']))
                     for key in ('vertices','normals','uv'):
