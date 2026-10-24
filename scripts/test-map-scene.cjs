@@ -76,6 +76,16 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
     const engine=process.env.MAP_ENGINE||'chromium';assert(['chromium','firefox','webkit'].includes(engine));
     const engines=require('playwright'),{browserLaunchOptions}=require('./browser-stability-diagnostics.cjs');browser=await engines[engine].launch(browserLaunchOptions(engine,true));
     const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];page.on('pageerror',error=>errors.push(String(error)));
+    const assertCompassLayout=async()=>{
+      const layout=await page.evaluate(()=>{
+        const compass=document.querySelector('#homeMapCompass'),stage=document.querySelector('#homeStage'),rect=compass.getBoundingClientRect();
+        const overlaps=[...document.querySelectorAll('#homeStage,#homeTVs,#homeTVs>*,#homeTelemetry,#homeTelemetry>*')].filter(element=>{
+          const other=element.getBoundingClientRect();return other.width>0&&other.height>0&&rect.left<other.right&&rect.right>other.left&&rect.top<other.bottom&&rect.bottom>other.top;
+        }).map(element=>element.id||element.className);
+        return {toolbar:compass.parentElement.classList.contains('home-map-navigation'),afterAlign:compass.previousElementSibling.id==='homeMapAlign',outsideStage:!stage.contains(compass),arrow:compass.firstElementChild.tagName==='SPAN'&&/^rotate\(/.test(compass.firstElementChild.style.transform),rowHeight:rect.height===document.querySelector('#homeMapAlign').getBoundingClientRect().height,withinViewport:rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight,overlaps};
+      });
+      assert.deepEqual(layout,{toolbar:true,afterAlign:true,outsideStage:true,arrow:true,rowHeight:true,withinViewport:true,overlaps:[]},'Compass stays in its toolbar row, clear of scene overlays');
+    };
     const origin=`http://127.0.0.1:${server.address().port}`;await page.route('**/*',route=>route.request().url().startsWith(origin)||route.request().url().startsWith('data:')?route.continue():route.abort());
     await page.goto(origin);await page.waitForFunction(()=>window.__mapTest&&window.floorplan);
     await page.evaluate(({config,png})=>{
@@ -86,9 +96,12 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
     },{config,png});
     await page.evaluate(()=>window.__mapTest.loadMap());await page.locator('#homeMapOverview').waitFor({state:'visible'});
     await page.waitForFunction(()=>window.__mapTest.mapStats?.loaded>0);
+    assert.equal(await page.getByRole('img',{name:'Geographic north',exact:true}).isVisible(),true);
+    await assertCompassLayout();
     assert.equal(await page.locator('canvas').count(),1,'Map uses the existing renderer canvas');
     await page.locator('#homeMapOverview').click();await page.waitForFunction(()=>document.querySelector('#homeStage').dataset.mapCoarse==='true');
     assert.equal(await page.locator('#homeMapCompass').isVisible(),true);assert.equal(await page.locator('#homeMapCaption').isVisible(),true);
+    await assertCompassLayout();
     assert.equal(await page.locator('#homeMarkers').isVisible(),false,'Device overlays disappear at map scale');
     assert.equal(await page.evaluate(()=>{const before=window.__mapLightUpdates;window.renderModel();return window.__mapLightUpdates===before;}),true,'Coarse maps skip house lighting uploads');
     const coarse=await page.evaluate(()=>window.__mapTest.exportNavigationState());assert.equal(coarse.mode,'map');assert(coarse.zoom<.65);
@@ -157,13 +170,16 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
     await page.waitForFunction(()=>window.__mapTest.mapStats.inflight===0&&recoveryTileAttempts[recoveryKey]===2);
     assert.equal(await page.locator('#homeMapRetry').isVisible(),false);assert.equal(await page.locator('#homeMapStatus').textContent(),'');
     assert.equal(await page.evaluate(()=>Object.entries(recoveryTileAttempts).every(([key,count])=>count===(key===recoveryKey?2:1))),true,'Retry preserves all healthy tile requests');
+    await page.setViewportSize({width:390,height:844});await assertCompassLayout();
     await page.locator('#homeMapHome').click();
+    await assertCompassLayout();
     // Family view permissions are still derived from the authenticated host init.
     await page.evaluate(()=>{window.__mapTest.configureMap({revision:5,configured:false,config:null});});
     assert.equal(await page.locator('#homeMapOverview').isVisible(),false);assert.equal(await page.evaluate(()=>window.__mapTest.exportNavigationState().zoom),1);
+    assert.equal(await page.locator('#homeMapCompass').isVisible(),false,'Unconfigured maps hide the toolbar compass');
     await page.evaluate(()=>{window.homeMapRequest=async()=>{throw Error('offline');};return window.__mapTest.loadMap();});
     assert.match(await page.locator('#homeMapStatus').textContent(),/unavailable/);assert.equal(await page.locator('#homeMapOverview').isVisible(),false);
     assert.deepEqual(errors,[]);
-    console.log('PASS ('+engine+'): same-renderer map/Home transitions, wheel and touch zoom, overlays, alignment Save/Cancel, navigation state and idle budget.');
+    console.log('PASS ('+engine+'): same-renderer map/Home transitions, wheel and touch zoom, overlays, desktop/mobile compass layout, alignment Save/Cancel, navigation state and idle budget.');
   }finally{await browser?.close();await new Promise(resolve=>server?server.close(resolve):resolve());fs.rmSync(temporary,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});

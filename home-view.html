@@ -5,7 +5,7 @@
         <label for="homeRoom" data-viewer-i18n="View">View</label><select id="homeRoom"><option value="" data-viewer-i18n="Whole floor">Whole floor</option></select>
         <div class="home-navigation" role="group" aria-label="Plan navigation" data-viewer-i18n-attrs='{&quot;aria-label&quot;: &quot;Plan navigation&quot;}' title="Drag to rotate · Shift/right-drag to move · Arrow keys navigate · Home resets"><button id="homeRotate" aria-pressed="true" data-viewer-i18n="Rotate">Rotate</button><button id="homeMove" aria-pressed="false" data-viewer-i18n="Move">Move</button></div>
         <div class="home-zoom" role="group" aria-label="Plan zoom" data-viewer-i18n-attrs='{&quot;aria-label&quot;: &quot;Plan zoom&quot;}'><button id="homeZoomOut" aria-label="Zoom out" data-viewer-i18n-attrs='{&quot;aria-label&quot;: &quot;Zoom out&quot;}'>−</button><button id="homeZoomReset" aria-label="Reset view" data-viewer-i18n-attrs='{&quot;aria-label&quot;: &quot;Reset view&quot;}'>100%</button><button id="homeZoomIn" aria-label="Zoom in" data-viewer-i18n-attrs='{&quot;aria-label&quot;: &quot;Zoom in&quot;}'>+</button></div>
-        <div class="home-map-navigation" role="group" aria-label="Map navigation"><button id="homeMapHome" type="button" hidden>Home</button><button id="homeMapOverview" type="button" hidden>Map</button><button id="homeMapAlign" type="button" hidden>Align map</button></div>
+        <div class="home-map-navigation" role="group" aria-label="Map navigation"><button id="homeMapHome" type="button" hidden>Home</button><button id="homeMapOverview" type="button" hidden>Map</button><button id="homeMapAlign" type="button" hidden>Align map</button><div id="homeMapCompass" role="img" aria-label="Geographic north" hidden><span>↑</span>N</div></div>
         <button id="homeOtherFloor">__OTHER_TITLE__</button>
         <button id="homeFloorContext" aria-pressed="true" title="Show a muted lower floor behind this floor" hidden data-viewer-i18n="Lower floor outline">Lower floor outline</button>
         <button id="homeToggleControls" aria-controls="homeControls" aria-expanded="true">Hide controls</button>
@@ -41,7 +41,7 @@
         <p>Coordinates identify the model point in metres. North angle is clockwise from geographic north to the model’s −Z direction; 0° means +X east and −Z north.</p>
         <p id="homeMapEditorStatus" role="status"></p>
       </section>
-      <div id="homeStage"><div id="homeMapCompass" aria-label="Geographic north" hidden><span>↑</span>N</div><div id="homeLabels"></div><div id="homeMotion" aria-hidden="true"></div><div id="homeMarkers"></div><svg id="homeMediaLinks" aria-hidden="true"></svg><div id="homeCameras"></div><div id="homeTVs" aria-label="Media previews"></div><div id="homeTelemetry"></div></div>
+      <div id="homeStage"><div id="homeLabels"></div><div id="homeMotion" aria-hidden="true"></div><div id="homeMarkers"></div><svg id="homeMediaLinks" aria-hidden="true"></svg><div id="homeCameras"></div><div id="homeTVs" aria-label="Media previews"></div><div id="homeTelemetry"></div></div>
       <div id="homeMapCaption" hidden><span>© OpenStreetMap contributors</span><span id="homeMapStatus" role="status"></span><button id="homeMapRetry" type="button" hidden>Retry map</button></div>
       <p id="homeFeedback" role="status" aria-live="polite" hidden></p>
     </section>
