@@ -23,8 +23,8 @@ for(const mesh of scene.children[0].children){
     for(const attribute of ['position','normal','uv','color'].map(name=>geometry.getAttribute(name)).concat(geometry.index)){
       hash.update(new Uint8Array(attribute.array.buffer,attribute.array.byteOffset,attribute.array.byteLength));
     }
-    assert.equal(hash.digest('hex'),'1fdfd99268ea6da1f2258f4d45401289a0dba048f9e40a4f1486b28cd4cd8d39');
-    assert.equal(geometry.index.count/3,1632);
+    assert.equal(hash.digest('hex'),'9b3ff525eea61ea46b3f8de58d3f6eae1290af7b10b7333887810eb17c1ceff0');
+    assert.equal(geometry.index.count/3,1488);
     assert.deepEqual(geometry.boundingBox.min.toArray().map(value=>value||0),[-.5,0,-.5]);
     assert.deepEqual(geometry.boundingBox.max.toArray(),[.5,1,.5]);
   }

@@ -65,7 +65,7 @@ Without `enabled: true`, the layer allocates no geometry or materials and has no
 The layer uses fourteen shared `InstancedMesh` batches and nine physical material
 families. Trees have attached leaves and branches, cars have a continuous painted
 shell and distinct glazing, rubber tyres and metal hubs, and rabbits use the
-catalog's authored anatomy. The standard scene has 65,292 placed triangles.
+catalog's authored anatomy. The standard scene has 64,860 placed triangles.
 Materials receive the host's existing lights and optional shared physical detail
 through `decorateMaterial(material, family)`. Geometry casts and receives shadows
 when the host render profile enables them. The layer creates no lights, shadow
