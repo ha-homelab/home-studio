@@ -109,6 +109,7 @@ assert.equal((home.match(/renderer\.render\(/g) || []).length, 0);
 const calls = [];
 const context = vm.createContext({
   scene: {},
+  reflectionEnvironment: null, contactShading: null, hemisphere: null,
   renderProfile: {diffuseLighting: false}, coalesceMotion: false,
   interactionRenderer: null, interactionPointer: {moved: true}, THREE: {}, performance: {now: () => 0},
   createInteractionRenderer: () => ({draw: () => {calls.push('copy draw'); throw Error('GPU copy unavailable');}}),
@@ -124,6 +125,25 @@ context.renderProfile.diffuseLighting = true;
 context.coalesceMotion = true;
 assert.throws(() => context.drawScene({}), /GPU copy unavailable/);
 assert.deepEqual(calls, ['before', 'copy draw', 'after'], 'Timing also finishes when the bounded motion draw fails');
+// Optional physical-lighting passes share the same cleanup guarantee.
+context.coalesceMotion = false;
+context.interactionPointer = null;
+context.hemisphere = {intensity: .75};
+context.$ = () => ({dataset: {}});
+context.reflectionEnvironment = {update: intensity => {assert.equal(intensity, .75);calls.push('reflection');}};
+context.renderer.render = () => calls.push('draw');
+const physicalCamera = {};
+context.contactShading = {apply: (scene, camera) => {
+  assert.equal(scene, context.scene);assert.equal(camera, physicalCamera);
+  calls.push('contact');throw Error('Contact pass unavailable');
+}};
+calls.length = 0;
+assert.throws(() => context.drawScene(physicalCamera), /Contact pass unavailable/);
+assert.deepEqual(calls, ['before', 'reflection', 'draw', 'contact', 'after'], 'Contact-pass failure still finishes timing');
+context.reflectionEnvironment.update = () => {calls.push('reflection');throw Error('Reflection pass unavailable');};
+calls.length = 0;
+assert.throws(() => context.drawScene(physicalCamera), /Reflection pass unavailable/);
+assert.deepEqual(calls, ['before', 'reflection', 'after'], 'Reflection failure also finishes timing');
 async function testHomeDrawPaths() {
   const THREE = await import('data:text/javascript;base64,' + fs.readFileSync(path.join(root, 'vendor/three.module.min.js')).toString('base64'));
   const mapObject = {visible:true}, house = {visible:true}, hiddenHouse = {visible:false}, light = {visible:true,isLight:true};
@@ -137,6 +157,7 @@ async function testHomeDrawPaths() {
     xm:x => x, zm:z => z, $:id => id==='homeStage' ? stage : {firstElementChild:{style:{}}},
     mapLayer:{object:mapObject,config:{enabled:true,north_deg:0},render() {}}, mapDraft:null, mapFraming:null, mapCoarseState:false,
     environmentLayer:null, roomLighting:null, lowerFloorContext:null, assumedZones:null, presenceView:null, vacuumView:null,
+    reflectionEnvironment:null, contactShading:null, hemisphere:null,
     roomLabels:true, signalZone:'', showLowerFloor:true, labels:[], points:[], refreshSignalStatus() {}, positionMediaPreviews() {},
     scene:{children}, renderCount:0, renderSuspended:false, renderLost:false, document:{hidden:false},
     coalesceMotion:false, interactionPointer:null,
