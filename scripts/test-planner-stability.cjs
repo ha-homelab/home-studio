@@ -152,7 +152,10 @@ const server=http.createServer((request,response)=>{
   if(route==='/favicon.ico'){response.writeHead(204,{'Cache-Control':'no-store'}).end();return;}
   if(route==='/fixture.json'){response.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify(project));return;}
   if(route==='/planner/')route='/planner/index.html';
-  if(!/^\/(planner|vendor)\/[\w./-]+$/.test(route) || route.includes('..')){response.writeHead(404).end();return;}
+  // The editor imports these shared renderer modules from the repository root.
+  // Keep this fixture scoped: it must not serve arbitrary root/private files.
+  const sharedModule=/^\/(?:pbr-color-data|pbr-materials|material-textures|environment-lighting)\.js$/.test(route);
+  if((!/^\/(planner|vendor)\/[\w./-]+$/.test(route) && !sharedModule) || route.includes('..')){response.writeHead(404).end();return;}
   const file=path.join(root,route),extension=path.extname(file);
   let descriptor,content;
   try {

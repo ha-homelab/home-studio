@@ -45,6 +45,13 @@ isolated container holds the 128 MiB output tmpfs alive while the host checks it
 two-file inventory and copies it out. All container streams are captured into a
 bounded private log; Docker's persistent log driver is disabled.
 
+The compressed home package has a separate 128 MiB transport limit; each
+extracted scene file remains limited to 64 MiB and total expansion to 512 MiB.
+Worker acceptance metadata is limited to 100,000 bytes. The outer candidate,
+including its metadata and trusted installer, must also fit the envelope's
+128 MiB plaintext limit. The output tmpfs and outer-container overhead can
+therefore reject a package near the transport ceiling.
+
 The host rejects traversal, links, special files, duplicate archive paths,
 oversized expansion, unexpected output, and any package that changes or omits
 an exact staged public component file. It supplies the installer from the

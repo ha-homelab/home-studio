@@ -40,7 +40,7 @@ const root=path.resolve(__dirname,'..'),viewer=fs.readFileSync(path.join(root,'v
   const loop=viewer.slice(viewer.indexOf('// A wall_id shares'),viewer.indexOf('ground=new THREE.Mesh'));
   assert(loop.includes('createSceneMaterial(')&&loop.includes('createStaticGlassPasses('));
   function scene(diffuse){
-    const context=vm.createContext({THREE,Float32Array,Uint16Array,Uint32Array,model,
+    const context=vm.createContext({THREE,Float32Array,Uint16Array,Uint32Array,model,inventoryTextures:{get(){return null;}},
       renderProfile:{diffuseLighting:diffuse},root:new THREE.Group(),clipping:new THREE.Plane(new THREE.Vector3(0,-1,0),2.1)});
     vm.runInContext(fs.readFileSync(path.join(root,'room-lighting.js'),'utf8'),context);
     vm.runInContext(viewer.slice(viewer.indexOf('function wallPrism('),viewer.indexOf('let wallOutlines,')),context);

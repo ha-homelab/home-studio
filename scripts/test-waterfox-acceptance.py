@@ -106,8 +106,9 @@ if (renderer) {
   window.__nativeViewerPrograms.attachRenderer(renderer);
   const nativeRender = renderer.render.bind(renderer);
   renderer.render = (scene, camera) => {
+    const before = window.__browserRenderPasses.scene;
     const result = nativeRender(scene, camera);
-    if (scene?.name !== 'interaction-copy') window.__nativeRenderedLights = window.__browserScene().activePointLights;
+    if (window.__browserRenderPasses.scene > before) window.__nativeRenderedLights = window.__browserRenderedLights;
     return result;
   };
 }
@@ -529,6 +530,15 @@ def assert_state_programs(before, after):
     require([identity(link) for link in old] == [identity(link) for link in new], 'State changes must retain every exact program link identity')
 
 
+# Acceptance checkpoints only: failure diagnostics and native draw observers
+# must never block on extra GPU work. The planner has separate eager checks.
+VIEWER_SHADER_CHECK = """const checks=window.__flushBrowserShaders(),stats=window.__browserStability;
+if(checks.pending!==0||checks.discarded!==0||!Number.isInteger(checks.checked)||
+   checks.checked!==stats.linkedPrograms||stats.linkedPrograms<=0||stats.shaderErrors.length)
+  throw Error('Unverified viewer shaders: '+JSON.stringify({checks,linked:stats.linkedPrograms,errors:stats.shaderErrors}));
+"""
+
+
 def viewer(client, origin, project, record, save):
     record['loadBudgetMs'] = VIEWER_LOAD_BUDGET_MS
     client.call('WebDriver:Navigate', {'url': origin})
@@ -565,18 +575,21 @@ def viewer(client, origin, project, record, save):
                 load.wait('window.fixtureLoaded')
                 load.run(lambda: client.call('WebDriver:SwitchToFrame', {'id': 0}))
                 load.wait(f"window.floorplan?.renderCount>0 && window.floorplan.canEdit===true && document.querySelector('#homeConnection')?.dataset.connected==='true' && document.querySelector('#homeMapAlign')?.hidden===false && window.__nativeRenderedLights==={len(items)}")
+                sample['loadShaderChecks'] = load.run(lambda: client.execute(VIEWER_SHADER_CHECK + 'return checks;'))
                 load.complete()
         finally:
             save()
-        snapshot = lambda: client.execute('return {...window.__browserStability,programLedger:window.__nativeViewerPrograms.snapshot(),nativeGraphics:window.__sampleNativeGraphics("viewer-snapshot"),renderedLights:window.__nativeRenderedLights,renderCount:window.floorplan.renderCount,scene:window.__browserScene()};')
-        sample['initial'] = initial = snapshot()
+        snapshot_script = 'return {...window.__browserStability,programLedger:window.__nativeViewerPrograms.snapshot(),nativeGraphics:window.__sampleNativeGraphics("viewer-snapshot"),renderedLights:window.__nativeRenderedLights,renderCount:window.floorplan.renderCount,scene:window.__browserScene()};'
+        snapshot = lambda: client.execute(snapshot_script)
+        verified_snapshot = lambda: client.execute(VIEWER_SHADER_CHECK + snapshot_script)
+        sample['initial'] = initial = verified_snapshot()
         save()
         assert_graphics(initial)
         require(initial['scene']['pointLights'] == len(items), 'Every fixture light retains a shader slot')
         require(initial['scene']['activePointLights'] == len(items), 'Every on-state fixture light contributes illumination')
         sample['dragMs'] = client.canvas_drag('#homeStage canvas', diagnostics=sample.setdefault('dragDiagnostics', {}), snapshot=snapshot)
         client.wait(f'window.floorplan.renderCount>{initial["renderCount"]}')
-        sample['afterDrag'] = after_drag = snapshot()
+        sample['afterDrag'] = after_drag = verified_snapshot()
         require(after_drag['scene']['camera'] != initial['scene']['camera'], 'Real pointer drag changes the viewer camera')
         before_world = initial['scene']['camera']['world']
         after_world = after_drag['scene']['camera']['world']
@@ -592,7 +605,7 @@ def viewer(client, origin, project, record, save):
             for index, item in enumerate(items):
                 next_states[item['entity_id']]['state'] = 'on' if index < active else 'off'
             update_viewer_state(client, next_states, active)
-            value = snapshot()
+            value = verified_snapshot()
             require(value['scene']['pointLights'] == len(items), 'State updates retain every light slot')
             sample['states'].append({'active': active, 'linkedPrograms': value['linkedPrograms'], 'renderCount': value['renderCount'], 'renderedLights': value['renderedLights'], 'programLedger': value['programLedger']})
             assert_graphics(value)
@@ -600,24 +613,24 @@ def viewer(client, origin, project, record, save):
             before_state = value
         require(len({value['linkedPrograms'] for value in sample['states']}) == 1, 'State changes must not compile new shader variants')
         if cycle == 1:
-            before = snapshot()['renderCount']
-            client.execute("const e=document.querySelector('#homeStage canvas').getContext('webgl2').getExtension('WEBGL_lose_context');if(!e)throw Error('WEBGL_lose_context required');window.restoreTestContext=()=>e.restoreContext();e.loseContext();return true;")
+            before = verified_snapshot()['renderCount']
+            client.execute(VIEWER_SHADER_CHECK + "const e=document.querySelector('#homeStage canvas').getContext('webgl2').getExtension('WEBGL_lose_context');if(!e)throw Error('WEBGL_lose_context required');window.restoreTestContext=()=>e.restoreContext();e.loseContext();return true;")
             client.wait('window.__browserStability.contextLosses===1')
             client.execute('for(let i=0;i<40;i++){window.requestModelRender();window.renderModel();}return true;')
             time.sleep(.1)
-            require(snapshot()['renderCount'] == before, 'Lost contexts suppress explicit and pending draws')
+            require(verified_snapshot()['renderCount'] == before, 'Lost contexts suppress explicit and pending draws')
             client.execute('window.restoreTestContext();return true;')
             client.wait(f'window.floorplan.renderCount>{before}')
-            sample['recovery'] = snapshot()
+            sample['recovery'] = verified_snapshot()
             assert_recovered_graphics(sample['recovery'])
             sample['recoveryDragMs'] = client.canvas_drag('#homeStage canvas', diagnostics=sample.setdefault('recoveryDragDiagnostics', {}), snapshot=snapshot)
             client.wait(f'window.floorplan.renderCount>{sample["recovery"]["renderCount"]}')
-            sample['afterRecoveryDrag'] = after = snapshot()
+            sample['afterRecoveryDrag'] = after = verified_snapshot()
             assert_viewer_interaction(sample['recovery'], after)
             assert_first_motion_programs(sample['recovery'], after)
             assert_recovered_interaction(sample['recovery']['renderCount'], after['renderCount'], sample['recovery']['scene']['camera'], after['scene']['camera'], after)
-            post_restore_viewer_modes(client, sample, snapshot, save, len(items))
-        sample['final'] = snapshot()
+            post_restore_viewer_modes(client, sample, verified_snapshot, save, len(items))
+        sample['final'] = verified_snapshot()
         assert_graphics(sample['final'])
         require(sample['final']['contextLosses'] == cycle, 'No unexpected WebGL context loss')
         save()

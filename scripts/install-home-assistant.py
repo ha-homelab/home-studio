@@ -50,9 +50,11 @@ CORE_FILES = frozenset({
     "__init__.py", "curtains.py", "site.py", "validation.py", "manifest.json",
     "site.json", "curtains.json", "static/panel.js",
 })
-FLOOR_FILES = ("index.html", "model-data.json", "plan.svg", "inventory.json",
-               "inventory-template.json")
-FLOOR_FORMATS = ("glb", "obj", "mtl", "dae", "usda")
+# Runtime data and the viewer's linked downloads are required. Authoring SVG,
+# USDA and seed inventories may remain in older archives, but are not consumed
+# by the installed integration and need not duplicate the embedded data.
+FLOOR_FILES = ("index.html", "model-data.json")
+FLOOR_FORMATS = ("glb", "obj", "mtl", "dae")
 
 
 class InstallError(ValueError):
@@ -158,8 +160,8 @@ def validate_site(files, *, allow_site_features=False):
         if floor["stem"] in stems:
             raise InstallError("site.json contains duplicate floor stems")
         stems.add(floor["stem"])
-        names = ("index.html", "model-data.json") if private else FLOOR_FILES
-        formats = ("glb", "obj", "mtl", "dae") if private else FLOOR_FORMATS
+        names = FLOOR_FILES
+        formats = FLOOR_FORMATS
         required = {f"assets/{floor_id}/{name}" for name in names}
         required.update(f"assets/{floor_id}/{floor['stem']}.{ext}" for ext in formats)
         require_files(files, required)

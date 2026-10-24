@@ -75,6 +75,8 @@ def validate_catalog(catalog):
                 for axis, value in enumerate(vertex):
                     low, high = (0, 1) if axis == 1 else (-.5, .5)
                     require(finite_number(value, low - 1e-8, high + 1e-8), prefix + ': geometry exceeds normalized bounds')
+            if 'surface_finish' in part:
+                require(isinstance(part['surface_finish'], str) and part['surface_finish'] in {'fabric','leather','plastic','painted','wood','ceramic','glass','rubber','stone','metal','brushed_metal','matte_metal','polished_metal','mirror','matte_paint','rough_wood','polished_stone','paper','foliage','soil','car_paint','solar_cell','light_diffuser','fur','feather'}, prefix + ': unknown physical finish')
             material = part.get('material')
             require(isinstance(material, str), prefix + ': invalid material')
             for style in styles.values():

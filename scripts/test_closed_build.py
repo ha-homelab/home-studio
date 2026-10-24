@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import sys
 import tarfile
 import tempfile
@@ -462,6 +463,16 @@ class BoundaryTests(unittest.TestCase):
                                       "source_run": {"id": "10", "attempt": "1", "latest_attempt": "1", "conclusion": "success"},
                                       "closed_build_run": {"id": "20", "attempt": "2", "latest_attempt": "2", "conclusion": "success"}}}
         build.validate_acceptance(accepted, public, "test")
+        for size in (build.MAX_FILE + 1, build.MAX_PACKAGE):
+            with self.subTest(payload_size=size):
+                build.validate_acceptance({**accepted, "payload_size": size}, public, "test")
+        build.validate_acceptance({**accepted, "installer_size": build.MAX_FILE}, public, "test")
+        for field, size in (("payload_size", build.MAX_PACKAGE + 1),
+                            ("installer_size", build.MAX_FILE + 1),
+                            ("payload_size", True), ("payload_size", 0),
+                            ("installer_size", False), ("installer_size", -1)):
+            with self.subTest(field=field, size=size), self.assertRaises(build.Rejected):
+                build.validate_acceptance({**accepted, field: size}, public, "test")
         accepted["site_acceptance"]["checks"]["browser"] = False
         with self.assertRaises(build.Rejected):
             build.validate_acceptance(accepted, public, "test")
@@ -680,11 +691,79 @@ class BoundaryTests(unittest.TestCase):
             with self.assertRaises(build.Rejected):
                 build.validate_output(output, public, "rebuild-preserve")
 
+    def test_compressed_package_can_exceed_one_scene_file(self):
+        # Stored gzip makes the container larger than 64 MiB while each member
+        # stays below the unchanged scene-file limit. No random data is needed.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            public, output = root / "public", root / "output"
+            (public / "component").mkdir(parents=True)
+            (public / "component/core.py").write_bytes(b"public immutable")
+            output.mkdir()
+            evidence = {"schema": 1, "passed": True, "checks": ["package", "site-contracts", "geometry"]}
+            (output / "acceptance.json").write_bytes(envelope.canonical(evidence))
+            payload = output / "home-package.tar.gz"
+            block = bytes(32 * 1024 * 1024)
+            with tarfile.open(payload, "w:gz", format=tarfile.USTAR_FORMAT, compresslevel=0) as packed:
+                for name, data in (("core.py", b"public immutable"), ("site.json", b"{}"),
+                                   ("first.bin", block), ("second.bin", block)):
+                    member = tarfile.TarInfo("custom_components/home_floorplan/" + name)
+                    member.size = len(data)
+                    packed.addfile(member, io.BytesIO(data))
+            self.assertGreater(payload.stat().st_size, 64 * 1024 * 1024)
+            result, actual = build.validate_output(output, public, "rebuild-preserve")
+            self.assertEqual(envelope.digest(result), envelope.digest(payload.read_bytes()))
+            self.assertEqual(actual, evidence)
+            # Oversized transport is rejected before it is read/decompressed.
+            with payload.open("wb") as stream:
+                stream.truncate(128 * 1024 * 1024 + 1)
+            with self.assertRaises(build.Rejected):
+                build.validate_output(output, public, "rebuild-preserve")
+
     def test_candidate_contains_trusted_installer(self):
         packed = build.pack_candidate(b"package", {"schema": 1}, b"public installer")
         with tarfile.open(fileobj=io.BytesIO(packed), mode="r:gz") as contents:
             self.assertEqual(contents.getnames(), ["candidate.json", "home-package.tar.gz", "install-home-assistant.py"])
             self.assertEqual(contents.extractfile("install-home-assistant.py").read(), b"public installer")
+        with patch.object(build, "MAX_PACKAGE", 6), self.assertRaises(build.Rejected):
+            build.pack_candidate(b"package", {"schema": 1}, b"public installer")
+        with patch.object(build, "MAX_ENVELOPE", 2 * (len(packed) - 1)), self.assertRaises(build.Rejected):
+            build.pack_candidate(b"package", {"schema": 1}, b"public installer")
+
+    def test_worker_output_inspector_uses_per_file_bounds(self):
+        commands = []
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(build, "capture", side_effect=lambda command, *_: commands.append(command)), \
+                 patch.object(build.subprocess, "run"):
+                build.run_worker("example.invalid/tool@sha256:" + "a" * 64,
+                                 root / "input", root / "public", root / "output",
+                                 root / "context", root / "private.log")
+        program, = [command[-1] for command in commands if command[:2] == ["docker", "exec"]]
+
+        def inspect(files):
+            with patch.object(os, "listdir", return_value=list(files)), \
+                 patch.object(os, "lstat", side_effect=lambda name: files[Path(name).name]):
+                exec(program, {})
+
+        def file(size, mode=stat.S_IFREG | 0o644, links=1):
+            return SimpleNamespace(st_size=size, st_mode=mode, st_nlink=links)
+
+        self.assertEqual(build.MAX_FILE, 64 * 1024 * 1024)
+        self.assertEqual(build.MAX_PACKAGE, 128 * 1024 * 1024)
+        self.assertEqual(build.MAX_TOTAL, 512 * 1024 * 1024)
+        valid = {"home-package.tar.gz": file(build.MAX_PACKAGE), "acceptance.json": file(100_000)}
+        inspect(valid)
+        for changed in (
+            {**valid, "home-package.tar.gz": file(build.MAX_PACKAGE + 1)},
+            {**valid, "acceptance.json": file(100_001)},
+            {**valid, "extra": file(1)},
+            {"home-package.tar.gz": valid["home-package.tar.gz"]},
+            {**valid, "home-package.tar.gz": file(1, stat.S_IFLNK | 0o777)},
+            {**valid, "acceptance.json": file(1, links=2)},
+        ):
+            with self.subTest(files=changed), self.assertRaises(AssertionError):
+                inspect(changed)
 
     @unittest.skipUnless(os.environ.get("CLOSED_DOCKER_TEST") == "1", "explicit local Docker test")
     def test_real_container_success_failure_and_network_boundary(self):

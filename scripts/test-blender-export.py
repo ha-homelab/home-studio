@@ -146,9 +146,15 @@ class ExportTests(unittest.IsolatedAsyncioTestCase):
         response = await self.request(source, floor=None, format='obj')
         self.assertFalse(response.errors)
         with zipfile.ZipFile(io.BytesIO(base64.b64decode(response.results[0]['base64']))) as archive:
-            self.assertEqual(set(archive.namelist()), {'home.obj', 'materials.mtl'})
             obj = archive.read('home.obj').decode()
             mtl = archive.read('materials.mtl').decode()
+            maps = {line.split()[-1] for line in mtl.splitlines()
+                    if line.startswith(('map_', 'norm '))}
+            self.assertTrue(maps, 'Authored furniture retains its physical material maps')
+            self.assertEqual(set(archive.namelist()), {'home.obj', 'materials.mtl'} | maps)
+            for name in maps:
+                self.assertTrue(name.startswith('textures/material_'))
+                self.assertTrue(archive.read(name).startswith(b'\x89PNG\r\n\x1a\n'))
         self.assertIn('mtllib materials.mtl', obj)
         self.assertIn('newmtl material_', mtl)
         self.assertIn('d 0.3', mtl)
@@ -455,7 +461,7 @@ class CompactExportTests(unittest.TestCase):
                         return arrays[kind][value - 1 if value > 0 else value]
                     actual.append((group, material, resolve('v', position), resolve('vn', normal), resolve('vt', uv)))
         expected = []
-        rounded = lambda values: tuple(float(f'{value:.9g}') for value in values)
+        rounded = lambda values, places=5: tuple(float(f'{value:.{places}f}') for value in values)
         for ordinal, group in enumerate(scene[0]['groups'], 1):
             c, s = math.cos(group['rotation']), math.sin(group['rotation'])
             sx, sy, sz = group['scale']; tx, ty, tz = group['translation']
@@ -466,7 +472,7 @@ class CompactExportTests(unittest.TestCase):
                     x, y, z = [v / scale for v, scale in zip(mesh['normals'][index], group['scale'])]
                     x, z = c*x + s*z, -s*x + c*z
                     length = math.hypot(x, y, z) or 1
-                    normal = rounded((x / length, -z / length, y / length))
+                    normal = rounded((x / length, -z / length, y / length), 4)
                     expected.append((f'{ordinal}_Floor {group["name"]}', 'material_0' if 'texture' in mesh else 'material_1',
                                      position, normal, rounded(mesh['uv'][index]) if 'texture' in mesh else None))
         self.assertEqual(actual, expected)

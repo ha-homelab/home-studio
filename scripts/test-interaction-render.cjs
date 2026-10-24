@@ -99,6 +99,9 @@ const lifecycleHandlers={}, lifecycleOrder=[];
 const lifecycle={renderLost:false,renderSuspended:false,interactionPointer:{moved:true},interactionRenderer:{dispose(){lifecycleOrder.push('dispose');}},cancelRender(){lifecycleOrder.push('cancel');},observer:{disconnect(){lifecycleOrder.push('disconnect');}},renderer:{domElement:{addEventListener:(name,fn)=>lifecycleHandlers[name]=fn},dispose(){lifecycleOrder.push('renderer-dispose');},forceContextLoss(){lifecycleOrder.push('force-loss');}},window:{addEventListener:(name,fn)=>lifecycleHandlers[name]=fn}};
 lifecycle.homeView=null;
 lifecycle.environmentLayer=null;
+lifecycle.reflectionEnvironment=null;
+lifecycle.contactShading=null;
+lifecycle.inventoryTextures={dispose(){}};
 lifecycle.releaseViewerGeometryGPU=()=>lifecycleOrder.push('geometry-release');
 lifecycle.editorFloorMaterials=null;
 lifecycle.releaseViewerTextureGPU=()=>lifecycleOrder.push('texture-release');
@@ -115,6 +118,7 @@ for (const diffuse of [false,true]) {
 const hooks={}, history=[];
 let created=0;
 const c={editorFloorMaterials:null,homeView:null,environmentLayer:null,coalesceMotion:true,renderProfile:{diffuseLighting:diffuse},renderSuspended:false,renderLost:false,renderCount:0,
+ reflectionEnvironment:null,contactShading:null,hemisphere:null,inventoryTextures:{dispose(){}},$:()=>({dataset:{}}),
  interactionRenderer:null,interactionPointer:{moved:true},scene:{},THREE:{},document:{hidden:false},performance:{now:()=>0},
  wallSheenMotion:{beforeRender(){},afterRender(){}},cancelRender(){},invalidateShadows(){},
  requestRender(){history.push('request');},resize(){},observer:{disconnect(){}},releaseStaticGlassPasses(){},disposeStaticGlassPasses(){},releaseViewerGeometryGPU(){},releaseViewerTextureGPU(){},releaseWallOutlineMaterials(){},

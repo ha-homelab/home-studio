@@ -1,4 +1,4 @@
-"""Bounded, metadata-free opaque PNG albedo and explicit per-vertex UVs.
+"""Bounded, metadata-free opaque PNG material channels and explicit per-vertex UVs.
 
 No image generation, network, color conversion, or source-image preparation is
 performed here. A producer must review and prepare the color swatch offline.
@@ -10,16 +10,23 @@ import re
 import struct
 import zlib
 
+if __package__:
+    from .pbr_materials import TEXTURE_CHANNELS, validate_pbr_fields, family_textures
+else:
+    from pbr_materials import TEXTURE_CHANNELS, validate_pbr_fields, family_textures
 
-# Per-model limits; fixed dimensions also bound decoded CPU/GPU storage.
-MAX_MATERIAL_TEXTURES = 64
+
+# Per-model limits also bound semantic-role decoded CPU/GPU storage.
+MAX_MATERIAL_TEXTURES = 128
+MAX_MATERIAL_TEXTURE_PIXELS = 12 * 1024 * 1024
+MATERIAL_TEXTURE_SIZES = (128, 256, 512, 1024)
 MAX_MATERIAL_TEXTURE_BYTES = 8 * 1024 * 1024
-MAX_MATERIAL_PNG_BYTES = 256 * 1024
+MAX_MATERIAL_PNG_BYTES = 1024 * 1024
 MAX_MATERIAL_BASE64_CHARS = 4 * ((MAX_MATERIAL_PNG_BYTES + 2) // 3)
 
 
 # Artistic starting values, not measured material properties.
-MATERIAL_SURFACE_PROFILES = {'fabric': [0.92, 0], 'leather': [0.5, 0], 'plastic': [0.48, 0], 'painted': [0.48, 0], 'wood': [0.58, 0], 'ceramic': [0.24, 0], 'glass': [0.12, 0], 'rubber': [0.95, 0], 'stone': [0.88, 0], 'metal': [0.3, 0.75], 'brushed_metal': [0.4, 0.75], 'matte_metal': [0.5, 0.75], 'polished_metal': [0.3, 0.9], 'mirror': [0.06, 0.9], 'matte_paint': [0.85, 0], 'rough_wood': [0.85, 0], 'polished_stone': [0.35, 0], 'paper': [0.85, 0], 'foliage': [0.75, 0], 'soil': [1, 0], 'car_paint': [0.25, 0.15], 'solar_cell': [0.25, 0.25], 'light_diffuser': [0.4, 0]}
+MATERIAL_SURFACE_PROFILES = {'feather': [.75, 0], 'fur': [.96, 0], 'fabric': [0.92, 0], 'leather': [0.5, 0], 'plastic': [0.48, 0], 'painted': [0.48, 0], 'wood': [0.58, 0], 'ceramic': [0.24, 0], 'glass': [0.12, 0], 'rubber': [0.95, 0], 'stone': [0.88, 0], 'metal': [0.3, 0.75], 'brushed_metal': [0.4, 0.75], 'matte_metal': [0.5, 0.75], 'polished_metal': [0.3, 0.9], 'mirror': [0.06, 0.9], 'matte_paint': [0.85, 0], 'rough_wood': [0.85, 0], 'polished_stone': [0.35, 0], 'paper': [0.85, 0], 'foliage': [0.75, 0], 'soil': [1, 0], 'car_paint': [0.25, 0.15], 'solar_cell': [0.25, 0.25], 'light_diffuser': [0.4, 0]}
 MATERIAL_SURFACE_FINISHES = tuple(MATERIAL_SURFACE_PROFILES)
 
 
@@ -48,8 +55,9 @@ def material_surface_profile(name=None, surface_finish=None):
 
 def decode_material_texture(spec):
     if (not isinstance(spec, dict) or set(spec) != {'mime_type', 'width', 'height', 'data_uri'}
-            or spec['mime_type'] != 'image/png' or spec['width'] != 256 or spec['height'] != 256):
-        raise ValueError('Material textures must be 256-pixel PNG swatches')
+            or spec['mime_type'] != 'image/png' or type(spec['width']) is not int
+            or spec['width'] not in MATERIAL_TEXTURE_SIZES or spec['height'] != spec['width']):
+        raise ValueError('Material textures must be square 128–1024 pixel PNG swatches')
     uri = spec['data_uri']
     prefix = 'data:image/png;base64,'
     if not isinstance(uri, str) or not uri.startswith(prefix) or len(uri) > len(prefix) + MAX_MATERIAL_BASE64_CHARS:
@@ -77,7 +85,7 @@ def decode_material_texture(spec):
             if kinds or length != 13:
                 raise ValueError('Invalid material PNG header')
             width, height, bits, color, compression, filtering, interlace = struct.unpack('>IIBBBBB', payload)
-            if (width, height, bits, compression, filtering, interlace) != (256, 256, 8, 0, 0, 0) or color not in (2, 3):
+            if (width, height, bits, compression, filtering, interlace) != (spec['width'], spec['height'], 8, 0, 0, 0) or color not in (2, 3):
                 raise ValueError('Material PNG must be opaque RGB or indexed 8-bit color')
             channels = 3 if color == 2 else 1
         elif kind == b'PLTE':
@@ -94,13 +102,13 @@ def decode_material_texture(spec):
         position = end
     if not kinds or kinds[-1] != b'IEND' or not compressed or channels == 1 and not palette:
         raise ValueError('Incomplete material PNG')
-    expected = (256 * channels + 1) * 256
+    expected = (width * channels + 1) * height
     try:
         decoder = zlib.decompressobj()
         pixels = decoder.decompress(compressed, expected + 1)
     except zlib.error as error:
         raise ValueError('Invalid material PNG pixels') from error
-    if len(pixels) != expected or not decoder.eof or decoder.unused_data or any(pixels[row * (256 * channels + 1)] > 4 for row in range(256)):
+    if len(pixels) != expected or not decoder.eof or decoder.unused_data or any(pixels[row * (width * channels + 1)] > 4 for row in range(height)):
         raise ValueError('Invalid material PNG pixel dimensions')
     return raw
 
@@ -130,21 +138,42 @@ def material_uv(mesh, dimensions=None):
 def validate_material_textures(model):
     definitions = model.get('material_textures', {})
     if not isinstance(definitions, dict) or len(definitions) > MAX_MATERIAL_TEXTURES:
-        raise ValueError('At most 64 material textures are supported')
-    result = {}
+        raise ValueError('At most 128 material textures are supported')
+    result, decoded, semantic, family_pixels = {}, {}, set(), {}
     for key, spec in definitions.items():
         if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}', key):
             raise ValueError('Invalid material texture identifier')
-        result[key] = decode_material_texture(spec)
-    if sum(map(len, result.values())) > MAX_MATERIAL_TEXTURE_BYTES:
-        raise ValueError('Material textures exceed the 8 MiB total budget')
+        raw = decode_material_texture(spec)
+        result[key] = raw
+        decoded[spec['data_uri']] = (raw, spec['width'] * spec['height'])
+    declared_uris = set(decoded)
     meshes = list(model.get('meshes', []))
     meshes.extend(mesh for asset in model.get('object_assets', {}).values() for mesh in asset['meshes'])
     for mesh in meshes:
         if 'surface_finish' in mesh:
             validate_surface_finish(mesh['surface_finish'])
-        if 'albedo_texture' in mesh:
-            if not isinstance(mesh['albedo_texture'], str) or mesh['albedo_texture'] not in result or model['materials'][mesh['material']][3] != 1:
-                raise ValueError('Material texture requires a known opaque surface')
+        validate_pbr_fields(mesh, MATERIAL_SURFACE_FINISHES)
+        channels = [key for key in TEXTURE_CHANNELS if key in mesh]
+        if channels or 'material_family' in mesh:
             material_uv(mesh)
+        for key in channels:
+            if not isinstance(mesh[key], str) or mesh[key] not in result:
+                raise ValueError('Material texture requires a known surface map')
+            if key == 'albedo_texture' and model['materials'][mesh['material']][3] != 1:
+                raise ValueError('Albedo texture requires an opaque surface')
+            semantic.add((definitions[mesh[key]]['data_uri'], key == 'albedo_texture'))
+        family=mesh.get('material_family');generic=family_textures(family)
+        if generic: family_pixels[family]=sum(spec['width']*spec['height'] for spec in generic.values())
+        for key, spec in generic.items():
+            if key not in mesh:
+                uri = spec['data_uri']
+                if uri not in decoded:
+                    decoded[uri] = (decode_material_texture(spec), spec['width'] * spec['height'])
+
+    # Unused definitions still consume CPU decoding/storage once, not once per alias.
+    semantic.update((uri, False) for uri in declared_uris if not any(key[0] == uri for key in semantic))
+    if sum(len(raw) for raw, _ in decoded.values()) > MAX_MATERIAL_TEXTURE_BYTES:
+        raise ValueError('Material textures exceed the 8 MiB total budget')
+    if sum(decoded[uri][1] for uri, _ in semantic) + sum(family_pixels.values()) > MAX_MATERIAL_TEXTURE_PIXELS:
+        raise ValueError('Material textures exceed the 12 Mi texel decoded budget')
     return result

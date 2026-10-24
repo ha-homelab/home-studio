@@ -2,6 +2,7 @@
 """Check browser/compiler geometry parity and the complete furniture export path."""
 import copy
 import base64
+import hashlib
 import importlib.util
 import json
 import math
@@ -128,9 +129,18 @@ class FurnitureTests(unittest.TestCase):
                         self.assertAlmostEqual(value, browser_value, places=12)
                 self.assertEqual(len(actual['meshes']), len(expected['meshes']))
                 for mesh, browser_mesh in zip(actual['meshes'], expected['meshes']):
-                    for key in ('name', 'indices', 'material', 'kind'):
+                    for key in ('name', 'material', 'kind', 'surface_finish', 'material_family'):
                         self.assertEqual(mesh[key], browser_mesh[key])
-                    self.assert_mesh_equal(mesh, browser_mesh)
+                    # Exact-tuple indexing may share a mathematically identical
+                    # corner differently across libm implementations. Compare
+                    # the complete ordered triangle stream, including UV seams.
+                    self.assertEqual(len(mesh['indices']), len(browser_mesh['indices']))
+                    for key in ('vertices', 'normals', 'uv'):
+                        dimensions = next(model['dimensions_m'] for model in CATALOG['models'] if model['id'] == fixture['item']['model_id'])
+                        precision = 2e-12 * (max(dimensions.values()) if key == 'uv' else 1)
+                        for i, j in zip(mesh['indices'], browser_mesh['indices']):
+                            for value, browser_value in zip(mesh[key][i], browser_mesh[key][j]):
+                                self.assertLessEqual(abs(value-browser_value), precision, 'Authored corner attributes match within their declared precision')
 
     def test_validation_legacy_and_invalid_appearance(self):
         legacy = json.loads((ROOT / 'planner/example-home.json').read_text())
@@ -173,7 +183,9 @@ class FurnitureTests(unittest.TestCase):
             angle = math.radians(item['rotation_deg'])
             for mesh, part in zip(meshes, normalized['meshes']):
                 self.assertEqual(mesh['material'], part['material'])
-                for point, local in zip(mesh['vertices'], part['vertices']):
+                self.assertEqual(len(mesh['indices']), len(part['indices']))
+                for world_index, local_index in zip(mesh['indices'], part['indices']):
+                    point, local = mesh['vertices'][world_index], part['vertices'][local_index]
                     x, y, z = local
                     d, p = item['dimensions_m'], item['position_m']
                     expected = [p['x'] + math.cos(angle)*x*d['width'] + math.sin(angle)*z*d['depth'],
@@ -222,7 +234,7 @@ class FurnitureTests(unittest.TestCase):
             document = json.loads(glb[20:20 + length])
             self.assertEqual(len(document['meshes']), len(export_data['meshes']))
             self.assertEqual(document['extras']['units'], 'metres')
-            materials = {entry['name']: entry['pbrMetallicRoughness']['baseColorFactor'] for entry in document['materials']}
+            materials = {source: entry['pbrMetallicRoughness']['baseColorFactor'] for entry in document['materials'] for source in entry['extras']['source_materials']}
             for color in ('furniture_a1b2c3', 'furniture_e7513d'):
                 self.assertEqual(materials[color], data['materials'][color])
                 self.assertIn('newmtl ' + color, (folder / (floor['id'] + '.mtl')).read_text())
@@ -231,45 +243,87 @@ class FurnitureTests(unittest.TestCase):
             dae = ET.parse(folder / (floor['id'] + '.dae'))
             ns = {'c': 'http://www.collada.org/2005/11/COLLADASchema'}
             dae_meshes = dae.findall('.//c:library_geometries/c:geometry', ns)
+            dae_ids = {node.get('id'): node for node in dae.iter() if node.get('id')}
             self.assertEqual(len(dae_meshes), len(export_data['meshes']))
-            obj_vertices = [float(value) for line in obj.splitlines() if line.startswith('v ') for value in line[2:].split()]
-            z_up_vertices = [value for mesh in export_data['meshes'] for x, y, z in mesh['vertices'] for value in (x, -z, y)]
-            self.assertEqual(len(obj_vertices), len(z_up_vertices))
-            for value, want in zip(obj_vertices, z_up_vertices):
-                self.assertAlmostEqual(value, want, places=6)
-            usd_points = re.findall(r'point3f\[\] points = \[(.*?)\]', usda)
+            # OBJ pools are independently deduplicated and may use relative
+            # indices. Compare ordered triangle corners rather than row counts.
+            positions, normals, obj_groups = [], [], {}
+            for line in obj.splitlines():
+                fields = line.split()
+                if not fields: continue
+                if fields[0] == 'v': positions.append(tuple(map(float, fields[1:])))
+                elif fields[0] == 'vn': normals.append(tuple(map(float, fields[1:])))
+                elif fields[0] == 'o': group = []; obj_groups[line[2:]] = group
+                elif fields[0] == 'f':
+                    for corner in fields[1:]:
+                        pi, _, ni = corner.split('/')
+                        index = lambda value, pool: int(value) - 1 if int(value) > 0 else len(pool) + int(value)
+                        group.append((positions[index(pi, positions)], normals[index(ni, normals)]))
+            usd_points = re.findall(r'point3f\[\] points\s*=\s*\[(.*?)\]', usda)
             self.assertEqual(len(usd_points), len(export_data['meshes']))
+            f32 = lambda value: struct.unpack('<f', struct.pack('<f', value))[0]
             for mesh, dae_mesh, usd_point_text in zip(export_data['meshes'], dae_meshes, usd_points):
-                actual = [float(value) for value in dae_mesh.find('.//c:float_array', ns).text.split()]
-                expected = [value for x, y, z in mesh['vertices'] for value in (x, -z, y)]
-                self.assertEqual(len(actual), len(expected))
-                for value, want in zip(actual, expected):
-                    self.assertAlmostEqual(value, want, places=6)
-                usd_vertices = [float(value) for value in re.findall(r'-?\d+\.\d+', usd_point_text)]
-                expected = [value for point in mesh['vertices'] for value in point]
-                self.assertEqual(len(usd_vertices), len(expected))
-                for value, want in zip(usd_vertices, expected):
-                    self.assertAlmostEqual(value, want, places=6)
+                self.assertEqual(len(obj_groups[mesh['name']]), len(mesh['indices']))
+                for (position, normal), index in zip(obj_groups[mesh['name']], mesh['indices']):
+                    x,y,z=mesh['vertices'][index]
+                    for value,want in zip(position,(x,-z,y)): self.assertLessEqual(abs(value-want),.000005000001)
+                    x,y,z=mesh['normals'][index]; normal_length=math.sqrt(x*x+y*y+z*z)
+                    for value,want in zip(normal,(x/normal_length,-z/normal_length,y/normal_length)): self.assertLessEqual(abs(value-want),.000050000001)
+                triangles = dae_mesh.find('c:mesh/c:triangles', ns)
+                inputs = triangles.findall('c:input', ns)
+                corner_width = max(int(value.get('offset')) for value in inputs) + 1
+                position_input = next(value for value in inputs if value.get('semantic') == 'VERTEX')
+                vertices = dae_ids[position_input.get('source')[1:]]
+                source = dae_ids[vertices.find('c:input', ns).get('source')[1:]]
+                accessor = source.find('c:technique_common/c:accessor', ns)
+                values = list(map(float, dae_ids[accessor.get('source')[1:]].text.split()))
+                indices = list(map(int, triangles.find('c:p', ns).text.split()))[int(position_input.get('offset'))::corner_width]
+                actual = [value for index in indices for value in values[index*3:index*3+3]]
+                expected = [f32(value) for index in mesh['indices'] for x, y, z in [mesh['vertices'][index]] for value in (x, -z, y)]
+                self.assertEqual([f32(value) for value in actual], expected)
+                usd_vertices = [float(value) for value in re.findall(r'-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?', usd_point_text)]
+                expected = [f32(value) for point in mesh['vertices'] for value in point]
+                self.assertEqual([f32(value) for value in usd_vertices], expected)
             for color in ('furniture_a1b2c3', 'furniture_e7513d'):
-                effect = dae.find(f'.//c:effect[@id="{color}-fx"]//c:color', ns)
-                self.assertEqual([float(value) for value in effect.text.split()], data['materials'][color])
-                self.assertIn('def Material "' + color + '"', usda)
+                effects = [effect for effect in dae.findall('.//c:effect',ns) if effect.find('.//c:source_material',ns).text == color]
+                self.assertTrue(effects)
+                for effect in effects:
+                    actual=[f32(float(value)) for value in effect.find('.//c:base_color',ns).text.split()]
+                    self.assertEqual(actual,list(map(f32,data['materials'][color])))
+                self.assertIn('sourceMaterial="' + color + '"', usda)
             for mesh in export_data['meshes']:
                 self.assertIn('o ' + mesh['name'] + '\n', obj)
-                self.assertIn('def Mesh "' + mesh['name'] + '"', usda)
-            # Inspect actual GLB position buffer bytes, not just node names.
+                self.assertIn('sourceMesh="' + mesh['name'] + '"', usda)
+            # Decode ordered GLB corners including the index stream. Compaction
+            # must retain float32 positions and normals exactly.
             binary_offset = 20 + length + 8
+            def accessor(index):
+                entry=document['accessors'][index]; view=document['bufferViews'][entry['bufferView']]
+                width=3 if entry['type']=='VEC3' else 2 if entry['type']=='VEC2' else 1
+                code='f' if entry['componentType']==5126 else 'I'
+                return struct.unpack_from('<'+code*(entry['count']*width),glb,binary_offset+view.get('byteOffset',0)+entry.get('byteOffset',0))
             for mesh, exported in zip(export_data['meshes'], document['meshes']):
-                accessor = document['accessors'][exported['primitives'][0]['attributes']['POSITION']]
-                view = document['bufferViews'][accessor['bufferView']]
-                values = struct.unpack_from('<' + 'f' * (accessor['count'] * 3), glb, binary_offset + view['byteOffset'])
-                expected = [value for point in mesh['vertices'] for value in point]
-                self.assertEqual(len(values), len(expected))
-                for value, want in zip(values, expected):
-                    self.assertAlmostEqual(value, want, places=5)
+                primitive=exported['primitives'][0]; indices=accessor(primitive['indices'])
+                self.assertEqual(len(indices),len(mesh['indices']))
+                for semantic,key in [('POSITION','vertices'),('NORMAL','normals')]:
+                    values=accessor(primitive['attributes'][semantic])
+                    for actual_index,expected_index in zip(indices,mesh['indices']):
+                        self.assertEqual(values[actual_index*3:actual_index*3+3],tuple(map(f32,mesh[key][expected_index])))
             with tarfile.open(output / 'home-floorplan.tar.gz') as package:
                 name = 'custom_components/home_floorplan/assets/' + floor['id'] + '/model-data.json'
                 self.assertEqual(json.load(package.extractfile(name)), data)
+                prefix = name.rsplit('/', 1)[0] + '/'
+                members = set(package.getnames())
+                for local_only in ('plan.svg', 'inventory.json', 'inventory-template.json', floor['id'] + '.usda'):
+                    self.assertTrue((folder / local_only).is_file())
+                    self.assertNotIn(prefix + local_only, members, 'HA excludes only unlinked authoring duplicates')
+                manifest_name = floor['id'] + '.exports.json'
+                texture_manifest = json.load(package.extractfile(prefix + manifest_name))
+                for texture_name, digest in texture_manifest['textures'].items():
+                    self.assertIn(prefix + texture_name, members)
+                    self.assertEqual(hashlib.sha256(package.extractfile(prefix + texture_name).read()).hexdigest(), digest)
+                for extension in ('glb', 'obj', 'mtl', 'dae'):
+                    self.assertIn(prefix + floor['id'] + '.' + extension, members)
 
     def test_maximum_density_floor_builds_and_installs_with_safety_limits(self):
         plant = next(model for model in CATALOG['models'] if model['id'] == 'plant')

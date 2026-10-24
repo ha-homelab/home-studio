@@ -6,7 +6,7 @@ const path = require('node:path');
 const {EventEmitter} = require('node:events');
 const vm = require('node:vm');
 const {test, after} = require('node:test');
-const {createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
+const {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
 
 test('host phase timing closes sequential phases and preserves the timeout observation', () => {
   let now=100;
@@ -27,6 +27,147 @@ test('host phase timing closes sequential phases and preserves the timeout obser
   idle.freezeTimeout();assert.deepEqual(empty.timeoutPhase,{elapsedMs:0,activePhase:null});
 });
 
+test('cold-load diagnostics preserve all readiness predicates and bound synthetic event data', () => {
+  let now=12;
+  const nodes={'#homeConnection':{dataset:{connected:'true'}},'#homeMapAlign':{hidden:true},
+    '#homeMapStatus':{textContent:'Map settings unavailable. Home controls are still available.'},
+    '#homeMapCaption':{hidden:false},'#homeMapRetry':{hidden:false}};
+  const env={performance:{now:()=>now,timeOrigin:1000},document:{querySelector:id=>nodes[id]},
+    floorplan:{renderCount:2},__browserRenderedLights:72};env.window=env;
+  vm.runInNewContext(`(${installViewerLoadDiagnostics.toString()})({role:'frame',expectedLights:72})`,env);
+  const diagnostic=env.__viewerLoadDiagnostics;
+  diagnostic.trace('map-request',{request_id:'map-1',action:'get',pending:1,payload:{secret:'not recorded'},token:'not recorded'});
+  assert.equal(diagnostic.snapshot().pending[0].requestId,'map-1');
+  now=31013;assert.equal(diagnostic.snapshot().pending[0].ageMs,31001);
+  diagnostic.trace('map-timeout',{request_id:'map-1',pending:1});
+  diagnostic.trace('load-map-error',{error:new Error('Map request timed out.')});
+  let result=JSON.parse(JSON.stringify(diagnostic.snapshot()));
+  assert.deepEqual(result.readiness.predicates,{rendered:true,connected:true,mapAlign:false,lights:true});
+  assert.equal(result.readiness.ready,false);assert.equal(result.readiness.renderedLights,72);
+  assert.equal(result.events[2].atMs-result.events[1].atMs,31001);
+  assert.equal(result.events[2].epochMs,32013);
+  assert.equal(result.pending.length,0,'Timed-out requests are not reported as pending');
+  assert.equal(result.events[3].error.message,'Map request timed out.');
+  assert(!JSON.stringify(result).includes('not recorded'),'Transport payloads and arbitrary properties are never serialized');
+  nodes['#homeMapAlign'].hidden=false;
+  assert.equal(diagnostic.snapshot().readiness.ready,true);
+  env.floorplan.renderCount=0;nodes['#homeConnection'].dataset.connected='false';env.__browserRenderedLights=71;
+  assert.deepEqual(JSON.parse(JSON.stringify(diagnostic.snapshot().readiness.predicates)),{rendered:false,connected:false,mapAlign:true,lights:false});
+  for(let i=0;i<200;i++)diagnostic.trace('map-result',{request_id:'private-unexpected-id',action:'unknown'});
+  result=JSON.parse(JSON.stringify(diagnostic.snapshot()));
+  assert.equal(result.events.length,96);assert.equal(result.dropped,108);
+  assert(!JSON.stringify(result).includes('private-unexpected-id'));
+  diagnostic.reset();assert.equal(diagnostic.snapshot().events.length,1);assert.equal(diagnostic.snapshot().dropped,0);
+  for(let i=1;i<=40;i++)diagnostic.trace('map-request',{request_id:`map-${i}`,action:'private-action'});
+  assert.equal(diagnostic.snapshot().pending.length,32);assert(!JSON.stringify(diagnostic.snapshot()).includes('private-action'));
+  for(let i=0;i<100;i++)diagnostic.trace('map-result');
+  diagnostic.trace('map-close');assert.equal(diagnostic.snapshot().pending.length,0,'Pending state stays current even after the event cap');
+});
+
+test('exact transport instrumentation distinguishes timely replies from timeout and late unmatched replies', async () => {
+  const viewer=fs.readFileSync(path.join(__dirname,'..','viewer.js'),'utf8');
+  const home=fs.readFileSync(path.join(__dirname,'..','home-view.js'),'utf8');
+  const instrumented=instrumentViewerLoadSource(viewer+'\n'+home);
+  assert.equal(instrumented.status,'enabled');
+  const source=instrumented.html;
+  const comparison=instrumentViewerLoadSource(viewer,{comparison:true});
+  assert.equal(comparison.status,'unavailable');assert.match(comparison.reason,/anchor must occur once/);
+  assert.equal(comparison.html,viewer,'Unsupported old-source comparisons do not retain partial instrumentation');
+  assert.throws(()=>instrumentViewerLoadSource(viewer),/anchor must occur once/,'Missing production anchors fail closed');
+  assert.throws(()=>instrumentViewerLoadSource(viewer+'\n'+home+'\n'+home),/anchor must occur once/,'Duplicate production anchors fail closed');
+  const request=source.slice(source.indexOf('window.homeMapRequest='),source.indexOf('window.homeMapNavigationChanged='));
+  const response=source.slice(source.indexOf("  if(message?.type==='map_result'){"),source.indexOf("  if(message?.type==='dismiss_overlays')"));
+  const load=source.slice(source.indexOf('  async function loadMap(){'),source.indexOf('  const mapFields='));
+  for(const outcome of ['reply','timeout','configure-error']) {
+    const timers=new Map(),sent=[];let now=0;
+    const env={performance:{now:()=>now,timeOrigin:1000},document:{querySelector:()=>null},embedded:true,
+      bridge:{postMessage:message=>sent.push(message)},setTimeout:(callback,delay)=>{assert.equal(delay,30000);timers.set(1,callback);return 1;},
+      clearTimeout:id=>timers.delete(id),configureMap:()=>{if(outcome==='configure-error')throw new TypeError('Synthetic configure failure');},
+      refreshMapControls(){},refreshMapStatus(){}};env.window=env;
+    vm.runInNewContext(`(${installViewerLoadDiagnostics.toString()})({role:'frame',expectedLights:72});
+      const mapRequests=new Map();let mapSequence=0,mapLoading=false,mapSettingsError=false;
+      ${request}\n${load}\nglobalThis.load=loadMap;globalThis.receive=message=>{${response}};`,env);
+    const loading=env.load();assert.equal(sent.length,1);assert.equal(timers.size,1);
+    if(outcome==='timeout') {now=31000;timers.get(1)();}
+    env.receive({type:'map_result',request_id:sent[0].request_id,success:true,result:{revision:0,config:null}});
+    await loading;
+    const events=JSON.parse(JSON.stringify(env.__viewerLoadDiagnostics.snapshot().events));
+    assert.equal(events.find(event=>event.event==='map-result').matched,outcome!=='timeout');
+    const error=events.find(event=>event.event==='load-map-error');
+    if(outcome==='reply') {assert.equal(error,undefined);assert(events.some(event=>event.event==='load-map-complete'));assert.equal(timers.size,0);}
+    else assert.equal(error.error.message,outcome==='timeout'?'Map request timed out.':'Synthetic configure failure');
+    assert.equal(events.some(event=>event.event==='map-timeout'),outcome==='timeout');
+  }
+});
+
+test('shader status queries wait for the explicit readiness flush and retain timing', () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  const start=source.indexOf('function instrumentation('),end=source.indexOf('// Serialized into the viewer frame.',start);
+  assert(start>0&&end>start);
+  let now=0,links=0,statusQueries=0;
+  const gl={getExtension:()=>null,getParameter:()=>16,LINK_STATUS:1,
+    linkProgram(){links++;now+=11;},deleteProgram(){},isContextLost:()=>false,getProgramParameter(){statusQueries++;now+=23;return true;}};
+  function Canvas(){};Canvas.prototype.getContext=()=>gl;Canvas.prototype.addEventListener=()=>{};
+  const env={HTMLCanvasElement:Canvas,performance:{now:()=>now},addEventListener:()=>{},console:{error(){},info(){}}};env.window=env;
+  vm.runInNewContext('globalThis.installShaderChecks='+deferViewerShaderChecks.toString(),env);
+  vm.runInNewContext(source.slice(start,end)+'\ninstrumentation(installShaderChecks);',env);
+  const context=new env.HTMLCanvasElement().getContext('webgl2');context.linkProgram({});context.linkProgram({});
+  assert.equal(statusQueries,0,'linkProgram does not add an eager synchronization barrier');
+  assert.equal(env.__browserStability.shaderChecks.pending,2);
+  env.__flushBrowserShaders();
+  const stats=JSON.parse(JSON.stringify(env.__browserStability));
+  assert.equal(stats.shaderChecks.pending,0);assert.equal(stats.shaderChecks.checked,2);
+  assert.equal(links,2);assert.equal(statusQueries,2,'Every linked program is checked once by the diagnostic');
+  assert.equal(stats.linkedPrograms,2);assert.equal(stats.shaderTiming.linkMs,22);assert.equal(stats.shaderTiming.statusMs,46);
+  assert.deepEqual(stats.shaderTiming.longestStatus,{startedMs:22,durationMs:23});
+});
+
+test('deferred checks preserve failed links, deletion, relinking and context generations', () => {
+  const make=()=>{
+    let now=0,lost=false;const events={},calls=[];
+    const stats={shaderErrors:[],linkedPrograms:0,shaderTiming:{linkMs:0,statusMs:0,longestLink:null,longestStatus:null},shaderChecks:{pending:0,checked:0,discarded:0}};
+    const gl={LINK_STATUS:1,isContextLost:()=>lost,
+      linkProgram:p=>{assert(!p.deleted);calls.push(['link',p.id]);},
+      deleteProgram:p=>{calls.push(['delete',p.id]);p.deleted=true;},
+      getProgramParameter:p=>{assert(!lost&&!p.deleted,'Never query a lost or deleted program');calls.push(['status',p.id]);now++;return p.valid!==false;},
+      getProgramInfoLog:()=>''};
+    const env={gl,canvas:{addEventListener:(name,fn)=>{events[name]=fn;}},stats,performance:{now:()=>now}};
+    vm.runInNewContext('globalThis.owner=('+deferViewerShaderChecks.toString()+')(gl,canvas,stats)',env);
+    return {gl,stats,calls,flush:env.owner.flush,lose(){lost=true;events.webglcontextlost();},restore(){lost=false;events.webglcontextrestored();}};
+  };
+  const deleted=make(),p={id:1};deleted.gl.linkProgram(p);deleted.gl.deleteProgram(p);deleted.flush();
+  assert.deepEqual(deleted.calls,[['link',1],['status',1],['delete',1]]);
+  assert.equal(deleted.stats.shaderChecks.pending,0);
+  const relinked=make(),q={id:2};relinked.gl.linkProgram(q);relinked.gl.linkProgram(q);relinked.flush();
+  assert.deepEqual(relinked.calls,[['link',2],['status',2],['link',2],['status',2]]);
+  assert.equal(relinked.stats.shaderChecks.checked,relinked.stats.linkedPrograms);
+  const failed=make();failed.gl.linkProgram({id:3,valid:false});failed.flush();
+  assert.equal(failed.stats.shaderChecks.pending,0);
+  assert.deepEqual(failed.stats.shaderErrors,['Program link failed without a driver log.'],'An empty driver log cannot hide a failed link');
+  const unexpected=make(),old={id:4};unexpected.gl.linkProgram(old);unexpected.lose();unexpected.restore();
+  unexpected.gl.deleteProgram(old);unexpected.gl.linkProgram({id:5});unexpected.flush();
+  assert.deepEqual(unexpected.calls,[['link',4],['delete',4],['link',5],['status',5]],'Old-epoch handles are never queried after restore');
+  assert.equal(unexpected.stats.shaderChecks.discarded,1);assert.equal(unexpected.stats.shaderChecks.pending,0);
+  assert.equal(unexpected.stats.shaderErrors.length,1,'Unverified lost programs remain a sticky failure');
+  const planned=make();planned.gl.linkProgram({id:6});planned.flush();planned.lose();planned.restore();
+  planned.gl.linkProgram({id:7});planned.flush();
+  assert.deepEqual(planned.stats.shaderErrors,[]);assert.equal(planned.stats.shaderChecks.discarded,0);
+  assert.equal(planned.stats.shaderChecks.checked,2);
+  const bounded=make();for(let id=0;id<257;id++)bounded.gl.linkProgram({id});
+  assert.equal(bounded.stats.shaderChecks.pending,1);assert.equal(bounded.stats.shaderChecks.checked,256);
+  bounded.flush();assert.equal(bounded.stats.shaderChecks.checked,257);assert.deepEqual(bounded.stats.shaderErrors,[]);
+});
+
+test('deferred shader checks remain inside cold readiness and every final lifecycle receipt', () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  const ready=source.indexOf("child.waitForFunction(expected => window.floorplan?.renderCount > 0");
+  const flush=source.indexOf('const shaders=await load.run(',ready),complete=source.indexOf('load.complete();',ready);
+  assert(ready>0&&ready<flush&&flush<complete,'The same deadline encloses both real readiness and shader validation');
+  assert(source.indexOf('const checks=window.__flushBrowserShaders();')<source.indexOf('extension.loseContext();'));
+  assert(source.indexOf('const finalShaders=await snapshot();')<source.indexOf("phases.start('viewer-detach'"));
+  assert(source.includes('check(finalShaders.shaderErrors.length===0'));
+});
+
 test('viewer host rejects unsupported map actions and records every unexpected command', () => {
   const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
   const start=source.indexOf('            channel.port1.onmessage = event => {');
@@ -34,6 +175,7 @@ test('viewer host rejects unsupported map actions and records every unexpected c
   assert(start>0&&end>start);
   const replies=[],env={states:{},viewerCommands:[],viewerMapRequests:[],deferMapReply:false,
     channel:{port1:{postMessage:message=>replies.push(JSON.parse(JSON.stringify(message)))}}};
+  const trace=[];env.__viewerLoadDiagnostics={trace:(event,detail)=>trace.push({event,...detail})};
   env.window=env;vm.runInNewContext(source.slice(start,end),env);
   const send=data=>env.channel.port1.onmessage({data});
   for(const type of ['model_config','view_preferences','map_view'])send({type});
@@ -43,6 +185,8 @@ test('viewer host rejects unsupported map actions and records every unexpected c
   env.deferMapReply=true;const count=replies.length;
   send({type:'map_request',action:'get',request_id:'deferred'});
   assert.equal(replies.length,count,'Only the intended delayed get is held');
+  assert.equal(trace.filter(event=>event.event==='host-map-request').length,2);
+  assert.equal(trace.filter(event=>event.event==='host-map-reply').length,1,'A held response cannot be recorded as sent');
   for(const action of ['save','tile','unknown']) {
     const message={type:'map_request',action,request_id:action};send(message);
     assert.equal(replies.at(-1).success,false);assert.equal(replies.at(-1).request_id,action);
@@ -190,15 +334,15 @@ test('wheel acceptance preserves the sized idle deadline and accepts two bounded
 
 test('Viewer frame receipts advance only after the real draw succeeds', () => {
   let active = 18, fail = false;
-  const env = {renderer: {info:{render:{calls:1,triangles:1}},domElement:{width:632,height:394},getViewport(v){return v.copy({x:0,y:0,z:632,w:394});},getPixelRatio(){return 1;},render() {if (fail) throw Error('draw failed'); return 42;}},
+  const env = {mainScene:{}, renderer: {getRenderTarget:()=>null,info:{render:{calls:1,triangles:1}},domElement:{width:632,height:394},getViewport(v){return v.copy({x:0,y:0,z:632,w:394});},getPixelRatio(){return 1;},render() {if (fail) throw Error('draw failed'); return 42;}},
     __browserScene: () => ({activePointLights: active})};
   env.window = env;
-  vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer)`, env);
+  vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer,mainScene)`, env);
   const camera = {projectionMatrix: {toArray: () => [1]}, matrixWorld: {toArray: () => [2]}};
-  assert.equal(env.renderer.render({}, camera), 42);
+  assert.equal(env.renderer.render(env.mainScene, camera), 42);
   active = 0;
   assert.equal(env.__browserRenderedLights, 18, 'CPU state is not a completed frame');
-  env.renderer.render({}, camera);
+  env.renderer.render(env.mainScene, camera);
   assert.equal(env.__browserRenderedLights, 0);
   active = 9;
   env.renderer.render({name:'interaction-copy'}, {});
@@ -209,21 +353,49 @@ test('Viewer frame receipts advance only after the real draw succeeds', () => {
   assert.equal(env.__browserRenderPasses.last,'copy');
   assert.deepEqual(Array.from(env.__browserRenderPasses.copyViewport),[0,0,632,394]);
   fail = true;
-  assert.throws(() => env.renderer.render({}, camera), /draw failed/);
+  assert.throws(() => env.renderer.render(env.mainScene, camera), /draw failed/);
   assert.equal(env.__browserRenderedLights, 0, 'A failed draw cannot certify new state');
+});
+
+test('viewer receipts exclude real offscreen depth and fullscreen contact draws', () => {
+  let target=null,active=18,draws=0,fail=false;
+  const mainScene={},quadScene={},camera={projectionMatrix:{toArray:()=>[2]},matrixWorld:{toArray:()=>[3]}};
+  const quadCamera={projectionMatrix:{toArray:()=>[1]},matrixWorld:{toArray:()=>[1]}};
+  const env={mainScene,__browserScene:()=>({activePointLights:active}),renderer:{
+    info:{render:{calls:8,triangles:12}},domElement:{width:800,height:600},
+    getRenderTarget:()=>target,getViewport:v=>v.copy({x:0,y:0,z:800,w:600}),getPixelRatio:()=>1,
+    render(){draws++;if(fail)throw Error('real auxiliary failure');return draws;}}};
+  env.window=env;
+  vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer,mainScene)`,env);
+  env.renderer.render(mainScene,camera);
+  const receipt=JSON.stringify(env.__browserRenderPasses);
+  active=0;target={depthTexture:{}};
+  env.renderer.render(mainScene,camera); // The real room's contact-depth pass.
+  target={};env.renderer.render(quadScene,quadCamera); // Offscreen AO.
+  target=null;env.renderer.render(quadScene,quadCamera); // Final contact composite.
+  assert.equal(draws,4,'Observation must not skip any actual draw');
+  assert.equal(JSON.stringify(env.__browserRenderPasses),receipt,'Auxiliary passes cannot satisfy frame or wheel gates');
+  assert.deepEqual(Array.from(env.__browserCamera.world),[3],'The room camera survives contact compositing');
+  assert.equal(env.__browserRenderedLights,18,'An auxiliary pass cannot certify changed light state');
+  fail=true;assert.throws(()=>env.renderer.render(quadScene,quadCamera),/real auxiliary failure/);
+  fail=false;env.renderer.render(mainScene,camera);
+  assert.equal(env.__browserRenderedLights,0);assert.equal(env.__browserRenderPasses.scene,2);
+  env.renderer.render({name:'interaction-copy'},quadCamera);
+  assert.equal(env.__browserRenderPasses.copy,1,'Software interaction copying remains measured');
+  assert.deepEqual(Array.from(env.__browserCamera.world),[3]);
 });
 
 async function lightStateMeasurement({drawAt=50, expectedLights=71, mutation, lateRead=false}={}) {
   let now=0, serial=0, completed=false, result, error, measuring=false;
   const timers=new Map(), state={renderCount:0, activeLights:72, markers:72, slots:72};
   const camera={projectionMatrix:{toArray:()=>[1]},matrixWorld:{toArray:()=>[1]}};
-  const env={performance:{now:()=>now},
+  const env={mainScene:{},performance:{now:()=>now},
     setTimeout(callback, delay){const id=++serial;timers.set(id,{at:now+delay,callback});return id;},
     // Model a browser that never delivers additional idle RAF callbacks.
     requestAnimationFrame(){throw Error('Light-state receipt must not request an idle animation frame');},
     document:{querySelectorAll:()=>({length:state.markers}),visibilityState:'visible',hidden:false,hasFocus:()=>true},
     floorplan:{homeMode:true,get renderCount(){return state.renderCount;}},__browserStability:{linkedPrograms:19},
-    renderer:{info:{render:{calls:8,triangles:12}},domElement:{width:920,height:622},
+    renderer:{getRenderTarget:()=>null,info:{render:{calls:8,triangles:12}},domElement:{width:920,height:622},
       getViewport(value){return value.copy({x:0,y:0,z:920,w:622});},getPixelRatio:()=>1,
       render(){state.renderCount++;}},
     __browserScene(){
@@ -232,12 +404,12 @@ async function lightStateMeasurement({drawAt=50, expectedLights=71, mutation, la
         drawingBuffer:[920,622],renderPasses:env.__browserRenderPasses};
     }};
   env.window=env;
-  vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer);globalThis.wait=${waitForViewerLightState.toString()};`,env);
-  env.renderer.render({},camera);
+  vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer,mainScene);globalThis.wait=${waitForViewerLightState.toString()};`,env);
+  env.renderer.render(env.mainScene,camera);
   const before={beforeRenderCount:state.renderCount,beforeSceneDraws:env.__browserRenderPasses.scene};
   state.markers=state.activeLights=expectedLights;
   const draw=()=>{
-    env.renderer.render(mutation==='copy'?{name:'interaction-copy'}:{},camera);
+    env.renderer.render(mutation==='copy'?{name:'interaction-copy'}:env.mainScene,camera);
     if(mutation==='markers')state.markers++;
     if(mutation==='active')state.activeLights++;
     if(mutation==='slots')state.slots++;
@@ -351,6 +523,20 @@ function suite(name, playwright) {
 const options = {deadlineMs: 1000, reportOnly: false, launch: {headless: true},
   context: {viewport: {width: 1280, height: 800}}, fixture: {rooms: 6, lights: 18}};
 const read = (diagnostics, file = 'firefox.json') => JSON.parse(fs.readFileSync(path.join(diagnostics.directory, file)));
+
+test('failed-load capture preserves pending shader and map evidence without synchronization', async () => {
+  const fake=fakeBrowser();let flushes=0;
+  const env={location:{href:'about:srcdoc',pathname:''},navigator:{userAgent:'fixture'},devicePixelRatio:1,
+    innerWidth:800,innerHeight:600,scrollX:0,scrollY:0,__browserStability:{shaderChecks:{pending:1}},
+    __viewerLoadDiagnostics:{snapshot:()=>({pending:[{requestId:'map-1'}]})},
+    __flushBrowserShaders(){flushes++;throw Error('A failed-run observation must not wait for shaders');}};env.window=env;
+  fake.page.frames=()=>[{evaluate:async callback=>vm.runInNewContext('('+callback.toString()+')()',env)}];
+  const diagnostics=suite('pending-shader-failure',{firefox:{launch:async()=>fake.browser}});
+  await assert.rejects(diagnostics.run('firefox',options,async()=>{throw Error('Synthetic cold-load failure');}),/Synthetic cold-load failure/);
+  const record=read(diagnostics);
+  assert.equal(flushes,0);assert.equal(record.snapshot[0].stats.shaderChecks.pending,1);
+  assert.deepEqual(record.snapshot[0].viewerLoad.pending,[{requestId:'map-1'}]);
+});
 
 test('invalid engines and bounded fixture values cannot produce an empty green run', () => {
   assert.deepEqual(selectedEngines(' firefox, chromium '), ['firefox', 'chromium']);
@@ -988,7 +1174,7 @@ function freshPreviewHarness(view = 'preview') {
   }
   class Renderer {
     constructor({canvas}) {
-      this.domElement=canvas;this.shadowMap={};this.id=renderers.length+1;this.lost=false;renderers.push(this);
+      this.domElement=canvas;this.shadowMap={};this.capabilities={getMaxAnisotropy:()=>1};this.id=renderers.length+1;this.lost=false;renderers.push(this);
       this.restored=()=>reusedRestores++;
       canvas.addEventListener('webglcontextrestored',this.restored);
     }
@@ -1004,6 +1190,10 @@ function freshPreviewHarness(view = 'preview') {
   const window = new EventTarget();
   context=vm.createContext({AbortController,console,document,window,devicePixelRatio:2,
     // The isolated lifecycle fixture uses the normal, unthemed canvas palette.
+    // Optional PBR owners are exercised separately; this fixture isolates scheduling.
+    PBR_COLOR_DATA:{},createPBRDetails:()=>({configure(){},get(){return {};},dispose(){}}),
+    createReflectionEnvironment:()=>({update(){},dispose(){}}),createContactShading:()=>({apply(){},dispose(){}}),
+    applyMaterialPBR(){},installInstanceMaterialUV(){},
     planColors:{background:'#f2f4ed'},
     // This renderer-lifecycle fixture has no scenery; preserve its optional layer contract.
     createEnvironmentControls:()=>({refresh(){}}),createEnvironmentLayer:()=>({setActive(){},dispose(){}}),

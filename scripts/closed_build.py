@@ -36,6 +36,7 @@ OWNER_ID = "307715255"
 WORKFLOW = ".github/workflows/release-pipeline.yml"
 MAX_FILES = 12000
 MAX_FILE = 64 * 1024 * 1024
+MAX_PACKAGE = 128 * 1024 * 1024
 MAX_TOTAL = 512 * 1024 * 1024
 MAX_LOG = 4 * 1024 * 1024
 REQUEST = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}\Z")
@@ -368,10 +369,12 @@ def run_worker(image, source, public, output, context, log, *, timeout=900):
                  "--memory", "64m", "--log-driver", "none", "--mount", f"type=volume,src={volume},dst=/output",
                  "--entrypoint", "python3", image, "-c", "import time;time.sleep(1500)"], log, 30)
         capture(command, log, timeout)
+        limits = {"home-package.tar.gz": MAX_PACKAGE, "acceptance.json": 100_000}
         inspect = ("import os,stat; p='/output'; "
-                   "assert set(os.listdir(p))=={'home-package.tar.gz','acceptance.json'}; "
-                   "s=[os.lstat(p+'/'+n) for n in os.listdir(p)]; "
-                   "assert all(stat.S_ISREG(i.st_mode) and i.st_nlink==1 and i.st_size<=67108864 for i in s)")
+                   f"limits={limits!r}; "
+                   "assert set(os.listdir(p))==set(limits); "
+                   "s=[(n,os.lstat(p+'/'+n)) for n in os.listdir(p)]; "
+                   "assert all(stat.S_ISREG(i.st_mode) and i.st_nlink==1 and i.st_size<=limits[n] for n,i in s)")
         capture(["docker", "exec", anchor, "python3", "-c", inspect], log, 30)
         for filename in ("home-package.tar.gz", "acceptance.json"):
             capture(["docker", "cp", anchor + ":/output/" + filename, str(output / filename)], log, 60)
@@ -397,7 +400,7 @@ def validate_output(output, public, build_mode, *, synthetic=False):
         require(not evidence.get("fixture") and set(evidence.get("checks", [])) >= REQUIRED_CHECKS)
     if build_mode == "rebuild-preserve":
         require("geometry" in evidence["checks"])
-    payload = regular(output / "home-package.tar.gz")
+    payload = regular(output / "home-package.tar.gz", MAX_PACKAGE)
     with tempfile.TemporaryDirectory(prefix="closed-check-") as directory:
         extracted = Path(directory)
         extract_tar(payload, extracted)
@@ -411,6 +414,7 @@ def validate_output(output, public, build_mode, *, synthetic=False):
 
 
 def pack_candidate(payload, manifest, installer):
+    require(len(payload) <= MAX_PACKAGE)
     stream = io.BytesIO()
     with tarfile.open(fileobj=stream, mode="w:gz", format=tarfile.USTAR_FORMAT) as archive:
         for name, data in (("candidate.json", canonical(manifest)), ("home-package.tar.gz", payload),
@@ -418,7 +422,11 @@ def pack_candidate(payload, manifest, installer):
             member = tarfile.TarInfo(name)
             member.size, member.mode = len(data), 0o644
             archive.addfile(member, io.BytesIO(data))
-    return stream.getvalue()
+    packed = stream.getvalue()
+    # The outer candidate also carries metadata and the trusted installer.
+    # Keep the authenticated envelope's independent plaintext limit intact.
+    require(len(packed) <= MAX_ENVELOPE // 2)
+    return packed
 
 
 def policy():
@@ -540,8 +548,8 @@ def validate_acceptance(accepted, context, request_id):
     require(re.fullmatch(r"[0-9a-f]{40}", accepted["build_source_sha"]) is not None)
     for key in ("build_run_id", "build_run_attempt"):
         require(re.fullmatch(r"[1-9][0-9]*", accepted[key]) is not None)
-    for key in ("payload_size", "installer_size"):
-        require(type(accepted[key]) is int and 0 < accepted[key] <= MAX_FILE)
+    for key, maximum in (("payload_size", MAX_PACKAGE), ("installer_size", MAX_FILE)):
+        require(type(accepted[key]) is int and 0 < accepted[key] <= maximum)
     site = accepted["site_acceptance"]
     require(site["schema"] == 1 and site["state"] == "site-canary-passed")
     require(site["payload_sha256"] == accepted["payload_sha256"])

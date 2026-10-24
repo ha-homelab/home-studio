@@ -425,9 +425,21 @@ def make_floor(project, floor, next_floor):
             for x, y, z in part["vertices"]:
                 x, z = x * d["width"], z * d["depth"]
                 vertices.append([p["x"] + cosine * x + sine * z, p["y"] + y * d["height"], p["z"] - sine * x + cosine * z])
-            faces = [part["indices"][index:index + 3] for index in range(0, len(part["indices"]), 3)]
-            g.mesh(item_name + "_" + part["name"], vertices, faces, part["material"], "inventory",
-                   item_id=item["id"], entity_id=item["entity_id"], model_id=item["model_id"])
+            # Keep authored seams and smooth normals. The primitive builder
+            # expands triangles and computes flat normals, losing both here.
+            normals = []
+            for x, y, z in part["normals"]:
+                x, y, z = x / d["width"], y / d["height"], z / d["depth"]
+                normal = [cosine * x + sine * z, y, -sine * x + cosine * z]
+                length = math.sqrt(sum(value * value for value in normal))
+                normals.append([value / length for value in normal])
+            placed = copy.deepcopy(part)
+            placed.update(name=item_name + "_" + part["name"], vertices=vertices, normals=normals,
+                          kind="inventory", item_id=item["id"], entity_id=item["entity_id"], model_id=item["model_id"])
+            if "uv" in part:
+                placed["uv"] = material_uv(part, d)
+                placed.pop("uv_dimensions", None)
+            g.meshes.append(placed)
     points = [p for mesh in g.meshes for p in mesh["vertices"]]
     minx, maxx = min(p[0] for p in points), max(p[0] for p in points)
     minz, maxz = min(p[2] for p in points), max(p[2] for p in points)
@@ -529,6 +541,9 @@ def render_viewer(data, svg):
         "/*__ENVIRONMENT_JS__*/": (ROOT / "planner/environment.js").read_text(encoding="utf-8").replace("export ", ""),
         "__INTERACTION_RENDER_JS__": (ROOT / "planner/interaction-render.js").read_text(encoding="utf-8").replace("export function createInteractionRenderer", "function createInteractionRenderer"),
         "__ROOM_LIGHTING_JS__": (ROOT / "room-lighting.js").read_text(encoding="utf-8"),
+        "/*__PBR_COLOR_DATA_JS__*/": (ROOT / "pbr-color-data.js").read_text(encoding="utf-8"),
+        "/*__PBR_MATERIALS_JS__*/": (ROOT / "pbr-materials.js").read_text(encoding="utf-8"),
+        "/*__ENVIRONMENT_LIGHTING_JS__*/": (ROOT / "environment-lighting.js").read_text(encoding="utf-8"),
         "/*__MATERIAL_TEXTURES_JS__*/": (ROOT / "material-textures.js").read_text(encoding="utf-8"),
         "__THREE_B64__": base64.b64encode((ROOT / "vendor/three.module.min.js").read_bytes()).decode(),
         "__PLAN_MIME__": "image/svg+xml", "__PLAN_DATA__": base64.b64encode(viewer_plan.encode()).decode(),
@@ -597,8 +612,30 @@ def package_ha(output, manifest):
             entry.size, entry.mode = len(contents), 0o644
             archive.addfile(entry, io.BytesIO(contents))
         for floor_id in manifest["floors"]:
-            for source in sorted((output / floor_id).iterdir()):
-                archive.add(source, arcname=base + "/assets/" + floor_id + "/" + source.name, recursive=False)
+            folder = output / floor_id
+            stem = manifest['floors'][floor_id]['stem']
+            # Authoring SVG, USDA and seed inventory remain in the local build.
+            # HA already embeds the plan/seed in HTML and model-data; it serves
+            # only the runtime and the formats linked by the viewer.
+            names = {'index.html', 'model-data.json'}
+            names.update(stem + '.' + ext for ext in ('glb', 'obj', 'mtl', 'dae', 'usdz')
+                         if (folder / (stem + '.' + ext)).is_file())
+            physical_manifest = folder / (stem + '.exports.json')
+            if physical_manifest.is_file():
+                names.add(physical_manifest.name)
+                textures = json.loads(physical_manifest.read_text())['textures']
+                for name, digest in textures.items():
+                    if (name != stem + '.textures/' + digest + '.png'
+                            or not re.fullmatch('[0-9a-f]{64}', digest)
+                            or hashlib.sha256((folder / name).read_bytes()).hexdigest() != digest):
+                        fail('ha-package', 'invalid physical texture dependency')
+                    names.add(name)
+            for name in sorted(names):
+                source = folder / name
+                if source.is_symlink():
+                    fail("ha-package", "refusing symlink output " + str(source))
+                if source.is_file():
+                    archive.add(source, arcname=base + "/assets/" + floor_id + "/" + source.relative_to(folder).as_posix(), recursive=False)
 
 
 def compile_project(project, output=DEFAULT_OUTPUT, ha_package=False, project_path=None):
@@ -660,7 +697,10 @@ def compile_project(project, output=DEFAULT_OUTPUT, ha_package=False, project_pa
             inventory = {"schema_version": 1, "model": floor["id"], "units": "metres", "up_axis": "Y", "items": floor["items"]}
             (folder / "inventory.json").write_text(json_text(inventory, True) + "\n", encoding="utf-8")
             (folder / "inventory-template.json").write_text(json_text({**inventory, "items": []}, True) + "\n", encoding="utf-8")
-            export_models(data, folder, floor["id"])
+            physical = any(any(mesh.get(key) for key in ('material_family', 'albedo_texture',
+                           'normal_texture', 'roughness_texture', 'metalness_texture', 'ao_texture'))
+                           for mesh in data['meshes'])
+            export_models(data, folder, floor["id"], physical=True) if physical else export_models(data, folder, floor["id"])
             normalize_glb(folder / (floor["id"] + ".glb"), data)
             (folder / "index.html").write_text(render_viewer(data, svg), encoding="utf-8")
         (stage / "site.json").write_text(json_text(manifest, True) + "\n", encoding="utf-8")
@@ -718,14 +758,25 @@ def export_floor(model, floor, reference_items=None, *, elevated=False):
     groups = []
     materials = model['materials']
     validate_material_textures(model)
+    physical_parts = {}
 
-    def mesh_data(mesh, dimensions=None):
+    def mesh_data(mesh, dimensions=None, scope='architecture'):
         result = {key: mesh[key] for key in ('vertices', 'normals', 'indices')} | {'color': materials[mesh['material']], 'material_name': mesh['material']}
         if 'surface_finish' in mesh:
             result['surface_finish'] = mesh['surface_finish']
-        if 'albedo_texture' in mesh:
+        if __package__ and "." in __package__:
+            from ..pbr_materials import export_material_fields, TEXTURE_CHANNELS
+        else:
+            from pbr_materials import export_material_fields, TEXTURE_CHANNELS
+        if any(key in mesh for key in TEXTURE_CHANNELS) or 'material_family' in mesh:
             result['uv'] = material_uv(mesh, dimensions)
-            result['texture'] = model['material_textures'][mesh['albedo_texture']]
+            result.update(export_material_fields(mesh, model.get('material_textures', {})))
+            # Anonymous, floor-local provenance for physical interchange only.
+            # GLB/OBJ ignore it; never expose household names or entity IDs.
+            name = mesh.get('name', '')
+            base = re.sub(r'_texture_(?:front|back|left|right|top|bottom)$', '', name)
+            key = (scope, base) if name else ('unnamed', len(physical_parts))
+            result['physical_part'] = physical_parts.setdefault(key, len(physical_parts))
         return result
 
     for index, mesh in enumerate(model['meshes']):
@@ -746,14 +797,14 @@ def export_floor(model, floor, reference_items=None, *, elevated=False):
         if replaced_asset:
             asset = None
         if asset:
-            group['meshes'] = [mesh_data(mesh, dimensions) for mesh in asset['meshes']]
+            group['meshes'] = [mesh_data(mesh, dimensions, ('item', item_number)) for mesh in asset['meshes']]
         else:
             original_position, size = original['position_m'], original['dimensions_m']
             cosine, sine = math.cos(math.radians(original['rotation_deg'])), math.sin(math.radians(original['rotation_deg']))
             for mesh in (() if replaced_asset else model['meshes']):
                 if mesh.get('kind') != 'inventory' or mesh.get('item_id') != item['id']:
                     continue
-                local = mesh_data(mesh)
+                local = mesh_data(mesh, scope=('item', item_number))
                 vertices, normals = [], []
                 for x, y, z in mesh['vertices']:
                     x, y, z = x-original_position['x'], y-original_position['y'], z-original_position['z']

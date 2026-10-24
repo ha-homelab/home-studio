@@ -1,4 +1,8 @@
 import './language-links.js';
+import {PBR_COLOR_DATA} from '../pbr-color-data.js';
+import {createPBRDetails,applyMaterialPBR,installInstanceMaterialUV} from '../pbr-materials.js';
+import {MATERIAL_SURFACE_PROFILES} from '../material-textures.js';
+import {createReflectionEnvironment,createContactShading} from '../environment-lighting.js';
 import { createEnvironmentLayer, createEnvironmentControls } from './environment.js';
 import { embeddedContext, memoryDraftOptions, connectHost } from './ha-bridge.js';
 import { addMeasuredRoom, installOnboarding } from './onboarding.js';
@@ -252,7 +256,7 @@ function status(message, error = false) {
 function translatedText(id, key) { const element = $(id); element.dataset.i18n = key; element.textContent = t(key); }
 function itemAsset(item) {
   if (!item.model_id) return null;
-  const key = `${item.model_id}|${item.style_id || ''}|${item.color || ''}|${item.pattern_id || ''}|${item.pattern_color || ''}`;
+  const key = `${item.model_id}|${item.style_id || ''}|${item.color || ''}|${item.pattern_id || ''}|${item.pattern_color || ''}|${item.dimensions_m?.width}|${item.dimensions_m?.height}|${item.dimensions_m?.depth}`;
   if (!assetCache.has(key)) {
     if (assetCache.size >= APPEARANCE_CACHE_LIMIT) assetCache.delete(assetCache.keys().next().value);
     assetCache.set(key, buildFurnitureAsset(item));
@@ -349,7 +353,7 @@ function drawItemThumbnail(canvas, model, appearance = { model_id: model.id, sty
   thumbnailCache.set(key, pixels); context.putImageData(pixels, 0, 0);
 }
 function itemPlanShapes(item) {
-  const key = `${item.model_id}|${item.style_id || ''}|${item.color || ''}|${item.pattern_id || ''}|${item.pattern_color || ''}`;
+  const key = `${item.model_id}|${item.style_id || ''}|${item.color || ''}|${item.pattern_id || ''}|${item.pattern_color || ''}|${item.dimensions_m?.width}|${item.dimensions_m?.height}|${item.dimensions_m?.depth}`;
   if (planShapeCache.has(key)) return planShapeCache.get(key);
   const asset = itemAsset(item);
   if (!asset) return null;
@@ -1044,6 +1048,7 @@ function environmentSite() {
   });
   return { bounds: { minX: Math.min(...boxes.map(b => b.minX)), maxX: Math.max(...boxes.map(b => b.maxX)), minZ: Math.min(...boxes.map(b => b.minZ)), maxZ: Math.max(...boxes.map(b => b.maxZ)) }, elevation: Math.min(...floors.map(f => f.elevation_m)) };
 }
+let previewDetails=null,previewReflections=null,previewContact=null;
 let previewLost = false, previewSize = '', previewPixels = 2000000, previewInitialized = false, previewRendererDisposed = false, previewInstancing = false, previewDiffuseLighting = false;
 const orbit = { yaw: -Math.PI / 3, pitch: .8, radius: 17, baseRadius: 17, target: new THREE.Vector3(4, 0, 3), mode: 'orbit', pointers: new Map(), gesture: null };
 function createPreviewMaterial(options) {
@@ -1065,13 +1070,13 @@ function initPreview() {
     renderer = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: true, alpha: false }); previewRendererDisposed = false; renderer.setClearColor(planColors.background); renderer.outputColorSpace = THREE.SRGBColorSpace;
     const profile = previewRenderProfile(renderer.getContext()); previewPixels = profile.pixels; previewInstancing = profile.instanceCatalog; previewDiffuseLighting = profile.diffuseLighting;
     renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = .9; renderer.shadowMap.enabled = true; renderer.shadowMap.type = previewDiffuseLighting ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
-    scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(40, 1, .02, 1500); scene.add(new THREE.HemisphereLight(0xffffff, 0xc7cfbc, 1.7));
-    previewSun = new THREE.DirectionalLight(0xfff6e6, 2.5); previewSun.castShadow = true; previewSun.shadow.mapSize.set(profile.shadowSize, profile.shadowSize); previewSun.shadow.normalBias = .025; previewSun.shadow.bias = -.0002; scene.add(previewSun); scene.add(previewSun.target);
+    scene = new THREE.Scene();previewDetails=createPBRDetails(THREE,PBR_COLOR_DATA);previewDetails.configure(Math.min(4,renderer.capabilities.getMaxAnisotropy()));previewReflections=createReflectionEnvironment(THREE,renderer,scene,profile);previewReflections.update(.4);if(!previewDiffuseLighting)scene.environmentIntensity=.55;previewContact=createContactShading(THREE,renderer,profile); camera = new THREE.PerspectiveCamera(40, 1, .02, 1500); scene.add(new THREE.HemisphereLight(0xffffff, 0xc7cfbc, previewDiffuseLighting ? 1.7 : .85));
+    previewSun = new THREE.DirectionalLight(0xfff6e6, previewDiffuseLighting ? 2.5 : 3); previewSun.castShadow = true; previewSun.shadow.mapSize.set(profile.shadowSize, profile.shadowSize); previewSun.shadow.normalBias = .025; previewSun.shadow.bias = -.0002; scene.add(previewSun); scene.add(previewSun.target);
     // Orbiting moves only the camera. Reuse shadows until scene geometry changes.
     previewSun.shadow.autoUpdate = false; previewSun.shadow.needsUpdate = true;
-    const fill = new THREE.DirectionalLight(0xdce9f2, .5); fill.position.set(12, 10, -10); scene.add(fill);
+    const fill = new THREE.DirectionalLight(0xdce9f2, previewDiffuseLighting ? .5 : .3); fill.position.set(12, 10, -10); scene.add(fill);
     worldGroup = new THREE.Group(); scene.add(worldGroup);
-    previewEnvironment = createEnvironmentLayer(THREE, { scene, ...environmentSite(), visibilityElement: previewCanvas, frameInterval: previewDiffuseLighting ? 750 : previewPixels <= 250000 ? 500 : 180, requestRender: requestPreviewRender, active: view !== 'plan', settings: previewEnvironmentSettings });
+    previewEnvironment = createEnvironmentLayer(THREE, { scene, ...environmentSite(), visibilityElement: previewCanvas, frameInterval: previewDiffuseLighting ? 750 : previewPixels <= 250000 ? 500 : 180, requestRender: requestPreviewRender, active: view !== 'plan', settings: previewEnvironmentSettings,decorateMaterial:(material,family)=>{applyMaterialPBR(THREE,material,{channels:previewDetails.get(family)});installInstanceMaterialUV(material)} });
     previewEnvironmentControls.refresh();
     if (!previewInitialized) { fitPreview(); previewInitialized = true; }
   } catch (error) { disposePreviewRenderer(); renderer?.forceContextLoss(); previewUnavailable = true; releasePreviewPointer(); updatePreviewNavigation(); $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
@@ -1097,6 +1102,7 @@ function disposePreviewGeometry() {
   }
 }
 function disposePreviewRenderer() {
+  previewReflections?.dispose();previewReflections=null;previewContact?.dispose();previewContact=null;previewDetails?.dispose();previewDetails=null;
   previewEnvironment?.dispose(); previewEnvironment = null;
   if (!renderer || previewRendererDisposed) return;
   disposePreviewGeometry();
@@ -1185,10 +1191,12 @@ function rebuildPreview() {
         for (const part of asset.meshes) {
           let geometry = catalogGeometries.get(part);
           if (!geometry) {
-            geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(part.vertices.flat(), 3)); geometry.setAttribute('normal', new THREE.Float32BufferAttribute(part.normals.flat(), 3)); geometry.setIndex(part.indices);
+            geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(part.vertices.flat(), 3)); geometry.setAttribute('normal', new THREE.Float32BufferAttribute(part.normals.flat(), 3)); geometry.setIndex(part.indices);if(part.uv)geometry.setAttribute('uv',new THREE.Float32BufferAttribute(part.uv.flat(),2));
             catalogGeometries.set(part, geometry);
           }
-          const material = createPreviewMaterial({ color: new THREE.Color(...asset.materials[part.material].slice(0, 3)), roughness: .78 });
+          const profile=MATERIAL_SURFACE_PROFILES[part.surface_finish]||[.78,0];
+          const material = createPreviewMaterial({ color: new THREE.Color(...asset.materials[part.material].slice(0, 3)), roughness:profile[0],metalness:profile[1] });
+          if(!previewDiffuseLighting&&part.uv)applyMaterialPBR(THREE,material,{channels:previewDetails.get(part.material_family)});
           const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; mesh.castShadow = true; mesh.receiveShadow = true; group.add(mesh); itemMeshCount++;
         }
         worldGroup.add(group);
@@ -1234,7 +1242,7 @@ function drawPreview() {
   const width = size.width, height = size.height, ratio = canvasPixelRatio(width, height, previewPixels), nextSize = [width, height, ratio].join();
   // Setting canvas dimensions, even to the same values, resets its drawing buffer.
   if (nextSize !== previewSize) { renderer.setDrawingBufferSize(width, height, ratio); previewSize = nextSize; camera.aspect = width / height; camera.updateProjectionMatrix(); }
-  const horiz = Math.cos(orbit.pitch) * orbit.radius; camera.position.set(orbit.target.x + Math.cos(orbit.yaw) * horiz, orbit.target.y + Math.sin(orbit.pitch) * orbit.radius, orbit.target.z + Math.sin(orbit.yaw) * horiz); camera.lookAt(orbit.target); renderer.render(scene, camera); previewMetadata.renderCount = (previewMetadata.renderCount || 0) + 1;
+  const horiz = Math.cos(orbit.pitch) * orbit.radius; camera.position.set(orbit.target.x + Math.cos(orbit.yaw) * horiz, orbit.target.y + Math.sin(orbit.pitch) * orbit.radius, orbit.target.z + Math.sin(orbit.yaw) * horiz); camera.lookAt(orbit.target); renderer.render(scene, camera);if(!orbit.pointers.size&&!previewEdit)previewContact?.apply(scene,camera); previewMetadata.renderCount = (previewMetadata.renderCount || 0) + 1;
   const corners = previewFloors().flatMap(f => {
     const b = floorBounds(f), out = [];
     for (const x of [b.minX, b.maxX]) for (const z of [b.minZ, b.maxZ]) for (const y of [f.elevation_m, f.elevation_m + f.height_m]) out.push(new THREE.Vector3(x, y, z).project(camera));

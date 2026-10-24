@@ -246,7 +246,7 @@ function pointShadowMapSize(lightCount, maxTextureSize = 4096, maxFaceSize = 512
 // directional shadow and material maps; extra fixtures still illuminate rooms.
 function configurePointShadows(lights, capabilities = {}, profile = {}) {
   const maxTextures = Number.isFinite(capabilities.maxTextures) ? capabilities.maxTextures : 8;
-  const shadowCount = Math.max(0, Math.min(lights.length, profile.pointShadows ?? 8, Math.floor(maxTextures) - 4));
+  const shadowCount = Math.max(0, Math.min(lights.length, profile.pointShadows ?? 8, Math.floor(maxTextures) - (profile.materialTextureUnits ?? 4)));
   const size = pointShadowMapSize(shadowCount, capabilities.maxTextureSize, profile.pointShadowSize);
   lights.forEach((light, i) => {
     light.castShadow = i < shadowCount;

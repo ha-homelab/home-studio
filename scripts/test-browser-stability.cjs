@@ -3,6 +3,7 @@
 // Install browsers: npx playwright install chromium firefox webkit
 // Select engines: BROWSER_STABILITY_ENGINES=firefox,chromium node scripts/test-browser-stability.cjs
 // Compare a checkout: HOME_STUDIO_SOURCE_ROOT=/path/to/checkout node scripts/test-browser-stability.cjs
+// Older comparison sources retain all gates; unavailable transport probes are reported explicitly.
 // Default: six rooms / eighteen lights. BROWSER_STABILITY_ROOMS supports 1–24 rooms.
 // BROWSER_STABILITY_LIGHTS_PER_ROOM supports 1–16 fictional lights per room.
 // HOME_STUDIO_DIAGNOSTICS_DIR (or BROWSER_STABILITY_DIAGNOSTICS_DIR) keeps JSON/failure PNGs.
@@ -14,7 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
-const {changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
+const {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
 const {createStartupDiagnostics} = require('./browser-startup-diagnostics.cjs');
 
 const root = path.resolve(process.env.HOME_STUDIO_SOURCE_ROOT || path.join(__dirname, '..'));
@@ -46,8 +47,11 @@ function fixture() {
   return { schema_version:1, id:'browser_stability', title:'Fictional browser stability fixture', floors:[floor] };
 }
 
-function instrumentation() {
-  const stats = window.__browserStability = { shaderErrors:[], errors:[], linkedPrograms:0, contexts:0, contextLosses:0 };
+function instrumentation(installShaderChecks) {
+  const stats = window.__browserStability = { shaderErrors:[], errors:[], linkedPrograms:0, contexts:0, contextLosses:0,
+    shaderTiming:{linkMs:0,statusMs:0,longestLink:null,longestStatus:null},shaderChecks:{pending:0,checked:0,discarded:0} };
+  const shaderOwners=[];
+  window.__flushBrowserShaders=()=>{for(const owner of shaderOwners)owner.flush();return {...stats.shaderChecks};};
   window.addEventListener('error', event=>stats.errors.push(event.message || String(event.error)));
   window.addEventListener('unhandledrejection', event=>stats.errors.push(String(event.reason)));
   const logError = console.error.bind(console);
@@ -63,11 +67,7 @@ function instrumentation() {
       unmaskedRenderer:debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : null,textureUnits:gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS),maxTextureSize:gl.getParameter(gl.MAX_TEXTURE_SIZE)};
     console.info('[home-studio-test-gpu]' + JSON.stringify(stats.gpu));
     this.addEventListener('webglcontextlost', () => stats.contextLosses++);
-    const link = gl.linkProgram.bind(gl);
-    gl.linkProgram = program => {
-      link(program);stats.linkedPrograms++;
-      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) stats.shaderErrors.push(gl.getProgramInfoLog(program));
-    };
+    shaderOwners.push(installShaderChecks(gl,this,stats));
     return gl;
   };
 }
@@ -177,11 +177,11 @@ async function waitForHomeViewport({beforeRenderCount,beforeSceneDraws,captionVi
   throw Error('Home viewport did not receive a fresh complete scene draw: '+JSON.stringify(latest));
 }
 
-async function run(browserName, origin, project, sourceHash) {
+async function run(browserName, origin, project, sourceHash, loadInstrumentation) {
   const profile = browserProfile(browserName, {viewport: {width: 1280, height: 800}});
   const inputDiagnostics = viewerInputOptions(browserName, profile);
   return diagnostics.run(browserName, {
-    reportOnly, deadlineMs: 180000, sourceHash, sourceFiles, sourceHashScope,
+    reportOnly, deadlineMs: 180000, sourceHash, sourceFiles, sourceHashScope, loadInstrumentation,
     fixture: {floors: 1, rooms: project.floors[0].rooms.length, lights: project.floors[0].items.length},
     launch: browserLaunchOptions(browserName, process.env.BROWSER_STABILITY_HEADED !== '1'),
     context: profile.context, profile, inputDiagnostics,
@@ -209,6 +209,7 @@ async function run(browserName, origin, project, sourceHash) {
   };
     phases.start('dashboard-navigation');
     await page.goto(origin);
+    await page.evaluate(installViewerLoadDiagnostics, {role:'host'});
     const states = Object.fromEntries(project.floors[0].items.map(item => [item.entity_id,{state:'on',name:item.name,light:{brightness:180,color_mode:'color_temp',color_temp_kelvin:3000}}]));
     states['sun.sun'] = {state:'above_horizon',elevation:30};
     for (let cycle = 0; cycle < 2; cycle++) {
@@ -220,6 +221,7 @@ async function run(browserName, origin, project, sourceHash) {
       let frame, child;
       try {
         await load.run(() => page.evaluate(async ({items,states,height}) => {
+          window.__viewerLoadDiagnostics.reset();
           const html = await (await fetch('/viewer')).text();
           const iframe = document.createElement('iframe');
           iframe.id = 'viewer';iframe.sandbox = 'allow-scripts allow-downloads allow-forms';
@@ -227,15 +229,23 @@ async function run(browserName, origin, project, sourceHash) {
           iframe.onload = () => {
             const channel = new MessageChannel();window.viewerPort = channel.port1;window.viewerCommands=[];window.viewerMapRequests=[];window.deferMapReply=false;
             channel.port1.onmessage = event => {
-              if(event.data.type==='model_config') channel.port1.postMessage({type:'states',connected:true,states});
+              if(event.data.type==='model_config') {
+                channel.port1.postMessage({type:'states',connected:true,states});
+                window.__viewerLoadDiagnostics.trace('host-states');
+              }
               if(event.data.type==='map_request') {
+                window.__viewerLoadDiagnostics.trace('host-map-request',{request_id:event.data.request_id,action:event.data.action});
                 window.viewerMapRequests.push(event.data);
                 if(event.data.action!=='get') window.viewerCommands.push(event.data);
-                if(event.data.action!=='get'||!window.deferMapReply) channel.port1.postMessage({type:'map_result',request_id:event.data.request_id,
+                if(event.data.action!=='get'||!window.deferMapReply) {
+                  channel.port1.postMessage({type:'map_result',request_id:event.data.request_id,
                   ...(event.data.action==='get'?{success:true,result:{revision:0,configured:false,config:null,reference:null}}:
                     {success:false,error:'Unsupported map request in the viewer fixture.'})});
+                  window.__viewerLoadDiagnostics.trace('host-map-reply',{request_id:event.data.request_id,action:event.data.action,success:event.data.action==='get'});
+                }
               } else if(!['model_config','view_preferences','map_view'].includes(event.data.type)) window.viewerCommands.push(event.data);
             };
+            window.__viewerLoadDiagnostics.trace('host-init');
             iframe.contentWindow.postMessage({type:'home-floorplan:init',can_edit:true,items,preferences:{}},'*',[channel.port2]);
           };
           iframe.srcdoc = html;document.body.append(iframe);
@@ -245,15 +255,20 @@ async function run(browserName, origin, project, sourceHash) {
         // FrameLocator supports locators, but evaluate uses the actual child Frame.
         child = page.frames().find(value => value !== page.mainFrame());
         await load.run(() => child.waitForFunction(expected => window.floorplan?.renderCount > 0 && document.querySelector('#homeConnection')?.dataset.connected === 'true' && document.querySelector('#homeMapAlign')?.hidden === false && window.__browserRenderedLights === expected, project.floors[0].items.length, {timeout: load.remainingMs()}));
+        const shaders=await load.run(()=>child.evaluate(()=>({checks:window.__flushBrowserShaders(),linked:window.__browserStability.linkedPrograms,errors:window.__browserStability.shaderErrors})));
+        check(shaders.checks.pending===0&&shaders.checks.discarded===0&&shaders.checks.checked===shaders.linked,'Cold readiness verifies every linked shader generation');
+        check(shaders.errors.length===0,'Cold readiness requires valid shader links');
         load.complete();
       } finally { load.close(); save(); }
       const loadMs = sample.loadMs;
       phases.start('initial-checks', {cycle});
       console.log(`${browserName}: first connected draw in ${sample.loadMs} ms`);
-      const snapshot = () => child.evaluate(() => ({...window.__browserStability,renderedLights:window.__browserRenderedLights,renderCount:window.floorplan.renderCount,homeMode:window.floorplan.homeMode,scene:window.__browserScene?.()}));
+      const snapshot = () => child.evaluate(() => {window.__flushBrowserShaders();return {...window.__browserStability,renderedLights:window.__browserRenderedLights,renderCount:window.floorplan.renderCount,homeMode:window.floorplan.homeMode,scene:window.__browserScene?.()};});
       let initial = await snapshot();
       record.gpu = initial.gpu;
       Object.assign(sample, initial);
+      sample.viewerLoad = await child.evaluate(() => window.__viewerLoadDiagnostics.snapshot());
+      sample.hostLoad = await page.evaluate(() => window.__viewerLoadDiagnostics.snapshot());
       save();
       sample.initialPrograms = initial.linkedPrograms;
       assert.deepEqual(await page.evaluate(() => window.viewerMapRequests.map(request=>request.action)), ['get'], 'The fixture answers initial map settings without leaving a timeout pending');
@@ -374,6 +389,8 @@ async function run(browserName, origin, project, sourceHash) {
           const gl = document.querySelector('#homeStage canvas').getContext('webgl2');
           const extension = gl.getExtension('WEBGL_lose_context');
           if(!extension)throw Error('WebGL context-loss testing requires WEBGL_lose_context');
+          const checks=window.__flushBrowserShaders();
+          if(checks.pending||checks.discarded||checks.checked!==window.__browserStability.linkedPrograms||window.__browserStability.shaderErrors.length)throw Error('Unverified shaders before planned context loss');
           window.__restoreContext = () => extension.restoreContext();
           extension.loseContext();
         });
@@ -424,7 +441,7 @@ async function run(browserName, origin, project, sourceHash) {
         } else assert(mapLayout.viewport[1]<restored.viewport[1], 'The delayed map error must shrink the real desktop Home stage');
         // Disposing outlines and revisiting cached wall geometry after restoration
         // must not delete handles from the lost generation. Keep the same case
-        // deadline and existing per-operation limits; no screenshots or link queries.
+        // deadline and existing per-operation limits; shader checks follow the actual draw.
         sample.postRestoreViews = [];
         for (const mode of ['editor-cutaway', 'editor-full', 'home']) {
           phases.start('post-restore-' + mode, {cycle});
@@ -465,6 +482,10 @@ async function run(browserName, origin, project, sourceHash) {
       }
       // Browser teardown and Playwright's frame registry update asynchronously.
       // Subscribe before removing the iframe so even a fast detach is observed.
+      const finalShaders=await snapshot();
+      sample.finalShaderChecks=finalShaders.shaderChecks;
+      check(finalShaders.shaderChecks.pending===0&&finalShaders.shaderChecks.discarded===0&&finalShaders.shaderChecks.checked===finalShaders.linkedPrograms,'Every linked shader generation is verified before detach');
+      check(finalShaders.shaderErrors.length===0,'Every phase retains valid shader links');
       phases.start('viewer-detach', {cycle});
       sample.viewerCommands = await page.evaluate(() => window.viewerCommands);
       check(sample.viewerCommands.length===0, 'Viewer navigation never issues a device, write, or unsupported command');
@@ -501,9 +522,12 @@ async function run(browserName, origin, project, sourceHash) {
   if (built.error) throw built.error;
   assert.equal(built.status,0,built.stderr || built.stdout || `Python builder exited with signal ${built.signal}`);
   let html = fs.readFileSync(path.join(output,'main/index.html'),'utf8');
-  html = html.replace('<head>',`<head><script>window.__HOME_FLOORPLAN_EMBED__=true;(${instrumentation.toString()})();</script>`);
+  const {html:instrumented, ...loadInstrumentation} = instrumentViewerLoadSource(html,
+    {comparison:fs.realpathSync(root) !== fs.realpathSync(path.join(__dirname,'..'))});
+  html = instrumented;
+  html = html.replace('<head>',`<head><script>window.__HOME_FLOORPLAN_EMBED__=true;(${installViewerLoadDiagnostics.toString()})({role:'frame',expectedLights:${project.floors[0].items.length}});(${instrumentation.toString()})(${deferViewerShaderChecks.toString()});</script>`);
   html = startup.checkpointSource(html, 'renderProfile=selectRenderProfile(renderer.getContext());', 'renderProfile');
-  html = html.replace('</script></body>', `if(renderer)(${captureViewerFrames.toString()})(renderer);window.__browserScene=()=>({rasterProbe:renderProfile.rasterProbe||null,shadowType:renderer.shadowMap.type,materialTypes:(()=>{const types=new Set();scene.traverse(o=>{for(const m of (Array.isArray(o.material)?o.material:[o.material]))if(m)types.add(m.type)});return [...types].sort()})(),camera:window.__browserCamera,renderPasses:window.__browserRenderPasses,drawingBuffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),programs:renderer.info.programs.length,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,triangles:renderer.info.render.triangles,drawCalls:renderer.info.render.calls,shadowMaps:(()=>{const sizes=[];scene.traverse(o=>{if(o.castShadow&&o.shadow)sizes.push([o.type,o.shadow.mapSize.x,o.shadow.mapSize.y])});return sizes})(),pointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible)n++});return n})(),activePointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible&&o.intensity>0)n++});return n})()});\n</script></body>`);
+  html = html.replace('</script></body>', `if(renderer)(${captureViewerFrames.toString()})(renderer,scene);window.__browserScene=()=>({rasterProbe:renderProfile.rasterProbe||null,shadowType:renderer.shadowMap.type,materialTypes:(()=>{const types=new Set();scene.traverse(o=>{for(const m of (Array.isArray(o.material)?o.material:[o.material]))if(m)types.add(m.type)});return [...types].sort()})(),camera:window.__browserCamera,renderPasses:window.__browserRenderPasses,drawingBuffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),programs:renderer.info.programs.length,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,triangles:renderer.info.render.triangles,drawCalls:renderer.info.render.calls,shadowMaps:(()=>{const sizes=[];scene.traverse(o=>{if(o.castShadow&&o.shadow)sizes.push([o.type,o.shadow.mapSize.x,o.shadow.mapSize.y])});return sizes})(),pointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible)n++});return n})(),activePointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible&&o.intensity>0)n++});return n})()});\n</script></body>`);
   let sourceHash = crypto.createHash('sha256').update(html).digest('hex');
   const server = http.createServer((request,response) => {
     if(startup.handle(request,response,sourceHash))return;
@@ -519,10 +543,10 @@ async function run(browserName, origin, project, sourceHash) {
     html = startup.allowLoopback(html, origin);
     sourceHash = crypto.createHash('sha256').update(html).digest('hex');
     if(fixtureOnly) {
-      console.log(JSON.stringify({fixtureServer:true,origin:`http://127.0.0.1:${server.address().port}`,sourceHash,sourceFiles,sourceHashScope}));
+      console.log(JSON.stringify({fixtureServer:true,origin:`http://127.0.0.1:${server.address().port}`,sourceHash,sourceFiles,sourceHashScope,loadInstrumentation}));
       await new Promise(resolve=>{process.once('SIGTERM',resolve);process.once('SIGINT',resolve);});
     } else {
-      await diagnostics.runAll(engines, browserName=>run(browserName,`http://127.0.0.1:${server.address().port}`,project,sourceHash));
+      await diagnostics.runAll(engines, browserName=>run(browserName,`http://127.0.0.1:${server.address().port}`,project,sourceHash,loadInstrumentation));
     }
   } finally {await new Promise(resolve=>server.close(resolve));}
 })().then(()=>diagnostics?.finish(),error=>{diagnostics?.finish(error);console.error(error);process.exitCode=1;})

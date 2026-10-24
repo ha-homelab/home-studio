@@ -5,6 +5,131 @@ const os = require('node:os');
 const path = require('node:path');
 const {execFileSync} = require('node:child_process');
 
+// Installed only in the fictional acceptance host/frame. Keep payloads, model
+// content and bridge credentials out of this bounded transport timeline.
+function installViewerLoadDiagnostics({role, expectedLights = null}) {
+  const events = [], allowed = new Set(['host-start','host-init','host-map-request','host-map-reply','host-states',
+    'frame-start','frame-init','map-request','map-posted','map-timeout','map-result','map-settled','map-close',
+    'load-map-start','load-map-complete','load-map-error','configure-map-start','configure-map-accepted','configure-map-complete']);
+  let dropped = 0;
+  const pending = new Map();
+  function trace(event, detail = {}) {
+    if (!allowed.has(event)) return;
+    const atMs=performance.now();
+    if (event === 'map-request' && /^map-\d{1,8}$/.test(detail.request_id) && pending.size < 32)
+      pending.set(detail.request_id,{requestId:detail.request_id,action:['get','save','tile'].includes(detail.action)?detail.action:null,startedMs:atMs});
+    if (event === 'map-settled' || event === 'map-timeout') pending.delete(detail.request_id);
+    if (event === 'map-close') pending.clear();
+    if (events.length >= 96) { dropped++; return; }
+    const entry = {event, atMs, epochMs:performance.timeOrigin + atMs};
+    if (/^map-\d{1,8}$/.test(detail.request_id)) entry.requestId = detail.request_id;
+    if (['get','save','tile'].includes(detail.action)) entry.action = detail.action;
+    for (const key of ['success','matched','loaded']) if (typeof detail[key] === 'boolean') entry[key] = detail[key];
+    if (Number.isSafeInteger(detail.pending) && detail.pending >= 0 && detail.pending <= 32) entry.pending = detail.pending;
+    // Errors originate only from this synthetic, isolated viewer. No request or
+    // result object is serialized; stack storage is capped independently.
+    if (detail.error) entry.error = {name:String(detail.error.name || 'Error').slice(0,80),
+      message:String(detail.error.message || detail.error).slice(0,400),
+      stack:String(detail.error.stack || '').split('\n').slice(0,5).map(line=>line.slice(0,300)).join('\n')};
+    events.push(entry);
+  }
+  function snapshot() {
+    const renderCount = window.floorplan?.renderCount, renderedLights = window.__browserRenderedLights;
+    const connection = document.querySelector('#homeConnection'), align = document.querySelector('#homeMapAlign');
+    const predicates = {rendered:renderCount > 0, connected:connection?.dataset.connected === 'true',
+      mapAlign:align?.hidden === false, lights:renderedLights === expectedLights};
+    return {role, events:events.map(event=>({...event})), dropped,
+      pending:[...pending.values()].map(request=>({...request,ageMs:performance.now()-request.startedMs})),
+      readiness:role === 'frame' ? {
+      predicates, ready:Object.values(predicates).every(Boolean), expectedLights,
+      renderCount:Number.isFinite(renderCount) ? renderCount : null,
+      renderedLights:Number.isFinite(renderedLights) ? renderedLights : null,
+      connectionPresent:!!connection, alignPresent:!!align,
+      mapStatus:document.querySelector('#homeMapStatus')?.textContent?.slice(0,400) || '',
+      mapCaptionHidden:document.querySelector('#homeMapCaption')?.hidden ?? null,
+      mapRetryHidden:document.querySelector('#homeMapRetry')?.hidden ?? null,
+    } : null};
+  }
+  window.__viewerLoadDiagnostics = {trace,snapshot,reset(){events.length=0;pending.clear();dropped=0;trace(role+'-start');}};
+  window.__viewerLoadDiagnostics.reset();
+}
+
+// Exact anchors deliberately fail closed when production transport changes.
+// The replacements observe actual paths without changing timers or ordering.
+function instrumentViewerLoadSource(source, {comparison = false} = {}) {
+  const original = source;
+  const replace = (before, after) => {
+    assert.equal(source.split(before).length - 1, 1, `Viewer diagnostic anchor must occur once: ${before}`);
+    source = source.replace(before, after);
+  };
+  const trace = (event, detail='{}') => `window.__viewerLoadDiagnostics.trace('${event}',${detail});`;
+  try {
+    replace("const timer=setTimeout(()=>{mapRequests.delete(request_id);reject(Error('Map request timed out.'));},30000);",
+      "const timer=setTimeout(()=>{"+trace('map-timeout','{request_id,pending:mapRequests.size}')+"mapRequests.delete(request_id);reject(Error('Map request timed out.'));},30000);");
+    replace('mapRequests.set(request_id,{resolve,reject,timer});',
+      'mapRequests.set(request_id,{resolve,reject,timer});'+trace('map-request','{request_id,action,pending:mapRequests.size}'));
+    replace("bridge.postMessage({...payload,type:'map_request',request_id,action});",
+      "bridge.postMessage({...payload,type:'map_request',request_id,action});"+trace('map-posted','{request_id,action}'));
+    replace('const request=mapRequests.get(message.request_id);if(!request)return;',
+      'const request=mapRequests.get(message.request_id);'+trace('map-result','{request_id:message.request_id,matched:!!request,success:message.success,pending:mapRequests.size}')+'if(!request)return;');
+    replace('mapRequests.delete(message.request_id);clearTimeout(request.timer);',
+      'mapRequests.delete(message.request_id);clearTimeout(request.timer);'+trace('map-settled','{request_id:message.request_id,success:message.success}'));
+    replace('function rejectMapRequests(){', 'function rejectMapRequests(){'+trace('map-close','{pending:mapRequests.size}'));
+    replace('bridge=event.ports[0];homeView?.applyViewPreferences', 'bridge=event.ports[0];'+trace('frame-init')+'homeView?.applyViewPreferences');
+    replace('function configureMap(result){', 'function configureMap(result){'+trace('configure-map-start'));
+    replace('mapRevision=result.revision;mapConfig=config;mapLoaded=true;mapSettingsError=false;',
+      'mapRevision=result.revision;mapConfig=config;mapLoaded=true;mapSettingsError=false;'+trace('configure-map-accepted','{loaded:mapLoaded}'));
+    replace('refreshMapControls();refreshMapStatus();updateZoom(false);',
+      'refreshMapControls();refreshMapStatus();updateZoom(false);'+trace('configure-map-complete','{loaded:mapLoaded}'));
+    replace("try{configureMap(await window.homeMapRequest('get',{}));}",
+      "try{"+trace('load-map-start')+"configureMap(await window.homeMapRequest('get',{}));"+trace('load-map-complete')+'}');
+    replace('catch(error){mapSettingsError=true;refreshMapControls();refreshMapStatus();}',
+      'catch(error){'+trace('load-map-error','{error}')+'mapSettingsError=true;refreshMapControls();refreshMapStatus();}');
+    return {html:source, status:'enabled'};
+  } catch (error) {
+    if (!comparison) throw error;
+    return {html:original, status:'unavailable', reason:String(error.message)};
+  }
+}
+
+// Defer test-only synchronization until the scene has actually drawn. Every
+// linked generation must still be checked before a receipt or planned loss.
+function deferViewerShaderChecks(gl, canvas, stats) {
+  const pending = new Map();
+  let generation = 0, lost = false;
+  const checks = stats.shaderChecks;
+  const discard = () => {
+    if (!pending.size) return;
+    stats.shaderErrors.push(`Context lost with ${pending.size} unverified shader link(s).`);
+    checks.discarded += pending.size;checks.pending -= pending.size;pending.clear();
+  };
+  const check = program => {
+    if (!pending.has(program)) return;
+    if (lost || gl.isContextLost() || pending.get(program) !== generation) { discard(); return; }
+    pending.delete(program);checks.pending--;
+    const started=performance.now(), linked=gl.getProgramParameter(program,gl.LINK_STATUS), durationMs=performance.now()-started;
+    stats.shaderTiming.statusMs+=durationMs;checks.checked++;
+    if(!stats.shaderTiming.longestStatus||durationMs>stats.shaderTiming.longestStatus.durationMs)
+      stats.shaderTiming.longestStatus={startedMs:started,durationMs};
+    if(!linked)stats.shaderErrors.push(gl.getProgramInfoLog(program)||'Program link failed without a driver log.');
+  };
+  const flush = () => { for(const program of pending.keys())check(program); };
+  canvas.addEventListener('webglcontextlost',()=>{lost=true;generation++;discard();});
+  canvas.addEventListener('webglcontextrestored',()=>{lost=false;generation++;});
+  const link=gl.linkProgram.bind(gl), remove=gl.deleteProgram.bind(gl);
+  gl.linkProgram=program=>{
+    check(program); // Preserve the old link attempt before relinking its handle.
+    if(pending.size>=256)flush(); // Bound retained handles; overflow still verifies every link.
+    const started=performance.now();link(program);const durationMs=performance.now()-started;
+    stats.linkedPrograms++;stats.shaderTiming.linkMs+=durationMs;
+    if(!stats.shaderTiming.longestLink||durationMs>stats.shaderTiming.longestLink.durationMs)
+      stats.shaderTiming.longestLink={startedMs:started,durationMs};
+    pending.set(program,generation);checks.pending++;
+  };
+  gl.deleteProgram=program=>{check(program);return remove(program);};
+  return {flush};
+}
+
 function positiveInteger(name, fallback, maximum) {
   const value = Number(process.env[name] ?? fallback);
   assert(Number.isSafeInteger(value) && value > 0 && value <= maximum,
@@ -354,6 +479,7 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       os: summary.os, nodeVersion: process.version, browserVersion: null, playwrightVersion: null,
       reportOnly: options.reportOnly, fixture: options.fixture, sourceRevision, sourceHash: options.sourceHash || null,
       ...(options.sourceFiles ? {sourceFiles:options.sourceFiles, sourceHashScope:options.sourceHashScope} : {}),
+      ...(options.loadInstrumentation ? {loadInstrumentation:options.loadInstrumentation} : {}),
       profile: options.profile || {name: 'desktop', emulated: false, realMobileOS: false}, identity: null,
       launch: {headless: options.launch.headless, channel: options.launch.channel || null,
         executablePath: options.launch.executablePath || null, args: options.launch.args || [],
@@ -461,6 +587,7 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
               {width:visualViewport.width,height:visualViewport.height,scale:visualViewport.scale,x:visualViewport.offsetLeft,y:visualViewport.offsetTop} : null},
             input: window.__acceptanceInput || null,
             stats: window.__browserStability || window.__plannerStats || null, scene, sceneError,
+            viewerLoad: window.__viewerLoadDiagnostics?.snapshot() || null,
           };
         }))), 2500, 'Failure snapshot');
         record.gpu ||= record.snapshot.find(frame => frame.stats?.gpu)?.stats.gpu || null;
@@ -685,13 +812,18 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
 
 // Injected into the fictional viewer after its renderer exists. CPU state can
 // change before a queued frame; only a successful draw advances this receipt.
-function captureViewerFrames(renderer) {
+function captureViewerFrames(renderer, mainScene) {
   const draw = renderer.render.bind(renderer);
   const passes = window.__browserRenderPasses = {scene: 0, copy: 0, last: null, sceneViewport: null, copyViewport: null};
   const viewport = {copy(value) {this.x=value.x;this.y=value.y;this.z=value.z;this.w=value.w;return this;}};
   renderer.render = (scene, camera) => {
+    // The room's depth mask renders offscreen; contact compositing uses a
+    // different scene and an identity camera. Neither certifies a fresh room
+    // frame. Bounded pointer motion still renders the room to this framebuffer.
+    const defaultTarget = renderer.getRenderTarget() === null;
     const result = draw(scene, camera);
     const copy = scene?.name === 'interaction-copy';
+    if (!defaultTarget || (!copy && scene !== mainScene)) return result;
     const kind = copy ? 'copy' : 'scene';
     passes[kind]++; passes.last = kind;
     renderer.getViewport(viewport);
@@ -777,6 +909,7 @@ function changeRestoredViewerMode(mode) {
 }
 
 function captureRestoredViewerMode() {
+  window.__flushBrowserShaders?.();
   const canvas = document.querySelector('#homeStage canvas, #view3d canvas');
   const gl = canvas.getContext('webgl2'), glErrors = [];
   const contextLost = gl.isContextLost();
@@ -843,4 +976,4 @@ function assertViewerScenarioComplete(record) {
   record.viewerCompletion = {version: 1, cycles: 2, postRestoreModes: modes};
 }
 
-module.exports = {VIEWER_LOAD_BUDGET_MS, createViewerLoadDeadline, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction};
+module.exports = {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, VIEWER_LOAD_BUDGET_MS, createViewerLoadDeadline, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction};

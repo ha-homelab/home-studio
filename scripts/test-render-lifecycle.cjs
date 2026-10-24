@@ -9,8 +9,8 @@ let serial = 0, draws = 0, invalidations = 0, disposals = 0, losses = 0, disconn
 let box = {width:3840, height:2160};
 const buffers = [];
 const context = vm.createContext({
-  environmentLayer: null, initialViewReady: true, editorFloorMaterials: null, homeView: null, renderCount: 0, camera: {updateProjectionMatrix() {}}, scene: {},
-  $() {return {getBoundingClientRect: () => box};},
+  reflectionEnvironment: null, contactShading: null, inventoryTextures: {dispose(){},releaseGPU(){},configure(){}}, environmentLayer: null, initialViewReady: true, failed3D: false, editorFloorMaterials: null, homeView: null, renderCount: 0, camera: {updateProjectionMatrix() {}}, scene: {},
+  $() {return {dataset:{},getBoundingClientRect: () => box};},
   document: {hidden: false, addEventListener(type, fn) { events[type] = fn; }},
   window: {addEventListener(type, fn) { events[type] = fn; }},
   requestAnimationFrame(fn) { frames.set(++serial, fn); return serial; },
@@ -30,7 +30,7 @@ const context = vm.createContext({
   },
 });
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../planner/render-capacity.js'), 'utf8').replace('export function ', 'function '), context);
-const prefixes = ['let renderRequest=', 'let interactionRenderer=', 'function cancelRender(', 'function requestRender(',
+const prefixes = ['let renderRequest=', 'let interactionRenderer=', 'function cancelRender(', 'function loadInitialMap(', 'function requestRender(',
   'function selectRenderProfile(', 'function renderPixelRatio(', 'function drawScene(', 'function render(){',
   "renderer.domElement.addEventListener('webglcontextlost'", "renderer.domElement.addEventListener('webglcontextrestored'",
   "document.addEventListener('visibilitychange'", "window.addEventListener('pagehide'", "window.addEventListener('pageshow'"];
@@ -215,7 +215,7 @@ function motionScheduler(diffuse = true, reduced = diffuse) {
   const raf = new Map(), timers = new Map(), handlers = {}, painted = [], errors = [], paths = [];
   let time = 0, id = 0, width = 800, rejectDraw = false, drawDuration = 0, clockReads = 0, afterDraw = null;
   const c = vm.createContext({
-    environmentLayer:null,editorFloorMaterials:null, initialViewReady:true, renderCount:0, renderProfile:{diffuseLighting:diffuse,pixels:reduced?(diffuse?62500:250000):2000000},
+    reflectionEnvironment:null,contactShading:null,inventoryTextures:{dispose(){},releaseGPU(){},configure(){}},environmentLayer:null,editorFloorMaterials:null, initialViewReady:true, failed3D:false, renderCount:0, renderProfile:{diffuseLighting:diffuse,pixels:reduced?(diffuse?62500:250000):2000000},
     devicePixelRatio:1, THREE:{}, scene:{}, camera:{position:0,updateProjectionMatrix(){}},
     document:{hidden:false,addEventListener:(type,fn)=>handlers[type]=fn},
     window:{addEventListener:(type,fn)=>handlers[type]=fn},
@@ -224,7 +224,7 @@ function motionScheduler(diffuse = true, reduced = diffuse) {
     cancelAnimationFrame(key){raf.delete(key);},
     setTimeout(fn,delay){timers.set(++id,{fn,due:time+delay});return id;},
     clearTimeout(key){timers.delete(key);},
-    $(){return {getBoundingClientRect:()=>({width,height:600})};},
+    $(){return {dataset:{},getBoundingClientRect:()=>({width,height:600})};},
     observer:{disconnect(){}},wallSheenMotion:{beforeRender(){},afterRender(){}},
     releaseStaticGlassPasses(){},disposeStaticGlassPasses(){},releaseViewerGeometryGPU(){},releaseViewerTextureGPU(){},releaseWallOutlineMaterials(){},
     updateWallOutlines(){},updateEditorCamera(){},invalidateShadows(){},
@@ -452,7 +452,7 @@ function modeScheduler(legacy=false,diffuse=false,canEdit=true) {
   const q=motionScheduler(diffuse,diffuse), c=q.c, elements=new Map(), modes=[], cleanups=[];
   let width=800;
   const element=id=>{
-    if(!elements.has(id))elements.set(id,{checked:true,hidden:false,prepend(){},
+    if(!elements.has(id))elements.set(id,{checked:true,hidden:false,dataset:{},prepend(){},
       getBoundingClientRect:()=>({width,height:600})});
     return elements.get(id);
   };
@@ -461,7 +461,7 @@ function modeScheduler(legacy=false,diffuse=false,canEdit=true) {
     hideMediaControls(){cleanups.push({kind:'media',active:c.active});},
     cancelNativePress(){cleanups.push({kind:'native',active:c.active});},
     THREE:{Color:class {constructor(value){this.value=value;}}},hemisphere:{},sun:{},ground:{},grid:{},
-    clipping:{constant:2.1},environmentLayer:null,editorFloorMaterials:null,homeArchitectureMaterials:null,setWallOutlineAppearance(){},roomLighting:null,root:{children:[]},objectGroup:{},overlayGroup:null,points:[],
+    clipping:{constant:2.1},reflectionEnvironment:null,contactShading:null,inventoryTextures:{dispose(){},releaseGPU(){},configure(){}},environmentLayer:null,editorFloorMaterials:null,homeArchitectureMaterials:null,setWallOutlineAppearance(){},roomLighting:null,root:{children:[]},objectGroup:{},overlayGroup:null,points:[],
     clearTrail(){},showMode(){},refreshControls(){},updateFixtureShadows(){},updateHeightCaption(){},$:element});
   c.document.body={classList:{toggle(){}}};
   c.window.floorplan={get renderCount(){return c.renderCount;}};

@@ -1,4 +1,8 @@
 [
+  "pbr-color-data.js",
+  "pbr-materials.js",
+  "material-textures.js",
+  "environment-lighting.js",
   "site.css",
   "privacy.html",
   "install.html",

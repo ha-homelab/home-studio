@@ -198,6 +198,81 @@ class ViewerColdLoadTests(unittest.TestCase):
         self.assertIsNone(client._cold_load_deadline)
 
 
+class ViewerShaderCheckpointTests(unittest.TestCase):
+    def test_real_queue_and_native_ledger_share_verified_links_across_restoration(self):
+        result = subprocess.run(['node', '-e', r'''
+          const assert=require('node:assert/strict'),vm=require('node:vm');
+          const {deferViewerShaderChecks}=require('./scripts/browser-stability-diagnostics.cjs');
+          const {check,ledger}=JSON.parse(require('node:fs').readFileSync(0,'utf8'));
+          function fixture(){
+            const events={},calls=[];let lost=false;
+            const canvas={addEventListener:(name,fn)=>(events[name]??=[]).push(fn)};
+            const gl={VERTEX_SHADER:35633,FRAGMENT_SHADER:35632,LINK_STATUS:35714,
+              createShader:type=>({type}),shaderSource(){},attachShader(){},detachShader(){},
+              linkProgram(){},deleteProgram(){},useProgram(){},drawArrays(){},drawElements(){},
+              drawArraysInstanced(){},drawElementsInstanced(){},isContextLost:()=>lost,
+              getProgramParameter:p=>{calls.push(p);return p.valid;},getProgramInfoLog:()=>''};
+            const stats={linkedPrograms:0,shaderErrors:[],shaderChecks:{pending:0,checked:0,discarded:0},
+              shaderTiming:{linkMs:0,statusMs:0,longestLink:null,longestStatus:null}};
+            const ctx=vm.createContext({window:{__browserStability:stats}});
+            vm.runInContext(ledger,ctx);ctx.window.__nativeTrackViewerContext(gl,canvas);
+            const owner=deferViewerShaderChecks(gl,canvas,stats);
+            ctx.window.__flushBrowserShaders=()=>{owner.flush();return stats.shaderChecks;};
+            const run=()=>vm.runInContext('(function(){'+check+'})()',ctx);
+            const link=(valid=true)=>{const p={valid};for(const type of [35633,35632]){
+              const s=gl.createShader(type);gl.shaderSource(s,'source');gl.attachShader(p,s);
+            }gl.linkProgram(p);return p;};
+            const event=name=>{lost=name==='webglcontextlost';for(const fn of events[name]??[])fn();};
+            return {stats,calls,run,link,event,ctx};
+          }
+          const f=fixture();f.link();f.link();assert.equal(f.calls.length,0);
+          f.run();assert.equal(f.calls.length,2);assert.equal(f.stats.shaderChecks.checked,2);
+          f.event('webglcontextlost');f.run();assert.equal(f.calls.length,2,'No lost-context query');
+          f.event('webglcontextrestored');f.link();f.run();
+          const ledgerStats=f.ctx.window.__nativeViewerPrograms.snapshot();
+          assert.equal(ledgerStats.contexts[0].links.length,3);assert.equal(ledgerStats.errors.length,0);
+          assert.equal(f.stats.shaderChecks.checked,3);assert.equal(f.stats.shaderChecks.discarded,0);
+          const old=fixture();old.link();old.event('webglcontextlost');
+          assert.throws(old.run,/Unverified viewer shaders/);assert.equal(old.calls.length,0);
+          const failed=fixture();failed.link(false);assert.throws(failed.run,/Program link failed/);
+          const incomplete=fixture();incomplete.link();incomplete.run();incomplete.stats.linkedPrograms++;
+          assert.throws(incomplete.run,/Unverified viewer shaders/);
+        '''], input=json.dumps({'check': acceptance.VIEWER_SHADER_CHECK,
+                              'ledger': acceptance.NATIVE_VIEWER_PROGRAM_DIAGNOSTICS}),
+            text=True, capture_output=True, timeout=10, cwd=acceptance.ROOT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_actual_cold_checkpoint_cannot_extend_the_existing_load_deadline(self):
+        for elapsed, passed in [(59.999, True), (60, False)]:
+            now=[0.0]; client=Mock(); record={'samples':[]}
+            def execute(script, *_args):
+                if script.startswith(acceptance.VIEWER_SHADER_CHECK):
+                    now[0]=elapsed
+                    return {'pending':0,'checked':2,'discarded':0}
+            client.execute.side_effect=execute
+            def save():
+                if record['samples'][0].get('loadCompleted'): raise RuntimeError('stop after cold checkpoint')
+            with patch.object(acceptance.time, 'monotonic', lambda:now[0]):
+                with self.assertRaises(RuntimeError if passed else TimeoutError):
+                    acceptance.viewer(client,'http://fixture',{'floors':[{'items':[]}]},record,save)
+            sample=record['samples'][0]
+            self.assertEqual(sample['loadCompleted'],passed)
+            self.assertEqual(sample['loadBudgetMs'],60000)
+            self.assertAlmostEqual(sample['loadMs'],elapsed*1000)
+            client.canvas_drag.assert_not_called()
+
+    def test_only_success_checkpoints_flush_and_deliberate_loss_is_atomic(self):
+        source=inspect.getsource(acceptance.viewer)
+        self.assertIn('snapshot = lambda: client.execute(snapshot_script)',source)
+        self.assertIn('verified_snapshot = lambda: client.execute(VIEWER_SHADER_CHECK + snapshot_script)',source)
+        self.assertEqual(source.count('snapshot=snapshot)'),2,'Both failed-drag captures remain passive')
+        self.assertIn('client.execute(VIEWER_SHADER_CHECK + "const e=',source)
+        self.assertIn("sample['final'] = verified_snapshot()",source)
+        self.assertIn('post_restore_viewer_modes(client, sample, verified_snapshot,',source)
+        self.assertNotIn('VIEWER_SHADER_CHECK',inspect.getsource(acceptance.planner))
+        self.assertNotIn('VIEWER_SHADER_CHECK',inspect.getsource(acceptance.run_case))
+
+
 class RestoredViewerModeTests(unittest.TestCase):
     def stats(self, mode='home', count=4):
         return {'contexts':1, 'contextLosses':1, 'gpu':{'version':'WebGL 2.0'},
@@ -248,7 +323,7 @@ class RestoredViewerModeTests(unittest.TestCase):
         viewer=inspect.getsource(acceptance.viewer)
         self.assertEqual(viewer.count('post_restore_viewer_modes('),1)
         self.assertLess(viewer.index('assert_recovered_interaction('),viewer.index('post_restore_viewer_modes('))
-        self.assertLess(viewer.index('post_restore_viewer_modes('),viewer.index("sample['final'] = snapshot()"))
+        self.assertLess(viewer.index('post_restore_viewer_modes('),viewer.index("sample['final'] = verified_snapshot()"))
 
 
 class Socket:
@@ -356,7 +431,7 @@ class ProgramIsolationTests(unittest.TestCase):
             env = {**vars(acceptance), 'sample': {}, 'items': [{'entity_id': 'light.' + str(i)} for i in range(72)],
                    'states': {'light.' + str(i): {'state': 'on'} for i in range(72)},
                    'after_drag': program_stats(7, True), 'initial': program_stats(), 'client': object(),
-                   'snapshot': iter(values).__next__, 'assert_graphics': lambda value: None,
+                   'verified_snapshot': iter(values).__next__, 'assert_graphics': lambda value: None,
                    'update_viewer_state': lambda client, states, active: updates.append(active)}
             if bad:
                 with self.assertRaisesRegex(AssertionError, 'link or relink'): exec(block, env)
@@ -390,7 +465,8 @@ class ToolingTests(unittest.TestCase):
                         raise RuntimeError('snapshot transport failed')
                     return scene
                 capture = Mock(side_effect=snapshot)
-                env = {'client': client, 'sample': sample, 'snapshot': capture, 'initial': {'renderCount': 3}}
+                env = {'client': client, 'sample': sample, 'snapshot': capture,
+                       'verified_snapshot': capture, 'initial': {'renderCount': 3}}
                 with patch.object(acceptance.time, 'monotonic', lambda: now[0]):
                     if total_ms >= 15000:
                         with self.assertRaisesRegex(AssertionError, f'drag exceeded 15 seconds: {total_ms} ms'):
@@ -799,21 +875,28 @@ captured.then(srcdoc=>{
     def test_frame_marker_updates_only_after_real_render(self):
         javascript = r"""
 const assert = require('node:assert/strict'), vm = require('node:vm'), fs = require('node:fs');
+const {captureViewerFrames}=require('./scripts/browser-stability-diagnostics.cjs');
 let active = 18, fail = false;
-const env = {renderer:{render(){if(fail)throw Error('draw failed');return 42;}},
+const env = {mainScene:{},renderer:{getRenderTarget:()=>null,getPixelRatio:()=>1,
+  getViewport:v=>v.copy({x:0,y:0,z:800,w:600}),info:{render:{calls:1,triangles:1}},domElement:{width:800,height:600},
+  render(){if(fail)throw Error('draw failed');return 42;}},
   __browserScene:()=>({activePointLights:active})};
 env.window=env;
+const camera={projectionMatrix:{toArray:()=>[2]},matrixWorld:{toArray:()=>[3]}};
+vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer,mainScene)`,env);
 vm.runInNewContext(fs.readFileSync(0,'utf8'),env);
-assert.equal(env.renderer.render(),42);
+assert.equal(env.renderer.render(env.mainScene,camera),42);
 active=0;
 assert.equal(env.__nativeRenderedLights,18,'A CPU state update must not count as a frame');
-env.renderer.render();
+env.renderer.render(env.mainScene,camera);
 assert.equal(env.__nativeRenderedLights,0);
 active=9;
 env.renderer.render({name:'interaction-copy'});
 assert.equal(env.__nativeRenderedLights,0,'A copy pass cannot certify new state');
+env.renderer.render({},camera);
+assert.equal(env.__nativeRenderedLights,0,'A fullscreen contact pass cannot certify new state');
 fail=true;
-assert.throws(()=>env.renderer.render());
+assert.throws(()=>env.renderer.render(env.mainScene,camera));
 assert.equal(env.__nativeRenderedLights,0,'A failed draw must not count as the new state');
 """
         result = subprocess.run(['node', '-e', javascript], input=acceptance.NATIVE_VIEWER_PROGRAM_DIAGNOSTICS + acceptance.NATIVE_VIEWER_FRAME_DIAGNOSTICS,
