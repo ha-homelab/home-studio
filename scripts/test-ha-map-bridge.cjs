@@ -265,7 +265,7 @@ test('real opaque iframe exchanges map reads, preview tiles, revisioned saves an
     const attribution=page.locator('home-floorplan-panel #map-attribution');await attribution.waitFor({state:'visible'});
     assert.equal(await attribution.getAttribute('href'),'https://www.openstreetmap.org/copyright');
     const popupPromise=page.waitForEvent('popup');await attribution.click();const popup=await popupPromise;await popup.close();
-    assert.ok(requests.includes('https://www.openstreetmap.org/copyright'),'native attribution opens the fixed URL; test transport blocks outbound traffic');
+    assert.deepEqual(requests.filter(url=>new URL(url).origin!==origin),['https://www.openstreetmap.org/copyright'],'native attribution opens exactly the fixed URL; test transport blocks outbound traffic');
     const saved=await exchange({request_id:'save',action:'save',revision:0,config:config()});assert.equal(saved.result.revision,1);
     const conflict=await exchange({request_id:'conflict',action:'save',revision:0,config:config()});assert.equal(conflict.success,false);assert.match(conflict.error,/changed/);
     await frame.evaluate(view=>port.postMessage({type:'map_view',view}),preciseNavigation());

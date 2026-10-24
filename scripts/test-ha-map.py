@@ -224,7 +224,7 @@ class MapTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0)
         self.admin.user.is_admin = False
         self.manager.lock.release()
-        await pending
+        self.assertIs(await pending, self.admin)
         self.assertEqual(self.admin.errors[-1][0], "unauthorized")
         self.assertEqual(self.hass.saved, {})
 
@@ -284,6 +284,10 @@ class MapTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("HomeStudioMap/", options["headers"]["User-Agent"])
         self.assertNotIn("Referer", options["headers"])
         self.assertGreater(self.manager.tiles.cache[(2, 1, 3)]["expires"], time.monotonic() + 6 * 86400)
+
+    def test_malformed_expiry_uses_default_cache_ttl(self):
+        self.assertEqual(maps._cache_policy({"Expires": "invalid", "Age": "30"}),
+                         (maps.TILE_TTL - 30, True))
 
     async def test_expired_tiles_use_conditional_request_and_304(self):
         self.hass.session.responses = [Response(headers={"Cache-Control": "max-age=0", "ETag": '"tile1"',
@@ -372,7 +376,7 @@ class MapTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
         self.manager.document["config"]["enabled"] = False
         gate.set()
-        await pending
+        self.assertIs(await pending, family)
         self.assertEqual(family.errors[-1][0], "map_disabled")
         self.assertFalse(family.results)
 

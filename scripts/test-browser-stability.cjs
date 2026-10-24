@@ -389,17 +389,38 @@ async function run(browserName, origin, project, sourceHash) {
         check((await snapshot()).shaderErrors.length===0, 'Restored WebGL contexts rebuild valid programs');
         assert.deepEqual(restored.actual,restored.expected, 'Context restoration applies viewport changes made while the context was lost');
         recovery = {before:beforeLoss,after:(await snapshot()).renderCount,contextLosses:(await snapshot()).contextLosses,drawingBuffer:restored.actual};
-        // A delayed map failure changes the in-flow footer after the first
-        // restored draw. Only ResizeObserver may produce the required new frame.
+        // A delayed map failure changes the in-flow footer after restoration.
+        // Desktop gives it stage space; narrow layouts retain their fixed stage.
         phases.start('post-restore-map-layout', {cycle});
+        const captureMapLayout = () => child.evaluate(() => ({
+          narrow:matchMedia('(max-width:950px)').matches,
+          sectionHeight:document.querySelector('.home-map').getBoundingClientRect().height,
+          captionHeight:document.querySelector('#homeMapCaption').getBoundingClientRect().height,
+        }));
+        const layoutBefore = await captureMapLayout();
         await page.evaluate(() => {window.deferMapReply=true;});
         await child.evaluate(() => document.querySelector('#homeMapRetry').click());
         await page.waitForFunction(() => window.viewerMapRequests.length===2);
         await page.evaluate(() => window.viewerPort.postMessage({type:'map_result',request_id:window.viewerMapRequests[1].request_id,success:false,error:'Simulated delayed map failure'}));
         const mapLayout = await child.evaluate(waitForHomeViewport, {beforeRenderCount:restored.renderCount,beforeSceneDraws:restored.sceneDraws,captionVisible:true});
-        assert(mapLayout.viewport[1]<restored.viewport[1], 'The delayed map error must shrink the real Home stage');
-        assert.deepEqual(mapLayout.actual,mapLayout.expected, 'ResizeObserver resizes and redraws the restored canvas after a late map error');
-        sample.mapLayoutRecovery = {before:restored,after:mapLayout};save();
+        const layoutAfter = await captureMapLayout();
+        sample.mapLayoutRecovery = {before:restored,after:mapLayout,layoutBefore,layoutAfter};save();
+        assert.equal(layoutAfter.narrow,layoutBefore.narrow, 'A map status change must preserve the responsive layout');
+        assert(layoutAfter.captionHeight>0, 'The delayed map error occupies visible layout space');
+        assert.deepEqual(mapLayout.actual,mapLayout.expected, 'The restored canvas fits its stage after a late map error');
+        if(layoutBefore.narrow) {
+          assert.deepEqual(mapLayout.viewport,restored.viewport, 'A narrow layout preserves its fixed Home stage when the map caption appears');
+          assert(Math.abs(layoutAfter.sectionHeight-layoutBefore.sectionHeight-layoutAfter.captionHeight)<1,
+            'A narrow map section grows by the visible error caption height');
+          // Exercise ResizeObserver separately where the caption cannot resize
+          // the stage. No explicit render or resize API may satisfy this demand.
+          const viewport=page.viewportSize();
+          await page.setViewportSize({...viewport,width:viewport.width-20});
+          const resized = await child.evaluate(waitForHomeViewport, {beforeRenderCount:mapLayout.renderCount,beforeSceneDraws:mapLayout.sceneDraws,captionVisible:true});
+          sample.mapLayoutRecovery.resized=resized;save();
+          assert.notDeepEqual(resized.viewport,mapLayout.viewport, 'The real narrow viewport change must resize the Home stage');
+          assert.deepEqual(resized.actual,resized.expected, 'ResizeObserver redraws the narrow restored canvas at the new viewport');
+        } else assert(mapLayout.viewport[1]<restored.viewport[1], 'The delayed map error must shrink the real desktop Home stage');
         // Disposing outlines and revisiting cached wall geometry after restoration
         // must not delete handles from the lost generation. Keep the same case
         // deadline and existing per-operation limits; no screenshots or link queries.

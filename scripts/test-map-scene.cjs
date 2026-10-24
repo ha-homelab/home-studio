@@ -100,7 +100,6 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
     assert(Math.abs(projected[0]-.3)*box.width/2<2&&Math.abs(projected[1]-.2)*box.height/2<2,'Wheel keeps the geographic point under the cursor: '+JSON.stringify({projected,box}));
     const zoomed=await page.evaluate(()=>window.__mapTest.exportNavigationState());assert(zoomed.pan_x!==0||zoomed.pan_y!==0,'Wheel zoom preserves a noncentral ground anchor');
     await page.evaluate(()=>{
-      const canvas=document.querySelector('#homeStage canvas'),r=canvas.getBoundingClientRect();
       // Real touch contacts are exercised below via CDP; here restore a portable map state.
       window.__mapTest.applyNavigationState({mode:'map',zoom:.08,rotation:.2,tilt:0,pan_x:20,pan_y:-10});
     });

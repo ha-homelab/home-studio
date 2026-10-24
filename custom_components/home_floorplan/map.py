@@ -167,7 +167,8 @@ def _cache_policy(headers):
         try:
             ttl = max(0, parsedate_to_datetime(headers["Expires"]).timestamp() - time.time())
         except (TypeError, ValueError, OverflowError):
-            pass
+            # Malformed upstream expiry dates use the same fallback as missing dates.
+            ttl = TILE_TTL
     if "no-cache" in directives:
         ttl = 0
     age = headers.get("Age", "0")
