@@ -97,6 +97,7 @@ jobs:
           node --test scripts/test-inventory-appearance.cjs
           python3 scripts/test-material-textures.py
           python3 scripts/test-pbr-materials.py
+          python3 scripts/test-physical-exports.py
           PBR_SKIP_BROWSER=1 node scripts/test-pbr-materials.cjs
       - name: Check localized guides, wiki links and vector diagrams
         run: |

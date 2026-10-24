@@ -7,7 +7,13 @@ else:
     from material_textures import material_surface_profile
     from pbr_materials import validate_pbr_fields, packed_metallic_roughness, gltf_normal_spec
 
-def export_models(data, ROOT, stem):
+def export_models(data, ROOT, stem, *, physical=False):
+    if physical:
+        if __package__:
+            from .physical_exports import export_physical_models
+        else:
+            from physical_exports import export_physical_models
+        return export_physical_models(data, ROOT, stem)
     meshes=data['meshes'];MATS=data['materials'];H=data['ceiling_height_m']
     def export_glb():
         blob=bytearray();views=[];accessors=[];gm=[];nodes=[]

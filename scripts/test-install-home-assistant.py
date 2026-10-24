@@ -270,13 +270,19 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse((self.target / "access.py").exists())
         self.assertFalse((self.target / "room-activity.json").exists())
 
+    def test_optional_authoring_files_remain_compatible_with_older_archives(self):
+        for name in ("plan.svg", "inventory.json", "inventory-template.json", "main.usda"):
+            self.files["assets/main/" + name] = b"optional authoring source"
+        self.write_package()
+        installer.install(self.archive, self.config)
+        for name, value in self.files.items():
+            self.assertEqual((self.target / name).read_bytes(), value)
+
     def test_private_household_requires_explicit_flag_and_preserves_storage(self):
         site = json.loads(self.files["site.json"])
         site.update(site_id=None, site_features=True)
         self.files["site.json"] = json_bytes(site)
         self.files["curtains.json"] = json_bytes({"cover.example": {"guard": "switch.example"}})
-        for name in ("plan.svg", "inventory.json", "inventory-template.json", "main.usda"):
-            del self.files["assets/main/" + name]
         self.files["assets/main/main.usdz"] = b"optional private export"
         self.write_package()
         self.reject("--allow-site-features")

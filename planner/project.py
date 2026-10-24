@@ -612,8 +612,30 @@ def package_ha(output, manifest):
             entry.size, entry.mode = len(contents), 0o644
             archive.addfile(entry, io.BytesIO(contents))
         for floor_id in manifest["floors"]:
-            for source in sorted((output / floor_id).iterdir()):
-                archive.add(source, arcname=base + "/assets/" + floor_id + "/" + source.name, recursive=False)
+            folder = output / floor_id
+            stem = manifest['floors'][floor_id]['stem']
+            # Authoring SVG, USDA and seed inventory remain in the local build.
+            # HA already embeds the plan/seed in HTML and model-data; it serves
+            # only the runtime and the formats linked by the viewer.
+            names = {'index.html', 'model-data.json'}
+            names.update(stem + '.' + ext for ext in ('glb', 'obj', 'mtl', 'dae', 'usdz')
+                         if (folder / (stem + '.' + ext)).is_file())
+            physical_manifest = folder / (stem + '.exports.json')
+            if physical_manifest.is_file():
+                names.add(physical_manifest.name)
+                textures = json.loads(physical_manifest.read_text())['textures']
+                for name, digest in textures.items():
+                    if (name != stem + '.textures/' + digest + '.png'
+                            or not re.fullmatch('[0-9a-f]{64}', digest)
+                            or hashlib.sha256((folder / name).read_bytes()).hexdigest() != digest):
+                        fail('ha-package', 'invalid physical texture dependency')
+                    names.add(name)
+            for name in sorted(names):
+                source = folder / name
+                if source.is_symlink():
+                    fail("ha-package", "refusing symlink output " + str(source))
+                if source.is_file():
+                    archive.add(source, arcname=base + "/assets/" + floor_id + "/" + source.relative_to(folder).as_posix(), recursive=False)
 
 
 def compile_project(project, output=DEFAULT_OUTPUT, ha_package=False, project_path=None):
@@ -675,7 +697,10 @@ def compile_project(project, output=DEFAULT_OUTPUT, ha_package=False, project_pa
             inventory = {"schema_version": 1, "model": floor["id"], "units": "metres", "up_axis": "Y", "items": floor["items"]}
             (folder / "inventory.json").write_text(json_text(inventory, True) + "\n", encoding="utf-8")
             (folder / "inventory-template.json").write_text(json_text({**inventory, "items": []}, True) + "\n", encoding="utf-8")
-            export_models(data, folder, floor["id"])
+            physical = any(any(mesh.get(key) for key in ('material_family', 'albedo_texture',
+                           'normal_texture', 'roughness_texture', 'metalness_texture', 'ao_texture'))
+                           for mesh in data['meshes'])
+            export_models(data, folder, floor["id"], physical=True) if physical else export_models(data, folder, floor["id"])
             normalize_glb(folder / (floor["id"] + ".glb"), data)
             (folder / "index.html").write_text(render_viewer(data, svg), encoding="utf-8")
         (stage / "site.json").write_text(json_text(manifest, True) + "\n", encoding="utf-8")

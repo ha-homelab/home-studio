@@ -191,7 +191,7 @@ override the corresponding generic channel. `uv_dimensions` continues to
 convert normalized geometry into physical coordinates when it is present.
 
 Fabric and wood also receive bounded tintable color variation. The two shared
-128² RGB carriers in `pbr-color-data.js` come from generic text-only material
+128² luminance carriers in `pbr-color-data.js` come from generic text-only material
 images, with no household reference image or private metadata. The source
 hashes, prompts and routine downsampling are recorded in
 `material-color-provenance.json`. Runtime and Python code derive the same
@@ -208,6 +208,26 @@ together for glTF's image convention. OBJ packages include `norm`, `map_Pr`,
 `map_Pm`, and `map_Ka` plus explicit channel selectors. Those MTL extensions are
 reader-dependent; GLB is the preferred complete material interchange format.
 Existing 32 MiB export and 500,000 triangle limits remain in force.
+
+PBR-capable catalog builds and explicitly selected private schema3 builds also
+use this material path for their on-disk GLB/OBJ downloads. Historical builds
+retain their prior exports. Their USDA includes `UsdPreviewSurface`, shared PNG
+readers, per-channel physical UV transforms, linear scalar maps and correctly
+scaled tangent normals. USD coordinates retain the native bottom-left image
+origin. The optional Apple packaging step stores the binary layer and all
+hash-verified PNG dependencies with 64-byte ZIP alignment.
+
+COLLADA preserves vertex normals, UVs and mapped albedo; selected color tint is
+baked in linear space into its diffuse image. Tangent normal maps use the
+FCOLLADA extension. Roughness/metalness and other PBR references are retained in
+`HOME_STUDIO_PBR` metadata because COLLADA 1.4.1 has no portable PBR shader.
+Use GLB or USD when full material interchange is required. Float attributes in
+these exports retain their exact float32 values; source model data is unchanged.
+
+All authoring files remain in the local compiler output. The HA package carries
+the runtime, linked model downloads and their complete texture dependencies;
+it omits duplicate authoring USDA, SVG and seed-inventory files already embedded
+in the runtime data. Installer size limits are unchanged.
 
 Current-drawing OBJ writes positions and UVs to five decimal places (at most
 5 micrometres of error per position component, and 0.000005 per UV component).
