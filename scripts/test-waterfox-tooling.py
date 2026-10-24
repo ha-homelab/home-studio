@@ -81,7 +81,17 @@ class ViewerColdLoadTests(unittest.TestCase):
             assert.deepEqual(JSON.parse(JSON.stringify(value)),{revision:0,configured:false,config:null,reference:{latitude:0,longitude:0}});
             assert.equal(context.viewerMapRequests.length,1);assert.equal(context.viewerMapRequests[0].request_id,'map-1');
             assert.equal(timers.size,0);assert.equal(vm.runInContext('mapRequests.size',context),0);
-            await assert.rejects(context.homeMapRequest('save'),/Unsupported map request/);
+            for(const type of ['view_preferences','map_view'])context.viewerPort.onmessage({data:{type}});
+            assert.equal(context.viewerCommands.length,0,'Valid fixture messages are not commands');
+            for(const action of ['save','tile','unknown']){
+              if(action==='unknown')context.viewerPort.onmessage({data:{type:'map_request',action,request_id:action}});
+              else await assert.rejects(context.homeMapRequest(action),/Unsupported map request/);
+              assert.equal(context.viewerCommands.at(-1).action,action);
+              assert.equal(replies.at(-1).success,false);
+            }
+            for(const type of ['save','export','toggle','tv_power','curtain_command','media_command','more_info','floor','unexpected']){
+              context.viewerPort.onmessage({data:{type}});assert.equal(context.viewerCommands.at(-1).type,type);
+            }
             assert.equal(timers.size,0);assert.equal(vm.runInContext('mapRequests.size',context),0);
           })().catch(error=>{console.error(error);process.exitCode=1;});
         '''], input=json.dumps({'bootstrap': bootstrap, 'requests': requests, 'response': response}),

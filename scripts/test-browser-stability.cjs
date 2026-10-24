@@ -230,10 +230,11 @@ async function run(browserName, origin, project, sourceHash) {
               if(event.data.type==='model_config') channel.port1.postMessage({type:'states',connected:true,states});
               if(event.data.type==='map_request') {
                 window.viewerMapRequests.push(event.data);
-                if(!window.deferMapReply) channel.port1.postMessage({type:'map_result',request_id:event.data.request_id,
-                  success:true,result:{revision:0,configured:false,config:null,reference:null}});
-              }
-              if(['toggle','tv_power','curtain_command','media_command','more_info'].includes(event.data.type)) window.viewerCommands.push(event.data);
+                if(event.data.action!=='get') window.viewerCommands.push(event.data);
+                if(event.data.action!=='get'||!window.deferMapReply) channel.port1.postMessage({type:'map_result',request_id:event.data.request_id,
+                  ...(event.data.action==='get'?{success:true,result:{revision:0,configured:false,config:null,reference:null}}:
+                    {success:false,error:'Unsupported map request in the viewer fixture.'})});
+              } else if(!['model_config','view_preferences','map_view'].includes(event.data.type)) window.viewerCommands.push(event.data);
             };
             iframe.contentWindow.postMessage({type:'home-floorplan:init',can_edit:true,items,preferences:{}},'*',[channel.port2]);
           };
@@ -297,7 +298,7 @@ async function run(browserName, origin, project, sourceHash) {
       check(afterHomeDrag.renderCount>idleBefore, 'Dragging Home updates the rendered scene');
       check(sample.homeCameraChanged, 'Dragging Home changes the camera used to draw the scene');
       check(sample.homeCameraRotated, 'Dragging Home rotates the rendered camera, rather than only panning its projection');
-      check(sample.homeDragCommands.length===0, 'A real Home orbit never issues a device command or opens native details');
+      check(sample.homeDragCommands.length===0, 'A real Home orbit never issues a device or write command, or opens native details');
       await page.waitForTimeout(200);
       const orbitIdle = await snapshot();
       await page.waitForTimeout(350);
@@ -465,6 +466,9 @@ async function run(browserName, origin, project, sourceHash) {
       // Browser teardown and Playwright's frame registry update asynchronously.
       // Subscribe before removing the iframe so even a fast detach is observed.
       phases.start('viewer-detach', {cycle});
+      sample.viewerCommands = await page.evaluate(() => window.viewerCommands);
+      check(sample.viewerCommands.length===0, 'Viewer navigation never issues a device, write, or unsupported command');
+      save();
       const detachStarted = Date.now();
       await Promise.all([
         page.waitForEvent('framedetached',{predicate:detached=>detached===child,timeout:30000}),

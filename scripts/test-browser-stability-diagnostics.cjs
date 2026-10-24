@@ -27,6 +27,38 @@ test('host phase timing closes sequential phases and preserves the timeout obser
   idle.freezeTimeout();assert.deepEqual(empty.timeoutPhase,{elapsedMs:0,activePhase:null});
 });
 
+test('viewer host rejects unsupported map actions and records every unexpected command', () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  const start=source.indexOf('            channel.port1.onmessage = event => {');
+  const end=source.indexOf('\n            };',start)+'\n            };'.length;
+  assert(start>0&&end>start);
+  const replies=[],env={states:{},viewerCommands:[],viewerMapRequests:[],deferMapReply:false,
+    channel:{port1:{postMessage:message=>replies.push(JSON.parse(JSON.stringify(message)))}}};
+  env.window=env;vm.runInNewContext(source.slice(start,end),env);
+  const send=data=>env.channel.port1.onmessage({data});
+  for(const type of ['model_config','view_preferences','map_view'])send({type});
+  assert.deepEqual(env.viewerCommands,[]);assert.equal(replies[0].type,'states');
+  send({type:'map_request',action:'get',request_id:'initial'});
+  assert.deepEqual(replies.at(-1),{type:'map_result',request_id:'initial',success:true,result:{revision:0,configured:false,config:null,reference:null}});
+  env.deferMapReply=true;const count=replies.length;
+  send({type:'map_request',action:'get',request_id:'deferred'});
+  assert.equal(replies.length,count,'Only the intended delayed get is held');
+  for(const action of ['save','tile','unknown']) {
+    const message={type:'map_request',action,request_id:action};send(message);
+    assert.equal(replies.at(-1).success,false);assert.equal(replies.at(-1).request_id,action);
+    assert.equal(env.viewerCommands.at(-1),message,'Rejected map actions remain visible to no-command assertions');
+  }
+  for(const type of ['save','export','toggle','tv_power','curtain_command','media_command','more_info','floor','unexpected']) {
+    const message={type};send(message);assert.equal(env.viewerCommands.at(-1),message);
+  }
+  const checkStart=source.indexOf('      sample.viewerCommands = await page.evaluate');
+  const checkEnd=source.indexOf('\n      save();',checkStart);
+  const code='(async()=>{'+source.slice(checkStart,checkEnd)+'})()';
+  assert(checkStart>0&&checkEnd>checkStart);
+  return assert.rejects(vm.runInNewContext(code,{sample:{},page:{evaluate:async()=>env.viewerCommands},check:assert}),
+    /Viewer navigation never issues a device, write, or unsupported command/);
+});
+
 test('viewer drag receipts preserve native phases and the existing two-frame completion wait', async () => {
   const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
   const start=source.indexOf('const dragCanvas = async'),end=source.indexOf("    phases.start('dashboard-navigation');",start);

@@ -31,9 +31,13 @@ Path(sys.argv[1]).write_text(render_viewer(data,svg))`,output],{cwd:root,encodin
     await page.addScriptTag({path:path.join(root,'custom_components/home_floorplan/static/panel.js')});
     await page.evaluate(({html,items})=>{
       const panel=document.querySelector('home-floorplan-panel');
-      window.calls=[];window.inspected=[];
+      window.calls=[];window.mapReads=[];window.inspected=[];
       panel.addEventListener('hass-more-info',event=>inspected.push(event.detail.entityId));
       window.hass={user:{id:'fixture-admin',is_admin:true},connected:true,states:{},callWS:async message=>{
+        if(message.type==='home_floorplan/map_get'){
+          mapReads.push(message);
+          return {revision:0,configured:false,config:null,reference:{latitude:0,longitude:0}};
+        }
         if(message.type!=='home_floorplan/viewer')calls.push(message);
         return {html,items,can_edit:true,readable_entities:items.map(item=>item.entity_id),controllable_entities:items.map(item=>item.entity_id),revision:1,floor:'main',floors:['main'],site_features:false};
       },callService:(...args)=>calls.push(args)};
@@ -67,6 +71,7 @@ Path(sys.argv[1]).write_text(render_viewer(data,svg))`,output],{cwd:root,encodin
     await page.waitForFunction(()=>inspected.length===10);
     await page.mouse.up();
     assert.equal((await page.evaluate(()=>inspected)).length,10);
+    assert.deepEqual(await page.evaluate(()=>mapReads),[{type:'home_floorplan/map_get'}],'the viewer reads its unset map configuration once');
     assert.deepEqual(await page.evaluate(()=>calls),[],'inspection must not operate the lock or any other device');
     await frame.locator('#homeLanguage').selectOption('ru');
     assert.match(await marker.getAttribute('aria-label'),/Заперт/);
