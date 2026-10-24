@@ -1,5 +1,7 @@
-const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),{chromium}=require('playwright');
-const root=path.resolve(__dirname,'..'),output=process.env.PBR_TEST_OUTPUT||'/tmp/pbr-lighting';fs.mkdirSync(output,{recursive:true});
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{chromium}=require('playwright');
+const root=path.resolve(__dirname,'..'),output=process.env.PBR_TEST_OUTPUT||fs.mkdtempSync(path.join(os.tmpdir(),'pbr-lighting-'));fs.mkdirSync(output,{recursive:true,mode:0o700});
+if(!fs.lstatSync(output).isDirectory()||fs.lstatSync(output).isSymbolicLink())throw Error('PBR output must be a real directory');
+const writeOutput=(name,data)=>fs.writeFileSync(path.join(output,name),data,{flag:'wx',mode:0o600});
 (async()=>{
   const THREE='data:text/javascript;base64,'+fs.readFileSync(path.join(root,'vendor/three.module.min.js')).toString('base64');
   const src=['pbr-color-data.js','pbr-materials.js','environment-lighting.js'].map(p=>fs.readFileSync(path.join(root,p),'utf8')).join('\n');
@@ -21,11 +23,11 @@ const root=path.resolve(__dirname,'..'),output=process.env.PBR_TEST_OUTPUT||'/tm
   try{
     const page=await browser.newPage({viewport:{width:800,height:600}}),errors=[],network=[];page.on('pageerror',e=>errors.push(String(e)));page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});await page.route('**/*',r=>{network.push(r.request().url());r.abort()});
     await page.setContent(html);await page.waitForFunction(()=>window.test);
-    const baseline=await page.evaluate(()=>{test.render(false);const p=test.pixels();return {metal:test.sample([-1.1,.45,.44],p),panel:test.sample([1,.25,.46],p)}});await page.screenshot({path:path.join(output,'baseline.png')});
-    const reflected=await page.evaluate(()=>{test.enableEnvironment();test.render(false);const p=test.pixels();window.beforeAO=p;return {metal:test.sample([-1.1,.45,.44],p),panel:test.sample([1,.25,.46],p)}});await page.screenshot({path:path.join(output,'reflection.png')});
-    const ao=await page.evaluate(()=>{test.render(true);const p=test.pixels();let darker=0,delta=0;for(let i=0;i<p.length;i+=4){const d=beforeAO[i]-p[i];if(d>1){darker++;delta+=d}}return {darker,delta,panel:test.sample([1,.25,.46],p),contactPixels:test.contact.pixels,glError:test.renderer.getContext().getError(),fallback:test.fallback()}});await page.screenshot({path:path.join(output,'reflection-contact.png')});
+    const baseline=await page.evaluate(()=>{test.render(false);const p=test.pixels();return {metal:test.sample([-1.1,.45,.44],p),panel:test.sample([1,.25,.46],p)}});writeOutput('baseline.png',await page.screenshot());
+    const reflected=await page.evaluate(()=>{test.enableEnvironment();test.render(false);const p=test.pixels();window.beforeAO=p;return {metal:test.sample([-1.1,.45,.44],p),panel:test.sample([1,.25,.46],p)}});writeOutput('reflection.png',await page.screenshot());
+    const ao=await page.evaluate(()=>{test.render(true);const p=test.pixels();let darker=0,delta=0;for(let i=0;i<p.length;i+=4){const d=beforeAO[i]-p[i];if(d>1){darker++;delta+=d}}return {darker,delta,panel:test.sample([1,.25,.46],p),contactPixels:test.contact.pixels,glError:test.renderer.getContext().getError(),fallback:test.fallback()}});writeOutput('reflection-contact.png',await page.screenshot());
     assert(reflected.metal>baseline.metal+3,'metal needs reflected environment light');assert(ao.darker>100,'contact shading must affect real contact pixels');assert.equal(ao.panel,reflected.panel,'emissive display must not be darkened');assert.equal(ao.glError,0);assert.deepEqual(ao.fallback,{env:false,contact:false});assert.deepEqual(errors,[]);assert.deepEqual(network,[]);
     const clipping=await page.evaluate(()=>{test.cube.material.clippingPlanes=[new test.THREE.Plane(new test.THREE.Vector3(1,0,0),-5)];test.render(false);const before=test.sample([.45,0,0],test.pixels());test.render(true);const after=test.sample([.45,0,0],test.pixels());return {before,after}});assert(Math.abs(clipping.before-clipping.after)<1,'replaced clipping arrays cannot leave stale contact occluders');
-    const report={status:'PASS',node:process.version,playwright:require('playwright/package.json').version,chromium:browser.version(),baseline,reflected,ao,clipping,errors,network};fs.writeFileSync(path.join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
+    const report={status:'PASS',node:process.version,playwright:require('playwright/package.json').version,chromium:browser.version(),baseline,reflected,ao,clipping,errors,network};writeOutput('report.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report));
   }finally{await browser.close()}
 })().catch(e=>{console.error(e);process.exitCode=1});
