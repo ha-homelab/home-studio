@@ -4,7 +4,7 @@ The Home controls view can zoom from the 3D floor into an OpenStreetMap backgrou
 
 ## Align a home
 
-1. Open **Home controls** in the native Home Assistant panel as an administrator and select **Align map**.
+1. Open **Home controls** in the native Home Assistant panel as an administrator and select **Align map**. Opening alignment immediately requests map tiles around the saved alignment, or HA's configured location if no alignment is saved. **Cancel** discards settings changes but cannot undo those requests.
 2. Choose a known point in the model. Enter its **Model point X (m)** and **Model point Z (m)**, using the model's calibrated metre coordinates.
 3. Enter the geographic latitude and longitude of that same point. **Use HA location** copies Home Assistant's configured location as a starting point. It does not change Home Assistant's location or `zone.home`.
 4. Set **North angle (°)** and drag the map beneath the footprint to check alignment. North angle is clockwise from geographic north to the model's −Z direction: at 0°, model +X is east and model −Z is north; at 90°, model −Z points east.
