@@ -17,6 +17,39 @@
   UV reuse. Exports allow up to 500,000 triangles while retaining the 32 MiB
   size limit; native drawing and added-geometry limits remain unchanged.
 
+## [1.2.0] - Geographic context around your home
+
+### Added
+
+- Optional geographic map in the native Home controls view, using the existing
+  renderer. Zoom out to an aligned home footprint and surrounding streets;
+  zoom in to the furnished floor and its device controls.
+- Administrator alignment with precise coordinates, north direction, a
+  draggable preview, and explicit Save/Cancel. Mouse-wheel and two-finger zoom
+  preserve the pointed-to map location. Floor changes retain map framing.
+- Bounded authenticated tile retrieval, local caching, visible OpenStreetMap
+  attribution, and recovery when the map provider is unavailable. Distant map
+  views suspend house lighting and overlay animation work.
+
+### Upgrade
+
+- Install the integration update and restart Home Assistant. In Home controls,
+  choose **Align map** as an administrator to configure and enable the feature.
+  Existing installations start with the map disabled and retain their plans,
+  entity bindings, and Home Assistant location.
+- Geographic alignment lives separately in the private `home_floorplan.map`
+  Store. Preserve it with HA backups. Recheck alignment after changing the
+  drawing origin, scale, or orientation. See [map setup](docs/map-navigation.md).
+
+### Security
+
+- Tile requests pass through the authenticated HA host; the sandbox receives
+  validated images and configuration, never an HA token or unrestricted network
+  access. Saving alignment requires an administrator and the current revision.
+- The map provider sees the viewed area and HA's outbound IP. Geographic
+  alignment is not included in portable drawings or model exports. Map
+  screenshots and HA backups can still reveal a home's location.
+
 ## [1.1.0] - Connected editing, easier setup and Blender export
 
 ### Added
