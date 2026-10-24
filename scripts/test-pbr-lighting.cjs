@@ -5,6 +5,26 @@ const writeOutput=(name,data)=>fs.writeFileSync(path.join(output,name),data,{fla
 (async()=>{
   const THREE='data:text/javascript;base64,'+fs.readFileSync(path.join(root,'vendor/three.module.min.js')).toString('base64');
   const src=['pbr-color-data.js','pbr-materials.js','environment-lighting.js'].map(p=>fs.readFileSync(path.join(root,p),'utf8')).join('\n');
+  // Three attaches geometry-dispose listeners to each renderer context epoch.
+  // Exercise actual BufferGeometry events: no old epoch may survive GPU release.
+  const api=await import('data:text/javascript;base64,'+Buffer.from(src).toString('base64'));
+  const three=await import(THREE),tracked=new Set();let epoch=1,uploads=0;
+  const probe={info:{autoReset:true},shadowMap:{enabled:true},autoClear:true,
+    getRenderTarget:()=>null,getScissorTest:()=>false,getDrawingBufferSize:v=>v.set(800,600),
+    getViewport:v=>v.set(0,0,800,600),setViewport(){},setRenderTarget(){},initTexture(){},copyFramebufferToTexture(){},
+    render(scene){scene.traverse(object=>{const geometry=object.geometry;if(!geometry||tracked.has(geometry))return;
+      tracked.add(geometry);uploads++;const created=epoch;
+      const dispose=()=>{assert.equal(created,epoch,'No stale context may delete a new-epoch buffer');tracked.delete(geometry);geometry.removeEventListener('dispose',dispose)};
+      geometry.addEventListener('dispose',dispose);
+    })}};
+  const lifecycle=api.createContactShading(three,probe,{pixels:2000000,diffuseLighting:false});
+  const empty=new three.Scene(),probeCamera=new three.PerspectiveCamera();
+  lifecycle.apply(empty,probeCamera);assert.equal(tracked.size,1);
+  const quad=[...tracked][0],positions=Array.from(quad.attributes.position.array);
+  lifecycle.releaseGPU();assert.equal(tracked.size,0,'Contact quad must release its old context buffers');
+  epoch++;lifecycle.apply(empty,probeCamera);assert.equal(tracked.size,1);assert.equal([...tracked][0],quad);
+  assert.deepEqual(Array.from(quad.attributes.position.array),positions,'Restoration retains authored fullscreen geometry');
+  lifecycle.dispose();lifecycle.dispose();assert.equal(tracked.size,0);assert.equal(uploads,2);
   const html=`<!doctype html><style>body{margin:0;background:#ddd}</style><script type="module">import * as THREE from '${THREE}';${src}
   const renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.setSize(800,600);renderer.localClippingEnabled=true;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;document.body.append(renderer.domElement);
   const scene=new THREE.Scene();scene.background=new THREE.Color(.12,.12,.12);const camera=new THREE.PerspectiveCamera(38,800/600,.05,50);camera.position.set(3,3.2,4.5);camera.lookAt(0,.2,0);

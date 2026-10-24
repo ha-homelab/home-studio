@@ -116,8 +116,10 @@ export function createContactShading(THREE,renderer,profile) {
       const autoClear=renderer.autoClear,autoReset=renderer.info.autoReset;
       try{renderer.info.autoReset=false;quad.material=shader;renderer.setRenderTarget(aoTarget);renderer.autoClear=true;renderer.render(quadScene,quadCamera);renderer.setRenderTarget(null);renderer.setViewport(viewport);quad.material=composite;renderer.autoClear=false;renderer.render(quadScene,quadCamera)}finally{quad.material=shader;renderer.setRenderTarget(null);renderer.setViewport(viewport);renderer.autoClear=autoClear;renderer.info.autoReset=autoReset}
     },
-    releaseGPU(){releaseTargets();for(const material of materials.values())material.dispose();materials.clear();shader.dispose();composite.dispose()},
-    dispose(){if(disposed)return;this.releaseGPU();geometry.dispose();disposed=true},
+    // Dispose also detaches Three's old context-specific buffer listeners. The
+    // CPU attributes remain available for the next draw after context recovery.
+    releaseGPU(){releaseTargets();for(const material of materials.values())material.dispose();materials.clear();shader.dispose();composite.dispose();geometry.dispose()},
+    dispose(){if(disposed)return;this.releaseGPU();disposed=true},
     get active(){return enabled&&!disposed},get pixels(){return target?target.width*target.height:0}
   };
 }
