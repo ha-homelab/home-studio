@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import math
 from pathlib import Path
 import struct
 import sys
@@ -32,6 +33,41 @@ def document(raw):
 
 
 class PBRTests(unittest.TestCase):
+    def test_compiler_retains_indexed_smooth_geometry_and_physical_uvs(self):
+        from planner.project import make_floor
+        project=json.loads((ROOT/'planner/example-home.json').read_text())
+        floor=project['floors'][0]
+        item=copy.deepcopy(floor['items'][0])
+        item.update(model_id='synthetic', position_m={'x':2,'y':.5,'z':3},
+                    dimensions_m={'width':2,'height':3,'depth':4}, rotation_deg=37)
+        floor['items']=[item]
+        n=math.sqrt(.5)
+        part={'name':'smooth','material':'surface','kind':'inventory',
+              'vertices':[[-.5,0,-.5],[-.5,0,.5],[.5,0,-.5],[.5,0,.5]],
+              'normals':[[n,n,0],[0,n,n],[-n,n,0],[0,n,-n]],
+              'indices':[0,1,2,2,1,3], 'uv':[[0,0],[0,1],[1,0],[1,1]],
+              'uv_dimensions':['width','depth'],'surface_finish':'fabric',
+              'material_family':'fabric','material_uv_scale':.25,'normal_scale':.6}
+        asset={'meshes':[part],'materials':{'surface':[.3,.4,.5,1]}}
+        original=copy.deepcopy(asset)
+        with patch('planner.project.build_furniture_asset',return_value=asset):
+            model,_=make_floor(project,floor,None)
+        placed=next(m for m in model['meshes'] if m.get('item_id')==item['id'])
+        self.assertEqual(asset,original)
+        self.assertEqual(placed['indices'],part['indices'])
+        self.assertEqual(len(placed['vertices']),4)
+        self.assertEqual(placed['uv'],[[0,0],[0,4],[2,0],[2,4]])
+        self.assertNotIn('uv_dimensions',placed)
+        for field in ('surface_finish','material_family','material_uv_scale','normal_scale'):
+            self.assertEqual(placed[field],part[field])
+        c,s=math.cos(math.radians(37)),math.sin(math.radians(37))
+        for source,normal in zip(part['normals'],placed['normals']):
+            x,y,z=source[0]/2,source[1]/3,source[2]/4
+            expected=[c*x+s*z,y,-s*x+c*z]
+            length=math.sqrt(sum(v*v for v in expected))
+            for actual,want in zip(normal,expected):self.assertAlmostEqual(actual,want/length,places=12)
+        self.assertEqual(model['object_assets'][item['id']]['meshes'],original['meshes'])
+
     def test_all_channels_and_color_roles(self):
         mesh,normal,orm=fixture();mesh.update(normal_texture='n',roughness_texture='orm',metalness_texture='orm',ao_texture='orm',normal_scale=.4,ao_strength=.7)
         model={'materials':{'surface':[1,1,1,1]},'meshes':[mesh],'material_textures':{'n':normal,'orm':orm}}

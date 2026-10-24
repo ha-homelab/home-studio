@@ -425,9 +425,21 @@ def make_floor(project, floor, next_floor):
             for x, y, z in part["vertices"]:
                 x, z = x * d["width"], z * d["depth"]
                 vertices.append([p["x"] + cosine * x + sine * z, p["y"] + y * d["height"], p["z"] - sine * x + cosine * z])
-            faces = [part["indices"][index:index + 3] for index in range(0, len(part["indices"]), 3)]
-            g.mesh(item_name + "_" + part["name"], vertices, faces, part["material"], "inventory",
-                   item_id=item["id"], entity_id=item["entity_id"], model_id=item["model_id"])
+            # Keep authored seams and smooth normals. The primitive builder
+            # expands triangles and computes flat normals, losing both here.
+            normals = []
+            for x, y, z in part["normals"]:
+                x, y, z = x / d["width"], y / d["height"], z / d["depth"]
+                normal = [cosine * x + sine * z, y, -sine * x + cosine * z]
+                length = math.sqrt(sum(value * value for value in normal))
+                normals.append([value / length for value in normal])
+            placed = copy.deepcopy(part)
+            placed.update(name=item_name + "_" + part["name"], vertices=vertices, normals=normals,
+                          kind="inventory", item_id=item["id"], entity_id=item["entity_id"], model_id=item["model_id"])
+            if "uv" in part:
+                placed["uv"] = material_uv(part, d)
+                placed.pop("uv_dimensions", None)
+            g.meshes.append(placed)
     points = [p for mesh in g.meshes for p in mesh["vertices"]]
     minx, maxx = min(p[0] for p in points), max(p[0] for p in points)
     minz, maxz = min(p[2] for p in points), max(p[2] for p in points)
