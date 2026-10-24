@@ -988,7 +988,7 @@ function freshPreviewHarness(view = 'preview') {
   }
   class Renderer {
     constructor({canvas}) {
-      this.domElement=canvas;this.shadowMap={};this.id=renderers.length+1;this.lost=false;renderers.push(this);
+      this.domElement=canvas;this.shadowMap={};this.capabilities={getMaxAnisotropy:()=>1};this.id=renderers.length+1;this.lost=false;renderers.push(this);
       this.restored=()=>reusedRestores++;
       canvas.addEventListener('webglcontextrestored',this.restored);
     }
@@ -1004,6 +1004,10 @@ function freshPreviewHarness(view = 'preview') {
   const window = new EventTarget();
   context=vm.createContext({AbortController,console,document,window,devicePixelRatio:2,
     // The isolated lifecycle fixture uses the normal, unthemed canvas palette.
+    // Optional PBR owners are exercised separately; this fixture isolates scheduling.
+    PBR_COLOR_DATA:{},createPBRDetails:()=>({configure(){},get(){return {};},dispose(){}}),
+    createReflectionEnvironment:()=>({update(){},dispose(){}}),createContactShading:()=>({apply(){},dispose(){}}),
+    applyMaterialPBR(){},installInstanceMaterialUV(){},
     planColors:{background:'#f2f4ed'},
     // This renderer-lifecycle fixture has no scenery; preserve its optional layer contract.
     createEnvironmentControls:()=>({refresh(){}}),createEnvironmentLayer:()=>({setActive(){},dispose(){}}),

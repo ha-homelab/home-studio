@@ -96,7 +96,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   let rendererName = 'ANGLE SwiftShader';
   let rect = {width: 3840, height: 2160};
   class Renderer {
-    constructor() { constructions++; this.shadowMap = {}; }
+    constructor() { constructions++; this.shadowMap = {}; this.capabilities={getMaxAnisotropy:()=>1}; }
     getContext() { return {getExtension: () => ({UNMASKED_RENDERER_WEBGL: 1}), getParameter: () => rendererName}; }
     setClearColor() {}
     setSize() { throw Error('Drawing must not reset the canvas on every frame'); }
@@ -112,6 +112,10 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   const c = vm.createContext({createEnvironmentLayer: (T, options) => createEnvironmentLayer(T, {...options, document:null, window:null}), createEnvironmentControls: () => ({refresh() {}}), t: value => value, AbortController, THREE: {...THREE, WebGLRenderer: Renderer}, project, activeFloorId: f.id, floor: () => project.floors[0],
     view: 'plan', drag: null, previewEdit: null, selection: null, spaceHeld: false, previewDirty: true, size: {...rect}, map: {x: 0, y: 0}, devicePixelRatio: 3,
     $: get, planCanvas: get('plan-canvas'), ctx: {setTransform() {}},
+    // Optional PBR owners are exercised separately; this fixture isolates scheduling.
+    PBR_COLOR_DATA:{},createPBRDetails:()=>({configure(){},get(){return {};},dispose(){}}),
+    createReflectionEnvironment:()=>({update(){},dispose(){}}),createContactShading:()=>({apply(){},dispose(){}}),
+    applyMaterialPBR(){},installInstanceMaterialUV(){},
     planColors: {background: '#f2f4ed'},
     floorBounds: model.floorBounds, distance: model.distance, wallPieces: model.wallPieces,
     COLORS: {floor: '#eeeeee', furniture: '#aaaaaa'}, itemAsset: () => null,
@@ -222,9 +226,10 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   // Repeated catalog furniture shares immutable vertex data, while appearance
   // variants, materials and per-item transforms keep their existing behavior.
   const furniture = await import('../planner/furniture.js');
+  const {MATERIAL_SURFACE_PROFILES}=await import('data:text/javascript;base64,'+fs.readFileSync(path.join(root,'material-textures.js')).toString('base64'));
   const catalogProject = model.clone(project), catalogFloor = catalogProject.floors[0];
   const sofa = furniture.getCatalogModel('sofa_3'), rug = furniture.getCatalogModel('rug');
-  catalogFloor.items = [sofa, sofa, sofa, rug, rug].map((design, i) => ({
+  catalogFloor.items = [sofa, sofa, sofa, rug, rug, sofa].map((design, i) => ({
     id: `catalog_${i}`, name: design.label, type: design.type, room: 'room',
     position_m: {x: i + 1, y: design.elevation_m, z: 2}, dimensions_m: {...design.dimensions_m},
     rotation_deg: i * 30, entity_id: '', notes: '', model_id: design.id, style_id: design.default_style,
@@ -232,7 +237,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   }));
   catalogFloor.items[1].dimensions_m.width *= 1.5;
   const sharedWorld = new THREE.Group();
-  const shared = vm.createContext({previewEnvironment: null, environmentSite: () => ({}), THREE, worldGroup: sharedWorld, previewSun: new THREE.DirectionalLight(),
+  const shared = vm.createContext({MATERIAL_SURFACE_PROFILES, previewDetails:{get(){return {}}}, applyMaterialPBR(){}, previewEnvironment: null, environmentSite: () => ({}), THREE, worldGroup: sharedWorld, previewSun: new THREE.DirectionalLight(),
     previewMetadata: {}, previewDirty: true, previewInstancing: false, previewDiffuseLighting: false, previewFloors: () => catalogProject.floors,
     previewItemNodes: new Map(), orbit: {mode: 'orbit'}, selection: null, activeFloorId: catalogFloor.id,
     assetCache: new Map(), APPEARANCE_CACHE_LIMIT: 100, buildFurnitureAsset: furniture.buildFurnitureAsset,
@@ -243,7 +248,9 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   shared.rebuildPreview();
   const groups = sharedWorld.children.filter(object => object.isGroup);
   assert.equal(groups.length, catalogFloor.items.length);
-  assert.equal(groups[0].children[0].geometry, groups[1].children[0].geometry, 'Repeated parts reuse one geometry even with different item dimensions');
+  assert.equal(groups[0].children[0].geometry, groups[5].children[0].geometry, 'Identical dimensions and appearance share immutable geometry');
+  assert.notEqual(groups[0].children[0].geometry, groups[1].children[0].geometry, 'Different item dimensions require different metric UV charts');
+  assert.notDeepEqual(shared.itemAsset(catalogFloor.items[0]).meshes[0].uv,shared.itemAsset(catalogFloor.items[1]).meshes[0].uv,'Dimension-aware asset cache regenerates physical texture coordinates');
   assert.notEqual(groups[0].children[0].material, groups[1].children[0].material, 'Materials retain their original identity and render sorting');
   assert.notEqual(groups[0].children[0].geometry, groups[2].children[0].geometry, 'Different cached appearances do not accidentally share mutable asset data');
   for (const [i, group] of groups.entries()) {
@@ -258,7 +265,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
       assert.deepEqual(mesh.geometry.attributes.normal.array, new Float32Array(part.normals.flat()));
       assert.deepEqual(Array.from(mesh.geometry.index.array), part.indices);
       assert.deepEqual(mesh.material.color.toArray(), asset.materials[part.material].slice(0, 3));
-      assert.equal(mesh.material.roughness, .78); assert(mesh.castShadow && mesh.receiveShadow);
+      assert.equal(mesh.material.roughness, (MATERIAL_SURFACE_PROFILES[part.surface_finish]||[.78,0])[0]); assert(mesh.castShadow && mesh.receiveShadow);
     }
   }
   const oldGeometry = new Map(), oldMaterials = new Map();

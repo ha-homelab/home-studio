@@ -90,11 +90,14 @@ jobs:
         run: |
           python3 scripts/generate-furniture-catalog.py --check
           python3 scripts/test-furniture.py
+          python3 scripts/test-furniture-profiles.py
           python3 scripts/test-furniture-patterns.py
           node scripts/test-furniture-patterns.mjs
           python3 scripts/test-inventory-appearance.py
           node --test scripts/test-inventory-appearance.cjs
           python3 scripts/test-material-textures.py
+          python3 scripts/test-pbr-materials.py
+          PBR_SKIP_BROWSER=1 node scripts/test-pbr-materials.cjs
       - name: Check localized guides, wiki links and vector diagrams
         run: |
           python3 scripts/test-docs.py
@@ -142,6 +145,7 @@ jobs:
       - name: Test optional garden surroundings and bounded decorative motion
         run: |
           node scripts/test-environment.mjs
+          node scripts/test-environment-surfaces.mjs
           node scripts/test-environment-browser.cjs
       - name: Test AI preview, review, undo and real local companion
         env:
