@@ -685,13 +685,18 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
 
 // Injected into the fictional viewer after its renderer exists. CPU state can
 // change before a queued frame; only a successful draw advances this receipt.
-function captureViewerFrames(renderer) {
+function captureViewerFrames(renderer, mainScene) {
   const draw = renderer.render.bind(renderer);
   const passes = window.__browserRenderPasses = {scene: 0, copy: 0, last: null, sceneViewport: null, copyViewport: null};
   const viewport = {copy(value) {this.x=value.x;this.y=value.y;this.z=value.z;this.w=value.w;return this;}};
   renderer.render = (scene, camera) => {
+    // The room's depth mask renders offscreen; contact compositing uses a
+    // different scene and an identity camera. Neither certifies a fresh room
+    // frame. Bounded pointer motion still renders the room to this framebuffer.
+    const defaultTarget = renderer.getRenderTarget() === null;
     const result = draw(scene, camera);
     const copy = scene?.name === 'interaction-copy';
+    if (!defaultTarget || (!copy && scene !== mainScene)) return result;
     const kind = copy ? 'copy' : 'scene';
     passes[kind]++; passes.last = kind;
     renderer.getViewport(viewport);

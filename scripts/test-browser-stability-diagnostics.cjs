@@ -190,15 +190,15 @@ test('wheel acceptance preserves the sized idle deadline and accepts two bounded
 
 test('Viewer frame receipts advance only after the real draw succeeds', () => {
   let active = 18, fail = false;
-  const env = {renderer: {info:{render:{calls:1,triangles:1}},domElement:{width:632,height:394},getViewport(v){return v.copy({x:0,y:0,z:632,w:394});},getPixelRatio(){return 1;},render() {if (fail) throw Error('draw failed'); return 42;}},
+  const env = {mainScene:{}, renderer: {getRenderTarget:()=>null,info:{render:{calls:1,triangles:1}},domElement:{width:632,height:394},getViewport(v){return v.copy({x:0,y:0,z:632,w:394});},getPixelRatio(){return 1;},render() {if (fail) throw Error('draw failed'); return 42;}},
     __browserScene: () => ({activePointLights: active})};
   env.window = env;
-  vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer)`, env);
+  vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer,mainScene)`, env);
   const camera = {projectionMatrix: {toArray: () => [1]}, matrixWorld: {toArray: () => [2]}};
-  assert.equal(env.renderer.render({}, camera), 42);
+  assert.equal(env.renderer.render(env.mainScene, camera), 42);
   active = 0;
   assert.equal(env.__browserRenderedLights, 18, 'CPU state is not a completed frame');
-  env.renderer.render({}, camera);
+  env.renderer.render(env.mainScene, camera);
   assert.equal(env.__browserRenderedLights, 0);
   active = 9;
   env.renderer.render({name:'interaction-copy'}, {});
@@ -209,21 +209,49 @@ test('Viewer frame receipts advance only after the real draw succeeds', () => {
   assert.equal(env.__browserRenderPasses.last,'copy');
   assert.deepEqual(Array.from(env.__browserRenderPasses.copyViewport),[0,0,632,394]);
   fail = true;
-  assert.throws(() => env.renderer.render({}, camera), /draw failed/);
+  assert.throws(() => env.renderer.render(env.mainScene, camera), /draw failed/);
   assert.equal(env.__browserRenderedLights, 0, 'A failed draw cannot certify new state');
+});
+
+test('viewer receipts exclude real offscreen depth and fullscreen contact draws', () => {
+  let target=null,active=18,draws=0,fail=false;
+  const mainScene={},quadScene={},camera={projectionMatrix:{toArray:()=>[2]},matrixWorld:{toArray:()=>[3]}};
+  const quadCamera={projectionMatrix:{toArray:()=>[1]},matrixWorld:{toArray:()=>[1]}};
+  const env={mainScene,__browserScene:()=>({activePointLights:active}),renderer:{
+    info:{render:{calls:8,triangles:12}},domElement:{width:800,height:600},
+    getRenderTarget:()=>target,getViewport:v=>v.copy({x:0,y:0,z:800,w:600}),getPixelRatio:()=>1,
+    render(){draws++;if(fail)throw Error('real auxiliary failure');return draws;}}};
+  env.window=env;
+  vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer,mainScene)`,env);
+  env.renderer.render(mainScene,camera);
+  const receipt=JSON.stringify(env.__browserRenderPasses);
+  active=0;target={depthTexture:{}};
+  env.renderer.render(mainScene,camera); // The real room's contact-depth pass.
+  target={};env.renderer.render(quadScene,quadCamera); // Offscreen AO.
+  target=null;env.renderer.render(quadScene,quadCamera); // Final contact composite.
+  assert.equal(draws,4,'Observation must not skip any actual draw');
+  assert.equal(JSON.stringify(env.__browserRenderPasses),receipt,'Auxiliary passes cannot satisfy frame or wheel gates');
+  assert.deepEqual(Array.from(env.__browserCamera.world),[3],'The room camera survives contact compositing');
+  assert.equal(env.__browserRenderedLights,18,'An auxiliary pass cannot certify changed light state');
+  fail=true;assert.throws(()=>env.renderer.render(quadScene,quadCamera),/real auxiliary failure/);
+  fail=false;env.renderer.render(mainScene,camera);
+  assert.equal(env.__browserRenderedLights,0);assert.equal(env.__browserRenderPasses.scene,2);
+  env.renderer.render({name:'interaction-copy'},quadCamera);
+  assert.equal(env.__browserRenderPasses.copy,1,'Software interaction copying remains measured');
+  assert.deepEqual(Array.from(env.__browserCamera.world),[3]);
 });
 
 async function lightStateMeasurement({drawAt=50, expectedLights=71, mutation, lateRead=false}={}) {
   let now=0, serial=0, completed=false, result, error, measuring=false;
   const timers=new Map(), state={renderCount:0, activeLights:72, markers:72, slots:72};
   const camera={projectionMatrix:{toArray:()=>[1]},matrixWorld:{toArray:()=>[1]}};
-  const env={performance:{now:()=>now},
+  const env={mainScene:{},performance:{now:()=>now},
     setTimeout(callback, delay){const id=++serial;timers.set(id,{at:now+delay,callback});return id;},
     // Model a browser that never delivers additional idle RAF callbacks.
     requestAnimationFrame(){throw Error('Light-state receipt must not request an idle animation frame');},
     document:{querySelectorAll:()=>({length:state.markers}),visibilityState:'visible',hidden:false,hasFocus:()=>true},
     floorplan:{homeMode:true,get renderCount(){return state.renderCount;}},__browserStability:{linkedPrograms:19},
-    renderer:{info:{render:{calls:8,triangles:12}},domElement:{width:920,height:622},
+    renderer:{getRenderTarget:()=>null,info:{render:{calls:8,triangles:12}},domElement:{width:920,height:622},
       getViewport(value){return value.copy({x:0,y:0,z:920,w:622});},getPixelRatio:()=>1,
       render(){state.renderCount++;}},
     __browserScene(){
@@ -232,12 +260,12 @@ async function lightStateMeasurement({drawAt=50, expectedLights=71, mutation, la
         drawingBuffer:[920,622],renderPasses:env.__browserRenderPasses};
     }};
   env.window=env;
-  vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer);globalThis.wait=${waitForViewerLightState.toString()};`,env);
-  env.renderer.render({},camera);
+  vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer,mainScene);globalThis.wait=${waitForViewerLightState.toString()};`,env);
+  env.renderer.render(env.mainScene,camera);
   const before={beforeRenderCount:state.renderCount,beforeSceneDraws:env.__browserRenderPasses.scene};
   state.markers=state.activeLights=expectedLights;
   const draw=()=>{
-    env.renderer.render(mutation==='copy'?{name:'interaction-copy'}:{},camera);
+    env.renderer.render(mutation==='copy'?{name:'interaction-copy'}:env.mainScene,camera);
     if(mutation==='markers')state.markers++;
     if(mutation==='active')state.activeLights++;
     if(mutation==='slots')state.slots++;

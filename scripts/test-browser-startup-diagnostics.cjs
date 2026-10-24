@@ -153,6 +153,35 @@ test('the real planner fixture permits only its exact diagnostic origin', () => 
   assert(fs.readFileSync(path.join(__dirname,'../planner/index.html'),'utf8').includes("connect-src 'none'"));
 });
 
+test('the real planner fixture serves its complete local module graph without exposing root files', () => {
+  const root=path.join(__dirname,'..'),source=fs.readFileSync(path.join(__dirname,'test-planner-stability.cjs'),'utf8');
+  const start=source.indexOf('const server=http.createServer('),end=source.indexOf('\nasync function run(',start);
+  const handle=vm.runInNewContext(source.slice(start,end)+'\nserver',{
+    http:{createServer:callback=>Object.assign(callback,{address:()=>({port:12345})})},
+    URL,fs,path,root,startup:createStartupDiagnostics(),sourceHash:'a'.repeat(64),fixtureOnly:false,traceRecovery:false,
+    editor:fs.readFileSync(path.join(root,'planner/editor.js'),'utf8'),
+  });
+  const request=route=>{
+    let status,headers,content;
+    handle({url:route},{writeHead(code,value){status=code;headers=value;return this;},end(value){content=value;}});
+    return {status,headers,content};
+  };
+  const pending=['/planner/editor.js'],seen=new Set();
+  while(pending.length){
+    const route=pending.pop();if(seen.has(route))continue;seen.add(route);
+    const response=request(route);assert.equal(response.status,200,route);
+    assert.equal(response.headers['Content-Type'],'text/javascript',route);
+    const code=response.content.toString();
+    for(const match of code.matchAll(/(?:\bfrom\s*|\bimport\s*)['"]([^'"]+)['"]/g)){
+      assert(match[1].startsWith('.'),'Fixture modules must remain local');
+      pending.push(new URL(match[1],`http://fixture${route}`).pathname);
+    }
+  }
+  for(const name of ['pbr-color-data','pbr-materials','material-textures','environment-lighting'])assert(seen.has(`/${name}.js`));
+  for(const route of ['/package.json','/build.py','/runtime-size-budget.json','/pbr-materials.js.bak','/not-a-module.js','/planner/../build.py','/planner/%2e%2e/build.py'])
+    assert.equal(request(route).status,404,`Do not expose ${route}`);
+});
+
 test('loopback receiver persists bounded whitelisted data, rejecting paths, private fields and excess payloads', async () => {
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'home-studio-startup-test-'));
   const filename=path.join(directory,'startup.jsonl'), receiver=createStartupDiagnostics(filename), sourceHash='a'.repeat(64);

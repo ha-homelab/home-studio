@@ -106,8 +106,9 @@ if (renderer) {
   window.__nativeViewerPrograms.attachRenderer(renderer);
   const nativeRender = renderer.render.bind(renderer);
   renderer.render = (scene, camera) => {
+    const before = window.__browserRenderPasses.scene;
     const result = nativeRender(scene, camera);
-    if (scene?.name !== 'interaction-copy') window.__nativeRenderedLights = window.__browserScene().activePointLights;
+    if (window.__browserRenderPasses.scene > before) window.__nativeRenderedLights = window.__browserRenderedLights;
     return result;
   };
 }

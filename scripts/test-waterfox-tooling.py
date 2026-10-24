@@ -799,21 +799,28 @@ captured.then(srcdoc=>{
     def test_frame_marker_updates_only_after_real_render(self):
         javascript = r"""
 const assert = require('node:assert/strict'), vm = require('node:vm'), fs = require('node:fs');
+const {captureViewerFrames}=require('./scripts/browser-stability-diagnostics.cjs');
 let active = 18, fail = false;
-const env = {renderer:{render(){if(fail)throw Error('draw failed');return 42;}},
+const env = {mainScene:{},renderer:{getRenderTarget:()=>null,getPixelRatio:()=>1,
+  getViewport:v=>v.copy({x:0,y:0,z:800,w:600}),info:{render:{calls:1,triangles:1}},domElement:{width:800,height:600},
+  render(){if(fail)throw Error('draw failed');return 42;}},
   __browserScene:()=>({activePointLights:active})};
 env.window=env;
+const camera={projectionMatrix:{toArray:()=>[2]},matrixWorld:{toArray:()=>[3]}};
+vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer,mainScene)`,env);
 vm.runInNewContext(fs.readFileSync(0,'utf8'),env);
-assert.equal(env.renderer.render(),42);
+assert.equal(env.renderer.render(env.mainScene,camera),42);
 active=0;
 assert.equal(env.__nativeRenderedLights,18,'A CPU state update must not count as a frame');
-env.renderer.render();
+env.renderer.render(env.mainScene,camera);
 assert.equal(env.__nativeRenderedLights,0);
 active=9;
 env.renderer.render({name:'interaction-copy'});
 assert.equal(env.__nativeRenderedLights,0,'A copy pass cannot certify new state');
+env.renderer.render({},camera);
+assert.equal(env.__nativeRenderedLights,0,'A fullscreen contact pass cannot certify new state');
 fail=true;
-assert.throws(()=>env.renderer.render());
+assert.throws(()=>env.renderer.render(env.mainScene,camera));
 assert.equal(env.__nativeRenderedLights,0,'A failed draw must not count as the new state');
 """
         result = subprocess.run(['node', '-e', javascript], input=acceptance.NATIVE_VIEWER_PROGRAM_DIAGNOSTICS + acceptance.NATIVE_VIEWER_FRAME_DIAGNOSTICS,
