@@ -124,7 +124,10 @@ jobs:
       - name: Test drawing, furnishing, export and installation through the editor
         run: npm run test:planner
       - name: Test optional albedo surfaces in the compiled viewer
-        run: MATERIAL_TEXTURE_ENGINES=chromium,firefox,webkit LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-material-textures.cjs
+        run: |
+          node scripts/test-material-profiles.cjs
+          MATERIAL_TEXTURE_ENGINES=chromium,firefox,webkit LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-material-textures.cjs
+          LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-static-material-textures.cjs
       - name: Test optional garden surroundings and bounded decorative motion
         run: |
           node scripts/test-environment.mjs

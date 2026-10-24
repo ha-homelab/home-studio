@@ -1,5 +1,9 @@
 """glTF, USD, OBJ and COLLADA exports from the same metric triangle meshes."""
 import json, struct
+if __package__:
+    from .material_textures import material_surface_profile
+else:
+    from material_textures import material_surface_profile
 
 def export_models(data, ROOT, stem):
     meshes=data['meshes'];MATS=data['materials'];H=data['ceiling_height_m']
@@ -19,7 +23,7 @@ def export_models(data, ROOT, stem):
             nodes.append(dict(name=m['name'],mesh=len(gm)-1,extras=dict(category=m['kind'],estimated=m.get('estimated',False))))
         gl=dict(asset=dict(version='2.0',generator=data['title']+' dimension-constrained reconstruction'),scene=0,
            scenes=[dict(name=stem+'_ceiling_2_7m',nodes=list(range(len(nodes))))],nodes=nodes,meshes=gm,
-           materials=[dict(name=k,pbrMetallicRoughness=dict(baseColorFactor=v,metallicFactor=.05,roughnessFactor=.72),doubleSided=True,alphaMode='BLEND' if v[3]<1 else 'OPAQUE') for k,v in MATS.items()],
+           materials=[dict(name=k,pbrMetallicRoughness=dict(baseColorFactor=v,metallicFactor=material_surface_profile(k)["metalness"],roughnessFactor=material_surface_profile(k)["roughness"]),doubleSided=True,alphaMode='BLEND' if v[3]<1 else 'OPAQUE') for k,v in MATS.items()],
            buffers=[dict(byteLength=len(blob))],bufferViews=views,accessors=accessors,
            extras=dict(units='metres',ceiling_height=H,status='provisional reconstruction; see README.md'))
         jj=json.dumps(gl,separators=(',',':')).encode();jj+=b' '*((-len(jj))%4);blob+=b'\0'*((-len(blob))%4)
@@ -78,17 +82,18 @@ def export_scene(floors, format):
     import re
     import zipfile
     if __package__:
-        from .material_textures import decode_material_texture, material_uv
+        from .material_textures import decode_material_texture, material_uv, MAX_MATERIAL_TEXTURES, MAX_MATERIAL_TEXTURE_BYTES
     else:
-        from material_textures import decode_material_texture, material_uv
+        from material_textures import decode_material_texture, material_uv, MAX_MATERIAL_TEXTURES, MAX_MATERIAL_TEXTURE_BYTES
 
     if format not in ('glb', 'obj'):
         raise ValueError('Choose GLB or OBJ for this export.')
     materials, colors, count, vertex_count, mesh_count = [], {}, 0, 0, 0
-    image_ids, image_bytes, material_maps = {}, [], []
+    image_ids, image_bytes, material_maps, material_profiles = {}, [], [], []
 
     def material_key(mesh):
-        return tuple(mesh['color']) + (mesh.get('texture', {}).get('data_uri'),)
+        profile = material_surface_profile(mesh.get('material_name'))
+        return tuple(mesh['color']) + (mesh.get('texture', {}).get('data_uri'), profile['roughness'], profile['metalness'])
 
     def label(value):
         # Entity references sometimes occur in commissioned mesh/display names.
@@ -136,7 +141,7 @@ def export_scene(floors, format):
                     if uri not in image_ids:
                         image_bytes.append(decode_material_texture(mesh['texture']))
                         image_ids[uri] = len(image_bytes) - 1
-                        if len(image_bytes) > 8 or sum(map(len, image_bytes)) > 524288:
+                        if len(image_bytes) > MAX_MATERIAL_TEXTURES or sum(map(len, image_bytes)) > MAX_MATERIAL_TEXTURE_BYTES:
                             raise ValueError('Export exceeds the material texture budget.')
                     image_index = image_ids[uri]
                 key = material_key(mesh)
@@ -144,6 +149,7 @@ def export_scene(floors, format):
                     colors[key] = len(materials)
                     materials.append(color)
                     material_maps.append(image_index)
+                    material_profiles.append(material_surface_profile(mesh.get("material_name")))
     if not count:
         raise ValueError('Add a room or object before exporting.')
 
@@ -209,7 +215,7 @@ def export_scene(floors, format):
                     'materials': [{'name': 'material_' + str(index), 'doubleSided': True,
                                    'alphaMode': 'BLEND' if color[3] < 1 else 'OPAQUE',
                                    'pbrMetallicRoughness': {'baseColorFactor': [1, 1, 1, 1] if material_maps[index] is not None else color,
-                                                           'metallicFactor': .05, 'roughnessFactor': .72,
+                                                           'metallicFactor': material_profiles[index]['metalness'], 'roughnessFactor': material_profiles[index]['roughness'],
                                                            **({'baseColorTexture': {'index': material_maps[index]}} if material_maps[index] is not None else {})}}
                                   for index, color in enumerate(materials)],
                     'buffers': [{'byteLength': len(blob)}], 'bufferViews': views, 'accessors': accessors}

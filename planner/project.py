@@ -720,7 +720,7 @@ def export_floor(model, floor, reference_items=None, *, elevated=False):
     validate_material_textures(model)
 
     def mesh_data(mesh, dimensions=None):
-        result = {key: mesh[key] for key in ('vertices', 'normals', 'indices')} | {'color': materials[mesh['material']]}
+        result = {key: mesh[key] for key in ('vertices', 'normals', 'indices')} | {'color': materials[mesh['material']], 'material_name': mesh['material']}
         if 'albedo_texture' in mesh:
             result['uv'] = material_uv(mesh, dimensions)
             result['texture'] = model['material_textures'][mesh['albedo_texture']]

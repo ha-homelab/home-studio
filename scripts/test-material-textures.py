@@ -8,28 +8,29 @@ from pathlib import Path
 import struct
 import sys
 import unittest
+from unittest.mock import patch
 import zipfile
 import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from geometry import create_geometry
-from material_textures import decode_material_texture, material_uv, validate_material_textures
+from material_textures import decode_material_texture, material_uv, validate_material_textures, material_surface_profile, MAX_MATERIAL_PNG_BYTES, MAX_MATERIAL_BASE64_CHARS
 from planner.project import export_floor, make_floor, render_viewer
 from exporters import export_scene
 
 
-def swatch():
+def swatch(seed=0, level=-1):
     def chunk(kind, value):
         return struct.pack('>I', len(value)) + kind + value + struct.pack('>I', zlib.crc32(kind + value))
-    pixels = b''.join(b'\0' + b''.join(bytes((60 + (x // 16) % 2 * 100, 70 + y // 2, 100)) for x in range(256)) for y in range(256))
+    pixels = b''.join(b'\0' + b''.join(bytes((60 + (x // 16) % 2 * 100, 70 + y // 2, 100 + seed)) for x in range(256)) for y in range(256))
     data = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 256, 256, 8, 2, 0, 0, 0))
-    data += chunk(b'IDAT', zlib.compress(pixels)) + chunk(b'IEND', b'')
+    data += chunk(b'IDAT', zlib.compress(pixels, level)) + chunk(b'IEND', b'')
     return {'mime_type': 'image/png', 'width': 256, 'height': 256,
             'data_uri': 'data:image/png;base64,' + base64.b64encode(data).decode()}
 
 
-def fixture():
+def fixture(static=False):
     project = json.loads((ROOT / 'planner/example-home.json').read_text())
     floor = project['floors'][0]
     floor['items'] = [{'id': name, 'name': name.title(), 'type': 'furniture', 'room': 'living',
@@ -54,18 +55,85 @@ def fixture():
     model['object_assets']['textured'] = {'meshes': parts}
     model['object_assets']['plain'] = {'meshes': [box]}
     model['material_textures'] = {'fabric': swatch()}
+    if static:
+        for mesh in model['meshes']:
+            if mesh['kind'] in ('floors', 'walls') and model['materials'][mesh['material']][3] == 1:
+                mesh.update(albedo_texture='fabric', uv=[[x / .25, (y if mesh['kind'] == 'walls' else z) / .25] for x, y, z in mesh['vertices']])
     return model, svg, floor
 
 
 class MaterialTextureTests(unittest.TestCase):
     def test_bounded_opaque_png_and_bad_inputs(self):
         spec = swatch()
-        self.assertLess(len(decode_material_texture(spec)), 98304)
+        self.assertLess(len(decode_material_texture(spec)), MAX_MATERIAL_PNG_BYTES)
         for change in [{'data_uri': 'https://example.invalid/image.png'}, {'width': 1024},
-                       {'data_uri': 'data:image/png;base64,' + 'A' * 131076}, {'extra': 1}]:
+                       {'data_uri': 'data:image/png;base64,' + 'A' * (MAX_MATERIAL_BASE64_CHARS + 4)}, {'extra': 1}]:
             with self.assertRaises(ValueError): decode_material_texture(spec | change)
         data = bytearray(base64.b64decode(spec['data_uri'].split(',')[1])); data[33] ^= 1
         with self.assertRaises(ValueError): decode_material_texture(spec | {'data_uri': 'data:image/png;base64,' + base64.b64encode(data).decode()})
+
+    def test_collection_and_export_budgets(self):
+        specs = {f'tile_{i}': swatch(i) for i in range(64)}
+        model = {'material_textures': specs, 'materials': {}, 'meshes': []}
+        self.assertEqual(len(validate_material_textures(model)), 64)
+        with self.assertRaises(ValueError):
+            validate_material_textures(model | {'material_textures': specs | {'too_many': swatch(64)}})
+        with patch('material_textures.MAX_MATERIAL_TEXTURE_BYTES', 1):
+            with self.assertRaises(ValueError): validate_material_textures(model)
+        base = {'vertices': [[0,0,0],[1,0,0],[0,0,1]], 'normals': [[0,1,0]]*3,
+                'indices': [0,1,2], 'color': [1,1,1,1], 'uv': [[0,0],[1,0],[0,1]]}
+        group = {'name': 'Synthetic swatches', 'translation': [0,0,0], 'scale': [1,1,1], 'rotation': 0,
+                 'meshes': [base | {'texture': spec} for spec in specs.values()]}
+        floors = [{'name': 'Fictional floor', 'elevation': 0, 'groups': [group]}]
+        raw = export_scene(floors, 'glb'); length = struct.unpack_from('<I', raw, 12)[0]
+        self.assertEqual(len(json.loads(raw[20:20+length])['images']), 64)
+        with zipfile.ZipFile(io.BytesIO(export_scene(floors, 'obj'))) as archive:
+            self.assertEqual(len([name for name in archive.namelist() if name.endswith('.png')]), 64)
+        with patch('material_textures.MAX_MATERIAL_TEXTURE_BYTES', 1):
+            with self.assertRaises(ValueError): export_scene(floors, 'glb')
+        group['meshes'].append(base | {'texture': swatch(64)})
+        with self.assertRaises(ValueError): export_scene(floors, 'glb')
+
+    def test_full_rgb_payload_and_real_aggregate_limit(self):
+        large = swatch(level=0)
+        self.assertGreater(len(decode_material_texture(large)), 96 * 1024)
+        self.assertLess(len(decode_material_texture(large)), 256 * 1024)
+        definitions = {f'tile_{i}': large for i in range(42)}
+        self.assertEqual(len(validate_material_textures({'material_textures': definitions})), 42)
+        definitions['overflow'] = large
+        with self.assertRaises(ValueError): validate_material_textures({'material_textures': definitions})
+
+    def test_static_uv_validation_and_export(self):
+        model, _, floor = fixture(static=True)
+        static = next(mesh for mesh in model['meshes'] if 'albedo_texture' in mesh)
+        self.assertTrue(validate_material_textures(model))
+        scene = export_floor(model, floor)
+        architecture = [mesh for group in scene['groups'] if group['name'].startswith('Architecture') for mesh in group['meshes'] if 'texture' in mesh]
+        self.assertTrue(architecture)
+        self.assertEqual(architecture[0]['uv'], static['uv'])
+        for mutation in [{'uv': []}, {'albedo_texture': 'missing'}]:
+            old = dict(static);static.update(mutation)
+            with self.assertRaises(ValueError): validate_material_textures(model)
+            static.clear();static.update(old)
+
+    def test_glb_preserves_finish_profiles_with_identical_rgb(self):
+        model, _, floor = fixture()
+        scene = export_floor(model, floor)
+        self.assertTrue(all('material_name' in mesh for group in scene['groups'] for mesh in group['meshes']))
+        base = {'vertices': [[0,0,0],[1,0,0],[0,0,1]], 'normals': [[0,1,0]]*3,
+                'indices': [0,1,2], 'color': [.4,.4,.4,1]}
+        names = ['brushed_steel', 'upholstery_taupe', 'glass', 'painted_steel']
+        group = {'name': 'Synthetic equal-color finishes', 'translation': [0,0,0], 'scale': [1,1,1], 'rotation': 0,
+                 'meshes': [base | {'material_name': name} for name in names]}
+        raw = export_scene([{'name': 'Test', 'elevation': 0, 'groups': [group]}], 'glb')
+        length = struct.unpack_from('<I', raw, 12)[0]
+        document = json.loads(raw[20:20+length])
+        self.assertEqual(len(document['materials']), len(names), 'identical colors must not merge different finish responses')
+        for material, name in zip(document['materials'], names):
+            profile = material_surface_profile(name)
+            actual = material['pbrMetallicRoughness']
+            self.assertEqual(actual['roughnessFactor'], profile['roughness'])
+            self.assertEqual(actual['metallicFactor'], profile['metalness'])
 
     def test_explicit_uv_selection_and_current_dimensions(self):
         model, _, floor = fixture()
@@ -121,8 +189,10 @@ class MaterialTextureTests(unittest.TestCase):
 if __name__ == '__main__':
     if len(sys.argv) == 2 and sys.argv[1] == '--spec':
         print(json.dumps(swatch()))
-    elif len(sys.argv) == 3 and sys.argv[1] == '--fixture':
-        model, svg, _ = fixture()
+    elif len(sys.argv) == 2 and sys.argv[1] == '--spec-large':
+        print(json.dumps(swatch(level=0)))
+    elif len(sys.argv) == 3 and sys.argv[1] in ('--fixture', '--fixture-static'):
+        model, svg, _ = fixture(static=sys.argv[1] == '--fixture-static')
         Path(sys.argv[2]).write_text(render_viewer(model, svg), encoding='utf-8')
     else:
         unittest.main()
