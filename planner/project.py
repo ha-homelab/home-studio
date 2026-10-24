@@ -529,6 +529,8 @@ def render_viewer(data, svg):
         "/*__ENVIRONMENT_JS__*/": (ROOT / "planner/environment.js").read_text(encoding="utf-8").replace("export ", ""),
         "__INTERACTION_RENDER_JS__": (ROOT / "planner/interaction-render.js").read_text(encoding="utf-8").replace("export function createInteractionRenderer", "function createInteractionRenderer"),
         "__ROOM_LIGHTING_JS__": (ROOT / "room-lighting.js").read_text(encoding="utf-8"),
+        "/*__PBR_MATERIALS_JS__*/": (ROOT / "pbr-materials.js").read_text(encoding="utf-8"),
+        "/*__ENVIRONMENT_LIGHTING_JS__*/": (ROOT / "environment-lighting.js").read_text(encoding="utf-8"),
         "/*__MATERIAL_TEXTURES_JS__*/": (ROOT / "material-textures.js").read_text(encoding="utf-8"),
         "__THREE_B64__": base64.b64encode((ROOT / "vendor/three.module.min.js").read_bytes()).decode(),
         "__PLAN_MIME__": "image/svg+xml", "__PLAN_DATA__": base64.b64encode(viewer_plan.encode()).decode(),
@@ -723,9 +725,13 @@ def export_floor(model, floor, reference_items=None, *, elevated=False):
         result = {key: mesh[key] for key in ('vertices', 'normals', 'indices')} | {'color': materials[mesh['material']], 'material_name': mesh['material']}
         if 'surface_finish' in mesh:
             result['surface_finish'] = mesh['surface_finish']
-        if 'albedo_texture' in mesh:
+        if __package__ and "." in __package__:
+            from ..pbr_materials import export_material_fields, TEXTURE_CHANNELS
+        else:
+            from pbr_materials import export_material_fields, TEXTURE_CHANNELS
+        if any(key in mesh for key in TEXTURE_CHANNELS) or 'material_family' in mesh:
             result['uv'] = material_uv(mesh, dimensions)
-            result['texture'] = model['material_textures'][mesh['albedo_texture']]
+            result.update(export_material_fields(mesh, model.get('material_textures', {})))
         return result
 
     for index, mesh in enumerate(model['meshes']):

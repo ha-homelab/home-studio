@@ -1,7 +1,7 @@
 // Real pinned Three ownership tests plus the compiled viewer, with fictional data.
 const assert = require('node:assert/strict'), fs = require('node:fs'), vm = require('node:vm');
 const path = require('node:path'), os = require('node:os'), {spawnSync} = require('node:child_process');
-const root = path.resolve(__dirname, '..'), source = fs.readFileSync(path.join(root, 'material-textures.js'), 'utf8');
+const root = path.resolve(__dirname, '..'), source = fs.readFileSync(path.join(root, 'material-textures.js'), 'utf8').replaceAll('export ','');
 function python(args) {
   const run = spawnSync(process.env.PYTHON || 'python3', [path.join(__dirname, 'test-material-textures.py'), ...args], {encoding:'utf8'});
   if (run.status !== 0) throw Error(run.stderr || run.stdout); return run.stdout;
@@ -56,7 +56,7 @@ const spec = JSON.parse(python(['--spec']));
   }
   assert.equal(loads.length,count,'invalid payload never starts a decode');
   // Count is bounded before decoding, even when many IDs share one tile.
-  const many=Object.fromEntries(Array.from({length:64},(_,i)=>['tile_'+i,spec]));
+  const many=Object.fromEntries(Array.from({length:128},(_,i)=>['tile_'+i,spec]));
   owner=context.createMaterialTextures(engine,many);loads.at(-1).onload();assert(await owner.ready);assert.equal(owner.count,1);owner.dispose();
   const beforeOverflow=loads.length;
   owner=context.createMaterialTextures(engine,{...many,overflow:spec});assert.equal(await owner.ready,false);assert.equal(loads.length,beforeOverflow);
@@ -64,8 +64,8 @@ const spec = JSON.parse(python(['--spec']));
   const largeSet=Object.fromEntries(Array.from({length:42},(_,i)=>['tile_'+i,largeSpec]));
   owner=context.createMaterialTextures(engine,largeSet);loads.at(-1).onload();assert(await owner.ready);owner.dispose();
   const beforeTotal=loads.length;
-  owner=context.createMaterialTextures(engine,{...largeSet,overflow:largeSpec});assert.equal(await owner.ready,false);assert.equal(loads.length,beforeTotal,'8 MiB total guard runs before decode');
-  owner=context.createMaterialTextures(engine,{fabric:spec});loads.at(-1).onload();const raced=made.at(-1);owner.dispose();
+  owner=context.createMaterialTextures(engine,{...largeSet,overflow:largeSpec});loads.at(-1).onload();assert.equal(await owner.ready,true);assert.equal(loads.length,beforeTotal+1,'aliases share one decode and encoded payload');owner.dispose();
+  owner=context.createMaterialTextures(engine,{fabric:spec});loads.at(-1).onload();await Promise.resolve();const raced=made.at(-1);owner.dispose();
   assert.equal(await owner.ready,false);assert.equal(raced.released,1,'onload-to-promise disposal race releases ownership');
   owner=context.createMaterialTextures(engine,{fabric:spec});loads.at(-1).onerror();assert.equal(await owner.ready,false);
   owner=context.createMaterialTextures(engine,{fabric:spec});owner.dispose();assert.equal(await owner.ready,false);
@@ -80,6 +80,7 @@ const spec = JSON.parse(python(['--spec']));
   owner.dispose();assert.equal(deadlines.size,0);
   console.log('Material ownership, UV scaling, fallback, room-lighting and disposal tests passed.');
 
+  if(process.env.MATERIAL_TEXTURE_UNIT_ONLY==='1')return;
   const temp=fs.mkdtempSync(path.join(os.tmpdir(),'home-studio-materials-'));
   try {
     const file=path.join(temp,'viewer.html');python(['--fixture',file]);let html=fs.readFileSync(file,'utf8');

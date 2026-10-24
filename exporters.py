@@ -2,8 +2,10 @@
 import json, struct
 if __package__:
     from .material_textures import material_surface_profile
+    from .pbr_materials import validate_pbr_fields, packed_metallic_roughness, gltf_normal_spec
 else:
     from material_textures import material_surface_profile
+    from pbr_materials import validate_pbr_fields, packed_metallic_roughness, gltf_normal_spec
 
 def export_models(data, ROOT, stem):
     meshes=data['meshes'];MATS=data['materials'];H=data['ceiling_height_m']
@@ -64,7 +66,7 @@ def export_models(data, ROOT, stem):
 
 
 # Interactive exports are independent of the historical on-disk export bundle.
-# Only geometry, colors, validated embedded albedo and display labels cross this
+# Only geometry, colors, validated embedded material channels and display labels cross this
 # boundary; never model extras or references to external image resources.
 MAX_EXPORT_TRIANGLES = 500_000
 MAX_EXPORT_BYTES = 32 * 1024 * 1024
@@ -73,7 +75,7 @@ MAX_EXPORT_BYTES = 32 * 1024 * 1024
 def _compact_export_mesh(mesh):
     """Reuse exact corner attributes without changing normal or UV seams."""
     used = set(mesh['indices'])
-    textured = 'texture' in mesh
+    textured = any(key in mesh for key in ('texture','normal_texture','roughness_texture','metalness_texture','ao_texture'))
     vertices, normals, uv, remap, unique = [], [], [], {}, {}
     for index, vertex in enumerate(mesh['vertices']):
         if index not in used:
@@ -106,18 +108,29 @@ def export_scene(floors, format):
     import re
     import zipfile
     if __package__:
-        from .material_textures import decode_material_texture, material_uv, MAX_MATERIAL_TEXTURES, MAX_MATERIAL_TEXTURE_BYTES
+        from .material_textures import decode_material_texture, material_uv, MAX_MATERIAL_TEXTURES, MAX_MATERIAL_TEXTURE_BYTES, MAX_MATERIAL_TEXTURE_PIXELS, MATERIAL_SURFACE_FINISHES
     else:
-        from material_textures import decode_material_texture, material_uv, MAX_MATERIAL_TEXTURES, MAX_MATERIAL_TEXTURE_BYTES
+        from material_textures import decode_material_texture, material_uv, MAX_MATERIAL_TEXTURES, MAX_MATERIAL_TEXTURE_BYTES, MAX_MATERIAL_TEXTURE_PIXELS, MATERIAL_SURFACE_FINISHES
 
     if format not in ('glb', 'obj'):
         raise ValueError('Choose GLB or OBJ for this export.')
     materials, colors, count, vertex_count, mesh_count = [], {}, 0, 0, 0
-    image_ids, image_bytes, material_maps, material_profiles = {}, [], [], []
+    image_ids, image_bytes, image_pixels, material_maps, material_profiles, material_flags = {}, [], [], [], [], []
+    channels = ('texture', 'normal_texture', 'roughness_texture', 'metalness_texture', 'ao_texture')
+    packed_cache, decoded_cache = {}, {}
+
+    def decode_once(spec):
+        if not isinstance(spec,dict) or set(spec)!={'data_uri','width','height','mime_type'}:
+            raise ValueError('Invalid material texture descriptor')
+        if not isinstance(spec['data_uri'],str) or type(spec['width']) is not int or type(spec['height']) is not int or not isinstance(spec['mime_type'],str):
+            raise ValueError('Invalid material texture descriptor')
+        key=(spec['data_uri'],spec['width'],spec['height'],spec['mime_type'])
+        if key not in decoded_cache: decoded_cache[key]=decode_material_texture(spec)
+        return decoded_cache[key]
 
     def material_key(mesh):
         profile = material_surface_profile(mesh.get('material_name'), mesh.get('surface_finish'))
-        return tuple(mesh['color']) + (mesh.get('texture', {}).get('data_uri'), profile['roughness'], profile['metalness'])
+        return tuple(mesh['color']) + tuple(mesh.get(key, {}).get('data_uri') for key in channels) + (profile['roughness'], profile['metalness'], mesh.get('normal_scale',1), mesh.get('ao_strength',1), mesh.get('albedo_tint',False), tuple(sorted(mesh.get('pbr_repeats',{}).items())))
 
     def label(value):
         # Entity references sometimes occur in commissioned mesh/display names.
@@ -150,29 +163,40 @@ def export_scene(floors, format):
                 color = tuple(mesh['color'])
                 if not finite(color, 4) or not all(0 <= value <= 1 for value in color):
                     raise ValueError('The installed model contains an invalid material.')
-                image_index = None
-                if 'texture' in mesh:
-                    if color[3] != 1:
-                        raise ValueError('Albedo textures require an opaque material.')
-                    material_uv(mesh)
-                    if not isinstance(mesh['texture'], dict):
-                        raise ValueError('Invalid material texture.')
-                    uri = mesh['texture'].get('data_uri')
-                    if not isinstance(uri, str):
-                        raise ValueError('Invalid material texture URI.')
-                    if set(mesh['texture']) != {'data_uri', 'width', 'height', 'mime_type'} or mesh['texture']['width'] != 256 or mesh['texture']['height'] != 256 or mesh['texture']['mime_type'] != 'image/png':
-                        raise ValueError('Invalid material texture descriptor.')
+                validate_pbr_fields(mesh, MATERIAL_SURFACE_FINISHES)
+                repeats = mesh.get('pbr_repeats', {})
+                if not isinstance(repeats, dict) or any(key not in channels or type(value) not in (int,float) or not math.isfinite(value) or not 0 < value <= 1000000 for key,value in repeats.items()):
+                    raise ValueError('Invalid texture repeat')
+                maps = {}
+                if any(key in mesh for key in channels): material_uv(mesh)
+                if 'texture' in mesh and color[3] != 1: raise ValueError('Albedo textures require an opaque material.')
+                source_maps = {key:mesh[key] for key in channels if key in mesh}
+                for spec in source_maps.values(): decode_once(spec)
+                if format == 'glb':
+                    rough,metal=mesh.get('roughness_texture'),mesh.get('metalness_texture')
+                    if rough or metal:
+                        if rough and metal and repeats.get('roughness_texture',1)!=repeats.get('metalness_texture',1):
+                            raise ValueError('glTF metallic and roughness maps require the same physical repeat')
+                        cache_key=(rough and rough['data_uri'],metal and metal['data_uri'])
+                        if cache_key not in packed_cache: packed_cache[cache_key]=packed_metallic_roughness(rough,metal)
+                        source_maps['metallic_roughness_texture']=packed_cache[cache_key]
+                    source_maps.pop('roughness_texture',None);source_maps.pop('metalness_texture',None)
+                    if 'normal_texture' in source_maps:
+                        spec=source_maps['normal_texture'];source_maps['normal_texture']=gltf_normal_spec(spec['data_uri'],spec['width'])
+                for channel,spec in source_maps.items():
+                    raw = decode_once(spec); uri=spec['data_uri']
                     if uri not in image_ids:
-                        image_bytes.append(decode_material_texture(mesh['texture']))
-                        image_ids[uri] = len(image_bytes) - 1
-                        if len(image_bytes) > MAX_MATERIAL_TEXTURES or sum(map(len, image_bytes)) > MAX_MATERIAL_TEXTURE_BYTES:
+                        image_ids[uri]=len(image_bytes);image_bytes.append(raw);image_pixels.append(spec['width']*spec['height'])
+                        if len(image_bytes)>MAX_MATERIAL_TEXTURES or sum(map(len,image_bytes))>MAX_MATERIAL_TEXTURE_BYTES or sum(image_pixels)>MAX_MATERIAL_TEXTURE_PIXELS:
                             raise ValueError('Export exceeds the material texture budget.')
-                    image_index = image_ids[uri]
+                    repeat=repeats.get(channel,repeats.get('roughness_texture',repeats.get('metalness_texture',1)) if channel=='metallic_roughness_texture' else 1)
+                    maps[channel]=(image_ids[uri],repeat)
                 key = material_key(mesh)
                 if key not in colors:
                     colors[key] = len(materials)
                     materials.append(color)
-                    material_maps.append(image_index)
+                    material_maps.append(maps)
+                    material_flags.append({'normal_scale':mesh.get('normal_scale',1),'ao_strength':mesh.get('ao_strength',1),'albedo_tint':mesh.get('albedo_tint',False)})
                     material_profiles.append(material_surface_profile(mesh.get("material_name"), mesh.get("surface_finish")))
     if not count:
         raise ValueError('Add a room or object before exporting.')
@@ -221,7 +245,7 @@ def export_scene(floors, format):
                     normal = accessor(mesh['normals'], 3)
                     indices = accessor(mesh['indices'], 0)
                     attributes = {'POSITION': position, 'NORMAL': normal}
-                    if 'texture' in mesh:
+                    if any(key in mesh for key in channels):
                         # glTF's image origin is top-left; native Three maps and
                         # OBJ use bottom-left UVs. Keep the same visual surface.
                         attributes['TEXCOORD_0'] = accessor([[u, 1-v] for u, v in mesh['uv']], 2)
@@ -235,15 +259,26 @@ def export_scene(floors, format):
             views.append({'buffer': 0, 'byteOffset': len(blob), 'byteLength': len(raw)})
             bounded_extend(blob, raw)
             images.append({'bufferView': len(views)-1, 'mimeType': 'image/png'})
+        def texture_info(pair, **extra):
+            index,repeat=pair
+            return {'index':index, **extra, **({'extensions':{'KHR_texture_transform':{'scale':[repeat,repeat],'offset':[0,1-repeat]}}} if repeat!=1 else {})}
+
+        gltf_materials=[]
+        for index,color in enumerate(materials):
+            maps,flags=material_maps[index],material_flags[index]
+            entry={'name':'material_'+str(index),'doubleSided':True,'alphaMode':'BLEND' if color[3]<1 else 'OPAQUE',
+                   'pbrMetallicRoughness':{'baseColorFactor':[1,1,1,1] if 'texture' in maps and not flags['albedo_tint'] else color,
+                       'metallicFactor':material_profiles[index]['metalness'],'roughnessFactor':material_profiles[index]['roughness']}}
+            if 'texture' in maps: entry['pbrMetallicRoughness']['baseColorTexture']=texture_info(maps['texture'])
+            if 'metallic_roughness_texture' in maps: entry['pbrMetallicRoughness']['metallicRoughnessTexture']=texture_info(maps['metallic_roughness_texture'])
+            if 'normal_texture' in maps: entry['normalTexture']=texture_info(maps['normal_texture'],scale=flags['normal_scale'])
+            if 'ao_texture' in maps: entry['occlusionTexture']=texture_info(maps['ao_texture'],strength=flags['ao_strength'])
+            gltf_materials.append(entry)
         document = {'asset': {'version': '2.0', 'generator': 'Home Studio geometry export'},
                     'scene': 0, 'scenes': [{'nodes': roots}], 'nodes': nodes, 'meshes': meshes,
-                    'materials': [{'name': 'material_' + str(index), 'doubleSided': True,
-                                   'alphaMode': 'BLEND' if color[3] < 1 else 'OPAQUE',
-                                   'pbrMetallicRoughness': {'baseColorFactor': [1, 1, 1, 1] if material_maps[index] is not None else color,
-                                                           'metallicFactor': material_profiles[index]['metalness'], 'roughnessFactor': material_profiles[index]['roughness'],
-                                                           **({'baseColorTexture': {'index': material_maps[index]}} if material_maps[index] is not None else {})}}
-                                  for index, color in enumerate(materials)],
+                    'materials': gltf_materials,
                     'buffers': [{'byteLength': len(blob)}], 'bufferViews': views, 'accessors': accessors}
+        if any(repeat!=1 for maps in material_maps for _,repeat in maps.values()): document['extensionsUsed']=['KHR_texture_transform']
         if images:
             document.update(images=images, samplers=[{'wrapS': 10497, 'wrapT': 10497, 'minFilter': 9987, 'magFilter': 9729}],
                             textures=[{'source': index, 'sampler': 0} for index in range(len(images))])
@@ -297,7 +332,7 @@ def export_scene(floors, format):
                     x, z = cosine * x + sine * z, -sine * x + cosine * z
                     length = math.hypot(x, y, z) or 1
                     normals.append(attribute(normal_ids, 'vn', (x/length, -z/length, y/length)))
-                textured = 'texture' in mesh
+                textured = any(key in mesh for key in ('texture','normal_texture','roughness_texture','metalness_texture','ao_texture'))
                 if textured:
                     for u, v in mesh['uv']:
                         uvs.append(attribute(uv_ids, 'vt', (u, v)))
@@ -307,11 +342,15 @@ def export_scene(floors, format):
                                              f'{reference(normals[index], normal_ids)}'
                                              for index in mesh['indices'][start:start+3]))
     for index, color in enumerate(materials):
-        image_index = material_maps[index]
-        rgb = [1, 1, 1] if image_index is not None else color[:3]
-        line(mtl, f'newmtl material_{index}\nKd {rgb[0]} {rgb[1]} {rgb[2]}\nd {color[3]}')
-        if image_index is not None:
-            line(mtl, f'map_Kd textures/material_{image_index}.png')
+        maps,flags=material_maps[index],material_flags[index]
+        rgb=[1,1,1] if 'texture' in maps and not flags['albedo_tint'] else color[:3]
+        line(mtl,f'newmtl material_{index}\nKd {rgb[0]} {rgb[1]} {rgb[2]}\nd {color[3]}')
+        line(mtl,f"Pr {material_profiles[index]['roughness']}\nPm {material_profiles[index]['metalness']}")
+        for channel,keyword in (('texture','map_Kd'),('normal_texture','norm'),('roughness_texture','map_Pr'),('metalness_texture','map_Pm'),('ao_texture','map_Ka')):
+            if channel in maps:
+                image_index,repeat=maps[channel]
+                options=(f'-s {repeat} {repeat} 1 ' if repeat!=1 else '') + ({'roughness_texture':'-imfchan g ','metalness_texture':'-imfchan b ','ao_texture':'-imfchan r '}.get(channel,''))
+                line(mtl,f'{keyword} {options}textures/material_{image_index}.png')
     if len(obj) + len(mtl) + sum(map(len, image_bytes)) > MAX_EXPORT_BYTES:
         raise ValueError('Export exceeds 32 MB. Export one floor or reduce detailed furniture.')
     output = io.BytesIO()

@@ -1,7 +1,9 @@
 import * as THREE from 'data:text/javascript;base64,__THREE_B64__';
 __LIGHT_STATE_JS__
 __ROOM_LIGHTING_JS__
+/*__PBR_MATERIALS_JS__*/
 /*__MATERIAL_TEXTURES_JS__*/
+/*__ENVIRONMENT_LIGHTING_JS__*/
 __RENDER_CAPACITY_JS__
 __INTERACTION_RENDER_JS__
 /*__ENVIRONMENT_JS__*/
@@ -9,7 +11,7 @@ __VIEWER_I18N_JS__
 const viewerI18n=createViewerI18n(__VIEWER_I18N_DATA__),vt=(key,params)=>viewerI18n.t(key,params);
 viewerI18n.init();
 const model=JSON.parse(document.getElementById('modelData').textContent),$=id=>document.getElementById(id);
-const inventoryTextures=createMaterialTextures(THREE,model.material_textures);
+const inventoryTextures=createMaterialTextures(THREE,model.material_textures,model);
 // Display names can change without changing saved room IDs or device bindings.
 const roomCode=id=>model.room_display_ids?.[id]||id;
 const roomName=id=>model.room_display_names?.[id]||model.rooms.find(r=>r.id===id)?.name||id;
@@ -90,6 +92,7 @@ function validateInventoryItems(list){if(!Array.isArray(list)||list.length>2000)
 try{items=reconcileStoredAppearance(validateInventoryItems(items))}catch(e){items=[];setEditorStatus('Stored inventory could not be read. Import a valid backup JSON.')}
 const inventoryNodes=new Map(),objectsById=new Map();
 let environmentLayer = null;
+let reflectionEnvironment=null,contactShading=null;
 const environmentControls = [];
 let renderer,scene,camera,objectGroup,root,hemisphere,sun,ground,grid,homeView=null,radius=planRadius,azimuth=.57,polar=.48,target=new THREE.Vector3(planCenter[0],planBounds?model.ceiling_height_m/2:0,planCenter[1]),clipping=new THREE.Plane(new THREE.Vector3(0,-1,0),20),renderCount=0;
 // Defer embedded drawing to the next frame.
@@ -118,7 +121,7 @@ function createHomeArchitectureMaterials(THREE, group, model) {
       authored:new THREE.Color(...model.materials[source.material].slice(0,3))});
   }
   return {setHomeActive(active){for(const entry of entries){
-    entry.material.color.copy(active?(entry.material.map?white:entry.authored):entry.color);
+    entry.material.color.copy(active?(entry.material.map&&!entry.material.userData.albedoTint?white:entry.authored):entry.color);
     if(entry.emissive)entry.material.emissive.copy(active?black:entry.emissive);
   }}};
 }
@@ -310,7 +313,7 @@ function wallDisplayGeometry(source,shape,limit){
   geometry.userData.wallShadowCount=source.indices.length;
   geometry.userData.wallDisplayCount=display.indices.length;
   geometry.setDrawRange(source.indices.length,display.indices.length);
-  if(source.albedo_texture){const mapped=inventoryTextures.get(source,{width:1,height:1,depth:1});if(mapped){const uv=staticMaterialUV(source,geometry,mapped.uv);if(uv)geometry.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2))}}
+  if(source.uv){const mapped=inventoryTextures.get(source,{width:1,height:1,depth:1});if(mapped){const uv=staticMaterialUV(source,geometry,mapped.uv);if(uv)geometry.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2))}}
   return geometry;
 }
 const roundedWalls=[];
@@ -318,7 +321,7 @@ const roundedWalls=[];
 // Hidden scene objects and inactive wall variants still retain CPU geometry.
 function releaseViewerGeometryGPU(){const geometries=new Set();scene?.traverse(object=>{if(object.geometry)geometries.add(object.geometry)});for(const wall of roundedWalls)for(const geometry of wall.cache.values())geometries.add(geometry);for(const geometry of geometries)geometry.dispose()}
 // Shadow targets and loaded TV maps have the same per-context disposal ownership.
-function releaseViewerTextureGPU(){if(typeof inventoryTextures!=='undefined')inventoryTextures.releaseGPU();const targets=new Set(),textures=new Set();scene?.traverse(object=>{for(const target of [object.shadow?.map,object.shadow?.mapPass])if(target)targets.add(target)});for(const target of targets)target.dispose();for(const id of Object.keys(tvEntities)){const map=objectsById.get(id)?.userData.screen?.material.map;if(map)textures.add(map)}for(const texture of textures){texture.dispose();texture.needsUpdate=true}}
+function releaseViewerTextureGPU(){reflectionEnvironment?.releaseGPU();contactShading?.releaseGPU();if(typeof inventoryTextures!=='undefined')inventoryTextures.releaseGPU();const targets=new Set(),textures=new Set();scene?.traverse(object=>{for(const target of [object.shadow?.map,object.shadow?.mapPass])if(target)targets.add(target)});for(const target of targets)target.dispose();for(const id of Object.keys(tvEntities)){const map=objectsById.get(id)?.userData.screen?.material.map;if(map)textures.add(map)}for(const texture of textures){texture.dispose();texture.needsUpdate=true}}
 function updateRoundedWallGeometry(limit){
   for(const wall of roundedWalls){
     const key=Math.min(wall.shape.top,limit);
@@ -415,10 +418,10 @@ function updateWallOutlines(){
   root.add(wallOutlines);setWallOutlineAppearance(wallOutlineHome);
 }
 const wallSheenMotion=createWallSheenMotion();
-function drawScene(camera){if(renderSuspended||renderLost||document.hidden)return;wallSheenMotion.beforeRender();try{const pointer=interactionPointer,started=coalesceMotion&&pointer?.moved?performance.now():null;if(coalesceMotion){interactionRenderer??=createInteractionRenderer(THREE,renderer,renderProfile.diffuseLighting?31250:62500);interactionRenderer.draw(scene,camera,pointer?.moved===true)}else renderer.render(scene,camera);if(pointer?.moved&&interactionPointer===pointer){pointer.painted=true;if(started!==null){const elapsed=performance.now()-started;pointer.frameDelay=Number.isFinite(elapsed)?Math.min(250,Math.max(64,elapsed)):64}}}finally{wallSheenMotion.afterRender()}}
+function drawScene(camera){if(renderSuspended||renderLost||document.hidden)return;wallSheenMotion.beforeRender();try{reflectionEnvironment?.update(hemisphere?.intensity);const pointer=interactionPointer,started=coalesceMotion&&pointer?.moved?performance.now():null;if(coalesceMotion){interactionRenderer??=createInteractionRenderer(THREE,renderer,renderProfile.diffuseLighting?31250:62500);interactionRenderer.draw(scene,camera,pointer?.moved===true)}else renderer.render(scene,camera);if(!pointer?.moved&&$('homeStage')?.dataset.mapCoarse!=='true')contactShading?.apply(scene,camera);if(pointer?.moved&&interactionPointer===pointer){pointer.painted=true;if(started!==null){const elapsed=performance.now()-started;pointer.frameDelay=Number.isFinite(elapsed)?Math.min(250,Math.max(64,elapsed)):64}}}finally{wallSheenMotion.afterRender()}}
 // Keep the recovery controls outside both view modes. A failed renderer stays
 // paused until reload; editing or saving the 2D plan must not retry that draw.
-function report3DError(e){failed3D=true;initialViewReady=false;environmentLayer?.dispose();cancelRender();$('loadError').style.display='block';$('mode3d').disabled=true;$('openHome').disabled=true;console.error(e)}
+function report3DError(e){reflectionEnvironment?.dispose();contactShading?.dispose();failed3D=true;initialViewReady=false;environmentLayer?.dispose();cancelRender();$('loadError').style.display='block';$('mode3d').disabled=true;$('openHome').disabled=true;console.error(e)}
 $('recoverPlan').onclick=()=>{if(!canEdit)return;homeView?.setActive(false);showMode(true);$('loadError').style.display='none';setEditorStatus('3D view could not start. Plan editing and JSON export are still available.');$('modePlan').focus();};
 // Decode before material creation so static and inventory lighting owners see
 // the final map from their first registration. Failures retain palette colors.
@@ -426,7 +429,7 @@ await inventoryTextures.ready;
 try{
 scene=new THREE.Scene();scene.background=new THREE.Color('#e7e8df');camera=new THREE.PerspectiveCamera(42,1,.1,Math.max(150,planRadius*5));
 renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.localClippingEnabled=true;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.95;$('view3d').prepend(renderer.domElement);
-renderProfile=selectRenderProfile(renderer.getContext());if(renderProfile.diffuseLighting)renderer.shadowMap.type=THREE.BasicShadowMap;
+renderProfile=selectRenderProfile(renderer.getContext());renderProfile.materialTextureUnits=renderProfile.diffuseLighting?4:8;inventoryTextures.configure(renderer,renderProfile);reflectionEnvironment=createReflectionEnvironment(THREE,renderer,scene,renderProfile);contactShading=createContactShading(THREE,renderer,renderProfile);if(renderProfile.diffuseLighting)renderer.shadowMap.type=THREE.BasicShadowMap;
 // Capacity is cached for this context. Motion scheduling is independent of
 // material quality: software PBR keeps its materials and resting resolution.
 coalesceMotion=getRenderCapacity(renderer.getContext()).reduced;
@@ -441,7 +444,7 @@ const candidate=wallPrism(m,wallAxes.get(m.wall_id));
 const shape=candidate&&(m.wall_id||candidate.length>=candidate.depth*1.25)?candidate:null;
 const geometry=shape?wallDisplayGeometry(m,shape,clipping.constant):new THREE.BufferGeometry();
 if(!shape){geometry.setAttribute('position',new THREE.Float32BufferAttribute(m.vertices.flat(),3));geometry.setAttribute('normal',new THREE.Float32BufferAttribute(m.normals.flat(),3));geometry.setIndex(m.indices)}
-const col=model.materials[m.material];const mat=createSceneMaterial({color:m.kind==='walls'?0xb2d8d2:m.kind==='frames'?0x9abfcb:new THREE.Color(...col.slice(0,3)),roughness:.8,emissive:m.kind==='walls'?0x315d59:m.kind==='frames'?0x18333d:m.kind==='vehicles'?0x10181b:0,metalness:m.material==='steel'||m.kind==='vehicles'?.35:0,transparent:m.kind==='walls'||col[3]<1,opacity:m.kind==='walls'?.16:col[3],depthWrite:m.kind!=='walls',forceSinglePass:m.kind==='walls',side:THREE.DoubleSide},m.kind,m.material,m.surface_finish);const mapped=col[3]===1&&m.albedo_texture?inventoryTextures.get(m,{width:1,height:1,depth:1}):null;if(mapped){const uv=staticMaterialUV(m,geometry,mapped.uv);if(uv){geometry.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));mat.map=mapped.texture;mat.color.setRGB(1,1,1)}}if(m.kind==='walls'&&!mat.isMeshBasicMaterial)mat.onBeforeCompile=applyWallSheen;applyStaticMeshClipping(m,mat);const mesh=new THREE.Mesh(geometry,mat);mesh.name=m.name;mesh.userData.category=m.kind;mesh.castShadow=col[3]===1;mesh.receiveShadow=true;
+const col=model.materials[m.material];const mat=createSceneMaterial({color:m.kind==='walls'?0xb2d8d2:m.kind==='frames'?0x9abfcb:new THREE.Color(...col.slice(0,3)),roughness:.8,emissive:m.kind==='walls'?0x315d59:m.kind==='frames'?0x18333d:m.kind==='vehicles'?0x10181b:0,metalness:m.material==='steel'||m.kind==='vehicles'?.35:0,transparent:m.kind==='walls'||col[3]<1,opacity:m.kind==='walls'?.16:col[3],depthWrite:m.kind!=='walls',forceSinglePass:m.kind==='walls',side:THREE.DoubleSide},m.kind,m.material,m.surface_finish);const mapped=inventoryTextures.get(m,{width:1,height:1,depth:1});if(mapped){const uv=staticMaterialUV(m,geometry,mapped.uv);if(uv){geometry.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));applyMaterialPBR(THREE,mat,mapped)}}if(m.kind==='walls'&&!mat.isMeshBasicMaterial)mat.onBeforeCompile=applyWallSheen;applyStaticMeshClipping(m,mat);const mesh=new THREE.Mesh(geometry,mat);mesh.name=m.name;mesh.userData.category=m.kind;mesh.castShadow=col[3]===1;mesh.receiveShadow=true;
 if(shape){
   // The same draw uses the exact original 12 triangles for all shadow passes.
   // Three reads drawRange after onBeforeShadow; no buffers or materials change.
@@ -452,17 +455,17 @@ const glassPasses=createStaticGlassPasses(THREE,mesh,renderProfile.diffuseLighti
 // Apply the same backdrop policy before a standalone Editor's first render.
 ground=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(60,planRadius*2),Math.max(65,planRadius*2)),createSceneMaterial({color:'#dfe3d8',roughness:1}));ground.rotation.x=-Math.PI/2;ground.position.set(planCenter[0],-1.97,planCenter[1]);ground.receiveShadow=true;ground.visible=!renderProfile.diffuseLighting;scene.add(ground);grid=new THREE.GridHelper(44,44,0xc0cabe,0xd0d7cb);grid.position.set(planCenter[0],-1.96,planCenter[1]);scene.add(grid);
 const environmentConfig=model.environment||{},environmentBox=environmentConfig.bounds?null:new THREE.Box3().setFromObject(root);
-environmentLayer=createEnvironmentLayer(THREE,{scene,visibilityElement:renderer.domElement,frameInterval:environmentConfig.frame_interval_ms??(renderProfile.diffuseLighting?750:renderProfile.pixels<=250000?500:180),bounds:environmentConfig.bounds||{minX:environmentBox.min.x,maxX:environmentBox.max.x,minZ:environmentBox.min.z,maxZ:environmentBox.max.z},elevation:environmentConfig.elevation??-(model.elevation_m||0),settings:environmentConfig,requestRender});
+environmentLayer=createEnvironmentLayer(THREE,{scene,visibilityElement:renderer.domElement,frameInterval:environmentConfig.frame_interval_ms??(renderProfile.diffuseLighting?750:renderProfile.pixels<=250000?500:180),bounds:environmentConfig.bounds||{minX:environmentBox.min.x,maxX:environmentBox.max.x,minZ:environmentBox.min.z,maxZ:environmentBox.max.z},elevation:environmentConfig.elevation??-(model.elevation_m||0),settings:environmentConfig,requestRender,decorateMaterial:(material,family)=>{applyMaterialPBR(THREE,material,inventoryTextures.family(family));installInstanceMaterialUV(material)}});
 for(const container of [document.querySelector('.toolbar'),document.querySelector('.home-map-tools')])if(container)environmentControls.push(createEnvironmentControls(container,{getLayer:()=>environmentLayer,t:vt,onChange:()=>environmentControls.forEach(control=>control.refresh())}));
 homeArchitectureMaterials=createHomeArchitectureMaterials(THREE,root,model);
 editorFloorMaterials=createEditorFloorMaterials(THREE,root,ground,renderProfile);editorFloorMaterials.setHomeActive(embedded);
 renderer.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();renderLost=true;environmentLayer?.setActive(false);cancelRender();releaseViewerGeometryGPU();releaseViewerTextureGPU();releaseWallOutlineMaterials();editorFloorMaterials?.releaseGPU();interactionPointer=null;interactionRenderer?.dispose();interactionRenderer=null;releaseStaticGlassPasses();homeView?.releaseGPU?.();});
-renderer.domElement.addEventListener('webglcontextrestored',()=>{renderLost=false;environmentLayer?.setActive(homeView?.active||$('view3d').style.display!=='none');invalidateShadows();const before=renderCount;window.resizeModel?.();if(renderCount===before)requestRender()});
+renderer.domElement.addEventListener('webglcontextrestored',()=>{renderLost=false;reflectionEnvironment?.restore();environmentLayer?.setActive(homeView?.active||$('view3d').style.display!=='none');invalidateShadows();const before=renderCount;window.resizeModel?.();if(renderCount===before)requestRender()});
 function updateEditorCamera(){camera.position.set(target.x+radius*Math.sin(polar)*Math.sin(azimuth),target.y+radius*Math.cos(polar),target.z+radius*Math.sin(polar)*Math.cos(azimuth));camera.lookAt(target)}
 function render(){if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;const before=renderCount;updateWallOutlines();if(homeView?.active)homeView.render();else{updateEditorCamera();drawScene(camera);renderCount++}if(renderCount>before)cancelRender()}window.renderModel=render;window.requestModelRender=requestRender;
 let viewSize='';const resize=()=>{if(!initialViewReady||renderSuspended||renderLost||document.hidden)return;if(renderDelay)requestRender();const b=$(homeView?.active?'homeStage':'view3d').getBoundingClientRect(),ratio=renderPixelRatio(b.width,b.height),size=[homeView?.active,b.width,b.height,ratio].join();if(b.width&&b.height&&size!==viewSize){viewSize=size;renderer.setDrawingBufferSize(b.width,b.height,ratio);camera.aspect=b.width/b.height;camera.updateProjectionMatrix();render()}};window.resizeModel=resize;const observer=new ResizeObserver(resize);observer.observe($('view3d'));observer.observe($('homeStage'));
 document.addEventListener('visibilitychange',()=>{if(document.hidden){interactionPointer=null;cancelRender()}else{const before=renderCount;resize();if(renderCount===before)requestRender()}});
-window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();interactionPointer=null;if(!event.persisted){environmentLayer?.dispose();observer.disconnect();interactionRenderer?.dispose();interactionRenderer=null;homeView?.dispose?.();if(typeof inventoryTextures!=='undefined')inventoryTextures.dispose();disposeStaticGlassPasses();releaseWallOutlineMaterials(true);editorFloorMaterials?.dispose();renderer.dispose();renderer.forceContextLoss();}});
+window.addEventListener('pagehide',event=>{renderSuspended=true;cancelRender();interactionPointer=null;if(!event.persisted){reflectionEnvironment?.dispose();contactShading?.dispose();environmentLayer?.dispose();observer.disconnect();interactionRenderer?.dispose();interactionRenderer=null;homeView?.dispose?.();if(typeof inventoryTextures!=='undefined')inventoryTextures.dispose();disposeStaticGlassPasses();releaseWallOutlineMaterials(true);editorFloorMaterials?.dispose();renderer.dispose();renderer.forceContextLoss();}});
 // A resize can already paint the resumed state. Initial pageshow also needs
 // no extra frame after boot painted; leave any pending live-state request intact.
 window.addEventListener('pageshow',event=>{const resumed=renderSuspended||event.persisted,before=renderCount;renderSuspended=false;resize();if(renderCount===before&&(resumed||renderCount===0))requestRender()});
@@ -498,7 +501,7 @@ if(objectGroup){
 const size=it.dimensions_m,candidate=model.object_assets?.[it.id],asset=candidate?.model_id&&candidate.model_id!==it.model_id?null:candidate;let o;
 if(asset){
 o=new THREE.Group();const batches=inventoryMaterialBatches(asset,size,model.materials,inventoryTextures);
-for(const batch of batches){const material=batch.material;const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(batch.vertices,3));geo.setAttribute('normal',new THREE.Float32BufferAttribute(batch.normals,3));geo.setIndex(batch.indices);if(batch.texture)geo.setAttribute('uv',new THREE.Float32BufferAttribute(batch.uv,2));const col=model.materials[material];const mat=createSceneMaterial({color:new THREE.Color(...col.slice(0,3)),roughness:.8,transparent:col[3]<1,opacity:col[3],depthWrite:col[3]===1,side:THREE.DoubleSide},undefined,material,batch.surfaceFinish);if(batch.texture){mat.map=batch.texture;mat.color.setRGB(1,1,1)}const child=new THREE.Mesh(geo,mat);child.castShadow=col[3]===1;child.receiveShadow=true;child.userData.curtainFabric=!!model.cover_windows?.[it.id] && (batch.curtainFabric||/curtain|safety_mesh/.test(material));child.userData.curtainPanel=batch.curtainPanel;o.add(child)}
+for(const batch of batches){const material=batch.material;const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(batch.vertices,3));geo.setAttribute('normal',new THREE.Float32BufferAttribute(batch.normals,3));geo.setIndex(batch.indices);if(batch.mapped)geo.setAttribute('uv',new THREE.Float32BufferAttribute(batch.uv,2));const col=model.materials[material];const mat=createSceneMaterial({color:new THREE.Color(...col.slice(0,3)),roughness:.8,transparent:col[3]<1,opacity:col[3],depthWrite:col[3]===1,side:THREE.DoubleSide},undefined,material,batch.surfaceFinish);applyMaterialPBR(THREE,mat,batch.mapped);const child=new THREE.Mesh(geo,mat);child.castShadow=col[3]===1;child.receiveShadow=true;child.userData.curtainFabric=!!model.cover_windows?.[it.id] && (batch.curtainFabric||/curtain|safety_mesh/.test(material));child.userData.curtainPanel=batch.curtainPanel;o.add(child)}
 if(tvEntities[it.id]&&it.entity_id===tvEntities[it.id]){const screen=new THREE.Mesh(new THREE.PlaneGeometry(.968,.948),new THREE.MeshBasicMaterial({toneMapped:false}));screen.position.set(0,.515,.393);screen.visible=false;o.userData.screen=screen;o.add(screen)}
 o.scale.set(size.width,size.height,size.depth);o.position.set(it.position_m.x,it.position_m.y,it.position_m.z);
 }else{const geo=new THREE.BoxGeometry(size.width,size.height,size.depth);const mat=createSceneMaterial({color:it.type==='tv'?0x273239:0xb87637,roughness:.7});o=new THREE.Mesh(geo,mat);o.position.set(it.position_m.x,it.position_m.y+size.height/2,it.position_m.z);o.castShadow=true;o.receiveShadow=true;registerFallbackBoxProgram(THREE,o,renderProfile.diffuseLighting)}

@@ -44,6 +44,7 @@ WEBSITE_MEDIA_FILES = (
     'docs/media/blender-import.jpg',
 )
 SITE_FILES = (
+    'pbr-materials.js','material-textures.js','environment-lighting.js',
     'index.html', 'site.css', 'docs/images/native-editor.png', 'privacy.html', 'install.html', 'ai-setup.html', '404.html', '.nojekyll',
     *WEBSITE_MEDIA_FILES,
     'planner/index.html', 'planner/editor.css', 'planner/editor.js', 'planner/floor-navigator.js', 'planner/floor-navigator.css', 'planner/render-capacity.js', 'planner/interaction-render.js', 'planner/environment.js',
@@ -150,8 +151,8 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'scripts/test-inventory-appearance.cjs', 'scripts/test-inventory-appearance.py',
               'scripts/test-furniture-patterns.mjs', 'scripts/test-furniture-patterns.py',
               'scripts/test-furniture-editor.cjs', 'package.json', 'package-lock.json',
-              'planner/example-home.json', 'geometry.py', 'exporters.py', 'material_textures.py', 'material-textures.js',
-              'scripts/test-material-textures.py', 'scripts/test-material-textures.cjs', 'docs/material-textures.md',
+              'planner/example-home.json', 'geometry.py', 'exporters.py', 'material_textures.py', 'material-textures.js', 'pbr-materials.js', 'pbr_materials.py', 'environment-lighting.js',
+              'scripts/test-material-textures.py', 'scripts/test-material-textures.cjs', 'scripts/test-pbr-materials.py', 'scripts/test-pbr-materials.cjs', 'scripts/test-pbr-lighting.cjs', 'docs/material-textures.md',
               'viewer.template.html', 'viewer.js', 'home-view.html', 'home-view.css',
               'curtain-state.js', 'motion-state.js', 'appliance-state.js', 'presence-view.js', 'vacuum-state.js', 'vacuum-view.js', 'tv-screen.js', 'camera-preview.js', 'media-preview.js',
               'assumed-zone-view.js', 'map-layer.js', 'home-view.js', 'light-state.js', 'room-lighting.js',

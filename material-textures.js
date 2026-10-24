@@ -1,101 +1,106 @@
 // Explicit per-part semantics override legacy palette names; never infer from RGB.
 // Artistic starting values, not measured material properties.
-const MATERIAL_SURFACE_PROFILES = Object.freeze({"fabric":[0.92,0],"leather":[0.5,0],"plastic":[0.48,0],"painted":[0.48,0],"wood":[0.58,0],"ceramic":[0.24,0],"glass":[0.12,0],"rubber":[0.95,0],"stone":[0.88,0],"metal":[0.3,0.75],"brushed_metal":[0.4,0.75],"matte_metal":[0.5,0.75],"polished_metal":[0.3,0.9],"mirror":[0.06,0.9],"matte_paint":[0.85,0],"rough_wood":[0.85,0],"polished_stone":[0.35,0],"paper":[0.85,0],"foliage":[0.75,0],"soil":[1,0],"car_paint":[0.25,0.15],"solar_cell":[0.25,0.25],"light_diffuser":[0.4,0]});
+export const MATERIAL_SURFACE_PROFILES = Object.freeze({"feather":[0.75,0],"fur":[0.96,0],"fabric":[0.92,0],"leather":[0.5,0],"plastic":[0.48,0],"painted":[0.48,0],"wood":[0.58,0],"ceramic":[0.24,0],"glass":[0.12,0],"rubber":[0.95,0],"stone":[0.88,0],"metal":[0.3,0.75],"brushed_metal":[0.4,0.75],"matte_metal":[0.5,0.75],"polished_metal":[0.3,0.9],"mirror":[0.06,0.9],"matte_paint":[0.85,0],"rough_wood":[0.85,0],"polished_stone":[0.35,0],"paper":[0.85,0],"foliage":[0.75,0],"soil":[1,0],"car_paint":[0.25,0.15],"solar_cell":[0.25,0.25],"light_diffuser":[0.4,0]});
 const MATERIAL_SURFACE_FINISHES = Object.freeze(Object.keys(MATERIAL_SURFACE_PROFILES));
 function materialSurfaceFinish(value) {
   if (value !== undefined && !MATERIAL_SURFACE_FINISHES.includes(value)) throw Error("Invalid material surface finish");
   return value;
 }
 
-// Optional, build-validated albedo only. No URLs, material cloning or render loop.
-// The host owns materials; this owner retains decoded pixels across GPU loss.
-function createMaterialTextures(THREE, definitions) {
-  const maps = new Map(), images = new Set(), owned = new Set();
-  let disposed = false;
-  const specs = [], unique = new Map();
+// One decoded image per URI, one GPU texture per color-space role. No URLs.
+function createMaterialTextures(THREE, definitions, model) {
+  const maps=new Map(),images=new Set(),owned=new Set(),unique=new Map(),specs=[];
+  const details=typeof createPBRDetails==='function'?createPBRDetails(THREE):null;
+  const channels=typeof PBR_TEXTURE_CHANNELS!=='undefined'?PBR_TEXTURE_CHANNELS:['albedo_texture'];
+  let disposed=false,anisotropy=1,maxSize=1024,decodedPixels=0;
+  const uses=new Map(),uriRoles=new Map(),reservedFamilies=new Set();
+  for(const part of [...(model?.meshes||[]),...Object.values(model?.object_assets||{}).flatMap(a=>a.meshes)])for(const key of channels)if(part[key]) {
+    if(!uses.has(part[key]))uses.set(part[key],new Set());uses.get(part[key]).add(key==='albedo_texture');
+  }
   try {
-    if (definitions !== undefined) {
-      if (!definitions || Array.isArray(definitions) || typeof definitions !== 'object') throw Error('Invalid textures');
-      const entries = Object.entries(definitions);
-      if (entries.length > 64) throw Error('Too many textures');
-      let total = 0;
-      for (const [id, spec] of entries) {
-        if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(id) || !spec ||
-            Object.keys(spec).sort().join() !== 'data_uri,height,mime_type,width' ||
-            spec.mime_type !== 'image/png' || spec.width !== 256 || spec.height !== 256) throw Error('Invalid texture');
-        const uri = spec.data_uri, prefix = 'data:image/png;base64,';
-        if (typeof uri !== 'string' || !uri.startsWith(prefix) || uri.length > prefix.length + 349528) throw Error('Invalid texture URI');
-        const encoded = uri.slice(prefix.length);
-        if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) throw Error('Invalid base64');
-        const bytes = atob(encoded);
-        total += bytes.length;
-        if (bytes.length < 45 || bytes.length > 262144 || total > 8388608 || btoa(bytes) !== encoded ||
-            bytes.slice(0, 8) !== '\x89PNG\r\n\x1a\n' || bytes.slice(12, 16) !== 'IHDR') throw Error('Invalid PNG');
-        const integer = offset => ((bytes.charCodeAt(offset) * 16777216) + (bytes.charCodeAt(offset + 1) << 16) +
-          (bytes.charCodeAt(offset + 2) << 8) + bytes.charCodeAt(offset + 3));
-        if (integer(8) !== 13 || integer(16) !== 256 || integer(20) !== 256 || bytes.charCodeAt(24) !== 8 ||
-            ![2, 3].includes(bytes.charCodeAt(25))) throw Error('Unsupported PNG');
-        specs.push([id, uri]);
-      }
+    const entries=Object.entries(definitions||{}),payloads=new Map();
+    if(definitions!==undefined&&(!definitions||Array.isArray(definitions)||typeof definitions!=='object')||entries.length>128)throw Error('Invalid textures');
+    for(const [id,spec] of entries) {
+      if(!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(id)||!spec||Object.keys(spec).sort().join()!=='data_uri,height,mime_type,width'||
+          spec.mime_type!=='image/png'||![128,256,512,1024].includes(spec.width)||spec.height!==spec.width)throw Error('Invalid texture');
+      const uri=spec.data_uri,prefix='data:image/png;base64,';
+      if(typeof uri!=='string'||!uri.startsWith(prefix)||uri.length>prefix.length+1398104)throw Error('Invalid texture URI');
+      const encoded=uri.slice(prefix.length);
+      if(!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded))throw Error('Invalid base64');
+      const bytes=atob(encoded),integer=o=>bytes.charCodeAt(o)*16777216+(bytes.charCodeAt(o+1)<<16)+(bytes.charCodeAt(o+2)<<8)+bytes.charCodeAt(o+3);
+      if(bytes.length<45||bytes.length>1048576||btoa(bytes)!==encoded||bytes.slice(0,8)!=='\x89PNG\r\n\x1a\n'||bytes.slice(12,16)!=='IHDR'||
+          integer(8)!==13||integer(16)!==spec.width||integer(20)!==spec.height||bytes.charCodeAt(24)!==8||![2,3].includes(bytes.charCodeAt(25)))throw Error('Invalid PNG');
+      if(!payloads.has(uri))payloads.set(uri,{bytes:bytes.length,pixels:spec.width*spec.height,roles:new Set()});
+      for(const role of uses.get(id)||(!model?[true]:[]))payloads.get(uri).roles.add(role);
+      specs.push([id,spec]);
     }
-  } catch { specs.length = 0; }
-  const ready = Promise.all(specs.map(([id, uri]) => {
-    if (!unique.has(uri)) unique.set(uri, new Promise(resolve => {
-      const image = new Image(); images.add(image);
-      let settled = false;
-      const finish = value => {
-        if (settled) return;
-        settled = true; clearTimeout(deadline);
-        image.onload = image.onerror = null; resolve(value);
-      };
-      // Optional color detail must not hold the initial inventory indefinitely.
-      const deadline = setTimeout(() => { finish(null); image.src = ''; }, 5000);
-      image.onerror = () => finish(null);
-      image.onload = () => {
-        if (settled) return;
-        if (disposed || image.naturalWidth !== 256 || image.naturalHeight !== 256) return finish(null);
-        const texture = new THREE.Texture(image);
-        owned.add(texture);
-        texture.colorSpace = THREE.SRGBColorSpace;
-        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-        texture.anisotropy = 1; texture.needsUpdate = true;
-        finish(texture);
-      };
-      image.src = uri;
+    if([...payloads.values()].reduce((n,p)=>n+p.bytes,0)>8388608)throw Error('Texture byte budget');
+    for(const [uri,payload] of payloads){if(!payload.roles.size)payload.roles.add(false);uriRoles.set(uri,payload.roles)}
+    decodedPixels=[...payloads.values()].reduce((n,p)=>n+p.pixels*p.roles.size,0);
+    const families=new Set([...(model?.meshes||[]),...Object.values(model?.object_assets||{}).flatMap(a=>a.meshes)].map(p=>p.material_family).filter(f=>typeof PBR_DETAIL_PROFILES!=='undefined'&&Object.hasOwn(PBR_DETAIL_PROFILES,f)));
+    for(const family of families)reservedFamilies.add(family);
+    if(decodedPixels+families.size*128*128*2>12582912)throw Error('Texture pixel budget');
+  }catch{specs.length=0;decodedPixels=0}
+  function familyFor(family,scale=1) {
+    if(typeof PBR_DETAIL_PROFILES==='undefined'||!Object.hasOwn(PBR_DETAIL_PROFILES,family))return {};
+    if(!reservedFamilies.has(family)){if(decodedPixels+(reservedFamilies.size+1)*128*128*2>12582912)return {};reservedFamilies.add(family)}
+    return details?.get(family,scale)||{};
+  }
+  function textureFor(entry,color) {
+    if(entry.textures.has(color))return entry.textures.get(color);
+    const roles=uriRoles.get(entry.uri);if(roles&&!roles.has(color)){if(decodedPixels+entry.size*entry.size+reservedFamilies.size*128*128*2>12582912)return null;roles.add(color);decodedPixels+=entry.size*entry.size}
+    let pixels=entry.image;
+    if(entry.size>maxSize&&typeof document!=='undefined') {
+      const canvas=document.createElement('canvas');canvas.width=canvas.height=maxSize;
+      canvas.getContext('2d').drawImage(pixels,0,0,maxSize,maxSize);pixels=canvas;
+    }
+    const texture=new THREE.Texture(pixels);owned.add(texture);entry.textures.set(color,texture);
+    texture.colorSpace=color?THREE.SRGBColorSpace:THREE.NoColorSpace;
+    texture.wrapS=texture.wrapT=THREE.RepeatWrapping;texture.anisotropy=anisotropy;texture.needsUpdate=true;return texture;
+  }
+  const ready=Promise.all(specs.map(([id,spec])=>{
+    const uri=spec.data_uri;
+    if(!unique.has(uri))unique.set(uri,new Promise(resolve=>{
+      const image=new Image();images.add(image);let settled=false;
+      const finish=value=>{if(settled)return;settled=true;clearTimeout(deadline);image.onload=image.onerror=null;resolve(value)};
+      const deadline=setTimeout(()=>{finish(null);image.src=''},5000);
+      image.onerror=()=>finish(null);image.onload=()=>{
+        if(settled)return;if(disposed||image.naturalWidth!==spec.width||image.naturalHeight!==spec.height)return finish(null);
+        finish({image,uri,size:spec.width,textures:new Map()});
+      };image.src=uri;
     }));
-    return unique.get(uri).then(texture => { if (texture && !disposed) maps.set(id, texture); });
-  })).then(() => !disposed && maps.size > 0);
+    return unique.get(uri).then(entry=>{if(entry&&!disposed){maps.set(id,entry);for(const role of uses.get(id)||(!model?[true]:[]))textureFor(entry,role)}});
+  })).then(()=>!disposed&&maps.size>0);
   return {
     ready,
-    get(part, dimensions) {
-      const texture = maps.get(part.albedo_texture), uv = part.uv, axes = part.uv_dimensions;
-      if (disposed || !texture || !Array.isArray(uv) || uv.length !== part.vertices.length ||
-          axes !== undefined && (!Array.isArray(axes) || axes.length !== 2 || axes[0] === axes[1] ||
-            axes.some(axis => !['width', 'height', 'depth'].includes(axis)))) return null;
-      const scale = axes ? axes.map(axis => dimensions[axis]) : [1, 1], values = [];
-      if (scale.some(value => !Number.isFinite(value) || value <= 0)) return null;
-      for (const pair of uv) {
-        if (!Array.isArray(pair) || pair.length !== 2) return null;
-        for (let i = 0; i < 2; i++) {
-          const value = pair[i] * scale[i];
-          if (!Number.isFinite(pair[i]) || !Number.isFinite(value) || Math.abs(value) > 4096) return null;
-          values.push(value);
-        }
+    configure(renderer,profile={}) {
+      anisotropy=Math.min(profile.pixels<=250000?2:4,renderer.capabilities.getMaxAnisotropy());maxSize=profile.pixels<=250000?256:1024;
+      for(const entry of new Set(maps.values()))for(const [role,texture] of [...entry.textures]) {
+        // Released old GPU state is no longer referenced by materials (called before build).
+        texture.dispose();owned.delete(texture);entry.textures.delete(role);textureFor(entry,role);
       }
-      return {texture, uv: values};
+      details?.configure(anisotropy);
     },
-    releaseGPU() { if (!disposed) for (const texture of owned) { texture.dispose(); texture.needsUpdate = true; } },
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      for (const texture of owned) texture.dispose();
-      owned.clear();
-      maps.clear();
-      // Resolve pending loads too; no rebuild can outlive page teardown.
-      for (const image of images) { image.onerror?.(); image.src = ''; }
-      images.clear();
+    get(part,dimensions={width:1,height:1,depth:1}) {
+      if(disposed)return null;
+      for(const [key,max] of [['normal_scale',2],['ao_strength',1]])if(part[key]!==undefined&&(!Number.isFinite(part[key])||part[key]<0||part[key]>max))return null;
+      const resolved={};
+      for(const key of channels){const entry=maps.get(part[key]);if(entry){const texture=textureFor(entry,key==='albedo_texture');if(texture)resolved[key]=texture}}
+      const generic=familyFor(part.material_family,part.material_uv_scale??1);
+      for(const [key,texture] of Object.entries(generic))if(!resolved[key])resolved[key]=texture;
+      if(!Object.keys(resolved).length)return null;
+      const uv=part.uv,axes=part.uv_dimensions;
+      if(!Array.isArray(uv)||uv.length!==part.vertices.length||axes!==undefined&&(!Array.isArray(axes)||axes.length!==2||axes[0]===axes[1]||axes.some(a=>!['width','height','depth'].includes(a))))return null;
+      const scale=axes?axes.map(a=>dimensions[a]):[1,1],values=[];
+      if(scale.some(v=>!Number.isFinite(v)||v<=0))return null;
+      for(const pair of uv){if(!Array.isArray(pair)||pair.length!==2)return null;for(let i=0;i<2;i++){const v=pair[i]*scale[i];if(!Number.isFinite(pair[i])||!Number.isFinite(v)||Math.abs(v)>4096)return null;values.push(v)}}
+      return {texture:resolved.albedo_texture,channels:resolved,uv:values,normalScale:part.normal_scale??1,aoStrength:part.ao_strength??1,albedoTint:part.albedo_tint===true};
     },
-    get count() { return new Set(maps.values()).size; },
+    family(family){return {channels:familyFor(family)}},
+    releaseGPU(){if(!disposed){for(const texture of owned){texture.dispose();texture.needsUpdate=true}details?.releaseGPU()}},
+    dispose(){if(disposed)return;disposed=true;for(const texture of owned)texture.dispose();owned.clear();maps.clear();details?.dispose();for(const image of images){image.onerror?.();image.src=''}images.clear()},
+    get count(){return owned.size+(details?.count||0)},
+    get decodedPixels(){return decodedPixels+(details?.count||0)*128*128}
   };
 }
 
@@ -136,13 +141,13 @@ function staticMaterialUV(source, geometry, uv) {
 function inventoryMaterialBatches(asset, dimensions, materials, textures) {
   const batches = new Map();
   for (const part of asset.meshes) {
-    const mapped = materials[part.material]?.[3] === 1 ? textures.get(part, dimensions) : null;
+    const mapped = textures.get(part, dimensions);
     const surfaceFinish = materialSurfaceFinish(part.surface_finish);
-    const key = (surfaceFinish || '') + '|' + part.material + '|' + (part.curtain_fabric ? part.curtain_panel : 'fixed') + '|' + (mapped?.texture.uuid || '');
+    const key = (surfaceFinish || '') + '|' + part.material + '|' + (part.curtain_fabric ? part.curtain_panel : 'fixed') + '|' + JSON.stringify([Object.entries(mapped?.channels||{}).map(([k,t])=>[k,t.uuid]),mapped?.normalScale,mapped?.aoStrength,mapped?.albedoTint]);
     let batch = batches.get(key);
     if (!batch) {
       batch = {material:part.material, surfaceFinish, curtainFabric:part.curtain_fabric === true, curtainPanel:part.curtain_panel,
-        vertices:[], normals:[], indices:[], uv:[], texture:mapped?.texture};
+        vertices:[], normals:[], indices:[], uv:[], texture:mapped?.texture, mapped};
       batches.set(key, batch);
     }
     const offset = batch.vertices.length / 3;

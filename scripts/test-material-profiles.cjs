@@ -1,7 +1,7 @@
 // Exercise the real factory with pinned Three; synthetic finish names only.
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const {spawnSync}=require('node:child_process');
-const root=path.resolve(__dirname,'..'),source=fs.readFileSync(path.join(root,'viewer.js'),'utf8'),materialSource=fs.readFileSync(path.join(root,'material-textures.js'),'utf8');
+const root=path.resolve(__dirname,'..'),source=fs.readFileSync(path.join(root,'viewer.js'),'utf8'),materialSource=fs.readFileSync(path.join(root,'material-textures.js'),'utf8').replaceAll('export ','');
 (async()=>{
   const THREE=await import('data:text/javascript;base64,'+fs.readFileSync(path.join(root,'vendor/three.module.min.js')).toString('base64'));
   const factory=source.split('\n').find(line=>line.startsWith('function createSceneMaterial('));

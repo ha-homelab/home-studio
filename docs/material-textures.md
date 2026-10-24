@@ -1,9 +1,12 @@
 # Optional reviewed material textures
 
-Generated models may carry small, reviewed opaque albedo tiles. This adds color
-detail to existing metric meshes; it never replaces furniture with images.
+Generated models may carry reviewed PBR channels and generic physical surface
+detail on existing metric meshes; these never replace furniture with images.
 The source project, saved placements and entity bindings remain authoritative.
-No image generation service, network fetch or runtime image processing is used.
+No image generation service or network fetch is used. Generic microdetail is
+generated deterministically from bounded physical heightfields. The `fur`
+family uses fine directional coat detail, `feather` uses directional barb
+detail, and plush objects continue to use fabric.
 
 ## Producer schema
 
@@ -47,7 +50,8 @@ unmapped surfaces retain their original palette.
 
 The producer prepares and visually reviews tiles offline, including periodic
 joins, color space and any changes from source imagery. The compiler validates
-at most 64 images, 256 KiB per PNG and 8 MiB combined. Inputs must be 256²,
+at most 128 descriptors, 1 MiB per PNG and 8 MiB unique images combined. Inputs
+are square powers of two from 128 to 1024 pixels,
 8-bit, noninterlaced, metadata-free opaque RGB or indexed PNGs. Only IHDR,
 PLTE, IDAT and IEND chunks are accepted; CRC, decompressed bounds and scanline
 filters are checked. Alpha, animation, profiles and external URLs are rejected.
@@ -59,15 +63,12 @@ full PNG validation belongs to the trusted build/export boundary. Invalid
 descriptors, failed decodes and missing/invalid UVs render the original colors.
 Unready/failed maps do not split material batches. A successful map may add a
 draw for a selected surface but never adds a triangle. Identical data URIs
-share one decode and one texture. One 256² RGBA8 map with full mip levels needs
-349,524 GPU bytes plus roughly 256 KiB of decoded CPU pixels; driver and browser
-overhead are additional. The 64-map count caps full mip storage at about
-21.3 MiB and decoded CPU pixels at 16 MiB. The 256 KiB per-image allowance
-accepts detailed, non-indexed 256² RGB swatches without forcing destructive
-quantization; the 8 MiB aggregate guard still limits a complete collection
-and also applies to current-drawing exports. The existing
-32 MiB export-file guard remains in force. No normal, roughness or displacement
-maps are loaded.
+share one decode and one texture per color-space role. A 256² RGBA8 map with
+full mip levels needs 349,524 GPU bytes plus roughly 256 KiB of decoded CPU
+pixels; driver and browser overhead are additional. The total semantic-role
+texel budget is 12,582,912, including generic detail, and the existing 32 MiB
+export-file guard remains in force. Displacement maps are not loaded. See the
+physical-channel contract below for normal, roughness, metalness and AO maps.
 
 ## Rendering and lifecycle
 
@@ -94,9 +95,9 @@ There is no recurring timer, new animation loop or renderer.
 ## Exports and packaging
 
 The current-drawing `export_floor` / `export_scene` path carries only validated
-albedo and scaled UVs alongside existing geometry. GLB embeds PNG buffer views
+albedo, PBR channels and scaled UVs alongside existing geometry. GLB embeds PNG buffer views
 and TEXCOORD_0, flips V for glTF's image origin, and sets baseColorTexture with
-white base color. OBJ ZIP adds explicit `vt` indices, `map_Kd` and bounded PNG
+white base color unless albedo tint is explicitly enabled. OBJ ZIP adds explicit `vt` indices, `map_Kd` and bounded PNG
 members. Both remain self-contained and export current placements/dimensions.
 Historical `export_models` static USD/DAE/OBJ/GLB bundles retain their original
 solid-color behavior; rebuild current-drawing exports for textured assets.
@@ -104,7 +105,10 @@ solid-color behavior; rebuild current-drawing exports for textured assets.
 `render_viewer` expands `/*__MATERIAL_TEXTURES_JS__*/` from
 `material-textures.js`. Independent viewer builders must make the same source
 replacement and call the Python validator on trusted model data. The public
-runtime package includes both `material-textures.js` and `material_textures.py`.
+runtime package includes `material-textures.js`, `material_textures.py`,
+`pbr-materials.js`, `pbr_materials.py`, and `environment-lighting.js`. Independent
+builders also expand `/*__PBR_MATERIALS_JS__*/` and
+`/*__ENVIRONMENT_LIGHTING_JS__*/` from the matching sources.
 No household-specific image, identifier, binding or source path belongs in the
 public repository. Optional reference/beauty images are not part of this schema.
 
@@ -151,3 +155,55 @@ when the surface is unknown; null and unrecognized values are rejected. These
 are conservative artistic starting values, not measured physical properties.
 The complete explicit response table and legacy inference table are compared
 between Python/GLB and JavaScript/HA by `scripts/test-material-profiles.cjs`.
+
+## Physical surface channels and generic detail
+
+The portable model also accepts `normal_texture`, `roughness_texture`,
+`metalness_texture`, and `ao_texture` on an individual mesh. They reference the
+same `material_textures` dictionary as `albedo_texture` and share its explicit
+per-vertex UVs. Normal maps use tangent-space RGB (positive green in the native
+UV direction). Roughness reads **green**, metalness **blue**, and occlusion
+**red**, so one packed ORM image may serve all three. Albedo uses sRGB; all data
+channels use linear values. The same image used in both roles gets independent
+color-space texture views. `normal_scale` is 0–2, `ao_strength` is 0–1, and
+`albedo_tint: true` multiplies the existing palette color by albedo. The default
+is the previous white albedo multiplier. Plain or transparent surfaces do not
+need a color image to receive normal or roughness detail.
+
+Descriptors still contain exactly `mime_type`, `width`, `height`, and
+`data_uri`. The accepted metadata-free opaque PNG sizes are now 128, 256, 512,
+and 1024 square. Limits are **128 descriptors**, **1 MiB per image**, **8 MiB
+unique encoded images**, and **12,582,912 decoded texels**, counting sRGB and
+linear usage separately. Aliases do not multiply image memory. Generic detail
+counts against these budgets as well. On the reduced renderer, decoded images
+are uploaded at at most 256 square; normal hardware permits 1024. Anisotropy is
+bounded by both hardware support and the selected quality tier (2 or 4).
+
+`material_family` selects reviewed generic microdetail for the same family
+names as `surface_finish`. These are small deterministic periodic heightfields,
+not normal maps guessed from color photographs. They preserve palette colors
+and do not change silhouettes. Smooth glass, mirrors and light diffusers have
+no invented grain. Family maps use **metres**: `material_uv_scale` converts the
+shared authored UVs to metres (default 1). For example, if legacy UVs repeat a
+0.25 m tile, set `material_uv_scale: 0.25`. This factor affects generic detail
+only; explicit texture references always retain their authored mapping and
+override the corresponding generic channel. `uv_dimensions` continues to
+convert normalized geometry into physical coordinates when it is present.
+
+The browser and Python exporter generate identical family pixels. GLB includes
+normal, metallic/roughness, and occlusion maps, including physical repeat via
+`KHR_texture_transform`; the normal green channel and V-transform are adjusted
+together for glTF's image convention. OBJ packages include `norm`, `map_Pr`,
+`map_Pm`, and `map_Ka` plus explicit channel selectors. Those MTL extensions are
+reader-dependent; GLB is the preferred complete material interchange format.
+Existing 32 MiB export and 500,000 triangle limits remain in force.
+
+Normal hardware also receives a shared 128-face prefiltered analytic HDR
+reflection environment and contact shading from actual scene depth. The
+reflection environment is generic studio illumination, not a captured room or
+live reflection probe. Contact shading uses at most 250,000 depth/AO pixels,
+a 0.2 m neighborhood, and at most 18% darkening. A depth-aware filter limits
+halos; transparent surfaces and emissive displays are excluded as receivers.
+These are demand-rendered passes, with no separate animation loop. Reduced
+renderers retain ordinary lighting and shadow maps without these two effects.
+GPU resources are released/rebuilt on context loss and disposed on page exit.

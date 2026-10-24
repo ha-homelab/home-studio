@@ -10,6 +10,7 @@ const { chromium } = require('playwright');
 const root = path.resolve(__dirname, '..');
 const catalog = JSON.parse(fs.readFileSync(path.join(root, 'planner/catalog.json')));
 const files = new Map([
+  ...['pbr-materials.js','material-textures.js','environment-lighting.js'].map(name=>[name,[name,'text/javascript']]),
   ['planner/', ['planner/index.html', 'text/html']],
   ...['editor', 'model', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity', 'interaction-render', 'environment', 'onboarding', 'device-onboarding', 'device-onboarding-ui', 'room-transform', 'draft-storage', 'inspector-dom', 'floor-navigator', 'ha-bridge'].map(name => [`planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
   ...fs.readdirSync(path.join(root, 'planner/locales')).filter(name => name.endsWith('.js')).map(name => [`planner/locales/${name}`, [`planner/locales/${name}`, 'text/javascript']]),
@@ -46,7 +47,7 @@ function findFiles(folder, name) {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
-      args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+      args: ['--enable-webgl', '--use-angle='+(process.env.CHROMIUM_ANGLE_BACKEND||'swiftshader'), '--enable-unsafe-swiftshader'] });
     const errors = [], external = [];
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     const page = await context.newPage();

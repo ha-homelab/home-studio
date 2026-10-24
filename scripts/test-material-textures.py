@@ -73,11 +73,11 @@ class MaterialTextureTests(unittest.TestCase):
         with self.assertRaises(ValueError): decode_material_texture(spec | {'data_uri': 'data:image/png;base64,' + base64.b64encode(data).decode()})
 
     def test_collection_and_export_budgets(self):
-        specs = {f'tile_{i}': swatch(i) for i in range(64)}
+        specs = {f'tile_{i}': swatch(i) for i in range(128)}
         model = {'material_textures': specs, 'materials': {}, 'meshes': []}
-        self.assertEqual(len(validate_material_textures(model)), 64)
+        self.assertEqual(len(validate_material_textures(model)), 128)
         with self.assertRaises(ValueError):
-            validate_material_textures(model | {'material_textures': specs | {'too_many': swatch(64)}})
+            validate_material_textures(model | {'material_textures': specs | {'too_many': swatch(128)}})
         with patch('material_textures.MAX_MATERIAL_TEXTURE_BYTES', 1):
             with self.assertRaises(ValueError): validate_material_textures(model)
         base = {'vertices': [[0,0,0],[1,0,0],[0,0,1]], 'normals': [[0,1,0]]*3,
@@ -86,12 +86,12 @@ class MaterialTextureTests(unittest.TestCase):
                  'meshes': [base | {'texture': spec} for spec in specs.values()]}
         floors = [{'name': 'Fictional floor', 'elevation': 0, 'groups': [group]}]
         raw = export_scene(floors, 'glb'); length = struct.unpack_from('<I', raw, 12)[0]
-        self.assertEqual(len(json.loads(raw[20:20+length])['images']), 64)
+        self.assertEqual(len(json.loads(raw[20:20+length])['images']), 128)
         with zipfile.ZipFile(io.BytesIO(export_scene(floors, 'obj'))) as archive:
-            self.assertEqual(len([name for name in archive.namelist() if name.endswith('.png')]), 64)
+            self.assertEqual(len([name for name in archive.namelist() if name.endswith('.png')]), 128)
         with patch('material_textures.MAX_MATERIAL_TEXTURE_BYTES', 1):
             with self.assertRaises(ValueError): export_scene(floors, 'glb')
-        group['meshes'].append(base | {'texture': swatch(64)})
+        group['meshes'].append(base | {'texture': swatch(128)})
         with self.assertRaises(ValueError): export_scene(floors, 'glb')
 
     def test_full_rgb_payload_and_real_aggregate_limit(self):
@@ -101,7 +101,9 @@ class MaterialTextureTests(unittest.TestCase):
         definitions = {f'tile_{i}': large for i in range(42)}
         self.assertEqual(len(validate_material_textures({'material_textures': definitions})), 42)
         definitions['overflow'] = large
-        with self.assertRaises(ValueError): validate_material_textures({'material_textures': definitions})
+        self.assertEqual(len(validate_material_textures({'material_textures': definitions})),43)
+        with patch('material_textures.MAX_MATERIAL_TEXTURE_BYTES',len(decode_material_texture(large))-1):
+            with self.assertRaises(ValueError): validate_material_textures({'material_textures': definitions})
 
     def test_static_uv_validation_and_export(self):
         model, _, floor = fixture(static=True)
