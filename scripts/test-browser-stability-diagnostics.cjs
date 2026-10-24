@@ -48,6 +48,35 @@ test('viewer drag receipts preserve native phases and the existing two-frame com
   assert.match(source,/sample\.editorDragPhases = editorDrag\.phases/);
 });
 
+test('Home viewport waits for the observer frame and rejects stale or incomplete restoration receipts', async () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  const start=source.indexOf('async function waitForHomeViewport('),end=source.indexOf('\nasync function run(',start);
+  assert(start>0&&end>start);
+  for(const defect of [null,'stale-buffer','stale-scene','partial-viewport','stale-css','hidden-caption']) {
+    let now=0, repaired=false;
+    const state={renderCount:11,sceneDraws:defect==='stale-scene'?10:11};
+    const bounds=height=>({width:740,height});
+    const env={performance:{now:()=>now},setTimeout(callback,delay){now+=delay;if(now>=50)repaired=true;callback();},
+      document:{hidden:false,querySelector:selector=>selector==='#homeMapCaption'?{hidden:defect==='hidden-caption'}:
+        {getBoundingClientRect:()=>bounds(selector.endsWith('canvas')&&(!repaired||defect==='stale-css')?622:582)}},
+      floorplan:{homeMode:true,get renderCount(){return state.renderCount+(repaired?1:0);}},
+      __browserScene:()=>({pixelRatio:1,drawingBuffer:[740,repaired&&defect!=='stale-buffer'?582:622],
+        renderPasses:{scene:state.sceneDraws+(repaired&&defect!=='stale-scene'?1:0),last:'scene',sceneDrawCalls:284,
+          sceneViewport:[0,0,740,repaired&&defect!=='partial-viewport'?582:622]}})};
+    env.window=env;
+    vm.runInNewContext(source.slice(start,end)+'\nglobalThis.wait=waitForHomeViewport;',env);
+    const pending=env.wait({beforeRenderCount:10,beforeSceneDraws:10,captionVisible:true});
+    if(defect) {
+      await assert.rejects(pending,/Home viewport did not receive a fresh complete scene draw/);
+      assert.equal(now,30000,'An incomplete viewport cannot renew the fixed deadline');
+    } else {
+      const result=await pending;
+      assert.equal(now,50,'The old frame cannot satisfy the changed DOM size');
+      assert.deepEqual(Array.from(result.actual),[740,582]);assert.equal(result.sceneDraws,12);
+    }
+  }
+});
+
 // Drive the exact function serialized into the real viewer with a virtual
 // clock. This exercises deadlines and draw receipts without real-time sleeps.
 async function wheelMeasurement({draws=[16],receipt=true,camera=true,idleRaf=false,sized=true,blank=false}={}) {
