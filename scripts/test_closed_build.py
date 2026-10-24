@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -93,6 +94,111 @@ class EnvelopeTests(unittest.TestCase):
                 manifest = json.load(packed.extractfile("closed-build.json"))
                 self.assertEqual(manifest["worker_timeout_seconds"], 2)
                 self.assertEqual(manifest["build_mode"], "package-only")
+
+
+@unittest.skipUnless(os.name == "posix", "the production worker requires POSIX resource limits")
+class WorkerLimitTests(unittest.TestCase):
+    def run_entrypoint(self, root, body):
+        """Run the real entrypoint and kernel limit in a disposable child process.
+
+        Only container paths are mapped to temporary host directories. The
+        resource call, private child process and file writes are not mocked.
+        The hard limit must never be lowered in the test runner itself.
+        """
+        import resource
+        before = resource.getrlimit(resource.RLIMIT_FSIZE)
+        (root / "input/scripts").mkdir(parents=True)
+        (root / "output").mkdir()
+        program = '''import argparse,errno,io,json,os,pathlib,resource,tarfile
+p=argparse.ArgumentParser()
+for key in ('public-source','public-component','output','context','dependency-root'):
+ p.add_argument('--'+key)
+a=p.parse_args()
+print(json.dumps({'limits':resource.getrlimit(resource.RLIMIT_FSIZE)}),flush=True)
+''' + body + '''
+pathlib.Path(a.output).with_name('acceptance.json').write_text(json.dumps(
+ {'schema':1,'passed':True,'checks':['package','site-contracts','geometry']}))
+'''
+        (root / "input/scripts/closed-build-entry.py").write_text(program)
+        harness = '''import os,pathlib,shutil,subprocess,sys
+root=pathlib.Path(sys.argv[1])
+sys.path.insert(0,sys.argv[2])
+import closed_worker as worker
+paths={'/input':str(root/'input'),'/work/source':str(root/'source'),
+       '/output/home-package.tar.gz':str(root/'output/home-package.tar.gz'),
+       '/output/acceptance.json':str(root/'output/acceptance.json')}
+def mapped(path):
+ return paths.get(os.fspath(path),path)
+copytree,chdir,run=shutil.copytree,os.chdir,subprocess.run
+worker.shutil.copytree=lambda source,destination,*args,**kwargs: copytree(mapped(source),mapped(destination),*args,**kwargs)
+worker.os.chdir=lambda path: chdir(mapped(path))
+worker.Path=lambda path: pathlib.Path(mapped(path))
+worker.subprocess.run=lambda args,**kwargs: run([mapped(arg) for arg in args],**kwargs)
+raise SystemExit(worker.main())
+'''
+        result = subprocess.run([sys.executable, "-B", "-c", harness, str(root), str(build.ROOT / "scripts")],
+                                capture_output=True, text=True, timeout=60)
+        self.assertEqual(resource.getrlimit(resource.RLIMIT_FSIZE), before)
+        return result
+
+    @staticmethod
+    def package_body(member_size, copies, compression):
+        return f'''block=bytes({member_size})
+with tarfile.open(a.output,'w:gz',format=tarfile.USTAR_FORMAT,compresslevel={compression}) as archive:
+ for name,data in [('core.py',b'public immutable'),('site.json',b'{{}}')]+[(str(i)+'.bin',block) for i in range({copies})]:
+  member=tarfile.TarInfo('custom_components/home_floorplan/'+name)
+  member.size=len(data)
+  archive.addfile(member,io.BytesIO(data))
+'''
+
+    def test_real_entrypoint_creates_package_over_scene_member_limit(self):
+        with tempfile.TemporaryDirectory(prefix="closed-worker-limit-") as directory:
+            root = Path(directory)
+            result = self.run_entrypoint(root, self.package_body(32 * 1024 * 1024, 2, 0))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["limits"], [build.MAX_PACKAGE, build.MAX_PACKAGE])
+            output, public = root / "output", root / "public"
+            (public / "component").mkdir(parents=True)
+            (public / "component/core.py").write_bytes(b"public immutable")
+            size = (output / "home-package.tar.gz").stat().st_size
+            self.assertGreater(size, build.MAX_FILE)
+            self.assertLess(size, build.MAX_PACKAGE)
+            payload, _ = build.validate_output(output, public, "rebuild-preserve")
+            self.assertEqual(len(payload), size)
+
+    def test_real_entrypoint_kernel_rejects_file_over_package_limit(self):
+        # Probe scratch space so output-volume capacity cannot mask RLIMIT_FSIZE.
+        body = '''with open('oversized.bin','wb',buffering=0) as stream:
+ stream.seek(128*1024*1024)
+ try:
+  stream.write(b'x')
+ except OSError as error:
+  print(json.dumps({'errno':error.errno,'size':os.fstat(stream.fileno()).st_size}),flush=True)
+  raise SystemExit(9 if error.errno==errno.EFBIG else 10)
+raise AssertionError('kernel permitted a file larger than the package limit')
+'''
+        with tempfile.TemporaryDirectory(prefix="closed-worker-oversize-") as directory:
+            root = Path(directory)
+            result = self.run_entrypoint(root, body)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            records = [json.loads(line) for line in result.stdout.splitlines()]
+            self.assertEqual(records[0]["limits"], [build.MAX_PACKAGE, build.MAX_PACKAGE])
+            import errno
+            self.assertEqual(records[1]["errno"], errno.EFBIG)
+            self.assertLessEqual(records[1]["size"], build.MAX_PACKAGE)
+            self.assertFalse((root / "output/acceptance.json").exists())
+
+    def test_larger_worker_limit_does_not_allow_oversized_scene_member(self):
+        with tempfile.TemporaryDirectory(prefix="closed-worker-member-") as directory:
+            root = Path(directory)
+            result = self.run_entrypoint(root, self.package_body(build.MAX_FILE + 1, 1, 1))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            public = root / "public"
+            (public / "component").mkdir(parents=True)
+            (public / "component/core.py").write_bytes(b"public immutable")
+            self.assertLess((root / "output/home-package.tar.gz").stat().st_size, build.MAX_FILE)
+            with self.assertRaises(build.Rejected):
+                build.validate_output(root / "output", public, "rebuild-preserve")
 
 
 class BoundaryTests(unittest.TestCase):

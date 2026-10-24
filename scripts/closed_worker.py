@@ -8,8 +8,13 @@ import subprocess
 import sys
 
 
+# Match closed_build.MAX_PACKAGE: this per-file kernel bound also covers the
+# compressed output archive. The host separately enforces 64 MiB scene members.
+MAX_PACKAGE = 128 * 1024 * 1024
+
+
 def main():
-    resource.setrlimit(resource.RLIMIT_FSIZE, (64 * 1024 * 1024, 64 * 1024 * 1024))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_PACKAGE, MAX_PACKAGE))
     shutil.copytree("/input", "/work/source")
     os.chdir("/work/source")
     result = subprocess.run(
