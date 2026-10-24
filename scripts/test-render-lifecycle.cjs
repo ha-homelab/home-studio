@@ -9,7 +9,7 @@ let serial = 0, draws = 0, invalidations = 0, disposals = 0, losses = 0, disconn
 let box = {width:3840, height:2160};
 const buffers = [];
 const context = vm.createContext({
-  reflectionEnvironment: null, contactShading: null, inventoryTextures: {dispose(){},releaseGPU(){},configure(){}}, environmentLayer: null, initialViewReady: true, editorFloorMaterials: null, homeView: null, renderCount: 0, camera: {updateProjectionMatrix() {}}, scene: {},
+  reflectionEnvironment: null, contactShading: null, inventoryTextures: {dispose(){},releaseGPU(){},configure(){}}, environmentLayer: null, initialViewReady: true, failed3D: false, editorFloorMaterials: null, homeView: null, renderCount: 0, camera: {updateProjectionMatrix() {}}, scene: {},
   $() {return {dataset:{},getBoundingClientRect: () => box};},
   document: {hidden: false, addEventListener(type, fn) { events[type] = fn; }},
   window: {addEventListener(type, fn) { events[type] = fn; }},
@@ -30,7 +30,7 @@ const context = vm.createContext({
   },
 });
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../planner/render-capacity.js'), 'utf8').replace('export function ', 'function '), context);
-const prefixes = ['let renderRequest=', 'let interactionRenderer=', 'function cancelRender(', 'function requestRender(',
+const prefixes = ['let renderRequest=', 'let interactionRenderer=', 'function cancelRender(', 'function loadInitialMap(', 'function requestRender(',
   'function selectRenderProfile(', 'function renderPixelRatio(', 'function drawScene(', 'function render(){',
   "renderer.domElement.addEventListener('webglcontextlost'", "renderer.domElement.addEventListener('webglcontextrestored'",
   "document.addEventListener('visibilitychange'", "window.addEventListener('pagehide'", "window.addEventListener('pageshow'"];
@@ -215,7 +215,7 @@ function motionScheduler(diffuse = true, reduced = diffuse) {
   const raf = new Map(), timers = new Map(), handlers = {}, painted = [], errors = [], paths = [];
   let time = 0, id = 0, width = 800, rejectDraw = false, drawDuration = 0, clockReads = 0, afterDraw = null;
   const c = vm.createContext({
-    reflectionEnvironment:null,contactShading:null,inventoryTextures:{dispose(){},releaseGPU(){},configure(){}},environmentLayer:null,editorFloorMaterials:null, initialViewReady:true, renderCount:0, renderProfile:{diffuseLighting:diffuse,pixels:reduced?(diffuse?62500:250000):2000000},
+    reflectionEnvironment:null,contactShading:null,inventoryTextures:{dispose(){},releaseGPU(){},configure(){}},environmentLayer:null,editorFloorMaterials:null, initialViewReady:true, failed3D:false, renderCount:0, renderProfile:{diffuseLighting:diffuse,pixels:reduced?(diffuse?62500:250000):2000000},
     devicePixelRatio:1, THREE:{}, scene:{}, camera:{position:0,updateProjectionMatrix(){}},
     document:{hidden:false,addEventListener:(type,fn)=>handlers[type]=fn},
     window:{addEventListener:(type,fn)=>handlers[type]=fn},

@@ -92,6 +92,44 @@ function instrumentViewerLoadSource(source, {comparison = false} = {}) {
   }
 }
 
+// Defer test-only synchronization until the scene has actually drawn. Every
+// linked generation must still be checked before a receipt or planned loss.
+function deferViewerShaderChecks(gl, canvas, stats) {
+  const pending = new Map();
+  let generation = 0, lost = false;
+  const checks = stats.shaderChecks;
+  const discard = () => {
+    if (!pending.size) return;
+    stats.shaderErrors.push(`Context lost with ${pending.size} unverified shader link(s).`);
+    checks.discarded += pending.size;checks.pending -= pending.size;pending.clear();
+  };
+  const check = program => {
+    if (!pending.has(program)) return;
+    if (lost || gl.isContextLost() || pending.get(program) !== generation) { discard(); return; }
+    pending.delete(program);checks.pending--;
+    const started=performance.now(), linked=gl.getProgramParameter(program,gl.LINK_STATUS), durationMs=performance.now()-started;
+    stats.shaderTiming.statusMs+=durationMs;checks.checked++;
+    if(!stats.shaderTiming.longestStatus||durationMs>stats.shaderTiming.longestStatus.durationMs)
+      stats.shaderTiming.longestStatus={startedMs:started,durationMs};
+    if(!linked)stats.shaderErrors.push(gl.getProgramInfoLog(program)||'Program link failed without a driver log.');
+  };
+  const flush = () => { for(const program of pending.keys())check(program); };
+  canvas.addEventListener('webglcontextlost',()=>{lost=true;generation++;discard();});
+  canvas.addEventListener('webglcontextrestored',()=>{lost=false;generation++;});
+  const link=gl.linkProgram.bind(gl), remove=gl.deleteProgram.bind(gl);
+  gl.linkProgram=program=>{
+    check(program); // Preserve the old link attempt before relinking its handle.
+    if(pending.size>=256)flush(); // Bound retained handles; overflow still verifies every link.
+    const started=performance.now();link(program);const durationMs=performance.now()-started;
+    stats.linkedPrograms++;stats.shaderTiming.linkMs+=durationMs;
+    if(!stats.shaderTiming.longestLink||durationMs>stats.shaderTiming.longestLink.durationMs)
+      stats.shaderTiming.longestLink={startedMs:started,durationMs};
+    pending.set(program,generation);checks.pending++;
+  };
+  gl.deleteProgram=program=>{check(program);return remove(program);};
+  return {flush};
+}
+
 function positiveInteger(name, fallback, maximum) {
   const value = Number(process.env[name] ?? fallback);
   assert(Number.isSafeInteger(value) && value > 0 && value <= maximum,
@@ -871,6 +909,7 @@ function changeRestoredViewerMode(mode) {
 }
 
 function captureRestoredViewerMode() {
+  window.__flushBrowserShaders?.();
   const canvas = document.querySelector('#homeStage canvas, #view3d canvas');
   const gl = canvas.getContext('webgl2'), glErrors = [];
   const contextLost = gl.isContextLost();
@@ -937,4 +976,4 @@ function assertViewerScenarioComplete(record) {
   record.viewerCompletion = {version: 1, cycles: 2, postRestoreModes: modes};
 }
 
-module.exports = {installViewerLoadDiagnostics, instrumentViewerLoadSource, VIEWER_LOAD_BUDGET_MS, createViewerLoadDeadline, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction};
+module.exports = {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, VIEWER_LOAD_BUDGET_MS, createViewerLoadDeadline, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction};

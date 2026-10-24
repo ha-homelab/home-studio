@@ -6,7 +6,7 @@ const path = require('node:path');
 const {EventEmitter} = require('node:events');
 const vm = require('node:vm');
 const {test, after} = require('node:test');
-const {installViewerLoadDiagnostics, instrumentViewerLoadSource, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
+const {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
 
 test('host phase timing closes sequential phases and preserves the timeout observation', () => {
   let now=100;
@@ -100,21 +100,72 @@ test('exact transport instrumentation distinguishes timely replies from timeout 
   }
 });
 
-test('shader timing observes existing calls without adding GL status queries', () => {
+test('shader status queries wait for the explicit readiness flush and retain timing', () => {
   const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
-  const start=source.indexOf('function instrumentation() {'),end=source.indexOf('// Serialized into the viewer frame.',start);
+  const start=source.indexOf('function instrumentation('),end=source.indexOf('// Serialized into the viewer frame.',start);
   assert(start>0&&end>start);
   let now=0,links=0,statusQueries=0;
   const gl={getExtension:()=>null,getParameter:()=>16,LINK_STATUS:1,
-    linkProgram(){links++;now+=11;},getProgramParameter(){statusQueries++;now+=23;return true;}};
+    linkProgram(){links++;now+=11;},deleteProgram(){},isContextLost:()=>false,getProgramParameter(){statusQueries++;now+=23;return true;}};
   function Canvas(){};Canvas.prototype.getContext=()=>gl;Canvas.prototype.addEventListener=()=>{};
   const env={HTMLCanvasElement:Canvas,performance:{now:()=>now},addEventListener:()=>{},console:{error(){},info(){}}};env.window=env;
-  vm.runInNewContext(source.slice(start,end)+'\ninstrumentation();',env);
+  vm.runInNewContext('globalThis.installShaderChecks='+deferViewerShaderChecks.toString(),env);
+  vm.runInNewContext(source.slice(start,end)+'\ninstrumentation(installShaderChecks);',env);
   const context=new env.HTMLCanvasElement().getContext('webgl2');context.linkProgram({});context.linkProgram({});
+  assert.equal(statusQueries,0,'linkProgram does not add an eager synchronization barrier');
+  assert.equal(env.__browserStability.shaderChecks.pending,2);
+  env.__flushBrowserShaders();
   const stats=JSON.parse(JSON.stringify(env.__browserStability));
-  assert.equal(links,2);assert.equal(statusQueries,2,'No diagnostic-only GL synchronization queries');
+  assert.equal(stats.shaderChecks.pending,0);assert.equal(stats.shaderChecks.checked,2);
+  assert.equal(links,2);assert.equal(statusQueries,2,'Every linked program is checked once by the diagnostic');
   assert.equal(stats.linkedPrograms,2);assert.equal(stats.shaderTiming.linkMs,22);assert.equal(stats.shaderTiming.statusMs,46);
-  assert.deepEqual(stats.shaderTiming.longestStatus,{startedMs:11,durationMs:23});
+  assert.deepEqual(stats.shaderTiming.longestStatus,{startedMs:22,durationMs:23});
+});
+
+test('deferred checks preserve failed links, deletion, relinking and context generations', () => {
+  const make=()=>{
+    let now=0,lost=false;const events={},calls=[];
+    const stats={shaderErrors:[],linkedPrograms:0,shaderTiming:{linkMs:0,statusMs:0,longestLink:null,longestStatus:null},shaderChecks:{pending:0,checked:0,discarded:0}};
+    const gl={LINK_STATUS:1,isContextLost:()=>lost,
+      linkProgram:p=>{assert(!p.deleted);calls.push(['link',p.id]);},
+      deleteProgram:p=>{calls.push(['delete',p.id]);p.deleted=true;},
+      getProgramParameter:p=>{assert(!lost&&!p.deleted,'Never query a lost or deleted program');calls.push(['status',p.id]);now++;return p.valid!==false;},
+      getProgramInfoLog:()=>''};
+    const env={gl,canvas:{addEventListener:(name,fn)=>{events[name]=fn;}},stats,performance:{now:()=>now}};
+    vm.runInNewContext('globalThis.owner=('+deferViewerShaderChecks.toString()+')(gl,canvas,stats)',env);
+    return {gl,stats,calls,flush:env.owner.flush,lose(){lost=true;events.webglcontextlost();},restore(){lost=false;events.webglcontextrestored();}};
+  };
+  const deleted=make(),p={id:1};deleted.gl.linkProgram(p);deleted.gl.deleteProgram(p);deleted.flush();
+  assert.deepEqual(deleted.calls,[['link',1],['status',1],['delete',1]]);
+  assert.equal(deleted.stats.shaderChecks.pending,0);
+  const relinked=make(),q={id:2};relinked.gl.linkProgram(q);relinked.gl.linkProgram(q);relinked.flush();
+  assert.deepEqual(relinked.calls,[['link',2],['status',2],['link',2],['status',2]]);
+  assert.equal(relinked.stats.shaderChecks.checked,relinked.stats.linkedPrograms);
+  const failed=make();failed.gl.linkProgram({id:3,valid:false});failed.flush();
+  assert.equal(failed.stats.shaderChecks.pending,0);
+  assert.deepEqual(failed.stats.shaderErrors,['Program link failed without a driver log.'],'An empty driver log cannot hide a failed link');
+  const unexpected=make(),old={id:4};unexpected.gl.linkProgram(old);unexpected.lose();unexpected.restore();
+  unexpected.gl.deleteProgram(old);unexpected.gl.linkProgram({id:5});unexpected.flush();
+  assert.deepEqual(unexpected.calls,[['link',4],['delete',4],['link',5],['status',5]],'Old-epoch handles are never queried after restore');
+  assert.equal(unexpected.stats.shaderChecks.discarded,1);assert.equal(unexpected.stats.shaderChecks.pending,0);
+  assert.equal(unexpected.stats.shaderErrors.length,1,'Unverified lost programs remain a sticky failure');
+  const planned=make();planned.gl.linkProgram({id:6});planned.flush();planned.lose();planned.restore();
+  planned.gl.linkProgram({id:7});planned.flush();
+  assert.deepEqual(planned.stats.shaderErrors,[]);assert.equal(planned.stats.shaderChecks.discarded,0);
+  assert.equal(planned.stats.shaderChecks.checked,2);
+  const bounded=make();for(let id=0;id<257;id++)bounded.gl.linkProgram({id});
+  assert.equal(bounded.stats.shaderChecks.pending,1);assert.equal(bounded.stats.shaderChecks.checked,256);
+  bounded.flush();assert.equal(bounded.stats.shaderChecks.checked,257);assert.deepEqual(bounded.stats.shaderErrors,[]);
+});
+
+test('deferred shader checks remain inside cold readiness and every final lifecycle receipt', () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  const ready=source.indexOf("child.waitForFunction(expected => window.floorplan?.renderCount > 0");
+  const flush=source.indexOf('const shaders=await load.run(',ready),complete=source.indexOf('load.complete();',ready);
+  assert(ready>0&&ready<flush&&flush<complete,'The same deadline encloses both real readiness and shader validation');
+  assert(source.indexOf('const checks=window.__flushBrowserShaders();')<source.indexOf('extension.loseContext();'));
+  assert(source.indexOf('const finalShaders=await snapshot();')<source.indexOf("phases.start('viewer-detach'"));
+  assert(source.includes('check(finalShaders.shaderErrors.length===0'));
 });
 
 test('viewer host rejects unsupported map actions and records every unexpected command', () => {
@@ -472,6 +523,20 @@ function suite(name, playwright) {
 const options = {deadlineMs: 1000, reportOnly: false, launch: {headless: true},
   context: {viewport: {width: 1280, height: 800}}, fixture: {rooms: 6, lights: 18}};
 const read = (diagnostics, file = 'firefox.json') => JSON.parse(fs.readFileSync(path.join(diagnostics.directory, file)));
+
+test('failed-load capture preserves pending shader and map evidence without synchronization', async () => {
+  const fake=fakeBrowser();let flushes=0;
+  const env={location:{href:'about:srcdoc',pathname:''},navigator:{userAgent:'fixture'},devicePixelRatio:1,
+    innerWidth:800,innerHeight:600,scrollX:0,scrollY:0,__browserStability:{shaderChecks:{pending:1}},
+    __viewerLoadDiagnostics:{snapshot:()=>({pending:[{requestId:'map-1'}]})},
+    __flushBrowserShaders(){flushes++;throw Error('A failed-run observation must not wait for shaders');}};env.window=env;
+  fake.page.frames=()=>[{evaluate:async callback=>vm.runInNewContext('('+callback.toString()+')()',env)}];
+  const diagnostics=suite('pending-shader-failure',{firefox:{launch:async()=>fake.browser}});
+  await assert.rejects(diagnostics.run('firefox',options,async()=>{throw Error('Synthetic cold-load failure');}),/Synthetic cold-load failure/);
+  const record=read(diagnostics);
+  assert.equal(flushes,0);assert.equal(record.snapshot[0].stats.shaderChecks.pending,1);
+  assert.deepEqual(record.snapshot[0].viewerLoad.pending,[{requestId:'map-1'}]);
+});
 
 test('invalid engines and bounded fixture values cannot produce an empty green run', () => {
   assert.deepEqual(selectedEngines(' firefox, chromium '), ['firefox', 'chromium']);
