@@ -73,7 +73,7 @@ function fixture(homeMode, navigationMode = 'rotate') {
     between(viewer, 'let drag=null;', "$('resetView').onclick="),
     line(viewer, 'function showMode('),
     line(home, 'let homeGesture='), line(home, 'function cancelHomeGesture('),
-    line(home, 'let navigationMode='),
+    line(home, 'let navigationMode='), line(home, 'let mapSettingsError='),
     between(home, '  function resetZoom()', '  function applyViewPreferences('),
     between(home, '  function setActive(value) {', '  let nativePressTimer='),
     line(home, "window.addEventListener('pagehide',()=>{cancelHomeGesture();"),

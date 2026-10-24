@@ -60,6 +60,52 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   assert.equal(attempts.get(failedKey),2,'Explicit retry reloads the failed tile exactly once, including repeated clicks while pending');
   for(const [key,count] of beforeRetry)if(key!==failedKey)assert.equal(attempts.get(key),count,'Healthy cached tiles are retained');
   assert.equal(recoveryStatus.text,'');assert.equal(recoveryStatus.retry,false);assert(recoveryMax<=4&&recovery.stats.cached<=48&&recovery.stats.visible<=36);recovery.dispose();
+  // Real Home status owners must survive tiles settling after a settings failure.
+  const homeSource=fs.readFileSync(path.join(root,'home-view.js'),'utf8');
+  for(const scenario of ['disabled','healthy','partial']){
+    const nodes=new Map(),held=[],tileAttempts=new Map();let failFirst=scenario==='partial',firstKey;
+    const node=id=>{if(!nodes.has(id))nodes.set(id,{hidden:true,textContent:'',setAttribute(){}});return nodes.get(id);};
+    const c=vm.createContext({THREE,Promise,Map,Set,Math,Number,Error,$:node,scene:new THREE.Scene(),renderer:{},canEdit:true,zoom:1,panX:0,panY:0,
+      model:{rooms:[]},xm:x=>x,zm:z=>z,updateZoom(){},applyNavigationState(){},window:{}});
+    vm.runInContext(fs.readFileSync(path.join(root,'map-layer.js'),'utf8'),c);
+    const factory=c.createHomeMapLayer;
+    c.createHomeMapLayer=(three,scene,options)=>factory(three,scene,{...options,loadTexture:()=>new Promise(resolve=>held.push(resolve))});
+    const declarations=homeSource.split('\n').filter(line=>line.startsWith('  let navigationMode=')||line.startsWith('  let mapSettingsError='));
+    const statusStart=homeSource.indexOf('  function refreshMapStatus('),controlsStart=homeSource.indexOf('  function refreshMapControls(');
+    const statusEnd=homeSource.indexOf('\n  const mapFields=',controlsStart);
+    assert(controlsStart>=0&&statusEnd>controlsStart);
+    vm.runInContext(declarations.join('\n')+'\nfunction mapAvailable(){return !!mapLayer?.config?.enabled;}\n'+
+      homeSource.slice(statusStart>=0?statusStart:controlsStart,statusEnd)+'\nthis.layer=()=>mapLayer;',c);
+    c.window.homeMapRequest=async(action,tile)=>{
+      if(action!=='tile')throw Error('Settings offline');
+      const key=`${tile.z}/${tile.x}/${tile.y}`;firstKey??=key;tileAttempts.set(key,(tileAttempts.get(key)||0)+1);
+      if(failFirst&&key===firstKey)throw Error('Tile offline');return {data_url:png};
+    };
+    c.configureMap({revision:1,configured:true,config});c.layer().render(camera,{width:1200,height:1200});await tick();
+    assert(held.length>0,'The failure overlaps real pending tile decodes');
+    if(scenario==='disabled')c.configureMap({revision:2,configured:false,config:null});
+    await c.loadMap();
+    const assertSettingsFailure=()=>{
+      c.refreshMapControls();assert.match(node('homeMapStatus').textContent,/settings unavailable/);
+      assert.equal(node('homeMapRetry').hidden,false);assert.equal(node('homeMapCaption').hidden,false);
+    };
+    assertSettingsFailure();
+    const drain=async()=>{for(let i=0;i<100&&c.layer().stats.inflight;i++){held.splice(0).forEach(resolve=>resolve(new THREE.Texture()));await tick();}assert.equal(c.layer().stats.inflight,0);};
+    await drain();assertSettingsFailure();
+    c.configureMap({revision:0,configured:true,config});assertSettingsFailure();
+    c.window.homeMapRequest=async(action,tile)=>{
+      if(action!=='tile')return {revision:3,configured:scenario!=='disabled',config:scenario==='disabled'?null:config};
+      const key=`${tile.z}/${tile.x}/${tile.y}`;tileAttempts.set(key,(tileAttempts.get(key)||0)+1);return {data_url:png};
+    };
+    await c.loadMap();
+    if(scenario==='partial'){
+      assert.match(node('homeMapStatus').textContent,/Some map tiles/);assert.equal(node('homeMapRetry').hidden,false);
+      c.layer().render(camera,{width:1200,height:1200});c.layer().clearFailures();await drain();
+      assert.equal(tileAttempts.get(firstKey),2,'Normal tile retry remains explicit and recovers after settings success');
+    }
+    assert.equal(node('homeMapStatus').textContent,'','Accepted success clears the settings error even if the tile status is unchanged');
+    assert.equal(node('homeMapRetry').hidden,true);assert.equal(node('homeMapCaption').hidden,scenario==='disabled');c.layer().dispose();
+  }
   console.log('PASS: map coordinates, north rotation, dateline/pole tile indices, LOD, four-request limit, cache eviction, explicit tile recovery and disposal.');
   if(process.argv.includes('--unit-only'))return;
   const temporary=fs.mkdtempSync(path.join(os.tmpdir(),'home-map-test-'));let browser,server;

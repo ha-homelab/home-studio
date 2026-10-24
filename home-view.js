@@ -28,6 +28,7 @@ homeView = (() => {
   let countdownTimer, moduleItem;
   let sequence = 0, zoom = 1, panX = 0, panY = 0, controlsCollapsed = false;
   let navigationMode='rotate', homeRotation=0, homeTilt=0, mapLayer=null, mapConfig=null, mapDraft=null, mapReference=null, mapRevision=0, mapLoaded=false, mapLoading=false, mapSaving=false, mapBeforeEdit=null, pendingMapNavigation=null, mapFraming=null, mapBeforeRoom='', mapCoarseState=false;
+  let mapSettingsError=false, mapTileStatus='', mapTileRetry=false;
   const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6m-5 3h4M8.5 14.5a6 6 0 1 1 7 0L15 16H9z"/></svg>';
   const motionIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="14" cy="4" r="2"/><path d="m10 22 2-7-4-3 3-5 4 5 4 1M5 11l3-4 3-1M5 21l3-6"/></svg>';
   const tvIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>';
@@ -239,35 +240,40 @@ homeView = (() => {
     }
     updateZoom(false);
   }
+  function refreshMapStatus(){
+    $('homeMapStatus').textContent=mapSettingsError?'Map settings unavailable. Home controls are still available.':mapTileStatus;
+    $('homeMapRetry').hidden=!(mapSettingsError||mapTileRetry);
+  }
   function refreshMapControls(){
     const available=mapAvailable();
     $('homeMapHome').hidden=$('homeMapOverview').hidden=!available;
     $('homeMapOverview').setAttribute('aria-pressed',String(available&&zoom<.65));
     $('homeMapAlign').hidden=!canEdit||!mapLoaded;
     $('homeMapAlign').setAttribute('aria-expanded',String(!!mapDraft));
-    $('homeMapCaption').hidden=!available;$('homeMapCompass').hidden=!available;
+    $('homeMapCaption').hidden=!available&&!mapSettingsError;$('homeMapCompass').hidden=!available;
     $('homeMapEditor').hidden=!mapDraft;$('homeRoom').disabled=!!mapDraft;
   }
   function configureMap(result){
     if(!result||!Number.isSafeInteger(result.revision)||result.revision<mapRevision||typeof homeMapMath==='undefined')return;
     const config=homeMapMath.validConfig(result.config);
-    mapRevision=result.revision;mapConfig=config;mapLoaded=true;
+    mapRevision=result.revision;mapConfig=config;mapLoaded=true;mapSettingsError=false;
+    if(!config?.enabled){mapTileStatus='';mapTileRetry=false;}
     if(Number.isFinite(result.reference?.latitude)&&Math.abs(result.reference.latitude)<=90&&Number.isFinite(result.reference?.longitude)&&Math.abs(result.reference.longitude)<=180)mapReference={latitude:Math.max(-85,Math.min(85,result.reference.latitude)),longitude:result.reference.longitude};
     if(!mapLayer&&renderer&&typeof createHomeMapLayer==='function')mapLayer=createHomeMapLayer(THREE,scene,{
       elevation:-(model.elevation_m||0)-.08,polygons:model.rooms.map(room=>room.polygon.map(([x,z])=>[xm(x),zm(z)])),
       requestTile:payload=>window.homeMapRequest('tile',payload),onChange:()=>window.requestModelRender?.(),
-      onStatus:(text,retry)=>{$('homeMapStatus').textContent=text;$('homeMapRetry').hidden=!retry;}
+      onStatus:(text,retry)=>{if(mapLayer?.config?.enabled){mapTileStatus=text;mapTileRetry=retry;}refreshMapStatus();}
     });
     if(!mapDraft)mapLayer?.setConfig(config);
     if(pendingMapNavigation&&mapAvailable()){const state=pendingMapNavigation;pendingMapNavigation=null;applyNavigationState(state);}
     else if(!mapAvailable()){mapFraming=null;zoom=Math.max(.65,zoom);panX=panY=0;}
-    refreshMapControls();updateZoom(false);
+    refreshMapControls();refreshMapStatus();updateZoom(false);
   }
   async function loadMap(){
     if(mapLoading||typeof window.homeMapRequest!=='function')return;
     mapLoading=true;
     try{configureMap(await window.homeMapRequest('get',{}));}
-    catch(error){$('homeMapCaption').hidden=false;$('homeMapStatus').textContent='Map settings unavailable. Home controls are still available.';$('homeMapRetry').hidden=false;}
+    catch(error){mapSettingsError=true;refreshMapControls();refreshMapStatus();}
     finally{mapLoading=false;}
   }
   const mapFields={latitude:'homeMapLatitude',longitude:'homeMapLongitude',model_x:'homeMapX',model_z:'homeMapZ',north_deg:'homeMapNorth'};
