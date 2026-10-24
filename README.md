@@ -96,6 +96,17 @@ and an idle plan stay still. See [wall rendering and resource limits](docs/round
 [How we test and release Home Studio](docs/quality-and-release.md) ·
 [Saving and recovery](docs/first-session.md)
 
+## Place your home on the map
+
+The 1.2 beta line adds optional geographic context in the native Home Assistant
+view. An administrator can align the house with the map using **Align map**.
+Then zoom out to see the surrounding area, or zoom back in to use the 3D home.
+The map uses the same renderer; detailed device controls return at house scale.
+
+Alignment is stored separately in Home Assistant and is not added to exported
+drawings. Map tiles come from OpenStreetMap, which receives the area being
+viewed. See [map setup, privacy, and navigation](docs/map-navigation.md).
+
 ## Take your drawing into Blender
 
 The 1.1 beta line adds **Export for Blender** directly to the Home Assistant

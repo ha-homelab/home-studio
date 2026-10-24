@@ -174,3 +174,13 @@ body.control-only>header,body.control-only>main,body.control-only #editLayout,bo
 #homeView [data-kind="presence"]{color:#95e9df;background:#213e40;border-color:#568a89}
 #homeView [data-kind="presence"][data-state="on"]{color:#cefff8;background:#245650;border-color:#61e0cc;box-shadow:0 0 10px #36e7df55}
 @media(prefers-reduced-motion:reduce){.home-presence-indicator[data-state="quiet"]{transition:none}}
+
+/* Geographic context lives in the same canvas as the house. */
+.home-map-navigation{display:flex;gap:3px}#homeMapOverview[aria-pressed="true"],#homeMapAlign[aria-expanded="true"]{border-color:#64cbdc;background:#244852}
+#homeMapCaption{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:6px 0;font-size:10px;color:#c4d4d9}#homeMapCaption>span:first-child{color:#a6d8e4}#homeMapStatus{margin-inline-start:auto}#homeMapRetry{font-size:10px!important}
+#homeMapEditor{flex-shrink:0;max-height:32vh;overflow:auto;padding:12px;margin-top:10px;border:1px solid #648b95;border-radius:9px;background:#19303a;font-size:11px;color:#c5dce3}#homeMapEditor p{line-height:1.45;margin:8px 0 0}.map-editor-heading{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}.map-editor-heading strong{color:#eef9fb;font-size:13px}#homeMapForm{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:10px}#homeMapForm label{display:flex;flex-direction:column;gap:4px}#homeMapForm input[type=number]{width:118px;box-sizing:border-box;background:#10242c;color:#eaf6fa;border:1px solid #527680;border-radius:5px;padding:6px;font-size:12px}#homeMapForm .map-enabled{flex-direction:row;align-items:center;min-height:30px}#homeMapForm input[type=checkbox]{width:auto}#homeMapEditorStatus{color:#ffd19b}
+#homeMapCompass{position:absolute;top:16px;left:16px;z-index:2;display:flex;flex-direction:column;align-items:center;gap:2px;color:#e3faff;text-shadow:0 1px 3px #000;font:600 11px system-ui;pointer-events:none}#homeMapCompass span{display:block;font-size:30px;line-height:32px;transform-origin:center}
+#homeStage[data-map-coarse="true"]>:is(#homeLabels,#homeMotion,#homeMarkers,#homeMediaLinks,#homeCameras,#homeTVs,#homeTelemetry,.home-presence-layer,.home-vacuum-layer){display:none!important}#homeStage[data-map-coarse="true"]>canvas{cursor:grab}#homeStage[data-map-editing="true"]>canvas{cursor:move}
+@media(max-width:600px){#homeMapEditor{max-height:38vh}#homeMapForm input[type=number]{width:100px}.map-editor-heading span{font-size:10px}#homeMapStatus{margin-inline-start:0}}
+
+#homeStage[data-map-coarse="true"]>svg:not(#homeMediaLinks){display:none!important}

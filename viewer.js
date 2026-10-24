@@ -550,6 +550,19 @@ function refreshViewerLanguage(refreshStates=true){
   homeView?.refreshLanguage();environmentControls.forEach(control=>control.refresh());if(refreshStates)refreshEntityPresentation();
 }
 viewerI18n.onChange(({locale,source})=>{refreshViewerLanguage();if(source==='user')bridge?.postMessage({type:'view_preferences',language:locale});});
+// The sandbox receives only bounded map data through its authenticated HA host.
+const mapRequests=new Map();let mapSequence=0;
+window.homeMapRequest=(action,payload={})=>new Promise((resolve,reject)=>{
+  if(!embedded||!bridge)return reject(Error('Connect to Home Assistant to use the map.'));
+  if(!['get','save','tile'].includes(action)||mapRequests.size>=32)return reject(Error('Map request limit reached.'));
+  const request_id='map-'+(++mapSequence);
+  const timer=setTimeout(()=>{mapRequests.delete(request_id);reject(Error('Map request timed out.'));},30000);
+  mapRequests.set(request_id,{resolve,reject,timer});
+  bridge.postMessage({...payload,type:'map_request',request_id,action});
+});
+window.homeMapNavigationChanged=view=>bridge?.postMessage({type:'map_view',view});
+function rejectMapRequests(){for(const request of mapRequests.values()){clearTimeout(request.timer);request.reject(Error('Map connection closed.'));}mapRequests.clear();}
+window.addEventListener('pagehide',rejectMapRequests);
 __HOME_JS__
 if(embedded){
 $('otherFloor').onclick=e=>{if(bridge){e.preventDefault();if(model.next_floor?.id)bridge.postMessage({type:'floor',floor:model.next_floor.id})}};
@@ -562,6 +575,13 @@ document.body.classList.toggle('control-only',!canEdit);$('editLayout').hidden=!
 bridge=event.ports[0];homeView?.applyViewPreferences(event.data.preferences||{});
 bridge.onmessage=event=>{
   const message=event.data;
+  if(message?.type==='map_result'){
+    const request=mapRequests.get(message.request_id);if(!request)return;
+    mapRequests.delete(message.request_id);clearTimeout(request.timer);
+    if(message.success===true)request.resolve(message.result);
+    else request.reject(Error(typeof message.error==='string'?message.error.slice(0,200):'Map request failed.'));
+    return;
+  }
   if(message?.type==='dismiss_overlays'){homeView?.dismissOverlays();return}
   if(message?.type==='view_preferences'){homeView?.applyViewPreferences(message);return}
   if(message?.type==='camera_frames'){applyCameraFrames(message.frames);return}
@@ -587,6 +607,7 @@ function collectStateEntities(value,depth=0){
   else if(value&&typeof value==='object')for(const child of Object.values(value))collectStateEntities(child,depth+1);
 }
 for(const key of ['tv_entities','camera_entities','room_activity','receiver_activity','assumed_activity','motion_sources','motion_zones','telemetry','power_labels','appliance_status','presence_sources','vacuum_sources'])collectStateEntities(model[key]);
+if(typeof homeView!=='undefined'){homeView?.applyNavigationState?.(event.data.map_view);homeView?.loadMap?.();}
 bridge.postMessage({type:'model_config',model_id:model.id,state_entities:[...stateEntities],...Object.fromEntries(['tv_entities','camera_entities','room_activity','receiver_activity','assumed_activity'].map(key=>[key,model[key]]))});
 document.querySelector('aside').inert=!canEdit;if(inventoryChanged)rebuildInventoryView();setEditorStatus(appearanceRefreshNotice || 'Connected. Select an entity from the list to bind an object.');window.removeEventListener('message',init);
 });
