@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from planner.vehicle_authoring import VEHICLES, vehicle_parts
+from planner.bath_authoring import BATH_MODELS, bath_parts
 # Every category has an explicit default; exceptions below represent actual parts.
 CATEGORY_FINISH = {
     'seating': 'fabric', 'tables': 'wood', 'beds': 'fabric', 'storage': 'painted',
@@ -177,11 +178,15 @@ def author(catalog):
             if finish=='mirror': part['material']='#e2e5e3'
             part['geometry_profile']=geometry_for(model,part,finish)
             if part['geometry_profile']=='canopy':
+                if model['id'] in ('fir_tree','christmas_tree'):part['geometry_foliage']='needles'
+                else:part.pop('geometry_foliage',None)
                 part['geometry_dimensions']=[part['size'][i]*model['dimensions_m'][k] for i,k in enumerate(('width','height','depth'))]
                 part['geometry_leaf_count']=448 if model['id'] in ('clipped_hedge','round_canopy_tree','columnar_tree') else 64 if model['id']=='weeping_fig' else 128
             else:
                 part.pop('geometry_dimensions',None);part.pop('geometry_leaf_count',None)
         if model['id'] in VEHICLES: model['parts']=vehicle_parts(model)
+        if model['id'] in BATH_MODELS:model['parts']=bath_parts(model)
+        if model['id']=='toilet':model['default_style']='gallery_white'
         if model['id'] in anatomy:
             # Continuous authored sections and anchored features override the
             # category-level primitive rules; never restyle individual parts.

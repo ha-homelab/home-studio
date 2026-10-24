@@ -71,6 +71,7 @@ export function primitive(part, cutout = false) {
     if(corners>512)throw new Error('Vehicle shell exceeds corner budget.');
   }
   if(part.geometry_profile==='canopy') {
+    if(!['broadleaf','needles'].includes(part.geometry_foliage??'broadleaf'))throw Error('Invalid canopy foliage.');
     if(part.geometry_leaf_count!==undefined&&(!Number.isInteger(part.geometry_leaf_count)||part.geometry_leaf_count<16||part.geometry_leaf_count>500))throw Error('Canopy leaf count must be 16–500.');
     if(part.geometry_dimensions!==undefined&&(!Array.isArray(part.geometry_dimensions)||part.geometry_dimensions.length!==3||part.geometry_dimensions.some(v=>!Number.isFinite(v)||v<=0)))throw Error('Invalid canopy dimensions.');
   }
@@ -226,7 +227,7 @@ function refinedPrimitive(part, cutout = false, fit = true) {
       for(let row=1;row<spans;row++) {
         const latitude=Math.PI*row/spans,sy=Math.cos(latitude);
         for(let column=0;column<sides;column++) {
-          const angle=2*Math.PI*column/sides;let radius=.86*Math.sin(latitude);if(shape==='cone')radius=.86*(1-sy)/2;
+          const angle=2*Math.PI*column/sides;let radius=.86*Math.sin(latitude);if(shape==='cone')radius=(part.geometry_foliage==='needles'?.16:.86)*(1-sy)/2;
           let q=[radius*Math.cos(angle),.94*sy,radius*Math.sin(angle)];if(shape==='box')q=q.map(x=>Math.sign(x)*.88*Math.abs(x/.94)**.35);
           point(q,[Math.cos(angle),sy,Math.sin(angle)]);
         }
@@ -237,9 +238,10 @@ function refinedPrimitive(part, cutout = false, fit = true) {
       }
     }
     const count=profile==='sprig'?12:(part.geometry_leaf_count??128);
+    const needles=profile==='canopy'&&part.geometry_foliage==='needles',samples=count;
     for(let leaf=0;leaf<count;leaf++) {
-      const height=-.94+1.88*((leaf*17)%count)/(count-1),yaw=leaf*2.399963229728653,radial=Math.sqrt(Math.max(0,1-height*height));
-      let origin,along,across,normal,halfLength,halfWidth;
+      const sample=leaf,height=-.94+1.88*((sample*17)%samples)/(samples-1),yaw=sample*2.399963229728653,radial=Math.sqrt(Math.max(0,1-height*height));
+      let origin,along,across,normal,halfLength,halfWidth,thickness=.001;
       if(profile==='canopy') {
         let direction=[radial*Math.cos(yaw),height,radial*Math.sin(yaw)];
         if(shape==='box') {
@@ -254,6 +256,13 @@ function refinedPrimitive(part, cutout = false, fit = true) {
         const tangent=Math.abs(normal[1])<.99?unit([normal[2],0,-normal[0]]):[1,0,0];
         const bitangent=[normal[1]*tangent[2]-normal[2]*tangent[1],normal[2]*tangent[0]-normal[0]*tangent[2],normal[0]*tangent[1]-normal[1]*tangent[0]],tilt=leaf*1.1;
         along=tangent.map((x,i)=>Math.cos(tilt)*x+Math.sin(tilt)*bitangent[i]);across=tangent.map((x,i)=>-Math.sin(tilt)*x+Math.cos(tilt)*bitangent[i]);halfLength=.13;halfWidth=.055;
+        if(needles){
+          const dimensions=part.geometry_dimensions||[1,1,1],branchRadius=(1-height)*.5,axis=unit([Math.cos(yaw),-.16,Math.sin(yaw)]);
+          along=axis;across=[-Math.sin(yaw),0,Math.cos(yaw)];normal=unit([axis[1]*across[2],axis[2]*across[0]-axis[0]*across[2],-axis[1]*across[0]]);
+          const physicalRadius=branchRadius*Math.min(dimensions[0],dimensions[2])*.5;
+          halfLength=Math.max(.012,.47*physicalRadius);halfWidth=Math.max(.003,.072*physicalRadius);thickness=Math.max(.001,.028*physicalRadius);
+          origin=[.51*branchRadius*Math.cos(yaw),.91*height,.51*branchRadius*Math.sin(yaw)];
+        }
       } else {
         const radius=.72*radial;origin=[radius*Math.cos(yaw),height,radius*Math.sin(yaw)];along=unit([Math.cos(yaw),.35*Math.sin(leaf*1.7),Math.sin(yaw)]);across=[-Math.sin(yaw),0,Math.cos(yaw)];
         normal=[along[1]*across[2],along[2]*across[0]-along[0]*across[2],-along[1]*across[0]];halfLength=.38;halfWidth=.17;
@@ -261,7 +270,7 @@ function refinedPrimitive(part, cutout = false, fit = true) {
       const start=vertices.length;
       if(profile==='canopy') {
         const dimensions=part.geometry_dimensions||[1,1,1];
-        for(const [u,v,w] of [[-1,0,0],[1,0,0],[0,1,.001],[0,-1,.001]])point(origin.map((x,k)=>x+2*(u*halfLength*along[k]+v*halfWidth*across[k]+w*normal[k])/dimensions[k]),normal);
+        for(const [u,v,w] of [[-1,0,0],[1,0,0],[0,1,thickness],[0,-1,thickness]])point(origin.map((x,k)=>x+2*(u*halfLength*along[k]+v*halfWidth*across[k]+w*normal[k])/dimensions[k]),normal);
         faces.push([start,start+2,start+1],[start,start+1,start+3],[start,start+3,start+2],[start+1,start+2,start+3]);continue;
       }
       for(let i=0;i<6;i++){const a=2*Math.PI*i/6;point(origin.map((x,k)=>x+halfLength*Math.cos(a)*along[k]+halfWidth*Math.sin(a)*across[k]),normal);}

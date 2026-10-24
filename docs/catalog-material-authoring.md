@@ -1,6 +1,6 @@
 # Stock catalog geometry and physical surfaces
 
-The offline catalog contains 206 orbitable models composed of 2,254 named parts.
+The offline catalog contains 206 orbitable models composed of 2,252 named parts.
 These are authored approximations of furniture, appliances, plants, vehicles and
 decorative objects. They are not scans or photographs of a particular product.
 They remain ordinary meshes: no camera-facing photographic billboards are used.
@@ -15,7 +15,10 @@ browser and Python compiler implement the same profile geometry.
 
 Profiles add hard-surface bevels, upholstered cushion domes with closed piping,
 continuous rug surfaces, smooth rotational rims, volumetric leaf crowns and
-vehicle bodywork. Small rods retain twelve sides, intermediate rims sixteen,
+vehicle bodywork. Fir and Christmas-tree crowns use overlapping narrow radial
+branch sprays around a small inner core, retaining the same triangle count as
+the earlier broad foliage elements. Individual needles remain a scale-dependent
+approximation, not separately modeled hairs. Small rods retain twelve sides, intermediate rims sixteen,
 and prominent tabletops and mirror frames thirty-two. Organic animal profiles
 use closed, ascending cross-sections with shared authored normals for continuous
 body and bent limb skins. Sharp anatomical folds have explicit 60-degree
@@ -28,6 +31,10 @@ separate optical/trim parts. The compact car retains round headlights; the
 angular pickup retains flat sheet surfaces and a solid rear cover. Vehicle
 profiles use at most 512 authored corners per part and stay within the existing
 32-part catalog limit. Glazing is shaded, without a detailed cabin interior.
+`planner/bath_authoring.py` uses the same bounded section engine for hollow
+sanitary ware: outer walls pass over the rim and down to the inner floor, with
+closing caps below the opening. A ray-depth test prevents a flat disc from
+substituting for the bowl or tub cavity.
 
 The unprofiled primitive path remains available for legacy input and fixtures.
 Individual profile transformations preserve their specified rotated envelope.

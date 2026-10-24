@@ -137,6 +137,23 @@ class AuthoredProfiles(unittest.TestCase):
             with self.subTest(bad=list(bad)):
                 with self.assertRaises(ValueError):primitive({**source,**bad})
 
+    def test_bath_openings_are_recessed_geometry_not_dark_discs(self):
+        for model_id,z,limit in [('bathtub',0,.30),('toilet',.17,.45)]:
+            asset=build_furniture_asset({'model_id':model_id,'type':'furniture'})
+            hits=[]
+            for mesh in asset['meshes']:
+                for i in range(0,len(mesh['indices']),3):
+                    a,b,c=[mesh['vertices'][j] for j in mesh['indices'][i:i+3]]
+                    det=(b[2]-c[2])*(a[0]-c[0])+(c[0]-b[0])*(a[2]-c[2])
+                    if abs(det)<1e-14:continue
+                    u=((b[2]-c[2])*(-c[0])+(c[0]-b[0])*(z-c[2]))/det
+                    v=((c[2]-a[2])*(-c[0])+(a[0]-c[0])*(z-c[2]))/det
+                    w=1-u-v
+                    if min(u,v,w)>=-1e-10:hits.append(u*a[1]+v*b[1]+w*c[1])
+            self.assertTrue(hits,model_id)
+            self.assertLess(max(hits),limit,model_id+' opening must reach a recessed cavity')
+            self.assertTrue(any(p['geometry_profile']=='molded_shell' for p in MODELS[model_id]['parts']))
+
     def test_wood_grain_follows_tabletop_and_leg_axes(self):
         model=MODELS['dining_table'];asset=build_furniture_asset({'type':model['type'],'model_id':model['id']})
         scale=[model['dimensions_m'][k] for k in ('width','height','depth')]

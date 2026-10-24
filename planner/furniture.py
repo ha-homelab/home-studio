@@ -87,6 +87,7 @@ def primitive(part, cutout=False):
                     if not isinstance(point,list) or len(point)!=3 or not all(type(v) in (int,float) and math.isfinite(v) and -1.000000000001<=v<=1.000000000001 for v in point): raise ValueError('invalid vehicle corner')
         if sum(len(r)*len(r[0]) for r in shells)>512: raise ValueError('vehicle shell exceeds corner budget')
     if profile == 'canopy':
+        if part.get('geometry_foliage','broadleaf') not in ('broadleaf','needles'): raise ValueError('invalid canopy foliage')
         if 'geometry_leaf_count' in part and (type(part['geometry_leaf_count']) is not int or not 16<=part['geometry_leaf_count']<=500): raise ValueError('canopy leaf count must be 16–500')
         if 'geometry_dimensions' in part and (not isinstance(part['geometry_dimensions'],list) or len(part['geometry_dimensions'])!=3 or not all(type(v) in (int,float) and math.isfinite(v) and v>0 for v in part['geometry_dimensions'])): raise ValueError('invalid canopy dimensions')
     if profile == 'organic':
@@ -280,7 +281,7 @@ def refined_primitive(part, cutout=False, fit=True):
                 latitude=math.pi*row/spans;sy=math.cos(latitude)
                 for column in range(sides):
                     angle=2*math.pi*column/sides;radius=.86*math.sin(latitude)
-                    if shape=='cone':radius=.86*(1-sy)/2
+                    if shape=='cone':radius=(.16 if part.get('geometry_foliage')=='needles' else .86)*(1-sy)/2
                     q=[radius*math.cos(angle),.94*sy,radius*math.sin(angle)]
                     if shape=='box':q=[math.copysign(.88*abs(x/.94)**.35,x) for x in q]
                     point(q,[math.cos(angle),sy,math.sin(angle)])
@@ -290,9 +291,12 @@ def refined_primitive(part, cutout=False, fit=True):
                 for row in range(spans-2):
                     a,b=2+row*sides+column,2+row*sides+following;quad(a,b,b+sides,a+sides)
         count=12 if profile=='sprig' else part.get('geometry_leaf_count',128)
+        needles=profile=='canopy' and part.get('geometry_foliage')=='needles'
+        samples=count
         for leaf in range(count):
-            height = -0.94 + 1.88*((leaf*17)%count)/(count-1)
-            yaw = leaf*2.399963229728653
+            sample=leaf
+            height = -0.94 + 1.88*((sample*17)%samples)/(samples-1)
+            yaw = sample*2.399963229728653
             radial=math.sqrt(max(0,1-height*height))
             if profile=='canopy':
                 direction=[radial*math.cos(yaw),height,radial*math.sin(yaw)]
@@ -315,7 +319,21 @@ def refined_primitive(part, cutout=False, fit=True):
                 tilt=leaf*1.1
                 along=[math.cos(tilt)*tangent[i]+math.sin(tilt)*bitangent[i] for i in range(3)]
                 across=[-math.sin(tilt)*tangent[i]+math.cos(tilt)*bitangent[i] for i in range(3)]
-                half_length,half_width=.13,.055
+                half_length,half_width,thickness=.13,.055,.001
+                if needles:
+                    # Each closed narrow spray grows from the inner crown,
+                    # instead of placing sub-pixel needles on a solid cone.
+                    # The small core is covered by overlapping radial branchlets.
+                    dimensions=part.get('geometry_dimensions',[1,1,1])
+                    branch_radius=(1-height)*.5
+                    axis=unit([math.cos(yaw),-.16,math.sin(yaw)])
+                    along=axis;across=[-math.sin(yaw),0,math.cos(yaw)]
+                    normal=unit([axis[1]*across[2],axis[2]*across[0]-axis[0]*across[2],-axis[1]*across[0]])
+                    physical_radius=branch_radius*min(dimensions[0],dimensions[2])*.5
+                    half_length=max(.012,.47*physical_radius)
+                    half_width=max(.003,.072*physical_radius)
+                    thickness=max(.001,.028*physical_radius)
+                    origin=[.51*branch_radius*math.cos(yaw),.91*height,.51*branch_radius*math.sin(yaw)]
             else:
                 radius = .72*radial
                 origin=[radius*math.cos(yaw),height,radius*math.sin(yaw)]
@@ -326,7 +344,7 @@ def refined_primitive(part, cutout=False, fit=True):
             start=len(vertices)
             if profile=='canopy':
                 dimensions=part.get('geometry_dimensions',[1,1,1])
-                for u,v,w in ((-1,0,0),(1,0,0),(0,1,.001),(0,-1,.001)):
+                for u,v,w in ((-1,0,0),(1,0,0),(0,1,thickness),(0,-1,thickness)):
                     q=[origin[k]+2*(u*half_length*along[k]+v*half_width*across[k]+w*normal[k])/dimensions[k] for k in range(3)]
                     point(q,normal)
                 faces.extend(([start,start+2,start+1],[start,start+1,start+3],[start,start+3,start+2],[start+1,start+2,start+3]))

@@ -149,7 +149,7 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'scripts/test-viewer-startup.cjs', 'scripts/test-module-expiry.cjs', 'scripts/test-floor-context.py', 'scripts/test-floor-context.cjs',
               'planner/project.py', 'planner/package.json', 'planner/catalog.json', 'planner/furniture.py',
               'scripts/generate-furniture-catalog.py', 'scripts/test-furniture.mjs', 'scripts/test-furniture.py',
-              'planner/anatomy.json', 'planner/vehicle_authoring.py', 'scripts/author-furniture-profiles.py',
+              'planner/anatomy.json', 'planner/vehicle_authoring.py', 'planner/bath_authoring.py', 'scripts/author-furniture-profiles.py',
               'scripts/test-furniture-profiles.py', 'docs/catalog-material-authoring.md',
               'scripts/test-inventory-appearance.cjs', 'scripts/test-inventory-appearance.py',
               'scripts/test-furniture-patterns.mjs', 'scripts/test-furniture-patterns.py',
