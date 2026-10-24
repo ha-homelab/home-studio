@@ -1157,6 +1157,8 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
         const wallEnabled = prepareSharedWallProgram(THREE, mesh,
           fallbackFacing ? 'opaque' : !dynamicMaterials.has(mesh.material) && sharedWallRoles.get(mesh.material));
         const sharedWall = Boolean(wallEnabled);
+        const showWallSheen = wall && !(enabled && geometryOptions.neutralArchitecture);
+        if(wallEnabled)wallEnabled.value=showWallSheen;
         const textureState=pointTexture?.attach(mesh,group,enabled);
         if (textureState && directShadowFields) {
           const glass = staticGlassCallbacks.get(material);
@@ -1177,7 +1179,7 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
         const scalarDirectional = enabled && material.isMeshLambertMaterial ? directionalBody : null;
         mesh.material.onBeforeCompile = shader => {
           if (sharedWall) applySharedWallSheen(shader, wallEnabled);
-          else if (wall) applyWallSheen(shader);
+          else if (showWallSheen) applyWallSheen(shader);
           const facing = fallbackFacing || staticGlassFacing.get(mesh.material);
           if (sharedWall || facing) applyStaticFacing(THREE, shader, facing || bothFaces);
           // Keep uniform definitions identical in both material variants.
@@ -1211,7 +1213,7 @@ ${packed ? `    ${geometryDeclarations}\n` : ''}    void homeRoomEdge(vec2 p, ve
           shader.fragmentShader = (textureState?.active?'uniform highp sampler2D homePointTexture;\n':'') + (textureState?.active?textureFragment:fragment) + shader.fragmentShader.replace('#include <lights_fragment_begin>', directLighting).replace('#include <lights_fragment_end>', 'irradiance += homeDaylightIrradiance();\n' + indirectLighting);
         };
         mesh.material.customProgramCacheKey = () => (enabled ? fragment+(textureState?.active?':point-texture-v2'+(runTexture?':run-texture-v1':'')+(geometryTexture?':geometry-texture-v1':'')+(geometryOptions.signalTexture?':signal-texture-v1':''):'') : 'home-editor') +
-          (sharedWall ? ':wall-sheen-facing-v1' : wall ? ':wall-sheen-v2' : '') +
+          (sharedWall ? ':wall-sheen-facing-v1' : showWallSheen ? ':wall-sheen-v2' : '') +
           (!sharedWall && staticGlassFacing.has(mesh.material) ? ':glass-facing-v1' : '') +
           (enabled && textureState?.active && literalRunLighting[decayState?.active?1:0] ? ':literal-lambert-point-body-v1' : '') +
           (enabled && textureState?.active && material.isMeshLambertMaterial && literalShadowPrefixes[decayState?.active?1:0] ? ':literal-lambert-shadow-point-v1' : '') +

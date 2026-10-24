@@ -63,7 +63,7 @@ function fixture(homeMode, navigationMode = 'rotate') {
     activateDevice: item => actions.push(item.id),
     $: getNode, vt: text => text, scene: {}, hemisphere: {}, sun: {}, ground: {}, grid: {}, clipping: {},
     root: {children: []}, points: [], renderProfile: {}, lowerFloorContext: null, overlayGroup: null, environmentLayer: null,
-    editorFloorMaterials: null, attachRoomLighting() {}, updateFixtureShadows() {}, refreshControls() {},
+    editorFloorMaterials: null, homeArchitectureMaterials: null, setWallOutlineAppearance() {}, attachRoomLighting() {}, updateFixtureShadows() {}, refreshControls() {},
     nativePressPointers:new Set(), hideMediaControls() {}, cancelNativePress() {}, discardMediaControls() {}, previewTV() {},
   });
   c.homeView = {get active() { return c.active; }};

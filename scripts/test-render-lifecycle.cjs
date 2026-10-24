@@ -461,7 +461,7 @@ function modeScheduler(legacy=false,diffuse=false,canEdit=true) {
     hideMediaControls(){cleanups.push({kind:'media',active:c.active});},
     cancelNativePress(){cleanups.push({kind:'native',active:c.active});},
     THREE:{Color:class {constructor(value){this.value=value;}}},hemisphere:{},sun:{},ground:{},grid:{},
-    clipping:{constant:2.1},environmentLayer:null,editorFloorMaterials:null,roomLighting:null,root:{children:[]},objectGroup:{},overlayGroup:null,points:[],
+    clipping:{constant:2.1},environmentLayer:null,editorFloorMaterials:null,homeArchitectureMaterials:null,setWallOutlineAppearance(){},roomLighting:null,root:{children:[]},objectGroup:{},overlayGroup:null,points:[],
     clearTrail(){},showMode(){},refreshControls(){},updateFixtureShadows(){},updateHeightCaption(){},$:element});
   c.document.body={classList:{toggle(){}}};
   c.window.floorplan={get renderCount(){return c.renderCount;}};

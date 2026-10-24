@@ -53,6 +53,11 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
     previous=group;
   }
   assert.equal(JSON.stringify(f.context.model),saved,'Authored geometry remains immutable');
+  for(const home of [true,false,true,false]) {
+    f.context.setWallOutlineAppearance(home);
+    assert.deepEqual(Array.from(f.slots()),materials,'display mode retains every material identity');
+    materials.forEach((m,i)=>{assert.equal(m.color.getHex(),home?0x6a716c:i<2?0x387bff:0x81fff0);assert.equal(m.opacity,home?(i%2?.32:0):(i%2?1:i<2?.22:.42))});
+  }
   const other=fixture();assert(other.update(2.1).children.every((o,i)=>o.material!==materials[i]),'No material cache shared across viewers');
   const sorting=vm.createContext({});vm.runInContext(['Cl','Pl','Il'].map(name=>extract(vendor,name)).join('\n'),sorting);
   for(const [groupOrder,renderOrder,z]of[[0,0,0],[1,1,.5],[2,-1,-3]]){

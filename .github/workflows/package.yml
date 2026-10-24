@@ -126,6 +126,7 @@ jobs:
       - name: Test optional albedo surfaces in the compiled viewer
         run: |
           node scripts/test-material-profiles.cjs
+          node scripts/test-home-architecture.cjs
           MATERIAL_TEXTURE_ENGINES=chromium,firefox,webkit LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-material-textures.cjs
           LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-static-material-textures.cjs
       - name: Test optional garden surroundings and bounded decorative motion
