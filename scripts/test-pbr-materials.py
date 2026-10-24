@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import math
+import random
 from pathlib import Path
 import struct
 import sys
@@ -16,7 +17,7 @@ import zipfile
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from pbr_materials import DETAIL_PROFILES, detail_pixels, png_spec, rgb_pixels, export_material_fields
 from material_textures import validate_material_textures, decode_material_texture
-from exporters import export_scene
+from exporters import export_scene, _obj_number
 spec=importlib.util.spec_from_file_location('legacy',ROOT/'scripts/test-material-textures.py');legacy=importlib.util.module_from_spec(spec);spec.loader.exec_module(legacy)
 
 
@@ -33,6 +34,48 @@ def document(raw):
 
 
 class PBRTests(unittest.TestCase):
+    def test_obj_numeric_precision_has_explicit_metric_and_angular_bounds(self):
+        rng=random.Random(207)
+        for value in [0.,-0.,.000004999,-.000004999,12.999995,-12.999995]+[rng.uniform(-4096,4096) for _ in range(2000)]:
+            for kind in ('v','vt'):
+                encoded=_obj_number(value,kind)
+                self.assertNotIn(encoded,('', '-0'))
+                self.assertLessEqual(abs(float(encoded)-value),.000005000001)
+        for _ in range(2000):
+            vector=[rng.uniform(-1,1) for _ in range(3)]
+            length=math.hypot(*vector);normal=[v/length for v in vector]
+            actual=[float(_obj_number(v,'vn')) for v in normal]
+            cross=[normal[1]*actual[2]-normal[2]*actual[1],normal[2]*actual[0]-normal[0]*actual[2],normal[0]*actual[1]-normal[1]*actual[0]]
+            angle=math.degrees(math.atan2(math.hypot(*cross),sum(a*b for a,b in zip(normal,actual))))
+            self.assertLess(angle,.005)
+        mesh,_,_=fixture()
+        floors=[{'name':'Floor','elevation':0,'groups':[{'name':'Part','translation':[0,0,0],'scale':[1,1,1],'rotation':0,'meshes':[mesh]}]}]
+        unchanged=copy.deepcopy(floors)
+        with patch('exporters._obj_number',side_effect=AssertionError('OBJ encoding must not affect GLB')):
+            export_scene(floors,'glb')
+        self.assertEqual(floors,unchanged)
+
+    def test_exports_reuse_exact_encoded_streams_without_merging_materials(self):
+        a,normal,_=fixture();a['normal_texture']=normal
+        b=copy.deepcopy(a);b['color']=[.7,.6,.5,1]
+        b['vertices'][1][0]+=1e-12
+        b['normals'][0][2]+=1e-12
+        group={'name':'Synthetic','translation':[0,0,0],'scale':[1,1,1],'rotation':0,'meshes':[a,b]}
+        floors=[{'name':'Floor','elevation':0,'groups':[group]}]
+        doc,_=document(export_scene(floors,'glb'))
+        first,second=[m['primitives'][0] for m in doc['meshes']]
+        self.assertEqual(first['attributes'],second['attributes'])
+        self.assertEqual(first['indices'],second['indices'])
+        self.assertNotEqual(first['material'],second['material'])
+        with zipfile.ZipFile(io.BytesIO(export_scene(floors,'obj'))) as archive:
+            lines=archive.read('home.obj').decode().splitlines()
+        self.assertEqual(len([line for line in lines if line.startswith('v ')]),3)
+        self.assertEqual(len([line for line in lines if line.startswith('vn ')]),1)
+        self.assertEqual(len([line for line in lines if line.startswith('vt ')]),3)
+        faces=[line for line in lines if line.startswith('f ')]
+        self.assertEqual(faces[0],faces[1])
+        self.assertEqual(len([line for line in lines if line.startswith('usemtl ')]),2)
+
     def test_compiler_retains_indexed_smooth_geometry_and_physical_uvs(self):
         from planner.project import make_floor
         project=json.loads((ROOT/'planner/example-home.json').read_text())
@@ -95,14 +138,18 @@ class PBRTests(unittest.TestCase):
     def test_family_uses_physical_units_and_never_overwrites_color(self):
         mesh,normal,_=fixture();mesh['material_family']='fabric'
         fields=export_material_fields(mesh,{})
-        self.assertNotIn('texture',fields);self.assertEqual(fields['pbr_repeats']['normal_texture'],40)
+        self.assertTrue(fields['albedo_tint']);self.assertIn('texture',fields);self.assertEqual(fields['pbr_repeats']['normal_texture'],40)
         scaled=export_material_fields(mesh|{'material_uv_scale':.25},{})
         self.assertEqual(scaled['pbr_repeats']['normal_texture'],10)
         mesh['normal_texture']='authored';fields=export_material_fields(mesh,{'authored':normal})
         self.assertEqual(fields['normal_texture'],normal);self.assertNotIn('normal_texture',fields['pbr_repeats'])
+        explicit=export_material_fields({'material_family':'fabric','albedo_texture':'authored'},{'authored':normal})
+        self.assertEqual(explicit['texture'],normal)
+        self.assertNotIn('albedo_tint',explicit)
+        self.assertNotIn('texture',explicit['pbr_repeats'])
         self.assertEqual(export_material_fields({'material_family':'mirror'},{}),{'material_family':'mirror'})
         for family in DETAIL_PROFILES:
-            pixels,_=detail_pixels(family)
+            pixels,*_=detail_pixels(family)
             for i in range(0,len(pixels),801):
                 j=i-i%3;v=[(x/255)*2-1 for x in pixels[j:j+3]]
                 self.assertAlmostEqual(sum(x*x for x in v),1,delta=.015)
@@ -137,6 +184,10 @@ class PBRTests(unittest.TestCase):
         self.assertEqual(doc['extensionsUsed'],['KHR_texture_transform'])
         self.assertEqual(doc['materials'][0]['normalTexture']['extensions']['KHR_texture_transform']['scale'],[40,40])
         self.assertEqual(doc['materials'][0]['normalTexture']['extensions']['KHR_texture_transform']['offset'],[0,-39])
+        mesh['color'][3]=.35
+        doc,_=document(export_scene([{'name':'Floor','elevation':0,'groups':[group]}],'glb'))
+        self.assertEqual(doc['materials'][0]['alphaMode'],'BLEND')
+        self.assertEqual(doc['materials'][0]['pbrMetallicRoughness']['baseColorFactor'],[.3,.4,.5,.35])
 
 if __name__=='__main__':
     if '--hashes' in sys.argv:print(json.dumps({k:[hashlib.sha256(v).hexdigest() for v in detail_pixels(k)] for k in DETAIL_PROFILES}))

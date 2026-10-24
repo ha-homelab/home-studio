@@ -541,6 +541,7 @@ def render_viewer(data, svg):
         "/*__ENVIRONMENT_JS__*/": (ROOT / "planner/environment.js").read_text(encoding="utf-8").replace("export ", ""),
         "__INTERACTION_RENDER_JS__": (ROOT / "planner/interaction-render.js").read_text(encoding="utf-8").replace("export function createInteractionRenderer", "function createInteractionRenderer"),
         "__ROOM_LIGHTING_JS__": (ROOT / "room-lighting.js").read_text(encoding="utf-8"),
+        "/*__PBR_COLOR_DATA_JS__*/": (ROOT / "pbr-color-data.js").read_text(encoding="utf-8"),
         "/*__PBR_MATERIALS_JS__*/": (ROOT / "pbr-materials.js").read_text(encoding="utf-8"),
         "/*__ENVIRONMENT_LIGHTING_JS__*/": (ROOT / "environment-lighting.js").read_text(encoding="utf-8"),
         "/*__MATERIAL_TEXTURES_JS__*/": (ROOT / "material-textures.js").read_text(encoding="utf-8"),

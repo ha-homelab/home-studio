@@ -6,6 +6,8 @@ small authored periodic heightfields add surface response, not object geometry.
 import base64
 import functools
 import math
+import json
+from pathlib import Path
 import struct
 import zlib
 
@@ -24,6 +26,17 @@ DETAIL_PROFILES = {
 }
 TEXTURE_CHANNELS = ('albedo_texture', 'normal_texture', 'roughness_texture', 'metalness_texture', 'ao_texture')
 PBR_FIELDS = ('material_family', 'normal_scale', 'ao_strength', 'albedo_tint', 'material_uv_scale')
+
+
+@functools.lru_cache(maxsize=1)
+def color_data():
+    # One canonical public data module is shared by Python and browser builds.
+    source = Path(__file__).with_name('pbr-color-data.js').read_text()
+    return json.loads(source.split('export const PBR_COLOR_DATA = Object.freeze(', 1)[1].rsplit(');', 1)[0])
+
+
+def color_profile(family):
+    return color_data().get('wood' if family == 'rough_wood' else family)
 
 
 def validate_pbr_fields(mesh, families):
@@ -59,7 +72,19 @@ def detail_pixels(family, size=128):
             normal.extend(byte((v/length*.5+.5)*255) for v in (-dx,-dy,1))
             value = byte(255*(1-variance*(height*.5+.5)))
             roughness.extend((255, value, 255))
-    return bytes(normal), bytes(roughness)
+    result = (bytes(normal), bytes(roughness))
+    color = color_profile(family)
+    if color:
+        rgb = base64.b64decode(color['rgb'])
+        luma = [(54*rgb[i]+183*rgb[i+1]+19*rgb[i+2]) >> 8 for i in range(0,len(rgb),3)]
+        ordered = sorted(luma)
+        low, high = ordered[len(ordered)//50], ordered[len(ordered)*49//50]
+        neutral = []
+        for value in luma:
+            linear = max(1-color['contrast'], min(1, 1-color['contrast']+(value-low)/max(1,high-low)*color['contrast']))
+            neutral.extend([byte(255*(1.055*linear**(1/2.4)-.055))]*3)
+        result += (bytes(neutral),)
+    return result
 
 
 def png_spec(pixels, size=128):
@@ -75,7 +100,7 @@ def family_textures(family):
     pixels = detail_pixels(family)
     if pixels is None:
         return {}
-    return dict(zip(('normal_texture','roughness_texture'), (png_spec(p) for p in pixels)))
+    return dict(zip(('normal_texture','roughness_texture','albedo_texture'), (png_spec(p) for p in pixels)))
 
 
 def export_material_fields(mesh, definitions):
@@ -87,9 +112,12 @@ def export_material_fields(mesh, definitions):
     family = mesh.get('material_family')
     repeats = {}
     for key, spec in family_textures(family).items():
-        if key not in result:
-            result[key] = spec
-            repeats[key] = mesh.get('material_uv_scale',1) / DETAIL_PROFILES[family][0]
+        target = 'texture' if key == 'albedo_texture' else key
+        if target not in result:
+            result[target] = spec
+            period = color_profile(family)['period'] if key == 'albedo_texture' else DETAIL_PROFILES[family][0]
+            repeats[target] = mesh.get('material_uv_scale',1) / period
+            if key == 'albedo_texture': result['albedo_tint'] = True
     if repeats:
         result['pbr_repeats'] = repeats
     return result

@@ -10,7 +10,7 @@ const { chromium } = require('playwright');
 const root = path.resolve(__dirname, '..');
 const catalog = JSON.parse(fs.readFileSync(path.join(root, 'planner/catalog.json')));
 const files = new Map([
-  ...['pbr-materials.js','material-textures.js','environment-lighting.js'].map(name=>[name,[name,'text/javascript']]),
+  ...['pbr-color-data.js','pbr-materials.js','material-textures.js','environment-lighting.js'].map(name=>[name,[name,'text/javascript']]),
   ['planner/', ['planner/index.html', 'text/html']],
   ...['editor', 'model', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity', 'interaction-render', 'environment', 'onboarding', 'device-onboarding', 'device-onboarding-ui', 'room-transform', 'draft-storage', 'inspector-dom', 'floor-navigator', 'ha-bridge'].map(name => [`planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
   ...fs.readdirSync(path.join(root, 'planner/locales')).filter(name => name.endsWith('.js')).map(name => [`planner/locales/${name}`, [`planner/locales/${name}`, 'text/javascript']]),

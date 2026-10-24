@@ -3,7 +3,7 @@
 Generated models may carry reviewed PBR channels and generic physical surface
 detail on existing metric meshes; these never replace furniture with images.
 The source project, saved placements and entity bindings remain authoritative.
-No image generation service or network fetch is used. Generic microdetail is
+No image generation service or network fetch is used at runtime. Generic microdetail is
 generated deterministically from bounded physical heightfields. The `fur`
 family uses fine directional coat detail, `feather` uses directional barb
 detail, and plush objects continue to use fabric.
@@ -106,8 +106,8 @@ solid-color behavior; rebuild current-drawing exports for textured assets.
 `material-textures.js`. Independent viewer builders must make the same source
 replacement and call the Python validator on trusted model data. The public
 runtime package includes `material-textures.js`, `material_textures.py`,
-`pbr-materials.js`, `pbr_materials.py`, and `environment-lighting.js`. Independent
-builders also expand `/*__PBR_MATERIALS_JS__*/` and
+`pbr-materials.js`, `pbr_materials.py`, `pbr-color-data.js`, and `environment-lighting.js`. Independent
+builders also expand `/*__PBR_COLOR_DATA_JS__*/`, `/*__PBR_MATERIALS_JS__*/` and
 `/*__ENVIRONMENT_LIGHTING_JS__*/` from the matching sources.
 No household-specific image, identifier, binding or source path belongs in the
 public repository. Optional reference/beauty images are not part of this schema.
@@ -150,7 +150,7 @@ inventory batching from merging different finishes. GLB uses the same response.
 Allowed values are `fabric`, `leather`, `plastic`, `painted`, `wood`, `ceramic`,
 `glass`, `rubber`, `stone`, `metal`, `brushed_metal`, `matte_metal`,
 `polished_metal`, `mirror`, `matte_paint`, `rough_wood`, `polished_stone`, `paper`,
-`foliage`, `soil`, `car_paint`, `solar_cell`, and `light_diffuser`. Omit the field
+`foliage`, `soil`, `car_paint`, `solar_cell`, `light_diffuser`, `fur`, and `feather`. Omit the field
 when the surface is unknown; null and unrecognized values are rejected. These
 are conservative artistic starting values, not measured physical properties.
 The complete explicit response table and legacy inference table are compared
@@ -190,6 +190,17 @@ only; explicit texture references always retain their authored mapping and
 override the corresponding generic channel. `uv_dimensions` continues to
 convert normalized geometry into physical coordinates when it is present.
 
+Fabric and wood also receive bounded tintable color variation. The two shared
+128² RGB carriers in `pbr-color-data.js` come from generic text-only material
+images, with no household reference image or private metadata. The source
+hashes, prompts and routine downsampling are recorded in
+`material-color-provenance.json`. Runtime and Python code derive the same
+restrained grayscale variation and multiply the selected material color;
+normals and roughness still come independently from the authored heightfields.
+Wood and rough wood share one color image. A family requires at most three
+128² images, and explicit albedo always takes precedence, retaining the prior
+white multiplier unless its producer explicitly requests `albedo_tint`.
+
 The browser and Python exporter generate identical family pixels. GLB includes
 normal, metallic/roughness, and occlusion maps, including physical repeat via
 `KHR_texture_transform`; the normal green channel and V-transform are adjusted
@@ -197,6 +208,16 @@ together for glTF's image convention. OBJ packages include `norm`, `map_Pr`,
 `map_Pm`, and `map_Ka` plus explicit channel selectors. Those MTL extensions are
 reader-dependent; GLB is the preferred complete material interchange format.
 Existing 32 MiB export and 500,000 triangle limits remain in force.
+
+Current-drawing OBJ writes positions and UVs to five decimal places (at most
+5 micrometres of error per position component, and 0.000005 per UV component).
+Normals use four decimal places, bounding angular error below 0.005 degrees.
+These are export-only encodings: saved model data and GLB float32 values are
+unchanged. Separate position, UV and normal index pools preserve seams, triangle
+order, groups and material assignments; short relative indices and occasional
+identical local attribute rows reduce file size. Repeated material-state
+commands are omitted. GLB reuses identical encoded attribute streams across
+primitives while retaining their separate nodes and material assignments.
 
 Normal hardware also receives a shared 128-face prefiltered analytic HDR
 reflection environment and contact shading from actual scene depth. The

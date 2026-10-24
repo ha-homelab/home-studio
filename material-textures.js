@@ -39,16 +39,16 @@ function createMaterialTextures(THREE, definitions, model) {
     decodedPixels=[...payloads.values()].reduce((n,p)=>n+p.pixels*p.roles.size,0);
     const families=new Set([...(model?.meshes||[]),...Object.values(model?.object_assets||{}).flatMap(a=>a.meshes)].map(p=>p.material_family).filter(f=>typeof PBR_DETAIL_PROFILES!=='undefined'&&Object.hasOwn(PBR_DETAIL_PROFILES,f)));
     for(const family of families)reservedFamilies.add(family);
-    if(decodedPixels+families.size*128*128*2>12582912)throw Error('Texture pixel budget');
+    if(decodedPixels+families.size*128*128*3>12582912)throw Error('Texture pixel budget');
   }catch{specs.length=0;decodedPixels=0}
   function familyFor(family,scale=1) {
     if(typeof PBR_DETAIL_PROFILES==='undefined'||!Object.hasOwn(PBR_DETAIL_PROFILES,family))return {};
-    if(!reservedFamilies.has(family)){if(decodedPixels+(reservedFamilies.size+1)*128*128*2>12582912)return {};reservedFamilies.add(family)}
+    if(!reservedFamilies.has(family)){if(decodedPixels+(reservedFamilies.size+1)*128*128*3>12582912)return {};reservedFamilies.add(family)}
     return details?.get(family,scale)||{};
   }
   function textureFor(entry,color) {
     if(entry.textures.has(color))return entry.textures.get(color);
-    const roles=uriRoles.get(entry.uri);if(roles&&!roles.has(color)){if(decodedPixels+entry.size*entry.size+reservedFamilies.size*128*128*2>12582912)return null;roles.add(color);decodedPixels+=entry.size*entry.size}
+    const roles=uriRoles.get(entry.uri);if(roles&&!roles.has(color)){if(decodedPixels+entry.size*entry.size+reservedFamilies.size*128*128*3>12582912)return null;roles.add(color);decodedPixels+=entry.size*entry.size}
     let pixels=entry.image;
     if(entry.size>maxSize&&typeof document!=='undefined') {
       const canvas=document.createElement('canvas');canvas.width=canvas.height=maxSize;
@@ -94,7 +94,7 @@ function createMaterialTextures(THREE, definitions, model) {
       const scale=axes?axes.map(a=>dimensions[a]):[1,1],values=[];
       if(scale.some(v=>!Number.isFinite(v)||v<=0))return null;
       for(const pair of uv){if(!Array.isArray(pair)||pair.length!==2)return null;for(let i=0;i<2;i++){const v=pair[i]*scale[i];if(!Number.isFinite(pair[i])||!Number.isFinite(v)||Math.abs(v)>4096)return null;values.push(v)}}
-      return {texture:resolved.albedo_texture,channels:resolved,uv:values,normalScale:part.normal_scale??1,aoStrength:part.ao_strength??1,albedoTint:part.albedo_tint===true};
+      return {texture:resolved.albedo_texture,channels:resolved,uv:values,normalScale:part.normal_scale??1,aoStrength:part.ao_strength??1,albedoTint:part.albedo_tint===true||resolved.albedo_texture?.userData?.tintable===true};
     },
     family(family){return {channels:familyFor(family)}},
     releaseGPU(){if(!disposed){for(const texture of owned){texture.dispose();texture.needsUpdate=true}details?.releaseGPU()}},

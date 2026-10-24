@@ -3,13 +3,13 @@ const root=path.resolve(__dirname,'..'),out=process.env.PBR_TEST_OUTPUT||'/tmp/h
 const python=(args)=>{const result=spawnSync(process.env.PYTHON||'python3',args,{cwd:root,encoding:'utf8',maxBuffer:16*1024*1024});if(result.status!==0)throw Error(result.error?.message||result.stderr||result.stdout.slice(-1000));return result.stdout};
 (async()=>{
   const THREE=await import('data:text/javascript;base64,'+fs.readFileSync(path.join(root,'vendor/three.module.min.js')).toString('base64'));
-  const context=vm.createContext({Uint8Array,Map,Set});vm.runInContext(fs.readFileSync(path.join(root,'pbr-materials.js'),'utf8').replaceAll('export ',''),context);
+  const context=vm.createContext({Uint8Array,Map,Set,atob});vm.runInContext(['pbr-color-data.js','pbr-materials.js'].map(p=>fs.readFileSync(path.join(root,p),'utf8')).join('\n').replaceAll('export ',''),context);
   const expected=JSON.parse(python(['scripts/test-pbr-materials.py','--hashes']));
-  for(const [family,hashes] of Object.entries(expected))assert.deepEqual(Object.values(context.pbrDetailPixels(family)).map(p=>crypto.createHash('sha256').update(p).digest('hex')),hashes,family+' Python/JS pixels');
+  for(const [family,hashes] of Object.entries(expected))assert.deepEqual(Object.values(context.pbrDetailPixels(family,128,vm.runInContext('PBR_COLOR_DATA',context))).map(p=>crypto.createHash('sha256').update(p).digest('hex')),hashes,family+' Python/JS pixels');
   assert.equal(context.pbrDetailPixels('constructor'),null);assert.equal(context.pbrDetailPixels('__proto__'),null);
   const details=context.createPBRDetails(THREE),a=details.get('fabric'),b=details.get('fabric');assert.equal(a.normal_texture,b.normal_texture);assert.equal(a.normal_texture.colorSpace,THREE.NoColorSpace);assert.equal(a.normal_texture.repeat.x,40);
   const mat=new THREE.MeshStandardMaterial({color:0x786040});const original=mat.color.clone();context.applyMaterialPBR(THREE,mat,{channels:a,normalScale:.4});assert(mat.color.equals(original));assert.equal(mat.normalScale.x,.4);assert.equal(mat.normalMap,a.normal_texture);
-  assert.equal(details.count,2);details.dispose();assert.equal(details.count,0);
+  assert.equal(details.count,3);details.dispose();assert.equal(details.count,0);
   console.log(Object.keys(expected).length+' physical families: exact Python/JS byte parity, shared ownership, color and metric scale passed.');
   if(process.env.PBR_SKIP_BROWSER==='1')return;
   const html=python(['-c',`import importlib.util,sys,json;sys.path.insert(0,'.');s=importlib.util.spec_from_file_location('f','scripts/test-material-textures.py');f=importlib.util.module_from_spec(s);s.loader.exec_module(f);m,svg,_=f.fixture();p=m['object_assets']['textured']['meshes'][1];p['material_family']='leather';p['normal_scale']=0.5;from pbr_materials import family_textures,png_spec;b=m['object_assets']['textured']['meshes'][0];b.update(uv=[[x,z] for x,y,z in b['vertices']],normal_texture='normal',roughness_texture='orm',metalness_texture='orm',ao_texture='orm',albedo_texture='orm',albedo_tint=True);m['material_textures'].update(normal=family_textures('wood')['normal_texture'],orm=png_spec(bytes([180,200,255])*128*128));print(f.render_viewer(m,svg))`]);
@@ -22,7 +22,7 @@ const python=(args)=>{const result=spawnSync(process.env.PYTHON||'python3',args,
     await page.route('**/*',route=>{requests.push(route.request().url());route.abort()});
     await page.setContent(hooked,{timeout:120000});await page.waitForFunction(()=>window.__pbr&&window.__pbr.objectsById.size===3,{timeout:120000});
     await page.evaluate(()=>{__pbr.homeView.setActive(true);window.renderModel()});
-    const sharing=await page.evaluate(()=>__pbr.sharing());assert.deepEqual(sharing,{shared:true,allocated:2,retained:0});
+    const sharing=await page.evaluate(()=>__pbr.sharing());assert.deepEqual(sharing,{shared:true,allocated:3,retained:0});
     const before=await page.evaluate(()=>__pbr.stats());assert.equal(before.glError,0);assert(before.env);assert(before.contactPixels>0&&before.contactPixels<=250000);
     const properties=await page.evaluate(()=>__pbr.objectsById.get('textured').children.map(o=>({type:o.material.type,map:!!o.material.map,normal:!!o.material.normalMap,rough:!!o.material.roughnessMap,scale:o.material.normalScale?.x,ao:!!o.material.aoMap,metal:!!o.material.metalnessMap,linear:o.material.normalMap?.colorSpace,shared:o.material.roughnessMap===o.material.aoMap&&o.material.aoMap===o.material.metalnessMap,separateColor:o.material.map!==o.material.roughnessMap})));
     assert(properties.some(p=>p.map&&p.normal&&p.rough&&p.scale===.5));assert(properties.some(p=>p.ao&&p.metal&&p.shared&&p.separateColor&&p.linear===''));

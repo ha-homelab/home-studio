@@ -2,7 +2,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const root=path.resolve(__dirname,'..'),output=process.env.PBR_TEST_OUTPUT||'/tmp/pbr-lighting';fs.mkdirSync(output,{recursive:true});
 (async()=>{
   const THREE='data:text/javascript;base64,'+fs.readFileSync(path.join(root,'vendor/three.module.min.js')).toString('base64');
-  const src=['pbr-materials.js','environment-lighting.js'].map(p=>fs.readFileSync(path.join(root,p),'utf8')).join('\n');
+  const src=['pbr-color-data.js','pbr-materials.js','environment-lighting.js'].map(p=>fs.readFileSync(path.join(root,p),'utf8')).join('\n');
   const html=`<!doctype html><style>body{margin:0;background:#ddd}</style><script type="module">import * as THREE from '${THREE}';${src}
   const renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.setSize(800,600);renderer.localClippingEnabled=true;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;document.body.append(renderer.domElement);
   const scene=new THREE.Scene();scene.background=new THREE.Color(.12,.12,.12);const camera=new THREE.PerspectiveCamera(38,800/600,.05,50);camera.position.set(3,3.2,4.5);camera.lookAt(0,.2,0);

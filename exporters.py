@@ -72,6 +72,22 @@ MAX_EXPORT_TRIANGLES = 500_000
 MAX_EXPORT_BYTES = 32 * 1024 * 1024
 
 
+def _obj_number(value, kind):
+    """Bound OBJ text to 5 µm/UV units and <0.005° normal error.
+
+    Model data and float32 GLB encoding are unaffected. A leading zero is
+    optional in OBJ decimal syntax; normalize negative zero as well.
+    """
+    text = value.__format__('.4f' if kind == 'vn' else '.5f').rstrip('0').rstrip('.')
+    if text in ('', '-0', '0'):
+        return '0'
+    if text.startswith('0.'):
+        return text[1:]
+    if text.startswith('-0.'):
+        return '-' + text[2:]
+    return text
+
+
 def _compact_export_mesh(mesh):
     """Reuse exact corner attributes without changing normal or UV seams."""
     used = set(mesh['indices'])
@@ -169,7 +185,8 @@ def export_scene(floors, format):
                     raise ValueError('Invalid texture repeat')
                 maps = {}
                 if any(key in mesh for key in channels): material_uv(mesh)
-                if 'texture' in mesh and color[3] != 1: raise ValueError('Albedo textures require an opaque material.')
+                if 'texture' in mesh and color[3] != 1 and not mesh.get('albedo_tint'):
+                    raise ValueError('Untinted albedo textures require an opaque material.')
                 source_maps = {key:mesh[key] for key in channels if key in mesh}
                 for spec in source_maps.values(): decode_once(spec)
                 if format == 'glb':
@@ -208,17 +225,20 @@ def export_scene(floors, format):
 
     if format == 'glb':
         blob, views, accessors, meshes, nodes, roots = bytearray(), [], [], [], [], []
+        accessor_ids = {}
 
         def accessor(values, vector):
+            # Reuse the exact output representation, including UV/normal seams.
+            # Separate authored doubles can encode identical float32 streams.
+            packed = (b''.join(struct.pack('<' + str(vector) + 'f', *value) for value in values)
+                      if vector else struct.pack('<' + 'I' * len(values), *values))
+            key = (vector, packed)
+            if key in accessor_ids:
+                return accessor_ids[key]
             while len(blob) % 4:
                 blob.append(0)
             offset = len(blob)
-            if vector:
-                for value in values:
-                    bounded_extend(blob, struct.pack('<' + str(vector) + 'f', *value))
-            else:
-                for value in values:
-                    bounded_extend(blob, struct.pack('<I', value))
+            bounded_extend(blob, packed)
             views.append({'buffer': 0, 'byteOffset': offset, 'byteLength': len(blob) - offset,
                           'target': 34962 if vector else 34963})
             entry = {'bufferView': len(views) - 1, 'componentType': 5126 if vector else 5125,
@@ -227,7 +247,8 @@ def export_scene(floors, format):
                 entry.update(min=[min(row[axis] for row in values) for axis in range(3)],
                              max=[max(row[axis] for row in values) for axis in range(3)])
             accessors.append(entry)
-            return len(accessors) - 1
+            accessor_ids[key] = len(accessors) - 1
+            return accessor_ids[key]
 
         for floor_number, floor in enumerate(floors, 1):
             roots.append(len(nodes))
@@ -292,15 +313,18 @@ def export_scene(floors, format):
                 payload + struct.pack('<II', len(blob), 0x004E4942) + blob)
 
     obj, mtl, ordinal = bytearray(), bytearray(), 0
+    mesh_serial, active_material = 0, None
     position_ids, normal_ids, uv_ids = {}, {}, {}
+    local_keys = set()
     def line(target, value):
         bounded_extend(target, (value + '\n').encode('utf-8'))
     def attribute(pool, kind, values):
-        key = tuple(values)
-        if key not in pool:
-            pool[key] = len(pool) + 1
-            line(obj, kind + ' ' + ' '.join(f'{value:.9g}' for value in key))
-        return pool[key]
+        key = tuple(_obj_number(value, kind) for value in values)
+        pool_key = (mesh_serial, key) if (kind, key) in local_keys else key
+        if pool_key not in pool:
+            pool[pool_key] = len(pool) + 1
+            line(obj, kind + ' ' + ' '.join(key))
+        return pool[pool_key]
     def reference(index, pool):
         # OBJ permits indices relative to the latest attribute declaration.
         # Either spelling resolves to the same corner; choose the shorter one.
@@ -319,28 +343,62 @@ def export_scene(floors, format):
             tx, ty, tz = group['translation']
             for mesh in group['meshes']:
                 mesh = _compact_export_mesh(mesh)
-                line(obj, 'usemtl material_' + str(colors[material_key(mesh)]))
+                mesh_serial += 1
+                next_material = colors[material_key(mesh)]
+                if next_material != active_material:
+                    line(obj, 'usemtl material_' + str(next_material))
+                    active_material = next_material
                 positions, normals, uvs = [], [], []
                 for x, y, z in mesh['vertices']:
                     x, y, z = x * sx, y * sy, z * sz
                     x, y, z = tx + cosine * x + sine * z, ty + y + floor['elevation'], tz - sine * x + cosine * z
                     if not all(math.isfinite(value) for value in (x, y, z)):
                         raise ValueError('The installed model contains invalid export coordinates.')
-                    positions.append(attribute(position_ids, 'v', (x, -z, y)))
+                    positions.append((x, -z, y))
                 for x, y, z in mesh['normals']:
                     x, y, z = x / sx, y / sy, z / sz
                     x, z = cosine * x + sine * z, -sine * x + cosine * z
                     length = math.hypot(x, y, z) or 1
-                    normals.append(attribute(normal_ids, 'vn', (x/length, -z/length, y/length)))
+                    normals.append((x/length, -z/length, y/length))
                 textured = any(key in mesh for key in ('texture','normal_texture','roughness_texture','metalness_texture','ao_texture'))
                 if textured:
                     for u, v in mesh['uv']:
-                        uvs.append(attribute(uv_ids, 'vt', (u, v)))
+                        uvs.append((u, v))
+                # A frequently reused, distant UV/normal row can cost more in
+                # long face indices than one identical local declaration. Only
+                # duplicate when a conservative byte estimate pays for it.
+                local_keys = set()
+                for kind, pool, values in [('vn', normal_ids, normals), ('vt', uv_ids, uvs)]:
+                    if not values:
+                        continue
+                    keys = [tuple(_obj_number(value, kind) for value in row) for row in values]
+                    frequencies = {}
+                    for index in mesh['indices']:
+                        key = keys[index]
+                        frequencies[key] = frequencies.get(key, 0) + 1
+                    relative_length = len(str(len(frequencies) + 1)) + 1
+                    for key, uses in frequencies.items():
+                        if key not in pool:
+                            continue
+                        old_length = len(reference(pool[key], pool))
+                        row_bytes = len(kind) + 2 + sum(len(value) + 1 for value in key)
+                        if uses * (old_length - relative_length) > row_bytes:
+                            local_keys.add((kind, key))
+                corners = {}
                 for start in range(0, len(mesh['indices']), 3):
-                    line(obj, 'f ' + ' '.join(f'{reference(positions[index], position_ids)}/'
-                                             f'{reference(uvs[index], uv_ids) if textured else ""}/'
-                                             f'{reference(normals[index], normal_ids)}'
-                                             for index in mesh['indices'][start:start+3]))
+                    triangle = mesh['indices'][start:start+3]
+                    # Declare attributes at first use, so relative indices stay
+                    # short even in large meshes. OBJ resolves each index where
+                    # its face occurs; group, face and corner order are retained.
+                    for index in triangle:
+                        if index not in corners:
+                            corners[index] = (attribute(position_ids, 'v', positions[index]),
+                                              attribute(uv_ids, 'vt', uvs[index]) if textured else None,
+                                              attribute(normal_ids, 'vn', normals[index]))
+                    line(obj, 'f ' + ' '.join(f'{reference(corners[index][0], position_ids)}/'
+                                             f'{reference(corners[index][1], uv_ids) if textured else ""}/'
+                                             f'{reference(corners[index][2], normal_ids)}'
+                                             for index in triangle))
     for index, color in enumerate(materials):
         maps,flags=material_maps[index],material_flags[index]
         rgb=[1,1,1] if 'texture' in maps and not flags['albedo_tint'] else color[:3]

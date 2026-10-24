@@ -1,4 +1,5 @@
 import './language-links.js';
+import {PBR_COLOR_DATA} from '../pbr-color-data.js';
 import {createPBRDetails,applyMaterialPBR,installInstanceMaterialUV} from '../pbr-materials.js';
 import {MATERIAL_SURFACE_PROFILES} from '../material-textures.js';
 import {createReflectionEnvironment,createContactShading} from '../environment-lighting.js';
@@ -1069,11 +1070,11 @@ function initPreview() {
     renderer = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: true, alpha: false }); previewRendererDisposed = false; renderer.setClearColor(planColors.background); renderer.outputColorSpace = THREE.SRGBColorSpace;
     const profile = previewRenderProfile(renderer.getContext()); previewPixels = profile.pixels; previewInstancing = profile.instanceCatalog; previewDiffuseLighting = profile.diffuseLighting;
     renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = .9; renderer.shadowMap.enabled = true; renderer.shadowMap.type = previewDiffuseLighting ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
-    scene = new THREE.Scene();previewDetails=createPBRDetails(THREE);previewDetails.configure(Math.min(4,renderer.capabilities.getMaxAnisotropy()));previewReflections=createReflectionEnvironment(THREE,renderer,scene,profile);previewReflections.update(.4);previewContact=createContactShading(THREE,renderer,profile); camera = new THREE.PerspectiveCamera(40, 1, .02, 1500); scene.add(new THREE.HemisphereLight(0xffffff, 0xc7cfbc, 1.7));
-    previewSun = new THREE.DirectionalLight(0xfff6e6, 2.5); previewSun.castShadow = true; previewSun.shadow.mapSize.set(profile.shadowSize, profile.shadowSize); previewSun.shadow.normalBias = .025; previewSun.shadow.bias = -.0002; scene.add(previewSun); scene.add(previewSun.target);
+    scene = new THREE.Scene();previewDetails=createPBRDetails(THREE,PBR_COLOR_DATA);previewDetails.configure(Math.min(4,renderer.capabilities.getMaxAnisotropy()));previewReflections=createReflectionEnvironment(THREE,renderer,scene,profile);previewReflections.update(.4);if(!previewDiffuseLighting)scene.environmentIntensity=.55;previewContact=createContactShading(THREE,renderer,profile); camera = new THREE.PerspectiveCamera(40, 1, .02, 1500); scene.add(new THREE.HemisphereLight(0xffffff, 0xc7cfbc, previewDiffuseLighting ? 1.7 : .85));
+    previewSun = new THREE.DirectionalLight(0xfff6e6, previewDiffuseLighting ? 2.5 : 3); previewSun.castShadow = true; previewSun.shadow.mapSize.set(profile.shadowSize, profile.shadowSize); previewSun.shadow.normalBias = .025; previewSun.shadow.bias = -.0002; scene.add(previewSun); scene.add(previewSun.target);
     // Orbiting moves only the camera. Reuse shadows until scene geometry changes.
     previewSun.shadow.autoUpdate = false; previewSun.shadow.needsUpdate = true;
-    const fill = new THREE.DirectionalLight(0xdce9f2, .5); fill.position.set(12, 10, -10); scene.add(fill);
+    const fill = new THREE.DirectionalLight(0xdce9f2, previewDiffuseLighting ? .5 : .3); fill.position.set(12, 10, -10); scene.add(fill);
     worldGroup = new THREE.Group(); scene.add(worldGroup);
     previewEnvironment = createEnvironmentLayer(THREE, { scene, ...environmentSite(), visibilityElement: previewCanvas, frameInterval: previewDiffuseLighting ? 750 : previewPixels <= 250000 ? 500 : 180, requestRender: requestPreviewRender, active: view !== 'plan', settings: previewEnvironmentSettings,decorateMaterial:(material,family)=>{applyMaterialPBR(THREE,material,{channels:previewDetails.get(family)});installInstanceMaterialUV(material)} });
     previewEnvironmentControls.refresh();

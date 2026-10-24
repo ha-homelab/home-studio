@@ -1,6 +1,7 @@
 import * as THREE from 'data:text/javascript;base64,__THREE_B64__';
 __LIGHT_STATE_JS__
 __ROOM_LIGHTING_JS__
+/*__PBR_COLOR_DATA_JS__*/
 /*__PBR_MATERIALS_JS__*/
 /*__MATERIAL_TEXTURES_JS__*/
 /*__ENVIRONMENT_LIGHTING_JS__*/

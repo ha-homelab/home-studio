@@ -1,4 +1,5 @@
 [
+  "pbr-color-data.js",
   "pbr-materials.js",
   "material-textures.js",
   "environment-lighting.js",

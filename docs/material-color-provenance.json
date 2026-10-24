@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "source_type": "generated from the quoted generic text prompts; no image inputs or household photos",
+  "textures": [
+    {
+      "family": "wood",
+      "source_sha256": "bb7bc2671981c533e70580723bdbd7547d58719dc8ea69b2c44832962a2cdc6b",
+      "prompt": "Fine straight-grain light hardwood surface with subtle elongated pores and understated natural grain. Grain runs horizontally, parallel to U. No planks, joints, knots larger than a few millimetres, end grain, seams or carved detail.\n\nTarget base color sRGB #DBC29B, with restrained microscopic contrast. Entire tile covers approximately 0.6 by 0.6 metres.\n\nSeamless base-color albedo, exactly straight-on and full frame. Flat material reflectance, no directional light, highlights, cast shadows, ambient occlusion, gradient, vignette, perspective or depth. No object silhouette, border, room, floor, wall, text or watermark. All four edges tile continuously. Opaque RGB. Geometry, roughness and lighting are supplied separately by the renderer.",
+      "rgb_pixels_sha256": "d7d6056263fa9852a0b57f0a2ca9857bedeaa03790c45aafa748e87c473d396d",
+      "processing": "Routine 128px RGB BOX downsample only. Original color samples retained; material code computes neutral luminance modulation at runtime, independently from authored normals.",
+      "linear_modulation_range": [
+        0.6799999999999999,
+        1
+      ]
+    },
+    {
+      "family": "fabric",
+      "source_sha256": "5bb65a5c9fd77bc09ab5da1a14cb8e0dcc27c13feb32848a5afdd2f4eedf0bda",
+      "prompt": "Dense fine plain-weave upholstery fabric. Small irregular interlaced fibers, subtle natural yarn variation, a soft matte cotton-polyester appearance. No large boucle loops, stripes, plaid, stitching or upholstery seams.\n\nOverall base-color target: sRGB #B8BAB6. Keep the texture close to this mean color with restrained microscopic contrast. The complete tile spans approximately 0.16 by 0.16 metres of real material.\n\nA seamless physically based base-color albedo texture, viewed exactly straight on and filling the entire square. Flat unlit reflectance only, even color across the frame. No illumination gradient, cast shadows, ambient occlusion, highlights, reflections, vignette, perspective, depth, object silhouette, border, wall, floor or room. No text or watermark. All four edges must tile continuously without an obvious repeated motif. Opaque RGB everywhere. This is material color only; geometry, normal, roughness and lighting are rendered separately.",
+      "rgb_pixels_sha256": "1fc500222882cd5bb6f67e59db480c60f63aef156da0c4b89691c79713280986",
+      "processing": "Routine 128px RGB BOX downsample only. Original color samples retained; material code computes neutral luminance modulation at runtime, independently from authored normals.",
+      "linear_modulation_range": [
+        0.72,
+        1
+      ]
+    }
+  ]
+}
