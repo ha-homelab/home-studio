@@ -197,7 +197,10 @@ class MaterialTextureTests(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(export_scene([scene], 'obj'))) as archive:
             self.assertEqual(set(archive.namelist()), {'home.obj', 'materials.mtl', 'textures/material_0.png'})
             self.assertEqual(archive.read('textures/material_0.png'), decode_material_texture(swatch()))
-            self.assertEqual(archive.read('home.obj').count(b'\nvt '), 6)
+            uv_lines = [tuple(map(float, line.split()[1:])) for line in archive.read('home.obj').decode().splitlines()
+                        if line.startswith('vt ')]
+            self.assertEqual(set(uv_lines), {(0, 0), (6.4, 0), (0, 4.8), (6.4, 4.8)})
+            self.assertEqual(len(uv_lines), 4)
             self.assertEqual(archive.read('materials.mtl').count(b'map_Kd'), 1)
 
     def test_omitted_payload_and_bad_binding(self):

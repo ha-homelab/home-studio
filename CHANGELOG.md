@@ -13,6 +13,9 @@
   the validated textures and surface data.
 - Refine optional surrounding trees and vehicles with smoother, more detailed
   geometry while preserving existing traffic paths and animation timing.
+- Keep detailed GLB and OBJ exports compact through exact vertex, normal and
+  UV reuse. Exports allow up to 500,000 triangles while retaining the 32 MiB
+  size limit; native drawing and added-geometry limits remain unchanged.
 
 ## [1.1.0] - Connected editing, easier setup and Blender export
 

@@ -85,7 +85,10 @@ the existing authenticated message channel. `home_floorplan/export_model`
 requires an administrator and the current project revision. It never saves or
 publishes the snapshot. Server work runs in the executor, serializes against
 other project operations, and retains its concurrency slot until a cancelled
-worker has really finished. The result is bounded to 32 MiB and 200,000 triangles.
+worker has really finished. The result is bounded to 32 MiB and 500,000 triangles.
+Native drawing generation and added geometry retain their separate 200,000-triangle
+budget. Exact vertex/normal/UV reuse keeps detailed exports compact without
+merging material groups, smoothing hard edges or changing texture seams.
 
 Native drawings use the shared compiler. Generated homes use their verified
 baseline geometry with current placements, preserving custom architecture and
