@@ -91,6 +91,8 @@ def export_physical_scene(floors, root, stem):
                     normals.append([v/length for v in n])
                 source = {'name': 'f' + str(fi) + '_g' + str(gi) + '_m' + str(mi) + '_' + identifier(group['name']),
                           'kind': 'scene', 'material': mesh.get('material_name', 'material')}
+                if type(mesh.get('physical_part')) is int and mesh['physical_part'] >= 0:
+                    source['dae_part'] = 'f' + str(fi) + '_part' + str(mesh['physical_part'])
                 if 'surface_finish' in mesh:source['surface_finish'] = mesh['surface_finish']
                 records.append((source, {**mesh, 'vertices': vertices, 'normals': normals}))
     return _export_records(records, root, stem, stem, scene=floors)
@@ -325,54 +327,79 @@ def write_dae(path, stem, records, materials, selected):
         line('</library_effects><library_materials>')
         for m in materials: line('<material id="' + m['id'] + '" name=' + quoteattr(m['source']) + '><instance_effect url="#' + m['id'] + '_fx"/></material>')
         line('</library_materials><library_geometries>')
+        groups = {}
         for ordinal, ((source, mesh), mi) in enumerate(zip(records, selected)):
-            # Internal XML identifiers need no verbose repeated prefix. Source
-            # mesh identities remain intact in each geometry/node name.
-            id_ = 'g' + format(ordinal, 'x');m = materials[mi]
-            line('<geometry id="' + id_ + '" name=' + quoteattr(source['name']) + '><mesh>')
-            arrays = [('position', [(x, -z, y) for x, y, z in mesh['vertices']], 'XYZ'), ('normal', [(x, -z, y) for x, y, z in mesh['normals']], 'XYZ')]
-            if 'uv' in mesh:
-                for key, channel in [('uv0', 'texture'), ('uv1', 'normal_texture')]:
-                    if key == 'uv0' or channel in m['channels']:
-                        scale = m['repeats'].get(channel, 1)
-                        arrays.append((key, [[u * scale, v * scale] for u, v in mesh['uv']], 'ST'))
-            # Each semantic may use its own exact index pool. Select pooling
-            # only when its shorter arrays outweigh any extra corner indices.
-            encoded = [[tuple(number(v) for v in row) for row in values] for _, values, _ in arrays]
-            original_indices = ' '.join(map(str, mesh['indices']))
-            original_size = sum(len(' '.join(v for row in rows for v in row)) for rows in encoded) + len(original_indices)
-            pooled, sequences, offsets = [], [], []
-            for rows in encoded:
-                unique = {};remap = []
-                for row in rows:
-                    if row not in unique:unique[row] = len(unique)
-                    remap.append(unique[row])
-                pooled.append(list(unique))
-                sequence = tuple(remap[i] for i in mesh['indices'])
-                if sequence not in sequences:sequences.append(sequence)
-                offsets.append(sequences.index(sequence))
-            pooled_indices = ' '.join(str(sequence[i]) for i in range(len(mesh['indices'])) for sequence in sequences)
-            pooled_size = sum(len(' '.join(v for row in rows for v in row)) for rows in pooled) + len(pooled_indices)
-            if pooled_size < original_size:
-                encoded, index_text = pooled, pooled_indices
-            else:
-                offsets, index_text = [0] * len(arrays), original_indices
-            for (name, _, axes), rows in zip(arrays, encoded):
-                text = ' '.join(v for row in rows for v in row)
-                line('<source id="' + id_ + '_' + name + '">')
-                # COLLADA accessors may share an existing document-wide array.
-                # This preserves normal/UV seams while removing repeated data.
+            name = source.get('dae_part', source['name'])
+            if 'dae_part' not in source and any(key in mesh for key in CHANNELS):
+                name = re.sub(r'_texture_(?:front|back|left|right|top|bottom)$', '', name)
+            # Separate unmarked records even if a caller repeats display names.
+            key = ('part', name) if name != source['name'] else ('mesh', ordinal)
+            groups.setdefault(key, (name, []))[1].append((source, mesh, mi))
+        for ordinal, (name, charts) in enumerate(groups.values()):
+            id_ = 'g' + format(ordinal, 'x')
+            line('<geometry id="' + id_ + '" name=' + quoteattr(name) + '><mesh>')
+            pools = {key: {} for key in ('position', 'normal', 'uv0', 'uv1')}
+            primitives = []
+            for source, mesh, mi in charts:
+                m = materials[mi]
+                arrays = [('position', [(x, -z, y) for x, y, z in mesh['vertices']]),
+                          ('normal', [(x, -z, y) for x, y, z in mesh['normals']])]
+                if 'uv' in mesh:
+                    for key, channel in [('uv0', 'texture'), ('uv1', 'normal_texture')]:
+                        if key == 'uv0' or channel in m['channels']:
+                            scale = m['repeats'].get(channel, 1)
+                            arrays.append((key, [(u * scale, v * scale) for u, v in mesh['uv']]))
+                sequences, inputs = [], []
+                for key, rows in arrays:
+                    pool, remap = pools[key], []
+                    for row in rows:
+                        value = tuple(number(v) for v in row)
+                        remap.append(pool.setdefault(value, len(pool)))
+                    sequence = tuple(remap[i] for i in mesh['indices'])
+                    if sequence not in sequences: sequences.append(sequence)
+                    inputs.append((key, sequences.index(sequence)))
+                indices = ' '.join(str(sequence[i]) for i in range(len(mesh['indices'])) for sequence in sequences)
+                primitives.append((source['name'], mi, inputs, len(mesh['indices']) // 3, indices))
+            if len(charts) == 1:
+                # An already indexed curved mesh may be smaller with one shared
+                # corner index than independently pooled attribute indices.
+                original = {key: [tuple(number(v) for v in row) for row in rows] for key, rows in arrays}
+                original_indices = ' '.join(map(str, mesh['indices']))
+                size = lambda values: sum(len(' '.join(v for row in rows for v in row)) for rows in values.values())
+                if size(original) + len(original_indices) < size(pools) + len(primitives[0][4]):
+                    pools = original
+                    primitives = [(source['name'], mi, [(key, 0) for key in original], len(mesh['indices']) // 3, original_indices)]
+            local_sources, source_ids = {}, {}
+            for key, pool in pools.items():
+                if not pool: continue
+                axes = 'ST' if key.startswith('uv') else 'XYZ'
+                text = ' '.join(v for row in pool for v in row)
+                if (text, axes) in local_sources:
+                    source_ids[key] = local_sources[(text, axes)]
+                    continue
+                source_ids[key] = local_sources[(text, axes)] = id_ + '_' + key
+                line('<source id="' + id_ + '_' + key + '">')
                 if text not in shared_arrays:
                     shared_arrays[text] = 'a' + str(len(shared_arrays))
-                    line('<float_array id="' + shared_arrays[text] + '" count="' + str(len(rows) * len(axes)) + '">' + text + '</float_array>')
-                line('<technique_common><accessor source="#' + shared_arrays[text] + '" count="' + str(len(rows)) + '" stride="' + str(len(axes)) + '">' + ''.join('<param name="' + axis + '" type="float"/>' for axis in axes) + '</accessor></technique_common></source>')
-            line('<vertices id="' + id_ + '_vertices"><input semantic="POSITION" source="#' + id_ + '_position"/></vertices><triangles material="material" count="' + str(len(mesh['indices']) // 3) + '">')
-            for (name, _, _), offset in zip(arrays, offsets):
-                semantic = 'VERTEX' if name == 'position' else 'NORMAL' if name == 'normal' else 'TEXCOORD'
-                suffix = 'vertices' if name == 'position' else name
-                line('<input semantic="' + semantic + '" source="#' + id_ + '_' + suffix + '" offset="' + str(offset) + '"' + (' set="' + name[-1] + '"' if name.startswith('uv') else '') + '/>')
-            line('<p>' + index_text + '</p></triangles></mesh></geometry>')
+                    line('<float_array id="' + shared_arrays[text] + '" count="' + str(len(pool) * len(axes)) + '">' + text + '</float_array>')
+                line('<technique_common><accessor source="#' + shared_arrays[text] + '" count="' + str(len(pool)) + '" stride="' + str(len(axes)) + '">' + ''.join('<param name="' + axis + '" type="float"/>' for axis in axes) + '</accessor></technique_common></source>')
+            line('<vertices id="' + id_ + '_vertices"><input semantic="POSITION" source="#' + id_ + '_position"/></vertices>')
+            for chart, mi, inputs, count, indices in primitives:
+                line('<triangles material="m' + str(mi) + '" count="' + str(count) + '">')
+                for key, offset in inputs:
+                    semantic = 'VERTEX' if key == 'position' else 'NORMAL' if key == 'normal' else 'TEXCOORD'
+                    source_id = id_ + '_vertices' if key == 'position' else source_ids[key]
+                    line('<input semantic="' + semantic + '" source="#' + source_id + '" offset="' + str(offset) + '"' + (' set="' + key[-1] + '"' if key.startswith('uv') else '') + '/>')
+                line('<p>' + indices + '</p>')
+                if chart != name:
+                    line('<extra><technique profile="HOME_STUDIO_PBR"><source_chart>' + escape(chart) + '</source_chart></technique></extra>')
+                line('</triangles>')
+            line('</mesh></geometry>')
         line('</library_geometries><library_visual_scenes><visual_scene id="Scene">')
-        for i, ((source, mesh), mi) in enumerate(zip(records, selected)):
-            line('<node id="n' + format(i, 'x') + '" name=' + quoteattr(source['name']) + '><instance_geometry url="#g' + format(i, 'x') + '"><bind_material><technique_common><instance_material symbol="material" target="#' + materials[mi]['id'] + '"><bind_vertex_input semantic="UV0" input_semantic="TEXCOORD" input_set="0"/><bind_vertex_input semantic="UV1" input_semantic="TEXCOORD" input_set="1"/></instance_material></technique_common></bind_material></instance_geometry></node>')
+        for ordinal, (name, charts) in enumerate(groups.values()):
+            id_ = format(ordinal, 'x')
+            line('<node id="n' + id_ + '" name=' + quoteattr(name) + '><instance_geometry url="#g' + id_ + '"><bind_material><technique_common>')
+            for mi in dict.fromkeys(mi for _, _, mi in charts):
+                line('<instance_material symbol="m' + str(mi) + '" target="#' + materials[mi]['id'] + '"><bind_vertex_input semantic="UV0" input_semantic="TEXCOORD" input_set="0"/><bind_vertex_input semantic="UV1" input_semantic="TEXCOORD" input_set="1"/></instance_material>')
+            line('</technique_common></bind_material></instance_geometry></node>')
         line('</visual_scene></library_visual_scenes><scene><instance_visual_scene url="#Scene"/></scene></COLLADA>')

@@ -24,8 +24,8 @@ def dae_corners(tree):
     ns={'c':'http://www.collada.org/2005/11/COLLADASchema'}
     ids={node.get('id'):node for node in tree.iter() if node.get('id')}
     result=[]
-    for geometry in tree.findall('.//c:geometry',ns):
-        triangles=geometry.find('c:mesh/c:triangles',ns);inputs=triangles.findall('c:input',ns)
+    for triangles in tree.findall('.//c:geometry/c:mesh/c:triangles',ns):
+        inputs=triangles.findall('c:input',ns)
         raw=list(map(int,triangles.find('c:p',ns).text.split()));width=max(int(v.get('offset')) for v in inputs)+1
         channels={}
         for value in inputs:
@@ -51,6 +51,41 @@ def fixture():
 
 
 class PhysicalExports(unittest.TestCase):
+    def test_projection_charts_recombine_without_losing_materials_or_object_scope(self):
+        from planner.project import export_floor
+        from exporters import export_scene
+        data=fixture();original=data['meshes'][0]
+        charts=[dict(copy.deepcopy(original),name='part_texture_'+face) for face in ('top','bottom')]
+        data['materials']['other']=[.6,.2,.1,1];charts[1]['material']='other'
+        data['meshes']=[];data['object_assets']={}
+        items=[]
+        for i in range(2):
+            name='private_household_identifier_'+str(i)
+            items.append({'id':name,'type':'chair','position_m':{'x':i*3,'y':0,'z':0},
+                          'dimensions_m':{'width':1,'height':1,'depth':1},'rotation_deg':0})
+            data['object_assets'][name]={'meshes':copy.deepcopy(charts)}
+        floor={'items':items,'elevation_m':0}
+        scene=export_floor(data,floor)
+        self.assertEqual([[m['physical_part'] for m in g['meshes']] for g in scene['groups']],[[0,0],[1,1]])
+        self.assertNotIn('private_household_identifier',json.dumps(scene))
+        stripped=copy.deepcopy(scene)
+        for group in stripped['groups']:
+            for mesh in group['meshes']:mesh.pop('physical_part')
+        for kind in ('glb','obj'):self.assertEqual(export_scene([scene],kind),export_scene([stripped],kind))
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);export_physical_scene([scene],root,'charts')
+            tree=ET.parse(root/'charts.dae');ns={'c':'http://www.collada.org/2005/11/COLLADASchema'}
+            geometries=tree.findall('.//c:geometry',ns)
+            self.assertEqual(len(geometries),2)
+            for geometry in geometries:
+                primitives=geometry.findall('c:mesh/c:triangles',ns)
+                self.assertEqual(len(primitives),2)
+                self.assertEqual(len({p.get('material') for p in primitives}),2)
+                self.assertEqual(len({p.find('c:extra/c:technique/c:source_chart',ns).text for p in primitives}),2)
+            rows=dae_corners(tree)
+            self.assertEqual(rows[0],rows[1]);self.assertEqual(rows[2],rows[3])
+            self.assertNotEqual(rows[0][('VERTEX',None)],rows[2][('VERTEX',None)])
+
     def test_decimal_encoding_round_trips_float32_exactly(self):
         rng=random.Random(912)
         for value in [0.,-0.,1.,-1.,1.234,.0000001]+[rng.uniform(-4096,4096) for _ in range(5000)]:

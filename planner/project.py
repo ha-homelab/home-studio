@@ -758,8 +758,9 @@ def export_floor(model, floor, reference_items=None, *, elevated=False):
     groups = []
     materials = model['materials']
     validate_material_textures(model)
+    physical_parts = {}
 
-    def mesh_data(mesh, dimensions=None):
+    def mesh_data(mesh, dimensions=None, scope='architecture'):
         result = {key: mesh[key] for key in ('vertices', 'normals', 'indices')} | {'color': materials[mesh['material']], 'material_name': mesh['material']}
         if 'surface_finish' in mesh:
             result['surface_finish'] = mesh['surface_finish']
@@ -770,6 +771,12 @@ def export_floor(model, floor, reference_items=None, *, elevated=False):
         if any(key in mesh for key in TEXTURE_CHANNELS) or 'material_family' in mesh:
             result['uv'] = material_uv(mesh, dimensions)
             result.update(export_material_fields(mesh, model.get('material_textures', {})))
+            # Anonymous, floor-local provenance for physical interchange only.
+            # GLB/OBJ ignore it; never expose household names or entity IDs.
+            name = mesh.get('name', '')
+            base = re.sub(r'_texture_(?:front|back|left|right|top|bottom)$', '', name)
+            key = (scope, base) if name else ('unnamed', len(physical_parts))
+            result['physical_part'] = physical_parts.setdefault(key, len(physical_parts))
         return result
 
     for index, mesh in enumerate(model['meshes']):
@@ -790,14 +797,14 @@ def export_floor(model, floor, reference_items=None, *, elevated=False):
         if replaced_asset:
             asset = None
         if asset:
-            group['meshes'] = [mesh_data(mesh, dimensions) for mesh in asset['meshes']]
+            group['meshes'] = [mesh_data(mesh, dimensions, ('item', item_number)) for mesh in asset['meshes']]
         else:
             original_position, size = original['position_m'], original['dimensions_m']
             cosine, sine = math.cos(math.radians(original['rotation_deg'])), math.sin(math.radians(original['rotation_deg']))
             for mesh in (() if replaced_asset else model['meshes']):
                 if mesh.get('kind') != 'inventory' or mesh.get('item_id') != item['id']:
                     continue
-                local = mesh_data(mesh)
+                local = mesh_data(mesh, scope=('item', item_number))
                 vertices, normals = [], []
                 for x, y, z in mesh['vertices']:
                     x, y, z = x-original_position['x'], y-original_position['y'], z-original_position['z']

@@ -225,6 +225,12 @@ Use GLB or USD when full material interchange is required. Float attributes in
 these exports retain their exact float32 values; source model data is unchanged.
 COLLADA may use independent per-semantic index pools and document-wide shared
 float arrays; both are standard accessor features and retain every corner.
+Generated projection charts for one original part share a multi-material
+COLLADA geometry. Each chart remains a separate triangle set with its original
+material and a `HOME_STUDIO_PBR/source_chart` identifier. Separate placed
+objects and architecture parts never merge. Saved-scene export uses anonymous
+floor-local part numbers for this grouping; household identifiers are not
+added to its downloads. GLB, OBJ and USD representations are unaffected.
 
 Saved-scene migration can call `export_physical_scene(floors, root, stem)` with
 the grouped result of `export_floor`. Only supplied groups are emitted. GLB
