@@ -69,7 +69,12 @@ delete fixture.floors[0].items[0].curtain; fixture.floors[0].items[0].entity_id 
     await viewer.waitForFunction(() => window.floorplan?.renderCount > 0);
     await page.evaluate(items => {
       const channel = new MessageChannel(); window.channel = channel.port1; window.messages = [];
-      channel.port1.onmessage = event => messages.push(event.data);
+      channel.port1.onmessage = event => {
+        if (event.data.type === 'map_request' && event.data.action === 'get') {
+          channel.port1.postMessage({ type:'map_result', request_id:event.data.request_id, success:true, result:{ revision:0, configured:false, config:null, reference:null } }); return;
+        }
+        messages.push(event.data);
+      };
       document.querySelector('iframe').contentWindow.postMessage({ type: 'home-floorplan:init', can_edit: true, items }, '*', [channel.port2]);
     }, model.inventory);
     await page.waitForFunction(() => messages.some(message => message.type === 'model_config'));

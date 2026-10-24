@@ -194,7 +194,12 @@ assert.equal(context.viewerStateLabel('on'), 'On');
     await frame.locator('#homeConnection').filter({ hasText: 'Disconnected' }).waitFor();
     await installed.evaluate(() => {
       const channel = new MessageChannel(); window.testMessages = []; window.testPort = channel.port1;
-      channel.port1.onmessage = event => window.testMessages.push(event.data);
+      channel.port1.onmessage = event => {
+        if (event.data.type === 'map_request' && event.data.action === 'get') {
+          channel.port1.postMessage({ type:'map_result', request_id:event.data.request_id, success:true, result:{ revision:0, configured:false, config:null, reference:null } }); return;
+        }
+        window.testMessages.push(event.data);
+      };
       const items = JSON.parse(document.getElementById('viewer').srcdoc.match(/<script id="modelData" type="application\/json">([\s\S]*?)<\/script>/)[1]).inventory;
       document.getElementById('viewer').contentWindow.postMessage({ type: 'home-floorplan:init', can_edit:true, items, preferences: { language: 'fr', sidebarCollapsed: true } }, '*', [channel.port2]);
       channel.port1.postMessage({ type: 'states', connected: true, states: { 'light.user_lamp': { state: 'on', name: 'HA user name' } } });
@@ -239,7 +244,12 @@ assert.equal(context.viewerStateLabel('on'), 'On');
       await recovery.evaluate(() => {
         const iframe = document.getElementById('viewer'), channel = new MessageChannel();
         window.testMessages = []; window.testPort = channel.port1;
-        channel.port1.onmessage = event => window.testMessages.push(event.data);
+        channel.port1.onmessage = event => {
+          if (event.data.type === 'map_request' && event.data.action === 'get') {
+            channel.port1.postMessage({ type:'map_result', request_id:event.data.request_id, success:true, result:{ revision:0, configured:false, config:null, reference:null } }); return;
+          }
+          window.testMessages.push(event.data);
+        };
         const items = JSON.parse(iframe.srcdoc.match(/<script id="modelData" type="application\/json">([\s\S]*?)<\/script>/)[1]).inventory;
         items[0].name = 'Saved host placement';
         window.savedItems = items;
