@@ -15,6 +15,7 @@ import importlib.util
 import json
 from pathlib import Path
 import struct
+import subprocess
 import sys
 import tempfile
 import threading
@@ -609,6 +610,57 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
         self.assertIn('has_published', await self.request('status'))
         self.assertTrue(await self.integration.async_setup_entry(self.hass, None))
         self.assertEqual(len(self.resources.async_items()), 1)
+
+
+class PortablePackageCompatibility(unittest.IsolatedAsyncioTestCase):
+    async def test_compiled_package_starts_and_registers_map_without_source_fallback(self):
+        with tempfile.TemporaryDirectory(prefix='studio-portable-package-') as temporary:
+            root = Path(temporary)
+            built = root / 'compiled'
+            # Exercise the separately maintained portable archive allowlist,
+            # then import only files actually delivered in that archive.
+            await asyncio.to_thread(subprocess.run, [
+                sys.executable, '-B', str(ROOT / 'scripts/build-planner-project.py'),
+                '--project', str(ROOT / 'planner/example-home.json'),
+                '--output', str(built), '--ha-package',
+            ], check=True, capture_output=True, timeout=60)
+            installer = load('portable_package_installer', ROOT / 'scripts/install-home-assistant.py')
+            package = installer.read_package(built / 'home-floorplan.tar.gz')
+            component = root / 'component'
+            for name, data in package.files.items():
+                path = component / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            integration = load('portable_distribution', component / '__init__.py', package=True)
+            config = root / 'config'
+            config.mkdir()
+            hass = HomeAssistant(str(config))
+            try:
+                device_registry.async_setup(hass)
+                await asyncio.gather(*(registry.async_load(hass) for registry in
+                                       (area_registry, device_registry, entity_registry, floor_registry)))
+                hass.auth = await auth.auth_manager_from_config(hass, [], [])
+                user = await hass.auth.async_create_user('Portable test admin', group_ids=[GROUP_ID_ADMIN])
+                hass.http = HTTPRecorder()
+                hass.data['lovelace'] = LovelaceData(resource_mode='storage', dashboards={}, yaml_dashboards={},
+                    resources=ResourceStorageCollection(hass, LovelaceStorage(hass, None)))
+                self.assertTrue(await integration.async_setup(hass, {}))
+                state = hass.data['home_floorplan']
+                self.assertTrue(state['initialized'])
+                self.assertEqual(set(state['models']), set(package.site['floors']))
+                self.assertEqual(Path(sys.modules['portable_distribution.map'].__file__), component / 'map.py')
+                for command in ('map_get', 'map_save', 'map_tile', 'viewer'):
+                    self.assertIn('home_floorplan/' + command, hass.data['websocket_api'])
+                connection = Connection(user)
+                handler, schema = hass.data['websocket_api']['home_floorplan/map_get']
+                message = {'id': 1, 'type': 'home_floorplan/map_get'}
+                handler(hass, connection, schema(message) if schema else message)
+                snapshot = await asyncio.wait_for(connection.result, 5)
+                self.assertEqual((snapshot['revision'], snapshot['configured'], snapshot['config']),
+                                 (0, False, None))
+                self.assertFalse((config / '.storage/home_floorplan.map').exists())
+            finally:
+                await hass.async_stop(force=True)
 
 
 if __name__ == '__main__':

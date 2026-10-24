@@ -576,7 +576,7 @@ def package_ha(output, manifest):
         # This is a portable distribution, not a copy of the local installation.
         # Private adapters are deliberately outside this reviewed source list.
         sources = [component / name for name in (
-            "__init__.py", "site.py", "validation.py", "curtains.py",
+            "__init__.py", "site.py", "validation.py", "curtains.py", "map.py",
             "manifest.json", "native.py", "generated.py", "permissions.py", "config_flow.py",
             "strings.json", "translations/en.json", "static/panel.js", "static/card.js",
         )]

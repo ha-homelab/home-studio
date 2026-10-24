@@ -4,7 +4,7 @@ The Home controls view can zoom from the 3D floor into an OpenStreetMap backgrou
 
 ## Align a home
 
-1. Open **Home controls** in the native Home Assistant panel as an administrator and select **Align map**.
+1. Open **Home controls** in the native Home Assistant panel as an administrator and select **Align map**. Opening alignment immediately requests map tiles around the saved alignment, or HA's configured location if no alignment is saved. **Cancel** discards settings changes but cannot undo those requests.
 2. Choose a known point in the model. Enter its **Model point X (m)** and **Model point Z (m)**, using the model's calibrated metre coordinates.
 3. Enter the geographic latitude and longitude of that same point. **Use HA location** copies Home Assistant's configured location as a starting point. It does not change Home Assistant's location or `zone.home`.
 4. Set **North angle (°)** and drag the map beneath the footprint to check alignment. North angle is clockwise from geographic north to the model's −Z direction: at 0°, model +X is east and model −Z is north; at 90°, model −Z points east.
@@ -51,6 +51,8 @@ This is raster map context for one aligned home. It does not provide address sea
 An unavailable tile or map service leaves the home controls usable. **Retry map** retries failed map loading; **Home** returns to model scale. A successful alignment save is confirmed only by HA. A save error does not overwrite the previously saved alignment. Corrupt or unreadable map storage is preserved and reported as unavailable rather than silently replaced.
 
 Standalone/portable viewers do not contain the private alignment or an authenticated tile transport. This feature requires the native Home Assistant host. Tests use fictional fixtures, a fake HA connection, and synthetic tiles; no real home coordinates are needed.
+
+Existing saved views retain the runtime they were published with. After updating the integration, republish a native project to add the map controls. For an externally generated home, rebuild and install its baseline with the updated tools while preserving its saved placements and bindings; republishing alone preserves that baseline's existing runtime. Updating the integration's files does not by itself migrate previously generated viewer HTML.
 
 ## Bridge regression check
 
