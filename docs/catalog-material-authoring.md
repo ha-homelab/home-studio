@@ -89,10 +89,10 @@ scale. This approximation must not be described as a measured material unwrap.
 Trees have attached branches and individual closed leaves. Cars have a painted
 cabin shell, inset glazing, wheel arches, door details and separate rubber/metal
 wheel surfaces. Rabbits share the catalog's authored anatomy instead of separate
-floating spheres. Their 1,632 triangles retain exact Float32 attributes through
+floating spheres. Their 1,488 triangles retain exact Float32 attributes through
 lossless LZSS transport; `author-environment-animal.py` regenerates the embedded
 data from the catalog. The rabbit chart already uses metres, and its paws reach
-the ground at rest. The whole layer uses 65,292 placed triangles for the standard
+the ground at rest. The whole layer uses 64,860 placed triangles for the standard
 scene. These are compact procedural models, not photogrammetric scans of a
 particular vehicle, plant or animal.
 
