@@ -64,7 +64,7 @@ function fixture(homeMode, navigationMode = 'rotate') {
     $: getNode, vt: text => text, scene: {}, hemisphere: {}, sun: {}, ground: {}, grid: {}, clipping: {},
     root: {children: []}, points: [], renderProfile: {}, lowerFloorContext: null, overlayGroup: null, environmentLayer: null,
     editorFloorMaterials: null, attachRoomLighting() {}, updateFixtureShadows() {}, refreshControls() {},
-    hideMediaControls() {}, cancelNativeHover() {}, discardMediaControls() {}, previewTV() {},
+    nativePressPointers:new Set(), hideMediaControls() {}, cancelNativePress() {}, discardMediaControls() {}, previewTV() {},
   });
   c.homeView = {get active() { return c.active; }};
   const code = [
@@ -75,9 +75,9 @@ function fixture(homeMode, navigationMode = 'rotate') {
     line(home, 'let homeGesture='), line(home, 'function cancelHomeGesture('),
     line(home, 'let navigationMode='),
     between(home, '  function resetZoom()', '  function applyViewPreferences('),
-    between(home, '  function setActive(value) {', '  let nativeHoverTimer='),
+    between(home, '  function setActive(value) {', '  let nativePressTimer='),
     line(home, "window.addEventListener('pagehide',()=>{cancelHomeGesture();"),
-    line(home, "document.addEventListener('visibilitychange',()=>{if(document.hidden)cancelHomeGesture();"),
+    line(home, "document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelHomeGesture();"),
     between(home, '  if(renderer) {\n    renderer.domElement.tabIndex', '  const signalText='),
   ].join('\n');
   vm.runInContext(code, c);

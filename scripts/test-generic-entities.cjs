@@ -57,6 +57,14 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   await page.waitForFunction(()=>messages.some(m=>m.type==='model_config'));
   await page.evaluate(()=>publish());
   const card=id=>frame.locator(`[data-home-device="${id}"]`);
+  async function holdForDetails(id){
+   const before=await page.evaluate(()=>messages.filter(message=>message.type==='more_info').length);
+   await card(id).hover();await page.mouse.down();
+   await page.waitForFunction(before=>messages.filter(message=>message.type==='more_info').length===before+1,before);
+   await page.mouse.up();
+   assert.equal(await page.evaluate(()=>messages.filter(message=>message.type==='more_info').length),before+1,
+    `${id}: releasing a hold does not open native details twice`);
+  }
   await card('cold').filter({hasText:'Temperature: -12.5 °C'}).waitFor();
   assert.equal(await frame.locator('[data-home-device]').count(),Object.keys(bindings).length,'every bound domain remains visible');
   assert.match(await card('entry').textContent(),/Door: Open/);
@@ -106,8 +114,11 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   await page.evaluate(()=>{for(const id of ['sensor.oven','binary_sensor.smoke','binary_sensor.presence'])delete states[id].restored;publish();});
 
   for(const id of ['cold','entry','thermostat','vacuum','action','future'])await card(id).click();
+  await page.waitForTimeout(750);
+  assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='more_info').length),0,'short clicks and hover do not inspect generic entities');
+  for(const id of ['cold','entry','thermostat','vacuum','action','future'])await holdForDetails(id);
   await page.waitForFunction(()=>messages.filter(m=>m.type==='more_info').length===6);
-  for(const id of ['range','alarm','presence'])await card(id).click();
+  for(const id of ['range','alarm','presence'])await holdForDetails(id);
   await page.waitForFunction(()=>messages.filter(m=>m.type==='more_info').length===9);
   assert.deepEqual(await page.evaluate(()=>messages.filter(m=>m.type==='toggle')),[],'generic entities and read-only indicators cannot send toggles');
   assert.equal((await frame.locator('#homeView').evaluate(()=>window.floorplan.illuminated)).includes('future'),false,'a generic entity on a lamp shape does not illuminate');
@@ -161,7 +172,7 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   await card('range').filter({hasText:'Unavailable'}).waitFor();
   for(const id of ['range','alarm','presence']){
    assert.equal(await card(id).getAttribute('aria-pressed'),null,'indicators remain readings after rebinding');
-   await card(id).click();
+   await holdForDetails(id);
   }
   await page.waitForFunction(()=>messages.filter(m=>m.type==='more_info').length>=15);
   assert.equal(await frame.locator('#curtainDialog').evaluate(dialog=>dialog.open),false);

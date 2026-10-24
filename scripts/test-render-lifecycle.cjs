@@ -444,8 +444,8 @@ console.log('PASS: per-gesture software adaptive64–250ms pacing, successful-dr
 // Editor can draw directly before its queued resize runs, leaving the cache at
 // the old Home dimensions when Home is selected again.
 const modeStart=homeSource.indexOf('  function attachRoomLighting() {');
-// Keep native-hover listeners outside this renderer fixture; cleanup calls use spies.
-const modeEnd=homeSource.indexOf('\n  let nativeHoverTimer=',modeStart);
+// Keep native-press listeners outside this renderer fixture; cleanup calls use spies.
+const modeEnd=homeSource.indexOf('\n  let nativePressTimer=',modeStart);
 assert(modeStart>=0&&modeEnd>modeStart,'Production Home mode switch is present');
 const modeSource=homeSource.slice(modeStart,modeEnd);
 function modeScheduler(legacy=false,diffuse=false,canEdit=true) {
@@ -459,7 +459,7 @@ function modeScheduler(legacy=false,diffuse=false,canEdit=true) {
   Object.assign(c,{active:true,canEdit,previewTV(){},lowerFloorContext:null,showLowerFloor:false,selected:null,
     cancelHomeGesture(){},cancelEditorGesture(){},
     hideMediaControls(){cleanups.push({kind:'media',active:c.active});},
-    cancelNativeHover(reset){cleanups.push({kind:'native',active:c.active,reset});},
+    cancelNativePress(){cleanups.push({kind:'native',active:c.active});},
     THREE:{Color:class {constructor(value){this.value=value;}}},hemisphere:{},sun:{},ground:{},grid:{},
     clipping:{constant:2.1},environmentLayer:null,editorFloorMaterials:null,roomLighting:null,root:{children:[]},objectGroup:{},overlayGroup:null,points:[],
     clearTrail(){},showMode(){},refreshControls(){},updateFixtureShadows(){},updateHeightCaption(){},$:element});
@@ -490,9 +490,9 @@ function rapidModeReturn(q) {
   const before=q.c.renderCount;
   q.c.setActive(true);
   assert.deepEqual(q.cleanups.slice(cleanupStart),[
-    {kind:'media',active:true},{kind:'native',active:true,reset:true},
-    {kind:'media',active:false},{kind:'native',active:false,reset:true},
-  ],'Home and Editor transitions close media controls and reset native hover before changing mode');
+    {kind:'media',active:true},{kind:'native',active:true},
+    {kind:'media',active:false},{kind:'native',active:false},
+  ],'Home and Editor transitions close media controls and cancel native press before changing mode');
   q.flush();q.flush();
   return q.c.renderCount-before;
 }

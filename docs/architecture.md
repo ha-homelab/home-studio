@@ -188,11 +188,13 @@ does not announce the capability, allowing component and generated-model
 upgrades to happen separately. This is data minimization and performance work,
 not a new permission boundary.
 
-Non-audio markers open native HA details after a 650 ms mouse dwell. Leaving or
-pressing the marker cancels the dwell. A latch prevents a closed native dialog
-from immediately reopening over the same marker. Keyboard/touch users have
-explicit controls; no hover starts a device action. Audio markers instead open
-one small shared DOM popover. Its buttons follow `supported_features`, and the
+Non-audio markers and device cards open native HA details after a deliberate
+650 ms primary-pointer hold. Passive hover never requests native details.
+Pointer ownership, movement, cancellation and lifecycle checks prevent a drag,
+view change or stale binding from becoming an inspection. A completed hold
+consumes its release click so it cannot also toggle a device. Explicit **Details**
+buttons remain keyboard accessible. Audio markers instead open one small shared
+DOM popover on hover or focus; its buttons follow `supported_features`, and the
 volume slider commits on change rather than on every input event. Popovers use
 no additional textures, polling loop or animation loop.
 
