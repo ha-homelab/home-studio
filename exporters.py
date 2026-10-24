@@ -69,6 +69,7 @@ def export_models(data, ROOT, stem, *, physical=False):
     dae+=['</library_geometries><library_visual_scenes><visual_scene id="Scene" name="Home floorplan">']
     for i,m in enumerate(meshes):dae.append(f'<node id="n{i}" name="{m["name"]}"><instance_geometry url="#g{i}"><bind_material><technique_common><instance_material symbol="mat" target="#{m["material"]}-mat"/></technique_common></bind_material></instance_geometry></node>')
     dae+=['</visual_scene></library_visual_scenes><scene><instance_visual_scene url="#Scene"/></scene></COLLADA>'];(ROOT/(stem+'.dae')).write_text('\n'.join(dae), encoding='utf-8')
+    return None
 
 
 # Interactive exports are independent of the historical on-disk export bundle.

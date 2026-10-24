@@ -3,7 +3,6 @@
 USD uses Cartesian texture coordinates and tangent normals (no glTF V flip).
 COLLADA preserves albedo, vertex normals and UVs; PBR extensions are advisory.
 """
-import base64
 import functools
 import hashlib
 import io
@@ -35,6 +34,8 @@ def identifier(value):
 def number(value):
     # All three formats store 32-bit attributes. Nine significant decimal digits
     # round-trip that representation, without the size of Python double repr.
+    if not math.isfinite(value):
+        raise ValueError('Physical export number must be finite')
     packed = struct.pack('<f', value)
     value = struct.unpack('<f', packed)[0]
     if value == 0:
@@ -43,6 +44,7 @@ def number(value):
         result = format(value, '.' + str(precision) + 'g')
         if struct.pack('<f', float(result)) == packed:
             return result
+    raise ValueError('Physical export number must be finite')
 
 
 def vector(values):
