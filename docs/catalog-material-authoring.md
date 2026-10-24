@@ -1,6 +1,6 @@
 # Stock catalog geometry and physical surfaces
 
-The offline catalog contains 206 orbitable models composed of 2,252 named parts.
+The offline catalog contains 206 orbitable models composed of 2,254 named parts.
 These are authored approximations of furniture, appliances, plants, vehicles and
 decorative objects. They are not scans or photographs of a particular product.
 They remain ordinary meshes: no camera-facing photographic billboards are used.
@@ -22,6 +22,12 @@ body and bent limb skins. Sharp anatomical folds have explicit 60-degree
 smoothing boundaries computed after fitting, avoiding inward shading normals
 on narrow ankle and sole transitions. `planner/anatomy.json` stores the eight reviewed animal
 part definitions and is applied after the general category rules.
+`planner/vehicle_authoring.py` similarly defines the six vehicle body classes:
+continuous painted shells, attached closed glazing strips, pillar gaps and
+separate optical/trim parts. The compact car retains round headlights; the
+angular pickup retains flat sheet surfaces and a solid rear cover. Vehicle
+profiles use at most 512 authored corners per part and stay within the existing
+32-part catalog limit. Glazing is shaded, without a detailed cabin interior.
 
 The unprofiled primitive path remains available for legacy input and fixtures.
 Individual profile transformations preserve their specified rotated envelope.

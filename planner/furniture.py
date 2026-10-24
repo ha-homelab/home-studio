@@ -68,10 +68,24 @@ def primitive(part, cutout=False):
     if 'pattern_face' in part and (part['shape'] != 'box' or part['pattern_face'] not in ('top', 'front')):
         raise ValueError('furniture pattern_face must be top or front on a box')
     profile = part.get('geometry_profile')
-    allowed = {'box': ('edge', 'soft', 'cushion', 'tailored', 'joined', 'flat', 'canopy'), 'cylinder': ('turned', 'lathed', 'lathed_fine', 'rod', 'soft', 'canopy', 'sprig', 'organic'),
+    allowed = {'box': ('edge', 'soft', 'cushion', 'tailored', 'joined', 'flat', 'canopy', 'vehicle_shell', 'molded_shell'), 'cylinder': ('turned', 'lathed', 'lathed_fine', 'rod', 'soft', 'canopy', 'sprig', 'organic'),
                'sphere': ('round', 'leaf', 'canopy', 'coachwork', 'greenhouse'), 'ring': ('rounded','rounded_fine'), 'cone': ('turned', 'canopy', 'grass')}
     if profile is not None and profile not in allowed[part['shape']]:
         raise ValueError('unsupported furniture geometry profile')
+    if profile in ('vehicle_shell','molded_shell'):
+        if ('geometry_rings' in part)==('geometry_shells' in part): raise ValueError('vehicle shell requires one ring representation')
+        if part.get('geometry_shading','smooth') not in ('smooth','flat'): raise ValueError('invalid vehicle shading')
+        shells=part.get('geometry_shells',[part.get('geometry_rings')])
+        if not isinstance(shells,list) or not 1<=len(shells)<=32: raise ValueError('invalid vehicle shell count')
+        for rings in shells:
+            if not isinstance(rings,list) or not 2<=len(rings)<=12: raise ValueError('vehicle shell requires 2–12 rings')
+            sides=len(rings[0]) if isinstance(rings[0],list) else 0
+            if sides not in (4,6,8,24,32): raise ValueError('vehicle rings require 4, 6, 8, 24 or 32 corners')
+            for ring in rings:
+                if not isinstance(ring,list) or len(ring)!=sides: raise ValueError('inconsistent vehicle ring')
+                for point in ring:
+                    if not isinstance(point,list) or len(point)!=3 or not all(type(v) in (int,float) and math.isfinite(v) and -1.000000000001<=v<=1.000000000001 for v in point): raise ValueError('invalid vehicle corner')
+        if sum(len(r)*len(r[0]) for r in shells)>512: raise ValueError('vehicle shell exceeds corner budget')
     if profile == 'canopy':
         if 'geometry_leaf_count' in part and (type(part['geometry_leaf_count']) is not int or not 16<=part['geometry_leaf_count']<=500): raise ValueError('canopy leaf count must be 16–500')
         if 'geometry_dimensions' in part and (not isinstance(part['geometry_dimensions'],list) or len(part['geometry_dimensions'])!=3 or not all(type(v) in (int,float) and math.isfinite(v) and v>0 for v in part['geometry_dimensions'])): raise ValueError('invalid canopy dimensions')
@@ -228,6 +242,16 @@ def refined_primitive(part, cutout=False, fit=True):
                 if len(low)==1:faces.append([low[0],high[j],high[k]])
                 elif len(high)==1:faces.append([low[j],high[0],low[k]])
                 else:quad(low[j],high[j],high[k],low[k])
+    elif profile in ('vehicle_shell','molded_shell'):
+        for rings in part.get('geometry_shells',[part.get('geometry_rings')]):
+            sides=len(rings[0]);offset=len(vertices)
+            for ring in rings:
+                for q in ring: point(q,[0,1,0])
+            for row in range(len(rings)-1):
+                for j in range(sides):
+                    k=(j+1)%sides;quad(offset+row*sides+j,offset+row*sides+k,offset+(row+1)*sides+k,offset+(row+1)*sides+j)
+            last=offset+(len(rings)-1)*sides
+            for j in range(1,sides-1):faces.extend(([offset,offset+j+1,offset+j],[last,last+j,last+j+1]))
     elif profile == 'greenhouse':
         # A sloped glazing enclosure has a roof, sills and planar windscreens.
         for q in ((-1,-1,-1),(1,-1,-1),(1,-1,1),(-1,-1,1),(-.7,1,-.58),(.7,1,-.58),(.7,1,.35),(-.7,1,.35)):
@@ -407,7 +431,7 @@ def refined_primitive(part, cutout=False, fit=True):
             faces.append([center_index,first,following])
     elif shape == 'sphere':
         sides, spans = 12, 6
-        point([0,1,0],[0,1,0]); point([0,-1,0],[0,-1,0])
+        point([0,1,.72 if profile == 'leaf' else 0],[0,1,0]); point([0,-1,-.72 if profile == 'leaf' else 0],[0,-1,0])
         for j in range(1,spans):
             latitude = math.pi*j/spans
             sy, radial = math.cos(latitude), math.sin(latitude)
@@ -419,8 +443,11 @@ def refined_primitive(part, cutout=False, fit=True):
                 if profile == 'coachwork':
                     q=[math.copysign(abs(value)**.55,value) for value in q]
                 if profile == 'leaf':
-                    # Broad leaves taper towards both ends and have a raised midrib.
+                    # A thin curved blade, rather than an inflated ellipsoid.
+                    # Depth comes from the blade's bend, so envelope fitting
+                    # cannot inflate its thin cross-section back into a capsule.
                     q[0] *= .65+.35*math.sin(latitude)
+                    q[2] = .72*sy + .22*(1-sy*sy) + .025*q[2]
                 n = [q[0], .5*radial if shape == 'cone' else sy, q[2]]
                 point(q,n)
         for i in range(sides):
@@ -496,10 +523,10 @@ def refined_primitive(part, cutout=False, fit=True):
             for j in range(cross_steps):
                 a=start+i*cross_steps+j;b=start+((i+1)%steps)*cross_steps+j
                 quad(a,b,start+((i+1)%steps)*cross_steps+(j+1)%cross_steps,start+i*cross_steps+(j+1)%cross_steps)
-    mesh=triangle_mesh(part,vertices,faces,None if profile in ('canopy','sprig','greenhouse','grass') else normals)
+    mesh=triangle_mesh(part,vertices,faces,None if profile in ('canopy','sprig','greenhouse','grass','vehicle_shell','molded_shell','leaf') else normals)
     if fit:
         mesh=fit_profile_mesh(part,mesh)
-        if profile=='organic': crease_normals(mesh)
+        if profile in ('organic','leaf') or profile in ('vehicle_shell','molded_shell') and part.get('geometry_shading')!='flat': crease_normals(mesh)
         # Authored geometry precision is 1e-12 normalized units; remove libm
         # residue before exact tuple indexing, well below display resolution.
         for key in ('vertices','normals'):

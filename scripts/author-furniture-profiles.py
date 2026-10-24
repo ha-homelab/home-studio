@@ -6,9 +6,12 @@ photographs. Styles choose pigment; these rules choose the underlying substance.
 Run this tool, then generate-furniture-catalog.py after editing the authoring rules.
 """
 import json
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
+from planner.vehicle_authoring import VEHICLES, vehicle_parts
 # Every category has an explicit default; exceptions below represent actual parts.
 CATEGORY_FINISH = {
     'seating': 'fabric', 'tables': 'wood', 'beds': 'fabric', 'storage': 'painted',
@@ -178,6 +181,7 @@ def author(catalog):
                 part['geometry_leaf_count']=448 if model['id'] in ('clipped_hedge','round_canopy_tree','columnar_tree') else 64 if model['id']=='weeping_fig' else 128
             else:
                 part.pop('geometry_dimensions',None);part.pop('geometry_leaf_count',None)
+        if model['id'] in VEHICLES: model['parts']=vehicle_parts(model)
         if model['id'] in anatomy:
             # Continuous authored sections and anchored features override the
             # category-level primitive rules; never restyle individual parts.

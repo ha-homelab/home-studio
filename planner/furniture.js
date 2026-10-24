@@ -54,9 +54,22 @@ export function primitive(part, cutout = false) {
   if (part.size.some(value => value <= 0)) throw new Error('Furniture primitive sizes must be positive.');
   if (Object.hasOwn(part, 'inner_ratio') && (part.shape !== 'ring' || !Number.isFinite(part.inner_ratio) || part.inner_ratio <= 0 || part.inner_ratio >= 1)) throw new Error('Ring inner_ratio must be between zero and one.');
   if (Object.hasOwn(part, 'pattern_face') && (part.shape !== 'box' || !['top', 'front'].includes(part.pattern_face))) throw new Error('Furniture pattern_face must be top or front on a box.');
-  const allowed = {box:['edge','soft','cushion','tailored','joined','flat','canopy'],cylinder:['turned','lathed','lathed_fine','rod','soft','canopy','sprig','organic'],sphere:['round','leaf','canopy','coachwork','greenhouse'],ring:['rounded','rounded_fine'],cone:['turned','canopy','grass']};
+  const allowed = {box:['edge','soft','cushion','tailored','joined','flat','canopy','vehicle_shell','molded_shell'],cylinder:['turned','lathed','lathed_fine','rod','soft','canopy','sprig','organic'],sphere:['round','leaf','canopy','coachwork','greenhouse'],ring:['rounded','rounded_fine'],cone:['turned','canopy','grass']};
   if (part.geometry_profile !== undefined) {
     if (!allowed[part.shape].includes(part.geometry_profile)) throw new Error('Unsupported furniture geometry profile.');
+  if(['vehicle_shell','molded_shell'].includes(part.geometry_profile)) {
+    if(Object.hasOwn(part,'geometry_rings')===Object.hasOwn(part,'geometry_shells'))throw new Error('Vehicle shell requires one ring representation.');
+    if(!['smooth','flat'].includes(part.geometry_shading??'smooth'))throw new Error('Invalid vehicle shading.');
+    const shells=part.geometry_shells??[part.geometry_rings];
+    if(!Array.isArray(shells)||shells.length<1||shells.length>32)throw new Error('Invalid vehicle shell count.');
+    let corners=0;
+    for(const rings of shells){const sides=Array.isArray(rings?.[0])?rings[0].length:0;
+      if(!Array.isArray(rings)||rings.length<2||rings.length>12||![4,6,8,24,32].includes(sides))throw new Error('Invalid vehicle shell rings.');
+      for(const ring of rings)if(!Array.isArray(ring)||ring.length!==sides||ring.some(p=>!Array.isArray(p)||p.length!==3||p.some(v=>typeof v!=='number'||!Number.isFinite(v)||Math.abs(v)>1.000000000001)))throw new Error('Invalid vehicle shell corner.');
+      corners+=rings.length*sides;
+    }
+    if(corners>512)throw new Error('Vehicle shell exceeds corner budget.');
+  }
   if(part.geometry_profile==='canopy') {
     if(part.geometry_leaf_count!==undefined&&(!Number.isInteger(part.geometry_leaf_count)||part.geometry_leaf_count<16||part.geometry_leaf_count>500))throw Error('Canopy leaf count must be 16–500.');
     if(part.geometry_dimensions!==undefined&&(!Array.isArray(part.geometry_dimensions)||part.geometry_dimensions.length!==3||part.geometry_dimensions.some(v=>!Number.isFinite(v)||v<=0)))throw Error('Invalid canopy dimensions.');
@@ -186,6 +199,12 @@ function refinedPrimitive(part, cutout = false, fit = true) {
       const low=rings[row],high=rings[row+1];
       for(let j=0;j<sides;j++){const k=(j+1)%sides;if(low.length===1)faces.push([low[0],high[j],high[k]]);else if(high.length===1)faces.push([low[j],high[0],low[k]]);else quad(low[j],high[j],high[k],low[k]);}
     }
+  } else if(['vehicle_shell','molded_shell'].includes(profile)) {
+    for(const rings of part.geometry_shells??[part.geometry_rings]){const sides=rings[0].length,offset=vertices.length;
+      for(const ring of rings)for(const q of ring)point(q,[0,1,0]);
+      for(let row=0;row<rings.length-1;row++)for(let j=0;j<sides;j++){const k=(j+1)%sides;quad(offset+row*sides+j,offset+row*sides+k,offset+(row+1)*sides+k,offset+(row+1)*sides+j);}
+      const last=offset+(rings.length-1)*sides;for(let j=1;j<sides-1;j++)faces.push([offset,offset+j+1,offset+j],[last,last+j,last+j+1]);
+    }
   } else if(profile==='greenhouse') {
     for(const q of [[-1,-1,-1],[1,-1,-1],[1,-1,1],[-1,-1,1],[-.7,1,-.58],[.7,1,-.58],[.7,1,.35],[-.7,1,.35]])point(q,[0,1,0]);
     faces.push([0,1,2],[0,2,3],[4,6,5],[4,7,6],[0,5,1],[0,4,5],[1,6,2],[1,5,6],[2,7,3],[2,6,7],[3,4,0],[3,7,4]);
@@ -312,13 +331,17 @@ function refinedPrimitive(part, cutout = false, fit = true) {
     }
   } else if (shape==='sphere') {
     const sides=12,spans=6;
-    point([0,1,0],[0,1,0]);point([0,-1,0],[0,-1,0]);
+    point([0,1,profile==='leaf'?.72:0],[0,1,0]);point([0,-1,profile==='leaf'?-.72:0],[0,-1,0]);
     for(let j=1;j<spans;j++) {
       const latitude=Math.PI*j/spans,sy=Math.cos(latitude),radial=shape==='cone'?(1-sy)/2:Math.sin(latitude);
       for(let i=0;i<sides;i++) {
         const angle=2*Math.PI*i/sides,q=[radial*Math.cos(angle),sy,radial*Math.sin(angle)];
         if(profile==='coachwork')for(let k=0;k<3;k++)q[k]=Math.sign(q[k])*Math.abs(q[k])**.55;
-        if(profile==='leaf')q[0]*=.65+.35*Math.sin(latitude);
+        if(profile==='leaf'){
+          // Keep a thin cross-section; the blade's bend provides its depth.
+          q[0]*=.65+.35*Math.sin(latitude);
+          q[2]=.72*sy+.22*(1-sy*sy)+.025*q[2];
+        }
         point(q,[q[0],shape==='cone'?.5*radial:sy,q[2]]);
       }
     }
@@ -377,10 +400,10 @@ function refinedPrimitive(part, cutout = false, fit = true) {
       quad(a,b,start+((i+1)%steps)*crossSteps+(j+1)%crossSteps,start+i*crossSteps+(j+1)%crossSteps);
     }
   }
-  const mesh=triangleMesh(part,vertices,faces,['canopy','sprig','greenhouse','grass'].includes(profile)?null:normals);
+  const mesh=triangleMesh(part,vertices,faces,['canopy','sprig','greenhouse','grass','vehicle_shell','molded_shell','leaf'].includes(profile)?null:normals);
   if (fit) {
     fitProfileMesh(part,mesh);
-    if(profile==='organic')creaseNormals(mesh);
+    if(['organic','leaf'].includes(profile)||['vehicle_shell','molded_shell'].includes(profile)&&part.geometry_shading!=='flat')creaseNormals(mesh);
     // Authored precision removes libm residue before exact tuple indexing.
     for (const key of ['vertices','normals']) mesh[key]=mesh[key].map(point=>point.map(value=>Math.round(value*1e12)/1e12));
   }

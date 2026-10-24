@@ -108,6 +108,35 @@ class AuthoredProfiles(unittest.TestCase):
                     [{**sections[0],'radius':[.2,.2]}]+sections[1:]):
             with self.assertRaises(ValueError):primitive({**part,'geometry_sections':bad})
 
+    def test_vehicle_surfaces_and_browser_corner_parity(self):
+        models=[m for m in CATALOG['models'] if m['category']=='vehicles']
+        items=[{'model_id':m['id'],'type':m['type']} for m in models]
+        source="import {buildFurnitureAsset} from './planner/furniture.js';console.log(JSON.stringify("+json.dumps(items)+".map(buildFurnitureAsset)));"
+        browser=json.loads(subprocess.check_output(['node','--input-type=module','-e',source],cwd=ROOT))
+        for model,item,other in zip(models,items,browser):
+            with self.subTest(model=model['id']):
+                self.assertLessEqual(len(model['parts']),32)
+                self.assertFalse(any(p['geometry_profile']=='greenhouse' for p in model['parts']))
+                glass=[p for p in model['parts'] if p['surface_finish']=='glass']
+                self.assertEqual(len(glass),1)
+                self.assertIn('geometry_shells',glass[0])
+                actual=build_furniture_asset(item)
+                self.assertEqual(actual['materials'],other['materials'])
+                for a,b in zip(actual['meshes'],other['meshes']):
+                    self.assertEqual(len(a['indices']),len(b['indices']))
+                    for key in ('vertices','normals','uv'):
+                        tolerance=2e-12*(max(model['dimensions_m'].values()) if key=='uv' else 1)
+                        for i,j in zip(a['indices'],b['indices']):
+                            for x,y in zip(a[key][i],b[key][j]):self.assertLessEqual(abs(x-y),tolerance)
+
+    def test_vehicle_ring_input_is_bounded_and_unambiguous(self):
+        source=next(p for p in MODELS['tesla_model_3']['parts'] if p['geometry_profile']=='vehicle_shell')
+        for bad in ({'geometry_rings':[]},{'geometry_rings':source['geometry_rings']*7},
+                    {'geometry_shells':[source['geometry_rings']]},
+                    {'geometry_rings':[[[math.nan,0,0]]*4]*2}):
+            with self.subTest(bad=list(bad)):
+                with self.assertRaises(ValueError):primitive({**source,**bad})
+
     def test_wood_grain_follows_tabletop_and_leg_axes(self):
         model=MODELS['dining_table'];asset=build_furniture_asset({'type':model['type'],'model_id':model['id']})
         scale=[model['dimensions_m'][k] for k in ('width','height','depth')]
