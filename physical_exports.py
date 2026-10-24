@@ -326,7 +326,9 @@ def write_dae(path, stem, records, materials, selected):
         for m in materials: line('<material id="' + m['id'] + '" name=' + quoteattr(m['source']) + '><instance_effect url="#' + m['id'] + '_fx"/></material>')
         line('</library_materials><library_geometries>')
         for ordinal, ((source, mesh), mi) in enumerate(zip(records, selected)):
-            id_ = 'geometry_' + str(ordinal);m = materials[mi]
+            # Internal XML identifiers need no verbose repeated prefix. Source
+            # mesh identities remain intact in each geometry/node name.
+            id_ = 'g' + format(ordinal, 'x');m = materials[mi]
             line('<geometry id="' + id_ + '" name=' + quoteattr(source['name']) + '><mesh>')
             arrays = [('position', [(x, -z, y) for x, y, z in mesh['vertices']], 'XYZ'), ('normal', [(x, -z, y) for x, y, z in mesh['normals']], 'XYZ')]
             if 'uv' in mesh:
@@ -372,5 +374,5 @@ def write_dae(path, stem, records, materials, selected):
             line('<p>' + index_text + '</p></triangles></mesh></geometry>')
         line('</library_geometries><library_visual_scenes><visual_scene id="Scene">')
         for i, ((source, mesh), mi) in enumerate(zip(records, selected)):
-            line('<node id="node_' + str(i) + '" name=' + quoteattr(source['name']) + '><instance_geometry url="#geometry_' + str(i) + '"><bind_material><technique_common><instance_material symbol="material" target="#' + materials[mi]['id'] + '"><bind_vertex_input semantic="UV0" input_semantic="TEXCOORD" input_set="0"/><bind_vertex_input semantic="UV1" input_semantic="TEXCOORD" input_set="1"/></instance_material></technique_common></bind_material></instance_geometry></node>')
+            line('<node id="n' + format(i, 'x') + '" name=' + quoteattr(source['name']) + '><instance_geometry url="#g' + format(i, 'x') + '"><bind_material><technique_common><instance_material symbol="material" target="#' + materials[mi]['id'] + '"><bind_vertex_input semantic="UV0" input_semantic="TEXCOORD" input_set="0"/><bind_vertex_input semantic="UV1" input_semantic="TEXCOORD" input_set="1"/></instance_material></technique_common></bind_material></instance_geometry></node>')
         line('</visual_scene></library_visual_scenes><scene><instance_visual_scene url="#Scene"/></scene></COLLADA>')
