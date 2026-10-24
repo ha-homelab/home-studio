@@ -52,6 +52,8 @@ An unavailable tile or map service leaves the home controls usable. **Retry map*
 
 Standalone/portable viewers do not contain the private alignment or an authenticated tile transport. This feature requires the native Home Assistant host. Tests use fictional fixtures, a fake HA connection, and synthetic tiles; no real home coordinates are needed.
 
+Existing saved views retain the runtime they were published with. After updating the integration, republish a native project to add the map controls. For an externally generated home, rebuild and install its baseline with the updated tools while preserving its saved placements and bindings; republishing alone preserves that baseline's existing runtime. Updating the integration's files does not by itself migrate previously generated viewer HTML.
+
 ## Bridge regression check
 
 Run `node --test scripts/test-ha-map-bridge.cjs` from the repository root after installing the development dependencies and Playwright Chromium. It exercises the actual host code with fake HA/MessagePorts, including authentication and edit restrictions, request/result validation, bounded queues, stale-session handling, local camera persistence, attribution, and dry-run separation. Its browser case loads the real panel on a loopback server and exchanges messages with an opaque iframe, including unconfigured and disabled maps, saves and revision conflicts, missing backend commands, account changes, and a working attribution link. External browser requests are blocked by the test harness.
