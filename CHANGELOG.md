@@ -1,23 +1,6 @@
 # Changelog
 
-## [Unreleased]
-
-### Changed
-
-- Render explicit per-part surface finishes with distinct responses for fabric,
-  wood, plastic, ceramic, glass and metal. A shared palette color no longer
-  determines the surface type; software-rendering fallbacks remain available.
-- Support bounded, embedded albedo tiles on selected furniture and architectural
-  surfaces, preserving physical repeat scale after furniture resizing and
-  retaining UVs through wall cutaways. Current-drawing GLB and OBJ exports include
-  the validated textures and surface data.
-- Refine optional surrounding trees and vehicles with smoother, more detailed
-  geometry while preserving existing traffic paths and animation timing.
-- Keep detailed GLB and OBJ exports compact through exact vertex, normal and
-  UV reuse. Exports allow up to 500,000 triangles while retaining the 32 MiB
-  size limit; native drawing and added-geometry limits remain unchanged.
-
-## [1.2.0] - Geographic context around your home
+## [1.2.0] - Geographic context and physical materials
 
 ### Added
 
@@ -30,6 +13,33 @@
 - Bounded authenticated tile retrieval, local caching, visible OpenStreetMap
   attribution, and recovery when the map provider is unavailable. Distant map
   views suspend house lighting and overlay animation work.
+
+### Changed
+
+- Refine all 206 catalog models with more detailed shapes and explicit per-part
+  finishes for fabric, wood, plastic, ceramic, glass and metal. Existing model
+  identifiers, placement dimensions, colors and device controls remain valid.
+- Support bounded albedo, normal and occlusion/roughness/metalness textures on
+  selected furniture and architectural surfaces. Physical repeat scale survives
+  resizing and wall cutaways. GLB retains the supported texture channels, UVs
+  and surface data. OBJ packages include texture maps and MTL extensions where
+  supported by the importing application; prefer GLB for complete material
+  interchange.
+- Add bounded environment reflections and contact shading for clearer material
+  and depth cues. Software-rendering fallbacks remain available. These are
+  authored real-time models: small objects, plants and animals can still look
+  simplified, and the result is not equivalent to a photograph.
+- Refine optional surrounding trees and vehicles with smoother, more detailed
+  geometry while preserving existing traffic paths and animation timing.
+- Keep detailed GLB and OBJ exports compact through exact vertex, normal and
+  UV reuse. Exports allow up to 500,000 triangles while retaining the 32 MiB
+  size limit; native drawing and added-geometry limits remain unchanged.
+
+### Fixed
+
+- Release contact-shading geometry buffers when a graphics context is lost, so
+  Safari can restore rendering and close the view again without stale-buffer
+  WebGL errors.
 
 ### Upgrade
 
