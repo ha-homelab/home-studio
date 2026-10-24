@@ -4,6 +4,7 @@ import base64
 import copy
 import hashlib
 import json
+import math
 import random
 from pathlib import Path
 import shutil
@@ -17,7 +18,26 @@ import xml.etree.ElementTree as ET
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from exporters import export_models
 from pbr_materials import png_spec
-from physical_exports import prepare, number
+from physical_exports import prepare, number, export_physical_scene, package_physical_usd
+
+
+def dae_corners(tree):
+    ns={'c':'http://www.collada.org/2005/11/COLLADASchema'}
+    ids={node.get('id'):node for node in tree.iter() if node.get('id')}
+    result=[]
+    for geometry in tree.findall('.//c:geometry',ns):
+        triangles=geometry.find('c:mesh/c:triangles',ns);inputs=triangles.findall('c:input',ns)
+        raw=list(map(int,triangles.find('c:p',ns).text.split()));width=max(int(v.get('offset')) for v in inputs)+1
+        channels={}
+        for value in inputs:
+            semantic=value.get('semantic');source=ids[value.get('source')[1:]]
+            if semantic=='VERTEX':source=ids[source.find('c:input',ns).get('source')[1:]]
+            accessor=source.find('c:technique_common/c:accessor',ns)
+            data=list(map(float,ids[accessor.get('source')[1:]].text.split()));stride=int(accessor.get('stride'))
+            offset=int(value.get('offset'))
+            channels[(semantic,value.get('set'))]=[tuple(data[i*stride:(i+1)*stride]) for i in raw[offset::width]]
+        result.append(channels)
+    return result
 
 
 def fixture():
@@ -66,22 +86,43 @@ class PhysicalExports(unittest.TestCase):
             self.assertTrue(tree.findall('.//c:input[@semantic="NORMAL"]',ns))
             self.assertTrue(tree.findall('.//c:input[@semantic="TEXCOORD"]',ns))
             self.assertTrue(tree.findall('.//c:diffuse/c:texture',ns))
-            geometry=tree.find('.//c:geometry/c:mesh',ns)
-            triangles=geometry.find('c:triangles',ns)
-            indices=[int(v) for v in triangles.find('c:p',ns).text.split()]
-            self.assertEqual(indices,data['meshes'][0]['indices'])
-            self.assertTrue(all(value.get('offset')=='0' for value in triangles.findall('c:input',ns)))
-            arrays={node.get('id'):[float(v) for v in node.find('c:float_array',ns).text.split()] for node in geometry.findall('c:source',ns)}
-            self.assertEqual(arrays['geometry_0_position'],[0,0,0,1,0,0,0,0,1])
-            self.assertEqual(arrays['geometry_0_normal'],[0,-1,0]*3)
-            self.assertEqual(arrays['geometry_0_uv0'],[0,0,1.5625,0,0,1.5625])
-            self.assertEqual(arrays['geometry_0_uv1'],[0,0,1,0,0,1])
+            corners=dae_corners(tree)[0]
+            self.assertEqual(corners[('VERTEX',None)],[(0,0,0),(1,0,0),(0,0,1)])
+            self.assertEqual(corners[('NORMAL',None)],[(0,-1,0)]*3)
+            self.assertEqual(corners[('TEXCOORD','0')],[(0,0),(1.5625,0),(0,1.5625)])
+            self.assertEqual(corners[('TEXCOORD','1')],[(0,0),(1,0),(0,1)])
             for value in tree.findall('.//c:image/c:init_from',ns):self.assertTrue((root/value.text).is_file())
             if shutil.which('usdcat'):
                 subprocess.run(['usdcat',str(root/'test_model.usda'),'-o',str(root/'test_model.usdc')],check=True,capture_output=True)
                 result=subprocess.run(['usdchecker','--arkit',str(root/'test_model.usdc')],capture_output=True,text=True)
                 self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         self.assertEqual(data,before)
+
+    def test_grouped_scene_transforms_and_shared_array_corners(self):
+        source=prepare(fixture())[0][1]
+        source['normals']=[[2**-.5,2**-.5,0]]*3
+        floors=[{'name':'Floor','elevation':4,'groups':[{'name':'Placed object','translation':[2,3,5],
+                 'scale':[2,3,4],'rotation':math.pi/2,'meshes':[source,source]}]}]
+        before=copy.deepcopy(floors)
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);result=export_physical_scene(floors,root,'scene')
+            self.assertTrue(all(p.is_file() for p in result['paths']))
+            tree=ET.parse(root/'scene.dae');corners=dae_corners(tree)
+            self.assertEqual(corners[0],corners[1])
+            for actual,wanted in zip(corners[0][('VERTEX',None)],[(2,-5,7),(2,-3,7),(2,-5,10)]):
+                for a,b in zip(actual,wanted):self.assertAlmostEqual(a,b,places=6)
+            normal=(0,3/math.sqrt(13),2/math.sqrt(13))
+            for a,b in zip(corners[0][('NORMAL',None)][0],normal):self.assertAlmostEqual(a,b,places=6)
+            ns={'c':'http://www.collada.org/2005/11/COLLADASchema'}
+            self.assertLess(len(tree.findall('.//c:float_array',ns)),len(tree.findall('.//c:source',ns)))
+            raw=(root/'scene.glb').read_bytes();length=struct.unpack_from('<I',raw,12)[0];glb=json.loads(raw[20:20+length])
+            self.assertEqual(glb['nodes'][0]['translation'],[0,4,0]);self.assertEqual(glb['nodes'][1]['scale'],[2,3,4])
+            if shutil.which('usdcat') and shutil.which('usdchecker'):
+                generated=package_physical_usd(root,'scene',usdcat=Path(shutil.which('usdcat')))
+                self.assertTrue(all(p.is_file() for p in generated['paths']))
+                check=subprocess.run(['usdchecker','--arkit',str(root/'scene.usdz')],capture_output=True,text=True)
+                self.assertEqual(check.returncode,0,check.stdout+check.stderr)
+        self.assertEqual(floors,before)
 
     def test_deterministic_export_and_explicit_legacy_opt_in(self):
         data=fixture()

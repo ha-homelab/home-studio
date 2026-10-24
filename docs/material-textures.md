@@ -223,6 +223,17 @@ FCOLLADA extension. Roughness/metalness and other PBR references are retained in
 `HOME_STUDIO_PBR` metadata because COLLADA 1.4.1 has no portable PBR shader.
 Use GLB or USD when full material interchange is required. Float attributes in
 these exports retain their exact float32 values; source model data is unchanged.
+COLLADA may use independent per-semantic index pools and document-wide shared
+float arrays; both are standard accessor features and retain every corner.
+
+Saved-scene migration can call `export_physical_scene(floors, root, stem)` with
+the grouped result of `export_floor`. Only supplied groups are emitted. GLB
+keeps group pivots; USD and COLLADA bake scale, rotation, translation and floor
+elevation, including inverse-transpose normal correction. The optional
+`package_physical_usd(root, stem, usdcat=absolute_path)` explicitly invokes a
+caller-supplied OpenUSD converter and creates aligned USDZ. Neither function
+discovers or installs external tools. Both return generated paths and the
+hash-bound texture manifest for the caller's receipt.
 
 All authoring files remain in the local compiler output. The HA package carries
 the runtime, linked model downloads and their complete texture dependencies;

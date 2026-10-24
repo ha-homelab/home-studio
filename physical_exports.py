@@ -8,8 +8,10 @@ import functools
 import hashlib
 import io
 import json
+import math
 import re
 import struct
+import subprocess
 import zipfile
 from pathlib import Path
 from xml.sax.saxutils import escape, quoteattr
@@ -63,6 +65,38 @@ def prepare(data):
 
 
 def export_physical_models(data, root, stem):
+    return _export_records(prepare(data), root, stem, data['title'])
+
+
+def export_physical_scene(floors, root, stem):
+    """Export only supplied scene groups; preserve GLB pivots and bake USD/DAE.
+
+    Accepts the exact grouped representation returned by export_floor. Texture
+    descriptors and physical repeats are already resolved by that boundary.
+    """
+    records = []
+    for fi, floor in enumerate(floors):
+        for gi, group in enumerate(floor['groups']):
+            sx, sy, sz = group['scale'];tx, ty, tz = group['translation']
+            if min(sx, sy, sz) <= 0:
+                raise ValueError('Physical export requires positive object scale')
+            c, s = math.cos(group['rotation']), math.sin(group['rotation'])
+            for mi, mesh in enumerate(group['meshes']):
+                vertices = [[tx+c*sx*x+s*sz*z, ty+sy*y+floor['elevation'], tz-s*sx*x+c*sz*z]
+                            for x, y, z in mesh['vertices']]
+                normals = []
+                for x, y, z in mesh['normals']:
+                    n = [c*x/sx+s*z/sz, y/sy, -s*x/sx+c*z/sz]
+                    length = math.hypot(*n) or 1
+                    normals.append([v/length for v in n])
+                source = {'name': 'f' + str(fi) + '_g' + str(gi) + '_m' + str(mi) + '_' + identifier(group['name']),
+                          'kind': 'scene', 'material': mesh.get('material_name', 'material')}
+                if 'surface_finish' in mesh:source['surface_finish'] = mesh['surface_finish']
+                records.append((source, {**mesh, 'vertices': vertices, 'normals': normals}))
+    return _export_records(records, root, stem, stem, scene=floors)
+
+
+def _export_records(records, root, stem, title, scene=None):
     if __package__:
         from .exporters import export_scene, MAX_EXPORT_BYTES
     else:
@@ -70,8 +104,8 @@ def export_physical_models(data, root, stem):
     root = Path(root)
     if identifier(stem) != stem:
         raise ValueError('Physical export requires a safe model stem')
-    records = prepare(data)
-    scene = [{'name': data['title'], 'elevation': 0, 'groups': [
+    grouped = scene is not None
+    scene = scene if grouped else [{'name': title, 'elevation': 0, 'groups': [
         {'name': source['name'], 'translation': [0, 0, 0], 'scale': [1, 1, 1],
          'rotation': 0, 'meshes': [mesh]} for source, mesh in records]}]
     # These shared serializers enforce all existing geometry/image/byte limits.
@@ -85,11 +119,12 @@ def export_physical_models(data, root, stem):
         gltf_mesh.update(name=source['name'], extras={'source_mesh': source['name'], 'source_material': source['material']})
     # Input meshes are already world-space. Retain the historical one-node-per-
     # mesh identity rather than exporting redundant identity-transform groups.
-    document['nodes'] = [{'name': source['name'], 'mesh': i,
-                          'extras': {'category': source['kind'], 'estimated': source.get('estimated', False),
-                                     'source_material': source['material']}}
-                         for i, (source, _) in enumerate(records)]
-    document['scenes'][0]['nodes'] = list(range(len(records)))
+    if not grouped:
+        document['nodes'] = [{'name': source['name'], 'mesh': i,
+                              'extras': {'category': source['kind'], 'estimated': source.get('estimated', False),
+                                         'source_material': source['material']}}
+                             for i, (source, _) in enumerate(records)]
+        document['scenes'][0]['nodes'] = list(range(len(records)))
     material_names = []
     for index, (material, names) in enumerate(zip(document['materials'], identities)):
         name = identifier(sorted(names)[0]) + '__' + str(index)
@@ -119,8 +154,9 @@ def export_physical_models(data, root, stem):
     def rename(match):
         return match[1] + material_names[int(match[2])]
     obj = re.sub(r'(?m)^(usemtl )material_(\d+)$', rename, obj)
-    object_names = iter(identifier(source['name']) for source, _ in records)
-    obj = re.sub(r'(?m)^o .*$', lambda _: 'o ' + next(object_names), obj)
+    if not grouped:
+        object_names = iter(identifier(source['name']) for source, _ in records)
+        obj = re.sub(r'(?m)^o .*$', lambda _: 'o ' + next(object_names), obj)
     mtl = re.sub(r'(?m)^(newmtl )material_(\d+)$', rename, mtl)
     (root / (stem + '.obj')).write_text(obj, encoding='utf-8')
     (root / (stem + '.mtl')).write_text(mtl, encoding='utf-8')
@@ -164,9 +200,50 @@ def export_physical_models(data, root, stem):
             raise ValueError('Export texture paths must not be symbolic links')
         path.write_bytes(raw)
     manifest = {'schema': 1, 'textures': {name: hashlib.sha256(raw).hexdigest() for name, raw in sorted(images.items())},
-                'source_meshes': len(records), 'source_materials': sorted(data['materials']),
+                'source_meshes': len(records), 'source_materials': sorted({s['material'] for s, _ in records}),
                 'limitations': 'COLLADA: diffuse texture, vertex normals and UV are portable; tangent normals and PBR scalar maps use documented extensions.'}
     (root / (stem + '.exports.json')).write_text(json.dumps(manifest, sort_keys=True, separators=(',', ':')) + '\n')
+    return {'manifest': root / (stem + '.exports.json'),
+            'paths': [root / (stem + '.' + ext) for ext in ('glb', 'obj', 'mtl', 'dae', 'usda', 'exports.json')]
+                     + [root / name for name in sorted(images)]}
+
+
+def package_physical_usd(root, stem, *, usdcat):
+    """Explicit optional OpenUSD conversion; never discover/install a tool."""
+    root, usdcat = Path(root), Path(usdcat)
+    if identifier(stem) != stem or not usdcat.is_absolute() or not usdcat.is_file():
+        raise ValueError('A safe model stem and explicit OpenUSD converter are required')
+    manifest_path = root / (stem + '.exports.json')
+    if manifest_path.is_symlink() or manifest_path.stat().st_size > 128 * 1024:
+        raise ValueError('Invalid physical export manifest')
+    manifest = json.loads(manifest_path.read_text())
+    textures = manifest.get('textures')
+    if manifest.get('schema') != 1 or not isinstance(textures, dict) or len(textures) > 256:
+        raise ValueError('Invalid physical export closure')
+    files, total = {}, 0
+    for name, digest in sorted(textures.items()):
+        if not isinstance(digest, str) or not re.fullmatch('[0-9a-f]{64}', digest) or name != stem + '.textures/' + digest + '.png':
+            raise ValueError('Invalid physical texture path')
+        path = root / name
+        if path.is_symlink() or path.parent.is_symlink():raise ValueError('Symbolic export texture path')
+        raw = path.read_bytes();total += len(raw)
+        if len(raw) > 1024 * 1024 or total > 16 * 1024 * 1024 or hashlib.sha256(raw).hexdigest() != digest:
+            raise ValueError('Physical texture closure changed')
+        files[name] = raw
+    source, binary, archive_path = [root / (stem + '.' + ext) for ext in ('usda', 'usdc', 'usdz')]
+    if any(path.is_symlink() for path in (source, binary, archive_path)):
+        raise ValueError('Symbolic USD export path')
+    subprocess.run([str(usdcat), str(source), '-o', str(binary)], check=True, capture_output=True, timeout=120)
+    raw = binary.read_bytes()
+    if not raw.startswith(b'PXR-USDC'):raise ValueError('OpenUSD did not produce a binary root layer')
+    with zipfile.ZipFile(archive_path, 'w') as archive:
+        for name, data in [(binary.name, raw), *files.items()]:
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            padding = (-(archive.fp.tell() + 30 + len(name.encode()))) % 64
+            if 0 < padding < 4:padding += 64
+            if padding:info.extra = struct.pack('<HH', 0x1986, padding - 4) + b'\0' * (padding - 4)
+            archive.writestr(info, data)
+    return {'manifest': manifest_path, 'paths': [binary, archive_path]}
 
 
 def write_usda(path, stem, records, materials, selected):
@@ -224,6 +301,7 @@ def write_usda(path, stem, records, materials, selected):
 
 
 def write_dae(path, stem, records, materials, selected):
+    shared_arrays = {}
     with path.open('w', encoding='utf-8') as file:
         def line(value): file.write(value + '\n')
         line('<?xml version="1.0" encoding="utf-8"?>\n<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1"><asset><contributor><authoring_tool>Home Studio physical export</authoring_tool></contributor><created>2026-10-24T00:00:00Z</created><modified>2026-10-24T00:00:00Z</modified><unit name="meter" meter="1"/><up_axis>Z_UP</up_axis></asset>')
@@ -256,16 +334,42 @@ def write_dae(path, stem, records, materials, selected):
                     if key == 'uv0' or channel in m['channels']:
                         scale = m['repeats'].get(channel, 1)
                         arrays.append((key, [[u * scale, v * scale] for u, v in mesh['uv']], 'ST'))
-            for name, values, axes in arrays:
-                line('<source id="' + id_ + '_' + name + '"><float_array id="' + id_ + '_' + name + '_array" count="' + str(len(values) * len(axes)) + '">' + ' '.join(number(v) for row in values for v in row) + '</float_array><technique_common><accessor source="#' + id_ + '_' + name + '_array" count="' + str(len(values)) + '" stride="' + str(len(axes)) + '">' + ''.join('<param name="' + axis + '" type="float"/>' for axis in axes) + '</accessor></technique_common></source>')
+            # Each semantic may use its own exact index pool. Select pooling
+            # only when its shorter arrays outweigh any extra corner indices.
+            encoded = [[tuple(number(v) for v in row) for row in values] for _, values, _ in arrays]
+            original_indices = ' '.join(map(str, mesh['indices']))
+            original_size = sum(len(' '.join(v for row in rows for v in row)) for rows in encoded) + len(original_indices)
+            pooled, sequences, offsets = [], [], []
+            for rows in encoded:
+                unique = {};remap = []
+                for row in rows:
+                    if row not in unique:unique[row] = len(unique)
+                    remap.append(unique[row])
+                pooled.append(list(unique))
+                sequence = tuple(remap[i] for i in mesh['indices'])
+                if sequence not in sequences:sequences.append(sequence)
+                offsets.append(sequences.index(sequence))
+            pooled_indices = ' '.join(str(sequence[i]) for i in range(len(mesh['indices'])) for sequence in sequences)
+            pooled_size = sum(len(' '.join(v for row in rows for v in row)) for rows in pooled) + len(pooled_indices)
+            if pooled_size < original_size:
+                encoded, index_text = pooled, pooled_indices
+            else:
+                offsets, index_text = [0] * len(arrays), original_indices
+            for (name, _, axes), rows in zip(arrays, encoded):
+                text = ' '.join(v for row in rows for v in row)
+                line('<source id="' + id_ + '_' + name + '">')
+                # COLLADA accessors may share an existing document-wide array.
+                # This preserves normal/UV seams while removing repeated data.
+                if text not in shared_arrays:
+                    shared_arrays[text] = 'a' + str(len(shared_arrays))
+                    line('<float_array id="' + shared_arrays[text] + '" count="' + str(len(rows) * len(axes)) + '">' + text + '</float_array>')
+                line('<technique_common><accessor source="#' + shared_arrays[text] + '" count="' + str(len(rows)) + '" stride="' + str(len(axes)) + '">' + ''.join('<param name="' + axis + '" type="float"/>' for axis in axes) + '</accessor></technique_common></source>')
             line('<vertices id="' + id_ + '_vertices"><input semantic="POSITION" source="#' + id_ + '_position"/></vertices><triangles material="material" count="' + str(len(mesh['indices']) // 3) + '">')
-            for name, _, _ in arrays:
+            for (name, _, _), offset in zip(arrays, offsets):
                 semantic = 'VERTEX' if name == 'position' else 'NORMAL' if name == 'normal' else 'TEXCOORD'
                 suffix = 'vertices' if name == 'position' else name
-                line('<input semantic="' + semantic + '" source="#' + id_ + '_' + suffix + '" offset="0"' + (' set="' + name[-1] + '"' if name.startswith('uv') else '') + '/>')
-            # All attribute arrays share this source's vertex index. COLLADA
-            # permits equal offsets, avoiding repeated copies of every index.
-            line('<p>' + ' '.join(map(str, mesh['indices'])) + '</p></triangles></mesh></geometry>')
+                line('<input semantic="' + semantic + '" source="#' + id_ + '_' + suffix + '" offset="' + str(offset) + '"' + (' set="' + name[-1] + '"' if name.startswith('uv') else '') + '/>')
+            line('<p>' + index_text + '</p></triangles></mesh></geometry>')
         line('</library_geometries><library_visual_scenes><visual_scene id="Scene">')
         for i, ((source, mesh), mi) in enumerate(zip(records, selected)):
             line('<node id="node_' + str(i) + '" name=' + quoteattr(source['name']) + '><instance_geometry url="#geometry_' + str(i) + '"><bind_material><technique_common><instance_material symbol="material" target="#' + materials[mi]['id'] + '"><bind_vertex_input semantic="UV0" input_semantic="TEXCOORD" input_set="0"/><bind_vertex_input semantic="UV1" input_semantic="TEXCOORD" input_set="1"/></instance_material></technique_common></bind_material></instance_geometry></node>')

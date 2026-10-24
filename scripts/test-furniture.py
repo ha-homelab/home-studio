@@ -243,6 +243,7 @@ class FurnitureTests(unittest.TestCase):
             dae = ET.parse(folder / (floor['id'] + '.dae'))
             ns = {'c': 'http://www.collada.org/2005/11/COLLADASchema'}
             dae_meshes = dae.findall('.//c:library_geometries/c:geometry', ns)
+            dae_ids = {node.get('id'): node for node in dae.iter() if node.get('id')}
             self.assertEqual(len(dae_meshes), len(export_data['meshes']))
             # OBJ pools are independently deduplicated and may use relative
             # indices. Compare ordered triangle corners rather than row counts.
@@ -268,8 +269,17 @@ class FurnitureTests(unittest.TestCase):
                     for value,want in zip(position,(x,-z,y)): self.assertLessEqual(abs(value-want),.000005000001)
                     x,y,z=mesh['normals'][index]; normal_length=math.sqrt(x*x+y*y+z*z)
                     for value,want in zip(normal,(x/normal_length,-z/normal_length,y/normal_length)): self.assertLessEqual(abs(value-want),.000050000001)
-                actual = [float(value) for value in dae_mesh.find('.//c:float_array', ns).text.split()]
-                expected = [f32(value) for x, y, z in mesh['vertices'] for value in (x, -z, y)]
+                triangles = dae_mesh.find('c:mesh/c:triangles', ns)
+                inputs = triangles.findall('c:input', ns)
+                corner_width = max(int(value.get('offset')) for value in inputs) + 1
+                position_input = next(value for value in inputs if value.get('semantic') == 'VERTEX')
+                vertices = dae_ids[position_input.get('source')[1:]]
+                source = dae_ids[vertices.find('c:input', ns).get('source')[1:]]
+                accessor = source.find('c:technique_common/c:accessor', ns)
+                values = list(map(float, dae_ids[accessor.get('source')[1:]].text.split()))
+                indices = list(map(int, triangles.find('c:p', ns).text.split()))[int(position_input.get('offset'))::corner_width]
+                actual = [value for index in indices for value in values[index*3:index*3+3]]
+                expected = [f32(value) for index in mesh['indices'] for x, y, z in [mesh['vertices'][index]] for value in (x, -z, y)]
                 self.assertEqual([f32(value) for value in actual], expected)
                 usd_vertices = [float(value) for value in re.findall(r'-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?', usd_point_text)]
                 expected = [f32(value) for point in mesh['vertices'] for value in point]
