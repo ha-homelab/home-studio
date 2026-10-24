@@ -76,8 +76,9 @@ class FurniturePatternTests(unittest.TestCase):
             self.assertEqual(build_furniture_asset({**item, 'pattern_id': 'none'}), asset)
             for index, part in enumerate(model['parts']):
                 unmarked = {key: value for key, value in part.items() if key != 'pattern_face'}
-                for key, value in primitive(unmarked).items():
-                    self.assertEqual(asset['meshes'][index][key], value)
+                for key in ('vertices', 'normals'):
+                    mesh=asset['meshes'][index]
+                    self.assertEqual([mesh[key][i] for i in mesh['indices']], primitive(unmarked)[key])
         for style in CATALOG['styles']:
             item = {**self.item, 'style_id': style['id'], 'pattern_id': 'dots', 'color': '#A1B2C3'}
             asset = build_furniture_asset(item)

@@ -107,7 +107,10 @@ if (process.argv.includes('--fixtures')) {
     assert.deepEqual(buildFurnitureAsset({ ...choice,pattern_id: 'none' }),plain,'explicit none preserves original geometry');
     for (const [index,part] of catalogModel.parts.entries()) {
       const stripped = { ...part }; delete stripped.pattern_face;
-      for (const key of ['vertices','normals','indices']) assert.deepEqual(plain.meshes[index][key],primitive(stripped)[key]);
+      // Exact tuple reuse treats +0 and -0 as the same numeric attribute.
+      // Preserve every other bit-level numeric difference in this comparison.
+      const unsignedZero=points=>points.map(p=>p.map(v=>v===0?0:v));
+      for (const key of ['vertices','normals']) assert.deepEqual(unsignedZero(plain.meshes[index].indices.map(i=>plain.meshes[index][key][i])),unsignedZero(primitive(stripped)[key]));
     }
     if (supportsFurniturePattern(catalogModel)) for (const pattern of PATTERNS.slice(1)) {
       const asset = buildFurnitureAsset({ ...choice,pattern_id: pattern.id });

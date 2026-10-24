@@ -128,9 +128,18 @@ class FurnitureTests(unittest.TestCase):
                         self.assertAlmostEqual(value, browser_value, places=12)
                 self.assertEqual(len(actual['meshes']), len(expected['meshes']))
                 for mesh, browser_mesh in zip(actual['meshes'], expected['meshes']):
-                    for key in ('name', 'indices', 'material', 'kind'):
+                    for key in ('name', 'material', 'kind', 'surface_finish', 'material_family'):
                         self.assertEqual(mesh[key], browser_mesh[key])
-                    self.assert_mesh_equal(mesh, browser_mesh)
+                    # Exact-tuple indexing may share a mathematically identical
+                    # corner differently across libm implementations. Compare
+                    # the complete ordered triangle stream, including UV seams.
+                    self.assertEqual(len(mesh['indices']), len(browser_mesh['indices']))
+                    for key in ('vertices', 'normals', 'uv'):
+                        dimensions = next(model['dimensions_m'] for model in CATALOG['models'] if model['id'] == fixture['item']['model_id'])
+                        precision = 2e-12 * (max(dimensions.values()) if key == 'uv' else 1)
+                        for i, j in zip(mesh['indices'], browser_mesh['indices']):
+                            for value, browser_value in zip(mesh[key][i], browser_mesh[key][j]):
+                                self.assertLessEqual(abs(value-browser_value), precision, 'Authored corner attributes match within their declared precision')
 
     def test_validation_legacy_and_invalid_appearance(self):
         legacy = json.loads((ROOT / 'planner/example-home.json').read_text())
@@ -173,7 +182,9 @@ class FurnitureTests(unittest.TestCase):
             angle = math.radians(item['rotation_deg'])
             for mesh, part in zip(meshes, normalized['meshes']):
                 self.assertEqual(mesh['material'], part['material'])
-                for point, local in zip(mesh['vertices'], part['vertices']):
+                self.assertEqual(len(mesh['indices']), len(part['indices']))
+                for world_index, local_index in zip(mesh['indices'], part['indices']):
+                    point, local = mesh['vertices'][world_index], part['vertices'][local_index]
                     x, y, z = local
                     d, p = item['dimensions_m'], item['position_m']
                     expected = [p['x'] + math.cos(angle)*x*d['width'] + math.sin(angle)*z*d['depth'],

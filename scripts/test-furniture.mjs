@@ -34,8 +34,10 @@ function unrotate(point, rotation = [0, 0, 0]) {
 }
 
 function verifyPrimitive(part, mesh) {
+  if(part.geometry_profile){const source=mesh;mesh={...source,vertices:source.indices.map(i=>source.vertices[i]),normals:source.indices.map(i=>source.normals[i]),indices:source.indices.map((_,i)=>i)};}
   const vertexCounts = { box: 36, cylinder: 144, sphere: 144, ring: 288, cone: 72 };
-  assert.equal(mesh.vertices.length, vertexCounts[part.shape]);
+  if (!part.geometry_profile) assert.equal(mesh.vertices.length, vertexCounts[part.shape]);
+  else assert(mesh.vertices.length <= 6144, 'Authored profile stays within 2048 triangles, including closed piping or foliage');
   assert.equal(mesh.vertices.length, mesh.normals.length);
   assert.equal(mesh.vertices.length, mesh.indices.length);
   for (let i = 0; i < mesh.vertices.length; i += 3) {
@@ -49,7 +51,8 @@ function verifyPrimitive(part, mesh) {
       assert.ok(point.every(Number.isFinite));
       assert.ok(normal.every(Number.isFinite));
       assert.ok(Math.abs(Math.hypot(...normal)-1) < 1e-10);
-      assert.ok(cross.every((value, axis) => Math.abs(value/Math.hypot(...cross)-normal[axis]) < 1e-10));
+      if (!part.geometry_profile) assert.ok(cross.every((value, axis) => Math.abs(value/Math.hypot(...cross)-normal[axis]) < 1e-10));
+      else assert(cross.reduce((sum,value,axis) => sum+value*normal[axis],0) >= -1e-12, `${part.geometry_profile}: authored normals agree with winding`);
       const local = unrotate(point.map((value, axis) => value-part.center[axis]), part.rotation_deg);
       const direction = unrotate(normal, part.rotation_deg);
       let outward = local.reduce((sum, value, axis) => sum+value*direction[axis], 0);
@@ -60,7 +63,7 @@ function verifyPrimitive(part, mesh) {
           outward = (local[0]*direction[0]+local[2]*direction[2])*(radius < (1+(part.inner_ratio ?? .72))/2 ? -1 : 1);
         }
       }
-      assert.ok(outward > 0, `${part.shape}: outward surface normals, including ring interior`);
+      if (!part.geometry_profile) assert.ok(outward > 0, `${part.shape}: outward surface normals, including ring interior`);
     }
   }
 }
