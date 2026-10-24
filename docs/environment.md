@@ -62,15 +62,31 @@ model.environment = {
 
 Without `enabled: true`, the layer allocates no geometry or materials and has no animation timer. Public compilation emits settings with both toggles off, bounds for all floors, and the lowest floor elevation relative to the current floor. This keeps the same landscape on the ground when switching upstairs. `window.floorplan.surroundings` and `window.planner.getPreviewMetadata().surroundings` expose diagnostic counts, paused/running status, and the traffic seed and current pass settings. A seed supplied to the layer, or through `settings.seed` in the compiled viewer, produces repeatable traffic. Palette or bounds rebuilds restart that sequence; pausing motion preserves its current position and arrival gaps.
 
-The layer uses shared `InstancedMesh` batches, flat unlit materials, no textures, no dynamic lighting and no shadow rendering. All five actors are allocated once on first enable. Palette changes replace and dispose that small resource set; animation reuses their instance transforms and color buffers. Cars briefly hide between passes instead of creating more actors. Each tick requests a motion frame through the existing renderer, preserving adaptive gesture throttling. The enclosing scene still incurs its normal rendering cost while motion is enabled, so static is the default.
+The layer uses fourteen shared `InstancedMesh` batches and nine physical material
+families. Trees have attached leaves and branches, cars have a continuous painted
+shell and distinct glazing, rubber tyres and metal hubs, and rabbits use the
+catalog's authored anatomy. The standard scene has 65,292 placed triangles.
+Materials receive the host's existing lights and optional shared physical detail
+through `decorateMaterial(material, family)`. Geometry casts and receives shadows
+when the host render profile enables them. The layer creates no lights, shadow
+maps, reflection probes or texture loaders of its own.
+
+All five actors are allocated once on first enable. Palette changes replace and
+dispose that resource set; animation reuses their instance transforms and color
+buffers. Cars briefly hide between passes instead of creating more actors. Each
+tick requests a motion frame through the existing renderer, preserving adaptive
+gesture throttling. The enclosing scene still incurs its normal rendering cost
+while motion is enabled, so static is the default.
 
 ## Verification
 
-The **Validate complete package** workflow runs both environment tests once in
+The **Validate complete package** workflow runs the environment tests once in
 its package job, after the existing browser-tool installation. The surrounding
 platform matrix continues to cover general rendering and navigation without
 repeating this dedicated Chromium scenario in every lane.
 
 - `node scripts/test-environment.mjs`: no allocation while off, bounded shared draw batches, full scenery envelopes outside both site edges, repeatable traffic across four seeds and repeated 30-minute simulations, varied speeds/gaps/rendered colors, unchanged actor and GPU buffer counts, preserved road side through settings and bounds rebuilds, visibility/reduced-motion/lifecycle pause, palette replacement and disposal.
 - `node scripts/test-environment-browser.cjs`: real garden placement, indoor/outdoor catalog items, unchanged camera fit, static idle rendering, reduced-motion pause, compiler metadata and Home controls. Set `ENVIRONMENT_SCREENSHOT_DIR` to save fictional-example screenshots.
+- `node scripts/test-environment-surfaces.mjs`: material families, draw/triangle bounds, metre UV scales, exact decoded rabbit GPU bytes and material disposal.
+- `python3 scripts/author-environment-animal.py --check`: reproducible catalog-to-scenery geometry; rerun without `--check` after changing the authored rabbit.
 - Existing furniture JS/Python, planner rendering budget and viewer lifecycle checks cover compatibility with catalog generation and on-demand rendering.

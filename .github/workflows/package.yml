@@ -144,6 +144,7 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-static-material-textures.cjs
       - name: Test optional garden surroundings and bounded decorative motion
         run: |
+          python3 scripts/author-environment-animal.py --check
           node scripts/test-environment.mjs
           node scripts/test-environment-surfaces.mjs
           node scripts/test-environment-browser.cjs
