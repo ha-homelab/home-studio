@@ -549,13 +549,21 @@ def viewer(client, origin, project, record, save):
             const iframe=document.createElement('iframe');
             iframe.id='viewer';iframe.sandbox='allow-scripts allow-downloads allow-forms';
             iframe.style.cssText='width:100%;height:740px;border:0';
-            iframe.onload=()=>{window.nativeViewer=iframe.contentWindow;const channel=new MessageChannel();window.viewerPort=channel.port1;
-              channel.port1.onmessage=e=>{if(e.data.type==='model_config')channel.port1.postMessage({type:'states',connected:true,states});};
+            iframe.onload=()=>{window.nativeViewer=iframe.contentWindow;const channel=new MessageChannel();window.viewerPort=channel.port1;window.viewerMapRequests=[];
+              channel.port1.onmessage=e=>{
+                if(e.data.type==='model_config')channel.port1.postMessage({type:'states',connected:true,states});
+                if(e.data.type==='map_request'){
+                  window.viewerMapRequests.push(e.data);
+                  channel.port1.postMessage({type:'map_result',request_id:e.data.request_id,
+                    ...(e.data.action==='get'?{success:true,result:{revision:0,configured:false,config:null,reference:{latitude:0,longitude:0}}}:
+                      {success:false,error:'Unsupported map request in the native fixture.'})});
+                }
+              };
               iframe.contentWindow.postMessage({type:'home-floorplan:init',items,preferences:{},can_edit:true},'*',[channel.port2]);window.fixtureLoaded=true;};
             iframe.srcdoc=html;document.body.append(iframe);}); return true;''', items, states, NATIVE_VIEWER_PROGRAM_DIAGNOSTICS + NATIVE_GL_DIAGNOSTICS, NATIVE_VIEWER_FRAME_DIAGNOSTICS))
                 load.wait('window.fixtureLoaded')
                 load.run(lambda: client.call('WebDriver:SwitchToFrame', {'id': 0}))
-                load.wait(f"window.floorplan?.renderCount>0 && window.floorplan.canEdit===true && document.querySelector('#homeConnection')?.dataset.connected==='true' && window.__nativeRenderedLights==={len(items)}")
+                load.wait(f"window.floorplan?.renderCount>0 && window.floorplan.canEdit===true && document.querySelector('#homeConnection')?.dataset.connected==='true' && document.querySelector('#homeMapAlign')?.hidden===false && window.__nativeRenderedLights==={len(items)}")
                 load.complete()
         finally:
             save()
