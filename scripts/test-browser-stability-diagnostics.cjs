@@ -6,7 +6,7 @@ const path = require('node:path');
 const {EventEmitter} = require('node:events');
 const vm = require('node:vm');
 const {test, after} = require('node:test');
-const {createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
+const {installViewerLoadDiagnostics, instrumentViewerLoadSource, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
 
 test('host phase timing closes sequential phases and preserves the timeout observation', () => {
   let now=100;
@@ -27,6 +27,96 @@ test('host phase timing closes sequential phases and preserves the timeout obser
   idle.freezeTimeout();assert.deepEqual(empty.timeoutPhase,{elapsedMs:0,activePhase:null});
 });
 
+test('cold-load diagnostics preserve all readiness predicates and bound synthetic event data', () => {
+  let now=12;
+  const nodes={'#homeConnection':{dataset:{connected:'true'}},'#homeMapAlign':{hidden:true},
+    '#homeMapStatus':{textContent:'Map settings unavailable. Home controls are still available.'},
+    '#homeMapCaption':{hidden:false},'#homeMapRetry':{hidden:false}};
+  const env={performance:{now:()=>now,timeOrigin:1000},document:{querySelector:id=>nodes[id]},
+    floorplan:{renderCount:2},__browserRenderedLights:72};env.window=env;
+  vm.runInNewContext(`(${installViewerLoadDiagnostics.toString()})({role:'frame',expectedLights:72})`,env);
+  const diagnostic=env.__viewerLoadDiagnostics;
+  diagnostic.trace('map-request',{request_id:'map-1',action:'get',pending:1,payload:{secret:'not recorded'},token:'not recorded'});
+  assert.equal(diagnostic.snapshot().pending[0].requestId,'map-1');
+  now=31013;assert.equal(diagnostic.snapshot().pending[0].ageMs,31001);
+  diagnostic.trace('map-timeout',{request_id:'map-1',pending:1});
+  diagnostic.trace('load-map-error',{error:new Error('Map request timed out.')});
+  let result=JSON.parse(JSON.stringify(diagnostic.snapshot()));
+  assert.deepEqual(result.readiness.predicates,{rendered:true,connected:true,mapAlign:false,lights:true});
+  assert.equal(result.readiness.ready,false);assert.equal(result.readiness.renderedLights,72);
+  assert.equal(result.events[2].atMs-result.events[1].atMs,31001);
+  assert.equal(result.events[2].epochMs,32013);
+  assert.equal(result.pending.length,0,'Timed-out requests are not reported as pending');
+  assert.equal(result.events[3].error.message,'Map request timed out.');
+  assert(!JSON.stringify(result).includes('not recorded'),'Transport payloads and arbitrary properties are never serialized');
+  nodes['#homeMapAlign'].hidden=false;
+  assert.equal(diagnostic.snapshot().readiness.ready,true);
+  env.floorplan.renderCount=0;nodes['#homeConnection'].dataset.connected='false';env.__browserRenderedLights=71;
+  assert.deepEqual(JSON.parse(JSON.stringify(diagnostic.snapshot().readiness.predicates)),{rendered:false,connected:false,mapAlign:true,lights:false});
+  for(let i=0;i<200;i++)diagnostic.trace('map-result',{request_id:'private-unexpected-id',action:'unknown'});
+  result=JSON.parse(JSON.stringify(diagnostic.snapshot()));
+  assert.equal(result.events.length,96);assert.equal(result.dropped,108);
+  assert(!JSON.stringify(result).includes('private-unexpected-id'));
+  diagnostic.reset();assert.equal(diagnostic.snapshot().events.length,1);assert.equal(diagnostic.snapshot().dropped,0);
+  for(let i=1;i<=40;i++)diagnostic.trace('map-request',{request_id:`map-${i}`,action:'private-action'});
+  assert.equal(diagnostic.snapshot().pending.length,32);assert(!JSON.stringify(diagnostic.snapshot()).includes('private-action'));
+  for(let i=0;i<100;i++)diagnostic.trace('map-result');
+  diagnostic.trace('map-close');assert.equal(diagnostic.snapshot().pending.length,0,'Pending state stays current even after the event cap');
+});
+
+test('exact transport instrumentation distinguishes timely replies from timeout and late unmatched replies', async () => {
+  const viewer=fs.readFileSync(path.join(__dirname,'..','viewer.js'),'utf8');
+  const home=fs.readFileSync(path.join(__dirname,'..','home-view.js'),'utf8');
+  const instrumented=instrumentViewerLoadSource(viewer+'\n'+home);
+  assert.equal(instrumented.status,'enabled');
+  const source=instrumented.html;
+  const comparison=instrumentViewerLoadSource(viewer,{comparison:true});
+  assert.equal(comparison.status,'unavailable');assert.match(comparison.reason,/anchor must occur once/);
+  assert.equal(comparison.html,viewer,'Unsupported old-source comparisons do not retain partial instrumentation');
+  assert.throws(()=>instrumentViewerLoadSource(viewer),/anchor must occur once/,'Missing production anchors fail closed');
+  assert.throws(()=>instrumentViewerLoadSource(viewer+'\n'+home+'\n'+home),/anchor must occur once/,'Duplicate production anchors fail closed');
+  const request=source.slice(source.indexOf('window.homeMapRequest='),source.indexOf('window.homeMapNavigationChanged='));
+  const response=source.slice(source.indexOf("  if(message?.type==='map_result'){"),source.indexOf("  if(message?.type==='dismiss_overlays')"));
+  const load=source.slice(source.indexOf('  async function loadMap(){'),source.indexOf('  const mapFields='));
+  for(const outcome of ['reply','timeout','configure-error']) {
+    const timers=new Map(),sent=[];let now=0;
+    const env={performance:{now:()=>now,timeOrigin:1000},document:{querySelector:()=>null},embedded:true,
+      bridge:{postMessage:message=>sent.push(message)},setTimeout:(callback,delay)=>{assert.equal(delay,30000);timers.set(1,callback);return 1;},
+      clearTimeout:id=>timers.delete(id),configureMap:()=>{if(outcome==='configure-error')throw new TypeError('Synthetic configure failure');},
+      refreshMapControls(){},refreshMapStatus(){}};env.window=env;
+    vm.runInNewContext(`(${installViewerLoadDiagnostics.toString()})({role:'frame',expectedLights:72});
+      const mapRequests=new Map();let mapSequence=0,mapLoading=false,mapSettingsError=false;
+      ${request}\n${load}\nglobalThis.load=loadMap;globalThis.receive=message=>{${response}};`,env);
+    const loading=env.load();assert.equal(sent.length,1);assert.equal(timers.size,1);
+    if(outcome==='timeout') {now=31000;timers.get(1)();}
+    env.receive({type:'map_result',request_id:sent[0].request_id,success:true,result:{revision:0,config:null}});
+    await loading;
+    const events=JSON.parse(JSON.stringify(env.__viewerLoadDiagnostics.snapshot().events));
+    assert.equal(events.find(event=>event.event==='map-result').matched,outcome!=='timeout');
+    const error=events.find(event=>event.event==='load-map-error');
+    if(outcome==='reply') {assert.equal(error,undefined);assert(events.some(event=>event.event==='load-map-complete'));assert.equal(timers.size,0);}
+    else assert.equal(error.error.message,outcome==='timeout'?'Map request timed out.':'Synthetic configure failure');
+    assert.equal(events.some(event=>event.event==='map-timeout'),outcome==='timeout');
+  }
+});
+
+test('shader timing observes existing calls without adding GL status queries', () => {
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  const start=source.indexOf('function instrumentation() {'),end=source.indexOf('// Serialized into the viewer frame.',start);
+  assert(start>0&&end>start);
+  let now=0,links=0,statusQueries=0;
+  const gl={getExtension:()=>null,getParameter:()=>16,LINK_STATUS:1,
+    linkProgram(){links++;now+=11;},getProgramParameter(){statusQueries++;now+=23;return true;}};
+  function Canvas(){};Canvas.prototype.getContext=()=>gl;Canvas.prototype.addEventListener=()=>{};
+  const env={HTMLCanvasElement:Canvas,performance:{now:()=>now},addEventListener:()=>{},console:{error(){},info(){}}};env.window=env;
+  vm.runInNewContext(source.slice(start,end)+'\ninstrumentation();',env);
+  const context=new env.HTMLCanvasElement().getContext('webgl2');context.linkProgram({});context.linkProgram({});
+  const stats=JSON.parse(JSON.stringify(env.__browserStability));
+  assert.equal(links,2);assert.equal(statusQueries,2,'No diagnostic-only GL synchronization queries');
+  assert.equal(stats.linkedPrograms,2);assert.equal(stats.shaderTiming.linkMs,22);assert.equal(stats.shaderTiming.statusMs,46);
+  assert.deepEqual(stats.shaderTiming.longestStatus,{startedMs:11,durationMs:23});
+});
+
 test('viewer host rejects unsupported map actions and records every unexpected command', () => {
   const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
   const start=source.indexOf('            channel.port1.onmessage = event => {');
@@ -34,6 +124,7 @@ test('viewer host rejects unsupported map actions and records every unexpected c
   assert(start>0&&end>start);
   const replies=[],env={states:{},viewerCommands:[],viewerMapRequests:[],deferMapReply:false,
     channel:{port1:{postMessage:message=>replies.push(JSON.parse(JSON.stringify(message)))}}};
+  const trace=[];env.__viewerLoadDiagnostics={trace:(event,detail)=>trace.push({event,...detail})};
   env.window=env;vm.runInNewContext(source.slice(start,end),env);
   const send=data=>env.channel.port1.onmessage({data});
   for(const type of ['model_config','view_preferences','map_view'])send({type});
@@ -43,6 +134,8 @@ test('viewer host rejects unsupported map actions and records every unexpected c
   env.deferMapReply=true;const count=replies.length;
   send({type:'map_request',action:'get',request_id:'deferred'});
   assert.equal(replies.length,count,'Only the intended delayed get is held');
+  assert.equal(trace.filter(event=>event.event==='host-map-request').length,2);
+  assert.equal(trace.filter(event=>event.event==='host-map-reply').length,1,'A held response cannot be recorded as sent');
   for(const action of ['save','tile','unknown']) {
     const message={type:'map_request',action,request_id:action};send(message);
     assert.equal(replies.at(-1).success,false);assert.equal(replies.at(-1).request_id,action);
