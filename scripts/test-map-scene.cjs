@@ -28,7 +28,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   const layer=context.createHomeMapLayer(THREE,scene,{polygons:[[[0,0],[10,0],[10,8],[0,8]]],requestTile:async()=>{active++;maxActive=Math.max(active,maxActive);requests++;await tick();active--;return {data_url:png};},loadTexture:async()=>{const texture=new THREE.Texture();texture.addEventListener('dispose',()=>disposedTextures++);return texture;},onChange:()=>changes++,onStatus:text=>status=text});
   layer.setConfig(config);
   const camera=new THREE.OrthographicCamera(-100,100,80,-80,.1,1e7);camera.position.set(3,200,-2);camera.up.set(0,0,-1);camera.lookAt(3,0,-2);camera.updateMatrixWorld();
-  async function settle(){for(let i=0;i<200&&layer.stats.inflight;i++)await tick();assert.equal(layer.stats.inflight,0);}
+  async function settle(target=layer){for(let i=0;i<200&&target.stats.inflight;i++)await tick();assert.equal(target.stats.inflight,0);}
   for(let i=0;i<18;i++){
     const span=50*2**(i%9);camera.left=-span+i*span;camera.right=span+i*span;camera.top=span;camera.bottom=-span;camera.updateProjectionMatrix();
     layer.render(camera,{width:1200,height:800},{coarse:true});await settle();layer.render(camera,{width:1200,height:800},{coarse:true});
@@ -41,7 +41,26 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   layer.setActive(false);assert.equal(layer.object.visible,false);layer.dispose();assert.equal(scene.children.length,0);assert.equal(layer.stats.cached,0);
   // Old requests must not install textures after an alignment change or teardown.
   let release;const stale=context.createHomeMapLayer(THREE,scene,{requestTile:()=>new Promise(resolve=>{release=resolve;}),loadTexture:async()=>new THREE.Texture()});stale.setConfig(config);stale.render(camera,{width:500,height:500});await tick();stale.dispose();release?.({data_url:png});await tick();assert.equal(scene.children.length,0);
-  console.log('PASS: map coordinates, north rotation, dateline/pole tile indices, LOD, four-request limit, cache eviction and disposal.');
+  // A failed tile stays visible as a recoverable error even when its 15 neighbors load.
+  const attempts=new Map();let failedKey,failTile=true,recoveryStatus,recoveryActive=0,recoveryMax=0;
+  const recovery=context.createHomeMapLayer(THREE,scene,{requestTile:async tile=>{
+    const key=`${tile.z}/${tile.x}/${tile.y}`;failedKey??=key;attempts.set(key,(attempts.get(key)||0)+1);recoveryMax=Math.max(recoveryMax,++recoveryActive);
+    await tick();recoveryActive--;if(key===failedKey&&failTile)throw Error('Transient tile failure');return {data_url:png};
+  },loadTexture:async()=>new THREE.Texture(),onStatus:(text,retry)=>recoveryStatus={text,retry}});
+  camera.left=camera.bottom=-350;camera.right=camera.top=350;camera.updateProjectionMatrix();recovery.setConfig(config);
+  recovery.render(camera,{width:1200,height:1200});await settle(recovery);
+  assert.equal(recovery.stats.visible,16);assert.equal(recovery.stats.loaded,15);assert.equal(recoveryStatus.retry,true);assert.match(recoveryStatus.text,/Some map tiles/);
+  for(let i=0;i<10;i++){recovery.render(camera,{width:1200,height:1200});await tick();}
+  assert.equal(attempts.get(failedKey),1,'Redraws must not automatically retry a failed tile');
+  camera.left+=5000;camera.right+=5000;camera.updateProjectionMatrix();recovery.render(camera,{width:1200,height:1200});await settle(recovery);
+  assert.equal(recoveryStatus.text,'','A cached failure outside the viewport must not mark loaded tiles as unavailable');
+  camera.left-=5000;camera.right-=5000;camera.updateProjectionMatrix();recovery.render(camera,{width:1200,height:1200});
+  assert.equal(recoveryStatus.retry,true);assert.equal(attempts.get(failedKey),1,'Returning to the failed tile still requires explicit retry');
+  failTile=false;const beforeRetry=new Map(attempts);recovery.clearFailures();recovery.clearFailures();await settle(recovery);
+  assert.equal(attempts.get(failedKey),2,'Explicit retry reloads the failed tile exactly once, including repeated clicks while pending');
+  for(const [key,count] of beforeRetry)if(key!==failedKey)assert.equal(attempts.get(key),count,'Healthy cached tiles are retained');
+  assert.equal(recoveryStatus.text,'');assert.equal(recoveryStatus.retry,false);assert(recoveryMax<=4&&recovery.stats.cached<=48&&recovery.stats.visible<=36);recovery.dispose();
+  console.log('PASS: map coordinates, north rotation, dateline/pole tile indices, LOD, four-request limit, cache eviction, explicit tile recovery and disposal.');
   if(process.argv.includes('--unit-only'))return;
   const temporary=fs.mkdtempSync(path.join(os.tmpdir(),'home-map-test-'));let browser,server;
   try{
@@ -119,8 +138,29 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
     const saves=await page.evaluate(()=>mapSaves);assert.equal(saves.length,1);assert.equal(saves[0].revision,1);assert.equal(saves[0].config.north_deg,25.05);
     await page.locator('#homeMapHome').click();await page.waitForFunction(()=>window.__mapTest.mapStats.inflight===0);
     const idle=await page.evaluate(()=>({renders:floorplan.renderCount,requests:mapRequests.length}));await page.waitForTimeout(250);const after=await page.evaluate(()=>({renders:floorplan.renderCount,requests:mapRequests.length}));assert.deepEqual(after,idle,'Idle map runs no animation/request loop');
+    await page.evaluate(png=>{
+      const config=mapSaves[0].config;window.recoveryTileAttempts={};window.recoveryKey=null;window.recoveryFail=true;
+      window.__mapTest.configureMap({revision:3,configured:false,config:null});
+      window.__mapTest.applyNavigationState({mode:'map',zoom:.035,rotation:0,tilt:0,pan_x:0,pan_y:0});
+      window.homeMapRequest=async(action,tile)=>{
+        if(action!=='tile')return {revision:4,configured:true,config};
+        const key=`${tile.z}/${tile.x}/${tile.y}`;window.recoveryKey??=key;recoveryTileAttempts[key]=(recoveryTileAttempts[key]||0)+1;
+        if(key===recoveryKey&&recoveryFail)throw Error('Transient tile failure');return {data_url:png};
+      };
+      window.__mapTest.configureMap({revision:4,configured:true,config});
+    },png);
+    await page.waitForFunction(()=>window.__mapTest.mapStats.inflight===0&&window.__mapTest.mapStats.loaded>0);
+    assert.equal(await page.evaluate(()=>window.__mapTest.mapStats.loaded),await page.evaluate(()=>window.__mapTest.mapStats.visible-1));
+    assert.match(await page.locator('#homeMapStatus').textContent(),/Some map tiles/);assert.equal(await page.locator('#homeMapRetry').isVisible(),true,'A partial map failure exposes Retry map');
+    await page.evaluate(()=>{for(let i=0;i<10;i++)window.renderModel();});await page.waitForTimeout(100);
+    assert.equal(await page.evaluate(()=>recoveryTileAttempts[recoveryKey]),1,'Rendering a partial map does not run an automatic retry loop');
+    await page.evaluate(()=>{recoveryFail=false;});await page.locator('#homeMapRetry').click();
+    await page.waitForFunction(()=>window.__mapTest.mapStats.inflight===0&&recoveryTileAttempts[recoveryKey]===2);
+    assert.equal(await page.locator('#homeMapRetry').isVisible(),false);assert.equal(await page.locator('#homeMapStatus').textContent(),'');
+    assert.equal(await page.evaluate(()=>Object.entries(recoveryTileAttempts).every(([key,count])=>count===(key===recoveryKey?2:1))),true,'Retry preserves all healthy tile requests');
+    await page.locator('#homeMapHome').click();
     // Family view permissions are still derived from the authenticated host init.
-    await page.evaluate(()=>{window.__mapTest.configureMap({revision:3,configured:false,config:null});});
+    await page.evaluate(()=>{window.__mapTest.configureMap({revision:5,configured:false,config:null});});
     assert.equal(await page.locator('#homeMapOverview').isVisible(),false);assert.equal(await page.evaluate(()=>window.__mapTest.exportNavigationState().zoom),1);
     await page.evaluate(()=>{window.homeMapRequest=async()=>{throw Error('offline');};return window.__mapTest.loadMap();});
     assert.match(await page.locator('#homeMapStatus').textContent(),/unavailable/);assert.equal(await page.locator('#homeMapOverview').isVisible(),false);

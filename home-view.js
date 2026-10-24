@@ -256,7 +256,7 @@ homeView = (() => {
     if(!mapLayer&&renderer&&typeof createHomeMapLayer==='function')mapLayer=createHomeMapLayer(THREE,scene,{
       elevation:-(model.elevation_m||0)-.08,polygons:model.rooms.map(room=>room.polygon.map(([x,z])=>[xm(x),zm(z)])),
       requestTile:payload=>window.homeMapRequest('tile',payload),onChange:()=>window.requestModelRender?.(),
-      onStatus:text=>{$('homeMapStatus').textContent=text;$('homeMapRetry').hidden=!text.startsWith('Map unavailable');}
+      onStatus:(text,retry)=>{$('homeMapStatus').textContent=text;$('homeMapRetry').hidden=!retry;}
     });
     if(!mapDraft)mapLayer?.setConfig(config);
     if(pendingMapNavigation&&mapAvailable()){const state=pendingMapNavigation;pendingMapNavigation=null;applyNavigationState(state);}

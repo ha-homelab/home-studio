@@ -41,11 +41,12 @@ function createHomeMapLayer(THREE,scene,options={}) {
   const marker=new THREE.Mesh(new THREE.RingGeometry(.55,.85,24),new THREE.MeshBasicMaterial({color:0x5ad9ff,depthTest:false,side:THREE.DoubleSide}));
   const markerOutline=new THREE.Mesh(new THREE.RingGeometry(.48,1.08,24),new THREE.MeshBasicMaterial({color:0x102833,depthTest:false,side:THREE.DoubleSide}));
   marker.rotation.x=markerOutline.rotation.x=-Math.PI/2;marker.renderOrder=6;markerOutline.renderOrder=5;group.add(markerOutline,marker);
-  let config=null,disposed=false,active=false,revision=0,desired=[],inflight=0,clock=0,failed=0,lastStatus='',lastFrame=null;
+  let config=null,disposed=false,active=false,revision=0,desired=[],inflight=0,clock=0,lastStatus='',lastFrame=null;
   const textureLoader=options.loadTexture||((url)=>new Promise((resolve,reject)=>new THREE.TextureLoader().load(url,resolve,undefined,reject)));
   function status(){
-    const ready=desired.filter(d=>cache.get(d.key)?.texture).length,message=ready?'':inflight?'Loading map…':failed?'Map unavailable. Home controls are still available.':'';
-    if(message!==lastStatus){lastStatus=message;options.onStatus?.(message);}
+    const ready=desired.filter(d=>cache.get(d.key)?.texture).length,failed=desired.some(d=>cache.get(d.key)?.failed);
+    const message=failed?(ready?'Some map tiles are unavailable. Retry map to reload them.':'Map unavailable. Home controls are still available.'):inflight&&ready<desired.length?'Loading map…':'';
+    if(message!==lastStatus){lastStatus=message;options.onStatus?.(message,failed);}
   }
   function remove(entry){entry.mesh?.geometry.dispose();entry.mesh?.material.dispose();if(entry.mesh)tileGroup.remove(entry.mesh);entry.texture?.dispose();cache.delete(entry.key);}
   function trim(){
@@ -84,7 +85,7 @@ function createHomeMapLayer(THREE,scene,options={}) {
         if(disposed||generation!==revision){texture.dispose();return;}
         texture.colorSpace=THREE.SRGBColorSpace;texture.generateMipmaps=false;texture.minFilter=THREE.LinearFilter;texture.magFilter=THREE.LinearFilter;
         entry.texture=texture;entry.failed=false;
-      }).catch(()=>{if(!disposed&&generation===revision){entry.failed=true;failed++;}}).finally(()=>{
+      }).catch(()=>{if(!disposed&&generation===revision){entry.failed=true;}}).finally(()=>{
         entry.loading=false;inflight--;
         if(disposed)return;
         trim();pump();status();options.onChange?.();
@@ -98,7 +99,7 @@ function createHomeMapLayer(THREE,scene,options={}) {
     // Geographic tile pixels do not change when the model anchor rotates/moves.
     // Keep their requests and textures; only rebuild their world placement.
     if(config?.enabled){for(const entry of cache.values())entry.worldX=undefined;}
-    else{revision++;failed=0;for(const entry of [...cache.values()])remove(entry);}
+    else{revision++;for(const entry of [...cache.values()])remove(entry);}
     group.visible=active&&!!config?.enabled;
   }
   function render(camera,rect,{visible=true,coarse=false,editing=false}={}){
@@ -115,7 +116,7 @@ function createHomeMapLayer(THREE,scene,options={}) {
     pump();
   }
   return {get object(){return group;},setConfig,render,pointAt,setActive(value){active=value;group.visible=value&&!!config?.enabled;},
-    clearFailures(){failed=0;for(const entry of [...cache.values()])if(entry.failed)remove(entry);pump();},
+    clearFailures(){for(const entry of [...cache.values()])if(entry.failed)remove(entry);pump();},
     get config(){return config;},get stats(){return {cached:cache.size,inflight,visible:desired.length,loaded:[...cache.values()].filter(e=>e.texture).length};},
     releaseGPU(){for(const entry of cache.values())if(entry.texture){entry.texture.dispose();entry.texture.needsUpdate=true;}},
     dispose(){disposed=true;revision++;for(const entry of [...cache.values()])remove(entry);footprint.children.forEach(line=>line.geometry.dispose());outlineMaterial.dispose();marker.geometry.dispose();marker.material.dispose();markerOutline.geometry.dispose();markerOutline.material.dispose();scene.remove(group);}};
