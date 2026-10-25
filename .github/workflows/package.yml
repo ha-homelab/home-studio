@@ -80,6 +80,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '22'
+      - name: Verify camera tours and bounded local recording
+        run: node --test scripts/test-camera-tour.mjs scripts/test-camera-tour-recording.mjs scripts/test-camera-tour-session-contract.mjs scripts/test-camera-tour-hosts.cjs
       - name: Verify geographic map math
         run: node scripts/test-map-scene.cjs --unit-only
       - name: Verify site geometry, compilation and isolated AI drafts
@@ -126,6 +128,11 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           npx playwright install --with-deps chromium firefox webkit
+      - name: Test camera tours and local video in three browser engines
+        run: |
+          for engine in chromium firefox webkit; do
+            CAMERA_TOUR_ENGINE="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-camera-tour-browser.cjs || exit 1
+          done
       - name: Test geographic map navigation in three browser engines
         run: |
           node --test scripts/test-ha-map-bridge.cjs

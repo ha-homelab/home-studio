@@ -78,8 +78,9 @@ still build, play and export the route as JSON.
 
 Recordings are bounded to two minutes and 64 MiB. The recorder stops when its
 duration limit is reached, the page becomes hidden or the video track ends.
-Rendering/capture errors, loss of the graphics context and recordings above
-the size limit discard incomplete output. Avoid changing the viewport size or
+Capture or encoding errors, loss of the graphics context and recordings above
+the size limit discard incomplete output. A camera-navigation error stops the
+route and finishes the current recording when the encoder can still complete it. Avoid changing the viewport size or
 switching pages during a take; recording is a live capture and follows the
 browser's rendering performance.
 

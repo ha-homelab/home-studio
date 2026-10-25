@@ -227,6 +227,16 @@ homeView = (() => {
     return state;
   }
   function notifyMapNavigation(){if(!mapDraft)window.homeMapNavigationChanged?.(exportNavigationState());}
+  function captureTourPose(){
+    if(mapDraft||zoom<.65)throw Error(vt('Return to the house view before saving a camera view.'));
+    return {type:'home',floorId:'viewer:'+model.id,room:selected,rotation:homeRotation,tilt:homeTilt,zoom,pan:[panX,panY]};
+  }
+  function applyTourPose(pose){
+    if(pose.type!=='home'||pose.floorId!=='viewer:'+model.id||pose.room&&!model.rooms.some(room=>room.id===pose.room))throw Error(vt('This view belongs to another plan.'));
+    if(selected!==pose.room){hideMediaControls();cancelNativePress();clearActivityLocation();selected=pose.room;signalZone='';$('homeRoom').value=selected;refreshControls();}
+    // Tour playback does not persist navigation or dispatch device commands.
+    applyNavigationState({mode:'model',rotation:Math.atan2(Math.sin(pose.rotation),Math.cos(pose.rotation)),tilt:pose.tilt,zoom:Math.max(.65,pose.zoom),pan_x:pose.pan[0],pan_y:pose.pan[1]});
+  }
   function applyNavigationState(value){
     if(!value||!['map','model'].includes(value.mode))return;
     for(const key of ['zoom','rotation','tilt','pan_x','pan_y'])if(!Number.isFinite(value[key]))return;
@@ -408,6 +418,7 @@ homeView = (() => {
     environmentLayer?.setActive(!renderLost&&!renderSuspended);
     if(lowerFloorContext)lowerFloorContext.visible=value&&showLowerFloor&&!selected;
     document.body.classList.toggle('home-mode', value); $('homeView').hidden = !value;
+    syncViewerTours();
     if (renderer) {
       (value ? $('homeStage') : $('view3d')).prepend(renderer.domElement);
       scene.background = new THREE.Color(value ? '#18242c' : '#e7e8df');
@@ -1124,6 +1135,6 @@ homeView = (() => {
     $('homeToggleControls').textContent=vt(controlsCollapsed?'Show controls':'Hide controls');
     for(const label of labels)label.el.setAttribute('aria-label',vt('Focus room')+': '+roomName(label.room));
   }
-  return {get active(){return active},get mapStats(){return mapLayer?.stats;},configureMap,loadMap,exportNavigationState,applyNavigationState,releaseGPU(){roomLighting?.releaseGPU();mapLayer?.releaseGPU();},dispose(){cancelNativePress();roomLighting?.dispose();presenceView?.dispose();vacuumView?.dispose();mapLayer?.dispose();},dismissOverlays,refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
+  return {get active(){return active},get mapStats(){return mapLayer?.stats;},configureMap,loadMap,exportNavigationState,applyNavigationState,captureTourPose,applyTourPose,releaseGPU(){roomLighting?.releaseGPU();mapLayer?.releaseGPU();},dispose(){cancelNativePress();roomLighting?.dispose();presenceView?.dispose();vacuumView?.dispose();mapLayer?.dispose();},dismissOverlays,refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
     get illuminated(){return points.filter(p=>p.overlay?.visible && active).map(p=>p.item.id)}};
 })();

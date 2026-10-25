@@ -36,7 +36,7 @@ export function createCameraTourPanel({ container, tour, t = value => value, rec
   add.classList.add('camera-tour-primary');
   const list = element('ol', '', 'camera-tour-list'); list.setAttribute('aria-label', label('Saved views'));
   const empty = element('p', label('Move the camera to your first viewpoint and save it.'), 'camera-tour-empty');
-  const note = element('p', label('Seconds sets travel time to the next view; the last view holds. Changes of floor, room, or view mode use a cut.'), 'camera-tour-help');
+  const note = element('p', label('Seconds sets travel time to the next view; the last view holds. Changes of floor or room use a cut.'), 'camera-tour-help');
   const transport = element('div', '', 'camera-tour-actions');
   const play = button('Play', () => tour.play()), pause = button('Pause', () => tour.pause()), stop = button('Stop', () => tour.stop());
   transport.append(play, pause, stop);
@@ -67,6 +67,8 @@ export function createCameraTourPanel({ container, tour, t = value => value, rec
   const recordButton = typeof record === 'function' ? button('Record video', () => record()) : null;
   if (recordButton) files.append(recordButton);
   const status = element('p', '', 'camera-tour-status'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+  // Route shortcuts must not reach the underlying house editor.
+  panel.addEventListener('keydown', event => event.stopPropagation());
   panel.append(header, help, storage, add, empty, list, note, transport, meter, files, status); container.append(panel);
 
   function makeRow(view, index) {

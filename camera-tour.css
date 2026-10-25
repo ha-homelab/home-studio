@@ -1,3 +1,9 @@
+/* Floating tools never resize the plan or enter the captured canvas. */
+.camera-tour-host { position: fixed; z-index: 60; inset: 90px 16px auto auto;
+  width: min(380px, calc(100vw - 32px)); max-height: calc(100vh - 106px); overflow: auto; }
+.camera-tour-host[hidden] { display: none !important; }
+.camera-tour-download { display: block; padding: 12px; background: #fcfdfb; color: #23645a;
+  border-radius: 8px; margin-top: 8px; font: 14px/1.45 system-ui, sans-serif; }
 .camera-tour-panel {
   box-sizing: border-box; width: min(100%, 380px); max-height: 85vh; overflow: auto;
   padding: 16px; color: #172a30; background: #fcfdfb; border: 1px solid #ccd6d1;

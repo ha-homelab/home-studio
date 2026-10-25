@@ -1,3 +1,4 @@
+import { installPlannerTour } from './camera-tour-adapter.js';
 import './language-links.js';
 import {PBR_COLOR_DATA} from '../pbr-color-data.js';
 import {createPBRDetails,applyMaterialPBR,installInstanceMaterialUV} from '../pbr-materials.js';
@@ -122,7 +123,7 @@ let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, space
 let canvasFrame = 0, canvasSuspended = false, planFrameRequested = false;
 // Optional integrations render a detached candidate; project/history/storage always
 // retain the accepted document. The ordinary editor imports no AI code.
-let candidatePreview = null, editorRevision = 0, siteEditor = null;
+let candidatePreview = null, editorRevision = 0, siteEditor = null, cameraTour = null;
 const editorListeners = new Set();
 function editorChanged() {
   candidatePreview = null; editorRevision++; previewDirty = true;
@@ -760,6 +761,7 @@ function setView(next) {
   if (drag) finishPointer(null, true);
   releasePreviewPointer();
   view = next;
+  cameraTour?.refresh();
   previewEnvironment?.setActive(next !== 'plan' && !previewLost && !canvasSuspended);
   if (!haSourcePolicy || siteEditor?.active) {
     for (const mode of ['plan', 'preview', 'split']) {
@@ -1265,7 +1267,7 @@ function drawPreview() {
   // Setting canvas dimensions, even to the same values, resets its drawing buffer.
   if (nextSize !== previewSize) { renderer.setDrawingBufferSize(width, height, ratio); previewSize = nextSize; camera.aspect = width / height; camera.updateProjectionMatrix(); }
   const far = Math.max(1500, orbit.radius * 4); if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); }
-  const horiz = Math.cos(orbit.pitch) * orbit.radius; camera.position.set(orbit.target.x + Math.cos(orbit.yaw) * horiz, orbit.target.y + Math.sin(orbit.pitch) * orbit.radius, orbit.target.z + Math.sin(orbit.yaw) * horiz); camera.lookAt(orbit.target); renderer.render(scene, camera);if(!orbit.pointers.size&&!previewEdit)previewContact?.apply(scene,camera); previewMetadata.renderCount = (previewMetadata.renderCount || 0) + 1;
+  const horiz = Math.cos(orbit.pitch) * orbit.radius; camera.position.set(orbit.target.x + Math.cos(orbit.yaw) * horiz, orbit.target.y + Math.sin(orbit.pitch) * orbit.radius, orbit.target.z + Math.sin(orbit.yaw) * horiz); camera.lookAt(orbit.target); renderer.render(scene, camera);if(!orbit.pointers.size&&!previewEdit&&renderer.domElement?.dataset?.cameraTourPlaying!=='true')previewContact?.apply(scene,camera); previewMetadata.renderCount = (previewMetadata.renderCount || 0) + 1;
   const corners = previewFloors().flatMap(f => {
     const b = floorBounds(f), out = [];
     for (const x of [b.minX, b.maxX]) for (const z of [b.minZ, b.maxZ]) for (const y of [f.elevation_m, f.elevation_m + f.height_m]) out.push(new THREE.Vector3(x, y, z).project(camera));
@@ -2017,3 +2019,27 @@ function renderAreaDevices(parent, room) {
   });
   add.disabled = entities.length === 0; parent.append(add);
 }
+
+// Navigation metadata is never written into the house project or HA Store.
+cameraTour = installPlannerTour({ button: $('preview-tour'), parent: $('preview-view'), t,
+  available: () => canNavigatePreview() && !previewEdit && !candidatePreview,
+  canvas: () => renderer?.domElement, render: () => renderPreview(),
+  report: message => status(message, true),
+  capture() {
+    if (!canNavigatePreview()) throw Error(t('Open the 3D preview to use a camera tour.'));
+    return { type: 'perspective', floorId: 'planner:' + activeFloorId,
+      yaw: orbit.yaw, pitch: orbit.pitch, radius: orbit.radius,
+      target: [orbit.target.x, orbit.target.y, orbit.target.z] };
+  },
+  apply(pose) {
+    const targetFloor = project.floors.find(f => 'planner:' + f.id === pose.floorId);
+    if (pose.type !== 'perspective' || !targetFloor || pose.target.some(v => Math.abs(v) > 10000)) throw Error(t('This view belongs to another plan.'));
+    if (activeFloorId !== targetFloor.id) {
+      activeFloorId = targetFloor.id; selection = null; previewDirty = true; renderUI();
+      requestCanvasRender();
+    }
+    orbit.yaw = previewYaw(pose.yaw); orbit.pitch = previewPitch(pose.pitch);
+    orbit.radius = previewRadius(pose.radius); orbit.target.set(...pose.target);
+    requestPreviewRender();
+  },
+});

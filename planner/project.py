@@ -538,6 +538,21 @@ def compiled_site_context(site, floor_elevation):
             "features": copy.deepcopy(site["features"])}
 
 
+def camera_tour_module():
+    """Bundle optional tools into one lazy offline ES module without global leaks."""
+    modules = []
+    for name in ("camera-tour.js", "camera-tour-recording.js", "camera-tour-panel.js", "camera-tour-session.js"):
+        source = (ROOT / name).read_text(encoding="utf-8")
+        names = re.findall(r"^export (?:async )?(?:function|const|class) ([A-Za-z_][A-Za-z0-9_]*)", source, flags=re.M)
+        if not names:
+            raise ValueError("Camera tour module has no named exports: " + name)
+        source = re.sub(r"^import .*?;\n", "", source, flags=re.M)
+        source = re.sub(r"^export ", "", source, flags=re.M)
+        modules.append("const {" + ",".join(names) + "}=(()=>{\n" + source + "\nreturn {" + ",".join(names) + "};})();")
+    modules.append("export {createCameraTourSession};")
+    return base64.b64encode("\n".join(modules).encode()).decode()
+
+
 def render_viewer(data, svg):
     template = (ROOT / "viewer.template.html").read_text(encoding="utf-8")
     # Saved model downloads represent the built project. The editable viewer
@@ -548,6 +563,9 @@ def render_viewer(data, svg):
         "__VIEWER_I18N_JS__": (ROOT / "viewer-i18n.js").read_text(encoding="utf-8"),
         "__VIEWER_I18N_DATA__": viewer_i18n.replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"),
         "__VIEWER_JS__": (ROOT / "viewer.js").read_text(encoding="utf-8"),
+        "/*__CAMERA_TOUR_VIEWER_JS__*/": (ROOT / "camera-tour-viewer.js").read_text(encoding="utf-8"),
+        "__CAMERA_TOUR_MODULE_B64__": camera_tour_module(),
+        "__CAMERA_TOUR_CSS__": (ROOT / "camera-tour.css").read_text(encoding="utf-8"),
         "__HOME_HTML__": (ROOT / "home-view.html").read_text(encoding="utf-8"),
         "__HOME_CSS__": (ROOT / "home-view.css").read_text(encoding="utf-8"),
         "__HOME_JS__": "\n".join((ROOT / name).read_text(encoding="utf-8") for name in ("curtain-state.js", "motion-state.js", "appliance-state.js", "presence-view.js", "vacuum-state.js", "vacuum-view.js", "tv-screen.js", "camera-preview.js", "media-preview.js", "assumed-zone-view.js", "map-layer.js", "home-view.js")),
@@ -570,7 +588,7 @@ def render_viewer(data, svg):
     }
     # Expand source fragments before inserting user text, so a title resembling a
     # template token cannot trigger a replacement inside the model or HTML.
-    source_tokens = {k: v for k, v in replacements.items() if k.endswith(("_JS__", "_JS__*/")) or k in {"__HOME_HTML__", "__HOME_CSS__"}}
+    source_tokens = {k: v for k, v in replacements.items() if k.endswith(("_JS__", "_JS__*/")) or k in {"__HOME_HTML__", "__HOME_CSS__", "__CAMERA_TOUR_CSS__"}}
     token = re.compile("|".join(map(re.escape, replacements)))
     while any(key in template for key in source_tokens):
         template = token.sub(lambda m: source_tokens.get(m.group(), m.group()), template)
