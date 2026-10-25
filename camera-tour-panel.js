@@ -28,7 +28,7 @@ export function createCameraTourPanel({ container, tour, t = value => value, rec
   }
   const panel = element('section', '', 'camera-tour-panel'); panel.setAttribute('aria-label', label('Camera tour'));
   const header = element('header', '', 'camera-tour-header');
-  const close = button('Close', () => { tour.stop(); onClose?.(); }, 'Close camera tour');
+  const close = button('Close', () => typeof onClose === 'function' ? onClose() : tour.stop(), 'Close camera tour');
   header.append(element('h2', label('Camera tour')), close);
   const help = element('p', label('Save views, arrange their order, then play or record the route.'), 'camera-tour-help');
   const storage = element('p', label('Views stay in this tab. Export the route to keep it.'), 'camera-tour-help');

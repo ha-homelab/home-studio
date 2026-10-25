@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createCameraTour, validateTour, interpolatePose } from '../camera-tour.js';
+import { createCameraTourPanel } from '../camera-tour-panel.js';
 
 const clone = value => structuredClone(value);
 const perspective = (changes = {}) => ({ type: 'perspective', floorId: 'ground', yaw: 0, pitch: 0.4, radius: 8, target: [0, 0, 0], ...changes });
@@ -141,4 +142,45 @@ test('observers receive snapshots, can unsubscribe, and cannot break completion 
   const before = calls; unsubscribe(); h.tick(250); assert.equal(calls, before); assert.equal(h.tour.getState().status, 'completed');
   h.tour.dispose(); assert.equal(h.frames.size, 0);
   assert.throws(() => h.tour.add(), /disposed/); assert.throws(() => h.tour.subscribe(() => {}), /disposed/);
+});
+
+// A small DOM boundary is sufficient for the ownership regression: closing is
+// delegated to the session before it attempts a potentially failing restore.
+function panelContainer() {
+  class Element {
+    constructor(tag) { this.tag = tag; this.children = []; this.attributes = {}; this.events = {}; this.classList = { add() {}, toggle() {} }; }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this.children = children; }
+    setAttribute(key, value) { this.attributes[key] = value; }
+    removeAttribute(key) { delete this.attributes[key]; }
+    addEventListener(type, listener) { this.events[type] = listener; }
+    remove() {}
+    find(predicate) { return predicate(this) ? this : this.children.map(child => child.find(predicate)).find(Boolean); }
+  }
+  const container = new Element('section');
+  container.ownerDocument = { createElement: tag => new Element(tag) };
+  return container;
+}
+
+test('panel delegates Close to its owner without attempting restoration first', async () => {
+  const container = panelContainer(); let closed = 0, stopped = 0;
+  const tour = { getState: () => ({ status: 'idle', waypoints: [], elapsed: 0, totalDuration: 0 }), subscribe: () => () => {},
+    stop() { stopped++; throw new Error('Restoration unavailable'); } };
+  const panel = createCameraTourPanel({ container, tour, onClose: async () => { closed++; } });
+  const close = container.find(node => node.attributes['aria-label'] === 'Close camera tour');
+  await close.events.click();
+  assert.equal(closed, 1); assert.equal(stopped, 0);
+  assert.equal(container.find(node => node.attributes.role === 'status').textContent, 'Ready');
+  panel.dispose();
+});
+
+test('a standalone panel still stops the tour on Close and reports restoration failures', async () => {
+  const container = panelContainer(); let stopped = 0;
+  const tour = { getState: () => ({ status: 'idle', waypoints: [], elapsed: 0, totalDuration: 0 }), subscribe: () => () => {},
+    stop() { stopped++; throw new Error('Restoration unavailable'); } };
+  const panel = createCameraTourPanel({ container, tour });
+  await container.find(node => node.attributes['aria-label'] === 'Close camera tour').events.click();
+  assert.equal(stopped, 1);
+  assert.equal(container.find(node => node.attributes.role === 'status').textContent, 'Restoration unavailable');
+  panel.dispose();
 });
