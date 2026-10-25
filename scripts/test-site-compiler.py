@@ -4,6 +4,7 @@ import copy
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -74,8 +75,50 @@ class SiteCompilerTests(unittest.TestCase):
             self.assertEqual(load_project(output / "project.json"), project)
             for floor in project["floors"]:
                 data = json.loads((output / floor["id"] / "model-data.json").read_text())
-                self.assertEqual(data["site_context"], dict(ground_elevation_m=10 - floor["elevation_m"]))
+                self.assertEqual(data["site_context"], dict(ground_elevation_m=10 - floor["elevation_m"],
+                                                          lowest_slab_elevation_m=9.84 - floor["elevation_m"]))
             self.assertNotIn("site", json.loads((output / "project.json").read_text()))
+
+    def test_authored_ground_and_roof_preserve_the_shared_three_floor_map_height(self):
+        for ground in (10, 12):
+            with self.subTest(ground=ground), tempfile.TemporaryDirectory() as temporary:
+                project = fixture()
+                middle = copy.deepcopy(project["floors"][0])
+                middle.update(id="middle", name="Middle", elevation_m=13)
+                project["floors"].append(middle)
+                project["site"]["ground_elevation_m"] = ground
+                original = copy.deepcopy(project)
+                output = Path(temporary) / "site"
+                compile_project(project, output)
+                models = []
+                for floor in project["floors"]:
+                    folder = output / floor["id"]
+                    model = json.loads((folder / "model-data.json").read_text())
+                    embedded = json.loads(re.search(r'<script id="modelData" type="application/json">(.*?)</script>',
+                                                    (folder / "index.html").read_text(), re.S).group(1))
+                    self.assertEqual(model["site_context"], embedded["site_context"])
+                    self.assertEqual(model["site_context"]["features"], project["site"]["features"])
+                    self.assertEqual(model["site_context"]["ground_elevation_m"], ground - floor["elevation_m"])
+                    models.append(model)
+                lowest_slab = min(model["elevation_m"] + vertex[1] for model in models
+                                  for mesh in model["meshes"] if mesh["kind"] == "floors"
+                                  for vertex in mesh["vertices"])
+                self.assertLess(lowest_slab, ground, "Authored ground must not conceal a missing slab datum")
+                for model in models:
+                    self.assertAlmostEqual(model["site_context"]["lowest_slab_elevation_m"] + model["elevation_m"], lowest_slab)
+                script = """const fs=require('node:fs'),vm=require('node:vm');
+const math=vm.runInNewContext(fs.readFileSync('map-layer.js','utf8')+';homeMapMath');
+const models=JSON.parse(fs.readFileSync(0,'utf8'));
+process.stdout.write(JSON.stringify(models.map(model=>{const context=math.context(model);
+const roof=context.features.find(feature=>feature.kind==='roof');
+return {map:context.elevation+model.elevation_m,roof:context.groundElevation+roof.height_m+model.elevation_m};})));"""
+                result = subprocess.run(["node", "-e", script], cwd=ROOT, input=json.dumps(models),
+                                        text=True, capture_output=True, check=True, timeout=15)
+                for heights in json.loads(result.stdout):
+                    self.assertAlmostEqual(heights["map"], lowest_slab - .08)
+                    self.assertEqual(heights["roof"], ground + 8)
+                self.assertEqual(project, original)
+                self.assertEqual(load_project(output / "project.json"), original)
 
     def test_empty_site_and_extreme_valid_datums(self):
         project = fixture()

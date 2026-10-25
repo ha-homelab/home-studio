@@ -66,7 +66,8 @@ def fixture(component):
                  "room_views": {"room_a": {"azimuth_rad": .4}}, "room_display_names": {"room_a": "Synthetic display name"},
                  "room_display_ids": {"room_a": "A"}, "tv_entities": {item["id"]: "media_player.synthetic_tv"},
                  "camera_entities": {item["id"]: "camera.synthetic_camera"}, "exterior_rooms": [],
-                 "site_context": {"synthetic_context": {"preserve": True}},
+                 "site_context": {"synthetic_context": {"preserve": True},
+                                  "lowest_slab_elevation_m": -.35 - (2.8 if floor == "upper" else 0)},
                  "lower_floor_context": {"elevation_m": -2.8, "surfaces": [], "lines": []},
                  "telemetry": [{"entity_id": "sensor.synthetic_energy"}],
                  "assumed_activity": {"sensor": "sensor.synthetic_zone", "geometry_sha256": "synthetic_fingerprint"},
@@ -120,6 +121,13 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
     def assert_baseline_unchanged(self):
         self.assertEqual(tree_hashes(self.component), self.baseline)
 
+    def assert_lowest_slab_preserved(self, assets, identifier):
+        expected = -.35 - self.models[identifier]["elevation_m"]
+        stored = json.loads((assets / identifier / "model-data.json").read_text(encoding="utf-8"))
+        embedded = embedded_model(assets / identifier / "index.html")
+        for model in (stored, embedded):
+            self.assertEqual(model["site_context"]["lowest_slab_elevation_m"], expected)
+
     async def publish_seed(self):
         await self.project.save(0, copy.deepcopy(self.project.document["project"]))
         return await self.project.publish(1)
@@ -143,6 +151,7 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
         ]}
         await adapter.save(0, source)
         assets, _, models, _, _ = await adapter.publish(1)
+        baseline_assets = adapter.root / "baselines" / adapter.document["baseline"] / "assets"
         for floor in original_floors:
             identifier = floor["id"]
             model = models[identifier]
@@ -151,6 +160,9 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(model["site_context"]["synthetic_context"], {"preserve": True})
             self.assertEqual(model["site_context"]["features"], source["site"]["features"])
             self.assertEqual(model["site_context"]["ground_elevation_m"], -1 - floor["elevation_m"])
+            self.assertNotEqual(model["site_context"]["lowest_slab_elevation_m"], model["site_context"]["ground_elevation_m"])
+            self.assert_lowest_slab_preserved(assets, identifier)
+            self.assert_lowest_slab_preserved(baseline_assets, identifier)
             before = (self.component / "assets" / identifier / "index.html").read_text(encoding="utf-8")
             after = (assets / identifier / "index.html").read_text(encoding="utf-8")
             self.assertEqual(MODEL_BLOCK.sub(r"\1MODEL\3", before), MODEL_BLOCK.sub(r"\1MODEL\3", after))
@@ -158,6 +170,7 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
         restarted = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
         await restarted.load()
         self.assertEqual(restarted.document["project"]["site"], source["site"])
+        self.assertEqual(set(restarted.document["project"]["site"]), {"ground_elevation_m", "features"})
         self.assertEqual(restarted.document["project"]["floors"], original_floors)
         self.assert_baseline_unchanged()
 
@@ -194,12 +207,16 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
         adapter = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
         await adapter.load()
         source = copy.deepcopy(adapter.document["project"])
+        self.assertEqual(set(source["site"]), {"ground_elevation_m", "features"})
         self.assertEqual(source.pop("site")["features"], features)
         await adapter.save(0, source)
         assets, _, models, _, _ = await adapter.publish(1)
+        baseline_assets = adapter.root / "baselines" / adapter.document["baseline"] / "assets"
         for identifier, model in models.items():
             self.assertNotIn("features", model["site_context"])
             self.assertEqual(model["site_context"]["synthetic_context"], {"preserve": True})
+            self.assert_lowest_slab_preserved(assets, identifier)
+            self.assert_lowest_slab_preserved(baseline_assets, identifier)
             self.assertEqual(model["meshes"], self.models[identifier]["meshes"])
             self.assertEqual(embedded_model(assets / identifier / "index.html")["site_context"], model["site_context"])
         restarted = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
@@ -215,6 +232,7 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
         project = generated.seed_project(self.site, self.models, self.inventory)
         self.assertAlmostEqual(project["site"]["ground_elevation_m"], .1)
         self.assertEqual(project["site"]["features"], features)
+        self.assertEqual(set(project["site"]), {"ground_elevation_m", "features"})
         self.assertIsNot(project["site"]["features"], features)
         self.models["ground"]["site_context"]["ground_elevation_m"] = 2
         with self.assertRaises(native.NativeError) as error:
