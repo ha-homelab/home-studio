@@ -362,7 +362,7 @@ const root = path.resolve(__dirname, '..');
   const rect = {width: 1200, height: 700};
   const label = {room: 'A', position: new THREE.Vector3(2, .06, 2), el: {style: {}}};
   const context = vm.createContext({
-    THREE: {...THREE, Vector3: TrackedVector}, active: true, renderProfile: {pointShadows:8, pointShadowSize:512}, renderer: {}, camera: undefined, cameraFit: undefined,
+    THREE: {...THREE, Vector3: TrackedVector}, active: true, renderProfile: {pointShadows:8, pointShadowSize:512}, renderer: {}, camera: undefined, cameraFit: undefined, houseFitBounds: undefined, root: new THREE.Group(),
     projectedPosition: new THREE.Vector3(), projectedForward: new THREE.Vector3(),
     selected: '', planRadius: 10, planBounds: true, zoom: 1, panX: 0, panY: 0, homeRotation: 0, homeTilt: 0,
     model: {ceiling_height_m: 3, rooms: [
