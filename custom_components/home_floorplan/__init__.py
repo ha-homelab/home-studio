@@ -523,8 +523,9 @@ async def ws_viewer(hass, connection, msg):
     if stale_exports:
         # Immutable commissioned exports do not describe the newly edited
         # home. Keep the originals in its backup, but do not offer them as
-        # current downloads. Inventory and draft JSON remain available.
-        content = content.replace("<head>", "<head><style>a.download,a[download]{display:none!important}</style>", 1)
+        # current downloads. Only the template's static model export links have
+        # both markers; current tour downloads and floor navigation stay usable.
+        content = content.replace("<head>", "<head><style>a.download[download]{display:none!important}</style>", 1)
     connection.send_result(msg["id"], {**result, **inventory, **capabilities, "html": content, "floor": floor,
                                      "site_features": site_features, "vacuum_sources": vacuum_sources})
 

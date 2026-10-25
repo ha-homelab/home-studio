@@ -199,6 +199,7 @@ async function exercise(context, origin, name) {
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   const origin = `http://127.0.0.1:${server.address().port}`;
   browser = await playwright[engine].launch(browserLaunchOptions(engine, true));
+  await require('./test-camera-tour-native-downloads.cjs').checkNativeTourDownloads(browser, root);
   for (const name of ['planner', 'editor', 'home']) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, locale: 'en-US', acceptDownloads: true });
     try { await exercise(context, origin, name); }
