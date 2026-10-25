@@ -19,9 +19,10 @@ function element() {
   return { style: { display: 'block' }, dataset: {}, attributes: {}, hidden: false,
     setAttribute(key, value) { this.attributes[key] = value; }, addEventListener() {}, append() {}, focus() {} };
 }
-async function homeHost() {
-  const nodes = new Map(), counts = { renders: 0, requests: 0, navigationWrites: 0 };
+async function homeHost({ embedded = false, canEdit = true } = {}) {
+  const nodes = new Map(), counts = { renders: 0, requests: 0, navigationWrites: 0, exportGrants: [] };
   const context = vm.createContext({
+    embedded, canEdit,
     model: { id: 'main', rooms: [{ id: 'living' }, { id: 'study' }] },
     selected: 'living', signalZone: '', zoom: 1, panX: 0, panY: 0, homeRotation: 0, homeTilt: 0.2,
     mapDraft: null, mapLayer: null, mapLoaded: false, mapFraming: null,
@@ -40,7 +41,8 @@ async function homeHost() {
     '\nfunction notifyMapNavigation(){window.homeMapNavigationChanged();}\n' +
     'globalThis.homeView={active:true,captureTourPose,applyTourPose};', context);
   let callbacks;
-  context.captureSession = options => { callbacks = options; return { show() {}, close() {}, interrupt() {}, dispose() {} }; };
+  context.captureSession = options => { callbacks = options; return { show() {}, close() {}, interrupt() {}, dispose() {},
+    setExportAllowed(value) { counts.exportGrants.push(value); } }; };
   vm.runInContext(read('camera-tour-viewer.js'), context);
   // Supply the lazy module at its documented session boundary. The callbacks
   // below are the real options produced by openViewerTour(), not test copies.
@@ -74,6 +76,23 @@ function plannerHost() {
 }
 const homePose = changes => ({ type: 'home', floorId: 'viewer:main', room: 'living', rotation: 0, tilt: 0.2, zoom: 1, pan: [0, 0], ...changes });
 const plannerPose = changes => ({ type: 'perspective', floorId: 'planner:upper', yaw: 0.4, pitch: 0.6, radius: 12, target: [4, 3, 2], ...changes });
+
+test('native export permission follows the trusted init grant; standalone remains enabled', async () => {
+  const family = await homeHost({ embedded: true, canEdit: false });
+  assert.equal(family.callbacks.canExport, false);
+  assert.equal(family.counts.exportGrants.at(-1), false);
+  family.context.event = { data: { can_edit: true } };
+  const grant = section(read('viewer.js'), 'canEdit=event.data.can_edit===true;', 'document.body.classList.toggle');
+  vm.runInContext(grant, family.context);
+  assert.equal(family.counts.exportGrants.at(-1), true, 'trusted init refreshes an already-open panel');
+  family.context.event.data.can_edit = false;
+  vm.runInContext(grant, family.context);
+  assert.equal(family.counts.exportGrants.at(-1), false);
+  const owner = await homeHost({ embedded: true, canEdit: true });
+  assert.equal(owner.callbacks.canExport, true);
+  const standalone = await homeHost({ embedded: false, canEdit: false });
+  assert.equal(standalone.callbacks.canExport, true);
+});
 
 test('Home host preserves the shortest 5 to -5 radian arc and renders once per applied pose', async () => {
   const { interpolatePose } = await import('data:text/javascript;base64,' + Buffer.from(read('camera-tour.js')).toString('base64'));

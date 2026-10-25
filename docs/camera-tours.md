@@ -59,6 +59,12 @@ Saving a planner project or publishing a home does not save this session's
 route. Tour JSON is separate from inventory JSON, Home Assistant storage and
 the GLB, OBJ, USDZ and DAE model downloads.
 
+In Home Assistant, family access can create and play a route within the page
+session. Route export and video recording require the host's existing download
+permission; those controls are disabled when access does not allow downloads.
+If that permission is removed, an active recording is discarded and its video
+download is removed. Camera playback remains available.
+
 ## Export a video
 
 Preview the route first, then choose **Record video** to play it from the

@@ -4,8 +4,9 @@ import { createTourRecorder, recordingSupport } from './camera-tour-recording.js
 
 // Presentation state stays separate from the house project and HA commands.
 export function createCameraTourSession({ container, capture, apply, canvas, render,
-  t = text => text, onClose = () => {}, onPlaying = () => {} }) {
+  t = text => text, onClose = () => {}, onPlaying = () => {}, canExport = true }) {
   let panel, recorder = null, recording = false, finishing = null, finishingCapture = null, disposed = false;
+  let exportAllowed = canExport === true;
   let downloadUrl = null, downloadLink = null, lastFrame = 0, generation = 0;
   const frameInterval = 1000 / 24;
   const notify = (callback, value) => {
@@ -33,6 +34,7 @@ export function createCameraTourSession({ container, capture, apply, canvas, ren
     try { link?.remove(); } finally { if (url) URL.revokeObjectURL(url); }
   }
   function offerDownload(result) {
+    if (!exportAllowed) return;
     releaseDownload();
     const link = document.createElement('a');
     downloadUrl = URL.createObjectURL(result.blob);
@@ -77,7 +79,7 @@ export function createCameraTourSession({ container, capture, apply, canvas, ren
     return finishing;
   }
   async function record() {
-    if (disposed) return;
+    if (disposed || !exportAllowed) return;
     if (recording || finishing) {
       const stopped = finishRecording();
       pauseTour();
@@ -123,7 +125,7 @@ export function createCameraTourSession({ container, capture, apply, canvas, ren
     catch (error) { panel.setStatus(error.message); }
     finally { container.hidden = true; notify(onClose); }
   }
-  panel = createCameraTourPanel({ container, tour, t, record, onClose: close });
+  panel = createCameraTourPanel({ container, tour, t, record, onClose: close, canExport: exportAllowed });
   const unsubscribe = tour.subscribe(state => {
     notify(onPlaying, state.status === 'playing');
     if (recording && state.status !== 'playing') void finishRecording();
@@ -139,6 +141,16 @@ export function createCameraTourSession({ container, capture, apply, canvas, ren
   window.addEventListener('pagehide', interrupt);
   return {
     tour, interrupt, close,
+    setExportAllowed(value) {
+      if (disposed || exportAllowed === (value === true)) return;
+      exportAllowed = value === true;
+      if (!exportAllowed) {
+        generation++;
+        void finishRecording(false);
+        releaseDownload();
+      }
+      panel.setExportAllowed(exportAllowed);
+    },
     show() { if (!disposed) { container.hidden = false; panel.refresh(); } },
     dispose() {
       if (disposed) return;

@@ -46,7 +46,11 @@ function fixture(options = {}) {
   class Recorder extends Target {
     static isTypeSupported(type) { return type === 'video/webm'; }
     constructor(_stream, config) { super(); this.mimeType = config.mimeType; this.state = 'inactive'; f.instances.push(this); }
-    start() { this.state = 'recording'; this.emit('dataavailable', { data: new Blob(['frame'], { type: this.mimeType }) }); }
+    start() {
+      this.state = 'recording';
+      if (!options.deferRecorderStart) queueMicrotask(() => this.emit('start'));
+      this.emit('dataavailable', { data: new Blob(['frame'], { type: this.mimeType }) });
+    }
     stop() { this.state = 'inactive'; if (!options.delayStop) queueMicrotask(() => this.emit('stop')); }
   }
   window.MediaRecorder = Recorder; window.Blob = Blob;
@@ -62,13 +66,14 @@ function fixture(options = {}) {
   });
   replace('__cameraTourPanelTest', args => {
     f.panel = args;
-    return { setRecording: value => { f.recording = value; }, setStatus: value => { f.status = value; }, refresh() {}, dispose() { f.panelDisposed = true; } };
+    return { setRecording: value => { f.recording = value; }, setExportAllowed: value => { f.exportAllowed = value; },
+      setStatus: value => { f.status = value; }, refresh() {}, dispose() { f.panelDisposed = true; } };
   });
   const pose = { type: 'perspective', floorId: 'floor', yaw: 0, pitch: 0.5, radius: 10, target: [0, 0, 0] };
   f.session = createCameraTourSession({ container, canvas: () => canvas, capture: () => pose,
     render: options.deferRender ? () => new Promise(resolve => { f.finishRender = resolve; }) : undefined,
     apply() { f.applies++; if (f.failApply) throw new Error('Apply failed'); },
-    onPlaying: options.onPlaying || (() => {}),
+    onPlaying: options.onPlaying || (() => {}), canExport: options.canExport,
   });
   f.session.tour.add();
   f.tick = time => { f.time = time; const callbacks = [...f.frames.values()]; f.frames.clear(); for (const callback of callbacks) callback(time); };
@@ -85,6 +90,84 @@ function fixture(options = {}) {
 }
 
 const tests = [
+  ['camera playback waits for actual encoder startup', async f => {
+    const pending = f.panel.record();
+    await flush();
+    f.tick(1500);
+    assert.equal(f.session.tour.getState().status, 'idle');
+    assert.equal(f.applies, 0, 'startup must not consume the camera route');
+    f.instances[0].emit('start');
+    await pending;
+    assert.equal(f.session.tour.getState().status, 'playing');
+    f.tick(1550);
+    assert(f.applies > 0);
+  }, { deferRecorderStart: true }],
+  ['permission loss while awaiting the encoder cannot start late playback', async f => {
+    const pending = f.panel.record();
+    await flush();
+    f.session.setExportAllowed(false);
+    await pending;
+    f.instances[0].emit('start');
+    f.tick(1500);
+    assert.equal(f.session.tour.getState().status, 'idle');
+    assert.equal(f.applies, 0);
+    assert.equal(f.tracks[0].stopCalls, 1);
+    assert.equal(f.urls.length, 0);
+  }, { deferRecorderStart: true }],
+  ['denied exports retain playback without creating a capture or download', async f => {
+    assert.equal(f.panel.canExport, false);
+    f.session.tour.play(); f.tick(50);
+    assert.equal(f.session.tour.getState().status, 'playing');
+    assert(f.applies > 0);
+    await f.panel.record();
+    assert.equal(f.tracks.length, 0); assert.equal(f.urls.length, 0);
+    f.session.tour.stop();
+    f.session.setExportAllowed(true);
+    await f.panel.record();
+    assert.equal(f.tracks.length, 1, 'a later trusted grant enables recording');
+  }, { canExport: false }],
+  ['permission downgrade cancels recording while retaining camera playback', async f => {
+    await f.panel.record();
+    f.session.setExportAllowed(false);
+    await flush();
+    assert.equal(f.tracks[0].stopCalls, 1);
+    assert.equal(f.recording, false); assert.equal(f.exportAllowed, false);
+    assert.equal(f.urls.length, 0); assert.equal(f.timers.size, 0);
+    assert.equal(f.session.tour.getState().status, 'playing');
+    await f.panel.record();
+    assert.equal(f.tracks.length, 1, 'a denied retry cannot open another capture');
+  }],
+  ['permission downgrade discards fulfilled output before its download handler', async f => {
+    await f.panel.record();
+    f.session.interrupt();
+    queueMicrotask(() => f.session.setExportAllowed(false));
+    await flush();
+    assert.equal(f.urls.length, 0); assert.equal(f.tracks[0].stopCalls, 1);
+  }],
+  ['permission downgrade cancels pending finalization and removes saved download', async f => {
+    await f.panel.record();
+    const stopping = f.panel.record();
+    f.session.setExportAllowed(false);
+    await stopping;
+    assert.equal(f.instances[0].count, 0); assert.equal(f.timers.size, 0);
+    assert.equal(f.urls.length, 0);
+  }, { delayStop: true }],
+  ['permission downgrade revokes a completed video and disposal cannot reenable exports', async f => {
+    await f.panel.record(); await f.panel.record();
+    assert.equal(f.urls.length, 1);
+    f.session.setExportAllowed(false);
+    assert.deepEqual(f.revoked, f.urls);
+    f.session.dispose(); f.session.setExportAllowed(true);
+    await f.panel.record();
+    assert.equal(f.tracks.length, 1); assert.equal(f.exportAllowed, false);
+  }],
+  ['permission downgrade during startup cannot start late playback', async f => {
+    const starting = f.panel.record();
+    await flush(); f.session.setExportAllowed(false);
+    await starting; f.finishRender(); await flush();
+    assert.equal(f.tracks[0].stopCalls, 1); assert.equal(f.urls.length, 0);
+    assert.equal(f.session.tour.getState().status, 'idle'); assert.equal(f.frames.size, 0);
+  }, { deferRender: true }],
   ['context-loss interruption discards capture before document event propagation', async f => {
     await f.panel.record();
     f.session.interrupt({ discard: true });

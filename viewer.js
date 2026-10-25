@@ -577,6 +577,7 @@ function inventorySnapshot(list){return JSON.stringify(list,(_,value)=>value&&ty
 window.addEventListener('message',function init(event){if(event.source!==parent||event.data?.type!=='home-floorplan:init'||!event.ports[0]||bridge)return;
 let inventoryChanged=false;try{const incoming=reconcileStoredAppearance(validateInventoryItems(event.data.items));inventoryChanged=inventorySnapshot(incoming)!==inventorySnapshot(items);if(inventoryChanged)items=incoming}catch(error){setEditorStatus('Cannot load saved inventory: '+error.message);return}
 canEdit=event.data.can_edit===true;
+syncViewerTourPermissions();
 document.body.classList.toggle('control-only',!canEdit);$('editLayout').hidden=!canEdit;$('recoverPlan').hidden=!canEdit;
 bridge=event.ports[0];homeView?.applyViewPreferences(event.data.preferences||{});
 bridge.onmessage=event=>{

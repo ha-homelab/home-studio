@@ -4,7 +4,11 @@ function tourModeAvailable(mode) {
   return !!renderer && !failed3D && !renderLost && !renderSuspended && !document.hidden &&
     (mode === 'home' ? homeView?.active : !homeView?.active && $('view3d').style.display !== 'none');
 }
+function syncViewerTourPermissions() {
+  for (const { session } of tourSessions.values()) session.setExportAllowed(!embedded || canEdit);
+}
 function syncViewerTours() {
+  syncViewerTourPermissions();
   for (const [mode, entry] of tourSessions) if (!tourModeAvailable(mode)) {
     entry.session.interrupt(); entry.container.hidden = true;
     $(mode === 'home' ? 'homeCameraTour' : 'editorCameraTour').setAttribute('aria-expanded', 'false');
@@ -31,6 +35,7 @@ async function openViewerTour() {
       const container = document.createElement('section');
       container.className = 'camera-tour-host'; document.body.append(container);
       const session = createCameraTourSession({ container, t: vt,
+        canExport: !embedded || canEdit,
         canvas: () => renderer?.domElement, render: () => window.renderModel?.(),
         capture() {
           if ((homeView?.active ? 'home' : 'editor') !== mode) throw Error(vt('Open this view before playing its tour.'));
@@ -53,6 +58,7 @@ async function openViewerTour() {
       entry = { session, container }; tourSessions.set(mode, entry);
     }
     for (const [key, other] of tourSessions) if (key !== mode) { other.session.interrupt(); other.container.hidden = true; }
+    syncViewerTourPermissions();
     entry.session.show(); button.setAttribute('aria-expanded', 'true');
   } catch (error) {
     setEditorStatus(error.message);

@@ -67,6 +67,7 @@ function fixture(options = {}) {
       this.timeslice = timeslice;
       if (options.startThrows) throw new Error('Recorder start failed');
       this.state = 'recording';
+      if (!options.manualStart) queueMicrotask(() => this.emit('start'));
     }
     stop() {
       this.stopCalls++;
@@ -171,6 +172,84 @@ test('actual MIME determines extension without mislabeling WebM as MP4', async c
   mp4.instances[0].chunk('mp4');
   assert.equal((await other.stop()).extension, 'mp4');
   mp4.clean(clock);
+});
+
+test('start waits for the recorder event before allowing a short tour to run', async clock => {
+  const f = fixture({ manualStart: true, finalData: 'video' });
+  let painted = 0, started = false;
+  const recorder = f.create({ render: () => { painted++; } });
+  const pending = recorder.start().then(() => { started = true; });
+  await flush();
+  assert.equal(painted, 1, 'paint supplies an initial frame while startup is pending');
+  clock.tick(1500);
+  await flush();
+  assert.equal(started, false, 'a short tour cannot consume its duration before encoder startup');
+  assert.equal(recorder.state, 'starting');
+  assert.equal(f.instances[0].stopCalls, 0);
+  f.instances[0].emit('start');
+  await pending;
+  assert.equal(recorder.state, 'recording');
+  assert.equal((await recorder.stop()).blob.size, 5);
+  f.clean(clock);
+});
+
+test('recorder startup and asynchronous first paint may complete in either order', async clock => {
+  for (const paintFirst of [false, true]) {
+    const f = fixture({ manualStart: true, finalData: 'video' });
+    let finishPaint, started = false;
+    const recorder = f.create({ render: () => new Promise(resolve => { finishPaint = resolve; }) });
+    const pending = recorder.start().then(() => { started = true; });
+    await flush();
+    if (paintFirst) finishPaint(); else f.instances[0].emit('start');
+    await flush();
+    assert.equal(started, false);
+    assert.equal(recorder.state, 'starting');
+    if (paintFirst) f.instances[0].emit('start'); else finishPaint();
+    await pending;
+    await recorder.stop();
+    f.clean(clock);
+  }
+});
+
+test('pending encoder startup is cancellable and cannot revive on a late start event', async clock => {
+  for (const action of ['cancel', 'dispose']) {
+    const f = fixture({ manualStart: true });
+    const recorder = f.create();
+    const pending = assert.rejects(recorder.start(), { name: 'AbortError' });
+    await flush();
+    recorder[action]();
+    f.instances[0].emit('start');
+    await pending;
+    assert.equal(recorder.state, action === 'dispose' ? 'disposed' : 'idle');
+    assert(!f.states.includes('recording'));
+    f.clean(clock);
+  }
+});
+
+test('missing encoder startup stays bounded by the existing duration limit', async clock => {
+  const f = fixture({ manualStart: true });
+  const recorder = f.create({ maxDurationMs: 5 });
+  const pending = assert.rejects(recorder.start(), /video data/);
+  await flush();
+  clock.tick(5);
+  await pending;
+  f.instances[0].emit('start');
+  assert.equal(recorder.state, 'idle');
+  assert(!f.states.includes('recording'));
+  f.clean(clock);
+});
+
+test('Stop during encoder startup releases resources without starting playback', async clock => {
+  const f = fixture({ manualStart: true });
+  const recorder = f.create();
+  const started = assert.rejects(recorder.start(), /video data/);
+  await flush();
+  await assert.rejects(recorder.stop(), /video data/);
+  await started;
+  f.instances[0].emit('start');
+  assert.equal(recorder.state, 'idle');
+  assert(!f.states.includes('recording'));
+  f.clean(clock);
 });
 
 test('only one start can run; cancel and dispose discard output', async clock => {

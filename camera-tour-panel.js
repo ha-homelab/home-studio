@@ -4,10 +4,12 @@ import { CAMERA_TOUR_LIMITS } from './camera-tour.js';
  * current state without rebuilding unchanged rows. record() toggles recording;
  * the owner calls setRecording(boolean) and setStatus(string). dispose() removes
  * this panel and subscription; the owner disposes its tour separately. */
-export function createCameraTourPanel({ container, tour, t = value => value, record, onClose } = {}) {
+export function createCameraTourPanel({ container, tour, t = value => value, record, onClose, canExport = true } = {}) {
   if (!container || !tour) throw new TypeError('A camera tour and panel container are required.');
   const doc = container.ownerDocument;
   let recording = false, disposed = false, routeKey = '', customStatus = '', statusIsError = false, rows = [];
+  let exportAllowed = canExport === true;
+  const exportUnavailable = 'You can create and play tours here. Your Home Assistant access does not allow route or video downloads.';
   const label = (value, values = {}) => {
     let translated = t(value, values) || value;
     for (const [key, replacement] of Object.entries(values)) translated = translated.replaceAll(`{${key}}`, String(replacement));
@@ -45,6 +47,7 @@ export function createCameraTourPanel({ container, tour, t = value => value, rec
   const meter = element('div', '', 'camera-tour-meter'); meter.append(progress, timing);
   const files = element('div', '', 'camera-tour-actions');
   const exportButton = button('Export route', () => {
+    if (!exportAllowed) throw new Error(label(exportUnavailable));
     const blob = new Blob([JSON.stringify(tour.export(), null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob), link = element('a'); link.href = url; link.download = 'camera-tour.json';
     panel.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 0);
@@ -111,15 +114,17 @@ export function createCameraTourPanel({ container, tour, t = value => value, rec
       else item.row.removeAttribute('aria-current');
     });
     const hasViews = state.waypoints.length > 0;
+    const storageMessage = label(exportAllowed ? 'Views stay in this tab. Export the route to keep it.' : exportUnavailable);
+    if (storage.textContent !== storageMessage) storage.textContent = storageMessage;
     empty.hidden = hasViews; note.hidden = !hasViews;
     add.disabled = locked || rows.length >= CAMERA_TOUR_LIMITS.waypoints || state.totalDuration + 3 > CAMERA_TOUR_LIMITS.seconds;
     play.disabled = !hasViews || state.status === 'playing' || recording; pause.disabled = state.status !== 'playing' || recording;
     stop.disabled = state.status === 'idle' && !recording;
-    exportButton.disabled = !hasViews; importButton.disabled = locked;
+    exportButton.disabled = !exportAllowed || !hasViews; importButton.disabled = locked;
     if (recordButton) {
       const caption = label(recording ? 'Stop recording' : 'Record video');
       recordButton.textContent = caption; recordButton.setAttribute('aria-label', caption);
-      recordButton.setAttribute('aria-pressed', String(recording)); recordButton.disabled = !recording && (!hasViews || state.status === 'playing');
+      recordButton.setAttribute('aria-pressed', String(recording)); recordButton.disabled = !exportAllowed || (!recording && (!hasViews || state.status === 'playing'));
     }
     progress.max = state.totalDuration || 1; progress.value = state.elapsed;
     const time = `${state.elapsed.toFixed(1)} / ${state.totalDuration.toFixed(1)} ${label('s')}`;
@@ -132,6 +137,10 @@ export function createCameraTourPanel({ container, tour, t = value => value, rec
   const unsubscribe = tour.subscribe(refresh); refresh();
   return {
     refresh,
+    setExportAllowed(value) {
+      if (disposed || exportAllowed === (value === true)) return;
+      exportAllowed = value === true; customStatus = ''; statusIsError = false; refresh();
+    },
     setRecording(value) { recording = Boolean(value); refresh(); },
     setStatus(value = '') { customStatus = String(value); statusIsError = false; refresh(); },
     dispose() { if (disposed) return; disposed = true; unsubscribe(); panel.remove(); }

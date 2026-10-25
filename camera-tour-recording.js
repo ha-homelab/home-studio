@@ -79,7 +79,8 @@ function hidden(document) {
 }
 
 /**
- * start(): Promise<void>; rejects if a recording is already active.
+ * start(): Promise<void>; waits for recorder startup and the initial render;
+ * rejects if a recording is already active.
  * stop(): Promise<{blob, mimeType, extension}>; repeated calls share the result.
  * cancel()/dispose(): discard output; dispose permanently prevents new starts.
  * onState receives idle/starting/recording/stopping/disposed. onError receives an
@@ -234,6 +235,13 @@ export function createTourRecorder({
         session.mimeType = session.recorder.mimeType || support.mimeType;
         if (!extensionFor(session.mimeType)) throw new Error('The browser selected an unsupported video format.');
         if (typeof session.recorder.addEventListener !== 'function' || typeof session.recorder.removeEventListener !== 'function') throw new Error('MediaRecorder events are unavailable in this browser.');
+        let painted = false, recordingStarted = false;
+        const ready = () => {
+          if (!painted || !recordingStarted || session.finished || session.stopping) return;
+          setState('recording');
+          if (!session.finished && !session.stopping) session.resolveStart();
+        };
+        listen(session.recorder, 'start', () => { recordingStarted = true; ready(); }, session.recorderListeners);
         listen(session.recorder, 'dataavailable', event => {
           if (session.finished || !event.data?.size) return;
           if (!Number.isFinite(event.data.size) || event.data.size < 0 || event.data.size > byteLimit - session.bytes) {
@@ -260,9 +268,10 @@ export function createTourRecorder({
         // Canvas capture observes draws, so paint after the stream and recorder
         // are active rather than relying on an earlier WebGL back buffer.
         if (typeof render === 'function') await render();
-        if (session.finished) return;
-        setState('recording');
-        if (!session.finished) session.resolveStart();
+        // start() changes the native state synchronously, but the encoder can
+        // start later. A short tour must not finish before that start event.
+        painted = true;
+        ready();
       } catch (error) { finish(session, asError(error, 'The canvas could not be recorded.')); }
     });
     return startPromise;
