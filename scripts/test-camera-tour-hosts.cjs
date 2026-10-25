@@ -149,3 +149,54 @@ test('planner rejects wrong mode, missing floors and excessive coordinates atomi
   context.canNavigatePreview = () => false;
   assert.equal(callbacks.available(), false); assert.throws(() => callbacks.capture(), /3D preview/);
 });
+
+test('whole-house framing includes static porches through every orbit angle without fitting backdrops or moving objects', async () => {
+  const THREE = await import('data:text/javascript;base64,' + Buffer.from(read('vendor/three.module.min.js')).toString('base64'));
+  const architecture = new THREE.Group();
+  const porch = new THREE.Mesh(new THREE.BoxGeometry(10, 3, 40));
+  porch.position.set(5, 1, 5); architecture.add(porch);
+  const bounds = new THREE.Box3().setFromObject(architecture), corners = [];
+  for (const x of [bounds.min.x, bounds.max.x]) for (const y of [bounds.min.y, bounds.max.y]) for (const z of [bounds.min.z, bounds.max.z]) {
+    corners.push(new THREE.Vector3(x, y, z));
+  }
+  let boundReads = 0;
+  const update = architecture.updateWorldMatrix;
+  architecture.updateWorldMatrix = function (...args) { boundReads++; return update.apply(this, args); };
+  const scene = new THREE.Scene(), moving = new THREE.Group();
+  scene.add(architecture, new THREE.Mesh(new THREE.BoxGeometry(100000, 1, 100000)), moving);
+  moving.add(new THREE.Mesh(new THREE.BoxGeometry(20000, 20000, 20000)));
+  const rect = { width: 1290, height: 1310 };
+  const context = vm.createContext({
+    THREE, active: true, renderer: {}, root: architecture, scene, objectGroup: moving,
+    model: { ceiling_height_m: 3, rooms: [{ id: 'living', polygon: [[-2, -8], [2, -8], [2, 8], [-2, 8]] }] },
+    selected: '', zoom: 0.8, panX: 0, panY: 0, homeRotation: 0, homeTilt: 0,
+    camera: null, cameraFit: null, houseFitBounds: null, planBounds: null, planRadius: 8,
+    mapLayer: null, mapDraft: null, mapFraming: null,
+    projectedPosition: new THREE.Vector3(), xm: value => value, zm: value => value,
+    $: () => ({ getBoundingClientRect: () => rect }),
+  });
+  // Exercise the production projection path with real Three.js matrices but no
+  // renderer, browser, private model, HA connection, or mirrored fit algorithm.
+  vm.runInContext(section(read('home-view.js'), '  function render() {', '    if(cameraOnly)return;') + '\n}', context);
+  for (const aspect of [0.35, 1290 / 1310, 2.1]) {
+    rect.width = rect.height * aspect;
+    for (const tilt of [-0.45, 0.2, 0.6]) for (let degree = 0; degree <= 360; degree += 5) {
+      context.homeRotation = degree * Math.PI / 180; context.homeTilt = tilt;
+      vm.runInContext('render(true)', context);
+      for (const point of corners) {
+        const projected = point.clone().project(context.camera);
+        assert(Math.abs(projected.x) < 0.71 && Math.abs(projected.y) < 0.71,
+          `Static porch clips at aspect ${aspect}, tilt ${tilt}, angle ${degree}`);
+      }
+      assert(context.camera.top - context.camera.bottom < 200, 'Backdrop or dynamic geometry inflated the fit');
+    }
+  }
+  assert.equal(boundReads, 1, 'Static bounds must be cached across rotations and aspect changes');
+  const wholeSpan = context.camera.top - context.camera.bottom;
+  context.selected = 'living'; vm.runInContext('render(true)', context);
+  assert(context.camera.top - context.camera.bottom < wholeSpan, 'Selected room must retain its own closer fit');
+  context.selected = ''; context.mapLayer = { config: { enabled: true } };
+  context.mapFraming = { span: 200, zoom: 0.8 }; vm.runInContext('render(true)', context);
+  near(context.camera.top - context.camera.bottom, 200);
+  assert.equal(boundReads, 1);
+});

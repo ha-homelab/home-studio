@@ -72,21 +72,50 @@ async function decodeVideo(page, bytes, mimeType) {
     const data = Uint8Array.from(atob(base64), value => value.charCodeAt(0));
     const url = URL.createObjectURL(new Blob([data], { type }));
     const video = document.createElement('video'); video.muted = true; video.playsInline = true; video.preload = 'auto';
+    // WebKit can report loadeddata before a detached video's frame is ready
+    // for canvas sampling. Keep it paused but attached, and await presentation.
+    document.body.append(video);
     const timeout = setTimeout(() => video.dispatchEvent(new Event('testtimeout')), 15000);
+    let frameCallback = null, animationFrame = null;
     try {
-      await new Promise((resolve, reject) => {
-        video.addEventListener('loadeddata', resolve, { once: true });
+      const failure = new Promise((_, reject) => {
         video.addEventListener('error', () => reject(new Error(`Video decode error ${video.error?.code}: ${video.error?.message}`)), { once: true });
         video.addEventListener('testtimeout', () => reject(new Error('Timed out decoding recorded video')), { once: true });
-        video.src = url; video.load();
       });
+      const waitForFrame = async (event, change) => {
+        const ready = new Promise(resolve => video.addEventListener(event, resolve, { once: true }));
+        const presented = typeof video.requestVideoFrameCallback === 'function'
+          ? new Promise(resolve => { frameCallback = video.requestVideoFrameCallback((_, metadata) => {
+            frameCallback = null; resolve(metadata.mediaTime);
+          }); })
+          : ready.then(() => new Promise(resolve => { animationFrame = requestAnimationFrame(() => {
+            animationFrame = requestAnimationFrame(() => { animationFrame = null; resolve(video.currentTime); });
+          }); }));
+        change();
+        return (await Promise.race([Promise.all([ready, presented]), failure]))[1];
+      };
+      const firstFrameTime = await waitForFrame('loadeddata', () => { video.src = url; video.load(); });
       const canvas = document.createElement('canvas'); canvas.width = canvas.height = 32;
       const context = canvas.getContext('2d'); context.drawImage(video, 0, 0, 32, 32);
       const pixels = context.getImageData(0, 0, 32, 32).data, colors = new Set();
       for (let i = 0; i < pixels.length; i += 4) colors.add(`${pixels[i]},${pixels[i + 1]},${pixels[i + 2]}`);
+      // A nonempty file alone does not prove that the camera moved.
+      const laterFrameTime = await waitForFrame('seeked', () => { video.currentTime = 1.1; });
+      context.drawImage(video, 0, 0, 32, 32);
+      const later = context.getImageData(0, 0, 32, 32).data;
+      let changedPixels = 0;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (Math.abs(pixels[i] - later[i]) + Math.abs(pixels[i+1] - later[i+1]) + Math.abs(pixels[i+2] - later[i+2]) > 45) changedPixels++;
+      }
       return { width: video.videoWidth, height: video.videoHeight, readyState: video.readyState,
-        duration: Number.isFinite(video.duration) ? video.duration : null, colors: colors.size };
-    } finally { clearTimeout(timeout); video.pause(); video.removeAttribute('src'); video.load(); URL.revokeObjectURL(url); }
+        duration: Number.isFinite(video.duration) ? video.duration : null, colors: colors.size, changedPixels,
+        firstFrameTime, laterFrameTime };
+    } finally {
+      clearTimeout(timeout);
+      if (frameCallback !== null) video.cancelVideoFrameCallback(frameCallback);
+      if (animationFrame !== null) cancelAnimationFrame(animationFrame);
+      video.pause(); video.removeAttribute('src'); video.load(); video.remove(); URL.revokeObjectURL(url);
+    }
   }, { base64: bytes.toString('base64'), type: mimeType });
   } finally { await decoder.close(); }
 }
@@ -116,6 +145,21 @@ async function exercise(context, origin, name) {
   const host = page.locator('.camera-tour-host:not([hidden])');
   const panel = host.locator('.camera-tour-panel');
   await button.click(); await panel.waitFor({ state: 'visible' });
+  assert.equal(await panel.locator('.camera-tour-view').count(), 5, 'opening provides a ready full orbit');
+  const initialRoute = await download(page, () => panel.getByRole('button', { name: 'Export route', exact: true }).click(), `${name}-default-orbit.json`);
+  const initialViews = JSON.parse(initialRoute.bytes).waypoints;
+  assert.equal(initialViews.reduce((sum, view) => sum + view.duration, 0), 20);
+  let totalRotation = 0;
+  for (let i = 1; i < initialViews.length; i++) {
+    const previous = initialViews[i - 1].pose, current = initialViews[i].pose;
+    const delta = (current.rotation ?? current.yaw) - (previous.rotation ?? previous.yaw);
+    totalRotation += Math.atan2(Math.sin(delta), Math.cos(delta));
+  }
+  assert(Math.abs(Math.abs(totalRotation) - Math.PI * 2) < 1e-8, 'default route completes a revolution');
+  assert.equal(await page.locator('canvas[data-camera-tour-playing="true"]').count(), 0, 'opening never starts animation');
+  await panel.getByRole('button', { name: 'Clear route', exact: true }).click();
+  await page.keyboard.press('Escape'); await button.click();
+  assert.equal(await panel.locator('.camera-tour-view').count(), 0, 'reopening preserves a deliberately empty route');
   await panel.getByRole('button', { name: 'Save current view', exact: true }).click();
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.querySelector('.camera-tour-host:not([hidden])'));
@@ -136,11 +180,19 @@ async function exercise(context, origin, name) {
   await panel.getByRole('button', { name: 'Play', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('.camera-tour-host:not([hidden]) .camera-tour-status')?.textContent === 'Tour finished');
   assert.deepEqual(await snapshot(), before, 'playing a tour changes no project or inventory data');
-  const result = { name, savedViews: 2, playback: 'passed', escape: 'passed' };
+  const result = { name, savedViews: 2, playback: 'passed', escape: 'passed', defaultOrbit: 'passed' };
+  await page.keyboard.press('Escape'); await button.click();
+  assert.equal(await panel.locator('.camera-tour-view').count(), 2, 'reopening preserves a custom route');
+  await panel.getByRole('button', { name: 'Full orbit', exact: true }).click();
+  assert.equal(await panel.locator('.camera-tour-view').count(), 5);
+  for (let index = 0; index < 5; index++) {
+    const seconds = panel.locator('input[type="number"]').nth(index);
+    await seconds.fill('0.75'); await seconds.press('Tab');
+  }
   const support = await page.evaluate(selector => {
     const canvas = document.querySelector(selector);
     const supported = typeof canvas.captureStream === 'function' && typeof MediaRecorder === 'function' && typeof MediaRecorder.isTypeSupported === 'function' &&
-      ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4;codecs=avc1.42E01E', 'video/mp4'].some(type => {
+      ['video/mp4;codecs=avc1', 'video/mp4'].some(type => {
         try { return MediaRecorder.isTypeSupported(type); } catch { return false; }
       });
     return Boolean(supported);
@@ -148,18 +200,23 @@ async function exercise(context, origin, name) {
   if (support) {
     const recorded = await download(page, () => panel.getByRole('button', { name: 'Record video', exact: true }).click(), `${name}-video`);
     const extension = path.extname(recorded.item.suggestedFilename());
-    assert(['.webm', '.mp4'].includes(extension), 'filename matches a supported container');
+    assert.equal(extension, '.mp4', 'recording is downloaded as MP4');
     assert(recorded.bytes.length > 100 && recorded.bytes.length <= 64 * 1024 * 1024, 'download has bounded, nonempty video data');
-    if (extension === '.webm') assert.equal(recorded.bytes.subarray(0, 4).toString('hex'), '1a45dfa3', 'WebM EBML header');
-    else assert.equal(recorded.bytes.subarray(4, 8).toString(), 'ftyp', 'MP4 file-type header');
+    assert.equal(recorded.bytes.subarray(4, 8).toString(), 'ftyp', 'genuine MP4 file-type header, never renamed WebM');
     const output = recorded.output + extension; fs.renameSync(recorded.output, output);
-    const decoded = await decodeVideo(page, recorded.bytes, extension === '.webm' ? 'video/webm' : 'video/mp4');
+    const decoded = await decodeVideo(page, recorded.bytes, 'video/mp4');
     assert(decoded.width > 0 && decoded.height > 0 && decoded.readyState >= 2, 'recorded video decodes a complete frame');
     assert(decoded.colors > 1, 'the first recorded frame contains rendered canvas content');
+    assert(decoded.changedPixels > 20, 'decoded frames show camera movement, not a static view');
     result.recording = { status: 'passed', file: path.basename(output), bytes: recorded.bytes.length, ...decoded };
     await page.waitForFunction(() => __cameraTourBrowser.streams.every(stream => stream.getTracks().every(track => track.readyState === 'ended')));
     assert(await page.evaluate(() => __cameraTourBrowser.recordings.every(recorder => recorder.state === 'inactive')), 'all recorders stopped');
-  } else result.recording = { status: 'unsupported', reason: 'This engine exposes no supported canvas MediaRecorder format.' };
+  } else {
+    await panel.getByRole('button', { name: 'Record video', exact: true }).click();
+    assert.match(await panel.locator('.camera-tour-status').innerText(), /MP4/, 'unsupported encoders receive an explanation');
+    assert.equal(await host.locator('.camera-tour-download').count(), 0, 'no WebM substitute is downloaded');
+    result.recording = { status: 'unsupported', reason: 'No native MP4 encoder; camera playback remains available.' };
+  }
   await panel.getByRole('button', { name: 'Play', exact: true }).click();
   await page.waitForFunction(() => Boolean(document.querySelector('canvas[data-camera-tour-playing="true"]')));
   await page.locator(planner ? '#plan-tab' : name === 'home' ? '#editLayout' : '#openHome').click();

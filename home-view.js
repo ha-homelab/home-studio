@@ -3,7 +3,7 @@ homeView = (() => {
   let active = false, camera, overlayGroup, roomLighting, selected = '', bindings = [], points = [], labels = [];
   let homeGesture=null, roomLabels=false, deviceFilter='all';
   function cancelHomeGesture(){const previous=homeGesture;homeGesture=null;if(previous)for(const id of previous.contacts?.keys()||[previous.id])if(renderer.domElement.hasPointerCapture(id))renderer.domElement.releasePointerCapture(id);}
-  let assumedZones, signalZone='', cameraFit;
+  let assumedZones, signalZone='', cameraFit, houseFitBounds;
   const projectedPosition = new THREE.Vector3(), projectedForward = new THREE.Vector3();
   let showLowerFloor=true;
   $('homeFloorContext').hidden=!lowerFloorContext;
@@ -889,6 +889,12 @@ homeView = (() => {
     if (!cameraFit || cameraFit.room!==selected || cameraFit.landscape!==landscape) {
       const rooms=selected ? model.rooms.filter(r=>r.id===selected) : model.rooms;
       const vertices=rooms.flatMap(r=>r.polygon.map(([x,z])=>new THREE.Vector3(xm(x),0,zm(z))));
+      if(!selected){
+        // Static architecture includes porches and yards outside room polygons.
+        // Exclude scene backdrops, weather and moving inventory; cache once.
+        houseFitBounds??=new THREE.Box3().setFromObject(root);
+        if(!houseFitBounds.isEmpty())for(const x of [houseFitBounds.min.x,houseFitBounds.max.x])for(const y of [houseFitBounds.min.y,houseFitBounds.max.y])for(const z of [houseFitBounds.min.z,houseFitBounds.max.z])vertices.push(new THREE.Vector3(x,y,z));
+      }
       const box=new THREE.Box3().setFromPoints(vertices), center=box.getCenter(new THREE.Vector3()); center.y=planBounds?model.ceiling_height_m/2:.6;
       // Keep room geometry cached while rotating; live states reuse the last fit.
       const offset=landscape ? new THREE.Vector3(-22,27,-7) : new THREE.Vector3(-6,28,-18);

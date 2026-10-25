@@ -33,7 +33,7 @@ const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve()
 function fixture(options = {}) {
   const original = new Map();
   const replace = (name, value) => { original.set(name, Object.getOwnPropertyDescriptor(globalThis, name)); Object.defineProperty(globalThis, name, { configurable: true, writable: true, value }); };
-  const f = { time: 0, applies: 0, frames: new Map(), timers: new Map(), next: 1, instances: [], tracks: [], urls: [], revoked: [], failApply: false, panelDisposed: false };
+  const f = { time: 0, applies: 0, frames: new Map(), timers: new Map(), next: 1, instances: [], tracks: [], urls: [], revoked: [], failApply: false, failCapture: options.initialCaptureFailure, panelDisposed: false };
   const window = new Target();
   const document = Object.assign(new Target(), { defaultView: window, hidden: false });
   const container = { hidden: false, children: [], append(node) { this.children.push(node); }, querySelector() { return this.children.find(node => node.className === 'camera-tour-download'); } };
@@ -44,7 +44,7 @@ function fixture(options = {}) {
     return Object.assign(new Target(), { getTracks: () => [track] });
   } });
   class Recorder extends Target {
-    static isTypeSupported(type) { return type === 'video/webm'; }
+    static isTypeSupported(type) { return type.startsWith('video/mp4'); }
     constructor(_stream, config) { super(); this.mimeType = config.mimeType; this.state = 'inactive'; f.instances.push(this); }
     start() {
       this.state = 'recording';
@@ -69,13 +69,16 @@ function fixture(options = {}) {
     return { setRecording: value => { f.recording = value; }, setExportAllowed: value => { f.exportAllowed = value; },
       setStatus: value => { f.status = value; }, refresh() {}, dispose() { f.panelDisposed = true; } };
   });
-  const pose = { type: 'perspective', floorId: 'floor', yaw: 0, pitch: 0.5, radius: 10, target: [0, 0, 0] };
-  f.session = createCameraTourSession({ container, canvas: () => canvas, capture: () => pose,
+  const pose = options.pose || { type: 'perspective', floorId: 'floor', yaw: 0, pitch: 0.5, radius: 10, target: [0, 0, 0] };
+  f.session = createCameraTourSession({ container, canvas: () => canvas, capture: () => {
+    if (f.failCapture) throw new Error('Return to the house view before saving a camera view.');
+    return pose;
+  },
     render: options.deferRender ? () => new Promise(resolve => { f.finishRender = resolve; }) : undefined,
-    apply() { f.applies++; if (f.failApply) throw new Error('Apply failed'); },
+    apply(value) { f.applies++; f.applied = structuredClone(value); if (f.failApply) throw new Error('Apply failed'); },
     onPlaying: options.onPlaying || (() => {}), canExport: options.canExport,
   });
-  f.session.tour.add();
+  if (!options.defaultRoute) { f.session.tour.clear(); f.session.tour.add(); }
   f.tick = time => { f.time = time; const callbacks = [...f.frames.values()]; f.frames.clear(); for (const callback of callbacks) callback(time); };
   f.document = document; f.window = window; f.canvas = canvas;
   f.restore = () => {
@@ -90,6 +93,33 @@ function fixture(options = {}) {
 }
 
 const tests = [
+  ['an unavailable first camera leaves a usable idle panel and allows an explicit orbit retry', async f => {
+    assert.match(f.status, /Return to the house view/);
+    f.session.show(); assert.deepEqual(f.session.tour.getState().waypoints, []);
+    assert.equal(f.applies, 0); assert.equal(f.frames.size, 0);
+    f.failCapture = false; f.panel.tour.orbit();
+    assert.equal(f.session.tour.getState().waypoints.length, 5);
+    assert.equal(f.session.tour.getState().status, 'idle'); assert.equal(f.frames.size, 0);
+  }, { defaultRoute: true, initialCaptureFailure: true }],
+  ['first opening offers an idle full orbit and reopening preserves custom or empty routes', async f => {
+    const tour = f.session.tour, original = tour.export();
+    assert.equal(original.waypoints.length, 5); assert.equal(tour.getState().totalDuration, 20);
+    f.session.show(); assert.equal(tour.getState().status, 'idle'); assert.equal(f.applies, 0); assert.equal(f.frames.size, 0);
+    tour.update('orbit_1', { name: 'My view', duration: 2 }); const edited = tour.export();
+    f.session.close(); f.session.show(); assert.deepEqual(tour.export(), edited);
+    tour.clear(); f.session.close(); f.session.show(); assert.deepEqual(tour.getState().waypoints, []);
+    tour.import(original); f.session.close(); f.session.show(); assert.deepEqual(tour.export(), original);
+    assert.equal(f.applies, 0); assert.equal(f.frames.size, 0);
+  }, { defaultRoute: true }],
+  ['a default Home orbit centres the house only on Play and Stop restores the selected room', async f => {
+    const tour = f.session.tour;
+    assert.equal(f.applies, 0); assert.equal(f.frames.size, 0);
+    tour.play();
+    assert.equal(f.applied.room, ''); assert.deepEqual(f.applied.pan, [0, 0]); assert.equal(f.applied.zoom, 0.8);
+    f.tick(1000); tour.stop();
+    assert.equal(f.applied.room, 'study'); assert.deepEqual(f.applied.pan, [7, -2]); assert.equal(f.applied.zoom, 2);
+    assert.equal(f.applied.rotation, 5); assert.equal(f.frames.size, 0);
+  }, { defaultRoute: true, pose: { type: 'home', floorId: 'floor', rotation: 5, tilt: 0.2, zoom: 2, pan: [7, -2], room: 'study' } }],
   ['camera playback waits for actual encoder startup', async f => {
     const pending = f.panel.record();
     await flush();

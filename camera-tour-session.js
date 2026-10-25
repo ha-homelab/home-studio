@@ -27,6 +27,11 @@ export function createCameraTourSession({ container, capture, apply, canvas, ren
   };
   const tour = createCameraTour({ capture, apply, requestFrame,
     cancelFrame: ticket => { ticket.cancelled = true; cancelAnimationFrame(ticket.id); } });
+  // Sessions are created lazily on first open. Reopening never replaces a route,
+  // including an intentionally cleared one. Preparing views does not render.
+  let initialError = '';
+  try { tour.orbit(t('Orbit')); }
+  catch (error) { initialError = error.message; }
   function releaseDownload() {
     const url = downloadUrl, link = downloadLink;
     downloadUrl = null;
@@ -126,6 +131,7 @@ export function createCameraTourSession({ container, capture, apply, canvas, ren
     finally { container.hidden = true; notify(onClose); }
   }
   panel = createCameraTourPanel({ container, tour, t, record, onClose: close, canExport: exportAllowed });
+  if (initialError) panel.setStatus(initialError);
   const unsubscribe = tour.subscribe(state => {
     notify(onPlaying, state.status === 'playing');
     if (recording && state.status !== 'playing') void finishRecording();

@@ -68,6 +68,49 @@ test('same-space interpolation uses radians and shortest rotation, without mutat
   assert.throws(() => interpolatePose(from, to, Infinity));
 });
 
+test('default orbits make a continuous full turn, stay idle until Play and restore the original view', () => {
+  for (const initial of [perspective({ yaw: -13, target: [4, 2, -3] }), home({ rotation: 5, room: 'study', pan: [8, -6], zoom: 2 })]) {
+    const h = harness(initial), key = initial.type === 'home' ? 'rotation' : 'yaw';
+    h.tour.orbit();
+    const route = h.tour.export();
+    assert.equal(route.schema, 1); assert.equal(route.waypoints.length, 5);
+    assert.equal(h.tour.getState().totalDuration, 20); assert.equal(h.tour.getState().status, 'idle');
+    assert.equal(h.frames.size, 0); assert.equal(h.applied.length, 0); assert.deepEqual(h.camera, initial);
+    assert.deepEqual(route.waypoints.at(-1).pose, route.waypoints[0].pose);
+    for (const { pose } of route.waypoints) {
+      assert.ok(Math.abs(pose[key]) <= Math.PI);
+      if (pose.type === 'home') {
+        assert.equal(pose.room, ''); assert.deepEqual(pose.pan, [0, 0]); assert.equal(pose.zoom, 0.8);
+        assert.equal(pose.tilt, initial.tilt);
+      } else {
+        assert.deepEqual(pose.target, initial.target); assert.equal(pose.radius, initial.radius); assert.equal(pose.pitch, initial.pitch);
+      }
+    }
+    h.tour.play();
+    let previous = h.camera[key], total = 0;
+    for (let halfLeg = 0; halfLeg < 8; halfLeg++) {
+      h.tick(2375);
+      const current = h.camera[key], movement = Math.atan2(Math.sin(current - previous), Math.cos(current - previous));
+      near(movement, Math.PI / 4); total += movement; previous = current;
+    }
+    near(total, 2 * Math.PI);
+    h.tick(1000); assert.equal(h.tour.getState().status, 'completed'); assert.equal(h.frames.size, 0);
+    h.tour.stop(); assert.deepEqual(h.camera, initial);
+  }
+});
+
+test('orbit views remain editable and exportable, and regeneration uses the current camera', () => {
+  const h = harness(); h.tour.orbit('Circuit');
+  h.tour.update('orbit_1', { name: 'Side', duration: 3 }); h.tour.move('orbit_2', -1);
+  const edited = h.tour.export(); h.tour.clear();
+  assert.deepEqual(h.tour.getState().waypoints, []); assert.equal(h.frames.size, 0);
+  h.tour.import(JSON.stringify(edited)); assert.deepEqual(h.tour.export(), edited);
+  const moved = perspective({ yaw: 2, target: [-1, 2, 3], radius: 20 }); h.setCamera(moved); h.tour.orbit();
+  assert.deepEqual(h.tour.getState().waypoints[0].pose, moved); assert.equal(h.applied.length, 0);
+  h.tour.play(); h.tick(1000); h.tour.clear();
+  assert.deepEqual(h.camera, moved); assert.equal(h.frames.size, 0); assert.equal(h.tour.getState().status, 'idle');
+});
+
 test('different floors, rooms and camera modes hold then cut without mixed coordinates', () => {
   const pairs = [[perspective(), perspective({ floorId: 'upper' })], [perspective(), home()],
     [home({ room: 'living' }), home({ room: 'kitchen', pan: [900, 200] })], [home(), home({ floorId: 'upper' })]];
@@ -148,7 +191,7 @@ test('observers receive snapshots, can unsubscribe, and cannot break completion 
 // delegated to the session before it attempts a potentially failing restore.
 function panelContainer() {
   class Element {
-    constructor(tag) { this.tag = tag; this.children = []; this.attributes = {}; this.events = {}; this.classList = { add() {}, toggle() {} }; }
+    constructor(tag) { this.tag = tag; this.children = []; this.attributes = {}; this.events = {}; this.dataset = {}; this.classList = { add() {}, toggle() {} }; }
     append(...children) { this.children.push(...children); }
     replaceChildren(...children) { this.children = children; }
     setAttribute(key, value) { this.attributes[key] = value; }
@@ -182,5 +225,24 @@ test('a standalone panel still stops the tour on Close and reports restoration f
   await container.find(node => node.attributes['aria-label'] === 'Close camera tour').events.click();
   assert.equal(stopped, 1);
   assert.equal(container.find(node => node.attributes.role === 'status').textContent, 'Restoration unavailable');
+  panel.dispose();
+});
+
+test('panel exposes orbit and clear controls, retains rows during playback and explains a single still view', async () => {
+  const h = harness(), container = panelContainer();
+  const panel = createCameraTourPanel({ container, tour: h.tour });
+  const control = name => container.find(node => node.attributes['aria-label'] === name);
+  const warning = container.find(node => node.textContent?.startsWith('One saved view'));
+  await control('Full orbit').events.click();
+  assert.equal(h.tour.getState().waypoints.length, 5); assert.equal(warning.hidden, true);
+  const nameInput = control('View 1 name');
+  h.tour.play(); h.tick(1000);
+  assert.equal(control('View 1 name'), nameInput, 'playback must preserve inputs instead of rebuilding rows');
+  assert.equal(control('Full orbit').disabled, true); assert.equal(control('Clear route').disabled, true);
+  h.tour.stop(); assert.equal(control('Full orbit').disabled, false);
+  await control('Clear route').events.click(); assert.equal(h.tour.getState().waypoints.length, 0);
+  assert.equal(control('Clear route').disabled, true); assert.equal(warning.hidden, true);
+  await control('Save current view').events.click(); assert.equal(warning.hidden, false);
+  assert.equal(control('Play').disabled, false, 'single-view routes remain supported');
   panel.dispose();
 });

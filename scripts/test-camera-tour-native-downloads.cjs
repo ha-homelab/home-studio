@@ -17,7 +17,7 @@ async function checkNativeTourDownloads(browser, root = path.resolve(__dirname, 
     export const recordingSupport=()=>({supported:true});
     export function createTourRecorder({onState}){
       return {async start(){window.captureStarts++;onState('recording');},
-        async stop(){onState('stopped');return {blob:new Blob(['synthetic video'],{type:'video/webm'}),extension:'webm'};},
+        async stop(){onState('stopped');return {blob:new Blob(['synthetic video'],{type:'video/mp4'}),extension:'mp4'};},
         cancel(){},dispose(){}};
     }
   `);
@@ -59,6 +59,7 @@ async function checkNativeTourDownloads(browser, root = path.resolve(__dirname, 
         assert.equal(await link.isVisible(), !stale, 'Legacy static exports without the download class stay hidden');
       assert.equal(await page.locator('#floor').isVisible(), true, 'Floor navigation is not an export');
       const host = page.locator('.camera-tour-host'), panel = host.locator('.camera-tour-panel');
+      await panel.getByRole('button', {name:'Clear route', exact:true}).click();
       await panel.getByRole('button', {name:'Save current view', exact:true}).click();
       await panel.getByLabel('View 1 seconds', {exact:true}).fill('0.25');
       await panel.getByLabel('View 1 seconds', {exact:true}).press('Tab');
@@ -70,7 +71,7 @@ async function checkNativeTourDownloads(browser, root = path.resolve(__dirname, 
       await video.waitFor({state:'visible'});
       const download = page.waitForEvent('download');
       await video.click();
-      assert.equal((await download).suggestedFilename(), 'home-studio-tour.webm');
+      assert.equal((await download).suggestedFilename(), 'home-studio-tour.mp4');
       assert.equal(await page.evaluate(() => captureStarts), 1);
       await page.evaluate(() => session.setExportAllowed(false));
       assert.equal(await video.count(), 0, 'Permission loss removes the output link');

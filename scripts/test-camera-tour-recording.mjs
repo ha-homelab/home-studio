@@ -48,15 +48,17 @@ function fixture(options = {}) {
   }));
   const stream = Object.assign(target(), { getTracks: () => tracks });
   const instances = [];
+  const constructionTypes = [];
   class Recorder extends Target {
     static isTypeSupported(type) {
       if (options.probeThrows?.includes(type)) throw new Error('Codec probe failed');
-      return (options.supported || ['video/webm;codecs=vp9']).includes(type);
+      return (options.supported || ['video/mp4;codecs=avc1']).includes(type);
     }
     constructor(input, config) {
       super();
-      if (options.constructorThrows) throw new Error('Recorder construction failed');
-      this.mimeType = options.actualMime || config.mimeType;
+      constructionTypes.push(config.mimeType);
+      if (options.constructorThrows || options.constructorThrowsFor?.includes(config.mimeType)) throw new Error('Recorder construction failed');
+      this.mimeType = options.actualMimes?.[config.mimeType] ?? options.actualMime ?? config.mimeType;
       this.stream = input;
       this.state = 'inactive';
       this.stopCalls = 0;
@@ -100,21 +102,24 @@ function fixture(options = {}) {
     for (const item of targets) assert.equal(item.listenerCount, 0, 'all listeners must be removed');
     if (acquired) for (const track of tracks) assert.equal(track.stopCalls, 1, 'every acquired track is stopped exactly once');
   };
-  return { canvas, document, window, tracks, stream, instances, states, errors, create, clean };
+  return { canvas, document, window, tracks, stream, instances, constructionTypes, states, errors, create, clean };
 }
 
 const tests = [];
 const test = (name, action) => tests.push([name, action]);
 const flush = async () => { for (let index = 0; index < 5; index++) await Promise.resolve(); };
 
-test('support probes are permission-free and select supported WebM/MP4', () => {
+test('support probes are permission-free and prefer H.264 MP4 without a WebM fallback', () => {
   const f = fixture();
-  assert.deepEqual(recordingSupport(f.canvas), { supported: true, reason: '', mimeType: 'video/webm;codecs=vp9', extension: 'webm' });
+  assert.deepEqual(recordingSupport(f.canvas), { supported: true, reason: '', mimeType: 'video/mp4;codecs=avc1', extension: 'mp4' });
   assert.equal(f.canvas.captures, 0);
   const mp4 = fixture({ supported: ['video/mp4'] });
   assert.equal(recordingSupport(mp4.canvas).extension, 'mp4');
-  const fallback = fixture({ supported: ['video/webm'], probeThrows: ['video/webm;codecs=vp9'] });
-  assert.equal(recordingSupport(fallback.canvas).mimeType, 'video/webm');
+  const fallback = fixture({ supported: ['video/mp4'], probeThrows: ['video/mp4;codecs=avc1'] });
+  assert.equal(recordingSupport(fallback.canvas).mimeType, 'video/mp4');
+  const both = fixture({ supported: ['video/webm', 'video/mp4', 'video/mp4;codecs=avc1'] });
+  assert.equal(recordingSupport(both.canvas).mimeType, 'video/mp4;codecs=avc1');
+  assert.match(recordingSupport(fixture({ supported: ['video/webm'] }).canvas).reason, /MP4.*unavailable/);
   assert.equal(recordingSupport(fixture({ supported: [] }).canvas).supported, false);
   assert.equal(recordingSupport(null).supported, false);
   f.canvas.width = 0;
@@ -143,8 +148,8 @@ test('normal stop retains final bytes, releases resources, and can restart', asy
   assert.equal(f.tracks[0].stopCalls, 1, 'tracks stop before final recorder data');
   const result = await stopped;
   assert.equal(await result.blob.text(), 'headtail');
-  assert.equal(result.mimeType, 'video/webm;codecs=vp9');
-  assert.equal(result.extension, 'webm');
+  assert.equal(result.mimeType, 'video/mp4;codecs=avc1');
+  assert.equal(result.extension, 'mp4');
   assert.equal(await recorder.stop(), result);
   assert.deepEqual(f.states, ['starting', 'recording', 'stopping', 'idle']);
   f.clean(clock);
@@ -157,21 +162,60 @@ test('normal stop retains final bytes, releases resources, and can restart', asy
   await assert.rejects(recorder.stop(), /no recording/);
 });
 
-test('actual MIME determines extension without mislabeling WebM as MP4', async clock => {
+test('a constructor that selects WebM is rejected without producing a mislabeled MP4', async clock => {
   const f = fixture({ supported: ['video/mp4'], actualMime: 'video/webm;codecs=vp8' });
   const recorder = f.create();
-  await recorder.start();
-  f.instances[0].chunk('video');
-  const result = await recorder.stop();
-  assert.equal(result.extension, 'webm');
-  assert.equal(result.blob.type, result.mimeType);
+  await assert.rejects(recorder.start(), /MP4/);
+  await assert.rejects(recorder.stop(), /MP4/);
   f.clean(clock);
-  const mp4 = fixture({ supported: ['video/mp4'] });
+  const mp4 = fixture({ supported: ['video/mp4'], actualMime: 'video/mp4;codecs=avc1.640028' });
   const other = mp4.create();
   await other.start();
   mp4.instances[0].chunk('mp4');
   assert.equal((await other.stop()).extension, 'mp4');
   mp4.clean(clock);
+});
+
+test('advertised MP4 construction failures retry only another MP4 candidate', async clock => {
+  for (const mismatch of [false, true]) {
+    const f = fixture({ supported: ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm'],
+      constructorThrowsFor: mismatch ? [] : ['video/mp4;codecs=avc1'],
+      actualMimes: mismatch ? { 'video/mp4;codecs=avc1': 'video/webm' } : {} });
+    const recorder = f.create();
+    await recorder.start();
+    assert.deepEqual(f.constructionTypes, ['video/mp4;codecs=avc1', 'video/mp4']);
+    f.instances.at(-1).chunk('mp4');
+    assert.equal((await recorder.stop()).extension, 'mp4');
+    f.clean(clock);
+  }
+});
+
+test('WebM-only browsers fail before capturing and keep no resources', async clock => {
+  const f = fixture({ supported: ['video/webm;codecs=vp9', 'video/webm'] });
+  const recorder = f.create();
+  await assert.rejects(recorder.start(), /MP4.*unavailable/);
+  assert.equal(f.canvas.captures, 0);
+  assert.equal(f.instances.length, 0);
+  f.clean(clock, false);
+});
+
+test('failure of every advertised MP4 candidate releases the shared capture once', async clock => {
+  const f = fixture({ supported: ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm'], constructorThrows: true });
+  const recorder = f.create();
+  await assert.rejects(recorder.start(), /construction failed/);
+  assert.deepEqual(f.constructionTypes, ['video/mp4;codecs=avc1', 'video/mp4']);
+  assert.equal(f.errors.length, 1);
+  f.clean(clock);
+});
+
+test('a non-MP4 first chunk is rejected even when the recorder advertised MP4', async clock => {
+  const f = fixture();
+  const recorder = f.create();
+  await recorder.start();
+  f.instances[0].chunk('webm', 'video/webm');
+  await assert.rejects(recorder.stop(), /non-MP4/);
+  assert.equal(f.errors.length, 1);
+  f.clean(clock);
 });
 
 test('start waits for the recorder event before allowing a short tour to run', async clock => {
@@ -351,7 +395,7 @@ test('exact byte limit stops, and overflow never returns truncated video', async
   const capture = capped.create({ maxBytes: 999999999 });
   await capture.start();
   // Synthetic metadata checks the hard cap without allocating a 64 MiB chunk.
-  capped.instances[0].emit('dataavailable', { data: { size: 64 * 1024 * 1024 + 1, type: 'video/webm' } });
+  capped.instances[0].emit('dataavailable', { data: { size: 64 * 1024 * 1024 + 1, type: 'video/mp4' } });
   await assert.rejects(capture.stop(), /file size limit/);
   capped.clean(clock);
 });
@@ -410,7 +454,7 @@ test('stop exceptions, empty video, and inconsistent MIME reject cleanly', async
     const f = fixture({ stopThrows: issue === 'stop' });
     const recorder = f.create();
     await recorder.start();
-    if (issue === 'mixed') { f.instances[0].chunk('webm'); f.instances[0].chunk('mp4', 'video/mp4'); }
+    if (issue === 'mixed') { f.instances[0].chunk('mp4'); f.instances[0].chunk('webm', 'video/webm'); }
     await assert.rejects(recorder.stop(), issue === 'stop' ? /stop failed/ : issue === 'empty' ? /video data/ : /inconsistent/);
     f.clean(clock);
   }

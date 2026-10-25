@@ -160,6 +160,21 @@ export function createCameraTour({ capture, apply, onChange, requestFrame = call
       const view = { id: `view_${suffix}`, name, duration: 3, pose: pose(capture()) };
       replace({ schema: 1, waypoints: [...document.waypoints, view] }); return copy(view);
     },
+    orbit(name = 'Orbit') {
+      ensureLive();
+      const start = pose(capture()), rotation = start.type === 'home' ? 'rotation' : 'yaw';
+      // Home orbits the whole house even when a room or panned view was selected.
+      // Perspective already carries its orbit centre, distance and height.
+      if (start.type === 'home') Object.assign(start, { room: '', pan: [0, 0], zoom: 0.8 });
+      start[rotation] = Math.atan2(Math.sin(start[rotation]), Math.cos(start[rotation]));
+      return replace({ schema: 1, waypoints: Array.from({ length: 5 }, (_, step) => {
+        const next = copy(start), value = start[rotation] + (step % 4) * Math.PI / 2;
+        next[rotation] = Math.atan2(Math.sin(value), Math.cos(value));
+        // Four short arcs retain a full circle under shortest-angle interpolation.
+        return { id: `orbit_${step}`, name: `${name} ${step * 90}°`, duration: step < 4 ? 4.75 : 1, pose: next };
+      }) });
+    },
+    clear() { ensureLive(); return replace({ schema: 1, waypoints: [] }); },
     remove(id) {
       ensureLive(); const next = copy(document); next.waypoints.splice(find(id), 1); return replace(next);
     },

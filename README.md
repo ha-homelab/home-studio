@@ -257,12 +257,17 @@ placed objects are saved in your project. See the [garden guide](docs/environmen
 
 ## Make a camera tour
 
-Open **Camera tour** in Preview 3D or the generated Home/Editor viewer to save
-named viewpoints, arrange a route, and play, pause or stop it. Routes support
+Open **Camera tour** in Preview 3D or the generated Home/Editor viewer for a
+ready-to-play 20-second full orbit. Opening the panel does not move the camera;
+choose **Play** or **Record video** to start. Edit its viewpoints, use **Full
+orbit** to replace the route, or **Clear route** to build your own. Routes support
 up to 32 views and two minutes; use **Export route** to keep their JSON beyond
-the current page session. **Record video** saves a local WebM or MP4 when the
-browser supports it, containing the rendered scene without audio or interface
-controls. You can upload the video yourself to another tool as a reference;
+the current page session.
+
+**Record video** saves a local MP4 when the browser can encode it, containing
+the rendered scene without audio or interface controls. Browsers without MP4
+recording support can still play tours; there is no WebM fallback or format
+conversion. You can upload the video yourself to another tool as a reference;
 the feature does not upload it or operate Home Assistant devices. See the
 [camera-tour guide](docs/camera-tours.md) for steps and viewer limits.
 
