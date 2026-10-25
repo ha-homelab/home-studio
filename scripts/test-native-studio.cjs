@@ -346,6 +346,15 @@ async function testDocumentFallback(context, origin, project, errors) {
     `default-src 'none'; script-src ${origin}; style-src ${origin} 'unsafe-inline'; img-src ${origin} data: blob:; font-src ${origin}; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`,
     'Fallback CSP must allow only the original asset origin and keep its other restrictions');
   assert.deepEqual(await child.evaluate(()=>window.planner.getProject()),project);
+  assert.equal(await child.locator('link[href$="/site-editor.css"]').getAttribute('href'),origin+'/home-floorplan-studio/planner/site-editor.css','Fallback rebases the bundled site stylesheet to the same trusted origin');
+  await child.locator('#site-mode').click();
+  assert.equal(await child.evaluate(()=>planner.getEditingMode()),'site','The fallback loads the site editor module');
+  assert.equal(await child.locator('.floor-section').isVisible(),false,'The fallback applies the site editor stylesheet');
+  await child.getByRole('button',{name:'Add site rectangle',exact:true}).click();
+  assert.equal(await child.evaluate(()=>planner.getProject().site.features.length),1,'Site authoring also works in the opaque fallback document');
+  await child.locator('#undo').click();
+  assert.deepEqual(await child.evaluate(()=>planner.getProject()),project,'Undo of a fallback site edit preserves the original floor drawing');
+  await child.locator('#inside-mode').click();
   assert.deepEqual(await child.evaluate(()=>({
     origin:window.origin,
     parent:(()=>{try{return parent.document.body.innerHTML;}catch{return 'isolated';}})(),
@@ -443,6 +452,7 @@ async function testDocumentFallback(context, origin, project, errors) {
     ['invalid UTF-8',{status:200,contentType:'text/html',body:Buffer.from([0xff,0xfe,0xff])},'editor-decode'],
     ['changed policy',{status:200,contentType:'text/html',body:original.replace("default-src 'none'","default-src *")},'editor-policy'],
     ['foreign script',{status:200,contentType:'text/html',body:original.replace('./editor.js','https://untrusted.invalid/editor.js')},'editor-assets'],
+    ['foreign site stylesheet',{status:200,contentType:'text/html',body:original.replace('./site-editor.css','https://untrusted.invalid/site-editor.css')},'editor-assets'],
     ['untrusted bootstrap',{status:200,contentType:'text/html',body:original.replace('</head>','<meta name="home-studio-bootstrap" content="untrusted"></head>')},'editor-document'],
     ['blocked document parsing',{status:200,contentType:'text/html',body:original},'editor-parse','parse'],
     ['blocked document assignment',{status:200,contentType:'text/html',body:original},'editor-open','open'],
