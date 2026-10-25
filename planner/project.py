@@ -685,6 +685,7 @@ def compile_project(project, output=DEFAULT_OUTPUT, ha_package=False, project_pa
                            minZ=min(d["bounds_m"]["min_z"] for _, d, _ in compiled), maxZ=max(d["bounds_m"]["max_z"] for _, d, _ in compiled))
         ground_elevation = min(d["elevation_m"] for _, d, _ in compiled)
         for floor, data, svg in compiled:
+            data["site_context"] = {"ground_elevation_m": ground_elevation - data["elevation_m"]}
             data["environment"] = dict(enabled=False, motion=False, palette="sage", bounds=site_bounds, elevation=ground_elevation - data["elevation_m"])
             below = [other for _, other, _ in compiled if other['elevation_m'] < data['elevation_m']]
             if below:

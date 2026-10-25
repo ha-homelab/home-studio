@@ -24,6 +24,37 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
     const tiles=math.tiles({...config,latitude,longitude},[[-span,-span],[-span,span],[span,span],[span,-span]],1200);
     assert(tiles.length>0&&tiles.length<=36);for(const tile of tiles){assert(tile.z>=0&&tile.z<=19);assert(tile.x>=0&&tile.x<2**tile.z&&tile.y>=0&&tile.y<2**tile.z);}
   }
+  const plain=value=>JSON.parse(JSON.stringify(value));
+  const rooms=[[[0,0],[4,0],[4,5],[0,5]],[[4,0],[7,0],[7,3],[4,3]]],outline=math.context({},rooms);
+  assert.equal(outline.polygons.length,1,'Shared partial room edges form one exterior contour');
+  assert(outline.polygons[0].some(p=>p[0]===4&&p[1]===3),'Concave exterior corner is retained');
+  assert.equal(math.context({},[rooms[0],rooms[0]]).polygons.length,0,'Overlapping rooms do not invent a roof');
+  assert.equal(math.context({},[rooms[0],rooms[0].map(([x,z])=>[x+10,z])]).polygons.length,0,'Disconnected rooms do not expose internal room contours');
+  for(const other of [[[1,1],[2,1],[2,2],[1,2]],[[2,2],[6,2],[6,6],[2,6]],[[2,0],[6,0],[6,5],[2,5]]]){
+    assert.equal(math.context({},[rooms[0],other]).polygons.length,0,'Nested or partly overlapping rooms cannot supply a reliable exterior');
+  }
+  const junction=math.context({},[rooms[0],[[4,0],[7,0],[7,2],[4,2]],[[4,2],[7,2],[7,5],[4,5]]]).polygons;
+  assert.equal(junction.length,1,'A shared T-junction produces one exterior');
+  assert(junction[0].every((p,i)=>{const q=junction[0][(i+1)%junction[0].length];return p[0]===q[0]&&[0,7].includes(p[0])||p[1]===q[1]&&[0,5].includes(p[1]);}),'No T-junction interior edge survives');
+  const roof={polygons_m:[[[0,0],[7,0],[7,3],[4,3],[4,5],[0,5]]],elevation_m:2.8};
+  const legacy={environment:{elevation:-1.8},meshes:[{kind:'floors',vertices:[[0,-.16,0]]}],lower_floor_context:{elevation_m:-2.86,surfaces:[0,-3.02,0,1,-3.02,0,1,-2.86,1]},site_context:{ground_elevation_m:-2.86,roof_outline:roof}};
+  const source=JSON.stringify(legacy),resolved=math.context(legacy,rooms);
+  assert(Math.abs(resolved.elevation+3.1)<1e-10);assert.equal(resolved.outlineElevation,2.8);assert.deepEqual(plain(resolved.polygons),roof.polygons_m);assert.equal(JSON.stringify(legacy),source);
+  assert.equal(math.context({elevation_m:16,environment:{elevation:-6}},[]).elevation,-6.08,'The site datum need not be zero');
+  assert.equal(math.context({...legacy,site_context:{}},rooms).elevation,resolved.elevation,'Legacy lower slabs recover the missing datum');
+  for(const bad of [null,{...roof,elevation_m:Infinity},{...roof,elevation_m:1001},{...roof,polygons_m:[[[0,0],[1,1],[0,1],[1,0]]]},{...roof,polygons_m:[[[0,0],[10001,0],[0,1]]]},{...roof,polygons_m:Array(17).fill(roof.polygons_m[0])}]){
+    const value=math.context({site_context:{roof_outline:bad}},[]);assert.equal(value.polygons.length,0,'Invalid optional roof is omitted');
+  }
+  const crossed={...roof,polygons_m:[[[0,0],[4,4],[0,4],[4,0],[5,2]]]};
+  assert.equal(math.context({site_context:{roof_outline:crossed}},[]).polygons.length,0,'A self-crossing roof with nonzero signed area is rejected');
+  assert.deepEqual(plain(math.context({site_context:{roof_outline:crossed}},rooms).polygons),plain(outline.polygons),'Invalid explicit roof falls back safely to a reliable exterior');
+  const levelLayer=context.createHomeMapLayer(THREE,new THREE.Scene(),{...resolved,requestTile:async()=>({data_url:png}),loadTexture:async()=>new THREE.Texture()});
+  const levelCamera=new THREE.OrthographicCamera(-10,10,10,-10,.1,100);levelCamera.position.set(0,20,10);levelCamera.lookAt(0,0,0);levelCamera.updateMatrixWorld();
+  assert(Math.abs(levelLayer.pointAt(levelCamera,0,0).y-resolved.elevation)<1e-8,'Navigation ray uses the same physical ground plane');
+  levelLayer.setConfig(config);levelLayer.render(levelCamera,{width:500,height:500});
+  for(let i=0;i<50&&levelLayer.stats.inflight;i++)await tick();levelLayer.render(levelCamera,{width:500,height:500});
+  const tile=levelLayer.object.children[0].children[0];assert(tile);assert.equal(tile.geometry.attributes.position.getY(0),Math.fround(resolved.elevation),'Rendered tile uses the navigation plane height');
+  const line=levelLayer.object.children[1].children[0];assert.equal(line.geometry.attributes.position.getY(0),Math.fround(2.8));assert.equal(line.material.depthWrite,false);levelLayer.dispose();
   const scene=new THREE.Scene();let active=0,maxActive=0,requests=0,changes=0,disposedTextures=0,status='';
   const layer=context.createHomeMapLayer(THREE,scene,{polygons:[[[0,0],[10,0],[10,8],[0,8]]],requestTile:async()=>{active++;maxActive=Math.max(active,maxActive);requests++;await tick();active--;return {data_url:png};},loadTexture:async()=>{const texture=new THREE.Texture();texture.addEventListener('dispose',()=>disposedTextures++);return texture;},onChange:()=>changes++,onStatus:text=>status=text});
   layer.setConfig(config);
@@ -106,16 +137,24 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
     assert.equal(node('homeMapStatus').textContent,'','Accepted success clears the settings error even if the tile status is unchanged');
     assert.equal(node('homeMapRetry').hidden,true);assert.equal(node('homeMapCaption').hidden,scenario==='disabled');c.layer().dispose();
   }
-  console.log('PASS: map coordinates, north rotation, dateline/pole tile indices, LOD, four-request limit, cache eviction, explicit tile recovery and disposal.');
+  console.log('PASS: map coordinates, multistorey ground, validated roof/exterior contours, north rotation, LOD, bounded tile recovery and disposal.');
   if(process.argv.includes('--unit-only'))return;
   const temporary=fs.mkdtempSync(path.join(os.tmpdir(),'home-map-test-'));let browser,server;
   try{
     const project=JSON.parse(fs.readFileSync(path.join(root,'planner/example-home.json'),'utf8'));
+    project.floors[0].elevation_m=3;
+    const lower=JSON.parse(JSON.stringify(project.floors[0]));lower.id='lower';lower.name='Lower floor';lower.elevation_m=0;
+    for(const room of lower.rooms)for(const p of room.polygon)p[0]-=4;
+    for(const wall of lower.walls){wall.start[0]-=4;wall.end[0]-=4;}for(const item of lower.items)item.position_m.x-=4;
+    project.floors.push(lower);
     fs.writeFileSync(path.join(temporary,'project.json'),JSON.stringify(project));
     const built=spawnSync(process.env.PYTHON||'python3',['scripts/build-planner-project.py','--project',path.join(temporary,'project.json'),'--output',path.join(temporary,'build')],{cwd:root,encoding:'utf8'});
     assert.equal(built.status,0,built.stderr||built.stdout);
     let html=fs.readFileSync(path.join(temporary,'build/main/index.html'),'utf8');
-    html=html.replace('rebuildInventoryView();if(embedded)','window.__mapThree=THREE;window.__mapTest=homeView;rebuildInventoryView();if(embedded)');
+    html=html.replace(/(<script id="modelData" type="application\/json">)([\s\S]*?)(<\/script>)/,(_all,start,json,end)=>{
+      const model=JSON.parse(json);delete model.elevation_m;model.environment.elevation=-1.8;model.site_context={roof_outline:roof};return start+JSON.stringify(model)+end;
+    });
+    html=html.replace('rebuildInventoryView();if(embedded)','window.__mapThree=THREE;window.__mapRenderer=renderer;window.__mapTest=homeView;rebuildInventoryView();if(embedded)');
     html=html.replaceAll('roomLighting?.update(points,camera);', 'window.__mapLightUpdates=(window.__mapLightUpdates||0)+1;roomLighting?.update(points,camera);');
     html=html.replace('return {get active(){return active},get mapStats()', 'return {debugResetFit(){cameraFit=null},get debugCamera(){return camera},get debugMap(){return mapLayer},get active(){return active},get mapStats()');
     server=http.createServer((request,response)=>{response.setHeader('Content-Type','text/html');response.end(html);});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -142,6 +181,24 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
     },{config,png});
     await page.evaluate(()=>window.__mapTest.loadMap());await page.locator('#homeMapOverview').waitFor({state:'visible'});
     await page.waitForFunction(()=>window.__mapTest.mapStats?.loaded>0);
+    const gpu=await page.evaluate(()=>{const gl=window.__mapRenderer.getContext(),info=gl.getExtension('WEBGL_debug_renderer_info');return info?gl.getParameter(info.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER);});
+    if(process.env.CHROMIUM_ANGLE_BACKEND==='metal')assert.match(gpu,/ANGLE.*Apple.*Metal|ANGLE.*Metal.*Apple/i,'Requested native Metal renderer must actually be active');
+    console.log('Map renderer: '+gpu);
+    for(const zoom of [.6,.24]){
+      await page.evaluate(zoom=>window.__mapTest.applyNavigationState({mode:'map',zoom,rotation:0,tilt:0,pan_x:0,pan_y:0}),zoom);
+      await page.waitForFunction(()=>window.__mapTest.mapStats.inflight===0);
+      const visible=await page.evaluate(()=>{
+        const gl=window.__mapRenderer.getContext(),w=gl.drawingBufferWidth,h=gl.drawingBufferHeight;
+        const sample=()=>{window.renderModel();const data=new Uint8Array(w*h*4);gl.readPixels(0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,data);return data;};
+        const before=sample(),button=document.querySelector('#homeFloorContext');button.click();const absent=sample();button.click();
+        let changed=0;for(let i=0;i<before.length;i+=4)if(Math.max(...[0,1,2].map(j=>Math.abs(before[i+j]-absent[i+j])))>=2)changed++;
+        const map=window.__mapTest.debugMap,camera=window.__mapTest.debugCamera;
+        return {changed,ground:map.pointAt(camera,0,0).y,outline:map.object.children[1].visible,roofY:map.object.children[1].children[0].geometry.attributes.position.getY(0)};
+      });
+      assert(visible.changed>20,`Lower storey contributes actual visible pixels at ${zoom}: ${JSON.stringify(visible)}`);
+      assert(Math.abs(visible.ground+3.24)<1e-6,'Map lies below the lower slab, not the upper floor');
+      assert.equal(visible.outline,true);assert.equal(visible.roofY,Math.fround(2.8));
+    }
     assert.equal(await page.getByRole('img',{name:'Geographic north',exact:true}).isVisible(),true);
     await assertCompassLayout();
     assert.equal(await page.locator('canvas').count(),1,'Map uses the existing renderer canvas');
@@ -184,6 +241,8 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
 
     await page.locator('#homeMapHome').click();await page.waitForFunction(()=>document.querySelector('#homeStage').dataset.mapCoarse==='false');
     assert.equal(await page.evaluate(()=>window.__mapTest.exportNavigationState().zoom),1);
+    assert.equal(await page.evaluate(()=>window.__mapTest.debugMap.object.children[1].visible),false,'Roof contour yields to Home controls at normal scale');
+    assert.equal(await page.locator('#homeMarkers').isVisible(),true,'Home restores the device overlay layer');
     await page.locator('#homeMapAlign').click();await page.locator('#homeMapEditor').waitFor({state:'visible'});
     await page.locator('#homeMapNorth').fill('90');await page.locator('#homeMapNorth').dispatchEvent('change');await page.locator('#homeMapCancel').click();assert.equal(await page.evaluate(()=>mapSaves.length),0,'Cancel keeps alignment local');
     await page.locator('#homeMapAlign').click();await page.locator('#homeMapNorth').fill('25.05');await page.locator('#homeMapNorth').dispatchEvent('change');

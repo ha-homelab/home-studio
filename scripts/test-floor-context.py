@@ -44,7 +44,7 @@ class FloorContextTests(unittest.TestCase):
         project = json.loads((ROOT / 'planner/example-home.json').read_text())
         base = project['floors'][0]
         project['floors'] = []
-        for floor_id, elevation in [('top', 6), ('bottom', 0), ('middle', 3)]:
+        for floor_id, elevation in [('top', 16), ('bottom', 10), ('middle', 13)]:
             floor = copy.deepcopy(base)
             floor.update(id=floor_id, name=floor_id, elevation_m=elevation)
             project['floors'].append(floor)
@@ -54,6 +54,8 @@ class FloorContextTests(unittest.TestCase):
             top = json.loads((output / 'top/model-data.json').read_text())
             bottom = json.loads((output / 'bottom/model-data.json').read_text())
             self.assertEqual(top['lower_floor_context']['elevation_m'], -3)
+            self.assertEqual(top['site_context']['ground_elevation_m'], -6)
+            self.assertEqual(bottom['site_context']['ground_elevation_m'], 0)
             self.assertNotIn('lower_floor_context', bottom)
             self.assertTrue(all(y < 0 for y in top['lower_floor_context']['lines'][1::3]))
             self.assertTrue(all(min(p[1] for p in mesh['vertices']) >= -.2 for mesh in top['meshes']))

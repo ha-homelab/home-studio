@@ -260,7 +260,7 @@ homeView = (() => {
     if(!config?.enabled){mapTileStatus='';mapTileRetry=false;}
     if(Number.isFinite(result.reference?.latitude)&&Math.abs(result.reference.latitude)<=90&&Number.isFinite(result.reference?.longitude)&&Math.abs(result.reference.longitude)<=180)mapReference={latitude:Math.max(-85,Math.min(85,result.reference.latitude)),longitude:result.reference.longitude};
     if(!mapLayer&&renderer&&typeof createHomeMapLayer==='function')mapLayer=createHomeMapLayer(THREE,scene,{
-      elevation:-(model.elevation_m||0)-.08,polygons:model.rooms.map(room=>room.polygon.map(([x,z])=>[xm(x),zm(z)])),
+      ...homeMapMath.context(model,model.rooms.filter(room=>!(model.exterior_rooms||[]).includes(room.id)).map(room=>room.polygon.map(([x,z])=>[xm(x),zm(z)]))),
       requestTile:payload=>window.homeMapRequest('tile',payload),onChange:()=>window.requestModelRender?.(),
       onStatus:(text,retry)=>{if(mapLayer?.config?.enabled){mapTileStatus=text;mapTileRetry=retry;}refreshMapStatus();}
     });
@@ -914,7 +914,7 @@ homeView = (() => {
         presenceView?.update(items,haStates,haConnected,active&&!coarse&&roomLabels&&!document.hidden,selected);
         vacuumView?.update(haStates,haConnected,active&&!coarse);
       }
-      mapLayer?.render(camera,rect,{visible:active,coarse,editing:!!mapDraft});
+      mapLayer?.render(camera,rect,{visible:active,coarse,editing:!!mapDraft,transition:zoom<.65});
       if(mapOn){const angle=mapLayer.config.north_deg*Math.PI/180,north=projectedPosition.set(-Math.sin(angle),0,-Math.cos(angle)).transformDirection(camera.matrixWorldInverse);$('homeMapCompass').firstElementChild.style.transform=`rotate(${Math.atan2(north.x,north.y)*180/Math.PI}deg)`;}
     }
     if(lowerFloorContext)lowerFloorContext.visible=showLowerFloor&&!selected&&!coarse;
