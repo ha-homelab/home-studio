@@ -12,6 +12,13 @@ function instrumentMapLayer(source){
   assert.equal(source.split(hook).length,2,'Map instrumentation must match exactly once');
   return source.replace(hook,'return {get debugVisibleTiles(){return desired.map(tile=>{const entry=cache.get(tile.key);return {key:tile.key,ready:!!entry?.texture,failed:!!entry?.failed,loading:!!entry?.loading};});},get object(){return group;}');
 }
+async function mapSnapshot(page){
+  return page.evaluate(()=>({stats:window.__mapTest?.mapStats,tiles:window.__mapTest?.debugMap?.debugVisibleTiles,
+    failedKey:window.recoveryKey,attempts:window.recoveryTileAttempts,sampling:window.recoverySampling,
+    status:document.querySelector('#homeMapStatus')?.textContent,
+    retryVisible:!!document.querySelector('#homeMapRetry')&&!document.querySelector('#homeMapRetry').hidden&&document.querySelector('#homeMapRetry').getBoundingClientRect().width>0,
+    stage:document.querySelector('#homeStage')?.getBoundingClientRect().toJSON()}));
+}
 (async()=>{
   const THREE=await import('data:text/javascript;base64,'+fs.readFileSync(path.join(root,'vendor/three.module.min.js')).toString('base64'));
   const context=vm.createContext({THREE,Promise,Map,Set,Math,Number,Error});
@@ -150,7 +157,7 @@ function instrumentMapLayer(source){
   }
   console.log('PASS: map coordinates, multistorey ground, validated roof/exterior contours, north rotation, LOD, bounded tile recovery and disposal.');
   if(process.argv.includes('--unit-only'))return;
-  const temporary=fs.mkdtempSync(path.join(os.tmpdir(),'home-map-test-'));let browser,server;
+  const temporary=fs.mkdtempSync(path.join(os.tmpdir(),'home-map-test-'));let browser,server,page;
   try{
     const project=JSON.parse(fs.readFileSync(path.join(root,'planner/example-home.json'),'utf8'));
     project.floors[0].elevation_m=3;
@@ -166,28 +173,23 @@ function instrumentMapLayer(source){
     html=html.replace(/(<script id="modelData" type="application\/json">)([\s\S]*?)(<\/script>)/,(_all,start,json,end)=>{
       const model=JSON.parse(json);delete model.elevation_m;model.environment.elevation=-1.8;model.site_context={roof_outline:roof};return start+JSON.stringify(model)+end;
     });
-    html=html.replace('rebuildInventoryView();if(embedded)','window.__mapThree=THREE;window.__mapRenderer=renderer;window.__mapTest=homeView;rebuildInventoryView();if(embedded)');
+    html=html.replace('rebuildInventoryView();if(embedded)','window.__mapMath=homeMapMath;window.__mapThree=THREE;window.__mapRenderer=renderer;window.__mapTest=homeView;rebuildInventoryView();if(embedded)');
     html=html.replaceAll('roomLighting?.update(points,camera);', 'window.__mapLightUpdates=(window.__mapLightUpdates||0)+1;roomLighting?.update(points,camera);');
     html=html.replace('return {get active(){return active},get mapStats()', 'return {debugResetFit(){cameraFit=null},get debugCamera(){return camera},get debugMap(){return mapLayer},get active(){return active},get mapStats()');
     server=http.createServer((request,response)=>{response.setHeader('Content-Type','text/html');response.end(html);});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
     const engine=process.env.MAP_ENGINE||'chromium';assert(['chromium','firefox','webkit'].includes(engine));
     const engines=require('playwright'),{browserLaunchOptions}=require('./browser-stability-diagnostics.cjs');browser=await engines[engine].launch(browserLaunchOptions(engine,true));
-    const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];page.on('pageerror',error=>errors.push(String(error)));
+    page=await browser.newPage({viewport:{width:1280,height:900}});const errors=[];page.on('pageerror',error=>errors.push(String(error)));
     const waitForCurrentTiles=async(failedKey=null)=>{
-      try{
-        const handle=await page.waitForFunction(failedKey=>{
-          const stats=window.__mapTest.mapStats,tiles=window.__mapTest.debugMap.debugVisibleTiles;
-          if(stats.inflight||tiles.length<2||tiles.some(tile=>tile.loading))return false;
-          if(failedKey&&!tiles.some(tile=>tile.key===failedKey&&tile.failed&&!tile.ready))return false;
-          return tiles.every(tile=>tile.key===failedKey?tile.failed&&!tile.ready:tile.ready&&!tile.failed)?{stats,tiles}:false;
-        },failedKey);
-        try{return await handle.jsonValue();}finally{await handle.dispose();}
-      }catch(error){
-        const snapshot=await page.evaluate(()=>({stats:window.__mapTest.mapStats,tiles:window.__mapTest.debugMap.debugVisibleTiles,
-          failedKey:window.recoveryKey,attempts:window.recoveryTileAttempts,status:document.querySelector('#homeMapStatus').textContent,
-          stage:document.querySelector('#homeStage').getBoundingClientRect().toJSON()})).catch(diagnosticError=>({diagnosticError:String(diagnosticError)}));
-        throw Error('Current map tile readiness failed: '+JSON.stringify(snapshot),{cause:error});
-      }
+      const handle=await page.waitForFunction(failedKey=>{
+        const stats=window.__mapTest.mapStats,tiles=window.__mapTest.debugMap.debugVisibleTiles,
+          status=document.querySelector('#homeMapStatus').textContent,retry=document.querySelector('#homeMapRetry'),
+          retryVisible=!retry.hidden&&retry.getBoundingClientRect().width>0;
+        if(stats.inflight||tiles.length<2||tiles.some(tile=>tile.loading))return false;
+        if(failedKey?(!tiles.some(tile=>tile.key===failedKey&&tile.failed&&!tile.ready)||!/Some map tiles/.test(status)||!retryVisible):(status!==''||retryVisible))return false;
+        return tiles.every(tile=>tile.key===failedKey?tile.failed&&!tile.ready:tile.ready&&!tile.failed)?{stats,tiles,status,retryVisible,attempts:window.recoveryTileAttempts}:false;
+      },failedKey);
+      try{return await handle.jsonValue();}finally{await handle.dispose();}
     };
     const assertCompassLayout=async()=>{
       const layout=await page.evaluate(()=>{
@@ -287,6 +289,18 @@ function instrumentMapLayer(source){
     // Clear only the layer cache, without hide/show of the caption or controls.
     await page.evaluate(()=>window.__mapTest.applyNavigationState({mode:'map',zoom:.035,rotation:0,tilt:0,pan_x:0,pan_y:0}));
     await waitForCurrentTiles();
+    // Place sampling halfway between LOD thresholds. Real error-caption resize
+    // can then change the viewport without invalidating the chosen center tile.
+    await page.evaluate(()=>{
+      const state=window.__mapTest.exportNavigationState(),map=window.__mapTest.debugMap,camera=window.__mapTest.debugCamera,
+        rect=document.querySelector('#homeStage').getBoundingClientRect(),transform=window.__mapMath.transform(map.config),
+        corners=[[-1,-1],[-1,1],[1,1],[1,-1]].map(p=>map.pointAt(camera,...p)).map(p=>transform.toMap(p.x,p.z)),
+        ratio=rect.width/(256*(Math.max(...corners.map(p=>p[0]))-Math.min(...corners.map(p=>p[0])))),
+        level=Number(map.debugVisibleTiles[0].key.split('/')[0]);
+      window.recoverySampling={before:ratio,level,target:2**(level+.5)};
+      state.span_m*=ratio/recoverySampling.target;window.__mapTest.applyNavigationState(state);
+    });
+    await waitForCurrentTiles();
     const recoveryKey=await page.evaluate(png=>{
       const map=window.__mapTest.debugMap,config=map.config;
       window.recoveryTileAttempts={};window.recoveryKey=map.debugVisibleTiles[0].key;window.recoveryFail=true;
@@ -299,14 +313,21 @@ function instrumentMapLayer(source){
     },png);
     const partial=await waitForCurrentTiles(recoveryKey);
     assert.equal(partial.tiles.filter(tile=>tile.ready).length,partial.tiles.length-1);
-    assert.match(await page.locator('#homeMapStatus').textContent(),/Some map tiles/);assert.equal(await page.locator('#homeMapRetry').isVisible(),true,'A partial map failure exposes Retry map');
+    assert.match(partial.status,/Some map tiles/);assert.equal(partial.retryVisible,true,'A partial map failure exposes Retry map');
     await page.evaluate(()=>{for(let i=0;i<10;i++)window.renderModel();});await page.waitForTimeout(100);
-    assert.equal(await page.evaluate(()=>recoveryTileAttempts[recoveryKey]),1,'Rendering a partial map does not run an automatic retry loop');
+    const stablePartial=await mapSnapshot(page);
+    assert(stablePartial.tiles.some(tile=>tile.key===recoveryKey&&tile.failed&&!tile.ready),'The selected failure remains in the viewport after redraws');
+    assert(stablePartial.tiles.every(tile=>tile.key===recoveryKey?tile.failed&&!tile.ready:tile.ready&&!tile.failed),'Every other current tile remains ready');
+    assert.match(stablePartial.status,/Some map tiles/);assert.equal(stablePartial.retryVisible,true);
+    assert.equal(stablePartial.attempts[recoveryKey],1,'Rendering a partial map does not run an automatic retry loop');
     await page.evaluate(()=>{recoveryFail=false;});await page.locator('#homeMapRetry').click();
-    await waitForCurrentTiles();
-    assert.equal(await page.evaluate(()=>recoveryTileAttempts[recoveryKey]),2,'Explicit retry requests the failed current tile exactly once');
-    assert.equal(await page.locator('#homeMapRetry').isVisible(),false);assert.equal(await page.locator('#homeMapStatus').textContent(),'');
-    assert.equal(await page.evaluate(()=>Object.entries(recoveryTileAttempts).every(([key,count])=>count===(key===recoveryKey?2:1))),true,'Retry preserves all healthy tile requests');
+    await waitForCurrentTiles();await page.waitForTimeout(100);
+    const recovered=await mapSnapshot(page);
+    assert.equal(recovered.stats.inflight,0);assert(recovered.tiles.every(tile=>tile.ready&&!tile.failed&&!tile.loading),'All current tiles remain healthy after Retry settles');
+    assert(recovered.tiles.some(tile=>tile.key===recoveryKey&&tile.ready),'The explicitly retried tile remains ready in the viewport');
+    assert.equal(recovered.attempts[recoveryKey],2,'Explicit retry requests the failed current tile exactly once');
+    assert.equal(recovered.retryVisible,false);assert.equal(recovered.status,'');
+    assert.equal(Object.entries(recovered.attempts).every(([key,count])=>count===(key===recoveryKey?2:1)),true,'Retry preserves all healthy tile requests');
     await page.setViewportSize({width:390,height:844});await assertCompassLayout();
     await page.locator('#homeMapHome').click();
     await assertCompassLayout();
@@ -318,5 +339,8 @@ function instrumentMapLayer(source){
     assert.match(await page.locator('#homeMapStatus').textContent(),/unavailable/);assert.equal(await page.locator('#homeMapOverview').isVisible(),false);
     assert.deepEqual(errors,[]);
     console.log('PASS ('+engine+'): same-renderer map/Home transitions, wheel and touch zoom, overlays, desktop/mobile compass layout, alignment Save/Cancel, navigation state and idle budget.');
+  }catch(error){
+    const snapshot=page?await mapSnapshot(page).catch(diagnosticError=>({diagnosticError:String(diagnosticError)})):{pageCreated:false};
+    throw Error('Map scene browser check failed: '+JSON.stringify(snapshot),{cause:error});
   }finally{await browser?.close();await new Promise(resolve=>server?server.close(resolve):resolve());fs.rmSync(temporary,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});
