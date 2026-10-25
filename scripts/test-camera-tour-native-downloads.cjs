@@ -34,6 +34,8 @@ async function checkNativeTourDownloads(browser, root = path.resolve(__dirname, 
       const page = await context.newPage();
       await page.setContent('<!doctype html><html><head></head><body>' +
         '<a class="download" id="model" href="model.glb" download>Static model</a>' +
+        ['glb','usdz','obj','mtl','dae'].map(format =>
+          `<a class="legacy-model" href="legacy.${format}" download>Legacy ${format}</a>`).join('') +
         '<a class="download" id="floor" href="#floor">Other floor</a>' +
         '<section class="camera-tour-host"></section></body></html>');
       await page.addStyleTag({content: read('camera-tour.css') + (stale ? styles[0][1] : '')});
@@ -53,6 +55,8 @@ async function checkNativeTourDownloads(browser, root = path.resolve(__dirname, 
         session.show();
       }, sessionModule);
       assert.equal(await page.locator('#model').isVisible(), !stale, 'Only stale static model exports are hidden');
+      for (const link of await page.locator('.legacy-model').all())
+        assert.equal(await link.isVisible(), !stale, 'Legacy static exports without the download class stay hidden');
       assert.equal(await page.locator('#floor').isVisible(), true, 'Floor navigation is not an export');
       const host = page.locator('.camera-tour-host'), panel = host.locator('.camera-tour-panel');
       await panel.getByRole('button', {name:'Save current view', exact:true}).click();

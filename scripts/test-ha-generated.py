@@ -707,7 +707,7 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
         state = self.integration_state()
         connection = support.Connection()
         await integration.ws_viewer(self.hass, connection, {"id": 0, "floor": "upper"})
-        self.assertNotIn("a.download[download]", connection.results[-1]["html"])
+        self.assertNotIn("display:none!important", connection.results[-1]["html"])
         await integration.ws_export(self.hass, connection, {"id": 1, "floor": "upper", "format": "glb"})
         self.assertEqual(connection.results[-1]["filename"], "upper_model.glb")
         await integration.ws_project_save(self.hass, connection, {"id": 2, "revision": 0, "project": self.project.document["project"]})
@@ -726,7 +726,8 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
                 await integration.ws_viewer(self.hass, reader, {"id": 6, "floor": "upper"})
                 self.assertEqual(reader.results[-1]["can_edit"], admin)
                 html = reader.results[-1]["html"]
-                self.assertIn("<style>a.download[download]{display:none!important}</style>", html)
+                selectors = ",".join(f"a[href$='.{format}']" for format in integration.FORMATS)
+                self.assertIn(f"<style>{selectors}{{display:none!important}}</style>", html)
                 self.assertNotIn("a.download,a[download]", html)
                 if not admin:
                     await integration.ws_export(self.hass, reader, {"id": 7, "floor": "upper", "format": "glb"})
