@@ -41,12 +41,10 @@ async function checkNativeTourDownloads(browser, root = path.resolve(__dirname, 
       await page.addStyleTag({content: read('camera-tour.css') + (stale ? styles[0][1] : '')});
       await page.evaluate(async module => {
         const {createCameraTourSession} = await import(module);
-        window.captureStarts = 0;
+        window.captureStarts = 0; window.automaticVideoDownloads = 0;
         const click = HTMLAnchorElement.prototype.click;
         HTMLAnchorElement.prototype.click = function () {
-          // Model a browser blocking only the automatic video download. The
-          // fallback must still be visible and work with an actual user click.
-          if (this.classList.contains('camera-tour-download')) return;
+          if (this.classList.contains('camera-tour-download')) automaticVideoDownloads++;
           return click.call(this);
         };
         window.session = createCameraTourSession({container: document.querySelector('section'),
@@ -67,14 +65,20 @@ async function checkNativeTourDownloads(browser, root = path.resolve(__dirname, 
       await panel.getByRole('button', {name:'Export route', exact:true}).click();
       assert.equal((await route).suggestedFilename(), 'camera-tour.json');
       await panel.getByRole('button', {name:'Record video', exact:true}).click();
-      const video = host.locator('.camera-tour-download');
-      await video.waitFor({state:'visible'});
+      const video = panel.locator('video.camera-tour-video'), link = panel.getByRole('link', {name:'Download MP4', exact:true});
+      await video.waitFor({state:'visible'}); await link.waitFor({state:'visible'});
+      assert.equal(await panel.getByRole('heading', {name:'Recorded tour', exact:true}).isVisible(), true);
+      assert.deepEqual(await video.evaluate(node => ({controls:node.controls,inline:node.playsInline,paused:node.paused,autoplay:node.autoplay,preload:node.preload})),
+        {controls:true,inline:true,paused:true,autoplay:false,preload:'metadata'});
+      assert.equal(await video.getAttribute('src'), await link.getAttribute('href'), 'player and download share one local URL');
+      assert.equal(await page.evaluate(() => automaticVideoDownloads), 0, 'completion never starts a download');
       const download = page.waitForEvent('download');
-      await video.click();
+      await link.click();
       assert.equal((await download).suggestedFilename(), 'home-studio-tour.mp4');
       assert.equal(await page.evaluate(() => captureStarts), 1);
       await page.evaluate(() => session.setExportAllowed(false));
-      assert.equal(await video.count(), 0, 'Permission loss removes the output link');
+      assert.equal(await video.count(), 0, 'Permission loss removes the player');
+      assert.equal(await link.count(), 0, 'Permission loss removes the output link');
       assert.equal(await panel.getByRole('button', {name:'Export route', exact:true}).isDisabled(), true);
       assert.equal(await panel.getByRole('button', {name:'Record video', exact:true}).isDisabled(), true);
       await panel.getByRole('button', {name:'Play', exact:true}).click();
@@ -85,7 +89,7 @@ async function checkNativeTourDownloads(browser, root = path.resolve(__dirname, 
     }
     assert.deepEqual(errors, []);
   } finally { await context.close(); }
-  console.log('PASS native tour downloads: static export branches, visible owner fallback, route export and family restrictions');
+  console.log('PASS native tour downloads: static export branches, inline owner player, explicit download, route export and family restrictions');
 }
 
 module.exports = {checkNativeTourDownloads};

@@ -25,6 +25,6 @@ export function installPlannerTour({ button, parent, capture, captureOrbit, appl
   document.addEventListener('webglcontextlost', () => session?.interrupt({ discard: true }), true);
   window.addEventListener('pagehide', event => { if (!event.persisted) { disposed = true; session?.dispose(); } });
   return { refresh() {
-    if (!available() && !container.hidden) { session?.interrupt(); container.hidden = true; button.setAttribute('aria-expanded', 'false'); }
+    if (!available() && !container.hidden) { session?.hide(); container.hidden = true; button.setAttribute('aria-expanded', 'false'); }
   } };
 }

@@ -8,8 +8,9 @@
   with ordered viewpoints, play/pause/stop, and separate JSON route backups.
 - A ready-to-play, 20-second full-house orbit when first opening Camera tour,
   with editable viewpoints and restoration of the previous camera view.
-- Local canvas video recording with native MP4 downloads, bounded
-  duration and size, and automatic cleanup when playback or the page stops.
+- Local canvas video recording with an inline player and explicit native MP4
+  downloads, bounded duration and size, and cleanup when playback or the page stops.
+  Completed recordings do not autoplay or download automatically.
   Browsers without MP4 recording keep tour playback and route export.
   Camera tours do not send Home Assistant service calls.
 

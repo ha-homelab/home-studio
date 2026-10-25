@@ -94,21 +94,25 @@ In Home Assistant, family access can create and play a route within the page
 session. Route export and video recording require the host's existing download
 permission; those controls are disabled when access does not allow downloads.
 If that permission is removed, an active recording is discarded and its video
-download is removed. Camera playback remains available.
+preview and download are removed. Camera playback remains available.
 
 ## Export a video
 
 Preview the route first, then choose **Record video** to play it from the
 beginning and capture a local video. Recording finishes at the end of the
-route; **Stop recording** saves an early take. The **Download video** link
-remains available if the browser blocks the automatic download. Keep the page
-visible while recording. The browser records the rendered
+route; **Stop recording** finishes an early take. The result appears under
+**Recorded tour** in the same panel, with video controls and a **Download MP4**
+link. It does not start playing or download automatically. Play it in the panel,
+then choose the link when you want to save the file. Closing the panel or hiding
+the page pauses and unloads the preview; reopening makes the same local result
+available again without autoplay. A successful new recording replaces it.
+Keep the page visible while recording. The browser records the rendered
 3D canvas: HTML room labels, device buttons, menus and other interface overlays
 are not included. The recorder does not capture the microphone, system audio
 or the rest of your screen.
 
-Home Studio records **MP4** using the browser's own encoder and downloads
-`home-studio-tour.mp4`. Support depends on the browser, device and available
+Home Studio records **MP4** using the browser's own encoder. **Download MP4**
+saves `home-studio-tour.mp4`. Support depends on the browser, device and available
 codec; a browser that can play MP4 may still be unable to record it. If MP4
 recording is unavailable, the panel explains the limitation. You can still
 create and play routes, and export their JSON when downloads are permitted.
@@ -147,7 +151,7 @@ separate `captureOrbit` adapter for whole-house framing; ordinary capture still
 supplies custom saved views and the original camera restored by Stop.
 
 `camera-tour-panel.js` presents that engine; `camera-tour.css` styles its
-controls. `camera-tour-session.js` connects playback, recording and downloads,
+controls. `camera-tour-session.js` connects playback, recording, inline video and downloads,
 and caps camera updates at 24 frames per second. `camera-tour-recording.js`
 owns canvas capture, format detection, the media stream and output limits.
 Recording uses the canvas provided by its host, with no new renderer, remote
@@ -167,6 +171,9 @@ Host cleanup stops playback and capture on page/view changes, graphics-context
 loss and renderer disposal. A restored planner may replace its canvas, so
 capture must resolve the current canvas when starting a new recording. Manual
 navigation cancels the pending restoration before changing the camera.
+The recorded player and download share one Blob URL. Hiding unloads the media
+source; showing the panel restores it without autoplay. A successful replacement,
+permission loss or session disposal removes the result and revokes its URL.
 
 Generated HTML embeds the runtime through `planner/project.py`; it must also
 embed the tour modules and styles so the viewer works offline. The public

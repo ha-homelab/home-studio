@@ -52,6 +52,9 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
   async function openTour(frame){
    await frame.locator('#homeCameraTour').click();
    const tour=frame.locator('.camera-tour-host:not([hidden])');
+   assert.equal(await tour.locator('.camera-tour-view').count(),5,'every viewer starts with a complete default orbit');
+   await tour.getByRole('button',{name:'Clear route',exact:true}).click();
+   assert.equal(await tour.locator('.camera-tour-view').count(),0,'clear prepares the custom-route fixture');
    await tour.getByRole('button',{name:'Save current view',exact:true}).click();
    const duration=tour.locator('input[type="number"]');await duration.fill('0.25');await duration.press('Tab');
    return tour;
@@ -74,6 +77,7 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
   // Forced clicks also reach the action guards without requesting a blocked download.
   await tour.getByRole('button',{name:'Export route',exact:true}).dispatchEvent('click');
   await tour.getByRole('button',{name:'Record video',exact:true}).dispatchEvent('click');
+  assert.equal(await tour.locator('video').count(),0,'family access cannot create a recorded preview');
   await tour.getByRole('button',{name:'Play',exact:true}).click();
   await tour.locator('.camera-tour-status').filter({hasText:'Tour finished'}).waitFor();
   assert.deepEqual(await frame.locator('#homeView').evaluate(()=>[tourDownloadAttempts,tourCaptureAttempts]),[0,0]);

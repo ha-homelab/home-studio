@@ -264,8 +264,10 @@ orbit** to replace the route, or **Clear route** to build your own. Routes suppo
 up to 32 views and two minutes; use **Export route** to keep their JSON beyond
 the current page session.
 
-**Record video** saves a local MP4 when the browser can encode it, containing
-the rendered scene without audio or interface controls. Browsers without MP4
+**Record video** prepares a local MP4 in the tour panel when the browser can
+encode it. Play the result there or choose **Download MP4** to save it; neither
+starts automatically. It contains the rendered scene without audio or interface
+controls. Browsers without MP4
 recording support can still play tours; there is no WebM fallback or format
 conversion. You can upload the video yourself to another tool as a reference;
 the feature does not upload it or operate Home Assistant devices. See the

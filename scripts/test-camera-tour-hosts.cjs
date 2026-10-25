@@ -47,7 +47,7 @@ async function homeHost({ embedded = false, canEdit = true, mode = 'home' } = {}
     'globalThis.homeView={active:true,captureTourPose,applyTourPose};', context);
   context.homeView.active = mode === 'home';
   let callbacks;
-  context.captureSession = options => { callbacks = options; return { show() {}, close() {}, interrupt() {}, dispose() {},
+  context.captureSession = options => { callbacks = options; return { show() {}, hide() {}, close() {}, interrupt() {}, dispose() {},
     setExportAllowed(value) { counts.exportGrants.push(value); } }; };
   vm.runInContext(read('camera-tour-viewer.js'), context);
   // Supply the lazy module at its documented session boundary. The callbacks

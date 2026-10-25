@@ -15,7 +15,7 @@ const MAX_EDITOR_HTML_BYTES = 128 * 1024;
 const MAX_MODEL_EXPORT_BYTES = 32 * 1024 * 1024;
 const MODEL_EXPORT_TIMEOUT_MS = 120000;
 const EDITOR_PATH = '/home-floorplan-studio/planner/index.html';
-const EDITOR_CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+const EDITOR_CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
 const EDITOR_LOAD_MESSAGES = Object.freeze({
   http: 'Home Assistant returned an HTTP error for the local editor',
   redirect: 'The local editor request was redirected',

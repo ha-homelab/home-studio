@@ -75,9 +75,10 @@ export function createCameraTourPanel({ container, tour, t = value => value, rec
   const recordButton = typeof record === 'function' ? button('Record video', () => record()) : null;
   if (recordButton) files.append(recordButton);
   const status = element('p', '', 'camera-tour-status'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+  const result = element('div', '', 'camera-tour-result'), resultTitle = element('h3', label('Recorded tour')); result.hidden = true;
   // Route shortcuts must not reach the underlying house editor.
   panel.addEventListener('keydown', event => event.stopPropagation());
-  panel.append(header, help, transport, meter, files, status, storage, routeActions, add, empty, list, note, singleView); container.append(panel);
+  panel.append(header, help, transport, meter, files, status, result, storage, routeActions, add, empty, list, note, singleView); container.append(panel);
 
   function makeRow(view, index) {
     const row = element('li', '', 'camera-tour-view'); row.dataset.waypointId = view.id;
@@ -144,6 +145,7 @@ export function createCameraTourPanel({ container, tour, t = value => value, rec
   const unsubscribe = tour.subscribe(refresh); refresh();
   return {
     refresh,
+    setResult(...nodes) { if (!disposed) { result.replaceChildren(...(nodes.length ? [resultTitle, ...nodes] : [])); result.hidden = !nodes.length; } },
     setExportAllowed(value) {
       if (disposed || exportAllowed === (value === true)) return;
       exportAllowed = value === true; customStatus = ''; statusIsError = false; refresh();

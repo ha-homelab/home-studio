@@ -65,8 +65,8 @@ async function download(page, action, filename) {
 }
 
 async function decodeVideo(page, bytes, mimeType) {
-  // The planner intentionally disallows inline media in its CSP. Inspect the
-  // downloaded file in an isolated blank page, without weakening app policy.
+  // Decode the downloaded bytes independently of the inline player so the
+  // saved file's content and motion are verified as well as on-page playback.
   const decoder = await page.context().newPage();
   try { return await decoder.evaluate(async ({ base64, type }) => {
     const data = Uint8Array.from(atob(base64), value => value.charCodeAt(0));
@@ -122,7 +122,8 @@ async function decodeVideo(page, bytes, mimeType) {
 
 async function exercise(context, origin, name) {
   const page = activePage = await context.newPage();
-  const errors = [], external = [], requests = [];
+  const errors = [], external = [], requests = [], downloads = [];
+  page.on('download', item => downloads.push(item));
   page.on('pageerror', error => errors.push(String(error)));
   page.on('request', request => { if (!['GET', 'HEAD'].includes(request.method())) requests.push({ method: request.method(), url: request.url() }); });
   await page.route('**/*', route => {
@@ -203,7 +204,24 @@ async function exercise(context, origin, name) {
     return Boolean(supported);
   }, canvasSelector);
   if (support) {
-    const recorded = await download(page, () => panel.getByRole('button', { name: 'Record video', exact: true }).click(), `${name}-video`);
+    const previousDownloads = downloads.length;
+    await panel.getByRole('button', { name: 'Record video', exact: true }).click();
+    const preview = panel.locator('video.camera-tour-video'), link = panel.getByRole('link', {name:'Download MP4', exact:true});
+    await preview.waitFor({state:'visible'});
+    assert.equal(await panel.evaluate(node => getComputedStyle(node).overflowY), 'visible', 'the host is the only scrolling panel');
+    assert.equal(await panel.getByRole('heading', {name:'Recorded tour', exact:true}).isVisible(), true);
+    assert.deepEqual(await preview.evaluate(video => ({controls:video.controls,inline:video.playsInline,paused:video.paused,autoplay:video.autoplay})),
+      {controls:true,inline:true,paused:true,autoplay:false});
+    const previewSource = await preview.getAttribute('src');
+    assert.equal(previewSource, await link.getAttribute('href'), 'inline playback and download share one blob URL');
+    await preview.evaluate(video => video.play());
+    await page.waitForFunction(() => {
+      const video = document.querySelector('video.camera-tour-video'); return video?.readyState >= 2 && video.currentTime > 0;
+    });
+    await preview.evaluate(video => video.pause());
+    assert.equal(downloads.length, previousDownloads, 'recording completion and inline playback do not download automatically');
+    await page.screenshot({path:path.join(artifacts, `${name}-recorded-preview.png`),fullPage:true});
+    const recorded = await download(page, () => link.click(), `${name}-video`);
     const extension = path.extname(recorded.item.suggestedFilename());
     assert.equal(extension, '.mp4', 'recording is downloaded as MP4');
     assert(recorded.bytes.length > 100 && recorded.bytes.length <= 64 * 1024 * 1024, 'download has bounded, nonempty video data');
@@ -213,9 +231,14 @@ async function exercise(context, origin, name) {
     assert(decoded.width > 0 && decoded.height > 0 && decoded.readyState >= 2, 'recorded video decodes a complete frame');
     assert(decoded.colors > 1, 'the first recorded frame contains rendered canvas content');
     assert(decoded.changedPixels > 20, 'decoded frames show camera movement, not a static view');
-    result.recording = { status: 'passed', file: path.basename(output), bytes: recorded.bytes.length, ...decoded };
+    result.recording = { status: 'passed', preview: 'passed', automaticDownloads: 0, file: path.basename(output), bytes: recorded.bytes.length, ...decoded };
     await page.waitForFunction(() => __cameraTourBrowser.streams.every(stream => stream.getTracks().every(track => track.readyState === 'ended')));
     assert(await page.evaluate(() => __cameraTourBrowser.recordings.every(recorder => recorder.state === 'inactive')), 'all recorders stopped');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('video.camera-tour-video').getAttribute('src'), null, 'closing unloads the preview');
+    await button.click();
+    assert.equal(await preview.getAttribute('src'), previewSource, 'reopening reuses the retained result');
+    assert.equal(await preview.evaluate(video => video.paused), true, 'reopening does not autoplay');
   } else {
     await panel.getByRole('button', { name: 'Record video', exact: true }).click();
     const reason = await panel.locator('.camera-tour-status').innerText();
@@ -232,6 +255,7 @@ async function exercise(context, origin, name) {
   await page.locator(planner ? '#plan-tab' : name === 'home' ? '#editLayout' : '#openHome').click();
   await page.waitForFunction(() => !document.querySelector('.camera-tour-host:not([hidden])'));
   await page.waitForFunction(() => !document.querySelector('canvas[data-camera-tour-playing="true"]'));
+  if (support) assert.equal(await page.locator('video.camera-tour-video').getAttribute('src'), null, 'switching modes unloads the preview');
   result.modeSwitch = 'passed';
   assert.deepEqual(await snapshot(), before, 'all tour controls leave project and inventory unchanged');
   const effects = await page.evaluate(() => ({ commands: __cameraTourBrowser.commands, permissions: __cameraTourBrowser.permissionRequests, unhandled: __cameraTourBrowser.unhandled }));

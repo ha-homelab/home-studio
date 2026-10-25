@@ -33,11 +33,17 @@ const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve()
 function fixture(options = {}) {
   const original = new Map();
   const replace = (name, value) => { original.set(name, Object.getOwnPropertyDescriptor(globalThis, name)); Object.defineProperty(globalThis, name, { configurable: true, writable: true, value }); };
-  const f = { time: 0, applies: 0, frames: new Map(), timers: new Map(), next: 1, instances: [], tracks: [], urls: [], revoked: [], failApply: false, failCapture: options.initialCaptureFailure, panelDisposed: false };
+  const f = { time: 0, applies: 0, frames: new Map(), timers: new Map(), next: 1, instances: [], tracks: [], urls: [], revoked: [], clicks: 0, failApply: false, failCapture: options.initialCaptureFailure, panelDisposed: false };
   const window = new Target();
   const document = Object.assign(new Target(), { defaultView: window, hidden: false });
   const container = { hidden: false, children: [], append(node) { this.children.push(node); }, querySelector() { return this.children.find(node => node.className === 'camera-tour-download'); } };
-  document.createElement = () => ({ click() {}, remove() { container.children = container.children.filter(node => node !== this); } });
+  document.createElement = tag => ({ tag, attributes: {}, paused: true, loads: 0,
+    click() { f.clicks++; }, remove() { container.children = container.children.filter(node => node !== this); },
+    setAttribute(name, value) { this.attributes[name] = String(value); },
+    getAttribute(name) { return this.attributes[name] ?? null; }, removeAttribute(name) { delete this.attributes[name]; },
+    set src(value) { this.setAttribute('src', value); }, get src() { return this.getAttribute('src') || ''; },
+    pause() { this.paused = true; }, load() { this.loads++; },
+  });
   const canvas = Object.assign(new Target(), { width: 640, height: 360, ownerDocument: document, captureStream() {
     const track = Object.assign(new Target(), { kind: 'video', readyState: 'live', stopCalls: 0, stop() { this.stopCalls++; this.readyState = 'ended'; } });
     f.tracks.push(track);
@@ -68,7 +74,8 @@ function fixture(options = {}) {
   replace('__cameraTourPanelTest', args => {
     f.panel = args;
     return { setRecording: value => { f.recording = value; }, setExportAllowed: value => { f.exportAllowed = value; },
-      setStatus: value => { f.status = value; }, refresh() {}, dispose() { f.panelDisposed = true; } };
+      setStatus: value => { f.status = value; }, setResult(...nodes) { container.children = nodes; },
+      refresh() {}, dispose() { f.panelDisposed = true; } };
   });
   f.pose = structuredClone(options.pose || { type: 'perspective', floorId: 'floor', yaw: 0, pitch: 0.5, radius: 10, target: [0, 0, 0] });
   f.session = createCameraTourSession({ container, canvas: () => canvas, capture: () => {
@@ -82,7 +89,8 @@ function fixture(options = {}) {
   });
   if (!options.defaultRoute) { f.session.tour.clear(); f.session.tour.add(); }
   f.tick = time => { f.time = time; const callbacks = [...f.frames.values()]; f.frames.clear(); for (const callback of callbacks) callback(time); };
-  f.document = document; f.window = window; f.canvas = canvas;
+  f.document = document; f.window = window; f.canvas = canvas; f.container = container;
+  f.video = () => container.children.find(node => node.tag === 'video');
   f.restore = () => {
     f.failApply = false;
     try { f.session.dispose(); } catch { /* Assertions report cleanup failures. */ }
@@ -95,6 +103,61 @@ function fixture(options = {}) {
 }
 
 const tests = [
+  ['completed video stays in an inline player until the user explicitly downloads', async f => {
+    await f.panel.record(); await f.panel.record();
+    const video = f.video(), link = f.container.querySelector();
+    assert(video); assert.equal(video.controls, true); assert.equal(video.playsInline, true);
+    assert.equal(video.preload, 'metadata'); assert.equal(video.paused, true); assert(!video.autoplay);
+    assert.equal(video.getAttribute('aria-label'), 'Recorded tour');
+    assert.equal(video.src, f.urls[0]); assert.equal(link.href, video.src); assert.equal(f.urls.length, 1);
+    assert.equal(link.textContent, 'Download MP4'); assert.equal(f.clicks, 0);
+    link.click(); assert.equal(f.clicks, 1);
+  }],
+  ['close and mode hiding unload preview; reopening reuses its URL without autoplay', async f => {
+    await f.panel.record(); await f.panel.record(); const video = f.video(), url = video.src;
+    for (const hide of [() => f.session.close(), () => f.session.hide()]) {
+      video.paused = false; hide();
+      assert.equal(video.paused, true); assert.equal(video.getAttribute('src'), null);
+      assert.equal(f.container.hidden, true); assert.equal(f.revoked.length, 0);
+      f.session.show(); assert.equal(video.src, url); assert.equal(video.paused, true);
+      assert.equal(f.urls.length, 1);
+    }
+  }],
+  ['manual interruption pauses preview and hidden documents unload it until visible', async f => {
+    await f.panel.record(); await f.panel.record(); const video = f.video(), url = video.src;
+    video.paused = false; f.session.interrupt(); assert.equal(video.paused, true); assert.equal(video.src, url);
+    video.paused = false; f.document.hidden = true; f.document.emit('visibilitychange');
+    assert.equal(video.paused, true); assert.equal(video.getAttribute('src'), null);
+    f.session.show(); assert.equal(video.getAttribute('src'), null, 'show cannot load media while the document is hidden');
+    f.document.hidden = false; f.document.emit('visibilitychange'); assert.equal(video.src, url); assert.equal(video.paused, true);
+    f.window.emit('pagehide'); assert.equal(video.getAttribute('src'), null);
+    f.session.show(); assert.equal(video.getAttribute('src'), null);
+    f.window.emit('pageshow'); assert.equal(video.src, url); assert.equal(video.paused, true);
+  }],
+  ['a result finalized after close retains its download but cannot decode while hidden', async f => {
+    await f.panel.record(); f.session.close(); f.instances[0].emit('stop'); await flush();
+    assert(f.video()); assert.equal(f.video().getAttribute('src'), null); assert.equal(f.urls.length, 1); assert.equal(f.clicks, 0);
+    f.session.show(); assert.equal(f.video().src, f.urls[0]); assert.equal(f.video().paused, true);
+  }, { delayStop: true }],
+  ['permission loss unloads and removes both preview and explicit download', async f => {
+    await f.panel.record(); await f.panel.record(); const video = f.video(); video.paused = false;
+    f.session.setExportAllowed(false);
+    assert.equal(video.paused, true); assert.equal(video.getAttribute('src'), null);
+    assert.equal(f.container.children.length, 0); assert.deepEqual(f.revoked, f.urls);
+  }],
+  ['a failing player cannot block hiding or result teardown', async f => {
+    await f.panel.record(); await f.panel.record(); const video = f.video(); video.paused = false;
+    video.pause = video.load = () => { throw new Error('Player unavailable'); };
+    f.session.close(); assert.equal(f.container.hidden, true); assert.equal(video.getAttribute('src'), null);
+    f.session.setExportAllowed(false); assert.equal(f.container.children.length, 0); assert.deepEqual(f.revoked, f.urls);
+  }],
+  ['a failed new take preserves the previous inline result until successful replacement', async f => {
+    await f.panel.record(); await f.panel.record(); const video = f.video(), url = video.src;
+    f.failApply = true; await f.panel.record();
+    assert.equal(f.video(), video); assert.equal(video.src, url); assert.equal(f.revoked.length, 0);
+    f.failApply = false; await f.panel.record(); await f.panel.record();
+    assert.notEqual(f.video(), video); assert.equal(video.getAttribute('src'), null); assert.deepEqual(f.revoked, [url]);
+  }],
   ['an unavailable first camera leaves a usable idle panel and allows an explicit orbit retry', async f => {
     assert.match(f.status, /Return to the house view/);
     f.session.show(); assert.deepEqual(f.session.tour.getState().waypoints, []);

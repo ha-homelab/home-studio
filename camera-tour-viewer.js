@@ -10,7 +10,7 @@ function syncViewerTourPermissions() {
 function syncViewerTours() {
   syncViewerTourPermissions();
   for (const [mode, entry] of tourSessions) if (!tourModeAvailable(mode)) {
-    entry.session.interrupt(); entry.container.hidden = true;
+    entry.session.hide();
     $(mode === 'home' ? 'homeCameraTour' : 'editorCameraTour').setAttribute('aria-expanded', 'false');
   }
 }
@@ -74,7 +74,7 @@ async function openViewerTour() {
       });
       entry = { session, container }; tourSessions.set(mode, entry);
     }
-    for (const [key, other] of tourSessions) if (key !== mode) { other.session.interrupt(); other.container.hidden = true; }
+    for (const [key, other] of tourSessions) if (key !== mode) other.session.hide();
     syncViewerTourPermissions();
     entry.session.show(); button.setAttribute('aria-expanded', 'true');
   } catch (error) {
