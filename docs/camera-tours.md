@@ -23,15 +23,18 @@ Home/Editor viewer.
    preview or playback. A completed route remains on its final view until you
    stop it or move the camera yourself.
 
-Manual camera navigation stops the tour and keeps your new framing. This
-includes dragging, zooming and using navigation controls. The tour's animation
-loop runs only while playing; pausing or stopping it does not leave a continuous
-camera animation running.
+Interacting outside the tour panel stops the tour. Manual camera navigation
+keeps your new framing, including dragging, zooming and navigation controls.
+The tour's animation loop runs only while playing; pausing or stopping it does
+not leave a continuous camera animation running.
 
-Movement eases between compatible views. A change of camera mode, floor or
-focused Home room uses a cut instead. The planner can include views on floors
-that exist in the open project. A generated viewer is scoped to its current
-floor; opening another floor ends that page's session.
+Movement eases between compatible views. The planner can include views on
+floors that exist in the open project, with a cut when the floor changes.
+Generated Home and Editor views each keep their own route for the current
+floor; their routes cannot be mixed. Home uses a cut when the focused room
+changes. Return from the map overview to the house before saving a Home view;
+map navigation is not part of a tour. Opening another generated-viewer floor
+ends that page's session.
 
 The route controls the camera only. It does not move furniture, change the
 drawing, or send Home Assistant service calls. It is not connected to security
@@ -39,17 +42,18 @@ camera entities or their live feeds.
 
 ## Keep your route
 
-Routes are held **in this page session only**. Use **Export route** to save JSON before
-reloading, closing the page or opening another floor. Import that JSON into the
-corresponding project/view when you want to replay or edit it again. Import
-replaces the current route, so export an existing route first if you want to
-keep both.
+Routes are held **in this page session only**. Use **Export route** to save JSON
+before reloading, closing the page or opening another generated-viewer floor.
+Use **Import route** in the corresponding project/view to replay or edit it
+again. Import replaces the current route, so export an existing route first
+if you want to keep both.
 
 Tour JSON contains names, timings, floor/room identifiers and camera poses. It
 does not contain the home's geometry. Keep it with the corresponding drawing;
 coordinates can frame the wrong place after geometry or floor heights change.
-Planner and generated-viewer camera coordinates are not a universal exchange
-format between unrelated models.
+Planner, generated Home and generated Editor routes are scoped to their own
+viewer type. Importing one into another viewer type does not convert its
+coordinates or make it playable there.
 
 Saving a planner project or publishing a home does not save this session's
 route. Tour JSON is separate from inventory JSON, Home Assistant storage and
@@ -57,8 +61,11 @@ the GLB, OBJ, USDZ and DAE model downloads.
 
 ## Export a video
 
-Preview the route first, then choose **Record video** to capture a local
-video. Keep the page visible while recording. The browser records the rendered
+Preview the route first, then choose **Record video** to play it from the
+beginning and capture a local video. Recording finishes at the end of the
+route; **Stop recording** saves an early take. The **Download video** link
+remains available if the browser blocks the automatic download. Keep the page
+visible while recording. The browser records the rendered
 3D canvas: HTML room labels, device buttons, menus and other interface overlays
 are not included. The recorder does not capture the microphone, system audio
 or the rest of your screen.
@@ -93,12 +100,16 @@ limited to 80 characters, each duration is at least 0.25 seconds, and rejected
 imports leave the existing route intact.
 
 `camera-tour-panel.js` presents that engine; `camera-tour.css` styles its
-controls. `camera-tour-recording.js` owns canvas capture, format detection, the media
-stream and output limits. Recording uses the canvas provided by its host,
-with no new renderer, remote encoder or Home Assistant command path.
+controls. `camera-tour-session.js` connects playback, recording and downloads,
+and caps camera updates at 24 frames per second. `camera-tour-recording.js`
+owns canvas capture, format detection, the media stream and output limits.
+Recording uses the canvas provided by its host, with no new renderer, remote
+encoder or Home Assistant command path.
 
-Each host adapts its existing camera state. The planner applies poses to
-`orbit` in `planner/editor.js`. The generated Editor applies them to the
+Each host loads the tools on demand and adapts its existing camera state.
+`planner/camera-tour-adapter.js` connects the planner to callbacks that apply
+poses to `orbit` in `planner/editor.js`. `camera-tour-viewer.js` creates the
+separate generated Home and Editor sessions. Editor poses update the
 radius/azimuth/polar/target state in `viewer.js`; Home owns its separate
 orthographic navigation in `home-view.js`. Directly moving a Three.js camera
 is insufficient because the next normal render rebuilds it from that state.
