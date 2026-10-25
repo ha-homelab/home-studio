@@ -508,11 +508,12 @@ def make_floor(project, floor, next_floor):
     svg.append('<g id="furniture">')
     for _, material, triangle in sorted(tops, key=lambda entry: entry[0]):
         if material.startswith("furniture_"):
-            color = "#" + material[len("furniture_"):]
+            color = "#" + material[len("furniture_"):len("furniture_") + 6]
         else:
             color = "#" + "".join(f"{round(channel * 255):02x}" for channel in materials[material][:3])
         coords = " ".join(f"{x:.3f},{z:.3f}" for x, z in (pixel([v[0], v[2]]) for v in triangle))
-        svg.append(f'<polygon points="{coords}" fill="{color}"/>')
+        opacity = f' fill-opacity="{materials[material][3]}"' if materials[material][3] < 1 else ""
+        svg.append(f'<polygon points="{coords}" fill="{color}"{opacity}/>')
     svg.append("</g></svg>")
     return data, "".join(svg)
 
