@@ -5,6 +5,8 @@ import re
 SITE_KINDS = ("home", "roof", "building", "street", "landscape")
 SITE_LIMITS = dict(features=64, points=64, totalPoints=1024, coordinate=1000, groundElevation=100, height=100)
 EPS = 1e-8
+# Match JavaScript String.trim exactly, including BOM and excluding NEL.
+NAME_WHITESPACE = "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 ID = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}\Z")
 RESERVED = {"__proto__", "prototype", "constructor", "toString", "valueOf", "hasOwnProperty",
             "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__",
@@ -61,7 +63,7 @@ def validate_site(site):
             raise ValueError(f"Site: duplicate identifier {identifier}")
         ids.add(identifier)
         name = feature["name"]
-        if not isinstance(name, str) or not name.strip() or len(name) > 120 or any(ord(c) < 32 or 0xd800 <= ord(c) <= 0xdfff for c in name):
+        if not isinstance(name, str) or not name.strip(NAME_WHITESPACE) or len(name) > 120 or any(ord(c) < 32 or 0xd800 <= ord(c) <= 0xdfff for c in name):
             raise ValueError("Site feature: name must be nonempty text of at most 120 characters without control characters or invalid Unicode")
         if feature["kind"] not in SITE_KINDS:
             raise ValueError("Site feature: invalid kind")

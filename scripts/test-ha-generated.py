@@ -177,6 +177,36 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((self.project.root / previous / "upper/index.html").is_file())
         self.assert_baseline_unchanged()
 
+    async def test_omitting_site_does_not_resurrect_baseline_features(self):
+        features = [{"id": "roof", "name": "Roof", "kind": "roof", "height_m": 6,
+                     "color": "#46a0aa", "polygon": [[0, 0], [5, 0], [5, 4], [0, 4]]}]
+        for identifier, model in self.models.items():
+            context = model["site_context"]
+            context.update(features=features, ground_elevation_m=-model["elevation_m"])
+            folder = self.component / "assets" / identifier
+            (folder / "model-data.json").write_text(encoded(model), encoding="utf-8")
+            page = folder / "index.html"
+            embedded = embedded_model(page)
+            embedded["site_context"] = copy.deepcopy(context)
+            page.write_text(MODEL_BLOCK.sub(lambda match: match[1] + encoded(embedded) + match[3],
+                                           page.read_text(encoding="utf-8")), encoding="utf-8")
+        self.baseline = tree_hashes(self.component)
+        adapter = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
+        await adapter.load()
+        source = copy.deepcopy(adapter.document["project"])
+        self.assertEqual(source.pop("site")["features"], features)
+        await adapter.save(0, source)
+        assets, _, models, _, _ = await adapter.publish(1)
+        for identifier, model in models.items():
+            self.assertNotIn("features", model["site_context"])
+            self.assertEqual(model["site_context"]["synthetic_context"], {"preserve": True})
+            self.assertEqual(model["meshes"], self.models[identifier]["meshes"])
+            self.assertEqual(embedded_model(assets / identifier / "index.html")["site_context"], model["site_context"])
+        restarted = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
+        await restarted.load()
+        self.assertNotIn("site", restarted.document["project"])
+        self.assert_baseline_unchanged()
+
     def test_installed_site_is_seeded_in_global_coordinates(self):
         features = [{"id": "roof", "name": "Roof", "kind": "roof", "height_m": 6,
                      "color": "#46a0aa", "polygon": [[0, 0], [5, 0], [5, 4], [0, 4]]}]

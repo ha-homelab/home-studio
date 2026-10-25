@@ -1,8 +1,10 @@
-# From room photos to an editable plan
+# From photos to an editable plan
 
 Home Studio can draft from photos directly in the [native Home Assistant
 editor](home-assistant-editor.md). It can furnish an existing measured room or
 create a measured rectangular room with proposed doors, windows and furniture.
+The **Site & roof** scope adds approximate house envelopes, flat roof outlines,
+neighboring buildings, streets and landscape to the editable site.
 The result is ordinary editable Home Studio geometry, not a picture. Manual
 drawing needs no AI setup. The standalone local companion is also available;
 the public hosted editor never collects keys or calls a model.
@@ -93,6 +95,31 @@ manually, then use the furnishing mode. Existing walls, objects and entity bindi
 are preserved. Openings are proposed only when creating a new room. Shared walls
 must match exactly; partial overlaps require manual drawing.
 
+## Add site and roof features from photos
+
+Choose **Site & roof · add exterior features** in the AI panel. Identify your own
+home in the required field, describe which roofs, neighbors, streets and landscape
+to include, and supply any known dimension and orientation. For example: “The white
+house in photo 1 is mine; its front wall is 10 m along +X. Include its roof, the
+neighbor to the right, and the street toward +Z.” X points right and Z down in 2D.
+
+Review the disclosed context before **Generate draft**: this scope sends existing
+site features and floor footprint polygons/elevations for alignment, plus your
+site descriptions, instructions and selected processed photos. It excludes room
+names, furniture, device bindings and private project notes. It uses the same
+chosen local or cloud provider, local photo processing, session privacy rules and
+explicit Generate action as room drafting.
+
+Review each proposed feature, its evidence, assumptions and missing measurements.
+You can deselect features and correct polygon coordinates and heights before
+confirming **Apply selected additions**. Existing site features, ground elevation,
+interior geometry and entity bindings are preserved. Applying is one undoable edit;
+changing the plan or request invalidates the draft. Photos remain approximate
+visual references, not a survey or exact photogrammetry. Roofs are flat outlines at
+the specified height; pitch and facets are not represented. No latitude, longitude
+or map location is inferred from photos. See the [site editor guide](site-editor.md)
+for manual adjustments and map alignment.
+
 ## Where the key and photos go
 
 ![Native editor, user-owned AI session, and selected local or cloud model; drafts return for review before becoming an editable plan.](assets/ai/planning-data-flow.svg)
@@ -103,6 +130,7 @@ companion, it sends the key to that local process instead. On Generate, the HA
 integration or companion sends the key to your chosen provider to authenticate.
 The chosen photos, instructions, sanitized room context and catalog vocabulary
 travel to that provider for inference. OpenRouter and other gateways add their upstream processing boundary.
+Site requests send the disclosed site context described above instead of the room catalog.
 Home Studio has no operated AI relay, key database, or photo collection.
 
 **A cloud API key is not “never transmitted.”** It stays out of persistent Home Studio
@@ -138,6 +166,10 @@ selecting the file. The HA backend and companion do not decode pixels or write p
 - Prepared images: at most 1600 pixels on the longest side in the UI. The server
   independently caps individual/combined byte size and header dimensions.
 - Model reply: at most 256 KiB for the draft; at most 64 proposed furniture items.
+- Site geometry: at most 64 features, 3–64 vertices per polygon and 1024 vertices
+  in total, including existing features. Coordinates stay within ±1000 m and
+  heights within 0–100 m; streets and landscape have zero height. Polygons must
+  be simple, with no crossings or repeated closing vertex.
 - Network generation: bounded to 90 seconds; no retries or redirect following.
 - Only catalog models/styles/patterns are accepted. No generated code, remote model
   URLs, tools, Home Assistant services or entity bindings are accepted.

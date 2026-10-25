@@ -174,13 +174,14 @@ async function mapSnapshot(page){
     for(const room of lower.rooms)for(const p of room.polygon)p[0]-=4;
     for(const wall of lower.walls){wall.start[0]-=4;wall.end[0]-=4;}for(const item of lower.items)item.position_m.x-=4;
     project.floors.push(lower);
+    project.site={ground_elevation_m:0,features:[{id:'synthetic_neighbor',name:'Synthetic neighbor',kind:'building',polygon:[[12,0],[24,0],[24,10],[12,10]],height_m:4,color:'#f256aa'}]};
     fs.writeFileSync(path.join(temporary,'project.json'),JSON.stringify(project));
     const built=spawnSync(process.env.PYTHON||'python3',['scripts/build-planner-project.py','--project',path.join(temporary,'project.json'),'--output',path.join(temporary,'build')],{cwd:root,encoding:'utf8'});
     assert.equal(built.status,0,built.stderr||built.stdout);
     let html=fs.readFileSync(path.join(temporary,'build/main/index.html'),'utf8');
     html=instrumentMapLayer(html);
     html=html.replace(/(<script id="modelData" type="application\/json">)([\s\S]*?)(<\/script>)/,(_all,start,json,end)=>{
-      const model=JSON.parse(json);delete model.elevation_m;model.environment.elevation=-1.8;model.site_context={roof_outline:roof};return start+JSON.stringify(model)+end;
+      const model=JSON.parse(json);delete model.elevation_m;model.environment.elevation=-1.8;model.site_context={...model.site_context,roof_outline:roof};return start+JSON.stringify(model)+end;
     });
     html=html.replace('rebuildInventoryView();if(embedded)','window.__mapMath=homeMapMath;window.__mapThree=THREE;window.__mapRenderer=renderer;window.__mapTest=homeView;rebuildInventoryView();if(embedded)');
     html=html.replaceAll('roomLighting?.update(points,camera);', 'window.__mapLightUpdates=(window.__mapLightUpdates||0)+1;roomLighting?.update(points,camera);');
@@ -200,6 +201,15 @@ async function mapSnapshot(page){
       },failedKey);
       try{return await handle.jsonValue();}finally{await handle.dispose();}
     };
+    // Read the real compiled model and real map group, without replacing either.
+    const authoredSitePixels=async()=>page.evaluate(()=>{
+      const layer=window.__mapTest.debugMap,site=layer.object.getObjectByName('home-site-features');
+      const gl=window.__mapRenderer.getContext(),w=gl.drawingBufferWidth,h=gl.drawingBufferHeight;
+      const sample=()=>{window.renderModel();const pixels=new Uint8Array(w*h*4);gl.readPixels(0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,pixels);return pixels;};
+      const visible=sample();site.children.forEach(object=>{object.visible=false;});const hidden=sample();site.children.forEach(object=>{object.visible=true;});window.renderModel();
+      let changed=0;for(let i=0;i<visible.length;i+=4)if(Math.max(...[0,1,2].map(channel=>Math.abs(visible[i+channel]-hidden[i+channel])))>=2)changed++;
+      return {visible:layer.object.visible&&site.visible,changed,objects:site.children.map(object=>object.name)};
+    });
     const assertCompassLayout=async()=>{
       const layout=await page.evaluate(()=>{
         const compass=document.querySelector('#homeMapCompass'),stage=document.querySelector('#homeStage'),rect=compass.getBoundingClientRect();
@@ -223,6 +233,12 @@ async function mapSnapshot(page){
     const gpu=await page.evaluate(()=>{const gl=window.__mapRenderer.getContext(),info=gl.getExtension('WEBGL_debug_renderer_info');return info?gl.getParameter(info.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER);});
     if(process.env.CHROMIUM_ANGLE_BACKEND==='metal')assert.match(gpu,/ANGLE.*Apple.*Metal|ANGLE.*Metal.*Apple/i,'Requested native Metal renderer must actually be active');
     console.log('Map renderer: '+gpu);
+    const compiledSite=await page.evaluate(()=>({site:window.floorplan.model.site_context,stats:window.__mapTest.mapStats,
+      roomIds:window.floorplan.model.rooms.map(room=>room.id),roomOptions:[...document.querySelector('#homeRoom').options].map(option=>option.value)}));
+    assert.deepEqual(compiledSite.site.features,project.site.features,'Compiler site features reach the actual Home view model unchanged');
+    assert.equal(compiledSite.site.ground_elevation_m,-3,'Compiler shifts the site ground to the selected floor origin');
+    assert.equal(compiledSite.stats.siteFeatures,1,'createHomeView passes authored features to its actual map layer');
+    assert.equal(compiledSite.stats.siteObjects,2,'The neighboring building has a surface and outline in the actual map scene');
     for(const zoom of [.6,.24]){
       await page.evaluate(zoom=>window.__mapTest.applyNavigationState({mode:'map',zoom,rotation:0,tilt:0,pan_x:0,pan_y:0}),zoom);
       await page.waitForFunction(()=>window.__mapTest.mapStats.inflight===0);
@@ -245,6 +261,10 @@ async function mapSnapshot(page){
     assert.equal(await page.locator('#homeMapCompass').isVisible(),true);assert.equal(await page.locator('#homeMapCaption').isVisible(),true);
     await assertCompassLayout();
     assert.equal(await page.locator('#homeMarkers').isVisible(),false,'Device overlays disappear at map scale');
+    const siteOverview=await authoredSitePixels();
+    assert.equal(siteOverview.visible,true,'Authored surroundings are visible in map overview');
+    assert.deepEqual(siteOverview.objects,['synthetic_neighbor','synthetic_neighbor-outline']);
+    assert(siteOverview.changed>5,'Authored surroundings contribute actual overview pixels: '+JSON.stringify(siteOverview));
     assert.equal(await page.evaluate(()=>{const before=window.__mapLightUpdates;window.renderModel();return window.__mapLightUpdates===before;}),true,'Coarse maps skip house lighting uploads');
     const coarse=await page.evaluate(()=>window.__mapTest.exportNavigationState());assert.equal(coarse.mode,'map');assert(coarse.zoom<.65);
     if(process.env.MAP_SCENE_SCREENSHOT)await page.screenshot({path:process.env.MAP_SCENE_SCREENSHOT});
@@ -282,7 +302,16 @@ async function mapSnapshot(page){
     assert.equal(await page.evaluate(()=>window.__mapTest.exportNavigationState().zoom),1);
     assert.equal(await page.evaluate(()=>window.__mapTest.debugMap.object.children[1].visible),false,'Roof contour yields to Home controls at normal scale');
     assert.equal(await page.locator('#homeMarkers').isVisible(),true,'Home restores the device overlay layer');
+    assert.equal(await page.evaluate(()=>window.__mapTest.debugMap.object.getObjectByName('home-site-features').visible),false,'Authored surroundings yield to interior controls at Home scale');
+    assert.deepEqual(await page.evaluate(()=>({roomIds:window.floorplan.model.rooms.map(room=>room.id),roomOptions:[...document.querySelector('#homeRoom').options].map(option=>option.value)})),
+      {roomIds:compiledSite.roomIds,roomOptions:compiledSite.roomOptions},'Site visibility never mutates interior rooms or selector choices');
+    await page.locator('#homeRoom').selectOption(compiledSite.roomIds[0]);
+    assert.equal(await page.locator('#homeRoom').inputValue(),compiledSite.roomIds[0],'The real interior room selector remains usable');
+    await page.locator('#homeRoom').selectOption('');
     await page.locator('#homeMapAlign').click();await page.locator('#homeMapEditor').waitFor({state:'visible'});
+    const siteAlignment=await authoredSitePixels();
+    assert.equal(siteAlignment.visible,true,'Authored surroundings are visible during geographic alignment');
+    assert(siteAlignment.changed>5,'Authored surroundings contribute actual alignment pixels: '+JSON.stringify(siteAlignment));
     await page.locator('#homeMapNorth').fill('90');await page.locator('#homeMapNorth').dispatchEvent('change');await page.locator('#homeMapCancel').click();assert.equal(await page.evaluate(()=>mapSaves.length),0,'Cancel keeps alignment local');
     await page.locator('#homeMapAlign').click();await page.locator('#homeMapNorth').fill('25.05');await page.locator('#homeMapNorth').dispatchEvent('change');
     await page.locator('#homeMapLatitude').fill('37.1234567');await page.locator('#homeMapLatitude').dispatchEvent('change');
@@ -347,7 +376,7 @@ async function mapSnapshot(page){
     await page.evaluate(()=>{window.homeMapRequest=async()=>{throw Error('offline');};return window.__mapTest.loadMap();});
     assert.match(await page.locator('#homeMapStatus').textContent(),/unavailable/);assert.equal(await page.locator('#homeMapOverview').isVisible(),false);
     assert.deepEqual(errors,[]);
-    console.log('PASS ('+engine+'): same-renderer map/Home transitions, wheel and touch zoom, overlays, desktop/mobile compass layout, alignment Save/Cancel, navigation state and idle budget.');
+    console.log('PASS ('+engine+'): compiled site overview/alignment pixels and interior preservation, same-renderer map/Home transitions, wheel and touch zoom, overlays, desktop/mobile compass layout, alignment Save/Cancel, navigation state and idle budget.');
   }catch(error){
     const snapshot=page?await mapSnapshot(page).catch(diagnosticError=>({diagnosticError:String(diagnosticError)})):{pageCreated:false};
     throw Error('Map scene browser check failed: '+JSON.stringify(snapshot),{cause:error});

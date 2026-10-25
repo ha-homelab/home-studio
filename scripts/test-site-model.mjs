@@ -19,6 +19,7 @@ validPatch(site => site.features[0].polygon = [[0, 0], [4, 0], [4, 1], [1, 1], [
 validPatch(site => site.features[0].polygon = [[0, 0], [2, 0], [4, 0], [4, 4], [0, 4]]);
 validPatch(site => site.features[0].polygon = [[-1000, -1000], [1000, -1000], [1000, 1000], [-1000, 1000]]);
 validPatch(site => site.features[0].name = '🏡'.repeat(120));
+validPatch(site => site.features[0].name = '\u0085');
 validPatch(site => site.features[0].height_m = 0);
 validPatch(site => site.features[0].height_m = 100);
 validPatch(site => site.features = Array.from({ length: 64 }, (_, i) => feature('building', i)));
@@ -33,7 +34,7 @@ invalidPatch(site => site.features.push(clone(site.features[0])));
 for (const key of Object.keys(feature())) invalidPatch(site => delete site.features[0][key]);
 invalidPatch(site => site.features[0].latitude = 10);
 for (const id of ['', '1home', '__proto__', 'constructor', 'a'.repeat(65), 'home-neighbor', true, null]) invalidPatch(site => site.features[0].id = id);
-for (const name of ['', '  ', 'a'.repeat(121), '🏡'.repeat(121), '\u0000', '\ud800', null, 1]) invalidPatch(site => site.features[0].name = name);
+for (const name of ['', '  ', '\ufeff', 'a'.repeat(121), '🏡'.repeat(121), '\u0000', '\ud800', null, 1]) invalidPatch(site => site.features[0].name = name);
 for (const kind of ['garage', '', null, [], {}]) invalidPatch(site => site.features[0].kind = kind);
 for (const color of ['red', '#fff', '#11223344', '112233', '#GGGGGG', null, []]) invalidPatch(site => site.features[0].color = color);
 for (const height of [-.01, 100.01, null, true, '1', Infinity, NaN]) invalidPatch(site => site.features[0].height_m = height);

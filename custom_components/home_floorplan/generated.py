@@ -147,6 +147,12 @@ def _merge_site_context(model, project, floor):
             "ground_elevation_m": site["ground_elevation_m"] - floor["elevation_m"],
             "features": copy.deepcopy(site["features"]),
         }
+    elif "features" in model.get("site_context", {}):
+        # Importing a project without its optional site must remove authored
+        # shapes, not bring them back from the immutable installed baseline.
+        # Keep the commissioned ground datum and unrelated private extensions.
+        model["site_context"] = {key: value for key, value in model["site_context"].items()
+                                 if key != "features"}
     return model
 
 
