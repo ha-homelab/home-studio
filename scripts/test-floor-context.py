@@ -3,14 +3,17 @@
 import copy
 import json
 from pathlib import Path
+import re
+import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from geometry import create_geometry, floor_context
-from planner.project import compile_project
+from planner.project import compile_project, make_floor
 
 class FloorContextTests(unittest.TestCase):
     def test_box_edges_have_no_face_diagonals_or_device_data(self):
@@ -60,6 +63,62 @@ class FloorContextTests(unittest.TestCase):
             self.assertTrue(all(y < 0 for y in top['lower_floor_context']['lines'][1::3]))
             self.assertTrue(all(min(p[1] for p in mesh['vertices']) >= -.2 for mesh in top['meshes']))
             self.assertEqual(set(top['lower_floor_context']), {'elevation_m', 'surfaces', 'lines'})
+
+    def test_compiler_shares_actual_lowest_slab_across_all_floor_frames(self):
+        for origin, count, bottom_depth, middle_depth in ((0, 3, .16, .16), (10, 3, .32, .25), (-3, 4, .16, 3.4)):
+            with self.subTest(origin=origin, count=count), tempfile.TemporaryDirectory() as temp:
+                floors = [{'id': 'floor' + str(i), 'name': 'Floor ' + str(i),
+                           'elevation_m': origin + 3 * i, 'height_m': 2.7,
+                           'rooms': [{'id': 'room', 'name': 'Room', 'material': 'floor',
+                                      'polygon': [[0, 0], [4, 0], [4, 4], [0, 4]]}],
+                           'walls': [], 'openings': [], 'items': []} for i in range(count)]
+                project = {'schema_version': 1, 'title': 'Shared slab fixture',
+                           'floors': [floors[-1], *floors[:-1]]}
+                before = copy.deepcopy(project)
+                generated = {}
+
+                def with_slab_depth(*args):
+                    data, svg = make_floor(*args)
+                    depth = {'floor0': bottom_depth, 'floor1': middle_depth}.get(data['id'], .16)
+                    # Exercise real compiler geometry with differing slab depths,
+                    # including a higher floor whose slab reaches below the bottom.
+                    for mesh in data['meshes']:
+                        if mesh['kind'] == 'floors':
+                            for vertex in mesh['vertices']:
+                                if vertex[1] < 0:
+                                    vertex[1] = -depth
+                    generated[data['id']] = copy.deepcopy(data)
+                    return data, svg
+
+                output = Path(temp) / 'site'
+                with patch('planner.project.make_floor', side_effect=with_slab_depth):
+                    compile_project(project, output)
+                self.assertEqual(project, before)
+                absolute_slab = min(data['elevation_m'] + p[1] for data in generated.values()
+                                    for mesh in data['meshes'] if mesh['kind'] == 'floors'
+                                    for p in mesh['vertices'])
+                models = []
+                for floor in floors:
+                    folder = output / floor['id']
+                    model = json.loads((folder / 'model-data.json').read_text())
+                    embedded = json.loads(re.search(r'<script id="modelData" type="application/json">(.*?)</script>',
+                                                    (folder / 'index.html').read_text(), re.S).group(1))
+                    self.assertEqual(model['site_context'], embedded['site_context'])
+                    self.assertEqual(model['meshes'], generated[floor['id']]['meshes'])
+                    self.assertEqual(model['site_context']['ground_elevation_m'], origin - floor['elevation_m'])
+                    self.assertEqual(model['environment']['elevation'], origin - floor['elevation_m'])
+                    self.assertAlmostEqual(model['site_context']['lowest_slab_elevation_m'] + floor['elevation_m'], absolute_slab)
+                    models.append(model)
+                # Use the actual browser-side pure math against compiler outputs;
+                # no browser, tiles or copied map-plane formula are involved.
+                script = """const fs=require('node:fs'),vm=require('node:vm');
+const math=vm.runInNewContext(fs.readFileSync('map-layer.js','utf8')+';homeMapMath');
+const models=JSON.parse(fs.readFileSync(0,'utf8'));
+process.stdout.write(JSON.stringify(models.map(m=>math.context(m).elevation+m.elevation_m)));"""
+                result = subprocess.run(['node', '-e', script], cwd=ROOT, input=json.dumps(models),
+                                        text=True, capture_output=True, check=True, timeout=15)
+                for height in json.loads(result.stdout):
+                    self.assertAlmostEqual(height, absolute_slab - .08, places=10)
 
 if __name__ == '__main__':
     unittest.main()

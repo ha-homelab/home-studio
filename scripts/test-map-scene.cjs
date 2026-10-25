@@ -56,6 +56,15 @@ async function mapSnapshot(page){
   assert(Math.abs(resolved.elevation+3.1)<1e-10);assert.equal(resolved.outlineElevation,2.8);assert.deepEqual(plain(resolved.polygons),roof.polygons_m);assert.equal(JSON.stringify(legacy),source);
   assert.equal(math.context({elevation_m:16,environment:{elevation:-6}},[]).elevation,-6.08,'The site datum need not be zero');
   assert.equal(math.context({...legacy,site_context:{}},rooms).elevation,resolved.elevation,'Legacy lower slabs recover the missing datum');
+  const topFloor={elevation_m:6,site_context:{ground_elevation_m:-6,lowest_slab_elevation_m:-6.16},meshes:[{kind:'floors',vertices:[[0,-.16,0]]}],lower_floor_context:{elevation_m:-3,surfaces:[0,-3.16,0]}};
+  const topSource=JSON.stringify(topFloor);
+  assert(Math.abs(math.context(topFloor).elevation+6.24)<1e-10,'The map includes the lowest slab even when only the nearest lower storey is displayed');
+  assert.equal(JSON.stringify(topFloor),topSource,'Resolving the shared slab datum preserves model geometry and metadata');
+  const oldTop=math.context({...topFloor,site_context:{ground_elevation_m:-6}});
+  for(const invalid of [undefined,null,true,'-6.16',NaN,Infinity,-Infinity,-1001,1001]){
+    assert.deepEqual(plain(math.context({...topFloor,site_context:{...topFloor.site_context,lowest_slab_elevation_m:invalid}})),plain(oldTop),'Invalid slab metadata retains the legacy fallback');
+  }
+  assert.equal(math.context({site_context:{lowest_slab_elevation_m:-1000}}).elevation,-1000.08,'The documented slab bound is inclusive');
   for(const bad of [null,{...roof,elevation_m:Infinity},{...roof,elevation_m:1001},{...roof,polygons_m:[[[0,0],[1,1],[0,1],[1,0]]]},{...roof,polygons_m:[[[0,0],[10001,0],[0,1]]]},{...roof,polygons_m:Array(17).fill(roof.polygons_m[0])}]){
     const value=math.context({site_context:{roof_outline:bad}},[]);assert.equal(value.polygons.length,0,'Invalid optional roof is omitted');
   }
