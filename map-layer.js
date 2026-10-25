@@ -62,6 +62,29 @@ const homeMapMath = (() => {
     // Disconnected rooms may be separated by walls, not separate buildings.
     return result.length===1?result:[];
   }
+  function features(value){
+    // Runtime data can also come from an older or externally produced bundle.
+    // Validate the optional layer before allocating any of its geometry.
+    if(!Array.isArray(value)||value.length>64)return [];
+    const ids=new Set(),result=[],reserved=new Set(['__proto__','prototype','constructor','toString','valueOf','hasOwnProperty','__defineGetter__','__defineSetter__','__lookupGetter__','__lookupSetter__','isPrototypeOf','propertyIsEnumerable','toLocaleString']);let count=0;
+    for(const f of value){
+      if(!f||typeof f!=='object'||Array.isArray(f)||Object.keys(f).length!==6||!['id','name','kind','polygon','height_m','color'].every(k=>Object.hasOwn(f,k)))return [];
+      if(typeof f.id!=='string'||!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(f.id)||reserved.has(f.id)||ids.has(f.id))return [];
+      if(typeof f.name!=='string'||!f.name.trim()||[...f.name].length>120||[...f.name].some(c=>c.codePointAt(0)<32||c.codePointAt(0)>=0xd800&&c.codePointAt(0)<=0xdfff))return [];
+      if(!['home','roof','building','street','landscape'].includes(f.kind)||typeof f.color!=='string'||!/^#[a-fA-F0-9]{6}$/.test(f.color)||!metric(f.height_m,100)||f.height_m<0)return [];
+      if(['street','landscape'].includes(f.kind)&&f.height_m!==0)return [];
+      if(!Array.isArray(f.polygon)||f.polygon.length>64||(count+=f.polygon.length)>1024)return [];
+      const shape=polygons([f.polygon]);if(!shape||Math.abs(area(shape[0]))/2<.01)return [];
+      const p=shape[0];
+      for(let i=0;i<p.length;i++){
+        const a=p[i],b=p[(i+1)%p.length],c=p[(i+2)%p.length];
+        if(a.some(v=>!metric(v,1000))||Math.hypot(a[0]-b[0],a[1]-b[1])<.01)return [];
+        if(Math.abs(cross(a,b,c))<=1e-8&&(a[0]-b[0])*(c[0]-b[0])+(a[1]-b[1])*(c[1]-b[1])>1e-8)return [];
+      }
+      ids.add(f.id);result.push({...f,polygon:p});
+    }
+    return result;
+  }
   function context(model,rooms=[]){
     const site=model.site_context||{},ground=metric(site.ground_elevation_m)?site.ground_elevation_m:metric(model.environment?.elevation)?model.environment.elevation:metric(model.elevation_m)?-model.elevation_m:0;
     let low=Math.min(0,ground);const lower=model.lower_floor_context;
@@ -70,7 +93,8 @@ const homeMapMath = (() => {
     for(const values of [lower?.surfaces,lower?.lines])if(Array.isArray(values))for(let i=1;i<values.length;i+=3)include(values[i]);
     include(lower?.elevation_m);include(site.lowest_slab_elevation_m);
     const roof=site.roof_outline,shape=metric(roof?.elevation_m)&&polygons(roof?.polygons_m);
-    return {elevation:low-.08,polygons:shape||exterior(rooms),outlineElevation:shape?roof.elevation_m:low-.06};
+    const authored=metric(site.ground_elevation_m,200)?features(site.features):[],hasHome=authored.some(f=>f.kind==='home'||f.kind==='roof');
+    return {elevation:low-.08,polygons:hasHome?[]:shape||exterior(rooms),outlineElevation:shape?roof.elevation_m:low-.06,features:authored,groundElevation:ground};
   }
   function tiles(config,bounds,pixels){
     const t=transform(config),corners=bounds.map(p=>t.toMap(...p)),span=Math.max(...corners.map(p=>p[0]))-Math.min(...corners.map(p=>p[0]));
@@ -84,16 +108,39 @@ const homeMapMath = (() => {
     const center=corners.reduce((a,p)=>[a[0]+p[0]/4,a[1]+p[1]/4],[0,0]);
     return result.sort((a,b)=>Math.hypot((a.worldX+.5)/2**a.z-center[0],(a.y+.5)/2**a.z-center[1])-Math.hypot((b.worldX+.5)/2**b.z-center[0],(b.y+.5)/2**b.z-center[1]));
   }
-  return {validConfig,project,unproject,transform,tiles,context};
+  return {validConfig,project,unproject,transform,tiles,context,features};
 })();
 function createHomeMapLayer(THREE,scene,options={}) {
-  const group=new THREE.Group(),tileGroup=new THREE.Group(),footprint=new THREE.Group(),cache=new Map(),ray=new THREE.Raycaster(),plane=new THREE.Plane(new THREE.Vector3(0,1,0),-(options.elevation??-.08));
-  group.name='home-geographic-map';group.visible=false;group.add(tileGroup,footprint);scene.add(group);
+  const group=new THREE.Group(),tileGroup=new THREE.Group(),footprint=new THREE.Group(),siteGroup=new THREE.Group(),cache=new Map(),ray=new THREE.Raycaster(),plane=new THREE.Plane(new THREE.Vector3(0,1,0),-(options.elevation??-.08));
+  group.name='home-geographic-map';group.visible=false;siteGroup.name='home-site-features';siteGroup.visible=false;group.add(tileGroup,footprint,siteGroup);scene.add(group);
   const floor=options.elevation??-.08,outlineMaterial=new THREE.LineBasicMaterial({color:0x5ad9ff,depthTest:true,depthWrite:false,transparent:true,opacity:.8});
   for(const polygon of options.polygons||[]){
     if(polygon.length<3)continue;
     const geometry=new THREE.BufferGeometry().setFromPoints([...polygon,polygon[0]].map(p=>new THREE.Vector3(p[0],options.outlineElevation??floor+.02,p[1])));
     const line=new THREE.Line(geometry,outlineMaterial);line.renderOrder=5;footprint.add(line);
+  }
+  const siteSurfaceMaterial=new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide}),siteLineMaterial=new THREE.LineBasicMaterial({vertexColors:true,depthWrite:false,transparent:true,opacity:.9});
+  const authored=Number.isFinite(options.groundElevation)&&Math.abs(options.groundElevation)<=200?homeMapMath.features(options.features):[],ground=options.groundElevation;
+  for(const feature of authored){
+    const p=feature.polygon,top=ground+feature.height_m,volume=feature.kind==='home'||feature.kind==='building',positions=[],colors=[],linePositions=[],lineColors=[],color=new THREE.Color(feature.color);
+    const vertex=(point,shade)=>{positions.push(...point);colors.push(color.r*shade,color.g*shade,color.b*shade);};
+    const edge=(a,b)=>{linePositions.push(...a,...b);lineColors.push(color.r,color.g,color.b,color.r,color.g,color.b);};
+    if(feature.kind!=='roof'){
+      const y=volume?top:ground+(feature.kind==='street'?.015:.005);
+      for(const triangle of THREE.ShapeUtils.triangulateShape(p.map(v=>new THREE.Vector2(...v)),[]))for(const i of triangle)vertex([p[i][0],y,p[i][1]],1);
+      if(volume&&feature.height_m>0)for(let i=0;i<p.length;i++){
+        const a=p[i],b=p[(i+1)%p.length],bottomA=[a[0],ground,a[1]],bottomB=[b[0],ground,b[1]],topA=[a[0],top,a[1]],topB=[b[0],top,b[1]],shade=.56+.18*Math.abs((b[0]-a[0])/Math.hypot(b[0]-a[0],b[1]-a[1]));
+        for(const point of [bottomA,bottomB,topB,bottomA,topB,topA])vertex(point,shade);
+        edge(bottomA,topA);
+      }
+      const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
+      const mesh=new THREE.Mesh(geometry,siteSurfaceMaterial);mesh.name=feature.id;siteGroup.add(mesh);
+    }
+    if(volume||feature.kind==='roof')for(let i=0;i<p.length;i++){const a=p[i],b=p[(i+1)%p.length];edge([a[0],top,a[1]],[b[0],top,b[1]]);}
+    if(linePositions.length){
+      const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(linePositions,3));geometry.setAttribute('color',new THREE.Float32BufferAttribute(lineColors,3));
+      const line=new THREE.LineSegments(geometry,siteLineMaterial);line.name=feature.id+'-outline';line.renderOrder=5;siteGroup.add(line);
+    }
   }
   const marker=new THREE.Mesh(new THREE.RingGeometry(.55,.85,24),new THREE.MeshBasicMaterial({color:0x5ad9ff,depthTest:false,side:THREE.DoubleSide}));
   const markerOutline=new THREE.Mesh(new THREE.RingGeometry(.48,1.08,24),new THREE.MeshBasicMaterial({color:0x102833,depthTest:false,side:THREE.DoubleSide}));
@@ -161,7 +208,7 @@ function createHomeMapLayer(THREE,scene,options={}) {
   }
   function render(camera,rect,{visible=true,coarse=false,editing=false,transition=false}={}){
     active=visible;group.visible=active&&!!config?.enabled;if(!group.visible)return;
-    footprint.visible=coarse||editing||transition;marker.visible=markerOutline.visible=coarse;
+    footprint.visible=coarse||editing||transition;siteGroup.visible=coarse||transition;marker.visible=markerOutline.visible=coarse;
     const bounds=[[-1,-1],[-1,1],[1,1],[1,-1]].map(p=>pointAt(camera,...p)).filter(Boolean).map(p=>[p.x,p.z]);
     if(bounds.length!==4)return;
     const span=Math.hypot(bounds[0][0]-bounds[3][0],bounds[0][1]-bounds[3][1]);
@@ -174,7 +221,7 @@ function createHomeMapLayer(THREE,scene,options={}) {
   }
   return {get object(){return group;},setConfig,render,pointAt,setActive(value){active=value;group.visible=value&&!!config?.enabled;},
     clearFailures(){for(const entry of [...cache.values()])if(entry.failed)remove(entry);pump();},
-    get config(){return config;},get stats(){return {cached:cache.size,inflight,visible:desired.length,loaded:[...cache.values()].filter(e=>e.texture).length};},
+    get config(){return config;},get stats(){return {cached:cache.size,inflight,visible:desired.length,loaded:[...cache.values()].filter(e=>e.texture).length,siteFeatures:authored.length,siteObjects:siteGroup.children.length};},
     releaseGPU(){for(const entry of cache.values())if(entry.texture){entry.texture.dispose();entry.texture.needsUpdate=true;}},
-    dispose(){disposed=true;revision++;for(const entry of [...cache.values()])remove(entry);footprint.children.forEach(line=>line.geometry.dispose());outlineMaterial.dispose();marker.geometry.dispose();marker.material.dispose();markerOutline.geometry.dispose();markerOutline.material.dispose();scene.remove(group);}};
+    dispose(){disposed=true;revision++;for(const entry of [...cache.values()])remove(entry);footprint.children.forEach(line=>line.geometry.dispose());siteGroup.children.forEach(object=>object.geometry.dispose());siteSurfaceMaterial.dispose();siteLineMaterial.dispose();outlineMaterial.dispose();marker.geometry.dispose();marker.material.dispose();markerOutline.geometry.dispose();markerOutline.material.dispose();scene.remove(group);}};
 }

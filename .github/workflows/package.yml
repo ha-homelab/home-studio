@@ -82,6 +82,11 @@ jobs:
           node-version: '22'
       - name: Verify geographic map math
         run: node scripts/test-map-scene.cjs --unit-only
+      - name: Verify site geometry, compilation and isolated AI drafts
+        run: |
+          node scripts/test-site-model.mjs
+          python3 scripts/test-site-compiler.py
+          node scripts/test-ai-site.mjs
       - name: Replay fuzz regression inputs without mutation campaigns
         run: node --test fuzz/*.test.mjs
       - name: Run bundled CPU regressions from the extracted public source ZIP
@@ -137,6 +142,11 @@ jobs:
           node --test scripts/test-family-view.cjs
       - name: Test drawing, furnishing, export and installation through the editor
         run: npm run test:planner
+      - name: Test site and roof authoring in real browsers
+        run: |
+          for engine in chromium firefox webkit; do
+            SITE_EDITOR_ENGINE="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-site-editor.cjs || exit 1
+          done
       - name: Test optional albedo surfaces in the compiled viewer
         run: |
           node scripts/test-material-profiles.cjs

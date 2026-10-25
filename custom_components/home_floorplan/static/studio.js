@@ -98,7 +98,7 @@ async function editorDocument(response, url, channel) {
   policy[0].content = EDITOR_CSP.replaceAll("'self'", url.origin);
   // Only the known bundled entry points are rebased; module-relative imports
   // then resolve from these URLs. No base tag or arbitrary URL is accepted.
-  const assets = [['link[rel="stylesheet"]', 'href', ['./editor.css', './floor-navigator.css']],
+  const assets = [['link[rel="stylesheet"]', 'href', ['./editor.css', './floor-navigator.css', './site-editor.css']],
     ['script', 'src', ['./ha-bridge.js', './editor.js']]];
   for (const [selector, attribute, expected] of assets) {
     const elements = [...document.querySelectorAll(selector)];

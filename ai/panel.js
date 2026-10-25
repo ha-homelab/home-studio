@@ -41,7 +41,8 @@ function apiFailure(code, status, upstreamStatus) {
 }
 // Fixed categories keep model-provided names and unrelated project fields out
 // of retry instructions. The user explicitly starts every new model request.
-function draftCorrection(error) {
+function draftCorrection(error, mode) {
+  if (mode === 'site') return 'The previous site draft failed validation. Return only the site schema, with unique candidate keys and simple polygons of 3–64 vertices, at most 64 features and 1024 vertices total. Use local metre coordinates within ±1000, heights 0–100 m, and zero height for streets and landscape. Preserve existing features and measured references. Do not infer geocoordinates. Omit features that cannot be placed reliably.';
   const message = String(error?.message || '');
   if (message.includes('complete rotated footprint')) return 'The previous draft placed furniture outside the room. Use x/z as the item center and keep its entire rotated width/depth footprint inside the supplied measured room polygon. Move the item inward or omit it if it cannot fit; do not enlarge the room or change known measurements.';
   if (message.includes('above the ceiling')) return 'The previous draft placed an item above the ceiling. Item y is its bottom elevation. Keep y plus item height at or below the supplied ceiling height; omit an item that cannot fit.';
@@ -73,7 +74,7 @@ export function mountAiPanel(bridge, sessionOrTransport) {
   // Static template only. All filenames, provider values and model text below
   // are assigned through textContent or input.value, never interpreted as HTML.
   panel.innerHTML = `
-    <div class="ai-header"><div><p class="eyebrow">OPTIONAL AI ASSISTANT</p><h2 id="ai-title" tabindex="-1">Plan from room photos</h2></div><button type="button" class="quiet" id="ai-close" aria-label="Close AI panel">×</button></div>
+    <div class="ai-header"><div><p class="eyebrow">OPTIONAL AI ASSISTANT</p><h2 id="ai-title" tabindex="-1">Plan from photos</h2></div><button type="button" class="quiet" id="ai-close" aria-label="Close AI panel">×</button></div>
     <p class="ai-note">AI can suggest editable objects. Photos do not establish accurate scale; use measured dimensions. This first AI interface is in English.</p>
     <section aria-labelledby="ai-session-title"><h3 id="ai-session-title">1. Choose the destination</h3>
       <label><span>Provider</span><select id="ai-provider" disabled></select></label>
@@ -84,9 +85,15 @@ export function mountAiPanel(bridge, sessionOrTransport) {
       <div class="ai-actions"><button id="ai-connect" class="primary" disabled>Connect session</button><button id="ai-disconnect" class="quiet" disabled>End session</button></div>
       <p id="ai-connection" class="ai-note">Disconnected. Connect a session before generating.</p>
     </section>
-    <section aria-labelledby="ai-input-title"><h3 id="ai-input-title">2. Describe one room</h3>
-      <label><span>Task</span><select id="ai-mode"><option value="furnish_room">Furnish selected measured room</option><option value="new_room">Create a measured rectangular room</option></select></label>
+    <section aria-labelledby="ai-input-title"><h3 id="ai-input-title">2. Describe the draft</h3>
+      <label><span>Scope</span><select id="ai-mode"><option value="furnish_room">Furnish selected measured room</option><option value="new_room">Create a measured rectangular room</option><option value="site">Site &amp; roof · add exterior features</option></select></label>
       <p id="ai-target" class="ai-note"></p>
+      <div id="ai-site-fields" hidden>
+        <label><span>Which building is your home? · required</span><textarea id="ai-site-home" rows="2" maxlength="1000" placeholder="The white two-storey house in the center of photo 1 is mine; photo 2 shows its rear."></textarea></label>
+        <label><span>Neighbors, streets, and landscape to include</span><textarea id="ai-site-include" rows="2" maxlength="1000" placeholder="Add my roof, the garage on the left, the neighbor to the right, and the street in front. Omit other buildings."></textarea></label>
+        <label><span>Known dimension and orientation</span><textarea id="ai-site-reference" rows="2" maxlength="1000" placeholder="My front wall is 10 m wide along +X. The street is below it in 2D (+Z). Photo 1 faces the front wall."></textarea></label>
+        <p class="ai-note">Additions only: existing site features, ground elevation, rooms, and device bindings stay fixed. X is right and Z is down in 2D. Photos provide approximate visual references, not a survey or exact photogrammetry. Confirm scale, orientation, roof height, and which property is yours. No latitude/longitude or map location is inferred.</p>
+      </div>
       <div id="ai-measurements" hidden><div class="ai-grid">
         <label><span>Measured width (m)</span><input id="ai-width" type="number" min="0.1" max="100" step="0.01" value="4"></label>
         <label><span>Measured depth (m)</span><input id="ai-depth" type="number" min="0.1" max="100" step="0.01" value="3"></label>
@@ -95,10 +102,10 @@ export function mountAiPanel(bridge, sessionOrTransport) {
         <label><span>Origin Z (m)</span><input id="ai-origin-z" type="number" min="-100" max="100" step="0.01" value="0"></label>
       </div><p class="ai-note">Origin is the top-left corner in 2D. Width goes right (+X); depth goes down (+Z). Edges 0–3 run clockwise from the top wall. On a populated floor, ceiling height must match that floor. Existing rooms are preserved.</p></div>
       <label><span>Instructions and known measurements</span><textarea id="ai-instructions" rows="4" maxlength="8000" placeholder="Describe the furniture, photo directions, reference wall, and measurements. Any language is welcome."></textarea></label>
-      <label><span>Room photos · optional</span><input id="ai-photos-input" type="file" accept="image/jpeg,image/png,image/webp" multiple></label>
+      <label><span>Photos · optional</span><input id="ai-photos-input" type="file" accept="image/jpeg,image/png,image/webp" multiple></label>
       <p class="ai-note">Up to 6 JPEG, PNG, or WebP photos, 10 MiB each, 30 MiB total, and 24 megapixels each. Convert HEIC/SVG first. Photos are resized to 1600 px and re-encoded locally to remove metadata. Remove or crop sensitive details before choosing files.</p>
       <div id="ai-photos" class="ai-photos"></div><p id="ai-photo-progress" class="ai-note" role="status"></p>
-      <details><summary>Review room context sent to the model</summary><pre id="ai-context" class="ai-note"></pre></details>
+      <details><summary>Review context sent to the model</summary><pre id="ai-context" class="ai-note"></pre></details>
       <p id="ai-send-summary" class="ai-note"></p>
       <div class="ai-actions"><button id="ai-generate" class="primary" disabled>Generate draft</button><button id="ai-cancel-request" class="quiet" hidden>Cancel generation</button></div>
     </section>
@@ -169,7 +176,7 @@ export function mountAiPanel(bridge, sessionOrTransport) {
   }
   function forgetSession(message = 'Session ended. The local key, photos, instructions, and draft were cleared.') {
     invalidate(); connection = null; clearTimeout(expiryTimer); expiryTimer = null;
-    $('key').value = ''; $('instructions').value = ''; clearPhotos();
+    $('key').value = ''; $('instructions').value = ''; for (const id of ['site-home', 'site-include', 'site-reference']) $(id).value = ''; clearPhotos();
     if (message) setStatus(message); update();
   }
   async function endSession(message) {
@@ -194,7 +201,8 @@ export function mountAiPanel(bridge, sessionOrTransport) {
     const selected = bridge.selectionContext();
     return createDraftContext(bridge.snapshot(), { ...selected, mode: $('mode').value,
       measurements: { width: Number($('width').value), depth: Number($('depth').value), height: Number($('height').value) },
-      origin: { x: Number($('origin-x').value), z: Number($('origin-z').value) } });
+      origin: { x: Number($('origin-x').value), z: Number($('origin-z').value) },
+      siteNotes: { own_home: $('site-home').value.trim(), include: $('site-include').value.trim(), reference: $('site-reference').value.trim() } });
   }
   function update() {
     if (disposed) return;
@@ -205,19 +213,21 @@ export function mountAiPanel(bridge, sessionOrTransport) {
     $('photos-input').disabled = processing || Boolean(pending);
     $('cancel-request').hidden = !pending;
     $('connection').textContent = active ? `Connected session · ${connection.provider} · ${connection.model} · ${connection.endpoint || provider?.default_endpoint || ''}. Connection does not test model vision capability.` : 'Disconnected. Connect a session before generating.';
-    $('measurements').hidden = $('mode').value !== 'new_room';
+    const siteMode = $('mode').value === 'site';
+    $('measurements').hidden = $('mode').value !== 'new_room'; $('site-fields').hidden = !siteMode;
+    $('instructions').placeholder = siteMode ? 'Describe photo directions, roof shape, features to add, and uncertain details. Any language is welcome.' : 'Describe the furniture, photo directions, reference wall, and measurements. Any language is welcome.';
     const selected = bridge.selectionContext(), project = bridge.snapshot();
     const floor = project.floors.find(value => value.id === selected.floorId), room = floor?.rooms.find(value => value.id === selected.roomId);
-    $('target').textContent = $('mode').value === 'new_room' ? `New measured room on ${floor?.name || 'the current floor'}.` : room ? `Selected room: ${room.name}. Measured walls and existing objects remain fixed.` : 'Select an existing room in the plan, or choose Create a measured rectangular room.';
-    const contextKey = [bridge.revision(), $('mode').value, ...['width', 'depth', 'height', 'origin-x', 'origin-z'].map(id => $(id).value)].join('|');
+    $('target').textContent = siteMode ? `Add approximate exterior features to the site (${project.site?.features.length || 0} existing). The context includes existing site features and floor footprint polygons for alignment; no device bindings or private notes.` : $('mode').value === 'new_room' ? `New measured room on ${floor?.name || 'the current floor'}.` : room ? `Selected room: ${room.name}. Measured walls and existing objects remain fixed.` : 'Select an existing room in the plan, or choose Create a measured rectangular room.';
+    const contextKey = [bridge.revision(), $('mode').value, ...['width', 'depth', 'height', 'origin-x', 'origin-z', 'site-home', 'site-include', 'site-reference'].map(id => $(id).value)].join('|');
     if (contextKey !== contextPreviewKey) {
       contextPreviewKey = contextKey;
-      try { const preview = context(); $('context').textContent = JSON.stringify({ ...preview, catalog: { version: preview.catalog.version, model_count: preview.catalog.models.length, description: 'Built-in catalog names, dimensions, styles, and patterns; no private project data.' } }, null, 2); $('context').dataset.valid = 'true'; }
+      try { const preview = context(); $('context').textContent = JSON.stringify(preview.catalog ? { ...preview, catalog: { version: preview.catalog.version, model_count: preview.catalog.models.length, description: 'Built-in catalog names, dimensions, styles, and patterns; no private project data.' } } : preview, null, 2); $('context').dataset.valid = 'true'; }
       catch (error) { $('context').textContent = error.message; $('context').dataset.valid = 'false'; }
     }
     if ($('context').dataset.valid !== 'true') $('generate').disabled = true;
     const bytes = photos.reduce((total, photo) => total + photo.blob.size, 0);
-    $('send-summary').textContent = `Generate sends the ${photos.length} photos shown (${(bytes / 1024).toFixed(0)} KiB after processing), your instructions, the limited room context above, and the catalog/schema to ${active ? connection.provider + ' / ' + connection.model : 'the destination you connect'}. Photos are not sent when selected or when connecting.`;
+    $('send-summary').textContent = `Generate sends the ${photos.length} photos shown (${(bytes / 1024).toFixed(0)} KiB after processing), your instructions, the ${siteMode ? 'site description, existing site and floor footprints' : 'limited room context and catalog'} above, and the response schema to ${active ? connection.provider + ' / ' + connection.model : 'the destination you connect'}. Photos are not sent when selected or when connecting.`;
     $('retry-hint').hidden = !lastDraftIssue;
     $('retry-hint').textContent = lastDraftIssue ? `Next Generate includes this correction: ${lastDraftIssue}` : '';
     $('apply').disabled = !review || !$('review-confirm').checked || Boolean(review.invalid);
@@ -238,7 +248,7 @@ export function mountAiPanel(bridge, sessionOrTransport) {
     $('photos').replaceChildren();
     photos.forEach((photo, index) => {
       const figure = el('figure'), img = el('img'), caption = el('figcaption', `Photo ${index + 1} · ${photo.width} × ${photo.height} · ${Math.ceil(photo.blob.size / 1024)} KiB`), remove = el('button', `Remove photo ${index + 1}`, 'quiet');
-      img.src = photo.url; img.alt = `Selected room photo ${index + 1}`; remove.type = 'button';
+      img.src = photo.url; img.alt = `Selected reference photo ${index + 1}`; remove.type = 'button';
       remove.addEventListener('click', () => { invalidate('Photos changed. Generate a fresh draft.'); URL.revokeObjectURL(photo.url); photos = photos.filter(value => value !== photo); renderPhotos(); update(); });
       figure.append(img, caption, remove); $('photos').append(figure);
     });
@@ -299,9 +309,16 @@ export function mountAiPanel(bridge, sessionOrTransport) {
       label.append(checkbox, el('span', candidate.name || candidate.candidate_key)); card.append(label);
       if (candidate.evidence) card.append(el('p', candidate.evidence, 'ai-note'));
       const detail = el('details'), grid = el('div', undefined, 'ai-grid'); detail.append(el('summary', 'Dimensions and position'));
-      const source = candidate.kind === 'item' ? review.raw.items.find(item => item.candidate_key === candidate.candidate_key) : review.raw.openings.find(item => item.candidate_key === candidate.candidate_key);
+      const source = (candidate.kind === 'site' ? review.raw.features : candidate.kind === 'item' ? review.raw.items : review.raw.openings).find(item => item.candidate_key === candidate.candidate_key);
       const addNumber = (caption, object, key) => grid.append(control(caption, 'number', object[key], value => { object[key] = value; refreshPreview(); }));
-      if (candidate.kind === 'item') {
+      if (candidate.kind === 'site') {
+        card.append(el('p', `${source.kind} · ${source.polygon.length} vertices · ${source.height_m} m high · approximate`, 'ai-note'));
+        addNumber(`Height (m) · ${candidate.name}`, source, 'height_m');
+        source.polygon.forEach((point, index) => {
+          addNumber(`Vertex ${index + 1} X (m) · ${candidate.name}`, point, 0);
+          addNumber(`Vertex ${index + 1} Z (m) · ${candidate.name}`, point, 1);
+        });
+      } else if (candidate.kind === 'item') {
         for (const axis of ['x', 'y', 'z']) addNumber(`${axis.toUpperCase()} (m) · ${candidate.name}`, source.position_m, axis);
         for (const dimension of ['width', 'depth', 'height']) addNumber(`${dimension} (m) · ${candidate.name}`, source.dimensions_m, dimension);
         addNumber(`Rotation (°) · ${candidate.name}`, source, 'rotation_deg');
@@ -313,7 +330,7 @@ export function mountAiPanel(bridge, sessionOrTransport) {
       checkbox.addEventListener('change', () => { checkbox.checked ? review.selected.add(candidate.candidate_key) : review.selected.delete(candidate.candidate_key); refreshPreview(); });
       $('candidates').append(card);
     }
-    if (!data.candidates.length) $('candidates').append(el('p', 'No furniture or opening candidates. A new-room draft can still add its measured shell.'));
+    if (!data.candidates.length) $('candidates').append(el('p', review.context.mode === 'site' ? 'No site features proposed. Your site and interior are unchanged.' : 'No furniture or opening candidates. A new-room draft can still add its measured shell.'));
     bridge.previewProject(data.project); update();
   }
   function refreshPreview() {
@@ -349,7 +366,7 @@ export function mountAiPanel(bridge, sessionOrTransport) {
       let prepared;
       try { prepared = prepareDraft(baseProject, draftContext, result.draft); }
       catch (error) {
-        lastDraftIssue = draftCorrection(error);
+        lastDraftIssue = draftCorrection(error, draftContext.mode);
         setStatus(`Draft could not be used: ${error.message} Your plan is unchanged. Review the correction below, then choose Generate draft to try again.`, true);
         return;
       }
@@ -396,8 +413,12 @@ export function mountAiPanel(bridge, sessionOrTransport) {
   $('disconnect').addEventListener('click', () => { void endSession(); });
   $('provider').addEventListener('change', () => { void endSession('Destination changed. Connect a new session before sending.'); providerFields(); });
   for (const id of ['model', 'endpoint']) $(id).addEventListener('input', () => { if (connection || connecting) void endSession('Connection settings changed. Connect a new session before sending.'); });
-  for (const id of ['mode', 'width', 'depth', 'height', 'origin-x', 'origin-z', 'instructions']) $(id).addEventListener('input', () => { invalidate('Request inputs changed. Generate a fresh draft.'); update(); });
-  const unsubscribe = bridge.subscribe(() => invalidate('The plan or selection changed. Generate a fresh draft for the current room.'));
+  for (const id of ['mode', 'width', 'depth', 'height', 'origin-x', 'origin-z', 'instructions', 'site-home', 'site-include', 'site-reference']) $(id).addEventListener('input', () => {
+    invalidate('Request inputs changed. Generate a fresh draft.');
+    if (id === 'mode') bridge.setEditingMode?.($('mode').value === 'site' ? 'site' : 'floor');
+    update();
+  });
+  const unsubscribe = bridge.subscribe(() => invalidate('The plan or selection changed. Generate a fresh draft for the current scope.'));
   open.addEventListener('click', () => { void loadProviders(); panel.hidden = false; open.setAttribute('aria-expanded', 'true'); $('title').focus(); update(); });
   function closePanel() { invalidate(); clearPhotos(); $('key').value = ''; panel.hidden = true; open.setAttribute('aria-expanded', 'false'); open.focus(); }
   $('close').addEventListener('click', closePanel);

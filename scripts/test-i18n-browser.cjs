@@ -10,9 +10,10 @@ const load = file => import(pathToFileURL(path.join(root, file)).href);
 const served = new Map([
   ...['pbr-color-data.js','pbr-materials.js','material-textures.js','environment-lighting.js'].map(name=>['/home-studio/'+name,[name,'text/javascript']]),
   ['/home-studio/planner/', ['planner/index.html', 'text/html']],
-  ...['editor', 'model', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity', 'interaction-render', 'environment', 'onboarding', 'device-onboarding', 'device-onboarding-ui', 'room-transform', 'draft-storage', 'inspector-dom', 'floor-navigator', 'ha-bridge'].map(name => [`/home-studio/planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
+  ...['editor', 'model', 'site-model', 'site-editor', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity', 'interaction-render', 'environment', 'onboarding', 'device-onboarding', 'device-onboarding-ui', 'room-transform', 'draft-storage', 'inspector-dom', 'floor-navigator', 'ha-bridge'].map(name => [`/home-studio/planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
   ...fs.readdirSync(path.join(root, 'planner/locales')).filter(name => name.endsWith('.js')).map(name => [`/home-studio/planner/locales/${name}`, [`planner/locales/${name}`, 'text/javascript']]),
   ['/home-studio/planner/editor.css', ['planner/editor.css', 'text/css']],
+  ['/home-studio/planner/site-editor.css', ['planner/site-editor.css', 'text/css']],
   ['/home-studio/planner/floor-navigator.css', ['planner/floor-navigator.css', 'text/css']],
   ['/home-studio/vendor/three.module.min.js', ['vendor/three.module.min.js', 'text/javascript']],
 ]);
@@ -119,7 +120,11 @@ const served = new Map([
     await change('ru');
     if (process.env.PLANNER_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.PLANNER_SCREENSHOT_DIR, 'i18n-russian.png') });
     await page.reload();
-    await page.waitForFunction(() => document.documentElement.lang === 'ru');
+    try { await page.waitForFunction(() => document.documentElement.lang === 'ru'); }
+    catch (error) {
+      error.message += '\nReload diagnostics: ' + JSON.stringify({ errors, state: await page.evaluate(() => ({ lang: document.documentElement.lang, url: location.href, ready: !!window.planner, savedLanguage: localStorage.getItem('home-studio.language.v1') })) });
+      throw error;
+    }
     assert.equal(await page.evaluate(() => JSON.stringify(window.planner.getProject())), before);
     await page.goto(url + '?lang=ja&from=guide#language');
     await page.waitForFunction(() => document.documentElement.lang === 'ja');

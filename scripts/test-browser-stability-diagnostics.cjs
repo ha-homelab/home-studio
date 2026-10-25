@@ -1208,7 +1208,7 @@ function freshPreviewHarness(view = 'preview') {
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../planner/render-capacity.js'), 'utf8').replace('export function ', 'function '), context);
   vm.runInContext(`
-    let drag=null,previewEdit=null,selection=null,previewDirty=true,canvasSuspended=false,spaceHeld=false,size={width:934,height:824},view=${JSON.stringify(view)};
+    let drag=null,previewEdit=null,selection=null,previewDirty=true,canvasSuspended=false,spaceHeld=false,siteEditor=null,size={width:934,height:824},view=${JSON.stringify(view)};
     let firstResize=false,planSize='old',map={x:0,y:0};
     const project={floors:[{elevation_m:0,walls:[],items:[{position_m:{x:7,z:9}}]}]};
     function displayedProject(){return project;}
@@ -1222,7 +1222,7 @@ function freshPreviewHarness(view = 'preview') {
     function rebuildPreview(){worldGroup.add(testMesh());previewDirty=false;}
     ${section('function drawPreview()', '// Project actions and keyboard navigation.')}
     ${section('function resizeCanvases(', 'const canvasObserver')}
-    ${section("window.addEventListener('pagehide'", "window.planner =")}
+    ${section("window.addEventListener('pagehide'", "siteEditor = createSiteEditor(")}
     initPreview();rebuildPreview();
   `,context);
   const evaluate = code => vm.runInContext(code,context);

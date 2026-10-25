@@ -42,6 +42,8 @@ WEBSITE_MEDIA_FILES = (
     'docs/media/blender-workflow.gif',
     'docs/media/blender-export-dialog.jpg',
     'docs/media/blender-import.jpg',
+    'docs/media/site-editor.jpg',
+    'docs/media/site-preview.jpg',
 )
 SITE_FILES = (
     'pbr-color-data.js','pbr-materials.js','material-textures.js','environment-lighting.js',
@@ -52,7 +54,7 @@ SITE_FILES = (
     'planner/ha-bridge.js', 'planner/draft-storage.js', 'planner/inspector-dom.js', 'planner/onboarding.js', 'planner/device-onboarding.js', 'planner/room-transform.js', 'planner/device-onboarding-ui.js', *(f'planner/examples/{name}.js' for name in ('practice', 'decor', 'patterns', 'garage')),
     'planner/help.js', 'planner/help.css', 'planner/help-locales.js', 'planner/language-links.js',
     *(f'planner/locales/{code}.js' for code in LOCALE_CODES),
-    'planner/model.js', 'planner/catalog.js', 'planner/furniture.js', 'planner/guide.html', 'planner/guide.css',
+    'planner/model.js', 'planner/site-model.js', 'planner/site-editor.js', 'planner/site-editor.css', 'planner/catalog.js', 'planner/furniture.js', 'planner/guide.html', 'planner/guide.css',
     'planner/publishing.html', 'planner/guide-assets/practice-home.json',
     'planner/guide-assets/01-room.jpg', 'planner/guide-assets/02-rooms.jpg',
     'planner/guide-assets/03-door.jpg', 'planner/guide-assets/04-window.jpg',
@@ -147,7 +149,9 @@ REPO_FILES = ('scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'TH
               'scripts/test-render-capacity.cjs', 'scripts/test-interaction-render.cjs', 'scripts/test-render-lifecycle.cjs', 'scripts/test-pointer-ownership.cjs', 'scripts/test-viewer-geometry-context.cjs', 'scripts/test-viewer-texture-context.cjs', 'docs/browser-compatibility.md',
               'scripts/test-planner-stability.cjs', 'scripts/test-planner-render-budget.cjs',
               'scripts/test-viewer-startup.cjs', 'scripts/test-module-expiry.cjs', 'scripts/test-floor-context.py', 'scripts/test-floor-context.cjs',
-              'planner/project.py', 'planner/package.json', 'planner/catalog.json', 'planner/furniture.py',
+              'planner/project.py', 'planner/site_model.py', 'planner/package.json', 'planner/catalog.json', 'planner/furniture.py',
+              'docs/site-editor.md', 'docs/images/site-editor-layers.svg',
+              'scripts/test-site-model.mjs', 'scripts/test-site-compiler.py', 'scripts/test-site-editor.cjs', 'scripts/test-ai-site.mjs',
               'scripts/generate-furniture-catalog.py', 'scripts/test-furniture.mjs', 'scripts/test-furniture.py',
               'planner/anatomy.json', 'planner/vehicle_authoring.py', 'planner/bath_authoring.py', 'scripts/author-furniture-profiles.py',
               'scripts/test-furniture-profiles.py', 'docs/catalog-material-authoring.md',

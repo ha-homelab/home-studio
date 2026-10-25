@@ -926,3 +926,33 @@ required from the HA interface.
 The editor offers **2D + 3D** when its drawing workspace is at least 700 CSS pixels wide. Both panes use the same accepted project, selection, undo history, and save path. The left pane remains the drawing surface; the right pane retains orbit, pan, zoom, and item-height controls. **Fit view** fits both panes; the bottom zoom controls apply to the drawing, and scrolling over the preview zooms the camera. Narrowing the workspace returns to the full-width drawing without changing the project.
 
 There is still one bounded WebGL context. Both panes share the on-demand frame scheduler, and a completed 2D move or resize updates the 3D geometry once. The preview retains the previous committed geometry during a 2D drag; it does not rebuild on every pointer event. Orbiting does not create undo entries or save changes. A pointer gesture in one pane prevents a competing edit in the other. Existing generated-home architecture remains protected and uses its published preview instead of a misleading partial 3D reconstruction.
+
+### Authored site context
+
+The optional version-1 `project.site` object is a local metric drawing shared
+by every floor. It contains a global ground elevation and bounded polygons for
+the home's footprint, horizontal roof outlines, other buildings, roads, and
+landscape areas. It does not contain geographic coordinates or map-provider
+configuration. See [the site drawing guide](site-editor.md) for the data contract
+and user workflow.
+
+`planner/site-model.js` and `planner/site_model.py` validate the same strict
+shape contract. The site editor uses the ordinary project transaction, undo,
+draft storage, and HA save paths. Site AI proposals use the existing optional
+provider connection and detached review flow; accepting a proposal only adds
+selected shapes to the current project. A stale proposal cannot replace newer
+edits or silently change rooms and device bindings.
+
+The compiler copies site features into each model's `site_context` and subtracts
+the floor's global elevation from the site's ground elevation. This gives every
+viewer the same physical site in its own floor-local coordinates. `map-layer.js`
+uses the existing Three.js scene and map lifecycle, with shared materials and
+bounded geometry. It reveals these outlines and volumes during map transition,
+overview, and alignment; the normal indoor view keeps its existing controls.
+
+Generated-home publication merges this context into trusted model data without
+recompiling commissioned meshes or replacing runtime code. It preserves unknown
+site-context fields. A saved viewer that predates site rendering rejects a
+nonempty site publication with rebuild instructions, while retaining the
+previous published generation. This capability check is separate from schema
+validation: saving a valid draft does not prove an old viewer can display it.

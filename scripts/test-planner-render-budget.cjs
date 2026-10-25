@@ -133,7 +133,9 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   });
   vm.runInContext(fs.readFileSync(path.join(root, 'planner/render-capacity.js'), 'utf8').replace('export function ', 'function '), c);
   const clock = frames(c);
-  vm.runInContext(scheduler + section('// On-demand 3D rendering.', '// Project actions and keyboard navigation.') + section('let firstResize =', 'window.planner ='), c);
+  // Keep the real lifecycle handlers; site form construction is exercised by
+  // test-site-editor.cjs rather than this deterministic rendering fixture.
+  vm.runInContext(scheduler + section('// On-demand 3D rendering.', '// Project actions and keyboard navigation.') + section('let firstResize =', 'siteEditor = createSiteEditor('), c);
   c.renderPreview(); assert.equal(constructions, 0, 'Plan-only use creates no WebGL context');
   for (const label of ['SwiftShader', 'llvmpipe', 'softpipe', 'lavapipe', 'Microsoft Basic Render Driver', 'Apple Software Renderer']) {
     const profile = c.previewRenderProfile({getExtension: () => ({UNMASKED_RENDERER_WEBGL: 1}), getParameter: () => label});
@@ -239,7 +241,7 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   const sharedWorld = new THREE.Group();
   const shared = vm.createContext({MATERIAL_SURFACE_PROFILES, previewDetails:{get(){return {}}}, applyMaterialPBR(){}, previewEnvironment: null, environmentSite: () => ({}), THREE, worldGroup: sharedWorld, previewSun: new THREE.DirectionalLight(),
     previewMetadata: {}, previewDirty: true, previewInstancing: false, previewDiffuseLighting: false, previewFloors: () => catalogProject.floors,
-    previewItemNodes: new Map(), orbit: {mode: 'orbit'}, selection: null, activeFloorId: catalogFloor.id,
+    previewItemNodes: new Map(), orbit: {mode: 'orbit'}, selection: null, siteEditor: null, activeFloorId: catalogFloor.id,
     assetCache: new Map(), APPEARANCE_CACHE_LIMIT: 100, buildFurnitureAsset: furniture.buildFurnitureAsset,
     distance: model.distance, wallPieces: model.wallPieces, floorBounds: model.floorBounds,
     COLORS: {floor: '#eeeeee', furniture: '#aaaaaa'},

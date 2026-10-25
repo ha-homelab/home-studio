@@ -97,6 +97,11 @@ The abbreviated context/schema above illustrate the envelope only; use
 excludes project notes, entity bindings, unrelated rooms, source URLs and credentials.
 It includes measured room geometry, relevant existing objects, openings and bounded
 catalog vocabulary. User instructions and visible text in photos remain untrusted.
+For `mode: "site"`, the context instead contains `site`, `site_notes` (explicit
+own-home identification, requested surroundings and known dimension/orientation),
+and `floor_footprints` (polygons and elevations only). It excludes room names,
+furniture, bindings, project notes, georeferencing and the furniture catalog. The
+same companion/native protocol and provider adapters handle this scope.
 
 The provider adapter encodes catalog models as named columns and rows in the
 outbound prompt. This preserves every model, label, dimension and appearance
@@ -131,6 +136,25 @@ serialized context back into `prepareDraft` is not an authorization shortcut.
 `needs_measurements`. New-room responses also include `room_name` and `openings`.
 Candidate IDs are unique review keys, not project IDs. The application allocates its
 own IDs. Optional appearance values are explicit nullable fields in strict schemas.
+
+Site responses contain `features` instead of room items/openings. Each feature has
+`candidate_key`, `name`, `kind`, `polygon`, `height_m`, `color` and `evidence`.
+Kinds are `home`, `roof`, `building`, `street` and `landscape`. `prepareDraft`
+validates every candidate, including deselected ones, through the shared site
+validator and assigns selected features fresh IDs using `nextSiteId`. It appends
+only to `project.site.features`, retaining existing ground elevation and features;
+all other project content, including interior geometry and bindings, is preserved.
+No selected features leaves the original project unchanged, without adding an
+empty site. The same frozen-context baseline and final revision checks guard apply.
+
+Site bounds are 64 features, 3–64 vertices per simple polygon, 1024 total vertices,
+coordinates within ±1000 m and heights 0–100 m. Merged capacity includes existing
+features. Streets and landscape require zero height. Roofs represent a flat
+outline at their specified height. Unknown fields, including model-proposed IDs,
+ground changes and geographic coordinates, are rejected. The prompt explicitly
+requires approximate estimates, ownership clarification and missing measurements;
+it cannot turn photos into surveyed geometry or infer exact geocoordinates.
+The [site editor guide](site-editor.md) describes manual editing and map alignment.
 
 Each furniture candidate identifies a catalog model/style and supplies metre-based
 `position_m`, `dimensions_m`, rotation and evidence. X/Z is the floor plane; Y is
@@ -182,6 +206,7 @@ process. Unsupported HEIC/SVG input requires explicit user conversion.
 
 ```sh
 node scripts/test-ai-draft.mjs
+node scripts/test-ai-site.mjs
 python3 scripts/test-ai-companion.py
 AI_PLANNER_ENGINES=chromium,firefox,webkit node scripts/test-ai-planner.cjs
 AI_PLANNER_ENGINES=chromium,firefox,webkit node scripts/test-ai-integration.cjs
@@ -204,6 +229,8 @@ WebGPU inference and photo reconstruction of arbitrary floor geometry are not
 implemented. The current AI UI is English; instructions may be multilingual.
 
 No continuous render loop is added for AI. Image decoding happens only for selected
-photos; inference requests happen only on Generate. The installed viewer and its resource
-budget are unchanged. A very large catalog context can still cost provider tokens;
-one room per request bounds the private spatial context and makes review practical.
+photos; inference requests happen only on Generate. No provider or AI code is added
+to the installed viewer. Accepted site shapes add bounded geometry to its map
+layer. A large room catalog or site context can still cost provider tokens. Requests
+use one room or the explicitly disclosed site scope, with bounded candidate counts
+and an explicit review before applying.

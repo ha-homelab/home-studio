@@ -107,6 +107,14 @@ Alignment is stored separately in Home Assistant and is not added to exported
 drawings. Map tiles come from OpenStreetMap, which receives the area being
 viewed. See [map setup, privacy, and navigation](docs/map-navigation.md).
 
+Use **Site & roof** in the editor to draw your building footprint and roof edge,
+neighboring buildings, streets, and garden outlines on the same metric grid as
+your rooms. The site becomes a lightweight outside view when you zoom out on
+the HA map. You can also ask your connected AI to propose site shapes from
+photos, identify your own home in the instructions, and review the result before
+adding it. Existing rooms and device bindings stay intact.
+[Follow the site drawing guide](docs/site-editor.md).
+
 ## Take your drawing into Blender
 
 The 1.1 beta line adds **Export for Blender** directly to the Home Assistant

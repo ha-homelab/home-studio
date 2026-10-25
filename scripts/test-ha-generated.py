@@ -66,7 +66,8 @@ def fixture(component):
                  "room_views": {"room_a": {"azimuth_rad": .4}}, "room_display_names": {"room_a": "Synthetic display name"},
                  "room_display_ids": {"room_a": "A"}, "tv_entities": {item["id"]: "media_player.synthetic_tv"},
                  "camera_entities": {item["id"]: "camera.synthetic_camera"}, "exterior_rooms": [],
-                 "site_context": {"synthetic_context": {"preserve": True}},
+                 "site_context": {"synthetic_context": {"preserve": True},
+                                  "lowest_slab_elevation_m": -.35 - (2.8 if floor == "upper" else 0)},
                  "lower_floor_context": {"elevation_m": -2.8, "surfaces": [], "lines": []},
                  "telemetry": [{"entity_id": "sensor.synthetic_energy"}],
                  "assumed_activity": {"sensor": "sensor.synthetic_zone", "geometry_sha256": "synthetic_fingerprint"},
@@ -120,9 +121,138 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
     def assert_baseline_unchanged(self):
         self.assertEqual(tree_hashes(self.component), self.baseline)
 
+    def assert_lowest_slab_preserved(self, assets, identifier):
+        expected = -.35 - self.models[identifier]["elevation_m"]
+        stored = json.loads((assets / identifier / "model-data.json").read_text(encoding="utf-8"))
+        embedded = embedded_model(assets / identifier / "index.html")
+        for model in (stored, embedded):
+            self.assertEqual(model["site_context"]["lowest_slab_elevation_m"], expected)
+
     async def publish_seed(self):
         await self.project.save(0, copy.deepcopy(self.project.document["project"]))
         return await self.project.publish(1)
+
+    async def test_site_publication_preserves_installed_geometry_and_private_extensions(self):
+        runtime = (ROOT / "map-layer.js").read_text(encoding="utf-8")
+        for floor in self.models:
+            page = self.component / "assets" / floor / "index.html"
+            page.write_text(page.read_text(encoding="utf-8").replace(
+                "</body>", "<script>" + runtime + "</script></body>"), encoding="utf-8")
+        self.baseline = tree_hashes(self.component)
+        adapter = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
+        await adapter.load()
+        source = copy.deepcopy(adapter.document["project"])
+        original_floors = copy.deepcopy(source["floors"])
+        source["site"] = {"ground_elevation_m": -1, "features": [
+            {"id": "home_1", "name": "Fictional home", "kind": "home", "height_m": 6,
+             "color": "#46a0aa", "polygon": [[0, 0], [5, 0], [5, 4], [0, 4]]},
+            {"id": "neighbor_1", "name": "Fictional neighbor", "kind": "building", "height_m": 5,
+             "color": "#aa9cb4", "polygon": [[8, 0], [12, 0], [12, 4], [8, 4]]},
+        ]}
+        await adapter.save(0, source)
+        assets, _, models, _, _ = await adapter.publish(1)
+        baseline_assets = adapter.root / "baselines" / adapter.document["baseline"] / "assets"
+        for floor in original_floors:
+            identifier = floor["id"]
+            model = models[identifier]
+            self.assertEqual(model["meshes"], self.models[identifier]["meshes"])
+            self.assertEqual(model["custom_extension"], self.models[identifier]["custom_extension"])
+            self.assertEqual(model["site_context"]["synthetic_context"], {"preserve": True})
+            self.assertEqual(model["site_context"]["features"], source["site"]["features"])
+            self.assertEqual(model["site_context"]["ground_elevation_m"], -1 - floor["elevation_m"])
+            self.assertNotEqual(model["site_context"]["lowest_slab_elevation_m"], model["site_context"]["ground_elevation_m"])
+            self.assert_lowest_slab_preserved(assets, identifier)
+            self.assert_lowest_slab_preserved(baseline_assets, identifier)
+            before = (self.component / "assets" / identifier / "index.html").read_text(encoding="utf-8")
+            after = (assets / identifier / "index.html").read_text(encoding="utf-8")
+            self.assertEqual(MODEL_BLOCK.sub(r"\1MODEL\3", before), MODEL_BLOCK.sub(r"\1MODEL\3", after))
+            self.assertEqual(embedded_model(assets / identifier / "index.html")["site_context"], model["site_context"])
+        restarted = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
+        await restarted.load()
+        self.assertEqual(restarted.document["project"]["site"], source["site"])
+        self.assertEqual(set(restarted.document["project"]["site"]), {"ground_elevation_m", "features"})
+        self.assertEqual(restarted.document["project"]["floors"], original_floors)
+        self.assert_baseline_unchanged()
+
+    async def test_old_viewer_rejects_site_publish_and_keeps_previous_home(self):
+        await self.publish_seed()
+        previous = self.project.document["generation"]
+        source = copy.deepcopy(self.project.document["project"])
+        source["site"] = {"ground_elevation_m": 0, "features": [
+            {"id": "roof", "name": "Roof", "kind": "roof", "height_m": 6,
+             "color": "#46a0aa", "polygon": [[0, 0], [5, 0], [5, 4], [0, 4]]},
+        ]}
+        await self.project.save(1, source)
+        with self.assertRaises(native.NativeError) as error:
+            await self.project.publish(2)
+        self.assertEqual(error.exception.code, "unsupported_site_runtime")
+        self.assertEqual(self.project.document["generation"], previous)
+        self.assertTrue((self.project.root / previous / "upper/index.html").is_file())
+        self.assert_baseline_unchanged()
+
+    async def test_omitting_site_does_not_resurrect_baseline_features(self):
+        features = [{"id": "roof", "name": "Roof", "kind": "roof", "height_m": 6,
+                     "color": "#46a0aa", "polygon": [[0, 0], [5, 0], [5, 4], [0, 4]]}]
+        for identifier, model in self.models.items():
+            context = model["site_context"]
+            context.update(features=features, ground_elevation_m=-model["elevation_m"])
+            folder = self.component / "assets" / identifier
+            (folder / "model-data.json").write_text(encoded(model), encoding="utf-8")
+            page = folder / "index.html"
+            embedded = embedded_model(page)
+            embedded["site_context"] = copy.deepcopy(context)
+            page.write_text(MODEL_BLOCK.sub(lambda match: match[1] + encoded(embedded) + match[3],
+                                           page.read_text(encoding="utf-8")), encoding="utf-8")
+        self.baseline = tree_hashes(self.component)
+        adapter = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
+        await adapter.load()
+        source = copy.deepcopy(adapter.document["project"])
+        self.assertEqual(set(source["site"]), {"ground_elevation_m", "features"})
+        self.assertEqual(source.pop("site")["features"], features)
+        await adapter.save(0, source)
+        assets, _, models, _, _ = await adapter.publish(1)
+        baseline_assets = adapter.root / "baselines" / adapter.document["baseline"] / "assets"
+        for identifier, model in models.items():
+            self.assertNotIn("features", model["site_context"])
+            self.assertEqual(model["site_context"]["synthetic_context"], {"preserve": True})
+            self.assert_lowest_slab_preserved(assets, identifier)
+            self.assert_lowest_slab_preserved(baseline_assets, identifier)
+            self.assertEqual(model["meshes"], self.models[identifier]["meshes"])
+            self.assertEqual(embedded_model(assets / identifier / "index.html")["site_context"], model["site_context"])
+        restarted = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
+        await restarted.load()
+        self.assertNotIn("site", restarted.document["project"])
+        self.assert_baseline_unchanged()
+
+    def test_installed_site_is_seeded_in_global_coordinates(self):
+        features = [{"id": "roof", "name": "Roof", "kind": "roof", "height_m": 6,
+                     "color": "#46a0aa", "polygon": [[0, 0], [5, 0], [5, 4], [0, 4]]}]
+        for model in self.models.values():
+            model["site_context"].update(ground_elevation_m=.1 - model["elevation_m"], features=features)
+        project = generated.seed_project(self.site, self.models, self.inventory)
+        self.assertAlmostEqual(project["site"]["ground_elevation_m"], .1)
+        self.assertEqual(project["site"]["features"], features)
+        self.assertEqual(set(project["site"]), {"ground_elevation_m", "features"})
+        self.assertIsNot(project["site"]["features"], features)
+        self.models["ground"]["site_context"]["ground_elevation_m"] = 2
+        with self.assertRaises(native.NativeError) as error:
+            generated.seed_project(self.site, self.models, self.inventory)
+        self.assertEqual(error.exception.code, "unsupported_source")
+
+    def test_installed_site_requires_a_valid_ground_elevation(self):
+        for value in (None, True, "0", float("nan")):
+            with self.subTest(value=value):
+                self.models["upper"]["site_context"].update(features=[], ground_elevation_m=value)
+                with self.assertRaises(native.NativeError) as error:
+                    generated.seed_project(self.site, self.models, self.inventory)
+                self.assertEqual(error.exception.code, "unsupported_source")
+
+    def test_inert_site_capability_text_does_not_enable_an_old_viewer(self):
+        source = {"site": {"features": [{}]}}
+        for markup in ('<p>homeMapMath.features(options.features) home-site-features</p>',
+                       '<script type="application/json">"homeMapMath.features(options.features) home-site-features"</script>'):
+            with self.subTest(markup=markup), self.assertRaises(native.NativeError):
+                generated._check_site_runtime(markup, source)
 
     async def test_seed_preserves_ids_calibration_and_current_stored_inventory(self):
         current = copy.deepcopy(self.inventory)

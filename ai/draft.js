@@ -1,11 +1,12 @@
 // Detached, additive AI proposals. No provider output is a project or executable recipe.
 import { CATALOG, PATTERNS, getCatalogModel, getCatalogStyle, supportsFurniturePattern, validateFurnitureAppearance } from '../planner/furniture.js';
 import { LIMITS, clone, distance, nextId, outlineRoom, pointInPolygon, validateProject } from '../planner/model.js';
+import { createSite, nextSiteId, SITE_KINDS, SITE_LIMITS, validateSite } from '../planner/site-model.js';
 import { parseDraftJSON } from './json.js';
 
 export { parseDraftJSON } from './json.js';
 const EPS = 1e-8;
-const MODES = ['furnish_room', 'new_room'];
+const MODES = ['furnish_room', 'new_room', 'site'];
 const trustedContexts = new WeakMap();
 const ITEM_FIELDS = ['candidate_key', 'name', 'model_id', 'style_id', 'position_m', 'dimensions_m', 'rotation_deg', 'evidence'];
 const APPEARANCE_FIELDS = ['color', 'pattern_id', 'pattern_color'];
@@ -58,10 +59,22 @@ function rectangle(measurements, origin) {
 }
 
 /** Capture a sanitized provider context and privately bind it to this exact project. */
-export function createDraftContext(project, { floorId, roomId, mode = 'furnish_room', measurements, origin } = {}) {
+export function createDraftContext(project, { floorId, roomId, mode = 'furnish_room', measurements, origin, siteNotes } = {}) {
   validateProject(project);
   const baseline = serializeProject(project);
   if (!MODES.includes(mode)) throw new Error('Unknown AI draft mode.');
+  const requestId = `request_${globalThis.crypto?.randomUUID?.().replaceAll('-', '') || Date.now().toString(36) + Math.random().toString(36).slice(2)}`;
+  if (mode === 'site') {
+    fields(siteNotes, ['own_home', 'include', 'reference'], 'Site description');
+    for (const [field, label] of [['own_home', 'Identify your own home in the photos'], ['include', 'Requested surroundings'], ['reference', 'Known dimension and orientation']]) {
+      text(typeof siteNotes[field] === 'string' ? siteNotes[field].replace(/[\r\n\t]/g, ' ') : siteNotes[field], 1000, label, field !== 'own_home');
+    }
+    const context = freeze({ draft_version: 1, request_id: requestId, mode,
+      site: clone(project.site || createSite()), site_notes: clone(siteNotes),
+      floor_footprints: project.floors.map(floor => ({ elevation_m: floor.elevation_m, polygons: floor.rooms.map(room => clone(room.polygon)) })) });
+    trustedContexts.set(context, { baseline, mode });
+    return context;
+  }
   const floor = project.floors.find(value => value.id === floorId);
   if (!floor) throw new Error('Select a target floor before creating an AI draft.');
   let room = floor.rooms.find(value => value.id === roomId), measured = null, frame = null;
@@ -90,7 +103,6 @@ export function createDraftContext(project, { floorId, roomId, mode = 'furnish_r
         width_m: opening.width_m, sill_m: opening.sill_m, head_m: opening.head_m });
     });
   });
-  const requestId = `request_${globalThis.crypto?.randomUUID?.().replaceAll('-', '') || Date.now().toString(36) + Math.random().toString(36).slice(2)}`;
   const context = freeze({ draft_version: 1, request_id: requestId, mode, floor_id: floor.id, room_id: mode === 'furnish_room' ? room.id : null,
     ceiling_height_m: measured?.height ?? floor.height_m, room: { name: room.name, polygon: clone(room.polygon), material: room.material },
     measurements: measured, origin: frame, walls, openings,
@@ -108,6 +120,14 @@ const numberSchema = (minimum, maximum) => ({ type: 'number', minimum, maximum }
 export function draftSchema(mode = 'furnish_room') {
   if (!MODES.includes(mode)) throw new Error('Unknown AI draft mode.');
   const candidateKey = { type: 'string', pattern: KEY.source, maxLength: 64 };
+  if (mode === 'site') return objectSchema({
+    draft_version: { type: 'integer', enum: [1] }, request_id: stringSchema(100), kind: { type: 'string', enum: [mode] },
+    features: { type: 'array', maxItems: SITE_LIMITS.features, items: objectSchema({ candidate_key: candidateKey, name: stringSchema(100),
+      kind: { type: 'string', enum: SITE_KINDS }, polygon: { type: 'array', minItems: 3, maxItems: SITE_LIMITS.points,
+        items: { type: 'array', minItems: 2, maxItems: 2, items: numberSchema(-SITE_LIMITS.coordinate, SITE_LIMITS.coordinate) } },
+      height_m: numberSchema(0, SITE_LIMITS.height), color: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' }, evidence: stringSchema(300) }) },
+    assumptions: { type: 'array', maxItems: 16, items: stringSchema(300) }, needs_measurements: { type: 'array', maxItems: 16, items: stringSchema(300) },
+  });
   const color = { type: ['string', 'null'], pattern: '^#[0-9a-fA-F]{6}$' };
   const properties = {
     draft_version: { type: 'integer', enum: [1] }, request_id: stringSchema(100), kind: { type: 'string', enum: [mode] },
@@ -178,6 +198,7 @@ export function prepareDraft(project, context, rawDraft, { selectedCandidateKeys
   validateProject(project);
   if (serializeProject(project) !== trusted.baseline) throw new Error('The project changed after this draft request. Generate a new draft.');
   const draft = parseDraftJSON(rawDraft), creating = trusted.mode === 'new_room';
+  if (trusted.mode === 'site') return prepareSiteDraft(project, context, draft, selectedCandidateKeys);
   fields(draft, ['draft_version', 'request_id', 'kind', 'items', 'assumptions', 'needs_measurements', ...(creating ? ['room_name', 'openings'] : [])], 'AI draft');
   if (draft.draft_version !== 1) throw new Error('Unsupported AI draft version.');
   if (draft.request_id !== context.request_id || draft.kind !== trusted.mode) throw new Error('AI draft does not match this request and target.');
@@ -265,4 +286,37 @@ export function prepareDraft(project, context, rawDraft, { selectedCandidateKeys
   const itemCount = additions.length, openingCount = mappedOpenings.filter(value => selected.has(value.key)).length;
   const summary = `${creating ? `Add measured room “${room.name}”, ${trusted.measurements.width} × ${trusted.measurements.depth} × ${trusted.measurements.height} m; ` : ''}${itemCount} item${itemCount === 1 ? '' : 's'}${creating ? ` and ${openingCount} opening${openingCount === 1 ? '' : 's'}` : ''} selected.`;
   return { project: merged, summary, assumptions, needsMeasurements, candidates, warnings };
+}
+
+function prepareSiteDraft(project, context, draft, selectedCandidateKeys) {
+  fields(draft, ['draft_version', 'request_id', 'kind', 'features', 'assumptions', 'needs_measurements'], 'AI site draft');
+  if (draft.draft_version !== 1) throw new Error('Unsupported AI draft version.');
+  if (draft.request_id !== context.request_id || draft.kind !== 'site') throw new Error('AI draft does not match this request and target.');
+  const assumptions = array(draft.assumptions, 16, 'Assumptions').map(value => text(value, 300, 'Assumption'));
+  const needsMeasurements = array(draft.needs_measurements, 16, 'Measurements still needed').map(value => text(value, 300, 'Measurement question'));
+  const keys = new Set(), candidates = [], proposed = createSite();
+  for (const source of array(draft.features, SITE_LIMITS.features, 'Site features')) {
+    fields(source, ['candidate_key', 'name', 'kind', 'polygon', 'height_m', 'color', 'evidence'], 'Draft site feature');
+    key(source.candidate_key);
+    if (keys.has(source.candidate_key)) throw new Error('Candidate keys must be unique across site features.');
+    keys.add(source.candidate_key);
+    text(source.name, 100, 'Site feature name'); text(source.evidence, 300, 'Site feature evidence', true);
+    proposed.features.push({ id: source.candidate_key, name: source.name, kind: source.kind, polygon: clone(source.polygon), height_m: source.height_m, color: source.color });
+    candidates.push({ candidate_key: source.candidate_key, kind: 'site', name: source.name, evidence: source.evidence, feature: clone(source) });
+  }
+  // Validate every candidate, including unchecked ones; selection cannot hide bad data.
+  validateSite(proposed);
+  let selected = keys;
+  if (selectedCandidateKeys !== undefined) {
+    if (!Array.isArray(selectedCandidateKeys) && !(selectedCandidateKeys instanceof Set)) throw new Error('Selected candidate keys must be an array or Set.');
+    const values = [...selectedCandidateKeys]; selected = new Set(values);
+    if (selected.size !== values.length || values.some(value => !keys.has(value))) throw new Error('Selected candidate keys must be unique known candidates.');
+  }
+  const merged = clone(project), site = clone(project.site || createSite());
+  for (const feature of proposed.features) if (selected.has(feature.id)) site.features.push({ ...feature, id: nextSiteId(site, feature.kind) });
+  if (selected.size) merged.site = site;
+  validateSite(site); validateProject(merged); serializeProject(merged);
+  return { project: merged, candidates, assumptions, needsMeasurements,
+    summary: `${selected.size} site feature${selected.size === 1 ? '' : 's'} selected. Existing site features and interior geometry remain unchanged.`,
+    warnings: ['Photo-derived footprints, roof shapes, heights, and relative positions are approximate. Review scale, orientation, ownership, and alignment before applying; this is not a survey.'] };
 }

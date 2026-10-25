@@ -11,6 +11,7 @@ import { showAreaStarter, showDeviceChooser } from './device-onboarding-ui.js';
 import { createDraftStorage, DRAFT_KEY, PREVIOUS_KEY, DAMAGED_KEY } from './draft-storage.js';
 import { reconcileInspector } from './inspector-dom.js';
 import { createFloorNavigator } from './floor-navigator.js';
+import { createSiteEditor, buildSitePreview } from './site-editor.js';
 import { getRenderCapacity } from './render-capacity.js';
 import { formatValidationError } from './validation.js';
 import { roomBounds, roomMoveGroup, moveRoom, resizeRoom } from './room-transform.js';
@@ -121,7 +122,7 @@ let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, space
 let canvasFrame = 0, canvasSuspended = false, planFrameRequested = false;
 // Optional integrations render a detached candidate; project/history/storage always
 // retain the accepted document. The ordinary editor imports no AI code.
-let candidatePreview = null, editorRevision = 0;
+let candidatePreview = null, editorRevision = 0, siteEditor = null;
 const editorListeners = new Set();
 function editorChanged() {
   candidatePreview = null; editorRevision++; previewDirty = true;
@@ -265,7 +266,7 @@ function itemAsset(item) {
 }
 function materialColor(material, shade = 1) { return new THREE.Color(...material.slice(0, 3)).multiplyScalar(shade).getStyle(); }
 function placementName() { return placementModelId ? t(`model.${placementModelId}`) : t(LABELS[$('place-type').value]); }
-function toolHint() { return tool === 'item' ? t('Click inside a room to place: {item}. V returns to Select / move.', { item: placementName() }) + ' · Alt bypasses snap' : t(HINTS[tool]); }
+function toolHint() { if (siteEditor?.active) return siteEditor.hint(); return tool === 'item' ? t('Click inside a room to place: {item}. V returns to Select / move.', { item: placementName() }) + ' · Alt bypasses snap' : t(HINTS[tool]); }
 function updatePlacement() {
   $('placement-summary').textContent = t('Ready to place: {item}', { item: placementName() });
   $('browse-items').title = t('Open item library. Ready to place: {item}', { item: placementName() });
@@ -438,12 +439,14 @@ async function replaceProject(next, message) {
   return true;
 }
 function installRecoveredProject(next) {
+  siteEditor?.cancel(); siteEditor?.setActive(false);
   $('project-title').inspectorDraft = false; $('project-title').removeAttribute('aria-invalid');
   historyPush(project); project = clone(next); activeFloorId = project.floors[0].id;
   selection = null; connectedRoomMove = null; drag = null; previewDirty = true; inspectorScope = '';
   editorChanged(); setView('plan'); setTool('select'); renderUI(); fitPlan(); fitPreview(); renderPlan();
 }
 function undo(redo = false) {
+  siteEditor?.cancel();
   if (drag) finishPointer(null, true);
   if (previewEdit) finishPreviewEdit(null, true);
   const source = redo ? future : history, destination = redo ? history : future; if (!source.length) return;
@@ -480,6 +483,7 @@ function renderUI() {
   if (!count) objectList.append(node('p', 'object-empty', t('Your rooms, walls, and items will appear here.')));
   reconcileInspector($('object-list'), objectList);
   $('empty-state').hidden = count > 0 || tool !== 'select' || view === 'preview';
+  siteEditor?.updateUI();
   renderInspector(); if (view !== 'plan') renderPreview();
 }
 function setSelection(next) {
@@ -524,9 +528,9 @@ function inspectorValue(input) {
 }
 function renderInspector() {
   const parent = $('inspector-body'), next = node('div');
-  const scope = `${project.id || ''}:${activeFloorId}:${selection?.kind || ''}:${selection?.id || ''}`;
+  const scope = siteEditor?.active ? `site:${project.id}:${siteEditor.selectedId}` : `${project.id || ''}:${activeFloorId}:${selection?.kind || ''}:${selection?.id || ''}`;
   $('selected-item-details').hidden = selection?.kind !== 'items';
-  buildInspector(next);
+  if (siteEditor?.active) siteEditor.buildInspector(next); else buildInspector(next);
   if (scope === inspectorScope) {
     const previous = parent.querySelector('.item-appearance'), appearance = next.querySelector('.item-appearance');
     if (previous && appearance) appearance.open = previous.open;
@@ -740,6 +744,7 @@ function deleteSelection() {
   }, () => kind === 'walls' ? t('Wall and its openings deleted. Undo is available.') : kind === 'rooms' ? t('Room and its assigned items deleted. Walls remain. Undo is available.') : t('Object deleted. Undo is available.'));
 }
 function setTool(next) {
+  if (siteEditor?.active) siteEditor.setActive(false);
   if (drag) finishPointer(null, true);
   if (previewEdit) finishPreviewEdit(null, true);
   tool = next; document.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === tool)));
@@ -749,14 +754,14 @@ function setTool(next) {
   $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || view === 'preview';
 }
 function setView(next) {
-  if (next === 'preview' && haPublishedPreview) { haPublishedPreview(); return; }
+  if (next === 'preview' && haPublishedPreview && !siteEditor?.active) { haPublishedPreview(); return; }
   const rect = document.querySelector('.canvas-shell').getBoundingClientRect();
   if (next === 'split' && (haSourcePolicy || rect.width < 700)) next = 'plan';
   if (drag) finishPointer(null, true);
   releasePreviewPointer();
   view = next;
   previewEnvironment?.setActive(next !== 'plan' && !previewLost && !canvasSuspended);
-  if (!haSourcePolicy) {
+  if (!haSourcePolicy || siteEditor?.active) {
     for (const mode of ['plan', 'preview', 'split']) {
       const tab = $(mode + '-tab');
       tab.setAttribute('aria-selected', String(next === mode)); tab.tabIndex = next === mode ? 0 : -1;
@@ -769,6 +774,7 @@ function setView(next) {
   $('tool-hint').textContent = next === 'preview' ? previewHint() : toolHint();
   updatePreviewNavigation();
   $('empty-state').hidden = displayedFloor().rooms.length + displayedFloor().walls.length + displayedFloor().items.length > 0 || tool !== 'select' || next === 'preview';
+  siteEditor?.cancel(); siteEditor?.updateUI();
   resizeCanvases(rect); updateZoom();
 }
 function addOpening(wall, offset, type, precise = false) {
@@ -797,12 +803,12 @@ const toScreen = p => [map.x + p[0] * map.scale, map.y + p[1] * map.scale];
 const toWorld = p => [(p[0] - map.x) / map.scale, (p[1] - map.y) / map.scale];
 function localPoint(event, canvas = planCanvas) { const r = canvas.getBoundingClientRect(); return [event.clientX - r.left, event.clientY - r.top]; }
 function fitPlan() {
-  const b = floorBounds(displayedFloor()), pad = 90;
-  map.scale = Math.max(8, Math.min(95, (size.width - pad * 2) / Math.max(2, b.maxX - b.minX), (size.height - pad * 2) / Math.max(2, b.maxZ - b.minZ)));
+  const b = siteEditor?.active ? siteEditor.bounds() : floorBounds(displayedFloor()), pad = siteEditor?.active ? 55 : 90;
+  map.scale = Math.max(siteEditor?.active ? .05 : 8, Math.min(95, (size.width - pad * 2) / Math.max(2, b.maxX - b.minX), (size.height - pad * 2) / Math.max(2, b.maxZ - b.minZ)));
   map.x = (size.width - (b.minX + b.maxX) * map.scale) / 2; map.y = (size.height - (b.minZ + b.maxZ) * map.scale) / 2; updateZoom();
 }
 function zoomPlan(factor, anchor = [size.width / 2, size.height / 2]) {
-  const world = toWorld(anchor); map.scale = Math.max(4, Math.min(280, map.scale * factor)); map.x = anchor[0] - world[0] * map.scale; map.y = anchor[1] - world[1] * map.scale; requestCanvasRender(); updateZoom();
+  const world = toWorld(anchor); map.scale = Math.max(siteEditor?.active ? .05 : 4, Math.min(280, map.scale * factor)); map.x = anchor[0] - world[0] * map.scale; map.y = anchor[1] - world[1] * map.scale; requestCanvasRender(); updateZoom();
 }
 function updateZoom() { $('zoom-value').textContent = view !== 'preview' ? `${Math.round(map.scale / 55 * 100)}%` : `${Math.round(orbit.baseRadius / orbit.radius * 100)}%`; }
 function path(points, close = false) { ctx.beginPath(); points.forEach((p, i) => { const [x, y] = toScreen(p); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); if (close) ctx.closePath(); }
@@ -822,11 +828,12 @@ function renderPlan() {
   if (view === 'preview' || canvasSuspended || document.hidden) return;
   cancelCanvasRender();
   ctx.clearRect(0, 0, size.width, size.height); ctx.fillStyle = planColors.background; ctx.fillRect(0, 0, size.width, size.height);
-  const top = toWorld([0, 0]), bottom = toWorld([size.width, size.height]), gridStep = map.scale > 22 ? 1 : 5;
+  const top = toWorld([0, 0]), bottom = toWorld([size.width, size.height]), gridStep = siteEditor?.active ? Math.pow(10, Math.ceil(Math.log10(24 / map.scale))) : map.scale > 22 ? 1 : 5;
   ctx.lineWidth = 1;
   for (let x = Math.floor(top[0] / gridStep) * gridStep; x <= bottom[0]; x += gridStep) { const px = Math.round(toScreen([x, 0])[0]) + .5; ctx.strokeStyle = x === 0 ? planColors.axis : planColors.grid; ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, size.height); ctx.stroke(); }
   for (let z = Math.floor(top[1] / gridStep) * gridStep; z <= bottom[1]; z += gridStep) { const py = Math.round(toScreen([0, z])[1]) + .5; ctx.strokeStyle = z === 0 ? planColors.axis : planColors.grid; ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(size.width, py); ctx.stroke(); }
   if (map.scale >= 44) { ctx.fillStyle = planColors.dots; for (let x = Math.floor(top[0]); x <= bottom[0]; x += .25) for (let z = Math.floor(top[1]); z <= bottom[1]; z += .25) { const [px, py] = toScreen([x, z]); ctx.fillRect(px, py, 1, 1); } }
+  if (siteEditor?.active) { siteEditor.render(); return; }
   const f = displayedFloor();
   for (const r of f.rooms) {
     const active = selection?.kind === 'rooms' && selection.id === r.id;
@@ -870,6 +877,7 @@ function renderPlan() {
     else { ctx.fillRect(-w / 2, -d / 2, w, d); ctx.strokeRect(-w / 2, -d / 2, w, d); if (item.type === 'furniture' && w > 28 && d > 20) { ctx.strokeStyle = '#ffffff66'; ctx.strokeRect(-w / 2 + 4, -d / 2 + 4, w - 8, d - 8); } }
     ctx.restore();
   }
+
   const activeItem = selection?.kind === 'items' ? selected() : null;
   if (activeItem) {
     const [x, y] = toScreen([activeItem.position_m.x, activeItem.position_m.z]);
@@ -926,6 +934,10 @@ function hitTest(point) {
   return null;
 }
 planCanvas.addEventListener('pointerdown', event => {
+  if (siteEditor?.active) {
+    if (drag || previewEdit || orbit.pointers.size || canvasSuspended || document.hidden) return;
+    if (siteEditor.pointerDown(event)) return;
+  }
   // One pointer owns both the working copy and its immutable undo snapshot.
   if (drag || previewEdit || orbit.pointers.size || view === 'preview' || canvasSuspended || document.hidden || event.isPrimary === false || event.button !== 0 && event.button !== 1) return;
   event.preventDefault(); planCanvas.focus(); const screen = localPoint(event), world = toWorld(screen); planCanvas.setPointerCapture(event.pointerId);
@@ -948,6 +960,8 @@ planCanvas.addEventListener('pointerdown', event => {
   else drag = { kind: 'pan', pointerId: event.pointerId, screen, map: { ...map } };
 });
 planCanvas.addEventListener('pointermove', event => {
+  if (siteEditor?.active && (canvasSuspended || document.hidden)) return;
+  if (siteEditor?.pointerMove(event)) return;
   if (drag && drag.pointerId !== event.pointerId) return;
   if (drag && event.buttons === 0) { finishPointer(event, true); return; }
   const screen = localPoint(event), world = toWorld(screen); $('pointer-position').textContent = `x ${world[0].toFixed(2)} · z ${world[1].toFixed(2)} m`;
@@ -991,6 +1005,7 @@ planCanvas.addEventListener('pointermove', event => {
   requestCanvasRender();
 });
 function finishPointer(event, cancel = false) {
+  if (siteEditor?.pointerUp(event, cancel)) return;
   if (!drag || event && event.pointerId !== drag.pointerId) return;
   try {
   const current = drag; drag = null; planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
@@ -1081,10 +1096,12 @@ function initPreview() {
     if (!previewInitialized) { fitPreview(); previewInitialized = true; }
   } catch (error) { disposePreviewRenderer(); renderer?.forceContextLoss(); previewUnavailable = true; releasePreviewPointer(); updatePreviewNavigation(); $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
 }
-function previewFloors() { return $('all-floors').checked ? displayedProject().floors : [displayedFloor()]; }
+function previewFloors() { return siteEditor?.active || $('all-floors').checked ? displayedProject().floors : [displayedFloor()]; }
 function fitPreview() {
-  const floors = previewFloors(), bounds = floors.map(floorBounds), minX = Math.min(...bounds.map(b => b.minX)), maxX = Math.max(...bounds.map(b => b.maxX)), minZ = Math.min(...bounds.map(b => b.minZ)), maxZ = Math.max(...bounds.map(b => b.maxZ));
-  const low = Math.min(...floors.map(f => f.elevation_m)), high = Math.max(...floors.map(f => f.elevation_m + f.height_m));
+  const floors = previewFloors(), bounds = floors.map(floorBounds); if (siteEditor?.active) bounds.push(siteEditor.bounds());
+  const minX = Math.min(...bounds.map(b => b.minX)), maxX = Math.max(...bounds.map(b => b.maxX)), minZ = Math.min(...bounds.map(b => b.minZ)), maxZ = Math.max(...bounds.map(b => b.maxZ));
+  const site = siteEditor?.active ? displayedProject().site : null;
+  const low = Math.min(...floors.map(f => f.elevation_m), site?.ground_elevation_m ?? Infinity), high = Math.max(...floors.map(f => f.elevation_m + f.height_m), ...(site?.features || []).map(feature => site.ground_elevation_m + feature.height_m));
   const verticalFov = 40 * Math.PI / 180, horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * size.width / size.height);
   const sphereRadius = Math.hypot(maxX - minX, maxZ - minZ, high - low) / 2;
   orbit.target.set((minX + maxX) / 2, (low + high) / 2, (minZ + maxZ) / 2);
@@ -1217,6 +1234,7 @@ function rebuildPreview() {
       }
     }
   }
+  if (siteEditor?.active && displayedProject().site) worldGroup.add(buildSitePreview(THREE, displayedProject().site, createPreviewMaterial));
   const activeItem = selection?.kind === 'items' ? selected() : null;
   if (activeItem && orbit.mode === 'edit') {
     const p = activeItem.position_m, d = activeItem.dimensions_m;
@@ -1225,14 +1243,16 @@ function rebuildPreview() {
     outline.position.set(p.x, floor().elevation_m + p.y + d.height / 2, p.z); outline.rotation.y = activeItem.rotation_deg * Math.PI / 180; outline.renderOrder = 10; worldGroup.add(outline);
     const record = previewItemNodes.get(activeItem.id); if (record) { record.nodes.push(outline); record.positions.push(outline.position.clone()); }
   }
-  const floors = previewFloors(), bounds = floors.map(floorBounds), minX = Math.min(...bounds.map(b => b.minX)), maxX = Math.max(...bounds.map(b => b.maxX)), minZ = Math.min(...bounds.map(b => b.minZ)), maxZ = Math.max(...bounds.map(b => b.maxZ));
-  const low = Math.min(...floors.map(f => f.elevation_m)), high = Math.max(...floors.map(f => f.elevation_m + f.height_m)), span = Math.max(12, maxX - minX, maxZ - minZ, high - low), cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+  const floors = previewFloors(), bounds = floors.map(floorBounds); if (siteEditor?.active) bounds.push(siteEditor.bounds());
+  const minX = Math.min(...bounds.map(b => b.minX)), maxX = Math.max(...bounds.map(b => b.maxX)), minZ = Math.min(...bounds.map(b => b.minZ)), maxZ = Math.max(...bounds.map(b => b.maxZ));
+  const site = siteEditor?.active ? displayedProject().site : null;
+  const low = Math.min(...floors.map(f => f.elevation_m), site?.ground_elevation_m ?? Infinity), high = Math.max(...floors.map(f => f.elevation_m + f.height_m), ...(site?.features || []).map(feature => site.ground_elevation_m + feature.height_m)), span = Math.max(12, maxX - minX, maxZ - minZ, high - low), cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
   previewSun.position.set(cx - span * .6, high + span * 1.3, cz + span * .5); previewSun.target.position.set(cx, low, cz);
   Object.assign(previewSun.shadow.camera, { left: -span, right: span, top: span, bottom: -span, near: .1, far: span * 5 + 100 }); previewSun.shadow.camera.updateProjectionMatrix();
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(span * 8, span * 8), new THREE.ShadowMaterial({ color: '#54654c', opacity: .14 })); ground.rotation.x = -Math.PI / 2; ground.position.set(cx, low - .081, cz); ground.receiveShadow = true; worldGroup.add(ground);
   if (previewInstancing) instancePreviewCatalog(catalogGroups);
   let meshCount = 0; worldGroup.traverse(object => { if (object.isMesh) meshCount++; });
-  previewMetadata = { floors: previewFloors().map(f => f.id), rooms: roomCount, wallSolidPieces: wallMeshCount, openings: openingCount, items: itemCount, catalogItems: catalogItemCount, itemMeshes: itemMeshCount, meshes: meshCount, renderCount: previewMetadata.renderCount || 0 };
+  previewMetadata = { siteFeatures: siteEditor?.active ? displayedProject().site?.features.length || 0 : 0, floors: previewFloors().map(f => f.id), rooms: roomCount, wallSolidPieces: wallMeshCount, openings: openingCount, items: itemCount, catalogItems: catalogItemCount, itemMeshes: itemMeshCount, meshes: meshCount, renderCount: previewMetadata.renderCount || 0 };
   previewSun.shadow.needsUpdate = true;
   previewDirty = false;
 }
@@ -1242,6 +1262,7 @@ function drawPreview() {
   const width = size.width, height = size.height, ratio = canvasPixelRatio(width, height, previewPixels), nextSize = [width, height, ratio].join();
   // Setting canvas dimensions, even to the same values, resets its drawing buffer.
   if (nextSize !== previewSize) { renderer.setDrawingBufferSize(width, height, ratio); previewSize = nextSize; camera.aspect = width / height; camera.updateProjectionMatrix(); }
+  const far = Math.max(1500, orbit.radius * 4); if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); }
   const horiz = Math.cos(orbit.pitch) * orbit.radius; camera.position.set(orbit.target.x + Math.cos(orbit.yaw) * horiz, orbit.target.y + Math.sin(orbit.pitch) * orbit.radius, orbit.target.z + Math.sin(orbit.yaw) * horiz); camera.lookAt(orbit.target); renderer.render(scene, camera);if(!orbit.pointers.size&&!previewEdit)previewContact?.apply(scene,camera); previewMetadata.renderCount = (previewMetadata.renderCount || 0) + 1;
   const corners = previewFloors().flatMap(f => {
     const b = floorBounds(f), out = [];
@@ -1262,8 +1283,8 @@ function zoomPreview(factor) {
   orbit.radius = radius; rebasePreviewGesture(); requestPreviewRender();
 }
 let previewCanvas = $('preview-canvas'), previewEvents;
-function canNavigatePreview() { return view !== 'plan' && !drag && !previewLost && !previewUnavailable && !canvasSuspended && !document.hidden; }
-function previewRadius(value) { return Math.max(1, Math.min(600, value)); }
+function canNavigatePreview() { return view !== 'plan' && !drag && !siteEditor?.busy && !previewLost && !previewUnavailable && !canvasSuspended && !document.hidden; }
+function previewRadius(value) { return Math.max(1, Math.min(siteEditor?.active ? 10000 : 600, value)); }
 function previewPitch(value) { return Math.max(.1, Math.min(Math.PI / 2 - .001, value)); }
 function previewYaw(value) {
   if (value >= -Math.PI && value <= Math.PI) return value;
@@ -1540,7 +1561,7 @@ function exportProject() {
   try { validateProject(project); const blob = new Blob([serializeProject(project)], { type: 'application/json' }), url = URL.createObjectURL(blob), a = node('a'); a.href = url; a.download = 'project.json'; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); status(() => t('project.json exported. Keep it as your portable, editable backup.')); }
   catch (error) { status(() => t('Could not export project: {error}', { error: formatValidationError(error, t) }), true); }
 }
-function hasContent() { return project.floors.length > 1 || project.floors.some(f => ['rooms', 'walls', 'openings', 'items'].some(k => f[k].length)); }
+function hasContent() { return !!project.site?.features.length || project.floors.length > 1 || project.floors.some(f => ['rooms', 'walls', 'openings', 'items'].some(k => f[k].length)); }
 $('new-project').addEventListener('click', () => { if (!hasContent() || confirm(t('Start a new blank project? Export JSON first if you need a separate copy of the current plan. You can undo this.'))) replaceProject(blankProject(), () => t('New blank project created.')); });
 $('open-project').addEventListener('click', () => $('file-input').click());
 $('file-input').addEventListener('change', async e => {
@@ -1670,6 +1691,7 @@ $('copy-command').addEventListener('click', async () => { try { await navigator.
 window.addEventListener('keydown', e => {
   if (e.defaultPrevented) return;
   if (e.target.closest('input, textarea, select') || document.querySelector('dialog[open]')) return;
+  if (siteEditor?.keyDown(e)) return;
   if (e.key === 'Escape') { finishPointer(null, true); releasePreviewPointer(); setSelection(null); setTool('select'); renderUI(); renderPlan(); return; }
   if (e.code === 'Space' && (e.target === planCanvas || e.target === previewCanvas || e.target === document.body)) { e.preventDefault(); spaceHeld = true; if (view !== 'preview') planCanvas.style.cursor = 'grab'; }
   if (e.ctrlKey || e.metaKey) {
@@ -1685,7 +1707,7 @@ window.addEventListener('keydown', e => {
   }
 });
 window.addEventListener('keyup', e => { if (e.code === 'Space') { spaceHeld = false; planCanvas.style.cursor = tool === 'select' ? 'default' : 'crosshair'; } });
-window.addEventListener('blur', () => { spaceHeld = false; releasePreviewPointer(); if (drag) finishPointer(null, true); });
+window.addEventListener('blur', () => { siteEditor?.cancel(); spaceHeld = false; releasePreviewPointer(); if (drag) finishPointer(null, true); });
 window.addEventListener('beforeunload', e => { if ((saveFailed || pendingSaves) && hasContent()) { e.preventDefault(); e.returnValue = ''; } });
 let firstResize = true, planSize = '';
 function resizeCanvases(rect) {
@@ -1721,13 +1743,32 @@ function resizeCanvases(rect) {
 }
 const canvasObserver = new ResizeObserver(entries => resizeCanvases(entries[0].contentRect));
 canvasObserver.observe(document.querySelector('.canvas-shell'));
-document.addEventListener('visibilitychange', () => { if (document.hidden) { spaceHeld = false; if (drag) finishPointer(null, true); releasePreviewPointer(); cancelCanvasRender(); } else { resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { siteEditor?.cancel(); spaceHeld = false; if (drag) finishPointer(null, true); releasePreviewPointer(); cancelCanvasRender(); } else { resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); } });
 window.addEventListener('pagehide', event => {
-  canvasSuspended = true; if (drag) finishPointer(null, true); releasePreviewPointer(); cancelCanvasRender();
+  canvasSuspended = true; siteEditor?.cancel(); if (drag) finishPointer(null, true); releasePreviewPointer(); cancelCanvasRender();
   if (!event.persisted) { canvasObserver.disconnect(); previewEvents.abort(); releasePreviewPointer(); floorNavigator.destroy(); disposePreviewRenderer(); renderer?.forceContextLoss(); }
 });
 window.addEventListener('pageshow', () => { canvasSuspended = false; resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); });
-window.planner = Object.freeze({ getProject: () => clone(project), getPreviewMetadata: () => ({ ...previewMetadata, surroundings: previewEnvironment?.stats }), getView: () => view, getSelection: () => selection && { ...selection }, worldToScreen: point => toScreen(point), validate: () => validateProject(clone(project), { complete: true }) });
+siteEditor = createSiteEditor({
+  canvas: planCanvas, ctx, $, node, button, field, row, section, t,
+  getProject: displayedProject, getAcceptedProject: () => project, getView: () => view,
+  toScreen, toWorld, localPoint, snap, viewport: () => ({ map, size }), colors: () => planColors,
+  spaceHeld: () => spaceHeld, isCandidate: () => !!candidatePreview,
+  transact, status, renderUI, render: requestCanvasRender, changed: editorChanged,
+  reconcile: reconcileInspector, inspectorValue,
+  ensurePlan() { if (view === 'preview') setView('plan'); },
+  fit() { fitPlan(); fitPreview(); requestCanvasRender(); },
+  beforeModeChange() { if (drag) finishPointer(null, true); releasePreviewPointer(); },
+  modeChanged() {
+    orbit.mode = 'orbit'; selection = null; inspectorScope = ''; previewDirty = true;
+    if (haSourcePolicy) {
+      $('preview-tab').textContent = siteEditor.active ? 'Preview 3D' : 'Published home';
+      $('preview-tab').setAttribute('aria-label', siteEditor.active ? 'Preview 3D' : 'Published home');
+    }
+    setView('plan');
+  },
+});
+window.planner = Object.freeze({ getProject: () => clone(project), getPreviewMetadata: () => ({ ...previewMetadata, surroundings: previewEnvironment?.stats }), getView: () => view, getEditingMode: () => siteEditor.active ? 'site' : 'floor', getSiteSelection: () => siteEditor.selectedId, getSelection: () => selection && { ...selection }, worldToScreen: point => toScreen(point), validate: () => validateProject(clone(project), { complete: true }) });
 updatePlacement(); renderUI(); fitPlan(); renderPlan();
 if (startupMessage) status(startupMessage, saveFailed);
 if (saveFailed) { translatedText('save-status', 'Draft restore unavailable · export a backup'); $('save-status').classList.add('problem'); } else translatedText('save-status', startupMessage ? 'Restored from this browser' : 'Local draft · export to keep a copy');
@@ -1736,7 +1777,7 @@ function renderLocale() {
   // Switching a presentation preference must not discard an unfinished form.
   const drafts = [...$('inspector-body').querySelectorAll('input,select,textarea')].map(input => ({ value: input.value, checked: input.checked, draft: input.inspectorDraft, invalid: input.getAttribute('aria-invalid') }));
   translateStatic();
-  if (haSourcePolicy) $('preview-tab').textContent = 'Published home';
+  if (haSourcePolicy) $('preview-tab').textContent = siteEditor?.active ? 'Preview 3D' : 'Published home';
   $('language-select').value = getLocale();
   document.querySelectorAll('[data-tool]').forEach(element => {
     const label = element.querySelector('span:nth-child(2)').textContent;
@@ -1839,7 +1880,9 @@ document.querySelectorAll('[data-guide-action]').forEach(button => button.addEve
 export const editorBridge = Object.freeze({
   snapshot: () => clone(project),
   revision: () => editorRevision,
-  selectionContext: () => ({ floorId: activeFloorId, roomId: selection?.kind === 'rooms' ? selection.id : selection?.kind === 'items' ? selected()?.room : null }),
+  editingMode: () => siteEditor.active ? 'site' : 'floor',
+  setEditingMode(mode) { if (!['site', 'floor'].includes(mode)) throw new Error('Unknown editing mode.'); siteEditor.setActive(mode === 'site'); },
+  selectionContext: () => ({ mode: siteEditor.active ? 'site' : 'floor', siteFeatureId: siteEditor.active ? siteEditor.selectedId : null, floorId: activeFloorId, roomId: selection?.kind === 'rooms' ? selection.id : selection?.kind === 'items' ? selected()?.room : null }),
   subscribe(listener) { editorListeners.add(listener); return () => editorListeners.delete(listener); },
   previewProject(candidate) {
     validateProject(candidate); validateSourcePolicy(candidate); serializeProject(candidate); candidatePreview = clone(candidate); previewDirty = true;
@@ -1850,7 +1893,7 @@ export const editorBridge = Object.freeze({
     candidatePreview = null; previewDirty = true; setView(view); requestCanvasRender();
   },
   applyProject(candidate, baseRevision) {
-    if (baseRevision !== editorRevision || drag) throw new Error('The plan or selection changed. Generate a fresh draft.');
+    if (baseRevision !== editorRevision || drag || siteEditor.busy) throw new Error('The plan or selection changed. Generate a fresh draft.');
     validateProject(candidate); serializeProject(candidate);
     candidatePreview = null;
     const next = clone(candidate);

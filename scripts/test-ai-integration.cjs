@@ -20,12 +20,30 @@ const runtime = http.createServer(async (request, response) => {
     assert.equal(payload.model, 'synthetic-vision');
     assert.equal(payload.stream, false);
     assert.equal(payload.format.additionalProperties, false);
-    assert(payload.format.properties.items.items.required.includes('color'));
     assert.equal(payload.options.num_predict, 8192);
     assert.equal(payload.options.num_ctx, 32768);
     assert.equal(payload.messages[1].images.length, 1);
     assert(Buffer.from(payload.messages[1].images[0], 'base64').subarray(0, 2).equals(Buffer.from([255, 216])));
     const context = JSON.parse(payload.messages[1].content);
+    if (context.mode === 'site') {
+      assert(payload.format.properties.features.items.required.includes('polygon'));
+      assert.equal(context.context.site_notes.own_home, 'My home is the white house in the center.');
+      assert.equal(context.context.site_notes.include, 'One neighbor on the right and the front street.');
+      assert.equal(context.context.site_notes.reference, 'My front wall is 8 m wide; street at negative Z.');
+      assert(!JSON.stringify(context.context).includes('entity_id'), 'The site provider context omits device bindings');
+      inferenceCount++;
+      const feature = (candidate_key, name, kind, polygon, height_m, color) => ({ candidate_key, name, kind, polygon, height_m, color, evidence: 'Synthetic photo estimate; confirm on site.' });
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ message: { role: 'assistant', content: JSON.stringify({
+        draft_version: 1, request_id: context.request_id, kind: 'site',
+        features: [feature('home', 'Own home', 'home', [[0,0],[8,0],[8,6],[0,6]], 6, '#46a0aa'),
+                   feature('neighbor', 'Right neighbor', 'building', [[10,0],[16,0],[16,7],[10,7]], 5, '#aa9cb4'),
+                   feature('street', 'Front street', 'street', [[-10,-8],[25,-8],[25,-3],[-10,-3]], 0, '#657080')],
+        assumptions: ['Hidden roof edges are uncertain.'], needs_measurements: ['Confirm neighbor height.']
+      }) }, done: true, done_reason: 'stop' }));
+      return;
+    }
+    assert(payload.format.properties.items.items.required.includes('color'));
     assert.equal(context.mode, 'new_room');
     assert.equal(context.context.measurements.width, 4);
     inferenceCount++;
@@ -104,12 +122,34 @@ function startCompanion() {
         await page.waitForFunction(() => window.planner.getProject().floors[0].rooms.length === 1);
         await page.locator('#undo').click();
         assert.deepEqual(await page.evaluate(() => window.planner.getProject()), before);
+        await page.locator('#ai-mode').selectOption('site');
+        await page.locator('#ai-site-home').fill('My home is the white house in the center.');
+        await page.locator('#ai-site-include').fill('One neighbor on the right and the front street.');
+        await page.locator('#ai-site-reference').fill('My front wall is 8 m wide; street at negative Z.');
+        await page.locator('#ai-instructions').fill('Draw only the requested exterior shapes.');
+        await page.locator('#ai-photos-input').setInputFiles({ name: 'fictional-site.png', mimeType: 'image/png', buffer: Buffer.from(photo, 'base64') });
+        await page.waitForFunction(() => document.getElementById('ai-photo-progress').textContent.includes('1 photos ready'));
+        await page.locator('#ai-generate').click();
+        await page.waitForFunction(() => document.getElementById('ai-status').textContent.includes('Draft ready'));
+        assert.deepEqual(await page.evaluate(() => window.planner.getProject()), before, 'site review cannot change the accepted project');
+        assert.equal(await page.locator('#ai-candidates input[type="checkbox"]').count(), 3);
+        await page.locator('input[data-candidate-key="neighbor"]').uncheck();
+        await page.locator('#ai-review-confirm').check();
+        await page.locator('#ai-apply').click();
+        await page.waitForFunction(() => window.planner.getProject().site?.features.length === 2);
+        const withSite = await page.evaluate(() => window.planner.getProject());
+        assert.deepEqual(withSite.floors, before.floors, 'site application preserves every indoor record');
+        assert.deepEqual(withSite.site.features.map(feature => feature.kind), ['home', 'street']);
+        assert(!JSON.stringify(withSite).includes('fictional-site.png'));
+        assert(!JSON.stringify(withSite).includes('My home is the white house'));
+        await page.locator('#undo').click();
+        assert.deepEqual(await page.evaluate(() => window.planner.getProject()), before, 'site application is one reversible transaction');
         await page.locator('#ai-disconnect').click();
         assert.deepEqual(external, []); assert.deepEqual(errors, []);
-        console.log(`${engine}: real companion → local fake Ollama → photo preparation → draft → Apply/Undo passed`);
+        console.log(`${engine}: real companion → local fake Ollama → photo preparation → room and site drafts → selection → Apply/Undo passed`);
       } finally { await browser.close(); }
     }
-    assert.equal(inferenceCount, engines.length);
+    assert.equal(inferenceCount, engines.length * 2);
   } finally {
     if (companion?.child.exitCode === null) { const stopped = new Promise(resolve => companion.child.once('exit', resolve)); companion.child.kill(); await stopped; }
     runtime.closeAllConnections(); await new Promise(resolve => runtime.close(resolve));
