@@ -68,7 +68,7 @@ const homeMapMath = (() => {
     const include=y=>{if(metric(y))low=Math.min(low,y);};
     for(const mesh of model.meshes||[])if(mesh.kind==='floors')for(const p of mesh.vertices||[])include(p[1]);
     for(const values of [lower?.surfaces,lower?.lines])if(Array.isArray(values))for(let i=1;i<values.length;i+=3)include(values[i]);
-    include(lower?.elevation_m);
+    include(lower?.elevation_m);include(site.lowest_slab_elevation_m);
     const roof=site.roof_outline,shape=metric(roof?.elevation_m)&&polygons(roof?.polygons_m);
     return {elevation:low-.08,polygons:shape||exterior(rooms),outlineElevation:shape?roof.elevation_m:low-.06};
   }
