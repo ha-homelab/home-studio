@@ -193,7 +193,9 @@ class MaterialTextureTests(unittest.TestCase):
         self.assertEqual(material['baseColorFactor'], [1, 1, 1, 1])
         uv = document['accessors'][mapped[0]['attributes']['TEXCOORD_0']]
         view = document['bufferViews'][uv['bufferView']]
-        values = struct.unpack_from('<' + 'f' * uv['count'] * 2, raw, 28 + length + view['byteOffset'])
+        values = tuple(value for i in range(uv['count']) for value in
+                       struct.unpack_from('<2f', raw, 28 + length + view.get('byteOffset', 0) +
+                                          uv.get('byteOffset', 0) + i * view.get('byteStride', 8)))
         self.assertAlmostEqual(max(values[::2]), 6.4, places=5)
         self.assertAlmostEqual(min(values[1::2]), -3.8, places=5)
         with zipfile.ZipFile(io.BytesIO(export_scene([scene], 'obj'))) as archive:

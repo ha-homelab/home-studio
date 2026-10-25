@@ -198,13 +198,17 @@ class FurniturePatternTests(unittest.TestCase):
             def glb_accessor(index):
                 accessor = document['accessors'][index]
                 view = document['bufferViews'][accessor['bufferView']]
-                width = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3}[accessor['type']]
-                code = {5123: 'H', 5125: 'I', 5126: 'f'}[accessor['componentType']]
+                width = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4}[accessor['type']]
+                code = {5121: 'B', 5123: 'H', 5125: 'I', 5126: 'f'}[accessor['componentType']]
                 size = struct.calcsize('<' + code * width)
                 offset = 20 + length + 8 + view.get('byteOffset', 0) + accessor.get('byteOffset', 0)
                 return [struct.unpack_from('<' + code * width, glb, offset + i * view.get('byteStride', size))
                         for i in range(accessor['count'])]
 
+            self.assertTrue(any(a.get('byteOffset',0)>0 for a in document['accessors']))
+            self.assertIn(5121,{document['accessors'][m['primitives'][0]['indices']]['componentType']
+                                for m in document['meshes']})
+            self.assertTrue(any('TANGENT' in m['primitives'][0]['attributes'] for m in document['meshes']))
             usda = (folder / (floor['id'] + '.usda')).read_text()
             usd_meshes = re.findall(r'(?ms)^def Mesh [^\n]+\{\n(.*?)^\}', usda)
             def usd_array(body, key):

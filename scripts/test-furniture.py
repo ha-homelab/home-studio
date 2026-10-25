@@ -299,9 +299,16 @@ class FurnitureTests(unittest.TestCase):
             binary_offset = 20 + length + 8
             def accessor(index):
                 entry=document['accessors'][index]; view=document['bufferViews'][entry['bufferView']]
-                width=3 if entry['type']=='VEC3' else 2 if entry['type']=='VEC2' else 1
-                code='f' if entry['componentType']==5126 else 'I'
-                return struct.unpack_from('<'+code*(entry['count']*width),glb,binary_offset+view.get('byteOffset',0)+entry.get('byteOffset',0))
+                width={'SCALAR':1,'VEC2':2,'VEC3':3,'VEC4':4}[entry['type']]
+                code={5121:'B',5123:'H',5125:'I',5126:'f'}[entry['componentType']]
+                offset=binary_offset+view.get('byteOffset',0)+entry.get('byteOffset',0)
+                stride=view.get('byteStride',width*struct.calcsize(code))
+                return tuple(value for i in range(entry['count'])
+                             for value in struct.unpack_from('<'+code*width,glb,offset+i*stride))
+            self.assertTrue(any(a.get('byteOffset',0)>0 for a in document['accessors']))
+            self.assertIn(5121,{document['accessors'][m['primitives'][0]['indices']]['componentType']
+                                for m in document['meshes']})
+            self.assertTrue(any('TANGENT' in m['primitives'][0]['attributes'] for m in document['meshes']))
             for mesh, exported in zip(export_data['meshes'], document['meshes']):
                 primitive=exported['primitives'][0]; indices=accessor(primitive['indices'])
                 self.assertEqual(len(indices),len(mesh['indices']))

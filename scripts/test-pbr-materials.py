@@ -204,6 +204,192 @@ class PBRTests(unittest.TestCase):
         self.assertEqual(doc['materials'][0]['alphaMode'],'BLEND')
         self.assertEqual(doc['materials'][0]['pbrMetallicRoughness']['baseColorFactor'],[.3,.4,.5,.35])
 
+
+def accessor_values(doc, binary, index):
+    accessor = doc['accessors'][index]
+    view = doc['bufferViews'][accessor['bufferView']]
+    width = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4}[accessor['type']]
+    code = {5121: 'B', 5123: 'H', 5125: 'I', 5126: 'f'}[accessor['componentType']]
+    size = width * struct.calcsize(code)
+    offset = view.get('byteOffset', 0) + accessor.get('byteOffset', 0)
+    return [struct.unpack_from('<' + code * width, binary,
+                               offset + i * view.get('byteStride', size))
+            for i in range(accessor['count'])]
+
+
+class TangentExportTests(unittest.TestCase):
+    def mesh(self):
+        mesh, normal, _ = fixture()
+        mesh['normal_texture'] = normal
+        return mesh
+
+    def scene(self, *meshes):
+        return [{'name': 'Floor', 'elevation': 2., 'groups': [
+            {'name': 'Part', 'translation': [1., 2., 3.], 'scale': [2., 3., 4.],
+             'rotation': .3, 'meshes': list(meshes)}]}]
+
+    def frames(self, doc, binary):
+        for mesh in doc['meshes']:
+            primitive = mesh['primitives'][0]
+            if 'normalTexture' not in doc['materials'][primitive['material']]:
+                self.assertNotIn('TANGENT', primitive['attributes'])
+                continue
+            attributes = primitive['attributes']
+            positions = accessor_values(doc, binary, attributes['POSITION'])
+            normals = accessor_values(doc, binary, attributes['NORMAL'])
+            tangents = accessor_values(doc, binary, attributes['TANGENT'])
+            accessor = doc['accessors'][attributes['TANGENT']]
+            self.assertEqual((accessor['type'], accessor['componentType']), ('VEC4', 5126))
+            self.assertEqual(len(tangents), len(positions))
+            self.assertEqual(len(normals), len(positions))
+            for normal, tangent in zip(normals, tangents):
+                self.assertTrue(all(math.isfinite(x) for x in tangent))
+                self.assertAlmostEqual(math.hypot(*tangent[:3]), 1., places=6)
+                self.assertLessEqual(abs(sum(n*t for n,t in zip(normal,tangent))), 1e-5)
+                self.assertIn(tangent[3], (-1., 1.))
+            indices = [i[0] for i in accessor_values(doc, binary, primitive['indices'])]
+            for i in range(0, len(indices), 3):
+                self.assertEqual(len({tangents[j][3] for j in indices[i:i+3]}), 1)
+
+    def test_exported_flipped_and_rotated_uv_directions(self):
+        a = self.mesh(); b = self.mesh(); b['uv'] = [[0,0], [0,1], [1,0]]
+        source = self.scene(a,b); saved = copy.deepcopy(source)
+        doc, binary = document(export_scene(source, 'glb')); self.frames(doc,binary)
+        self.assertEqual(source, saved)
+        for mesh, expected in zip(doc['meshes'], [(1.,0.,0.,-1.), (0.,1.,0.,1.)]):
+            actual = accessor_values(doc,binary,mesh['primitives'][0]['attributes']['TANGENT'])
+            self.assertEqual(actual, [expected]*3)
+        self.assertEqual(doc['nodes'][1]['scale'], [2.,3.,4.])
+        self.assertEqual(doc['nodes'][1]['translation'], [1.,2.,3.])
+        # Positive nonuniform scale transforms N inversely and T directly.
+        n=[.3,0,math.sqrt(.91)]; a['normals']=[n]*3
+        d,raw=document(export_scene(self.scene(a),'glb')); self.frames(d,raw)
+        attrs=d['meshes'][0]['primitives'][0]['attributes']
+        normal=accessor_values(d,raw,attrs['NORMAL'])[0]
+        tangent=accessor_values(d,raw,attrs['TANGENT'])[0]
+        self.assertLessEqual(abs(sum((x/s)*(y*s) for x,y,s in zip(normal,tangent,[2,3,4]))),1e-5)
+
+    def test_mirrored_uv_splits_only_opposite_handed_corners(self):
+        m=self.mesh();m['vertices'] += [[0,-1,0]];m['normals'] += [[0,0,1]]
+        m['uv'] += [[0,1]];m['indices']=[0,1,2,1,0,3];saved=copy.deepcopy(m)
+        d,raw=document(export_scene(self.scene(m),'glb'));self.frames(d,raw)
+        p=d['meshes'][0]['primitives'][0];a=p['attributes']
+        self.assertEqual(d['accessors'][a['POSITION']]['count'],6)
+        indices=[v[0] for v in accessor_values(d,raw,p['indices'])]
+        actual=[(accessor_values(d,raw,a['POSITION'])[i], accessor_values(d,raw,a['NORMAL'])[i],
+                 accessor_values(d,raw,a['TEXCOORD_0'])[i]) for i in indices]
+        expected=[(tuple(m['vertices'][i]),tuple(m['normals'][i]),(m['uv'][i][0],1-m['uv'][i][1])) for i in m['indices']]
+        self.assertEqual(actual,expected);self.assertEqual(m,saved)
+
+    def test_degenerate_uv_area_and_crossing_normals_remain_finite(self):
+        meshes=[]
+        for field,value in [('uv',[[0,0]]*3),('uv',[[0,0],[1,0],[2,0]]),
+                            ('vertices',[[0,0,0],[1,0,0],[2,0,0]]),
+                            ('normals',[[0,0,1],[0,.6,.8],[0,.6,-.8]])]:
+            m=self.mesh();m[field]=value;meshes.append(m)
+        source=self.scene(*meshes);before=copy.deepcopy(source)
+        one=export_scene(source,'glb');self.assertEqual(one,export_scene(source,'glb'))
+        self.frames(*document(one));self.assertEqual(before,source)
+
+    def test_parallel_and_threshold_sweep_stays_orthogonal(self):
+        for z in (0.,1e-15,1e-12,1.4e-12,1.5e-12,2e-12,3e-12,1e-11,1e-9,1e-6):
+            with self.subTest(z=z):
+                m=self.mesh();m['vertices']=[[0,0,0],[1,1,0],[-1,1,0]]
+                length=math.sqrt(2+z*z);m['normals']=[[1/length,1/length,z/length]]*3
+                self.frames(*document(export_scene(self.scene(m),'glb')))
+
+    def test_computed_tangent_precision_bound(self):
+        rng=random.Random(817)
+        for _ in range(150):
+            # Plane normal has positive Z; the analytic dP/du is +X. Keep away
+            # from the separate undefined near-parallel branch exercised below.
+            n=[rng.uniform(-.6,.6),rng.uniform(-.6,.6),1.]
+            length=math.hypot(*n);n=[x/length for x in n]
+            m=self.mesh();m['normals']=[n]*3
+            d,raw=document(export_scene(self.scene(m),'glb'))
+            self.frames(d,raw)
+            tangent=accessor_values(d,raw,d['meshes'][0]['primitives'][0]['attributes']['TANGENT'])[0]
+            expected=[1-n[0]*n[0],-n[0]*n[1],-n[0]*n[2]]
+            cross=[tangent[1]*expected[2]-tangent[2]*expected[1],
+                   tangent[2]*expected[0]-tangent[0]*expected[2],
+                   tangent[0]*expected[1]-tangent[1]*expected[0]]
+            angle=math.atan2(math.hypot(*cross),sum(x*y for x,y in zip(tangent,expected)))
+            self.assertLessEqual(angle,1e-5)
+
+    def test_invalid_normals_and_nonfinite_source_reject(self):
+        m=self.mesh();m['normals'][0]=[0,0,0]
+        with self.assertRaisesRegex(ValueError,'nonzero'):export_scene(self.scene(m),'glb')
+        for field in ('vertices','normals','uv'):
+            m=self.mesh();m[field][0][0]=float('nan')
+            with self.subTest(field=field), self.assertRaises(ValueError):export_scene(self.scene(m),'glb')
+
+    def test_unused_vertices_are_compacted_before_tangent_generation(self):
+        m=self.mesh();m['vertices'].append([9,9,9]);m['normals'].append([0,0,0]);m['uv'].append([9,9])
+        d,raw=document(export_scene(self.scene(m),'glb'));self.frames(d,raw)
+        self.assertEqual(d['accessors'][d['meshes'][0]['primitives'][0]['attributes']['POSITION']]['count'],3)
+
+    def test_no_normal_map_skips_tangent_path(self):
+        m,_,_=fixture()
+        with patch('exporters._with_gltf_tangents',side_effect=AssertionError('no normal map')):
+            d,_=document(export_scene(self.scene(m),'glb'))
+            self.assertNotIn('TANGENT',d['meshes'][0]['primitives'][0]['attributes'])
+            export_scene(self.scene(self.mesh()),'obj')
+
+    def test_grouped_views_counts_alignment_and_exact_attributes(self):
+        a=self.mesh();b=self.mesh();b['vertices'] += [[0,-1,0]];b['normals'] += [[0,0,1]]
+        b['uv'] += [[0,-1]];b['indices']=[0,1,2,1,0,3]
+        d,raw=document(export_scene(self.scene(a,b),'glb'));self.frames(d,raw)
+        for source,mesh in zip((a,b),d['meshes']):
+            p=mesh['primitives'][0]
+            for semantic,field,width in [('POSITION','vertices',3),('NORMAL','normals',3),('TEXCOORD_0','uv',2)]:
+                vals=source[field]
+                if width==2:vals=[[u,1-v] for u,v in vals]
+                encoded=[struct.unpack('<'+'f'*width,struct.pack('<'+'f'*width,*v)) for v in vals]
+                self.assertEqual(accessor_values(d,raw,p['attributes'][semantic]),encoded)
+        self.assertEqual(len([v for v in d['bufferViews'] if v.get('target')==34962]),3)
+        for a in d['accessors']:
+            v=d['bufferViews'][a['bufferView']];width={'SCALAR':1,'VEC2':2,'VEC3':3,'VEC4':4}[a['type']]
+            size={5121:1,5123:2,5125:4,5126:4}[a['componentType']]*width
+            self.assertEqual(v.get('byteOffset',0)%4,0);self.assertEqual(a.get('byteOffset',0)%4,0)
+            self.assertLessEqual(a.get('byteOffset',0)+(a['count']-1)*v.get('byteStride',size)+size,v['byteLength'])
+            if a['type']!='SCALAR':self.assertEqual(v['byteStride'],width*4)
+            else:self.assertNotIn('byteStride',v)
+
+    def test_position_bounds_match_encoded_float32_and_late_reuse(self):
+        a=self.mesh();a['normals']=[[0,0,1],[0,1,0],[1,0,0]]
+        b=self.mesh();b['vertices']=copy.deepcopy(a['normals'])
+        c=self.mesh();c['vertices'][1][0]=1.123456789012345
+        d,raw=document(export_scene(self.scene(a,b,c),'glb'))
+        attrs=[m['primitives'][0]['attributes'] for m in d['meshes']]
+        self.assertEqual(attrs[0]['NORMAL'],attrs[1]['POSITION'])
+        for attr in attrs:
+            acc=d['accessors'][attr['POSITION']];values=accessor_values(d,raw,attr['POSITION'])
+            for name,operation in [('min',min),('max',max)]:
+                for axis in range(3):self.assertEqual(struct.pack('<f',acc[name][axis]),struct.pack('<f',operation(v[axis] for v in values)))
+        normal_only=d['accessors'][attrs[2]['NORMAL']]
+        self.assertNotIn('min',normal_only);self.assertNotIn('max',normal_only)
+
+    def test_index_width_boundaries_exclude_primitive_restart(self):
+        for count,component in ((255,5121),(256,5123),(65535,5123),(65536,5125)):
+            with self.subTest(count=count):
+                m,_,_=fixture();m['vertices']=[[i,i%2,0] for i in range(count)]
+                m['normals']=[[0,0,1]]*count;m.pop('uv');m['indices']=list(range(count))
+                m['indices'] += [0]*(-count%3)
+                d,raw=document(export_scene(self.scene(self.mesh(),m),'glb'))
+                index=d['meshes'][1]['primitives'][0]['indices']
+                self.assertEqual(d['accessors'][index]['componentType'],component)
+                self.assertEqual([x[0] for x in accessor_values(d,raw,index)],m['indices'])
+
+    def test_grouped_binary_and_final_json_limits_still_reject(self):
+        source=self.scene(self.mesh())
+        with patch('exporters.MAX_EXPORT_BYTES',64),self.assertRaisesRegex(ValueError,'32 MB'):
+            export_scene(source,'glb')
+        valid=export_scene(source,'glb');doc,_=document(valid)
+        binary_bytes=doc['buffers'][0]['byteLength']
+        with patch('exporters.MAX_EXPORT_BYTES',binary_bytes+32),self.assertRaisesRegex(ValueError,'32 MB'):
+            export_scene(source,'glb')
+
+
 if __name__=='__main__':
     if '--hashes' in sys.argv:print(json.dumps({k:[hashlib.sha256(v).hexdigest() for v in detail_pixels(k)] for k in DETAIL_PROFILES}))
     else:unittest.main()
