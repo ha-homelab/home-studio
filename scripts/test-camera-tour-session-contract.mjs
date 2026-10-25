@@ -75,6 +75,7 @@ function fixture(options = {}) {
     if (f.failCapture) throw new Error('Return to the house view before saving a camera view.');
     return f.pose;
   },
+    captureOrbit: options.orbitPose ? () => options.orbitPose : undefined,
     render: options.deferRender ? () => new Promise(resolve => { f.finishRender = resolve; }) : undefined,
     apply(value) { f.applies++; f.applied = structuredClone(value); if (f.failApply) throw new Error('Apply failed'); f.pose = structuredClone(value); },
     onPlaying: options.onPlaying || (() => {}), canExport: options.canExport,
@@ -148,6 +149,17 @@ const tests = [
     assert.equal(f.tracks[0].stopCalls, 1); assert.equal(f.frames.size, 0);
   }, { defaultRoute: true, deferRecorderStart: true,
     pose: { type: 'home', floorId: 'floor', rotation: 5, tilt: 0.2, zoom: 2, pan: [7, -2], room: 'study' } }],
+  ['a host-fitted orbit remains idle until recording and restores a close-up afterward', async f => {
+    const original = structuredClone(f.pose), first = f.session.tour.getState().waypoints[0].pose;
+    assert.equal(f.applies, 0); assert.equal(f.frames.size, 0);
+    assert.equal(first.radius, 45); assert.deepEqual(first.target, [10, 3, 6]);
+    await f.panel.record();
+    assert.deepEqual(f.encoderStartPose, first);
+    f.session.tour.stop(); await flush();
+    assert.deepEqual(f.pose, original); assert.equal(f.tracks[0].stopCalls, 1);
+  }, { defaultRoute: true,
+    pose: { type: 'perspective', floorId: 'floor', yaw: 0.2, pitch: 0.6, radius: 3, target: [2, 1, 1] },
+    orbitPose: { type: 'perspective', floorId: 'floor', yaw: 0.2, pitch: 0.6, radius: 45, target: [10, 3, 6] } }],
   ['failure to prepare the first route pose never creates a capture', async f => {
     f.failApply = true;
     await f.panel.record();

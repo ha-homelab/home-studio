@@ -82,9 +82,9 @@ export function interpolatePose(from, to, progress) {
 }
 
 /** Adapters capture/apply synchronous poses. No frame is requested while idle, paused, or complete. */
-export function createCameraTour({ capture, apply, onChange, requestFrame = callback => globalThis.requestAnimationFrame(callback),
+export function createCameraTour({ capture, captureOrbit = capture, apply, onChange, requestFrame = callback => globalThis.requestAnimationFrame(callback),
   cancelFrame = id => globalThis.cancelAnimationFrame(id), now = () => globalThis.performance.now() } = {}) {
-  if (typeof capture !== 'function' || typeof apply !== 'function') throw new TypeError('Camera capture and apply adapters are required.');
+  if (typeof capture !== 'function' || typeof captureOrbit !== 'function' || typeof apply !== 'function') throw new TypeError('Camera capture and apply adapters are required.');
   let document = { schema: 1, waypoints: [] }, status = 'idle', elapsed = 0, index = 0, original = null;
   let frame = null, generation = 0, startedAt = 0, disposed = false, error = '';
   const listeners = new Set();
@@ -162,9 +162,9 @@ export function createCameraTour({ capture, apply, onChange, requestFrame = call
     },
     orbit(name = 'Orbit') {
       ensureLive();
-      const start = pose(capture()), rotation = start.type === 'home' ? 'rotation' : 'yaw';
+      const start = pose(captureOrbit()), rotation = start.type === 'home' ? 'rotation' : 'yaw';
       // Home orbits the whole house even when a room or panned view was selected.
-      // Perspective already carries its orbit centre, distance and height.
+      // Perspective hosts supply a whole-house centre and fitted distance.
       if (start.type === 'home') Object.assign(start, { room: '', pan: [0, 0], zoom: 0.8 });
       start[rotation] = Math.atan2(Math.sin(start[rotation]), Math.cos(start[rotation]));
       return replace({ schema: 1, waypoints: Array.from({ length: 5 }, (_, step) => {

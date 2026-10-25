@@ -8,10 +8,11 @@ const perspective = (changes = {}) => ({ type: 'perspective', floorId: 'ground',
 const home = (changes = {}) => ({ type: 'home', floorId: 'ground', rotation: 0, tilt: 0.2, zoom: 1, pan: [0, 0], room: '', ...changes });
 const document = (poses = [perspective(), perspective({ target: [10, 0, 0] })], seconds = 2) => ({ schema: 1,
   waypoints: poses.map((pose, i) => ({ id: `view_${i + 1}`, name: `View ${i + 1}`, duration: seconds, pose })) });
-function harness(initial = perspective({ target: [99, 2, 3] })) {
+function harness(initial = perspective({ target: [99, 2, 3] }), captureOrbit) {
   let clock = 0, nextId = 0, current = clone(initial), captures = 0, failApply = false;
   const frames = new Map(), applied = [], states = [];
   const tour = createCameraTour({
+    captureOrbit,
     capture: () => { captures++; return clone(current); },
     apply: value => { if (failApply) throw new Error('Renderer unavailable'); current = clone(value); applied.push(value); },
     now: () => clock,
@@ -109,6 +110,23 @@ test('orbit views remain editable and exportable, and regeneration uses the curr
   assert.deepEqual(h.tour.getState().waypoints[0].pose, moved); assert.equal(h.applied.length, 0);
   h.tour.play(); h.tick(1000); h.tour.clear();
   assert.deepEqual(h.camera, moved); assert.equal(h.frames.size, 0); assert.equal(h.tour.getState().status, 'idle');
+});
+
+test('host orbit framing does not replace custom-view capture or the original restore pose', () => {
+  const original = perspective({ target: [3, 1, 2], radius: 4 });
+  let fitted = perspective({ target: [10, 3, 6], radius: 35 });
+  const h = harness(original, () => fitted);
+  h.tour.orbit();
+  assert.deepEqual(h.tour.export().waypoints[0].pose, fitted);
+  assert.deepEqual(h.camera, original); assert.equal(h.applied.length, 0); assert.equal(h.frames.size, 0);
+  h.tour.seek(0); h.tour.play(); h.tick(1000); h.tour.stop();
+  assert.deepEqual(h.camera, original);
+  h.tour.clear(); h.tour.add();
+  assert.deepEqual(h.tour.export().waypoints[0].pose, original);
+  fitted = perspective({ target: [-5, 4, 9], radius: 50 });
+  h.tour.orbit(); assert.deepEqual(h.tour.export().waypoints[0].pose, fitted);
+  const valid = h.tour.export(); fitted.radius = NaN;
+  assert.throws(() => h.tour.orbit()); assert.deepEqual(h.tour.export(), valid);
 });
 
 test('different floors, rooms and camera modes hold then cut without mixed coordinates', () => {

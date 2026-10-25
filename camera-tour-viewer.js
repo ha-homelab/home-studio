@@ -44,13 +44,30 @@ async function openViewerTour() {
             yaw: Math.PI / 2 - azimuth, pitch: Math.PI / 2 - polar, radius,
             target: [target.x, target.y, target.z] };
         },
+        captureOrbit() {
+          if (!tourModeAvailable(mode)) throw Error(vt('Open this view before playing its tour.'));
+          if (mode === 'home') return homeView.captureTourPose();
+          // Fit static architecture, not the focused room, movable inventory
+          // or scene backdrop. This computes a pose without moving the camera.
+          const bounds = new THREE.Box3().setFromObject(root);
+          const center = bounds.isEmpty() ? new THREE.Vector3(planCenter[0], planBounds ? model.ceiling_height_m / 2 : 0, planCenter[1]) : bounds.getCenter(new THREE.Vector3());
+          const sphereRadius = bounds.isEmpty() ? 0 : bounds.getSize(new THREE.Vector3()).length() / 2;
+          const vertical = camera.fov * Math.PI / 360, horizontal = Math.atan(Math.tan(vertical) * camera.aspect);
+          const fittedRadius = sphereRadius ? sphereRadius / Math.sin(Math.min(vertical, horizontal)) * 1.12 : planRadius;
+          return { type: 'perspective', floorId: 'viewer:' + model.id,
+            yaw: Math.PI / 2 - azimuth, pitch: Math.PI / 2 - polar, radius: Math.max(1, fittedRadius),
+            target: [center.x, center.y, center.z] };
+        },
         apply(pose) {
           if (!tourModeAvailable(mode)) throw Error(vt('Open this view before playing its tour.'));
           if (pose.floorId !== 'viewer:' + model.id) throw Error(vt('This view belongs to another plan.'));
           if (mode === 'home') { homeView.applyTourPose(pose); return; }
           if (pose.type !== 'perspective' || pose.target.some(v => Math.abs(v) > 10000)) throw Error(vt('This view belongs to another plan.'));
           azimuth = Math.PI / 2 - pose.yaw; polar = Math.max(.001, Math.min(1.56, Math.PI / 2 - pose.pitch));
-          radius = Math.max(1, Math.min(10000, pose.radius)); target.set(...pose.target); requestRender();
+          radius = Math.max(1, Math.min(10000, pose.radius)); target.set(...pose.target);
+          const far = Math.max(150, planRadius * 5, radius * 4);
+          if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); }
+          requestRender();
         },
         onPlaying(active) { if (renderer) renderer.domElement.dataset.cameraTourPlaying = String(active); },
         onClose() { button.setAttribute('aria-expanded', 'false'); button.focus(); },

@@ -139,6 +139,9 @@ async function exercise(context, origin, name) {
   if (name === 'home') { await page.locator('#openHome').click(); await page.waitForFunction(() => floorplan.homeMode); }
   const canvasSelector = planner ? '#preview-canvas' : name === 'home' ? '#homeStage canvas' : '#view3d canvas';
   await page.locator(canvasSelector).waitFor({ state: 'visible' });
+  // A default orbit must fit the house even when the current view is close up.
+  if (planner) for (let i = 0; i < 3; i++) await page.locator('#zoom-in').click();
+  if (name === 'editor') await page.locator('#focusRoom').selectOption(fixture.floors[0].rooms[0].id);
   const snapshot = () => page.evaluate(isPlanner => isPlanner ? window.planner.getProject() : { model: window.floorplan.model, items: window.floorplan.items }, planner);
   const before = await snapshot();
   const button = page.locator(planner ? '#preview-tour' : name === 'home' ? '#homeCameraTour' : '#editorCameraTour');
@@ -175,6 +178,8 @@ async function exercise(context, origin, name) {
   const route = await download(page, () => panel.getByRole('button', { name: 'Export route', exact: true }).click(), `${name}-route.json`);
   const routeJson = JSON.parse(route.bytes);
   assert.equal(routeJson.waypoints.length, 2);
+  if (name !== 'home') assert(initialViews[0].pose.radius > routeJson.waypoints[0].pose.radius,
+    'the default orbit fits the house while custom capture retains the original close-up');
   assert.notDeepEqual(routeJson.waypoints[0].pose, routeJson.waypoints[1].pose, 'navigation produced distinct camera poses');
   await page.screenshot({ path: path.join(artifacts, `${name}-two-views.png`), fullPage: true });
   await panel.getByRole('button', { name: 'Play', exact: true }).click();

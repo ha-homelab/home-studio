@@ -19,10 +19,15 @@ function element() {
   return { style: { display: 'block' }, dataset: {}, attributes: {}, hidden: false,
     setAttribute(key, value) { this.attributes[key] = value; }, addEventListener() {}, append() {}, focus() {} };
 }
-async function homeHost({ embedded = false, canEdit = true } = {}) {
+async function homeHost({ embedded = false, canEdit = true, mode = 'home' } = {}) {
+  const THREE = await import('data:text/javascript;base64,' + Buffer.from(read('vendor/three.module.min.js')).toString('base64'));
+  const architecture = new THREE.Group(), building = new THREE.Mesh(new THREE.BoxGeometry(24, 8, 40));
+  building.position.set(5, 3, 7); architecture.add(building);
   const nodes = new Map(), counts = { renders: 0, requests: 0, navigationWrites: 0, exportGrants: [] };
   const context = vm.createContext({
-    embedded, canEdit,
+    embedded, canEdit, THREE, root: architecture, camera: new THREE.PerspectiveCamera(42, 1, .1, 1000),
+    planCenter: [5, 7], planBounds: null, planRadius: 60,
+    target: new THREE.Vector3(3, 1, 2), radius: 4, azimuth: 0.2, polar: 0.8,
     model: { id: 'main', rooms: [{ id: 'living' }, { id: 'study' }] },
     selected: 'living', signalZone: '', zoom: 1, panX: 0, panY: 0, homeRotation: 0, homeTilt: 0.2,
     mapDraft: null, mapLayer: null, mapLoaded: false, mapFraming: null,
@@ -40,6 +45,7 @@ async function homeHost({ embedded = false, canEdit = true } = {}) {
     section(home, '  function updateZoom(', '  function zoomAt(') +
     '\nfunction notifyMapNavigation(){window.homeMapNavigationChanged();}\n' +
     'globalThis.homeView={active:true,captureTourPose,applyTourPose};', context);
+  context.homeView.active = mode === 'home';
   let callbacks;
   context.captureSession = options => { callbacks = options; return { show() {}, close() {}, interrupt() {}, dispose() {},
     setExportAllowed(value) { counts.exportGrants.push(value); } }; };
@@ -51,9 +57,10 @@ async function homeHost({ embedded = false, canEdit = true } = {}) {
   return { context, callbacks, counts };
 }
 function plannerHost() {
+  const item = { rotation_deg: 0, position_m: { x: 2, z: 2 }, dimensions_m: { width: 1, depth: 1 } };
   const project = { id: 'fixture', floors: [
-    { id: 'ground', items: [{ id: 'item_1', name: 'Ground chair' }] },
-    { id: 'upper', items: [{ id: 'item_1', name: 'Upper chair' }] },
+    { id: 'ground', elevation_m: 0, height_m: 3, walls: [], rooms: [{ polygon: [[0, 0], [20, 0], [20, 12], [0, 12]] }], items: [{ ...item, id: 'item_1', name: 'Ground chair' }] },
+    { id: 'upper', elevation_m: 3, height_m: 3, walls: [], rooms: [{ polygon: [[4, 2], [16, 2], [16, 10], [4, 10]] }], items: [{ ...item, id: 'item_1', name: 'Upper chair' }] },
   ] };
   const freeze = value => { Object.freeze(value); for (const child of Object.values(value)) if (child && typeof child === 'object') freeze(child); };
   freeze(project);
@@ -61,6 +68,8 @@ function plannerHost() {
   let callbacks;
   const context = vm.createContext({
     project, activeFloorId: 'ground', selection: { kind: 'items', id: 'item_1' }, previewDirty: false,
+    size: { width: 1200, height: 800 }, allFloors: false,
+    previewFloors: () => context.allFloors ? project.floors : project.floors.filter(floor => floor.id === context.activeFloorId),
     previewEdit: null, candidatePreview: null, siteEditor: null, renderer: { domElement: element() },
     orbit: { yaw: 0, pitch: 0.5, radius: 8, target: { x: 0, y: 0, z: 0, set(x, y, z) { Object.assign(this, { x, y, z }); } } },
     $: element, t: text => text, canNavigatePreview: () => true, renderPreview() {}, status() {},
@@ -69,7 +78,9 @@ function plannerHost() {
     requestCanvasRender() { counts.bothPanes++; }, requestPreviewRender() { counts.preview++; },
   });
   const editor = read('planner/editor.js');
-  vm.runInContext(section(editor, 'function previewRadius(', 'function previewHint(') +
+  vm.runInContext(section(read('planner/model.js'), 'export function floorBounds(').replace('export ', '') +
+    section(editor, 'function previewFit()', 'function fitPreview()') +
+    section(editor, 'function previewRadius(', 'function previewHint(') +
     section(editor, '// Navigation metadata is never written'), context);
   assert(callbacks, 'Planner did not install its camera session');
   return { context, callbacks, counts, project };
@@ -124,6 +135,50 @@ test('Home host rejects unavailable modes and wrong scope before changing camera
   context.document.hidden = false;
   assert.deepEqual(plain(callbacks.capture()), before); assert.equal(counts.renders, 0); assert.equal(counts.requests, 0);
   context.zoom = 0.1; assert.throws(() => callbacks.capture(), /house view/);
+});
+
+test('Editor orbit fits the static house through all angles without changing a focused camera', async () => {
+  const { callbacks, context, counts } = await homeHost({ mode: 'editor' });
+  const original = plain(callbacks.capture()), THREE = context.THREE;
+  const bounds = new THREE.Box3().setFromObject(context.root), corners = [];
+  for (const x of [bounds.min.x, bounds.max.x]) for (const y of [bounds.min.y, bounds.max.y]) for (const z of [bounds.min.z, bounds.max.z]) corners.push(new THREE.Vector3(x, y, z));
+  for (const aspect of [0.35, 1, 2.1]) {
+    context.camera.aspect = aspect;
+    const beforeRequests = counts.requests;
+    const pose = callbacks.captureOrbit();
+    assert.deepEqual(plain(pose.target), [5, 3, 7]); assert(pose.radius > original.radius);
+    near(pose.yaw, original.yaw); near(pose.pitch, original.pitch);
+    assert.deepEqual(plain(callbacks.capture()), original, 'preparing an orbit must not move the camera');
+    assert.equal(counts.requests, beforeRequests, 'preparing an orbit must not request a render');
+    callbacks.apply(pose);
+    assert(context.camera.far >= pose.radius * 4, 'a portrait fit must not place the house past the far clip plane');
+    const camera = new THREE.PerspectiveCamera(42, aspect, .1, context.camera.far), center = new THREE.Vector3(...pose.target);
+    for (let degree = 0; degree <= 360; degree += 5) {
+      const yaw = degree * Math.PI / 180, horizontal = Math.cos(pose.pitch) * pose.radius;
+      camera.position.set(center.x + Math.cos(yaw) * horizontal, center.y + Math.sin(pose.pitch) * pose.radius, center.z + Math.sin(yaw) * horizontal);
+      camera.lookAt(center); camera.updateMatrixWorld();
+      for (const corner of corners) {
+        const point = corner.clone().project(camera);
+        assert(Math.abs(point.x) < 1 && Math.abs(point.y) < 1 && Math.abs(point.z) < 1, `House clips at aspect ${aspect}, angle ${degree}`);
+      }
+    }
+    callbacks.apply(original);
+  }
+  assert.equal(counts.renders, 0); assert.equal(counts.requests, 6); assert.equal(counts.navigationWrites, 0);
+  context.homeView.active = true; assert.throws(() => callbacks.captureOrbit(), /Open this view/);
+});
+
+test('Planner orbit uses the complete visible floor fit without changing close-up navigation or project data', () => {
+  const { callbacks, context, counts, project } = plannerHost();
+  const original = plain(callbacks.capture()), before = JSON.stringify(project);
+  const landscape = callbacks.captureOrbit();
+  assert.deepEqual(plain(landscape.target), [10, 1.5, 6]); assert(landscape.radius > original.radius);
+  near(landscape.yaw, original.yaw); near(landscape.pitch, original.pitch);
+  context.size.width = 280; const portrait = callbacks.captureOrbit(); assert(portrait.radius > landscape.radius);
+  context.allFloors = true; assert.deepEqual(plain(callbacks.captureOrbit().target), [10, 3, 6]);
+  assert.deepEqual(plain(callbacks.capture()), original);
+  assert.equal(JSON.stringify(project), before); assert.deepEqual(counts, { ui: 0, bothPanes: 0, preview: 0 });
+  context.canNavigatePreview = () => false; assert.throws(() => callbacks.captureOrbit(), /3D preview/);
 });
 
 test('planner floor cuts clear duplicate-ID selections and schedule both panes without editing the project', () => {

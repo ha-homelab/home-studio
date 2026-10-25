@@ -3,7 +3,7 @@ import { createCameraTourPanel } from './camera-tour-panel.js';
 import { createTourRecorder, recordingSupport } from './camera-tour-recording.js';
 
 // Presentation state stays separate from the house project and HA commands.
-export function createCameraTourSession({ container, capture, apply, canvas, render,
+export function createCameraTourSession({ container, capture, captureOrbit, apply, canvas, render,
   t = text => text, onClose = () => {}, onPlaying = () => {}, canExport = true }) {
   let panel, recorder = null, recording = false, finishing = null, finishingCapture = null, disposed = false;
   let exportAllowed = canExport === true;
@@ -25,7 +25,7 @@ export function createCameraTourSession({ container, capture, apply, canvas, ren
     };
     ticket.id = requestAnimationFrame(step); return ticket;
   };
-  const tour = createCameraTour({ capture, apply, requestFrame,
+  const tour = createCameraTour({ capture, captureOrbit, apply, requestFrame,
     cancelFrame: ticket => { ticket.cancelled = true; cancelAnimationFrame(ticket.id); } });
   // Sessions are created lazily on first open. Reopening never replaces a route,
   // including an intentionally cleared one. Preparing views does not render.

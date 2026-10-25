@@ -13,15 +13,19 @@ starting angle and hold for one second. Opening the panel does not move the
 camera or start playback. Choose **Play** to preview it, or **Record video** to
 play it from the beginning and save an MP4 when your browser supports recording.
 
-In Preview 3D and generated Editor, the orbit keeps the current camera target,
-distance and viewing height. In Home, it frames the whole house with centered
-pan and a standard zoom, retaining your viewing tilt and starting angle.
+In Preview 3D, the orbit fits the complete visible floor or floors using the
+preview's fit calculation. In generated Editor, it fits the whole house's
+static geometry. Both retain your viewing tilt and starting angle instead of
+orbiting a previously focused room. In Home, it frames the whole house with
+centered pan and a standard zoom, retaining your viewing tilt and starting angle.
 Whole-house framing includes static porches and yard structures outside room
 footprints, while excluding decorative backdrops and moving objects. That
 framing takes effect when you preview, play or record the route.
 
-**Full orbit** replaces the current route using the current camera framing
-described above. Export your route first if you want to keep it. Closing and
+**Full orbit** replaces the current route with this whole-house or visible-floor
+fit, using your current viewing angle. **Save current view** still saves the
+exact framing you chose for a custom route. Export your route first if you want
+to keep it. Closing and
 reopening the panel preserves your edits, imported route or deliberately empty
 route for the current page session; it does not reset the orbit. In Home,
 return from the map overview to the house
@@ -138,7 +142,9 @@ imports leave the existing route intact.
 The orbit helper creates five ordinary waypoints with four 4.75-second legs
 and a one-second final hold. The session seeds them once on creation, without
 applying a pose or scheduling an animation frame. Orbit and custom routes use
-the same validation, editing, playback and JSON format.
+the same validation, editing, playback and JSON format. Hosts can provide a
+separate `captureOrbit` adapter for whole-house framing; ordinary capture still
+supplies custom saved views and the original camera restored by Stop.
 
 `camera-tour-panel.js` presents that engine; `camera-tour.css` styles its
 controls. `camera-tour-session.js` connects playback, recording and downloads,
