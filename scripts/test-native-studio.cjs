@@ -346,6 +346,7 @@ async function testDocumentFallback(context, origin, project, errors) {
     `default-src 'none'; script-src ${origin}; style-src ${origin} 'unsafe-inline'; img-src ${origin} data: blob:; font-src ${origin}; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`,
     'Fallback CSP must allow only the original asset origin and keep its other restrictions');
   assert.deepEqual(await child.evaluate(()=>window.planner.getProject()),project);
+  assert.equal(await child.locator('link[href$="/camera-tour.css"]').getAttribute('href'),origin+'/home-floorplan-studio/camera-tour.css','Fallback rebases the bundled tour stylesheet to the same trusted origin');
   assert.equal(await child.locator('link[href$="/site-editor.css"]').getAttribute('href'),origin+'/home-floorplan-studio/planner/site-editor.css','Fallback rebases the bundled site stylesheet to the same trusted origin');
   await child.locator('#site-mode').click();
   assert.equal(await child.evaluate(()=>planner.getEditingMode()),'site','The fallback loads the site editor module');
@@ -452,6 +453,7 @@ async function testDocumentFallback(context, origin, project, errors) {
     ['invalid UTF-8',{status:200,contentType:'text/html',body:Buffer.from([0xff,0xfe,0xff])},'editor-decode'],
     ['changed policy',{status:200,contentType:'text/html',body:original.replace("default-src 'none'","default-src *")},'editor-policy'],
     ['foreign script',{status:200,contentType:'text/html',body:original.replace('./editor.js','https://untrusted.invalid/editor.js')},'editor-assets'],
+    ['foreign tour stylesheet',{status:200,contentType:'text/html',body:original.replace('../camera-tour.css','https://untrusted.invalid/camera-tour.css')},'editor-assets'],
     ['foreign site stylesheet',{status:200,contentType:'text/html',body:original.replace('./site-editor.css','https://untrusted.invalid/site-editor.css')},'editor-assets'],
     ['untrusted bootstrap',{status:200,contentType:'text/html',body:original.replace('</head>','<meta name="home-studio-bootstrap" content="untrusted"></head>')},'editor-document'],
     ['blocked document parsing',{status:200,contentType:'text/html',body:original},'editor-parse','parse'],

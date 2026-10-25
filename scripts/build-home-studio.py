@@ -18,6 +18,7 @@ COMPONENT_FILES = (
     "static/panel.js", "static/card.js", "static/studio.js",
 )
 RUNTIME_FILES = (
+    'camera-tour.js', 'camera-tour-panel.js', 'camera-tour-recording.js', 'camera-tour-session.js', 'camera-tour.css', 'camera-tour-viewer.js',
     "geometry.py", "exporters.py", "physical_exports.py", "material_textures.py", "material-textures.js", "pbr-color-data.js", "pbr-materials.js", "pbr_materials.py", "environment-lighting.js", "viewer_locales.py", "planner/project.py", "planner/site_model.py", "planner/furniture.py", "planner/catalog.json",
     "viewer.template.html", "viewer.js", "viewer-i18n.js", "home-view.html", "home-view.css", "home-view.js",
     "curtain-state.js", "motion-state.js", "appliance-state.js", "presence-view.js", "vacuum-state.js", "vacuum-view.js", "tv-screen.js", "camera-preview.js", "media-preview.js",

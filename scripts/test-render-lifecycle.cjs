@@ -457,7 +457,7 @@ function modeScheduler(legacy=false,diffuse=false,canEdit=true) {
     return elements.get(id);
   };
   Object.assign(c,{active:true,canEdit,previewTV(){},lowerFloorContext:null,showLowerFloor:false,selected:null,
-    cancelHomeGesture(){},cancelEditorGesture(){},
+    cancelHomeGesture(){},cancelEditorGesture(){},syncViewerTours(){},
     hideMediaControls(){cleanups.push({kind:'media',active:c.active});},
     cancelNativePress(){cleanups.push({kind:'native',active:c.active});},
     THREE:{Color:class {constructor(value){this.value=value;}}},hemisphere:{},sun:{},ground:{},grid:{},

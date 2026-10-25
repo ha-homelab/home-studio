@@ -37,7 +37,7 @@ class Target {
 }
 function fixture(homeMode, navigationMode = 'rotate') {
   const canvas = new Target(), document = new Target(), window = new Target();
-  const actions = [], renders = [];
+  const actions = [], renders = [], tourSyncs = [];
   const nodes = new Map();
   const getNode = id => {
     if (!nodes.has(id)) nodes.set(id, {style: {}, attributes: {}, classList: {toggle() {}}, prepend() {}, checked: true,
@@ -61,6 +61,9 @@ function fixture(homeMode, navigationMode = 'rotate') {
     }},
     bindings: [{id: 'lamp', room: 'A'}], selected: 'A', objectGroup: {children: []},
     activateDevice: item => actions.push(item.id),
+    // The extracted mode handlers call the tour adapter after updating mode state.
+    syncViewerTours() { tourSyncs.push({active: c.active, homeHidden: getNode('homeView').hidden,
+      view3dDisplay: getNode('view3d').style.display}); },
     $: getNode, vt: text => text, scene: {}, hemisphere: {}, sun: {}, ground: {}, grid: {}, clipping: {},
     root: {children: []}, points: [], renderProfile: {}, lowerFloorContext: null, overlayGroup: null, environmentLayer: null,
     editorFloorMaterials: null, homeArchitectureMaterials: null, setWallOutlineAppearance() {}, attachRoomLighting() {}, updateFixtureShadows() {}, refreshControls() {},
@@ -92,7 +95,7 @@ function fixture(homeMode, navigationMode = 'rotate') {
     canvas.emit('keydown', event); return event;
   };
   if (navigationMode === 'move') getNode('homeMove').onclick();
-  return {c, canvas, document, window, actions, renders, pointer, position, rotation, key, getNode};
+  return {c, canvas, document, window, actions, renders, tourSyncs, pointer, position, rotation, key, getNode};
 }
 
 for (const [homeMode, navigationMode] of [[true, 'rotate'], [true, 'move'], [false, 'rotate']]) {
@@ -118,7 +121,15 @@ for (const [homeMode, navigationMode] of [[true, 'rotate'], [true, 'move'], [fal
       g.document.hidden = true; g.document.emit('visibilitychange'); g.document.hidden = false;
     } else if (cancellation === 'pagehide') g.window.emit('pagehide', {persisted: true});
     else if (cancellation === 'context') g.canvas.emit('webglcontextlost');
-    else if (cancellation === 'mode') {g.c.setActive(!homeMode);g.c.setActive(homeMode);}
+    else if (cancellation === 'mode') {
+      for (const active of [!homeMode, homeMode]) {
+        const before = g.tourSyncs.length;
+        g.c.setActive(active);
+        assert(g.tourSyncs.length > before, 'Changing Home mode synchronizes camera tours');
+        assert.equal(g.tourSyncs.at(-1).active, active, 'Tour sync sees the updated Home mode');
+        assert.equal(g.tourSyncs.at(-1).homeHidden, !active, 'Tour sync sees the updated Home visibility');
+      }
+    }
     else if (cancellation === 'buttons') g.pointer('pointermove', 1, 100, 100, {buttons: 0});
     else g.pointer(cancellation);
     g.pointer('pointermove', 1, 150, 150);
@@ -163,7 +174,14 @@ for (const shiftKey of [false, true]) {
 }
 mouse.canvas.emit('wheel', {deltaY: 100, preventDefault() {}});
 assert.equal(mouse.c.radius, 10 * Math.exp(.1), 'Editor wheel zoom is preserved');
-mouse.pointer('pointerdown');mouse.c.showMode(true);mouse.c.showMode(false);
+mouse.pointer('pointerdown');
+for (const plan of [true, false]) {
+  const before = mouse.tourSyncs.length;
+  mouse.c.showMode(plan);
+  assert(mouse.tourSyncs.length > before, 'Changing Plan/3D mode synchronizes camera tours');
+  assert.equal(mouse.tourSyncs.at(-1).view3dDisplay, plan ? 'none' : 'block',
+    'Tour sync sees the updated 3D visibility');
+}
 const beforePlan = mouse.position();mouse.pointer('pointermove', 1, 150, 150);
 assert.deepEqual(mouse.position(), beforePlan, 'Plan mode cancels an editor gesture');
 

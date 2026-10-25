@@ -135,7 +135,7 @@ console.log('PASS: deferred initial Home, early state/mode changes, frame orderi
 function exerciseHostInventory(transform = value => value, setup = () => {}) {
   const bootItems = [{id: 'lamp', name: 'Lamp', type: 'lamp', room: 'A', entity_id: 'light.lamp',
     position_m: {x: 1, y: 2, z: 3}, dimensions_m: {width: .3, depth: .3, height: .2}, rotation_deg: 0}];
-  const calls = {builds: 0, refreshes: 0, preferences: [], sent: [], status: [], removed: 0, artwork: [], commands: [], dismissals: 0, requests: 0, pendingAtRebuild: []};
+  const calls = {builds: 0, refreshes: 0, preferences: [], sent: [], status: [], removed: 0, artwork: [], commands: [], dismissals: 0, requests: 0, pendingAtRebuild: [], tourPermissions: []};
   let handler;
   const aside = {inert: true}, parent = {}, port = {postMessage: message => calls.sent.push(message)};
   const c = vm.createContext({
@@ -147,6 +147,7 @@ function exerciseHostInventory(transform = value => value, setup = () => {}) {
     document: {body:{classList:{toggle(){}}},querySelector: () => aside}, $:()=>({}),
     homeView: {applyViewPreferences(value) { calls.preferences.push(value); }, handleCommandResult(value) { calls.commands.push(value); }, dismissOverlays() { calls.dismissals++; }},
     setEditorStatus(value) { calls.status.push(value); },
+    syncViewerTourPermissions() { calls.tourPermissions.push(c.canEdit); },
     refreshEntityPresentation() { calls.refreshes++; },
     rebuildInventoryView() { calls.pendingAtRebuild.push(c.initialMapPending); calls.builds++; c.refreshEntityPresentation(); },
     initialMapPending: false, requestRender() { calls.requests++; },
@@ -166,6 +167,7 @@ function exerciseHostInventory(transform = value => value, setup = () => {}) {
   return {c, calls, bootItems, aside, port};
 }
 const sameInventory = exerciseHostInventory();
+assert.deepEqual(sameInventory.calls.tourPermissions, [true], 'Trusted init refreshes tour export permission');
 assert.equal(sameInventory.calls.builds, 0, 'Identical validated inventory reuses boot geometry and shadow maps');
 assert.equal(sameInventory.c.items, sameInventory.bootItems, 'Identical data preserves the assigned array');
 assert.equal(sameInventory.calls.refreshes, 0, 'An unchanged handshake does not redraw the already-presented disconnected state');

@@ -255,6 +255,17 @@ placed objects are saved in your project. See the [garden guide](docs/environmen
 
 ![Fictional Garden Studio showing editable planting, pets, and optional geometric surroundings](docs/images/garden-surroundings.png)
 
+## Make a camera tour
+
+Open **Camera tour** in Preview 3D or the generated Home/Editor viewer to save
+named viewpoints, arrange a route, and play, pause or stop it. Routes support
+up to 32 views and two minutes; use **Export route** to keep their JSON beyond
+the current page session. **Record video** saves a local WebM or MP4 when the
+browser supports it, containing the rendered scene without audio or interface
+controls. You can upload the video yourself to another tool as a reference;
+the feature does not upload it or operate Home Assistant devices. See the
+[camera-tour guide](docs/camera-tours.md) for steps and viewer limits.
+
 ## Optional help while setting up Home Assistant
 
 If installation is not working yet, start with the

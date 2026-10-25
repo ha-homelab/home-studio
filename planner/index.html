@@ -9,6 +9,7 @@
   <title data-i18n="Home studio · Floorplan planner">Home studio · Floorplan planner</title>
   <link rel="stylesheet" href="./editor.css">
   <link rel="stylesheet" href="./floor-navigator.css">
+  <link rel="stylesheet" href="../camera-tour.css">
   <link rel="stylesheet" href="./site-editor.css">
 </head>
 <body>
@@ -62,7 +63,7 @@
       <div class="canvas-shell">
         <div id="plan-view" class="view-panel" role="tabpanel" aria-labelledby="plan-tab"><canvas id="plan-canvas" tabindex="0" aria-label="Metric floor plan. Draw with pointer tools or use Add room by dimensions for keyboard input. Select objects from the On this floor list to edit precise coordinates." data-i18n-attrs="{&quot;aria-label&quot;:&quot;Metric floor plan. Draw with pointer tools or use Add room by dimensions for keyboard input. Select objects from the On this floor list to edit precise coordinates.&quot;}"></canvas></div>
         <div id="preview-view" class="view-panel" role="tabpanel" aria-labelledby="preview-tab" hidden><canvas id="preview-canvas" tabindex="0" aria-label="3D preview. Drag to orbit, scroll to zoom. Arrow keys orbit, plus and minus zoom." data-i18n-attrs="{&quot;aria-label&quot;:&quot;3D preview. Drag to orbit, scroll to zoom. Arrow keys orbit, plus and minus zoom.&quot;}"></canvas><div id="preview-navigation" class="preview-navigation" role="group" aria-label="3D navigation" data-i18n-attrs='{"aria-label":"3D navigation"}'>
-          <div class="navigation-modes"><button id="preview-orbit" aria-pressed="true" data-i18n="Orbit">Orbit</button><button id="preview-pan" aria-pressed="false" data-i18n="Pan">Pan</button></div>
+          <button id="preview-tour" type="button" aria-expanded="false" data-i18n="Camera tour">Camera tour</button><div class="navigation-modes"><button id="preview-orbit" aria-pressed="true" data-i18n="Orbit">Orbit</button><button id="preview-pan" aria-pressed="false" data-i18n="Pan">Pan</button></div>
           <button id="preview-edit" aria-pressed="false">Edit items</button>
           <div class="navigation-views"><button id="preview-rotate-left" aria-label="Rotate view left" title="Rotate view left" data-i18n-attrs='{"aria-label":"Rotate view left","title":"Rotate view left"}'>↶</button><button id="preview-top" title="Top view" data-i18n="Top view" data-i18n-attrs='{"title":"Top view"}'>Top view</button><button id="preview-rotate-right" aria-label="Rotate view right" title="Rotate view right" data-i18n-attrs='{"aria-label":"Rotate view right","title":"Rotate view right"}'>↷</button></div>
         </div><button id="preview-elevation-handle" class="preview-elevation-handle" hidden aria-label="Raise or lower selected item" title="Drag up or down to change height. Alt bypasses snap. Arrow keys change height by 5 cm."><span aria-hidden="true">↕ Y</span><output id="preview-elevation-value"></output></button><div id="preview-error" class="preview-error" hidden></div><label class="all-floors"><input id="all-floors" type="checkbox"> <span data-i18n="Show all floors">Show all floors</span></label><span class="preview-note" data-i18n="Real wall openings · geometry preview">Real wall openings · geometry preview</span></div>

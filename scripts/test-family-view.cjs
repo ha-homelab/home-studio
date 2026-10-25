@@ -23,10 +23,17 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
   browser=await chromium.launch(browserLaunchOptions('chromium',true));
   const page=await browser.newPage({viewport:{width:1200,height:850}}),errors=[];
   page.setDefaultTimeout(10000);page.on('pageerror',error=>errors.push(String(error)));
+  await page.addInitScript(()=>{
+   window.tourDownloadAttempts=0;window.tourCaptureAttempts=0;
+   const click=HTMLAnchorElement.prototype.click;
+   HTMLAnchorElement.prototype.click=function(...args){if(this.download)tourDownloadAttempts++;return click.apply(this,args);};
+   const capture=HTMLCanvasElement.prototype.captureStream;
+   if(capture)HTMLCanvasElement.prototype.captureStream=function(...args){tourCaptureAttempts++;return capture.apply(this,args);};
+  });
   await page.route('**/*',route=>route.request().url().startsWith(origin+'/')?route.continue():route.abort());
   async function mount(canEdit){
    await page.goto(origin);
-   await page.evaluate(html=>{const frame=document.createElement('iframe');frame.sandbox='allow-scripts';frame.srcdoc=html;document.body.append(frame);},embedded);
+   await page.evaluate(({html,canEdit})=>{const frame=document.createElement('iframe');frame.sandbox=canEdit?'allow-scripts allow-downloads allow-forms':'allow-scripts';frame.srcdoc=html;document.body.append(frame);},{html:embedded,canEdit});
    const frame=page.frameLocator('iframe');await frame.locator('#homeRoom').waitFor();
    await page.evaluate(({items,canEdit})=>{
     const channel=new MessageChannel();window.messages=[];window.channel=channel.port1;channel.port1.onmessage=event=>{
@@ -42,6 +49,13 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
    await frame.locator('[data-home-device="lamp"]').waitFor();
    return frame;
   }
+  async function openTour(frame){
+   await frame.locator('#homeCameraTour').click();
+   const tour=frame.locator('.camera-tour-host:not([hidden])');
+   await tour.getByRole('button',{name:'Save current view',exact:true}).click();
+   const duration=tour.locator('input[type="number"]');await duration.fill('0.25');await duration.press('Tab');
+   return tour;
+  }
   let frame=await mount(false);
   assert.equal(await frame.locator('#editLayout').isVisible(),false);
   assert.equal(await frame.locator('aside').isVisible(),false);
@@ -52,6 +66,18 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
   assert.equal(await frame.locator('[data-home-device="temperature"]').isVisible(),false);
   assert.equal(await frame.locator('[data-home-device="lamp"]').isVisible(),true);
   await frame.locator('#homeDeviceFilter').selectOption('all');
+  let tour=await openTour(frame);
+  assert.equal(await tour.getByRole('button',{name:'Export route',exact:true}).isDisabled(),true);
+  assert.equal(await tour.getByRole('button',{name:'Record video',exact:true}).isDisabled(),true);
+  assert.equal(await tour.getByRole('button',{name:'Import route',exact:true}).isEnabled(),true);
+  assert.equal(await tour.getByText('You can create and play tours here. Your Home Assistant access does not allow route or video downloads.',{exact:true}).count(),1);
+  // Forced clicks also reach the action guards without requesting a blocked download.
+  await tour.getByRole('button',{name:'Export route',exact:true}).dispatchEvent('click');
+  await tour.getByRole('button',{name:'Record video',exact:true}).dispatchEvent('click');
+  await tour.getByRole('button',{name:'Play',exact:true}).click();
+  await tour.locator('.camera-tour-status').filter({hasText:'Tour finished'}).waitFor();
+  assert.deepEqual(await frame.locator('#homeView').evaluate(()=>[tourDownloadAttempts,tourCaptureAttempts]),[0,0]);
+  await tour.getByRole('button',{name:'Close camera tour',exact:true}).click();
   assert.equal(await frame.locator('[data-home-device="temperature"]').isVisible(),true);
   // Hidden editing buttons and arbitrary preference messages cannot release this mode.
   await frame.locator('#editLayout').evaluate(button=>button.click());
@@ -71,11 +97,21 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
   await frame.locator('[data-home-details="lamp"]').click();
   await page.waitForFunction(()=>messages.some(message=>message.type==='more_info'));
   frame=await mount(true);
+  tour=await openTour(frame);
+  assert.equal(await tour.getByRole('button',{name:'Record video',exact:true}).isEnabled(),true);
+  const [ownerDownload]=await Promise.all([page.waitForEvent('download'),tour.getByRole('button',{name:'Export route',exact:true}).click()]);
+  assert.equal(ownerDownload.suggestedFilename(),'camera-tour.json');assert.equal(await ownerDownload.failure(),null);
+  await tour.getByRole('button',{name:'Close camera tour',exact:true}).click();
   await frame.locator('#editLayout').click();assert.equal(await frame.locator('aside').isVisible(),true);
   assert.equal(await frame.locator('#homeView').evaluate(()=>window.floorplan.canEdit),true);
-  await page.goto(origin+'/offline');await page.locator('#openHome').click();await page.locator('#editLayout').click();
+  await page.goto(origin+'/offline');await page.locator('#openHome').click();
+  tour=await openTour(page);
+  assert.equal(await tour.getByRole('button',{name:'Record video',exact:true}).isEnabled(),true);
+  const [standaloneDownload]=await Promise.all([page.waitForEvent('download'),tour.getByRole('button',{name:'Export route',exact:true}).click()]);
+  assert.equal(standaloneDownload.suggestedFilename(),'camera-tour.json');assert.equal(await standaloneDownload.failure(),null);
+  await tour.getByRole('button',{name:'Close camera tour',exact:true}).click();await page.locator('#editLayout').click();
   assert.equal(await page.locator('aside').isVisible(),true,'offline editor remains editable');
   assert.deepEqual(errors,[]);
-  console.log('PASS: family-only rendering, immutable host edit grant, allowed controls, read-only devices, label/device filters, admin editing, offline editing.');
+  console.log('PASS: family playback without download/capture attempts, owner/standalone tour exports, immutable host edit grant, allowed controls, read-only devices, label/device filters, admin editing, offline editing.');
  }finally{await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));fs.rmSync(temporary,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});
