@@ -48,6 +48,7 @@ function fixture(options = {}) {
     constructor(_stream, config) { super(); this.mimeType = config.mimeType; this.state = 'inactive'; f.instances.push(this); }
     start() {
       this.state = 'recording';
+      f.encoderStartPose = structuredClone(f.pose);
       if (!options.deferRecorderStart) queueMicrotask(() => this.emit('start'));
       this.emit('dataavailable', { data: new Blob(['frame'], { type: this.mimeType }) });
     }
@@ -69,13 +70,13 @@ function fixture(options = {}) {
     return { setRecording: value => { f.recording = value; }, setExportAllowed: value => { f.exportAllowed = value; },
       setStatus: value => { f.status = value; }, refresh() {}, dispose() { f.panelDisposed = true; } };
   });
-  const pose = options.pose || { type: 'perspective', floorId: 'floor', yaw: 0, pitch: 0.5, radius: 10, target: [0, 0, 0] };
+  f.pose = structuredClone(options.pose || { type: 'perspective', floorId: 'floor', yaw: 0, pitch: 0.5, radius: 10, target: [0, 0, 0] });
   f.session = createCameraTourSession({ container, canvas: () => canvas, capture: () => {
     if (f.failCapture) throw new Error('Return to the house view before saving a camera view.');
-    return pose;
+    return f.pose;
   },
     render: options.deferRender ? () => new Promise(resolve => { f.finishRender = resolve; }) : undefined,
-    apply(value) { f.applies++; f.applied = structuredClone(value); if (f.failApply) throw new Error('Apply failed'); },
+    apply(value) { f.applies++; f.applied = structuredClone(value); if (f.failApply) throw new Error('Apply failed'); f.pose = structuredClone(value); },
     onPlaying: options.onPlaying || (() => {}), canExport: options.canExport,
   });
   if (!options.defaultRoute) { f.session.tour.clear(); f.session.tour.add(); }
@@ -124,14 +125,55 @@ const tests = [
     const pending = f.panel.record();
     await flush();
     f.tick(1500);
-    assert.equal(f.session.tour.getState().status, 'idle');
-    assert.equal(f.applies, 0, 'startup must not consume the camera route');
+    assert.equal(f.session.tour.getState().status, 'paused');
+    assert.equal(f.session.tour.getState().elapsed, 0);
+    assert.equal(f.applies, 1, 'startup prepares only the first route frame');
+    assert.equal(f.frames.size, 0, 'startup must not consume the camera route');
     f.instances[0].emit('start');
     await pending;
     assert.equal(f.session.tour.getState().status, 'playing');
     f.tick(1550);
     assert(f.applies > 0);
   }, { deferRecorderStart: true }],
+  ['recording begins at the route pose and Stop restores the original Home view', async f => {
+    const original = structuredClone(f.pose), first = f.session.tour.getState().waypoints[0].pose;
+    const pending = f.panel.record();
+    await flush();
+    assert.deepEqual(f.encoderStartPose, first, 'the native encoder must see the route pose on start');
+    assert.equal(f.encoderStartPose.zoom, 0.8);
+    assert.equal(f.session.tour.getState().elapsed, 0);
+    f.instances[0].emit('start'); await pending;
+    f.session.tour.stop(); await flush();
+    assert.deepEqual(f.pose, original, 'play must retain the pre-seek restore snapshot');
+    assert.equal(f.tracks[0].stopCalls, 1); assert.equal(f.frames.size, 0);
+  }, { defaultRoute: true, deferRecorderStart: true,
+    pose: { type: 'home', floorId: 'floor', rotation: 5, tilt: 0.2, zoom: 2, pan: [7, -2], room: 'study' } }],
+  ['failure to prepare the first route pose never creates a capture', async f => {
+    f.failApply = true;
+    await f.panel.record();
+    assert.equal(f.status, 'Apply failed');
+    assert.equal(f.instances.length, 0); assert.equal(f.tracks.length, 0);
+    assert.equal(f.recording, undefined); assert.equal(f.frames.size, 0); assert.equal(f.timers.size, 0);
+  }],
+  ['Stop while preparing the first route pose prevents capture', async f => {
+    const unsubscribe = f.session.tour.subscribe(state => {
+      if (state.status === 'paused') f.session.tour.stop();
+    });
+    await f.panel.record(); unsubscribe();
+    assert.equal(f.session.tour.getState().status, 'idle');
+    assert.equal(f.instances.length, 0); assert.equal(f.tracks.length, 0);
+    assert.equal(f.frames.size, 0); assert.equal(f.timers.size, 0);
+  }],
+  ...['dispose', 'permission loss'].map(action => [`${action} while preparing the first route pose prevents capture`, async f => {
+    const unsubscribe = f.session.tour.subscribe(state => {
+      if (state.status !== 'paused') return;
+      if (action === 'dispose') f.session.dispose();
+      else f.session.setExportAllowed(false);
+    });
+    await f.panel.record(); unsubscribe();
+    assert.equal(f.instances.length, 0); assert.equal(f.tracks.length, 0);
+    assert.equal(f.frames.size, 0); assert.equal(f.timers.size, 0); assert.equal(f.urls.length, 0);
+  }]),
   ['permission loss while awaiting the encoder cannot start late playback', async f => {
     const pending = f.panel.record();
     await flush();
@@ -139,8 +181,9 @@ const tests = [
     await pending;
     f.instances[0].emit('start');
     f.tick(1500);
-    assert.equal(f.session.tour.getState().status, 'idle');
-    assert.equal(f.applies, 0);
+    assert.equal(f.session.tour.getState().status, 'paused');
+    assert.equal(f.applies, 1);
+    assert.equal(f.frames.size, 0);
     assert.equal(f.tracks[0].stopCalls, 1);
     assert.equal(f.urls.length, 0);
   }, { deferRecorderStart: true }],
@@ -196,7 +239,7 @@ const tests = [
     await flush(); f.session.setExportAllowed(false);
     await starting; f.finishRender(); await flush();
     assert.equal(f.tracks[0].stopCalls, 1); assert.equal(f.urls.length, 0);
-    assert.equal(f.session.tour.getState().status, 'idle'); assert.equal(f.frames.size, 0);
+    assert.equal(f.session.tour.getState().status, 'paused'); assert.equal(f.frames.size, 0);
   }, { deferRender: true }],
   ['context-loss interruption discards capture before document event propagation', async f => {
     await f.panel.record();

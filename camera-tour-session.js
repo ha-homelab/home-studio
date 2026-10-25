@@ -99,6 +99,14 @@ export function createCameraTourSession({ container, capture, apply, canvas, ren
     tour.stop({ restore: false });
     if (disposed) return;
     const attempt = ++generation;
+    // The encoder's first frame must already match the route. Seeking saves
+    // the original view without starting its clock; play resumes at zero.
+    try { tour.seek(0); }
+    catch (error) {
+      if (!disposed && generation === attempt) panel.setStatus(error.message);
+      return;
+    }
+    if (disposed || !exportAllowed || generation !== attempt || tour.getState().status !== 'paused') return;
     const current = createTourRecorder({ canvas: surface, render, frameRate: 24,
       onState(state) {
         if (!disposed && state === 'idle' && recording && recorder === current) {
