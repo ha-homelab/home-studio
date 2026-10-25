@@ -5,10 +5,17 @@ const {spawnSync}=require('node:child_process');
 const root=path.resolve(__dirname,'..');
 const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAHklEQVR4nGO4dP3Cf3yYAUTM3jETjtH5VFIwwG4AAJrHyi0UM1mUAAAAAElFTkSuQmCC';
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
+// Observe the actual desired set in test copies only; production stats include
+// healthy cached textures outside the viewport and cannot express readiness.
+function instrumentMapLayer(source){
+  const hook='return {get object(){return group;}';
+  assert.equal(source.split(hook).length,2,'Map instrumentation must match exactly once');
+  return source.replace(hook,'return {get debugVisibleTiles(){return desired.map(tile=>{const entry=cache.get(tile.key);return {key:tile.key,ready:!!entry?.texture,failed:!!entry?.failed,loading:!!entry?.loading};});},get object(){return group;}');
+}
 (async()=>{
   const THREE=await import('data:text/javascript;base64,'+fs.readFileSync(path.join(root,'vendor/three.module.min.js')).toString('base64'));
   const context=vm.createContext({THREE,Promise,Map,Set,Math,Number,Error});
-  vm.runInContext(fs.readFileSync(path.join(root,'map-layer.js'),'utf8')+'\nthis.math=homeMapMath;',context);
+  vm.runInContext(instrumentMapLayer(fs.readFileSync(path.join(root,'map-layer.js'),'utf8'))+'\nthis.math=homeMapMath;',context);
   const math=context.math,config={enabled:true,latitude:37.78,longitude:-122.42,model_x:3,model_z:-2,north_deg:0};
   assert(math.validConfig(config));for(const invalid of [{latitude:86},{north_deg:-1},{north_deg:361},{model_x:10001},{longitude:Infinity},{enabled:1}])assert.equal(math.validConfig({...config,...invalid}),null);
   const map=math.project(config.latitude,config.longitude),round=math.unproject(...map);
@@ -85,8 +92,12 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   assert.equal(attempts.get(failedKey),1,'Redraws must not automatically retry a failed tile');
   camera.left+=5000;camera.right+=5000;camera.updateProjectionMatrix();recovery.render(camera,{width:1200,height:1200});await settle(recovery);
   assert.equal(recoveryStatus.text,'','A cached failure outside the viewport must not mark loaded tiles as unavailable');
+  assert(recovery.debugVisibleTiles.every(tile=>tile.ready&&!tile.loading&&!tile.failed),'Current viewport is fully ready after a pan');
+  assert(recovery.stats.loaded>recovery.debugVisibleTiles.length,'Healthy cached textures outside the current viewport must not count as visible readiness');
   camera.left-=5000;camera.right-=5000;camera.updateProjectionMatrix();recovery.render(camera,{width:1200,height:1200});
   assert.equal(recoveryStatus.retry,true);assert.equal(attempts.get(failedKey),1,'Returning to the failed tile still requires explicit retry');
+  assert.equal(recovery.debugVisibleTiles.filter(tile=>tile.ready).length,recovery.debugVisibleTiles.length-1,'Partial readiness counts current tiles even with retained cache entries');
+  assert.equal(recovery.debugVisibleTiles.find(tile=>tile.key===failedKey).failed,true);
   failTile=false;const beforeRetry=new Map(attempts);recovery.clearFailures();recovery.clearFailures();await settle(recovery);
   assert.equal(attempts.get(failedKey),2,'Explicit retry reloads the failed tile exactly once, including repeated clicks while pending');
   for(const [key,count] of beforeRetry)if(key!==failedKey)assert.equal(attempts.get(key),count,'Healthy cached tiles are retained');
@@ -151,6 +162,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
     const built=spawnSync(process.env.PYTHON||'python3',['scripts/build-planner-project.py','--project',path.join(temporary,'project.json'),'--output',path.join(temporary,'build')],{cwd:root,encoding:'utf8'});
     assert.equal(built.status,0,built.stderr||built.stdout);
     let html=fs.readFileSync(path.join(temporary,'build/main/index.html'),'utf8');
+    html=instrumentMapLayer(html);
     html=html.replace(/(<script id="modelData" type="application\/json">)([\s\S]*?)(<\/script>)/,(_all,start,json,end)=>{
       const model=JSON.parse(json);delete model.elevation_m;model.environment.elevation=-1.8;model.site_context={roof_outline:roof};return start+JSON.stringify(model)+end;
     });
@@ -161,6 +173,22 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
     const engine=process.env.MAP_ENGINE||'chromium';assert(['chromium','firefox','webkit'].includes(engine));
     const engines=require('playwright'),{browserLaunchOptions}=require('./browser-stability-diagnostics.cjs');browser=await engines[engine].launch(browserLaunchOptions(engine,true));
     const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];page.on('pageerror',error=>errors.push(String(error)));
+    const waitForCurrentTiles=async(failedKey=null)=>{
+      try{
+        const handle=await page.waitForFunction(failedKey=>{
+          const stats=window.__mapTest.mapStats,tiles=window.__mapTest.debugMap.debugVisibleTiles;
+          if(stats.inflight||tiles.length<2||tiles.some(tile=>tile.loading))return false;
+          if(failedKey&&!tiles.some(tile=>tile.key===failedKey&&tile.failed&&!tile.ready))return false;
+          return tiles.every(tile=>tile.key===failedKey?tile.failed&&!tile.ready:tile.ready&&!tile.failed)?{stats,tiles}:false;
+        },failedKey);
+        try{return await handle.jsonValue();}finally{await handle.dispose();}
+      }catch(error){
+        const snapshot=await page.evaluate(()=>({stats:window.__mapTest.mapStats,tiles:window.__mapTest.debugMap.debugVisibleTiles,
+          failedKey:window.recoveryKey,attempts:window.recoveryTileAttempts,status:document.querySelector('#homeMapStatus').textContent,
+          stage:document.querySelector('#homeStage').getBoundingClientRect().toJSON()})).catch(diagnosticError=>({diagnosticError:String(diagnosticError)}));
+        throw Error('Current map tile readiness failed: '+JSON.stringify(snapshot),{cause:error});
+      }
+    };
     const assertCompassLayout=async()=>{
       const layout=await page.evaluate(()=>{
         const compass=document.querySelector('#homeMapCompass'),stage=document.querySelector('#homeStage'),rect=compass.getBoundingClientRect();
@@ -255,33 +283,28 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
     const saves=await page.evaluate(()=>mapSaves);assert.equal(saves.length,1);assert.equal(saves[0].revision,1);assert.equal(saves[0].config.north_deg,25.05);
     await page.locator('#homeMapHome').click();await page.waitForFunction(()=>window.__mapTest.mapStats.inflight===0);
     const idle=await page.evaluate(()=>({renders:floorplan.renderCount,requests:mapRequests.length}));await page.waitForTimeout(250);const after=await page.evaluate(()=>({renders:floorplan.renderCount,requests:mapRequests.length}));assert.deepEqual(after,idle,'Idle map runs no animation/request loop');
-    await page.evaluate(png=>{
-      const config=mapSaves[0].config;window.recoveryTileAttempts={};window.recoveryKey=null;window.recoveryFail=true;
-      window.__mapTest.configureMap({revision:3,configured:false,config:null});
-      window.__mapTest.applyNavigationState({mode:'map',zoom:.035,rotation:0,tilt:0,pan_x:0,pan_y:0});
+    // Establish final layout/view with healthy tiles before injecting a fault.
+    // Clear only the layer cache, without hide/show of the caption or controls.
+    await page.evaluate(()=>window.__mapTest.applyNavigationState({mode:'map',zoom:.035,rotation:0,tilt:0,pan_x:0,pan_y:0}));
+    await waitForCurrentTiles();
+    const recoveryKey=await page.evaluate(png=>{
+      const map=window.__mapTest.debugMap,config=map.config;
+      window.recoveryTileAttempts={};window.recoveryKey=map.debugVisibleTiles[0].key;window.recoveryFail=true;
       window.homeMapRequest=async(action,tile)=>{
         if(action!=='tile')return {revision:4,configured:true,config};
-        const key=`${tile.z}/${tile.x}/${tile.y}`;window.recoveryKey??=key;recoveryTileAttempts[key]=(recoveryTileAttempts[key]||0)+1;
+        const key=`${tile.z}/${tile.x}/${tile.y}`;recoveryTileAttempts[key]=(recoveryTileAttempts[key]||0)+1;
         if(key===recoveryKey&&recoveryFail)throw Error('Transient tile failure');return {data_url:png};
       };
-      window.__mapTest.configureMap({revision:4,configured:true,config});
+      map.setConfig(null);map.setConfig(config);window.renderModel();return recoveryKey;
     },png);
-    // Viewport changes can briefly leave an idle, partially decoded tile set.
-    // Wait for this request set, then compare one atomic snapshot across engines.
-    const partial=await page.waitForFunction(()=>{
-      const stats=window.__mapTest.mapStats;
-      return stats.visible>1&&stats.inflight===0&&stats.loaded===stats.visible-1?stats:false;
-    });
-    const partialStats=await partial.jsonValue();await partial.dispose();
-    assert.equal(partialStats.loaded,partialStats.visible-1);
+    const partial=await waitForCurrentTiles(recoveryKey);
+    assert.equal(partial.tiles.filter(tile=>tile.ready).length,partial.tiles.length-1);
     assert.match(await page.locator('#homeMapStatus').textContent(),/Some map tiles/);assert.equal(await page.locator('#homeMapRetry').isVisible(),true,'A partial map failure exposes Retry map');
     await page.evaluate(()=>{for(let i=0;i<10;i++)window.renderModel();});await page.waitForTimeout(100);
     assert.equal(await page.evaluate(()=>recoveryTileAttempts[recoveryKey]),1,'Rendering a partial map does not run an automatic retry loop');
     await page.evaluate(()=>{recoveryFail=false;});await page.locator('#homeMapRetry').click();
-    await page.waitForFunction(()=>{
-      const stats=window.__mapTest.mapStats;
-      return stats.inflight===0&&stats.loaded===stats.visible&&recoveryTileAttempts[recoveryKey]===2;
-    });
+    await waitForCurrentTiles();
+    assert.equal(await page.evaluate(()=>recoveryTileAttempts[recoveryKey]),2,'Explicit retry requests the failed current tile exactly once');
     assert.equal(await page.locator('#homeMapRetry').isVisible(),false);assert.equal(await page.locator('#homeMapStatus').textContent(),'');
     assert.equal(await page.evaluate(()=>Object.entries(recoveryTileAttempts).every(([key,count])=>count===(key===recoveryKey?2:1))),true,'Retry preserves all healthy tile requests');
     await page.setViewportSize({width:390,height:844});await assertCompassLayout();
