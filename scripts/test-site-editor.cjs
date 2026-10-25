@@ -42,6 +42,14 @@ async function at(page,point){const rect=await page.locator('#plan-canvas').boun
 async function clickPoint(page,point){await page.mouse.click(...await at(page,point));}
 async function dragPoint(page,a,b){await page.mouse.move(...await at(page,a));await page.mouse.down();await page.mouse.move(...await at(page,b),{steps:5});await page.mouse.up();}
 async function field(page,label,value){const input=page.getByLabel(label,{exact:true});await input.fill(value);await input.press('Tab');}
+async function checkBuildRoute(page,needsSiteSupport){
+ await page.locator('#build-project').click();
+ assert.equal(await page.locator('#build-toolkit-link').getAttribute('href'),`https://github.com/ha-homelab/home-studio/releases${needsSiteSupport?'':'/latest'}`);
+ assert.equal(await page.locator('#build-site-compatibility').isVisible(),needsSiteSupport);
+ assert.equal(await page.locator('#build-toolkit-link').innerText(),needsSiteSupport?'Choose a compatible release ↗':'Download the complete ZIP ↗');
+ if(needsSiteSupport)assert.match(await page.locator('#build-site-compatibility').innerText(),/v1\.2\.0-beta\.6 or newer/);
+ await page.getByRole('button',{name:'Close build instructions',exact:true}).click();
+}
 async function addRectangle(page,kind,x,z,w,d){
  await page.locator('#site-settings').click();
  await page.getByLabel('Draw next',{exact:true}).selectOption(kind);
@@ -58,6 +66,7 @@ async function addRectangle(page,kind,x,z,w,d){
  await page.goto(origin+'/planner/index.html');await page.waitForFunction(()=>window.planner);
  await page.locator('#file-input').setInputFiles({name:'fictional.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(fixture))});
  await page.waitForFunction(()=>planner.getProject().id==='site_fixture');
+ await checkBuildRoute(page,false);
  await page.getByRole('button',{name:'Site & roof',exact:true}).click();
  assert.equal(await page.evaluate(()=>planner.getEditingMode()),'site');
  assert.deepEqual((await model(page)).floors,fixture.floors);
@@ -67,6 +76,8 @@ async function addRectangle(page,kind,x,z,w,d){
  assert.equal((await model(page)).site.features.length,1);
  await field(page,'Feature name','Willow house');await field(page,'Height above ground (m)','5.6');
  await page.getByLabel('Feature color',{exact:true}).fill('#b89372');await page.getByLabel('Feature color',{exact:true}).dispatchEvent('change');
+ // Package compatibility follows the saved data, even while editing Inside.
+ await page.locator('#inside-mode').click();await checkBuildRoute(page,true);await page.locator('#site-mode').click();
  // Polygon drawing, Enter completion, numeric points, and preview remain separate from floors.
  await page.getByLabel('Draw next',{exact:true}).selectOption('roof');
  await page.getByRole('button',{name:'Draw polygon',exact:false}).click();
@@ -113,6 +124,11 @@ async function addRectangle(page,kind,x,z,w,d){
  await page.evaluate(async()=>{const {editorBridge:b}=await import('/planner/editor.js');const p=b.snapshot();p.site.features.push({...p.site.features[0],id:'candidate_house',name:'Candidate',polygon:[[30,0],[34,0],[34,4],[30,4]]});window.siteCandidate=p;window.siteRevision=b.revision();b.previewProject(p);});
  assert.deepEqual(await model(page),accepted);
  await page.evaluate(async()=>{const {editorBridge:b}=await import('/planner/editor.js');b.cancelPreview();});assert.deepEqual(await model(page),accepted);
+ // An empty site still uses the newer schema; a legacy import restores stable guidance.
+ await page.locator('#file-input').setInputFiles({name:'empty-site.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify({...fixture,id:'empty_site_fixture',site:{ground_elevation_m:0,features:[]}}))});
+ await page.waitForFunction(()=>planner.getProject().id==='empty_site_fixture');await checkBuildRoute(page,true);
+ await page.locator('#file-input').setInputFiles({name:'legacy.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(fixture))});
+ await page.waitForFunction(()=>planner.getProject().id==='site_fixture');await checkBuildRoute(page,false);
  // Site-only blank projects can be authored and previewed.
  await page.locator('#new-project').click();await page.locator('#site-mode').click();
  await page.getByRole('button',{name:'Add site rectangle',exact:true}).click();
@@ -145,6 +161,6 @@ async function addRectangle(page,kind,x,z,w,d){
  await protectedFrame.locator('#inside-mode').click();assert.equal(await protectedFrame.locator('#preview-tab').innerText(),'Published home');
  assert.equal(await protectedFrame.locator('#add-floor').isDisabled(),true);
  assert.deepEqual(errors,[]);
- console.log(`Site editor browser acceptance passed (${engine}): dimension and polygon authoring, fields/invalid geometry, vertex drag, undo/redo, cancel, five kinds, autosave/export/reload, detached preview, empty floors, and HA save bridge.`);
+ console.log(`Site editor browser acceptance passed (${engine}): dimension and polygon authoring, fields/invalid geometry, vertex drag, undo/redo, cancel, five kinds, autosave/export/reload, detached preview, package compatibility guidance, empty floors, and HA save bridge.`);
  }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));fs.rmSync(temp,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});

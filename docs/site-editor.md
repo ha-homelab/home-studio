@@ -90,6 +90,15 @@ the Home Assistant map alignment.
 
 ## Show it on the Home Assistant map
 
+Drawings with a `site` property require **v1.2.0-beta.6 or newer** in both the
+toolkit and Home Studio integration, even when the site has no shapes. The
+v1.1.0 stable release and v1.2.0-beta.5 cannot read these drawings. Choose a
+compatible version from [the releases](https://github.com/ha-homelab/home-studio/releases);
+for local builds download its `home-studio-VERSION.zip` asset, not the Source
+code ZIP. Keep this version requirement when following the installation guide,
+which normally points to the latest stable release. If a suitable release is
+not yet available, keep your exported JSON; preview releases are optional.
+
 Save and publish the drawing as usual. In the native **3D Home** view, an
 administrator can use **Align map** to align a known drawing point with its
 geographic location. Follow the [map alignment guide](map-navigation.md).
