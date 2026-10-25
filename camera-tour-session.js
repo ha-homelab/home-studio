@@ -5,7 +5,7 @@ import { createTourRecorder, recordingSupport } from './camera-tour-recording.js
 // Presentation state stays separate from the house project and HA commands.
 export function createCameraTourSession({ container, capture, apply, canvas, render,
   t = text => text, onClose = () => {}, onPlaying = () => {} }) {
-  let panel, recorder = null, recording = false, finishing = null, finishingRecorder = null, disposed = false;
+  let panel, recorder = null, recording = false, finishing = null, finishingCapture = null, disposed = false;
   let downloadUrl = null, downloadLink = null, lastFrame = 0, generation = 0;
   const frameInterval = 1000 / 24;
   const notify = (callback, value) => {
@@ -52,21 +52,27 @@ export function createCameraTourSession({ container, capture, apply, canvas, ren
   }
   function finishRecording(save = true) {
     if (finishing) {
-      if (!save) { finishingRecorder?.cancel(); finishingRecorder?.dispose(); }
+      if (!save && finishingCapture) {
+        // stop() may have fulfilled before its download handler runs. Keep
+        // cancellation attached to that finalization, not only its encoder.
+        finishingCapture.discarded = true;
+        finishingCapture.recorder.cancel(); finishingCapture.recorder.dispose();
+      }
       return finishing;
     }
     if (!recorder) return Promise.resolve();
     const current = recorder;
     recorder = null; recording = false; panel.setRecording(false);
     if (!save) { current.cancel(); current.dispose(); return Promise.resolve(); }
-    finishingRecorder = current;
+    const finalization = { recorder: current, discarded: false };
+    finishingCapture = finalization;
     finishing = current.stop().then(result => {
-      if (!disposed) offerDownload(result);
+      if (!disposed && !finalization.discarded) offerDownload(result);
     }).catch(error => {
-      if (!disposed && error.name !== 'AbortError') panel.setStatus(error.message);
+      if (!disposed && !finalization.discarded && error.name !== 'AbortError') panel.setStatus(error.message);
     }).finally(() => {
       current.dispose();
-      if (finishingRecorder === current) { finishingRecorder = null; finishing = null; }
+      if (finishingCapture === finalization) { finishingCapture = null; finishing = null; }
     });
     return finishing;
   }

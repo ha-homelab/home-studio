@@ -102,6 +102,25 @@ const tests = [
     assert.equal(f.tracks[0].stopCalls, 1, 'transport Stop must release the capture track');
     assert.equal(f.recording, false);
   }],
+  ['context loss cancels a fulfilled capture before its download handler runs', async f => {
+    await f.panel.record();
+    f.session.interrupt();
+    queueMicrotask(() => f.session.interrupt({ discard: true }));
+    await flush();
+    assert.equal(f.urls.length, 0, 'discard must survive an already-fulfilled encoder stop');
+    assert.equal(f.tracks[0].stopCalls, 1);
+    assert.equal(f.frames.size, 0);
+    assert.equal(f.timers.size, 0);
+  }],
+  ['manual navigation preserves a completed capture', async f => {
+    await f.panel.record();
+    f.session.interrupt();
+    await flush();
+    assert.equal(f.urls.length, 1, 'normal interruption should still offer the video');
+    assert.equal(f.tracks[0].stopCalls, 1);
+    assert.equal(f.frames.size, 0);
+    assert.equal(f.timers.size, 0);
+  }],
   ['camera apply failure stops recording', async f => {
     await f.panel.record();
     f.failApply = true;
