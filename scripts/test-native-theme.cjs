@@ -44,7 +44,8 @@ const server = http.createServer((req, res) => {
   if (pathname === '/fixture') return res.writeHead(200, { 'Content-Type': 'text/html' }).end(fixture);
   const route = pathname.replace(/^\/home-floorplan-static\//, '/custom_components/home_floorplan/static/')
     .replace(/^\/home-floorplan-studio\//, '/');
-  const editorModules = ['/pbr-color-data.js', '/pbr-materials.js', '/material-textures.js', '/environment-lighting.js'];
+  const editorModules = ['/pbr-color-data.js', '/pbr-materials.js', '/material-textures.js', '/environment-lighting.js',
+    '/camera-tour.js', '/camera-tour-panel.js', '/camera-tour-session.js', '/camera-tour-recording.js', '/camera-tour.css'];
   if (!/^\/(planner|vendor|ai|custom_components\/home_floorplan\/static)\//.test(route) && !editorModules.includes(route)) return res.writeHead(404).end();
   const file = path.resolve(root, '.' + route);
   if (!file.startsWith(root + path.sep)) return res.writeHead(404).end();

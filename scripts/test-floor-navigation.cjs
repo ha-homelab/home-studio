@@ -82,7 +82,8 @@ const server = http.createServer((request, response) => {
   let route = new URL(request.url, 'http://localhost').pathname;
   if (route === '/favicon.ico') { response.writeHead(204).end(); return; }
   if (route === '/planner/') route = '/planner/index.html';
-  const editorModules = ['/pbr-color-data.js', '/pbr-materials.js', '/material-textures.js', '/environment-lighting.js'];
+  const editorModules = ['/pbr-color-data.js', '/pbr-materials.js', '/material-textures.js', '/environment-lighting.js',
+    '/camera-tour.js', '/camera-tour-panel.js', '/camera-tour-session.js', '/camera-tour-recording.js', '/camera-tour.css'];
   if ((!/^\/(planner|vendor)\/[\w./-]+$/.test(route) && !editorModules.includes(route)) || route.includes('..')) { response.writeHead(404).end(); return; }
   const file = path.join(root, route);
   let descriptor;

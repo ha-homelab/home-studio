@@ -152,10 +152,11 @@ const server=http.createServer((request,response)=>{
   if(route==='/favicon.ico'){response.writeHead(204,{'Cache-Control':'no-store'}).end();return;}
   if(route==='/fixture.json'){response.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify(project));return;}
   if(route==='/planner/')route='/planner/index.html';
-  // The editor imports these shared renderer modules from the repository root.
+  // The editor imports shared renderer and tour assets from the repository root.
   // Keep this fixture scoped: it must not serve arbitrary root/private files.
-  const sharedModule=/^\/(?:pbr-color-data|pbr-materials|material-textures|environment-lighting)\.js$/.test(route);
-  if((!/^\/(planner|vendor)\/[\w./-]+$/.test(route) && !sharedModule) || route.includes('..')){response.writeHead(404).end();return;}
+  const sharedModule=/^\/(?:pbr-color-data|pbr-materials|material-textures|environment-lighting|camera-tour(?:-panel|-session|-recording)?)\.js$/.test(route);
+  const sharedStyle=route==='/camera-tour.css';
+  if((!/^\/(planner|vendor)\/[\w./-]+$/.test(route) && !sharedModule && !sharedStyle) || route.includes('..')){response.writeHead(404).end();return;}
   const file=path.join(root,route),extension=path.extname(file);
   let descriptor,content;
   try {
