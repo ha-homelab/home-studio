@@ -23,6 +23,15 @@ class SourceReplayTests(unittest.TestCase):
             source = work / 'extracted/home-studio'
             self.assertFalse((source / '.git').exists())
             self.assertFalse((source / 'node_modules').exists())
+            # Load the tour browser helper from the distributed entry point,
+            # without starting Playwright or relying on checkout-only files.
+            result = subprocess.run([node, '-e', """
+                const assert = require('node:assert/strict');
+                const {createRequire} = require('node:module');
+                const fromTour = createRequire(require('node:path').resolve('scripts/test-camera-tour-browser.cjs'));
+                assert.equal(typeof fromTour('./test-camera-tour-native-downloads.cjs').checkNativeTourDownloads, 'function');
+            """], cwd=source, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             replay = sorted(path.relative_to(source).as_posix()
                             for path in (source / 'fuzz').glob('*.test.mjs'))
             self.assertEqual(replay, ['fuzz/project-validation.test.mjs', 'fuzz/wall-geometry.test.mjs'])

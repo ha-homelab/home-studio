@@ -72,7 +72,7 @@ SITE_FILES = (
 # the website landing page and its promotional media out of both editor bundles.
 EDITOR_FILES = tuple(name for name in SITE_FILES if name not in ('index.html', *WEBSITE_MEDIA_FILES))
 REPO_FILES = (
-    'camera-tour-viewer.js', 'docs/camera-tours.md', 'docs/images/camera-tour-workflow.svg', 'scripts/test-camera-tour.mjs', 'scripts/test-camera-tour-recording.mjs', 'scripts/test-camera-tour-session-contract.mjs', 'scripts/test-camera-tour-browser.cjs', 'scripts/test-camera-tour-hosts.cjs','scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'THIRD_PARTY_NOTICES.md',
+    'camera-tour-viewer.js', 'docs/camera-tours.md', 'docs/images/camera-tour-workflow.svg', 'scripts/test-camera-tour.mjs', 'scripts/test-camera-tour-recording.mjs', 'scripts/test-camera-tour-session-contract.mjs', 'scripts/test-camera-tour-browser.cjs', 'scripts/test-camera-tour-native-downloads.cjs', 'scripts/test-camera-tour-hosts.cjs','scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'THIRD_PARTY_NOTICES.md',
               'docs/closed-build.md', '.closed-build-policy.json', 'requirements-closed-build.txt',
               '.github/workflows/closed-build.yml', 'docker/closed-worker.Dockerfile',
               'scripts/closed_build.py', 'scripts/closed_envelope.py', 'scripts/closed_worker.py',
