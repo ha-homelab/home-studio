@@ -48,9 +48,9 @@ def validate_furniture_appearance(item):
     return model
 
 
-def linear_color(color):
+def linear_color(color, opacity=1):
     values = [int(color[offset:offset + 2], 16) / 255 for offset in (1, 3, 5)]
-    return [value / 12.92 if value <= .04045 else ((value + .055) / 1.055) ** 2.4 for value in values] + [1]
+    return [value / 12.92 if value <= .04045 else ((value + .055) / 1.055) ** 2.4 for value in values] + [opacity]
 
 
 def primitive(part, cutout=False):
@@ -62,6 +62,8 @@ def primitive(part, cutout=False):
             raise ValueError('furniture ' + key + ' must contain three finite numbers')
     if any(value <= 0 for value in part['size']):
         raise ValueError('furniture primitive sizes must be positive')
+    if 'opacity' in part and (type(part['opacity']) not in (int, float) or not math.isfinite(part['opacity']) or not 0 <= part['opacity'] <= 1):
+        raise ValueError('furniture opacity must be a finite number from 0 to 1')
     if 'inner_ratio' in part and (part['shape'] != 'ring' or type(part['inner_ratio']) not in (int, float)
                                  or not math.isfinite(part['inner_ratio']) or not 0 < part['inner_ratio'] < 1):
         raise ValueError('ring inner_ratio must be between zero and one')
@@ -716,8 +718,10 @@ def build_furniture_asset(item):
     patterned_mesh = {'name': 'pattern', 'vertices': [], 'normals': [], 'indices': [], 'kind': 'inventory'}
     for index, part in enumerate(model['parts']):
         color = (item['color'] if part['material'] == 'body' and item.get('color') else style['materials'].get(part['material'], part['material'])).lower()
-        material = 'furniture_' + color[1:]
-        materials[material] = linear_color(color)
+        opacity = part.get('opacity', 1)
+        # Authored optical parts must not alias opaque parts with the same RGB.
+        material = 'furniture_' + color[1:] + ('_' + model['id'] + '_part_' + str(index) if opacity < 1 else '')
+        materials[material] = linear_color(color, opacity)
         fabric = supports_curtain(model) and part['material'] in ('body', 'accent')
         tags = {'curtain_fabric': True, 'curtain_panel': 'left' if part['center'][0] < 0 else 'right'} if fabric else {}
         mesh = {'name': 'part_' + str(index), **primitive(part, bool(pattern and part.get('pattern_face'))), 'material': material, 'kind': 'inventory', **tags}

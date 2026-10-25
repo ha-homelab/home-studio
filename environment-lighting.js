@@ -68,7 +68,12 @@ export function createContactShading(THREE,renderer,profile) {
         for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){vec2 q=uv+vec2(float(x),float(y))*stepUV;
           float w=1./(1.+float(x*x+y*y));w*=max(0.,1.-abs(texture2D(depthMap,q).r-depth)*2000.);
           sum+=texture2D(aoMap,q).r*w;weight+=w;}
-        gl_FragColor=vec4(c.rgb*(sum/max(weight,.001)),c.a);}`,
+        float ao=sum/max(weight,.001);
+        if(ao>=1.){gl_FragColor=c;return;}
+        vec3 linear=mix(pow((c.rgb+.055)/1.055,vec3(2.4)),c.rgb/12.92,step(c.rgb,vec3(.04045)));
+        linear*=ao;
+        vec3 encoded=mix(1.055*pow(linear,vec3(1./2.4))-.055,12.92*linear,step(linear,vec3(.0031308)));
+        gl_FragColor=vec4(encoded,c.a);}`,
     depthTest:false,depthWrite:false,blending:THREE.NoBlending,toneMapped:false
   });
   const quad=new THREE.Mesh(geometry,shader);quad.frustumCulled=false;quadScene.add(quad);

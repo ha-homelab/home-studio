@@ -3132,8 +3132,8 @@
       "parts": [
         {"shape": "box", "center": [0.0, 0.982, 0.0], "size": [0.9803921569, 0.036, 0.83], "material": "body", "surface_finish": "painted", "geometry_profile": "edge"},
         {"shape": "box", "center": [0.0, 0.073, 0.0], "size": [0.9803921569, 0.05, 0.72], "material": "metal", "surface_finish": "brushed_metal", "geometry_profile": "edge"},
-        {"shape": "box", "center": [-0.2328431373, 0.51, 0.0], "size": [0.4264705882, 0.82, 0.16], "material": "glass", "surface_finish": "glass", "geometry_profile": "flat"},
-        {"shape": "box", "center": [0.2328431373, 0.51, 0.0], "size": [0.4264705882, 0.82, 0.16], "material": "glass", "surface_finish": "glass", "geometry_profile": "flat"},
+        {"shape": "box", "center": [-0.2328431373, 0.51, 0.0], "size": [0.4264705882, 0.82, 0.16], "material": "glass", "surface_finish": "glass", "geometry_profile": "flat", "opacity": 0.3},
+        {"shape": "box", "center": [0.2328431373, 0.51, 0.0], "size": [0.4264705882, 0.82, 0.16], "material": "glass", "surface_finish": "glass", "geometry_profile": "flat", "opacity": 0.3},
         {"shape": "box", "center": [-0.4656862745, 0.525, 0.0], "size": [0.0294117647, 0.95, 0.5], "material": "body", "surface_finish": "painted", "geometry_profile": "edge"},
         {"shape": "box", "center": [0.0, 0.525, 0.0], "size": [0.0294117647, 0.95, 0.5], "material": "body", "surface_finish": "painted", "geometry_profile": "edge"},
         {"shape": "box", "center": [0.4656862745, 0.525, 0.0], "size": [0.0294117647, 0.95, 0.5], "material": "body", "surface_finish": "painted", "geometry_profile": "edge"},

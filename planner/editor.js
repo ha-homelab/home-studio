@@ -1151,6 +1151,7 @@ function instancePreviewCatalog(groups) {
   const batches = new Map();
   for (const group of groups) if (!blocked.has(group)) {
     for (const mesh of group.children) {
+      if (mesh.material.transparent || mesh.material.opacity < 1) continue;
       if (!batches.has(mesh.geometry)) batches.set(mesh.geometry, []);
       batches.get(mesh.geometry).push(mesh);
     }
@@ -1212,9 +1213,10 @@ function rebuildPreview() {
             catalogGeometries.set(part, geometry);
           }
           const profile=MATERIAL_SURFACE_PROFILES[part.surface_finish]||[.78,0];
-          const material = createPreviewMaterial({ color: new THREE.Color(...asset.materials[part.material].slice(0, 3)), roughness:profile[0],metalness:profile[1] });
+          const color = asset.materials[part.material], opacity = color[3];
+          const material = createPreviewMaterial({ color: new THREE.Color(...color.slice(0, 3)), roughness:profile[0],metalness:profile[1],transparent:opacity<1,opacity,depthWrite:opacity===1,side:opacity<1?THREE.DoubleSide:THREE.FrontSide });
           if(!previewDiffuseLighting&&part.uv)applyMaterialPBR(THREE,material,{channels:previewDetails.get(part.material_family)});
-          const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; mesh.castShadow = true; mesh.receiveShadow = true; group.add(mesh); itemMeshCount++;
+          const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; mesh.castShadow = opacity===1; mesh.receiveShadow = true; group.add(mesh); itemMeshCount++;
         }
         worldGroup.add(group);
         if (f.id === activeFloorId) previewItemNodes.set(item.id, { nodes: [group], positions: [group.position.clone()], origin: { ...p } });

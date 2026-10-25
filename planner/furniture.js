@@ -39,11 +39,11 @@ export function createFurnitureItemFields(modelId, styleId) {
   return fields;
 }
 
-function linearColor(hex) {
+function linearColor(hex, opacity = 1) {
   return [1, 3, 5].map(offset => {
     const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
     return value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4;
-  }).concat(1);
+  }).concat(opacity);
 }
 
 export function primitive(part, cutout = false) {
@@ -52,6 +52,7 @@ export function primitive(part, cutout = false) {
     if (!Array.isArray(part[key]) || part[key].length !== 3 || !part[key].every(Number.isFinite)) throw new Error('Furniture ' + key + ' must contain three finite numbers.');
   }
   if (part.size.some(value => value <= 0)) throw new Error('Furniture primitive sizes must be positive.');
+  if (Object.hasOwn(part, 'opacity') && (typeof part.opacity !== 'number' || !Number.isFinite(part.opacity) || part.opacity < 0 || part.opacity > 1)) throw new Error('Furniture opacity must be a finite number from 0 to 1.');
   if (Object.hasOwn(part, 'inner_ratio') && (part.shape !== 'ring' || !Number.isFinite(part.inner_ratio) || part.inner_ratio <= 0 || part.inner_ratio >= 1)) throw new Error('Ring inner_ratio must be between zero and one.');
   if (Object.hasOwn(part, 'pattern_face') && (part.shape !== 'box' || !['top', 'front'].includes(part.pattern_face))) throw new Error('Furniture pattern_face must be top or front on a box.');
   const allowed = {box:['edge','soft','cushion','tailored','joined','flat','canopy','vehicle_shell','molded_shell'],cylinder:['turned','lathed','lathed_fine','rod','soft','canopy','sprig','organic'],sphere:['round','leaf','canopy','coachwork','greenhouse'],ring:['rounded','rounded_fine'],cone:['turned','canopy','grass']};
@@ -546,8 +547,10 @@ export function buildFurnitureAsset(item) {
   const curtainPatterns = [];
   const meshes = model.parts.map((part, index) => {
     const color = (part.material === 'body' && item.color ? item.color : style.materials[part.material] || part.material).toLowerCase();
-    const material = 'furniture_' + color.slice(1);
-    materials[material] = linearColor(color);
+    const opacity = part.opacity ?? 1;
+    // Authored optical parts must not alias opaque parts with the same RGB.
+    const material = 'furniture_' + color.slice(1) + (opacity < 1 ? '_' + model.id + '_part_' + index : '');
+    materials[material] = linearColor(color, opacity);
     const fabric = supportsCurtain(model) && ['body', 'accent'].includes(part.material);
     const tags = fabric ? { curtain_fabric: true, curtain_panel: part.center[0] < 0 ? 'left' : 'right' } : {};
     const mesh = { name: 'part_' + index, ...primitive(part, !!(pattern && part.pattern_face)), surface_finish: part.surface_finish || 'painted', material_family: part.surface_finish || 'painted', material, kind: 'inventory', ...tags };

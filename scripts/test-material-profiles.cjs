@@ -2,6 +2,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const {spawnSync}=require('node:child_process');
 const root=path.resolve(__dirname,'..'),source=fs.readFileSync(path.join(root,'viewer.js'),'utf8'),materialSource=fs.readFileSync(path.join(root,'material-textures.js'),'utf8').replaceAll('export ','');
+
 (async()=>{
   const THREE=await import('data:text/javascript;base64,'+fs.readFileSync(path.join(root,'vendor/three.module.min.js')).toString('base64'));
   const factory=source.split('\n').find(line=>line.startsWith('function createSceneMaterial('));
@@ -36,5 +37,29 @@ const root=path.resolve(__dirname,'..'),source=fs.readFileSync(path.join(root,'v
     assert.equal(wall.type,diffuseLighting?'MeshBasicMaterial':'MeshStandardMaterial');wall.dispose();
     assert.equal(appearance.roughness,.8,'factory never mutates caller options');
   }
-  console.log('Material finish tables, per-part overrides/batching, emissive preservation, transparency and Lambert/wall fallback passed.');
+  const catalog=await import(require('node:url').pathToFileURL(path.join(root,'planner/furniture.js')));
+  const editor=fs.readFileSync(path.join(root,'planner/editor.js'),'utf8');
+  function declaration(name){const start=editor.indexOf('function '+name+'('),end=editor.indexOf('\n}',start);assert(start>=0&&end>start);return editor.slice(start,end+2);}
+  const asset=catalog.buildFurnitureAsset({model_id:'glass_railing',type:catalog.getCatalogModel('glass_railing').type});
+  const start=editor.indexOf('          const profile=MATERIAL_SURFACE_PROFILES[part.surface_finish]');
+  const end=editor.indexOf('\n',editor.indexOf('group.add(mesh); itemMeshCount++;',start));assert(start>=0&&end>start);
+  for(const diffuse of [false,true])for(const index of [0,2]){
+    const made=[],part=asset.meshes[index],context={THREE,asset,part,geometry:new THREE.BoxGeometry(),previewDiffuseLighting:diffuse,
+      MATERIAL_SURFACE_PROFILES:pythonProfiles,applyMaterialPBR(){},previewDetails:{get(){return {}}},group:{add(mesh){made.push(mesh)}},itemMeshCount:0};
+    vm.runInNewContext(declaration('createPreviewMaterial')+'\n'+editor.slice(start,end),context);
+    assert.equal(made.length,1);const mesh=made[0],transparent=index===2;
+    assert.equal(mesh.material.type,diffuse?'MeshLambertMaterial':'MeshStandardMaterial');
+    assert.equal(mesh.material.opacity,transparent?.3:1);assert.equal(mesh.material.transparent,transparent);
+    assert.equal(mesh.material.depthWrite,!transparent);assert.equal(mesh.material.side,transparent?THREE.DoubleSide:THREE.FrontSide);
+    assert.equal(mesh.castShadow,!transparent);assert.equal(mesh.receiveShadow,true);
+    mesh.material.dispose();context.geometry.dispose();
+  }
+  const shared=[{},{}],groups=[],batches=[];let removed=0;
+  for(let index=0;index<2;index++)groups.push({children:shared.map((geometry,i)=>({geometry,material:{transparent:i===1,opacity:i===1?.3:1,dispose(){}},matrixWorld:{},removeFromParent(){removed++}})),
+    bounds:{min:{x:index*3,y:0,z:0},max:{x:index*3+1,y:1,z:1}}});
+  vm.runInNewContext(declaration('instancePreviewCatalog')+'\ninstancePreviewCatalog(groups);',{groups,
+    worldGroup:{children:groups,updateMatrixWorld(){},add(batch){batches.push(batch)},remove(){}},THREE:{Box3:class{setFromObject(group){return group.bounds}},
+    InstancedMesh:class{constructor(geometry,material,count){Object.assign(this,{geometry,material,count,instanceMatrix:{}})}setMatrixAt(){}computeBoundingBox(){}computeBoundingSphere(){}}}});
+  assert.equal(batches.length,1,'only opaque catalog geometry may be instanced');assert.equal(batches[0].material.transparent,false);assert.equal(removed,2);
+  console.log('Material finish tables, per-part batching, editor glass/shadows, opaque-only instancing and Lambert/wall fallback passed.');
 })().catch(error=>{console.error(error);process.exitCode=1});
