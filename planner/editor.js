@@ -1682,6 +1682,10 @@ $('zoom-in').addEventListener('click', () => view !== 'preview' ? zoomPlan(1.2) 
 $('help-button').addEventListener('click', () => $('help-dialog').showModal());
 document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => $(b.dataset.close).close()));
 $('build-project').addEventListener('click', () => {
+  const needsSiteSupport = Object.hasOwn(project, 'site');
+  $('build-site-compatibility').hidden = !needsSiteSupport;
+  $('build-toolkit-link').href = `https://github.com/ha-homelab/home-studio/releases${needsSiteSupport ? '' : '/latest'}`;
+  translatedText('build-toolkit-link', needsSiteSupport ? 'Choose a compatible release ↗' : 'Download the complete ZIP ↗');
   const label = $('build-validation');
   try { validateProject(project, { complete: true }); label.className = 'callout'; buildValidationText = () => t('Your project passes the editor checks and is ready to export. The compiler performs its own final validation.'); label.textContent = buildValidationText(); }
   catch (error) { label.className = 'callout error'; buildValidationText = () => t('Before building: {error} You can still export this draft.', { error: formatValidationError(error, t) }); label.textContent = buildValidationText(); }
