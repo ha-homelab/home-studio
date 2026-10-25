@@ -1099,15 +1099,19 @@ function initPreview() {
   } catch (error) { disposePreviewRenderer(); renderer?.forceContextLoss(); previewUnavailable = true; releasePreviewPointer(); updatePreviewNavigation(); $('preview-error').hidden = false; translatedText('preview-error', '3D preview is unavailable in this browser. The 2D editor and JSON export still work. Try a browser with WebGL enabled.'); previewMetadata = { error: String(error.message) }; }
 }
 function previewFloors() { return siteEditor?.active || $('all-floors').checked ? displayedProject().floors : [displayedFloor()]; }
-function fitPreview() {
+function previewFit() {
   const floors = previewFloors(), bounds = floors.map(floorBounds); if (siteEditor?.active) bounds.push(siteEditor.bounds());
   const minX = Math.min(...bounds.map(b => b.minX)), maxX = Math.max(...bounds.map(b => b.maxX)), minZ = Math.min(...bounds.map(b => b.minZ)), maxZ = Math.max(...bounds.map(b => b.maxZ));
   const site = siteEditor?.active ? displayedProject().site : null;
   const low = Math.min(...floors.map(f => f.elevation_m), site?.ground_elevation_m ?? Infinity), high = Math.max(...floors.map(f => f.elevation_m + f.height_m), ...(site?.features || []).map(feature => site.ground_elevation_m + feature.height_m));
   const verticalFov = 40 * Math.PI / 180, horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * size.width / size.height);
   const sphereRadius = Math.hypot(maxX - minX, maxZ - minZ, high - low) / 2;
-  orbit.target.set((minX + maxX) / 2, (low + high) / 2, (minZ + maxZ) / 2);
-  orbit.radius = Math.max(6, sphereRadius / Math.sin(Math.min(verticalFov, horizontalFov) / 2) * 1.12); orbit.baseRadius = orbit.radius;
+  return { target: [(minX + maxX) / 2, (low + high) / 2, (minZ + maxZ) / 2],
+    radius: Math.max(6, sphereRadius / Math.sin(Math.min(verticalFov, horizontalFov) / 2) * 1.12) };
+}
+function fitPreview() {
+  const fit = previewFit();
+  orbit.target.set(...fit.target); orbit.radius = fit.radius; orbit.baseRadius = orbit.radius;
   rebasePreviewGesture();
   if (view !== 'plan' && renderer) requestPreviewRender();
 }
@@ -2030,6 +2034,12 @@ cameraTour = installPlannerTour({ button: $('preview-tour'), parent: $('preview-
     return { type: 'perspective', floorId: 'planner:' + activeFloorId,
       yaw: orbit.yaw, pitch: orbit.pitch, radius: orbit.radius,
       target: [orbit.target.x, orbit.target.y, orbit.target.z] };
+  },
+  captureOrbit() {
+    if (!canNavigatePreview()) throw Error(t('Open the 3D preview to use a camera tour.'));
+    const fit = previewFit();
+    return { type: 'perspective', floorId: 'planner:' + activeFloorId,
+      yaw: orbit.yaw, pitch: orbit.pitch, radius: fit.radius, target: fit.target };
   },
   apply(pose) {
     const targetFloor = project.floors.find(f => 'planner:' + f.id === pose.floorId);

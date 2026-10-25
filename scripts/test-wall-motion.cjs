@@ -151,7 +151,7 @@ async function testHomeDrawPaths() {
   const stage = {dataset:{},getBoundingClientRect:() => ({width:1200,height:700})};
   const trace = [], masks = [];
   const c = vm.createContext({
-    THREE, active:true, camera:undefined, cameraFit:undefined, projectedPosition:new THREE.Vector3(),
+    THREE, active:true, camera:undefined, cameraFit:undefined, houseFitBounds: undefined, root: new THREE.Group(), projectedPosition:new THREE.Vector3(),
     selected:'', planRadius:10, planBounds:true, zoom:1, panX:0, panY:0, homeRotation:0, homeTilt:0,
     model:{ceiling_height_m:3,rooms:[{id:'A',polygon:[[0,0],[4,0],[4,4],[0,4]]}]},
     xm:x => x, zm:z => z, $:id => id==='homeStage' ? stage : {firstElementChild:{style:{}}},

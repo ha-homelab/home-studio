@@ -4,8 +4,11 @@
 .camera-tour-host[hidden] { display: none !important; }
 .camera-tour-download { display: block; padding: 12px; background: #fcfdfb; color: #23645a;
   border-radius: 8px; margin-top: 8px; font: 14px/1.45 system-ui, sans-serif; }
+.camera-tour-result { margin-top: 12px; }
+.camera-tour-result h3 { margin: 0 0 8px; font-size: 15px; }
+.camera-tour-video { display: block; width: 100%; max-height: 45vh; border-radius: 8px; background: #172a30; }
 .camera-tour-panel {
-  box-sizing: border-box; width: min(100%, 380px); max-height: 85vh; overflow: auto;
+  box-sizing: border-box; width: min(100%, 380px);
   padding: 16px; color: #172a30; background: #fcfdfb; border: 1px solid #ccd6d1;
   border-radius: 14px; box-shadow: 0 12px 40px #132b3326; font: 14px/1.45 system-ui, sans-serif;
   overscroll-behavior: contain; color-scheme: light;
@@ -46,6 +49,6 @@
 .camera-tour-status { min-height: 20px; margin: 12px 0 0; color: #365c50; font-size: 12px; overflow-wrap: anywhere; }
 .camera-tour-error { color: #9c3029; }
 @media (max-width: 500px) {
-  .camera-tour-panel { width: 100%; max-height: 78vh; padding: 12px; }
+  .camera-tour-panel { width: 100%; padding: 12px; }
   .camera-tour-panel button { min-height: 40px; }
 }

@@ -3,11 +3,12 @@ import { createCameraTourPanel } from './camera-tour-panel.js';
 import { createTourRecorder, recordingSupport } from './camera-tour-recording.js';
 
 // Presentation state stays separate from the house project and HA commands.
-export function createCameraTourSession({ container, capture, apply, canvas, render,
+export function createCameraTourSession({ container, capture, captureOrbit, apply, canvas, render,
   t = text => text, onClose = () => {}, onPlaying = () => {}, canExport = true }) {
   let panel, recorder = null, recording = false, finishing = null, finishingCapture = null, disposed = false;
   let exportAllowed = canExport === true;
-  let downloadUrl = null, downloadLink = null, lastFrame = 0, generation = 0;
+  let pageHidden = false;
+  let downloadUrl = null, downloadLink = null, previewVideo = null, lastFrame = 0, generation = 0;
   const frameInterval = 1000 / 24;
   const notify = (callback, value) => {
     try { callback(value); } catch { /* Observer errors must not interrupt resource cleanup. */ }
@@ -25,28 +26,58 @@ export function createCameraTourSession({ container, capture, apply, canvas, ren
     };
     ticket.id = requestAnimationFrame(step); return ticket;
   };
-  const tour = createCameraTour({ capture, apply, requestFrame,
+  const tour = createCameraTour({ capture, captureOrbit, apply, requestFrame,
     cancelFrame: ticket => { ticket.cancelled = true; cancelAnimationFrame(ticket.id); } });
+  // Sessions are created lazily on first open. Reopening never replaces a route,
+  // including an intentionally cleared one. Preparing views does not render.
+  let initialError = '';
+  try { tour.orbit(t('Orbit')); }
+  catch (error) { initialError = error.message; }
+  function pausePreview(unload = false) {
+    if (!previewVideo) return;
+    try { if (!previewVideo.paused) previewVideo.pause(); } catch { /* Continue unloading a failed player. */ }
+    if (unload) {
+      for (const cleanup of [() => previewVideo.removeAttribute('src'), () => previewVideo.load()]) {
+        try { cleanup(); } catch { /* A failed player must not block hiding or teardown. */ }
+      }
+    }
+  }
+  function showPreview() {
+    if (!previewVideo || disposed || pageHidden || document.hidden || container.hidden || !downloadUrl) return;
+    if (previewVideo.getAttribute('src') !== downloadUrl) {
+      previewVideo.src = downloadUrl;
+      previewVideo.load();
+    }
+  }
   function releaseDownload() {
-    const url = downloadUrl, link = downloadLink;
+    const url = downloadUrl, link = downloadLink, video = previewVideo;
     downloadUrl = null;
     downloadLink = null;
-    try { link?.remove(); } finally { if (url) URL.revokeObjectURL(url); }
+    previewVideo = null;
+    for (const cleanup of [
+      () => video?.pause(), () => video?.removeAttribute('src'), () => video?.load(),
+      () => video?.remove(), () => link?.remove(), () => panel?.setResult(),
+      () => { if (url) URL.revokeObjectURL(url); },
+    ]) {
+      try { cleanup(); } catch { /* Release every resource even if the player failed. */ }
+    }
   }
   function offerDownload(result) {
     if (!exportAllowed) return;
     releaseDownload();
-    const link = document.createElement('a');
+    const link = document.createElement('a'), video = document.createElement('video');
     downloadUrl = URL.createObjectURL(result.blob);
     downloadLink = link;
+    previewVideo = video;
     try {
+      video.controls = true; video.playsInline = true; video.preload = 'metadata';
+      video.className = 'camera-tour-video'; video.setAttribute('aria-label', t('Recorded tour'));
       link.href = downloadUrl; link.download = `home-studio-tour.${result.extension}`;
-      link.textContent = t('Download video'); link.className = 'camera-tour-download';
-      container.append(link);
+      link.textContent = t('Download MP4'); link.className = 'camera-tour-download';
+      panel.setResult(video, link);
+      showPreview();
     } catch (error) { releaseDownload(); throw error; }
-    // The visible link remains available when automatic downloads are blocked.
-    try { link.click(); } catch { /* The user can still use the visible link. */ }
-    panel.setStatus(t('Video ready. Only the 3D canvas is included.'));
+    panel.setStatus(t('Video ready. Play it here or download the MP4. Only the 3D canvas is included.'));
   }
   function pauseTour() {
     if (disposed) return;
@@ -94,6 +125,15 @@ export function createCameraTourSession({ container, capture, apply, canvas, ren
     tour.stop({ restore: false });
     if (disposed) return;
     const attempt = ++generation;
+    pausePreview();
+    // The encoder's first frame must already match the route. Seeking saves
+    // the original view without starting its clock; play resumes at zero.
+    try { tour.seek(0); }
+    catch (error) {
+      if (!disposed && generation === attempt) panel.setStatus(error.message);
+      return;
+    }
+    if (disposed || !exportAllowed || generation !== attempt || tour.getState().status !== 'paused') return;
     const current = createTourRecorder({ canvas: surface, render, frameRate: 24,
       onState(state) {
         if (!disposed && state === 'idle' && recording && recorder === current) {
@@ -120,25 +160,32 @@ export function createCameraTourSession({ container, capture, apply, canvas, ren
   }
   function close() {
     if (disposed) return;
+    pausePreview(true);
     void finishRecording();
     try { tour.stop({ restore: true }); }
     catch (error) { panel.setStatus(error.message); }
     finally { container.hidden = true; notify(onClose); }
   }
   panel = createCameraTourPanel({ container, tour, t, record, onClose: close, canExport: exportAllowed });
+  if (initialError) panel.setStatus(initialError);
   const unsubscribe = tour.subscribe(state => {
+    if (state.status === 'playing') pausePreview();
     notify(onPlaying, state.status === 'playing');
     if (recording && state.status !== 'playing') void finishRecording();
   });
   function interrupt({ discard = false } = {}) {
     if (disposed) return;
+    pausePreview();
     // A user's drag takes over without snapping back to an earlier view.
     if (recording || discard) void finishRecording(!discard);
     if (tour.getState().status !== 'idle') tour.stop({ restore: false });
   }
-  function hidden() { if (document.hidden) interrupt(); }
+  function hidden() { if (document.hidden) { pausePreview(true); interrupt(); } else showPreview(); }
+  function pageHide() { pageHidden = true; pausePreview(true); interrupt(); }
+  function pageShow() { pageHidden = false; showPreview(); }
   document.addEventListener('visibilitychange', hidden);
-  window.addEventListener('pagehide', interrupt);
+  window.addEventListener('pagehide', pageHide);
+  window.addEventListener('pageshow', pageShow);
   return {
     tour, interrupt, close,
     setExportAllowed(value) {
@@ -151,7 +198,8 @@ export function createCameraTourSession({ container, capture, apply, canvas, ren
       }
       panel.setExportAllowed(exportAllowed);
     },
-    show() { if (!disposed) { container.hidden = false; panel.refresh(); } },
+    show() { if (!disposed) { container.hidden = false; panel.refresh(); showPreview(); } },
+    hide() { if (!disposed) { interrupt(); container.hidden = true; pausePreview(true); } },
     dispose() {
       if (disposed) return;
       disposed = true; generation++;
@@ -161,7 +209,8 @@ export function createCameraTourSession({ container, capture, apply, canvas, ren
         () => { void finishRecording(false); }, unsubscribe,
         () => tour.dispose(), () => panel.dispose(), releaseDownload,
         () => document.removeEventListener('visibilitychange', hidden),
-        () => window.removeEventListener('pagehide', interrupt),
+        () => window.removeEventListener('pagehide', pageHide),
+        () => window.removeEventListener('pageshow', pageShow),
         () => notify(onPlaying, false),
       ]) {
         try { cleanup(); } catch { /* Continue through every teardown action. */ }

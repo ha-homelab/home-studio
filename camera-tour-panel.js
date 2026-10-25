@@ -32,13 +32,18 @@ export function createCameraTourPanel({ container, tour, t = value => value, rec
   const header = element('header', '', 'camera-tour-header');
   const close = button('Close', () => typeof onClose === 'function' ? onClose() : tour.stop(), 'Close camera tour');
   header.append(element('h2', label('Camera tour')), close);
-  const help = element('p', label('Save views, arrange their order, then play or record the route.'), 'camera-tour-help');
+  const help = element('p', label('Play the full orbit, edit its views, or clear the route to start your own.'), 'camera-tour-help');
   const storage = element('p', label('Views stay in this tab. Export the route to keep it.'), 'camera-tour-help');
   const add = button('Save current view', () => tour.add(label('View {number}', { number: tour.getState().waypoints.length + 1 })));
   add.classList.add('camera-tour-primary');
+  const routeActions = element('div', '', 'camera-tour-actions');
+  const orbit = button('Full orbit', () => tour.orbit(label('Orbit')));
+  const clear = button('Clear route', () => tour.clear());
+  routeActions.append(orbit, clear);
   const list = element('ol', '', 'camera-tour-list'); list.setAttribute('aria-label', label('Saved views'));
   const empty = element('p', label('Move the camera to your first viewpoint and save it.'), 'camera-tour-empty');
   const note = element('p', label('Seconds sets travel time to the next view; the last view holds. Changes of floor or room use a cut.'), 'camera-tour-help');
+  const singleView = element('p', label('One saved view makes a still video. Save another view or use Full orbit for movement.'), 'camera-tour-help');
   const transport = element('div', '', 'camera-tour-actions');
   const play = button('Play', () => tour.play()), pause = button('Pause', () => tour.pause()), stop = button('Stop', () => tour.stop());
   transport.append(play, pause, stop);
@@ -70,9 +75,10 @@ export function createCameraTourPanel({ container, tour, t = value => value, rec
   const recordButton = typeof record === 'function' ? button('Record video', () => record()) : null;
   if (recordButton) files.append(recordButton);
   const status = element('p', '', 'camera-tour-status'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+  const result = element('div', '', 'camera-tour-result'), resultTitle = element('h3', label('Recorded tour')); result.hidden = true;
   // Route shortcuts must not reach the underlying house editor.
   panel.addEventListener('keydown', event => event.stopPropagation());
-  panel.append(header, help, storage, add, empty, list, note, transport, meter, files, status); container.append(panel);
+  panel.append(header, help, transport, meter, files, status, result, storage, routeActions, add, empty, list, note, singleView); container.append(panel);
 
   function makeRow(view, index) {
     const row = element('li', '', 'camera-tour-view'); row.dataset.waypointId = view.id;
@@ -117,6 +123,8 @@ export function createCameraTourPanel({ container, tour, t = value => value, rec
     const storageMessage = label(exportAllowed ? 'Views stay in this tab. Export the route to keep it.' : exportUnavailable);
     if (storage.textContent !== storageMessage) storage.textContent = storageMessage;
     empty.hidden = hasViews; note.hidden = !hasViews;
+    singleView.hidden = rows.length !== 1;
+    orbit.disabled = locked; clear.disabled = locked || !hasViews;
     add.disabled = locked || rows.length >= CAMERA_TOUR_LIMITS.waypoints || state.totalDuration + 3 > CAMERA_TOUR_LIMITS.seconds;
     play.disabled = !hasViews || state.status === 'playing' || recording; pause.disabled = state.status !== 'playing' || recording;
     stop.disabled = state.status === 'idle' && !recording;
@@ -137,6 +145,7 @@ export function createCameraTourPanel({ container, tour, t = value => value, rec
   const unsubscribe = tour.subscribe(refresh); refresh();
   return {
     refresh,
+    setResult(...nodes) { if (!disposed) { result.replaceChildren(...(nodes.length ? [resultTitle, ...nodes] : [])); result.hidden = !nodes.length; } },
     setExportAllowed(value) {
       if (disposed || exportAllowed === (value === true)) return;
       exportAllowed = value === true; customStatus = ''; statusIsError = false; refresh();

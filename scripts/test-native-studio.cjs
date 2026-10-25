@@ -343,7 +343,7 @@ async function testDocumentFallback(context, origin, project, errors) {
   assert(child,'Fallback mounted an editor document');
   assert.equal(child.url(),'about:srcdoc');
   assert.equal(await child.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content'),
-    `default-src 'none'; script-src ${origin}; style-src ${origin} 'unsafe-inline'; img-src ${origin} data: blob:; font-src ${origin}; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`,
+    `default-src 'none'; script-src ${origin}; style-src ${origin} 'unsafe-inline'; img-src ${origin} data: blob:; media-src blob:; font-src ${origin}; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`,
     'Fallback CSP must allow only the original asset origin and keep its other restrictions');
   assert.deepEqual(await child.evaluate(()=>window.planner.getProject()),project);
   assert.equal(await child.locator('link[href$="/camera-tour.css"]').getAttribute('href'),origin+'/home-floorplan-studio/camera-tour.css','Fallback rebases the bundled tour stylesheet to the same trusted origin');

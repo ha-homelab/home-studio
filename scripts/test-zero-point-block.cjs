@@ -121,7 +121,7 @@ vm.runInContext(source, code);
   // just-mutated light before drawing without waiting for a scheduled full frame.
   const captures=[], rect={width:1200,height:700}; let blocked=false, statusIntensity=0;
   const draw = vm.createContext({THREE,active:true,renderer:{},camera:new THREE.OrthographicCamera(-1,1,1,-1,.1,150),
-    cameraFit:undefined,selected:'',zoom:1,panX:0,panY:0,homeRotation:0,homeTilt:0,
+    cameraFit:undefined, houseFitBounds: undefined, root: new THREE.Group(),selected:'',zoom:1,panX:0,panY:0,homeRotation:0,homeTilt:0,
     planRadius:10,planBounds:true,xm:x=>x,zm:z=>z,
     model:{rooms,ceiling_height_m:3},points,labels:[],roomLighting:state.lighting,
     projectedPosition:new THREE.Vector3(),projectedForward:new THREE.Vector3(),

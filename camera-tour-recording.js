@@ -9,16 +9,21 @@ const MAX_DURATION_MS = 120000;
 const MAX_BYTES = 64 * 1024 * 1024;
 const STOP_TIMEOUT_MS = 3000;
 const MIME_TYPES = [
-  'video/webm;codecs=vp9',
-  'video/webm;codecs=vp8',
-  'video/webm',
-  'video/mp4;codecs=avc1.42E01E',
+  // Let the encoder choose an H.264 level appropriate for the canvas size.
+  'video/mp4;codecs=avc1',
   'video/mp4',
 ];
 
 function extensionFor(mimeType) {
   const base = String(mimeType || '').split(';', 1)[0].trim().toLowerCase();
-  return base === 'video/webm' ? 'webm' : base === 'video/mp4' ? 'mp4' : '';
+  return base === 'video/mp4' ? 'mp4' : '';
+}
+
+function supportedMimeTypes(Recorder) {
+  return MIME_TYPES.filter(mimeType => {
+    try { return Recorder.isTypeSupported(mimeType); }
+    catch { return false; } // A browser may reject an individual codec probe.
+  });
 }
 
 function environment(canvas) {
@@ -45,14 +50,9 @@ export function recordingSupport(canvas) {
   if (typeof Recorder !== 'function' || typeof Recorder.isTypeSupported !== 'function' || typeof Blob !== 'function') {
     return unavailable('MediaRecorder video recording is unavailable in this browser.');
   }
-  for (const mimeType of MIME_TYPES) {
-    try {
-      if (Recorder.isTypeSupported(mimeType)) {
-        return { supported: true, reason: '', mimeType, extension: extensionFor(mimeType) };
-      }
-    } catch { /* A browser may reject an individual codec probe. */ }
-  }
-  return unavailable('This browser does not support recording WebM or MP4 video.');
+  const [mimeType] = supportedMimeTypes(Recorder);
+  if (mimeType) return { supported: true, reason: '', mimeType, extension: 'mp4' };
+  return unavailable('MP4 recording is unavailable in this browser. Camera tour playback is still available.');
 }
 
 function bounded(value, fallback, maximum, label) {
@@ -231,9 +231,29 @@ export function createTourRecorder({
         }
         for (const track of session.tracks) listen(track, 'ended', () => requestStop(session), session.captureListeners);
         listen(session.stream, 'inactive', () => requestStop(session), session.captureListeners);
-        session.recorder = new env.Recorder(session.stream, { mimeType: support.mimeType });
-        session.mimeType = session.recorder.mimeType || support.mimeType;
-        if (!extensionFor(session.mimeType)) throw new Error('The browser selected an unsupported video format.');
+        let constructionError;
+        for (const mimeType of supportedMimeTypes(env.Recorder)) {
+          if (session.finished) return;
+          let recorder;
+          try {
+            recorder = new env.Recorder(session.stream, { mimeType });
+            if (!extensionFor(recorder.mimeType || mimeType)) throw new Error('The browser did not select an MP4 recording format.');
+            session.recorder = recorder;
+            session.mimeType = recorder.mimeType || mimeType;
+            break;
+          } catch (error) {
+            // A successful capability probe does not guarantee construction.
+            // Retry only another MP4 candidate; never fall back to WebM.
+            constructionError = error;
+            try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch { /* Try the remaining candidate. */ }
+          }
+        }
+        if (!session.recorder) throw asError(constructionError, 'The browser could not create an MP4 recorder.');
+        if (session.finished) {
+          try { if (session.recorder.state !== 'inactive') session.recorder.stop(); } catch { /* Capture has already been released. */ }
+          session.recorder = null;
+          return;
+        }
         if (typeof session.recorder.addEventListener !== 'function' || typeof session.recorder.removeEventListener !== 'function') throw new Error('MediaRecorder events are unavailable in this browser.');
         let painted = false, recordingStarted = false;
         const ready = () => {
@@ -250,8 +270,8 @@ export function createTourRecorder({
           }
           if (event.data.type) {
             const extension = extensionFor(event.data.type);
-            if (!extension || (session.bytes && extension !== extensionFor(session.mimeType))) {
-              finish(session, new Error('The browser returned an unsupported or inconsistent video format.'));
+            if (!extension) {
+              finish(session, new Error('The browser returned a non-MP4 or inconsistent video format.'));
               return;
             }
             session.mimeType = event.data.type;
