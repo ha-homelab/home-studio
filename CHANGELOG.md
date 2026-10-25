@@ -4,6 +4,12 @@
 
 ### Added
 
+- Named camera tours in the planner preview and generated Home/Editor views,
+  with ordered viewpoints, play/pause/stop, and separate JSON route backups.
+- Local canvas video recording with supported WebM/MP4 downloads, bounded
+  duration and size, and automatic cleanup when playback or the page stops.
+  Camera tours do not send Home Assistant service calls.
+
 - Separate **Site & roof** editing for house and roof outlines, neighboring
   buildings, streets, and landscape shapes. Local metric geometry follows the
   project through JSON backups, native HA publication, and map overview.
