@@ -266,13 +266,22 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
       };
       window.__mapTest.configureMap({revision:4,configured:true,config});
     },png);
-    await page.waitForFunction(()=>window.__mapTest.mapStats.inflight===0&&window.__mapTest.mapStats.loaded>0);
-    assert.equal(await page.evaluate(()=>window.__mapTest.mapStats.loaded),await page.evaluate(()=>window.__mapTest.mapStats.visible-1));
+    // Viewport changes can briefly leave an idle, partially decoded tile set.
+    // Wait for this request set, then compare one atomic snapshot across engines.
+    const partial=await page.waitForFunction(()=>{
+      const stats=window.__mapTest.mapStats;
+      return stats.visible>1&&stats.inflight===0&&stats.loaded===stats.visible-1?stats:false;
+    });
+    const partialStats=await partial.jsonValue();await partial.dispose();
+    assert.equal(partialStats.loaded,partialStats.visible-1);
     assert.match(await page.locator('#homeMapStatus').textContent(),/Some map tiles/);assert.equal(await page.locator('#homeMapRetry').isVisible(),true,'A partial map failure exposes Retry map');
     await page.evaluate(()=>{for(let i=0;i<10;i++)window.renderModel();});await page.waitForTimeout(100);
     assert.equal(await page.evaluate(()=>recoveryTileAttempts[recoveryKey]),1,'Rendering a partial map does not run an automatic retry loop');
     await page.evaluate(()=>{recoveryFail=false;});await page.locator('#homeMapRetry').click();
-    await page.waitForFunction(()=>window.__mapTest.mapStats.inflight===0&&recoveryTileAttempts[recoveryKey]===2);
+    await page.waitForFunction(()=>{
+      const stats=window.__mapTest.mapStats;
+      return stats.inflight===0&&stats.loaded===stats.visible&&recoveryTileAttempts[recoveryKey]===2;
+    });
     assert.equal(await page.locator('#homeMapRetry').isVisible(),false);assert.equal(await page.locator('#homeMapStatus').textContent(),'');
     assert.equal(await page.evaluate(()=>Object.entries(recoveryTileAttempts).every(([key,count])=>count===(key===recoveryKey?2:1))),true,'Retry preserves all healthy tile requests');
     await page.setViewportSize({width:390,height:844});await assertCompassLayout();
