@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="340" viewBox="0 0 1040 340" role="img" aria-labelledby="title description">
+  <title id="title">Build a camera tour and save a local video</title>
+  <desc id="description">Save named camera views, arrange the stops in order, play the route, and export a local video. The tour moves the camera without sending device commands. The video contains the rendered scene, not interface overlays. Any later upload is the user's separate choice.</desc>
+  <rect width="1040" height="340" rx="24" fill="#edf3f2"/>
+  <g font-family="system-ui,sans-serif" fill="#203d43">
+    <text x="28" y="49" font-size="27" font-weight="700">A repeatable view of your home</text>
+    <text x="28" y="80" font-size="17">From saved viewpoints to a local video.</text>
+    <g fill="#ffffff" stroke="#c6d5d3" stroke-width="1.5">
+      <rect x="28" y="109" width="224" height="158" rx="16"/>
+      <rect x="281" y="109" width="224" height="158" rx="16"/>
+      <rect x="534" y="109" width="224" height="158" rx="16"/>
+      <rect x="787" y="109" width="224" height="158" rx="16"/>
+    </g>
+    <g fill="#167f83">
+      <circle cx="59" cy="140" r="17"/>
+      <circle cx="312" cy="140" r="17"/>
+      <circle cx="565" cy="140" r="17"/>
+      <circle cx="818" cy="140" r="17"/>
+    </g>
+    <g fill="#ffffff" font-size="17" text-anchor="middle">
+      <text x="59" y="146">1</text><text x="312" y="146">2</text>
+      <text x="565" y="146">3</text><text x="818" y="146">4</text>
+    </g>
+    <g font-size="22" font-weight="700">
+      <text x="47" y="188">Save views</text><text x="300" y="188">Arrange</text>
+      <text x="553" y="188">Play</text><text x="806" y="188">Export video</text>
+    </g>
+    <g font-size="16">
+      <text x="47" y="219">Position the camera</text><text x="47" y="243">Name each stop</text>
+      <text x="300" y="219">Order your stops</text><text x="300" y="243">Set the pace</text>
+      <text x="553" y="219">Preview movement</text><text x="553" y="243">Pause or stop</text>
+      <text x="806" y="219">Save a local file</text><text x="806" y="243">Optional upload by you</text>
+    </g>
+    <g fill="none" stroke="#167f83" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M259 188h14m-5-5 5 5-5 5"/>
+      <path d="M512 188h14m-5-5 5 5-5 5"/>
+      <path d="M765 188h14m-5-5 5 5-5 5"/>
+    </g>
+    <text x="28" y="308" font-size="16">Camera movement only · No device commands · Video contains the rendered scene</text>
+  </g>
+</svg>
