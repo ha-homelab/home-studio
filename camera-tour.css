@@ -1,0 +1,45 @@
+.camera-tour-panel {
+  box-sizing: border-box; width: min(100%, 380px); max-height: 85vh; overflow: auto;
+  padding: 16px; color: #172a30; background: #fcfdfb; border: 1px solid #ccd6d1;
+  border-radius: 14px; box-shadow: 0 12px 40px #132b3326; font: 14px/1.45 system-ui, sans-serif;
+  overscroll-behavior: contain; color-scheme: light;
+}
+.camera-tour-panel *, .camera-tour-panel *::before, .camera-tour-panel *::after { box-sizing: border-box; }
+.camera-tour-panel [hidden] { display: none !important; }
+.camera-tour-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.camera-tour-header h2 { margin: 0; font-size: 19px; }
+.camera-tour-panel button {
+  min-height: 36px; padding: 7px 11px; color: #173d46; background: #fff; border: 1px solid #bfccc6;
+  border-radius: 7px; font: inherit; cursor: pointer;
+}
+.camera-tour-panel button:hover:enabled { background: #edf4f0; border-color: #597e70; }
+.camera-tour-panel button:disabled { opacity: .5; cursor: default; }
+.camera-tour-panel :focus-visible { outline: 3px solid #248299; outline-offset: 2px; }
+.camera-tour-panel .camera-tour-primary { color: #fff; background: #23645a; border-color: #23645a; width: 100%; }
+.camera-tour-panel .camera-tour-primary:hover:enabled { background: #194b43; }
+.camera-tour-help, .camera-tour-empty { margin: 10px 0; color: #536761; font-size: 12px; }
+.camera-tour-empty { padding: 16px 8px; text-align: center; }
+.camera-tour-list { margin: 12px 0; padding-left: 25px; }
+.camera-tour-view { padding: 10px 8px; border-bottom: 1px solid #dae2dd; }
+.camera-tour-view::marker { font-weight: 650; color: #35675a; }
+.camera-tour-view[aria-current] { background: #eaf3ed; border-radius: 8px; }
+.camera-tour-fields { display: flex; gap: 8px; }
+.camera-tour-field { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
+.camera-tour-field > span { color: #4e625a; font-size: 11px; }
+.camera-tour-panel input:not([type=file]) {
+  width: 100%; min-width: 0; padding: 7px; border: 1px solid #bfccc6; border-radius: 5px;
+  background: #fff; color: #172a30; font: inherit;
+}
+.camera-tour-duration { max-width: 80px; }
+.camera-tour-location { display: block; margin-top: 4px; overflow-wrap: anywhere; color: #63766e; font-size: 11px; }
+.camera-tour-row-actions, .camera-tour-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.camera-tour-row-actions button { min-height: 32px; padding: 4px 8px; font-size: 12px; }
+.camera-tour-meter { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
+.camera-tour-meter progress { min-width: 0; width: 100%; height: 8px; accent-color: #23645a; }
+.camera-tour-timing { flex-shrink: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+.camera-tour-status { min-height: 20px; margin: 12px 0 0; color: #365c50; font-size: 12px; overflow-wrap: anywhere; }
+.camera-tour-error { color: #9c3029; }
+@media (max-width: 500px) {
+  .camera-tour-panel { width: 100%; max-height: 78vh; padding: 12px; }
+  .camera-tour-panel button { min-height: 40px; }
+}
