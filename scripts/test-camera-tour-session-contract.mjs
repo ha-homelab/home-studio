@@ -85,6 +85,16 @@ function fixture(options = {}) {
 }
 
 const tests = [
+  ['context-loss interruption discards capture before document event propagation', async f => {
+    await f.panel.record();
+    f.session.interrupt({ discard: true });
+    await flush();
+    assert.equal(f.tracks[0].stopCalls, 1);
+    assert.equal(f.recording, false);
+    assert.equal(f.urls.length, 0, 'a stopped encoder must not publish context-loss output');
+    assert.equal(f.frames.size, 0);
+    assert.equal(f.timers.size, 0);
+  }],
   ['transport Stop also stops recording', async f => {
     await f.panel.record();
     f.session.tour.stop();

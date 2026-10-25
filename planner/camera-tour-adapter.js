@@ -22,7 +22,7 @@ export function installPlannerTour({ button, parent, capture, apply, canvas, ren
     if (event.type === 'keydown' && event.key === 'Escape' && !container.hidden) { session?.close(); return; }
     if (!event.target.closest?.('.camera-tour-host') && event.target !== button) session?.interrupt();
   }, { capture: true, passive: type === 'wheel' });
-  document.addEventListener('webglcontextlost', () => session?.interrupt(), true);
+  document.addEventListener('webglcontextlost', () => session?.interrupt({ discard: true }), true);
   window.addEventListener('pagehide', event => { if (!event.persisted) { disposed = true; session?.dispose(); } });
   return { refresh() {
     if (!available() && !container.hidden) { session?.interrupt(); container.hidden = true; button.setAttribute('aria-expanded', 'false'); }

@@ -122,10 +122,10 @@ export function createCameraTourSession({ container, capture, apply, canvas, ren
     notify(onPlaying, state.status === 'playing');
     if (recording && state.status !== 'playing') void finishRecording();
   });
-  function interrupt() {
+  function interrupt({ discard = false } = {}) {
     if (disposed) return;
     // A user's drag takes over without snapping back to an earlier view.
-    if (recording) void finishRecording();
+    if (recording || discard) void finishRecording(!discard);
     if (tour.getState().status !== 'idle') tour.stop({ restore: false });
   }
   function hidden() { if (document.hidden) interrupt(); }

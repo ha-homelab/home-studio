@@ -68,7 +68,9 @@ for (const type of ['pointerdown', 'wheel', 'keydown']) document.addEventListene
   }
   if (!event.target.closest?.('.camera-tour-host') && !['homeCameraTour', 'editorCameraTour'].includes(event.target.id)) interruptViewerTours();
 }, { capture: true, passive: type === 'wheel' });
-document.addEventListener('webglcontextlost', interruptViewerTours, true);
+document.addEventListener('webglcontextlost', () => {
+  for (const { session } of tourSessions.values()) session.interrupt({ discard: true });
+}, true);
 window.addEventListener('pagehide', event => {
   if (!event.persisted) {
     tourDisposed = true;
