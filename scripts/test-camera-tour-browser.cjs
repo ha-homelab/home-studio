@@ -213,9 +213,14 @@ async function exercise(context, origin, name) {
     assert(await page.evaluate(() => __cameraTourBrowser.recordings.every(recorder => recorder.state === 'inactive')), 'all recorders stopped');
   } else {
     await panel.getByRole('button', { name: 'Record video', exact: true }).click();
-    assert.match(await panel.locator('.camera-tour-status').innerText(), /MP4/, 'unsupported encoders receive an explanation');
+    const reason = await panel.locator('.camera-tour-status').innerText();
+    assert([
+      'MP4 recording is unavailable in this browser. Camera tour playback is still available.',
+      'MediaRecorder video recording is unavailable in this browser.',
+      'Canvas video recording is unavailable in this browser.',
+    ].includes(reason), `unsupported capture reports its actual capability limit: ${reason}`);
     assert.equal(await host.locator('.camera-tour-download').count(), 0, 'no WebM substitute is downloaded');
-    result.recording = { status: 'unsupported', reason: 'No native MP4 encoder; camera playback remains available.' };
+    result.recording = { status: 'unsupported', reason };
   }
   await panel.getByRole('button', { name: 'Play', exact: true }).click();
   await page.waitForFunction(() => Boolean(document.querySelector('canvas[data-camera-tour-playing="true"]')));
