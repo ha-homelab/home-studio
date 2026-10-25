@@ -12,13 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 GUIDES = ('README.md', 'CHANGELOG.md', 'docs/dry-run.md', 'docs/i18n.md', 'docs/architecture.md',
           'docs/first-session.md', 'docs/home-assistant-editor.md', 'docs/blender-export.md', 'docs/dashboard-and-media.md', 'docs/process-and-results.md', 'docs/quality-and-release.md', 'docs/quality.md',
           'docs/fuzzing.md', 'docs/browser-compatibility.md', 'docs/release-workflow.md',
-          'docs/VERSIONING.md', 'docs/translations/README.md')
+          'docs/VERSIONING.md', 'docs/translations/README.md', 'docs/site-editor.md')
 WIKI = ('Home', '_Sidebar', 'Getting-started', 'Dry-run', 'Troubleshooting',
         'Languages', 'Development')
 DIAGRAMS = ('docs/images/dry-run-command-flow.svg', 'docs/images/plan-state-lifecycle.svg',
             'docs/images/dry-run-delivery-process.svg', 'docs/images/dry-run-validation.svg',
             'docs/assets/quality/browser-coverage.svg', 'docs/assets/quality/fuzz-results.svg',
-            'docs/assets/quality/release-pipeline.svg', 'docs/assets/quality/webgl-recovery.svg')
+            'docs/assets/quality/release-pipeline.svg', 'docs/assets/quality/webgl-recovery.svg', 'docs/images/site-editor-layers.svg')
 LINK = re.compile(r'!?\[[^\]\n]*\]\(\s*(<[^>]+>|[^\s)]+)(?:\s+[\"\'][^\n)]*)?\s*\)')
 REFERENCE = re.compile(r'^\s*\[[^\]]+\]:\s*(<[^>]+>|\S+)', re.M)
 

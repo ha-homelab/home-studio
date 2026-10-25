@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Separate **Site & roof** editing for house and roof outlines, neighboring
+  buildings, streets, and landscape shapes. Local metric geometry follows the
+  project through JSON backups, native HA publication, and map overview.
+- Photo-assisted site proposals through the existing optional AI connection.
+  Review and choose the proposed shapes before adding them; existing rooms,
+  furniture, entity bindings, and private geographic alignment are preserved.
+- Cross-language geometry checks and editor, AI, publication, and saved-viewer
+  regressions. Older generated viewers request a toolkit rebuild instead of
+  silently ignoring a newly published site layer.
+
 ## [1.2.0] - Geographic context and physical materials
 
 ### Added

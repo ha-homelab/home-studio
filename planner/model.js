@@ -1,6 +1,7 @@
 // Pure, metric project operations shared by the editor and its checks.
 import { validateFurnitureAppearance, supportsCurtain, getCatalogModel } from './furniture.js';
 import { ValidationError } from './validation.js';
+import { validateSite } from './site-model.js';
 export const LIMITS = Object.freeze({ floors: 8, rooms: 64, walls: 256, openings: 256, items: 256, points: 64, bytes: 2_000_000 });
 const EPS = 1e-8;
 const ID = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
@@ -107,7 +108,8 @@ export function validateProject(project, { complete = false } = {}) {
   }
   function id(v, regex, label) { if (typeof v !== 'string' || !regex.test(v) || RESERVED.has(v)) fail(`${label} has an invalid identifier.`); }
   function point(v, label) { if (!Array.isArray(v) || v.length !== 2) fail(`${label} must be [x, z].`, '{name} must be [x, z].', { name: label }); number(v[0], -100, 100, label + ' x'); number(v[1], -100, 100, label + ' z'); }
-  fields(project, ['schema_version', 'title', 'floors'], 'Project', ['id']);
+  fields(project, ['schema_version', 'title', 'floors'], 'Project', ['id', 'site']);
+  if (Object.hasOwn(project, 'site')) validateSite(project.site);
   if (project.schema_version !== 1) fail('Unsupported project schema. Expected schema_version: 1.');
   if (project.id !== undefined) id(project.id, FLOOR_ID, 'Project');
   string(project.title, 120, 'Project title');

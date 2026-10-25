@@ -253,6 +253,28 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.project.document, previous)
         self.assertEqual(self.hass.saved[self.project.store.key], previous)
 
+    async def test_site_shapes_survive_native_publish_and_restart(self):
+        document = sample()
+        original_floors = copy.deepcopy(document["floors"])
+        document["site"] = {"ground_elevation_m": -1, "features": [
+            {"id": "home_1", "name": "Fictional home", "kind": "home",
+             "polygon": [[0, 0], [8, 0], [8, 6], [0, 6]], "height_m": 6, "color": "#3ca6aa"},
+            {"id": "roof_1", "name": "Roof edge", "kind": "roof",
+             "polygon": [[-0.3, -0.3], [8.3, -0.3], [8.3, 6.3], [-0.3, 6.3]],
+             "height_m": 6.5, "color": "#72dfe3"},
+        ]}
+        await self.project.save(0, document)
+        assets, _, models, _, _ = await self.project.publish(1)
+        self.assertTrue((assets / "main/index.html").is_file())
+        for floor in document["floors"]:
+            context = models[floor["id"]]["site_context"]
+            self.assertEqual(context["features"], document["site"]["features"])
+            self.assertEqual(context["ground_elevation_m"], -1 - floor["elevation_m"])
+        restarted = native.NativeProject(self.hass, self.project.root)
+        await restarted.load()
+        self.assertEqual(restarted.document["project"]["site"], document["site"])
+        self.assertEqual(restarted.document["project"]["floors"], original_floors)
+
     async def test_blank_draft_is_saved_but_not_published(self):
         document = sample()
         document["floors"] = [document["floors"][0]]

@@ -63,7 +63,7 @@ def bounded_tree(value, *, max_depth=24, max_nodes=24000, forbid_private=False):
                 if not isinstance(key, str) or len(key) > 256:
                     reject("Invalid JSON property name.")
                 if forbid_private and key.lower() in {"api_key", "authorization", "entity_id", "entity_ids", "notes", "token", "password"}:
-                    reject("Context contains a private field; send only sanitized room data.")
+                    reject("Context contains a private field; send only sanitized planning data.")
                 pending.append((child, depth + 1))
         elif isinstance(node, list):
             pending.extend((child, depth + 1) for child in node)
@@ -159,14 +159,16 @@ def validate_generate(value):
     if not isinstance(value, dict) or set(value) != required:
         reject("Generation requires request_id, mode, context, instructions, images, and schema only.")
     validate_request_id(value["request_id"])
-    if value["mode"] not in ("furnish_room", "new_room"):
+    if value["mode"] not in ("furnish_room", "new_room", "site"):
         reject("Unsupported planning mode.")
     if not isinstance(value["instructions"], str) or len(value["instructions"]) > 12000:
         reject("Instructions exceed the text limit.")
     context = value["context"]
     context_fields = {"draft_version", "request_id", "mode", "floor_id", "room_id", "ceiling_height_m", "room", "walls", "openings", "existing_items", "measurements", "origin", "catalog"}
+    if value["mode"] == "site":
+        context_fields = {"draft_version", "request_id", "mode", "site", "site_notes", "floor_footprints"}
     if not isinstance(context, dict) or set(context) - context_fields or len(dumps(context)) > MAX_CONTEXT_BYTES:
-        reject("Invalid or oversized sanitized room context.")
+        reject("Invalid or oversized sanitized planning context.")
     bounded_tree(context, forbid_private=True)
     if context.get("request_id", value["request_id"]) != value["request_id"] or context.get("mode", value["mode"]) != value["mode"]:
         reject("Request context does not match its envelope.")

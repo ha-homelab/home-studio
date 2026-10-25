@@ -1,9 +1,10 @@
 """Edit a generated home's inventory without rebuilding its original architecture.
 
 The installed viewer and models are trusted, server-owned source files. A draft
-contains only calibrated room outlines and editable inventory; it cannot supply
-HTML, replacement runtime code, or a path to another installation. Publications
-clone the private baseline and replace only its inert model data.
+contains calibrated room outlines, editable inventory and optional local site
+shapes; it cannot supply HTML, replacement runtime code, or a path to another
+installation. Publications clone the private baseline and replace only its
+inert model data.
 """
 from __future__ import annotations
 
@@ -122,6 +123,33 @@ def _check_curtain_runtime(html, floor):
                           "The current published home is unchanged.")
 
 
+def _check_site_runtime(html, project):
+    """Do not acknowledge a site publication that an older saved viewer hides."""
+    if not project.get("site", {}).get("features"):
+        return
+    scripts = _ViewerScripts()
+    scripts.feed(html)
+    code = re.sub(r"\s+", "", "\n".join(scripts.parts))
+    if "homeMapMath.features(options.features)" not in code or "home-site-features" not in code:
+        raise NativeError("unsupported_site_runtime",
+                          "This generated home's saved viewer does not support site shapes. "
+                          "Rebuild its viewer with the current Home Studio toolkit through the "
+                          "original home update process, then publish this saved draft again. "
+                          "The current published home is unchanged.")
+
+
+def _merge_site_context(model, project, floor):
+    """Replace authored metric shapes without replacing commissioned geometry."""
+    if "site" in project:
+        site = project["site"]
+        model["site_context"] = {
+            **model.get("site_context", {}),
+            "ground_elevation_m": site["ground_elevation_m"] - floor["elevation_m"],
+            "features": copy.deepcopy(site["features"]),
+        }
+    return model
+
+
 def _hashes(root):
     """Accept regular source files only, never follow a source symlink."""
     if root.is_symlink() or not root.is_dir():
@@ -164,7 +192,25 @@ def seed_project(site, models, inventory):
             floor["ha_floor_id"] = model["ha_floor_id"]
         floors.append(floor)
     title = next(iter(models.values())).get("project_title", "My home")
-    return validate_draft({"schema_version": 1, "title": title, "floors": floors})
+    project = {"schema_version": 1, "title": title, "floors": floors}
+    # Preserve previously authored site geometry when a generated package is
+    # installed as a new baseline. Geographic map settings never enter drafts.
+    for floor in floors:
+        context = models[floor["id"]].get("site_context", {})
+        if isinstance(context, dict) and "features" in context:
+            ground = context.get("ground_elevation_m")
+            if type(ground) not in (int, float) or not math.isfinite(ground):
+                raise NativeError("unsupported_source", "The installed site's ground elevation is invalid.")
+            authored = {"ground_elevation_m": ground + floor["elevation_m"],
+                        "features": copy.deepcopy(context["features"])}
+            if "site" in project:
+                previous = project["site"]
+                if previous["features"] != authored["features"] or not math.isclose(
+                        previous["ground_elevation_m"], authored["ground_elevation_m"], rel_tol=0, abs_tol=1e-9):
+                    raise NativeError("unsupported_source", "The installed floors disagree on their site geometry.")
+            else:
+                project["site"] = authored
+    return validate_draft(project)
 
 
 def _check_architecture(project, baseline):
@@ -512,7 +558,7 @@ class GeneratedProject(NativeProject):
             base = {**base, **embedded}
             original = originals[floor['id']]
             additions = _additions(runtime, project, floor, original)
-            model = _merge_model(base, floor, original, additions)
+            model = _merge_site_context(_merge_model(base, floor, original, additions), project, floor)
             result.append(runtime.export_floor(model, floor, reference_items=base.get('inventory', original['items']),
                                                elevated=floor_id is None))
         return result
@@ -539,7 +585,7 @@ class GeneratedProject(NativeProject):
                 model_path = target / floor_id / "model-data.json"
                 base = json.loads(model_path.read_text(encoding="utf-8"))
                 additions = _additions(runtime, project, floor, original)
-                model = _merge_model(base, floor, original, additions)
+                model = _merge_site_context(_merge_model(base, floor, original, additions), project, floor)
                 if project["title"] != self.baseline_project["title"]:
                     model["project_title"] = project["title"]
                 if model != base:
@@ -547,8 +593,9 @@ class GeneratedProject(NativeProject):
                 html_path = target / floor_id / "index.html"
                 html = html_path.read_text(encoding="utf-8")
                 _check_curtain_runtime(html, floor)
+                _check_site_runtime(html, project)
                 block, embedded = _embedded(html)
-                merged = _merge_model(embedded, floor, original, additions, runtime=True)
+                merged = _merge_site_context(_merge_model(embedded, floor, original, additions, runtime=True), project, floor)
                 if project["title"] != self.baseline_project["title"]:
                     merged["project_title"] = project["title"]
                 viewer_references[floor_id] = referenced_entities(merged)

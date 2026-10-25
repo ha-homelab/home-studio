@@ -9,6 +9,7 @@
   <title data-i18n="Home studio · Floorplan planner">Home studio · Floorplan planner</title>
   <link rel="stylesheet" href="./editor.css">
   <link rel="stylesheet" href="./floor-navigator.css">
+  <link rel="stylesheet" href="./site-editor.css">
 </head>
 <body>
   <header class="app-header">
@@ -23,6 +24,17 @@
   <p id="ha-workflow-note" class="ha-workflow-note" hidden>Opening Home Assistant drawing…</p>
   <main class="workspace">
     <aside class="left-panel" aria-label="Floor and drawing tools" data-i18n-attrs="{&quot;aria-label&quot;:&quot;Floor and drawing tools&quot;}">
+      <div class="editor-modes" role="group" aria-label="Editing mode"><button id="inside-mode" aria-pressed="true">Inside</button><button id="site-mode" aria-pressed="false">Site &amp; roof</button></div>
+      <section id="site-tools" hidden aria-label="Site drawing tools">
+        <div class="section-heading"><h2>Site &amp; roof</h2><span class="unit-badge">METERS</span></div>
+        <p class="site-intro">Your home in its surroundings.</p>
+        <button id="site-settings" class="quiet">Site settings · add by size</button>
+        <label class="field" for="site-kind"><span>Draw next</span><select id="site-kind" aria-label="Draw next"></select></label>
+        <div class="site-tool-buttons" role="group" aria-label="Site tools"><button data-site-tool="select" aria-pressed="true">↖ Select / move</button><button data-site-tool="polygon" aria-pressed="false">⬡ Draw polygon</button><button data-site-tool="rectangle" aria-pressed="false">▱ Draw rectangle</button></div>
+        <div class="site-actions"><button id="site-finish" class="primary" disabled>Finish shape</button><button id="site-cancel" class="quiet" disabled>Cancel</button></div>
+        <p id="site-progress" role="status">Trace your home, roof and surroundings in meters.</p>
+        <div class="section-heading"><h2>Site layers</h2><span id="site-count" class="muted">0</span></div><div id="site-list" class="site-list"></div>
+      </section>
       <section class="floor-section">
         <div class="section-heading"><h2 data-i18n="Your floors">Your floors</h2><button id="add-floor" class="icon-button" aria-label="Add floor" title="Add floor" data-i18n-attrs="{&quot;aria-label&quot;:&quot;Add floor&quot;,&quot;title&quot;:&quot;Add floor&quot;}">+</button></div>
         <div id="floor-list" class="floor-list"></div>

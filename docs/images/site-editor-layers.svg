@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="560" viewBox="0 0 1080 560" role="img" aria-labelledby="title description">
+  <title id="title">A site drawing shares the home's local coordinate grid</title>
+  <desc id="description">A fictional main home is teal, with a dashed roof overhang, purple neighboring buildings, a green garden and a gray street. Indoors, site features and private map alignment are separate layers.</desc>
+  <defs>
+    <pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><path d="M25 0H0V25" fill="none" stroke="#d5e0df" stroke-width="1"/></pattern>
+  </defs>
+  <rect width="1080" height="560" rx="24" fill="#edf3f2"/>
+  <g font-family="system-ui,sans-serif" fill="#203d43">
+    <text x="36" y="51" font-size="27" font-weight="700">One home. Two drawing modes.</text>
+    <text x="36" y="82" font-size="17">Keep your indoor details. Give the map an outside.</text>
+    <rect x="34" y="108" width="632" height="415" rx="18" fill="url(#grid)" stroke="#c6d5d3"/>
+    <rect x="55" y="412" width="590" height="79" rx="5" fill="#718392"/>
+    <path d="M65 452H634" fill="none" stroke="#e8eff5" stroke-dasharray="20 15" stroke-width="3"/>
+    <text x="84" y="442" fill="#ffffff" font-size="17">Street outline</text>
+    <rect x="66" y="164" width="110" height="168" rx="3" fill="#bcb5d5" stroke="#6e618e" stroke-width="3"/>
+    <rect x="509" y="197" width="122" height="154" rx="3" fill="#bcb5d5" stroke="#6e618e" stroke-width="3"/>
+    <text x="86" y="360" font-size="16">Neighbor</text><text x="530" y="379" font-size="16">Neighbor</text>
+    <path d="M239 207H389V267H456V363H239Z" fill="#85d4cd" stroke="#167f83" stroke-width="4"/>
+    <path d="M226 194H402V254H469V376H226Z" fill="none" stroke="#137493" stroke-width="3" stroke-dasharray="9 6"/>
+    <path d="M307 207V363M307 279H389" stroke="#348e8e" stroke-width="2" opacity=".5"/>
+    <text x="262" y="315" font-size="20" font-weight="700">My home</text>
+    <text x="237" y="178" font-size="16">Roof edge and overhang</text>
+    <rect x="421" y="123" width="158" height="51" rx="14" fill="#aacb9b" stroke="#64815c"/>
+    <text x="462" y="155" font-size="17">Garden</text>
+    <g transform="translate(708 136)">
+      <circle cx="17" cy="17" r="17" fill="#167f83"/><text x="11" y="23" fill="white" font-size="17">1</text>
+      <text x="47" y="21" font-size="23" font-weight="700">Inside</text>
+      <text x="47" y="53" font-size="17">Rooms, furniture and devices</text>
+      <circle cx="17" cy="125" r="17" fill="#167f83"/><text x="11" y="131" fill="white" font-size="17">2</text>
+      <text x="47" y="129" font-size="23" font-weight="700">Site &amp; roof</text>
+      <text x="47" y="161" font-size="17">Footprints and neighborhood</text>
+      <text x="47" y="188" font-size="17">Draw by hand or review AI drafts</text>
+      <circle cx="17" cy="265" r="17" fill="#167f83"/><text x="11" y="271" fill="white" font-size="17">3</text>
+      <text x="47" y="269" font-size="23" font-weight="700">Align map in HA</text>
+      <text x="47" y="301" font-size="17">Private geographic placement</text>
+      <text x="47" y="328" font-size="17">Shared by all floors</text>
+    </g>
+  </g>
+</svg>

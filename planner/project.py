@@ -34,6 +34,7 @@ else:
     from viewer_locales import load_viewer_i18n
     from material_textures import validate_material_textures, material_uv
 from .furniture import build_furniture_asset, validate_furniture_appearance, supports_curtain, MODELS
+from .site_model import validate_site
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "dist" / "planner-project"
@@ -186,7 +187,12 @@ def rooms_overlap(a, b):
 
 def validate_project(project, *, complete=True):
     """Validate completely and return a detached copy; never write partial output."""
-    fields(project, {"schema_version", "title", "floors"}, "project", {"id"})
+    fields(project, {"schema_version", "title", "floors"}, "project", {"id", "site"})
+    if "site" in project:
+        try:
+            validate_site(project["site"])
+        except ValueError as error:
+            fail("project.site", str(error))
     if type(project["schema_version"]) is not int or project["schema_version"] != 1:
         fail("project.schema_version", "only version 1 is supported")
     text(project["title"], "project.title")
@@ -468,6 +474,8 @@ def make_floor(project, floor, next_floor):
                 dimensions_m=dict(width=width, depth=depth, height=floor["height_m"]), bounds_m=dict(min_x=minx, min_z=minz, max_x=maxx, max_z=maxz),
                 dimension_checks=[], rooms=rooms, materials=materials, meshes=g.meshes, openings=openings, inventory=[{key: value for key, value in item.items() if key != "curtain"} for item in floor["items"]], object_assets=object_assets,
                 initial_room=None, next_floor=next_floor, exterior_rooms=[r["id"] for r in floor["rooms"] if r["material"] == "deck"], exports=["glb", "obj", "mtl", "dae", "usda"])
+    if "site" in project:
+        data["site_context"] = compiled_site_context(project["site"], floor["elevation_m"])
     for name in ("room_activity", "receiver_activity", "motion_paths", "motion_sources", "motion_zones", "cover_windows", "control_anchors", "control_groups", "room_views", "room_display_names", "room_display_ids", "camera_entities", "tv_entities"):
         data[name] = {}
     data["cover_windows"] = {item["id"]: {"openings": [item["curtain"]["opening_id"]], "mode": item["curtain"]["mode"]}
@@ -521,6 +529,12 @@ def runtime_model_data(data):
     transformed copies would double geometry data and exceed package limits.
     """
     return {**data, "meshes": [mesh for mesh in data["meshes"] if mesh["kind"] != "inventory"]}
+
+
+def compiled_site_context(site, floor_elevation):
+    """Keep local X/Z and relative feature heights; shift the ground per floor."""
+    return {"ground_elevation_m": site["ground_elevation_m"] - floor_elevation,
+            "features": copy.deepcopy(site["features"])}
 
 
 def render_viewer(data, svg):
@@ -683,12 +697,12 @@ def compile_project(project, output=DEFAULT_OUTPUT, ha_package=False, project_pa
             compiled.append((floor, data, svg))
         site_bounds = dict(minX=min(d["bounds_m"]["min_x"] for _, d, _ in compiled), maxX=max(d["bounds_m"]["max_x"] for _, d, _ in compiled),
                            minZ=min(d["bounds_m"]["min_z"] for _, d, _ in compiled), maxZ=max(d["bounds_m"]["max_z"] for _, d, _ in compiled))
-        ground_elevation = min(d["elevation_m"] for _, d, _ in compiled)
+        ground_elevation = project["site"]["ground_elevation_m"] if "site" in project else min(d["elevation_m"] for _, d, _ in compiled)
         lowest_slab_elevation = min(d["elevation_m"] + vertex[1] for _, d, _ in compiled
                                     for mesh in d["meshes"] if mesh["kind"] == "floors"
                                     for vertex in mesh["vertices"])
         for floor, data, svg in compiled:
-            data["site_context"] = {"ground_elevation_m": ground_elevation - data["elevation_m"]}
+            data.setdefault("site_context", {"ground_elevation_m": ground_elevation - data["elevation_m"]})
             data["site_context"]["lowest_slab_elevation_m"] = lowest_slab_elevation - data["elevation_m"]
             data["environment"] = dict(enabled=False, motion=False, palette="sage", bounds=site_bounds, elevation=ground_elevation - data["elevation_m"])
             below = [other for _, other, _ in compiled if other['elevation_m'] < data['elevation_m']]
