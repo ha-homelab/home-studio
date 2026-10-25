@@ -15,6 +15,63 @@ const homeMapMath = (() => {
     return {scale,toWorld:(u,v)=>{const dx=(u-x)*scale,dz=(v-y)*scale;return [config.model_x+dx*c+dz*s,config.model_z-dx*s+dz*c];},
       toMap:(wx,wz)=>{const dx=wx-config.model_x,dz=wz-config.model_z;return [x+(dx*c-dz*s)/scale,y+(dx*s+dz*c)/scale];}};
   }
+  const metric=(v,limit=1000)=>typeof v==='number'&&Number.isFinite(v)&&Math.abs(v)<=limit;
+  const cross=(a,b,c)=>(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+  const area=p=>p.reduce((sum,a,i)=>{const b=p[(i+1)%p.length];return sum+a[0]*b[1]-b[0]*a[1];},0);
+  const onEdge=(p,a,b)=>Math.abs(cross(a,b,p))<1e-8&&p.every((v,i)=>v>=Math.min(a[i],b[i])-1e-8&&v<=Math.max(a[i],b[i])+1e-8);
+  const intersects=(a,b,c,d)=>cross(a,b,c)*cross(a,b,d)<-1e-16&&cross(c,d,a)*cross(c,d,b)<-1e-16;
+  function polygons(value){
+    if(!Array.isArray(value)||!value.length||value.length>16||value.reduce((n,p)=>n+(Array.isArray(p)?p.length:513),0)>512)return null;
+    for(const p of value){
+      if(!Array.isArray(p)||p.length<3||p.length>256||p.some(v=>!Array.isArray(v)||v.length!==2||!v.every(n=>metric(n,10000)))||Math.abs(area(p))<1e-8)return null;
+      for(let i=0;i<p.length;i++)for(let j=i+1;j<p.length;j++){
+        if(p[i][0]===p[j][0]&&p[i][1]===p[j][1])return null;
+        if(j===i+1||i===0&&j===p.length-1)continue;
+        const a=p[i],b=p[(i+1)%p.length],c=p[j],d=p[(j+1)%p.length];
+        if(intersects(a,b,c,d)||onEdge(a,c,d)||onEdge(b,c,d)||onEdge(c,a,b)||onEdge(d,a,b))return null;
+      }
+    }
+    return value.map(p=>p.map(v=>v.slice()));
+  }
+  function exterior(value){
+    const valid=polygons(value);if(!valid)return [];
+    const points=valid.flat(),edges=new Map(),out=new Map();
+    for(let p of valid){
+      if(area(p)<0)p=p.slice().reverse();
+      for(let i=0;i<p.length;i++){
+        const a=p[i],b=p[(i+1)%p.length],cuts=points.filter(v=>onEdge(v,a,b));
+        cuts.sort((v,w)=>(v[0]-w[0])*(b[0]-a[0])+(v[1]-w[1])*(b[1]-a[1]));
+        for(let j=1;j<cuts.length;j++){
+          const start=cuts[j-1].join(','),end=cuts[j].join(',');if(start===end)continue;
+          const key=start+'|'+end,reverse=end+'|'+start;
+          if(edges.has(key))return [];if(edges.has(reverse))edges.delete(reverse);else edges.set(key,[cuts[j-1],cuts[j]]);
+        }
+      }
+    }
+    const boundary=[...edges.values()];
+    for(let i=0;i<boundary.length;i++){
+      const [a,b]=boundary[i],key=a.join(',');if(out.has(key))return [];out.set(key,b);
+      for(let j=i+1;j<boundary.length;j++)if(intersects(a,b,...boundary[j]))return [];
+    }
+    const result=[];
+    while(out.size){
+      const start=out.keys().next().value,p=[];let key=start;
+      do{const b=out.get(key);if(!b)return [];p.push(key.split(',').map(Number));out.delete(key);key=b.join(',');}while(key!==start);
+      if(area(p)>0)result.push(p);
+    }
+    // Disconnected rooms may be separated by walls, not separate buildings.
+    return result.length===1?result:[];
+  }
+  function context(model,rooms=[]){
+    const site=model.site_context||{},ground=metric(site.ground_elevation_m)?site.ground_elevation_m:metric(model.environment?.elevation)?model.environment.elevation:metric(model.elevation_m)?-model.elevation_m:0;
+    let low=Math.min(0,ground);const lower=model.lower_floor_context;
+    const include=y=>{if(metric(y))low=Math.min(low,y);};
+    for(const mesh of model.meshes||[])if(mesh.kind==='floors')for(const p of mesh.vertices||[])include(p[1]);
+    for(const values of [lower?.surfaces,lower?.lines])if(Array.isArray(values))for(let i=1;i<values.length;i+=3)include(values[i]);
+    include(lower?.elevation_m);
+    const roof=site.roof_outline,shape=metric(roof?.elevation_m)&&polygons(roof?.polygons_m);
+    return {elevation:low-.08,polygons:shape||exterior(rooms),outlineElevation:shape?roof.elevation_m:low-.06};
+  }
   function tiles(config,bounds,pixels){
     const t=transform(config),corners=bounds.map(p=>t.toMap(...p)),span=Math.max(...corners.map(p=>p[0]))-Math.min(...corners.map(p=>p[0]));
     let z=clamp(Math.floor(Math.log2(Math.max(1,pixels)/(256*Math.max(span,1e-12)))),3,19),result;
@@ -27,15 +84,15 @@ const homeMapMath = (() => {
     const center=corners.reduce((a,p)=>[a[0]+p[0]/4,a[1]+p[1]/4],[0,0]);
     return result.sort((a,b)=>Math.hypot((a.worldX+.5)/2**a.z-center[0],(a.y+.5)/2**a.z-center[1])-Math.hypot((b.worldX+.5)/2**b.z-center[0],(b.y+.5)/2**b.z-center[1]));
   }
-  return {validConfig,project,unproject,transform,tiles};
+  return {validConfig,project,unproject,transform,tiles,context};
 })();
 function createHomeMapLayer(THREE,scene,options={}) {
   const group=new THREE.Group(),tileGroup=new THREE.Group(),footprint=new THREE.Group(),cache=new Map(),ray=new THREE.Raycaster(),plane=new THREE.Plane(new THREE.Vector3(0,1,0),-(options.elevation??-.08));
   group.name='home-geographic-map';group.visible=false;group.add(tileGroup,footprint);scene.add(group);
-  const floor=options.elevation??-.08,outlineMaterial=new THREE.LineBasicMaterial({color:0x5ad9ff,depthTest:false,transparent:true,opacity:.95});
+  const floor=options.elevation??-.08,outlineMaterial=new THREE.LineBasicMaterial({color:0x5ad9ff,depthTest:true,depthWrite:false,transparent:true,opacity:.8});
   for(const polygon of options.polygons||[]){
     if(polygon.length<3)continue;
-    const geometry=new THREE.BufferGeometry().setFromPoints([...polygon,polygon[0]].map(p=>new THREE.Vector3(p[0],floor+.02,p[1])));
+    const geometry=new THREE.BufferGeometry().setFromPoints([...polygon,polygon[0]].map(p=>new THREE.Vector3(p[0],options.outlineElevation??floor+.02,p[1])));
     const line=new THREE.Line(geometry,outlineMaterial);line.renderOrder=5;footprint.add(line);
   }
   const marker=new THREE.Mesh(new THREE.RingGeometry(.55,.85,24),new THREE.MeshBasicMaterial({color:0x5ad9ff,depthTest:false,side:THREE.DoubleSide}));
@@ -102,9 +159,9 @@ function createHomeMapLayer(THREE,scene,options={}) {
     else{revision++;for(const entry of [...cache.values()])remove(entry);}
     group.visible=active&&!!config?.enabled;
   }
-  function render(camera,rect,{visible=true,coarse=false,editing=false}={}){
+  function render(camera,rect,{visible=true,coarse=false,editing=false,transition=false}={}){
     active=visible;group.visible=active&&!!config?.enabled;if(!group.visible)return;
-    footprint.visible=coarse||editing;marker.visible=markerOutline.visible=coarse;
+    footprint.visible=coarse||editing||transition;marker.visible=markerOutline.visible=coarse;
     const bounds=[[-1,-1],[-1,1],[1,1],[1,-1]].map(p=>pointAt(camera,...p)).filter(Boolean).map(p=>[p.x,p.z]);
     if(bounds.length!==4)return;
     const span=Math.hypot(bounds[0][0]-bounds[3][0],bounds[0][1]-bounds[3][1]);
