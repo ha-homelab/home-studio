@@ -31,16 +31,22 @@ def glb(result):
     return json.loads(raw[20:20 + length]), raw, 28 + length
 
 
+def glb_values(document, raw, binary, index):
+    accessor = document['accessors'][index]
+    view = document['bufferViews'][accessor['bufferView']]
+    width = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4}[accessor['type']]
+    code = {5121: 'B', 5123: 'H', 5125: 'I', 5126: 'f'}[accessor['componentType']]
+    offset = binary + view.get('byteOffset', 0) + accessor.get('byteOffset', 0)
+    stride = view.get('byteStride', width * struct.calcsize(code))
+    return [struct.unpack_from('<' + code * width, raw, offset + i * stride)
+            for i in range(accessor['count'])]
+
+
 def positions(document, raw, binary, node):
     primitive = document['meshes'][node['mesh']]['primitives'][0]
-    accessor = document['accessors'][primitive['attributes']['POSITION']]
-    view = document['bufferViews'][accessor['bufferView']]
-    values = struct.unpack_from('<' + 'f' * (accessor['count'] * 3), raw, binary + view['byteOffset'])
-    points = [values[index:index + 3] for index in range(0, len(values), 3)]
-    indices = document['accessors'][primitive['indices']]
-    index_view = document['bufferViews'][indices['bufferView']]
-    order = struct.unpack_from('<' + 'I' * indices['count'], raw, binary + index_view['byteOffset'])
-    return [points[index] for index in order]
+    points = glb_values(document, raw, binary, primitive['attributes']['POSITION'])
+    order = glb_values(document, raw, binary, primitive['indices'])
+    return [points[index[0]] for index in order]
 
 
 class ExportTests(unittest.IsolatedAsyncioTestCase):
@@ -403,10 +409,8 @@ class CompactExportTests(unittest.TestCase):
         size = struct.unpack_from('<I', raw, 12)[0]
         doc = json.loads(raw[20:20 + size]); binary = 28 + size
         def accessor(index):
-            acc = doc['accessors'][index]; width = {'VEC3': 3, 'VEC2': 2, 'SCALAR': 1}[acc['type']]
-            view = doc['bufferViews'][acc['bufferView']]
-            values = struct.unpack_from('<' + ('I' if acc['componentType'] == 5125 else 'f') * (acc['count'] * width), raw, binary + view['byteOffset'])
-            return [values[i:i + width] for i in range(0, len(values), width)]
+            return glb_values(doc, raw, binary, index)
+
         f32 = lambda values: struct.unpack('<' + 'f' * len(values), struct.pack('<' + 'f' * len(values), *values))
         root = doc['nodes'][doc['scenes'][0]['nodes'][0]]
         self.assertEqual(root['translation'], [0, -2, 0])

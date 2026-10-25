@@ -119,6 +119,86 @@ def _compact_export_mesh(mesh):
     return result
 
 
+def _with_gltf_tangents(mesh):
+    """Add area-weighted tangent frames using the exported (V-flipped) UVs.
+
+    Input must already be compacted (only indexed vertices remain).
+    Keep indexed vertices; split only opposite-handed or undefined UV charts.
+    Undefined derivatives get a deterministic orthonormal frame, never NaNs.
+    This is an authored tangent basis, not a bit-exact MikkTSpace implementation.
+    """
+    import math
+
+    def dot(a, b): return sum(x*y for x, y in zip(a, b))
+    def sub(a, b): return [x-y for x, y in zip(a, b)]
+    def cross(a, b): return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]
+    def unit(a):
+        length = math.sqrt(dot(a, a))
+        return [x/length for x in a] if length else None
+    def projected(a, n):
+        result = cross(n, cross(a, n))
+        # Double cross preserves orthogonality near parallel vectors, where
+        # subtracting the projection loses the small perpendicular component.
+        return result if dot(result, result) > 1e-24*dot(a, a) else [0., 0., 0.]
+    def fallback(n):
+        axis = min(range(3), key=lambda i: abs(n[i]))
+        return unit(projected([float(i == axis) for i in range(3)], n))
+
+    positions = list(mesh['vertices']); normals = list(mesh['normals']); uv = list(mesh['uv'])
+    normal_units = [unit(n) for n in normals]
+    if any(n is None for n in normal_units):
+        raise ValueError('Normal-mapped export requires nonzero normals')
+    groups, first, sums, seeds, output_indices = {}, {}, {}, {}, []
+    for offset in range(0, len(mesh['indices']), 3):
+        ids = mesh['indices'][offset:offset+3]
+        p = [mesh['vertices'][i] for i in ids]
+        tex = [(mesh['uv'][i][0], 1-mesh['uv'][i][1]) for i in ids]
+        e1, e2 = sub(p[1], p[0]), sub(p[2], p[0])
+        u1, v1 = sub(tex[1], tex[0]); u2, v2 = sub(tex[2], tex[0])
+        determinant = u1*v2-u2*v1
+        defined = (abs(determinant) > 1e-12*max(abs(u1*v2), abs(u2*v1))
+                   and dot(cross(e1, e2), cross(e1, e2)) > 0)
+        t = None
+        handedness = 0
+        if defined:
+            # Normalize before accumulating so UV scale cannot dominate smoothing.
+            sign = 1 if determinant > 0 else -1
+            t = unit([sign*(x*v2-y*v1) for x, y in zip(e1, e2)])
+            # Use one UV orientation for the entire triangle, as MikkTSpace
+            # does. Legacy smooth normals can cross the geometric face plane;
+            # do not repair those normals or create conflicting corner signs.
+            handedness = sign
+        weight = math.sqrt(dot(cross(e1, e2), cross(e1, e2)))
+        for index in ids:
+            key = (index, handedness)
+            if key not in groups:
+                if index not in first:
+                    out = index; first[index] = handedness
+                else:
+                    out = len(positions)
+                    positions.append(mesh['vertices'][index]); normals.append(mesh['normals'][index]); uv.append(mesh['uv'][index])
+                groups[key] = out; sums[out] = [0., 0., 0.]
+                seeds[out] = (t, handedness, normal_units[index])
+            out = groups[key]; output_indices.append(out)
+            if t is not None:
+                sums[out] = [a+weight*c for a, c in zip(sums[out], t)]
+    tangents = []
+    for index in range(len(positions)):
+        seed, handedness, n = seeds[index]
+        tangent = unit(projected(sums[index], n))
+        if tangent is None and seed is not None:
+            tangent = unit(projected(seed, n))
+        tangent = tangent or fallback(n)
+        # Bound only this derived frame, never authored geometry: 5 decimal
+        # components + normalization give <1e-5 rad direction error and allow
+        # identical physical frames to reuse their float32 accessor streams.
+        tangent = unit([round(x, 5) for x in tangent])
+        tangent = [x if x else 0. for x in tangent]
+        tangents.append([*tangent, float(handedness or 1)])
+    return {**mesh, 'vertices': positions, 'normals': normals, 'uv': uv,
+            'indices': output_indices, 'tangents': tangents}
+
+
 def export_scene(floors, format):
     """Serialize an allowlisted scene of floor/item groups, without writing files.
 
@@ -233,26 +313,75 @@ def export_scene(floors, format):
     if format == 'glb':
         blob, views, accessors, meshes, nodes, roots = bytearray(), [], [], [], [], []
         accessor_ids = {}
+        # Tangents add another attribute stream. Pool same-width attributes
+        # without changing their float32 bytes; each accessor retains its own
+        # count and offset. The historical no-normal-map encoding is unchanged.
+        compact = any('normal_texture' in mesh for floor in floors
+                      for group in floor['groups'] for mesh in group['meshes'])
+        pools, pool_bytes = {}, 0
 
-        def accessor(values, vector):
-            # Reuse the exact output representation, including UV/normal seams.
-            # Separate authored doubles can encode identical float32 streams.
+        def bounds(values):
+            def encoded(value):
+                if not compact:
+                    return value
+                # JSON bounds describe the stored float32 positions. Nine
+                # significant digits round-trip that exact representation.
+                packed = struct.pack('<f', value)
+                value = struct.unpack('<f', packed)[0]
+                for precision in range(1, 10):
+                    result = float(value.__format__('.' + str(precision) + 'g'))
+                    if struct.pack('<f', result) == packed:
+                        return result
+                raise ValueError('Invalid float32 position bound')
+            return {'min': [encoded(min(row[axis] for row in values)) for axis in range(3)],
+                    'max': [encoded(max(row[axis] for row in values)) for axis in range(3)]}
+
+        def accessor(values, vector, position=False):
+            nonlocal pool_bytes
+            component = 5126 if vector else 5125
+            code = 'I'
+            if compact and not vector:
+                maximum = max(values)
+                # glTF excludes the primitive-restart value for each width.
+                component, code = ((5121, 'B') if maximum < 255 else
+                                   (5123, 'H') if maximum < 65535 else (5125, 'I'))
             packed = (b''.join(struct.pack('<' + str(vector) + 'f', *value) for value in values)
-                      if vector else struct.pack('<' + 'I' * len(values), *values))
-            key = (vector, packed)
+                      if vector else struct.pack('<' + code * len(values), *values))
+            key = (vector, component, packed)
             if key in accessor_ids:
-                return accessor_ids[key]
-            while len(blob) % 4:
-                blob.append(0)
-            offset = len(blob)
-            bounded_extend(blob, packed)
-            views.append({'buffer': 0, 'byteOffset': offset, 'byteLength': len(blob) - offset,
-                          'target': 34962 if vector else 34963})
-            entry = {'bufferView': len(views) - 1, 'componentType': 5126 if vector else 5125,
-                     'count': len(values), 'type': 'VEC' + str(vector) if vector else 'SCALAR'}
-            if vector == 3:
-                entry.update(min=[min(row[axis] for row in values) for axis in range(3)],
-                             max=[max(row[axis] for row in values) for axis in range(3)])
+                index = accessor_ids[key]
+                # A stream first seen as NORMAL may later be used as POSITION.
+                if position and 'min' not in accessors[index]:
+                    accessors[index].update(bounds(values))
+                return index
+            if compact:
+                group = vector  # Index data has its own non-strided view.
+                if group not in pools:
+                    pools[group] = (len(views), bytearray())
+                    views.append({'buffer': 0, 'byteOffset': 0, 'byteLength': 0,
+                                  'target': 34962 if vector else 34963,
+                                  **({'byteStride': vector * 4} if vector else {})})
+                view, payload = pools[group]
+                padding = -len(payload) % 4
+                if pool_bytes + padding + len(packed) > MAX_EXPORT_BYTES:
+                    raise ValueError('Export exceeds 32 MB. Export one floor or reduce detailed furniture.')
+                payload.extend(b'\0' * padding)
+                offset = len(payload)
+                payload.extend(packed)
+                pool_bytes += padding + len(packed)
+                entry = {'bufferView': view, 'byteOffset': offset}
+            else:
+                while len(blob) % 4:
+                    blob.append(0)
+                offset = len(blob)
+                bounded_extend(blob, packed)
+                views.append({'buffer': 0, 'byteOffset': offset, 'byteLength': len(blob) - offset,
+                              'target': 34962 if vector else 34963})
+                entry = {'bufferView': len(views) - 1}
+            entry.update(componentType=component, count=len(values),
+                         type='VEC' + str(vector) if vector else 'SCALAR')
+            if vector == 3 and (position or not compact):
+                entry.update(bounds(values))
             accessors.append(entry)
             accessor_ids[key] = len(accessors) - 1
             return accessor_ids[key]
@@ -269,7 +398,9 @@ def export_scene(floors, format):
                 nodes.append(node)
                 for part, mesh in enumerate(group['meshes']):
                     mesh = _compact_export_mesh(mesh)
-                    position = accessor(mesh['vertices'], 3)
+                    if 'normal_texture' in mesh:
+                        mesh = _with_gltf_tangents(mesh)
+                    position = accessor(mesh['vertices'], 3, position=True)
                     normal = accessor(mesh['normals'], 3)
                     indices = accessor(mesh['indices'], 0)
                     attributes = {'POSITION': position, 'NORMAL': normal}
@@ -277,10 +408,16 @@ def export_scene(floors, format):
                         # glTF's image origin is top-left; native Three maps and
                         # OBJ use bottom-left UVs. Keep the same visual surface.
                         attributes['TEXCOORD_0'] = accessor([[u, 1-v] for u, v in mesh['uv']], 2)
+                    if 'normal_texture' in mesh:
+                        attributes['TANGENT'] = accessor(mesh['tangents'], 4)
                     node['children'].append(len(nodes))
                     nodes.append({'name': label(group['name']) + ' / part ' + str(part + 1), 'mesh': len(meshes)})
                     meshes.append({'primitives': [{'attributes': attributes,
                                                    'indices': indices, 'material': colors[material_key(mesh)]}]})
+        for view, payload in pools.values():
+            blob.extend(b'\0' * (-len(blob) % 4))
+            views[view].update(byteOffset=len(blob), byteLength=len(payload))
+            bounded_extend(blob, payload)
         images = []
         for raw in image_bytes:
             blob.extend(b'\0' * (-len(blob) % 4))
