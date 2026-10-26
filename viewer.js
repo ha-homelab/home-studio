@@ -424,7 +424,7 @@ const wallSheenMotion=createWallSheenMotion();
 function drawScene(camera){if(renderSuspended||renderLost||document.hidden)return;wallSheenMotion.beforeRender();try{reflectionEnvironment?.update(hemisphere?.intensity);const pointer=interactionPointer,touring=renderer.domElement?.dataset?.cameraTourPlaying==='true',started=coalesceMotion&&pointer?.moved?performance.now():null;if(coalesceMotion){interactionRenderer??=createInteractionRenderer(THREE,renderer,renderProfile.diffuseLighting?31250:62500);interactionRenderer.draw(scene,camera,pointer?.moved===true||touring)}else renderer.render(scene,camera);if(!pointer?.moved&&!touring&&$('homeStage')?.dataset.mapCoarse!=='true')contactShading?.apply(scene,camera);if(pointer?.moved&&interactionPointer===pointer){pointer.painted=true;if(started!==null){const elapsed=performance.now()-started;pointer.frameDelay=Number.isFinite(elapsed)?Math.min(250,Math.max(64,elapsed)):64}}}finally{wallSheenMotion.afterRender()}}
 // Keep the recovery controls outside both view modes. A failed renderer stays
 // paused until reload; editing or saving the 2D plan must not retry that draw.
-function report3DError(e){reflectionEnvironment?.dispose();contactShading?.dispose();failed3D=true;initialViewReady=false;environmentLayer?.dispose();cancelRender();$('loadError').style.display='block';$('mode3d').disabled=true;$('openHome').disabled=true;requestRender();console.error(e)}
+function report3DError(e){reflectionEnvironment?.dispose();contactShading?.dispose();failed3D=true;initialViewReady=false;homeView?.releaseGPU?.();environmentLayer?.dispose();cancelRender();$('loadError').style.display='block';$('mode3d').disabled=true;$('openHome').disabled=true;requestRender();console.error(e)}
 $('recoverPlan').onclick=()=>{if(!canEdit)return;homeView?.setActive(false);showMode(true);$('loadError').style.display='none';setEditorStatus('3D view could not start. Plan editing and JSON export are still available.');$('modePlan').focus();};
 // Decode before material creation so static and inventory lighting owners see
 // the final map from their first registration. Failures retain palette colors.
@@ -503,8 +503,32 @@ const li=document.createElement('li'),label=document.createElement('span');label
 if(objectGroup){
 const size=it.dimensions_m,candidate=model.object_assets?.[it.id],asset=candidate?.model_id&&candidate.model_id!==it.model_id?null:candidate;let o;
 if(asset){
-o=new THREE.Group();const batches=inventoryMaterialBatches(asset,size,model.materials,inventoryTextures);
-for(const batch of batches){const material=batch.material;const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(batch.vertices,3));geo.setAttribute('normal',new THREE.Float32BufferAttribute(batch.normals,3));geo.setIndex(batch.indices);if(batch.mapped)geo.setAttribute('uv',new THREE.Float32BufferAttribute(batch.uv,2));const col=model.materials[material];const mat=createSceneMaterial({color:new THREE.Color(...col.slice(0,3)),roughness:.8,transparent:col[3]<1,opacity:col[3],depthWrite:col[3]===1,side:THREE.DoubleSide},undefined,material,batch.surfaceFinish);applyMaterialPBR(THREE,mat,batch.mapped);const child=new THREE.Mesh(geo,mat);child.castShadow=col[3]===1;child.receiveShadow=true;child.userData.curtainFabric=!!model.cover_windows?.[it.id] && (batch.curtainFabric||/curtain|safety_mesh/.test(material));child.userData.curtainPanel=batch.curtainPanel;o.add(child)}
+o=new THREE.Group();const batches=inventoryMaterialBatches(asset,size,model.materials,inventoryTextures),animation=asset.device_animation;
+// Moving pieces retain the same material/texture ownership as fixed batches.
+let rotor=null;
+if(animation){
+  o.userData.deviceAnimation=animation;o.userData.deviceRotors=[];
+  if(animation.rotor){
+    const mount=new THREE.Group();mount.position.fromArray(animation.rotor.pivot);
+    // Cancel the item's nonuniform scale before rotation to keep blades rigid.
+    mount.scale.set(1/size.width,1/size.height,1/size.depth);o.add(mount);
+    rotor=new THREE.Group();mount.add(rotor);
+    rotor.userData.axis=animation.rotor.axis;o.userData.deviceRotors.push(rotor);
+  }
+}
+for(const batch of batches){
+  let vertices=batch.vertices,normals=batch.normals;
+  if(batch.fanRotor){
+    const pivot=animation.rotor.pivot,dimensions=[size.width,size.height,size.depth];
+    vertices=vertices.map((value,index)=>(value-pivot[index%3])*dimensions[index%3]);
+    normals=[];
+    for(let index=0;index<batch.normals.length;index+=3){const scaled=batch.normals.slice(index,index+3).map((value,axis)=>value/dimensions[axis]),length=Math.hypot(...scaled);normals.push(...scaled.map(value=>value/length));}
+  }
+  const material=batch.material,geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));geo.setAttribute('normal',new THREE.Float32BufferAttribute(normals,3));geo.setIndex(batch.indices);if(batch.mapped)geo.setAttribute('uv',new THREE.Float32BufferAttribute(batch.uv,2));
+  const col=model.materials[material],mat=createSceneMaterial({color:new THREE.Color(...col.slice(0,3)),roughness:.8,transparent:col[3]<1,opacity:col[3],depthWrite:col[3]===1,side:THREE.DoubleSide},undefined,material,batch.surfaceFinish);applyMaterialPBR(THREE,mat,batch.mapped);
+  const child=new THREE.Mesh(geo,mat);child.castShadow=col[3]===1;child.receiveShadow=true;child.userData.curtainFabric=!!model.cover_windows?.[it.id] && (batch.curtainFabric||/curtain|safety_mesh/.test(material));child.userData.curtainPanel=batch.curtainPanel;
+  (batch.fanRotor?rotor:o).add(child);
+}
 if(tvEntities[it.id]&&it.entity_id===tvEntities[it.id]){const screen=new THREE.Mesh(new THREE.PlaneGeometry(.968,.948),new THREE.MeshBasicMaterial({toneMapped:false}));screen.position.set(0,.515,.393);screen.visible=false;o.userData.screen=screen;o.add(screen)}
 o.scale.set(size.width,size.height,size.depth);o.position.set(it.position_m.x,it.position_m.y,it.position_m.z);
 }else{const geo=new THREE.BoxGeometry(size.width,size.height,size.depth);const mat=createSceneMaterial({color:it.type==='tv'?0x273239:0xb87637,roughness:.7});o=new THREE.Mesh(geo,mat);o.position.set(it.position_m.x,it.position_m.y+size.height/2,it.position_m.z);o.castShadow=true;o.receiveShadow=true;registerFallbackBoxProgram(THREE,o,renderProfile.diffuseLighting)}

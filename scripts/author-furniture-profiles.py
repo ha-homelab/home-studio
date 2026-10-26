@@ -38,6 +38,9 @@ CANOPY_MODELS = {'plant', 'fir_tree', 'christmas_tree', 'weeping_fig', 'clipped_
 # Specific per-part overrides distinguish screens, lamp shades, book blocks,
 # counter tops and functional hardware from similarly coloured soft furniture.
 OVERRIDES = {
+    'ceiling_fan': {0:'painted',2:'painted',5:'painted'},
+    'standing_fan': {3:'brushed_metal'}, 'desk_fan': {3:'brushed_metal'},
+    'panel_heater': {0:'painted',2:'painted',3:'painted',4:'painted'},
     'christmas_tree': {0:'wood',1:'wood',**{i:'metal' for i in range(7,10)},**{i:'glass' for i in range(10,21)}},
     'bookcase': {**{i: 'paper' for i in range(8,13)}},
     'television': {0:'plastic',1:'glass'},
@@ -107,6 +110,9 @@ def finish_for(model, index, part):
 def geometry_for(model, part, finish):
     shape, name = part['shape'], model['id']
     index=model['parts'].index(part)
+    # Twelve-sided flat caps keep the complete animated fixture below 500
+    # triangles while rounded guard rings and bevelled blades stay visible.
+    if shape == 'cylinder' and name in ('standing_fan','desk_fan'): return 'rod'
     cushion = (name in ('sofa_2','sofa_3','armchair') and index >= 8
                or name == 'corner_sofa' and index in (5,6)
                or name == 'chaise_lounge' and index in (5,6,9))

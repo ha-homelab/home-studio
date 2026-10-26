@@ -24,7 +24,7 @@ Je kunt de aparte browsereditor gebruiken terwijl je HA voorbereidt. Deze heeft 
 
 Teken je huis in de browser. Je hebt geen account nodig. Kies bovenaan in de editor je taal.
 
-1. Voeg kamers, muren, deuren en ramen toe. De bibliotheek bevat 206 modellen. Kies een kleurenpalet en bij geschikte objecten een oppervlaktepatroon.
+1. Voeg kamers, muren, deuren en ramen toe. De bibliotheek bevat 211 modellen. Kies een kleurenpalet en bij geschikte objecten een oppervlaktepatroon.
 2. Exporteer JSON om een bewerkbare kopie te bewaren. Concepten blijven alleen in deze browser. Een taalwissel verandert je plattegrond niet.
 
 ### Optioneel: draagbare toolkit en Python-compiler

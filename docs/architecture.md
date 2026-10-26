@@ -156,6 +156,37 @@ A role/account change tears down the old viewer and capabilities. An unpublished
 native source draft cannot be silently overwritten by a placement save from
 an older published viewer.
 
+## Device feedback and screen-space motion
+
+The catalog keeps optional `device_animation` metadata beside the five fan and
+HVAC models. Both furniture compilers preserve it; project inventory and saved
+entity bindings keep their existing schema. Published fan geometry separates
+rotating and stationary material batches while preserving physical finishes and
+UV coordinates. An inverse-scale mount keeps blades rigid when the user changes
+the fixture's dimensions. Each new fixture remains below 500 triangles, with
+the same deterministic authoring rules as the rest of the catalog.
+
+`climate-state.js` converts the host's bounded fan percentage and climate
+projection into display state. Selected HVAC mode does not imply active
+heating or cooling: `hvac_action` is authoritative. Missing, restored and
+unavailable readings cannot start an effect. `device-effects.js` projects
+three SVG airflow paths from each fixture and manages a single adaptive rotor
+timer. It suspends on document/page visibility, viewport exit, rendering loss,
+inactive home view and reduced motion. Low-capacity rendering retains CSS/SVG
+indicators without continuous scene drawing.
+
+`marker-motion.js` is independent of Three.js. Camera renders supply final
+screen coordinates, including grouped-button spacing. It eases the whole DOM
+button, with a maximum 24 px lag and 320 ms settling deadline; it performs no
+layout reads, state requests or WebGL draws. An idle view has no marker RAF.
+View changes reset cached coordinates and disposal removes all listeners.
+
+CPU contract tests cover state, projection, timing and cleanup. A generated
+viewer browser test sends fictional MessageChannel readings through the same
+sandbox interface as HA, checks the actual clickable positions, and verifies
+software and hardware rendering paths. Package tests compile all five fixtures
+from an extracted HACS bundle so these modules cannot be silently omitted.
+
 ## Dashboard embedding and media artwork
 
 ### Device state and command boundaries
@@ -540,7 +571,7 @@ edits. Keep the planner JSON as the design source.
 
 The complete package includes the source catalog and both geometry builders;
 Pages publishes only browser modules and the illustrated guide. CI exercises
-all 206 current designs, legacy projects, real export formats, a maximum-single-floor
+all 211 current designs, legacy projects, real export formats, a maximum-single-floor
 256-plant build/install case, a mixed full-catalog installation, browser editing/history/import, and installation of
 the browser's actual exported file. Installer file and total-size limits remain
 unchanged: 32 MiB per file and 96 MiB in total. The 256-item count ceiling is not

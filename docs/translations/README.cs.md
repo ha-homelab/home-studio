@@ -24,7 +24,7 @@ Během přípravy HA můžete použít samostatný editor v prohlížeči. Nemá
 
 Nakreslete svůj domov v prohlížeči. Nepotřebujete účet. Jazyk vyberete v horní části editoru.
 
-1. Přidejte místnosti, stěny, dveře a okna. Knihovna obsahuje 206 modelů. Vyberte barevnou paletu a u podporovaných předmětů také vzor povrchu.
+1. Přidejte místnosti, stěny, dveře a okna. Knihovna obsahuje 211 modelů. Vyberte barevnou paletu a u podporovaných předmětů také vzor povrchu.
 2. Exportujte JSON a uložte si upravitelnou kopii. Koncepty zůstávají pouze v tomto prohlížeči. Změna jazyka váš plán nezmění.
 
 ### Volitelně: přenosná sada nástrojů a kompilátor Python

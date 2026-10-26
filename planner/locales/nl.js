@@ -796,4 +796,9 @@ export default {
   "Loading map…": "Kaart laden…",
   "Preview 3D": "3D-voorbeeld",
   "Published home": "Gepubliceerd huis",
+  "model.ceiling_fan": "Plafondventilator met vier bladen",
+  "model.standing_fan": "Staande ventilator",
+  "model.desk_fan": "Tafelventilator",
+  "model.wall_air_conditioner": "Wandairconditioner",
+  "model.panel_heater": "Paneelverwarming",
 };

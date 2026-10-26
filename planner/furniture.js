@@ -553,6 +553,7 @@ export function buildFurnitureAsset(item) {
     materials[material] = linearColor(color, opacity);
     const fabric = supportsCurtain(model) && ['body', 'accent'].includes(part.material);
     const tags = fabric ? { curtain_fabric: true, curtain_panel: part.center[0] < 0 ? 'left' : 'right' } : {};
+    if (part.fan_rotor === true && model.device_animation?.rotor) tags.fan_rotor = true;
     const mesh = { name: 'part_' + index, ...primitive(part, !!(pattern && part.pattern_face)), surface_finish: part.surface_finish || 'painted', material_family: part.surface_finish || 'painted', material, kind: 'inventory', ...tags };
     if (pattern && part.pattern_face) {
       const [background, accent] = patternSurface(part, pattern);
@@ -571,5 +572,5 @@ export function buildFurnitureAsset(item) {
   }
   const patternFinish=model.parts.find(part=>part.pattern_face)?.surface_finish||'painted';
   for(const mesh of meshes){if(!mesh.surface_finish){mesh.surface_finish=patternFinish;mesh.material_family=patternFinish;}chartUV(mesh,item.dimensions_m||model.dimensions_m);if(model.parts.some(p=>p.geometry_profile))compactMesh(mesh);}
-  return { meshes, materials };
+  return { meshes, materials, ...(model.device_animation ? { device_animation: model.device_animation } : {}) };
 }

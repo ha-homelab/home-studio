@@ -796,4 +796,9 @@ export default {
   "Loading map…": "Karte wird geladen…",
   "Preview 3D": "3D-Vorschau",
   "Published home": "Veröffentlichtes Zuhause",
+  "model.ceiling_fan": "Deckenventilator mit vier Flügeln",
+  "model.standing_fan": "Standventilator",
+  "model.desk_fan": "Tischventilator",
+  "model.wall_air_conditioner": "Wandklimaanlage",
+  "model.panel_heater": "Flächenheizgerät",
 };

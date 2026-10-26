@@ -24,7 +24,7 @@ Możesz użyć osobnego edytora w przeglądarce podczas przygotowywania HA. Nie 
 
 Narysuj swój dom w przeglądarce. Konto nie jest potrzebne. Wybierz język u góry edytora.
 
-1. Dodaj pokoje, ściany, drzwi i okna. Biblioteka zawiera 206 modeli. Wybierz paletę kolorów, a dla obsługiwanych przedmiotów także wzór powierzchni.
+1. Dodaj pokoje, ściany, drzwi i okna. Biblioteka zawiera 211 modeli. Wybierz paletę kolorów, a dla obsługiwanych przedmiotów także wzór powierzchni.
 2. Wyeksportuj JSON, aby zachować edytowalną kopię. Szkice pozostają tylko w tej przeglądarce. Zmiana języka nie zmienia planu.
 
 ### Opcjonalnie: przenośne narzędzia i kompilator Python

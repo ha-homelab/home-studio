@@ -796,4 +796,9 @@ export default {
   "Loading map…": "در حال بارگذاری نقشه…",
   "Preview 3D": "پیش‌نمایش سه‌بعدی",
   "Published home": "خانهٔ منتشرشده",
+  "model.ceiling_fan": "پنکه سقفی چهارپره",
+  "model.standing_fan": "پنکه ایستاده",
+  "model.desk_fan": "پنکه رومیزی",
+  "model.wall_air_conditioner": "کولر گازی دیواری",
+  "model.panel_heater": "بخاری پنلی",
 };

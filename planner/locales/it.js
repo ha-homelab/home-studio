@@ -796,4 +796,9 @@ export default {
   "Loading map…": "Caricamento della mappa…",
   "Preview 3D": "Anteprima 3D",
   "Published home": "Casa pubblicata",
+  "model.ceiling_fan": "Ventilatore da soffitto a quattro pale",
+  "model.standing_fan": "Ventilatore a piantana",
+  "model.desk_fan": "Ventilatore da tavolo",
+  "model.wall_air_conditioner": "Condizionatore a parete",
+  "model.panel_heater": "Radiatore a pannello",
 };

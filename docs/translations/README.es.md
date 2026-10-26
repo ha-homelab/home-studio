@@ -24,7 +24,7 @@ Puedes usar el editor web independiente mientras preparas HA. No tiene conexión
 
 Dibuja tu casa en el navegador. No necesitas una cuenta. Elige el idioma en la parte superior del editor.
 
-1. Añade habitaciones, paredes, puertas y ventanas. La biblioteca incluye 206 modelos. Elige una paleta de colores y, en los objetos compatibles, un patrón de superficie.
+1. Añade habitaciones, paredes, puertas y ventanas. La biblioteca incluye 211 modelos. Elige una paleta de colores y, en los objetos compatibles, un patrón de superficie.
 2. Exporta JSON para guardar una copia editable. Los borradores permanecen solo en este navegador. Cambiar el idioma no modifica tu plano.
 
 ### Opcional: herramientas portátiles y compilador Python

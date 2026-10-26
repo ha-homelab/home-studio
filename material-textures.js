@@ -143,10 +143,13 @@ function inventoryMaterialBatches(asset, dimensions, materials, textures) {
   for (const part of asset.meshes) {
     const mapped = textures.get(part, dimensions);
     const surfaceFinish = materialSurfaceFinish(part.surface_finish);
-    const key = (surfaceFinish || '') + '|' + part.material + '|' + (part.curtain_fabric ? part.curtain_panel : 'fixed') + '|' + JSON.stringify([Object.entries(mapped?.channels||{}).map(([k,t])=>[k,t.uuid]),mapped?.normalScale,mapped?.aoStrength,mapped?.albedoTint]);
+    // A moving rotor cannot share geometry with its stationary housing, even
+    // when both use the same finish and cached texture channels.
+    const fanRotor = !!asset.device_animation?.rotor && part.fan_rotor === true;
+    const key = (surfaceFinish || '') + '|' + part.material + '|' + (fanRotor ? 'fan_rotor' : part.curtain_fabric ? part.curtain_panel : 'fixed') + '|' + JSON.stringify([Object.entries(mapped?.channels||{}).map(([k,t])=>[k,t.uuid]),mapped?.normalScale,mapped?.aoStrength,mapped?.albedoTint]);
     let batch = batches.get(key);
     if (!batch) {
-      batch = {material:part.material, surfaceFinish, curtainFabric:part.curtain_fabric === true, curtainPanel:part.curtain_panel,
+      batch = {material:part.material, surfaceFinish, fanRotor, curtainFabric:part.curtain_fabric === true, curtainPanel:part.curtain_panel,
         vertices:[], normals:[], indices:[], uv:[], texture:mapped?.texture, mapped};
       batches.set(key, batch);
     }

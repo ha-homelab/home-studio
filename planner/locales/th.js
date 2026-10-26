@@ -796,4 +796,9 @@ export default {
   "Loading map…": "กำลังโหลดแผนที่…",
   "Preview 3D": "ตัวอย่าง 3 มิติ",
   "Published home": "บ้านที่เผยแพร่แล้ว",
+  "model.ceiling_fan": "พัดลมเพดานสี่ใบพัด",
+  "model.standing_fan": "พัดลมตั้งพื้น",
+  "model.desk_fan": "พัดลมตั้งโต๊ะ",
+  "model.wall_air_conditioner": "เครื่องปรับอากาศติดผนัง",
+  "model.panel_heater": "เครื่องทำความร้อนแบบแผง",
 };

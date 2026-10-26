@@ -105,9 +105,10 @@ same companion/native protocol and provider adapters handle this scope.
 
 The provider adapter encodes catalog models as named columns and rows in the
 outbound prompt. This preserves every model, label, dimension and appearance
-capability while removing repeated field names (about 55% fewer catalog bytes for
-the 206-model catalog). The browser context and complete response schema remain
-unchanged. Tests reconstruct every descriptor to prevent a lossy optimization.
+capability while removing repeated field names (about 55% fewer catalog bytes,
+measured against the earlier 206-model catalog). The browser context and complete
+response schema remain unchanged. Tests reconstruct every descriptor to prevent a
+lossy optimization.
 
 `POST /api/ai/cancel` aborts pending work and invalidates late results.
 `POST /api/ai/disconnect` also clears credentials. Sessions expire after at most

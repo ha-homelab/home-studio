@@ -795,4 +795,9 @@ export default {
   "Loading map…": "মানচিত্র লোড হচ্ছে…",
   "Preview 3D": "ত্রিমাত্রিক প্রাক্‌দর্শন",
   "Published home": "প্রকাশিত বাড়ি",
+  "model.ceiling_fan": "চার পাখার সিলিং ফ্যান",
+  "model.standing_fan": "স্ট্যান্ড ফ্যান",
+  "model.desk_fan": "টেবিল ফ্যান",
+  "model.wall_air_conditioner": "দেয়ালে লাগানো এয়ার কন্ডিশনার",
+  "model.panel_heater": "প্যানেল হিটার",
 };

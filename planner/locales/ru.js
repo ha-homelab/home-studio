@@ -795,4 +795,9 @@ export default {
   "Loading map…": "Загрузка карты…",
   "Preview 3D": "Предпросмотр 3D",
   "Published home": "Опубликованный дом",
+  "model.ceiling_fan": "Потолочный вентилятор с четырьмя лопастями",
+  "model.standing_fan": "Напольный вентилятор",
+  "model.desk_fan": "Настольный вентилятор",
+  "model.wall_air_conditioner": "Настенный кондиционер",
+  "model.panel_heater": "Панельный обогреватель",
 };

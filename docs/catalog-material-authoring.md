@@ -1,6 +1,6 @@
 # Stock catalog geometry and physical surfaces
 
-The offline catalog contains 206 orbitable models composed of 2,252 named parts.
+The offline catalog contains 211 orbitable models composed of 2,287 named parts.
 These are authored approximations of furniture, appliances, plants, vehicles and
 decorative objects. They are not scans or photographs of a particular product.
 They remain ordinary meshes: no camera-facing photographic billboards are used.

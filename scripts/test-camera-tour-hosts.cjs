@@ -223,6 +223,7 @@ test('whole-house framing includes static porches through every orbit angle with
   const rect = { width: 1290, height: 1310 };
   const context = vm.createContext({
     THREE, active: true, renderer: {}, root: architecture, scene, objectGroup: moving,
+    markerViewport: '', markerMotion: {reset() {}},
     model: { ceiling_height_m: 3, rooms: [{ id: 'living', polygon: [[-2, -8], [2, -8], [2, 8], [-2, 8]] }] },
     selected: '', zoom: 0.8, panX: 0, panY: 0, homeRotation: 0, homeTilt: 0,
     camera: null, cameraFit: null, houseFitBounds: null, planBounds: null, planRadius: 8,

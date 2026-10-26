@@ -796,4 +796,9 @@ export default {
   "Loading map…": "Завантаження карти…",
   "Preview 3D": "3D-перегляд",
   "Published home": "Опублікований будинок",
+  "model.ceiling_fan": "Стельовий вентилятор із чотирма лопатями",
+  "model.standing_fan": "Підлоговий вентилятор",
+  "model.desk_fan": "Настільний вентилятор",
+  "model.wall_air_conditioner": "Настінний кондиціонер",
+  "model.panel_heater": "Панельний обігрівач",
 };
