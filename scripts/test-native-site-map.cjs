@@ -39,7 +39,7 @@ let server, browser;
       response.writeHead(200, { 'Content-Type': ({ '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.json': 'application/json' })[path.extname(file)] || 'application/octet-stream', 'Access-Control-Allow-Origin': '*' });
       response.end(body);
     } catch (error) {
-      if (!['ENOENT', 'ENOTDIR', 'ELOOP'].includes(error.code)) throw error;
+      if (!['ENOENT', 'ENOTDIR', 'ELOOP', 'EISDIR'].includes(error.code)) throw error;
       response.writeHead(404); response.end();
     } finally { if (descriptor !== undefined) fs.closeSync(descriptor); }
   });
@@ -47,6 +47,14 @@ let server, browser;
   const origin = `http://127.0.0.1:${server.address().port}`;
   assert.equal((await fetch(origin + '/home-floorplan-studio/planner/not-a-fixture.js')).status, 404);
   assert.equal((await fetch(origin + '/home-floorplan-studio/planner')).status, 404);
+  const nativeOpen = fs.openSync;
+  try {
+    fs.openSync = (file, ...args) => {
+      if (file === path.join(root, 'planner')) throw Object.assign(new Error('Directory open rejected'), { code: 'EISDIR' });
+      return nativeOpen(file, ...args);
+    };
+    assert.equal((await fetch(origin + '/home-floorplan-studio/planner')).status, 404, 'Directory-open errors also remain a 404');
+  } finally { fs.openSync = nativeOpen; }
   browser = await engines[engine].launch(browserLaunchOptions(engine, true));
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }); page.setDefaultTimeout(15000);
   const errors = []; page.on('pageerror', error => errors.push(String(error))); page.on('dialog', dialog => dialog.accept());
