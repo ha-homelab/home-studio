@@ -182,9 +182,9 @@ def _check_source_site_frame(project, assets):
             raise ValueError("The original floors disagree on site ground.")
     except ValueError as error:
         raise NativeError("inconsistent_site_frame",
-                          "Site changes need consistent floor reference levels. Rebuild the original home "
-                          "with matching floor elevations before publishing them. To continue without site changes, "
-                          "export the drawing, remove its top-level site field, and import it again. "
+                          "The imported home's floor reference levels need calibration before publishing site shapes. "
+                          "Use More options > Calibrate imported site frame to review the source levels, "
+                          "or rebuild the original home with consistent elevations. "
                           "The saved draft and current published home are unchanged. " + str(error)) from error
 
 

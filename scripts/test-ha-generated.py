@@ -295,6 +295,42 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((self.project.root / previous / "upper/index.html").is_file())
         self.assert_baseline_unchanged()
 
+    async def test_ambiguous_imported_floor_datums_reject_site_publish_without_changing_home(self):
+        for identifier, model in self.models.items():
+            model.pop("elevation_m", None)
+            model["site_context"]["ground_elevation_m"] = -2.86 if identifier == "upper" else 0
+            folder = self.component / "assets" / identifier
+            (folder / "model-data.json").write_text(encoded(model), encoding="utf-8")
+            page = folder / "index.html"
+            embedded = embedded_model(page)
+            embedded.pop("elevation_m", None)
+            embedded["site_context"]["ground_elevation_m"] = model["site_context"]["ground_elevation_m"]
+            page.write_text(MODEL_BLOCK.sub(lambda match: match[1] + encoded(embedded) + match[3],
+                                           page.read_text(encoding="utf-8")), encoding="utf-8")
+        self.baseline = tree_hashes(self.component)
+        adapter = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
+        await adapter.load()
+        source = copy.deepcopy(adapter.document["project"])
+        self.assertEqual([floor["elevation_m"] for floor in source["floors"]], [0, 0])
+        await adapter.save(0, source)
+        await adapter.publish(1)  # Existing indoor publication remains available without a site.
+        previous = adapter.document["generation"]
+        previous_hashes = tree_hashes(adapter.root / previous)
+        source["site"] = {"ground_elevation_m": 0, "features": [
+            {"id": "neighbor", "name": "Neighbor", "kind": "building", "height_m": 3,
+             "color": "#589aa8", "polygon": [[8, 0], [12, 0], [12, 4], [8, 4]]},
+        ]}
+        await adapter.save(1, source)
+        with self.assertRaises(native.NativeError) as error:
+            await adapter.publish(2)
+        self.assertEqual(error.exception.code, "inconsistent_site_frame")
+        self.assertIn("calibration", str(error.exception))
+        self.assertEqual(adapter.document["generation"], previous)
+        self.assertEqual(tree_hashes(adapter.root / previous), previous_hashes)
+        self.assertEqual(adapter.document["project"], source, "The saved draft remains recoverable")
+        self.assertEqual([floor["elevation_m"] for floor in source["floors"]], [0, 0])
+        self.assert_baseline_unchanged()
+
     async def test_omitting_site_does_not_resurrect_baseline_features(self):
         features = [{"id": "roof", "name": "Roof", "kind": "roof", "height_m": 6,
                      "color": "#46a0aa", "polygon": [[0, 0], [5, 0], [5, 4], [0, 4]]}]
