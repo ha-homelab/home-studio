@@ -7,7 +7,7 @@ const {EventEmitter} = require('node:events');
 const vm = require('node:vm');
 const {test, after} = require('node:test');
 const {sceneScreenshotRegion,analyzeScenePixels,inspectSceneScreenshot} = require('./browser-pixel-evidence.cjs');
-const {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
+const {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, waitForViewerDraw, assertViewerInteraction, bounded} = require('./browser-stability-diagnostics.cjs');
 
 test('host phase timing closes sequential phases and preserves the timeout observation', () => {
   let now=100;
@@ -204,25 +204,66 @@ test('viewer host rejects unsupported map actions and records every unexpected c
     /Viewer navigation never issues a device, write, or unsupported command/);
 });
 
-test('viewer drag receipts preserve native phases and the existing two-frame completion wait', async () => {
+function viewerInputFixture() {
   const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
-  const start=source.indexOf('const dragCanvas = async'),end=source.indexOf("    phases.start('dashboard-navigation');",start);
+  const start=source.indexOf('const completeInput = async'),end=source.indexOf("    phases.start('dashboard-navigation');",start);
   assert(start>=0&&end>start);
-  let now=100,drags=0,frames=0,evaluations=0,fail=false;
-  const phases={hoverMs:2,pressMs:3,moveMs:20,releaseMs:4};
-  const env={Date:{now:()=>now},input:{drag:async()=>{drags++;if(fail)throw Error('native failure');now+=29;return phases;}},
-    requestAnimationFrame:callback=>{frames++;now+=7;callback();}};
-  vm.runInNewContext(source.slice(start,end).replace('const dragCanvas','globalThis.dragCanvas'),env);
-  const locator={scrollIntoViewIfNeeded:async()=>{},boundingBox:async()=>({x:10,y:20,width:100,height:100}),evaluate:async()=>({x:.25,y:.35})};
-  const child={evaluate:async callback=>{evaluations++;return callback();}};
-  const result=await env.dragCanvas(locator,child);
-  assert.deepEqual(JSON.parse(JSON.stringify(result)),{durationMs:43,phases:{...phases,framesMs:14}});
-  assert.equal(drags,1);assert.equal(frames,2);assert.equal(evaluations,1);
-  assert.deepEqual(phases,{hoverMs:2,pressMs:3,moveMs:20,releaseMs:4},'Input phase data is not mutated');
-  fail=true;await assert.rejects(env.dragCanvas(locator,child),/native failure/);
-  assert.equal(drags,2);assert.equal(frames,2,'Failed native input cannot be replaced by another action');
-  assert.match(source,/sample\.homeDragPhases = homeDrag\.phases/);
-  assert.match(source,/sample\.editorDragPhases = editorDrag\.phases/);
+  let now=100,serial=0;const timers=new Map();
+  const env={performance:{now:()=>now},input:{},waitForViewerDraw,
+    setTimeout(callback,delay){const id=++serial;timers.set(id,{at:now+delay,callback});return id;},clearTimeout:id=>timers.delete(id),
+    requestAnimationFrame(){throw Error('Host completion cannot ask for an idle animation frame');}};
+  vm.runInNewContext(`const bounded=${bounded.toString()};`+source.slice(start,end)+';globalThis.complete=completeInput;globalThis.drag=dragCanvas;',env);
+  const flush=async()=>{for(let i=0;i<30;i++)await Promise.resolve();};
+  return {env,timers,source,now:()=>now,elapse:ms=>{now+=ms;},flush,
+    async advanceTo(at){now=at;for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.callback();}await flush();}};
+}
+
+test('viewer drag receipts preserve native input phases and share the remaining draw budget',async()=>{
+  for(const homeMode of [false,true]) {
+    const f=viewerInputFixture(),phases={hoverMs:2,pressMs:3,moveMs:20,releaseMs:4},before={renderCount:5,scene:{renderPasses:{scene:4},camera:{world:[1],projection:[1]}}};
+    let drags=0,evaluations=0,fail=false;
+    f.env.input.drag=async(from,to)=>{drags++;assert.deepEqual({...from},{x:35,y:55});assert.deepEqual({...to},{x:50,y:65});if(fail)throw Error('native failure');f.elapse(29);return phases;};
+    const locator={scrollIntoViewIfNeeded:async()=>{},boundingBox:async()=>({x:10,y:20,width:100,height:100}),evaluate:async()=>({x:.25,y:.35})};
+    const receipt={waitMs:150,renderCount:6};
+    const child={evaluate:async(callback,args)=>{
+      evaluations++;assert.equal(callback,waitForViewerDraw);
+      assert.deepEqual(JSON.parse(JSON.stringify(args)),{beforeRenderCount:5,beforeSceneDraws:4,beforeCamera:before.scene.camera,expectedHomeMode:homeMode,requireRotation:homeMode,timeoutMs:14971});
+      f.elapse(150);return receipt;
+    }};
+    const result=await f.env.drag(locator,child,before,homeMode);
+    assert.deepEqual(JSON.parse(JSON.stringify(result)),{durationMs:179,receipt,phases:{...phases,framesMs:150,receiptWaitMs:150}});
+    assert.equal(drags,1);assert.equal(evaluations,1);assert.equal(f.timers.size,0);
+    assert.deepEqual(phases,{hoverMs:2,pressMs:3,moveMs:20,releaseMs:4},'Input phase data is not mutated');
+    fail=true;await assert.rejects(f.env.drag(locator,child,before,homeMode),/native failure/);
+    assert.equal(drags,2);assert.equal(evaluations,1,'Failed native input cannot be replaced by another action');assert.equal(f.timers.size,0);
+    assert.match(f.source,/sample\.homeDragPhases = homeDrag\.phases/);assert.match(f.source,/sample\.editorDragPhases = editorDrag\.phases/);
+  }
+});
+
+test('host input deadline also bounds never-resolving native actions and frame evaluations',async()=>{
+  for(const blocked of ['input','evaluate']) {
+    const f=viewerInputFixture(),before={renderCount:1,scene:{renderPasses:{scene:1}}};let evaluations=0;
+    const action=()=>{if(blocked==='input')return new Promise(()=>{});f.elapse(8000);return {};};
+    const child={evaluate:(_callback,args)=>{evaluations++;assert.equal(args.timeoutMs,7000);assert.equal(args.beforeCamera,null);return new Promise(()=>{});}};
+    let error;const pending=f.env.complete(child,action,before,true).catch(failure=>{error=failure;});
+    await f.flush();assert.equal(evaluations,blocked==='input'?0:1);
+    assert.deepEqual([...f.timers.values()].map(timer=>timer.at),[15100],'The host timer retains the initial deadline after native input');
+    await f.advanceTo(15099);assert.equal(error,undefined);
+    await f.advanceTo(15100);await pending;
+    assert.match(error.message,/exceeded 15000 ms/);assert.equal(f.timers.size,0);
+  }
+});
+
+test('host rejects late native or protocol completion before the overdue timer fires',async()=>{
+  for(const stage of ['input','evaluate'])for(const elapsed of [15000,15001]) {
+    const f=viewerInputFixture(),before={renderCount:1,scene:{renderPasses:{scene:1}}};
+    let evaluations=0;
+    const action=()=>{if(stage==='input')f.elapse(elapsed);return {};};
+    const child={evaluate:async()=>{evaluations++;if(stage==='evaluate')f.elapse(elapsed);return {waitMs:150};}};
+    await assert.rejects(f.env.complete(child,action,before,true),/Viewer input exceeded 15000 ms/);
+    assert.equal(evaluations,stage==='input'?0:1,'Expired native input cannot start another protocol call');
+    assert.equal(f.now(),100+elapsed);assert.equal(f.timers.size,0,'Late resolution clears the timer but cannot certify success');
+  }
 });
 
 test('Home viewport waits for the observer frame and rejects stale or incomplete restoration receipts', async () => {
@@ -384,6 +425,118 @@ test('viewer receipts exclude real offscreen depth and fullscreen contact draws'
   env.renderer.render({name:'interaction-copy'},quadCamera);
   assert.equal(env.__browserRenderPasses.copy,1,'Software interaction copying remains measured');
   assert.deepEqual(Array.from(env.__browserCamera.world),[3]);
+});
+
+// Use the production recorder and serialized observer together. Only scheduled
+// application draws advance receipts; the fixture never delivers idle RAF.
+async function viewerDrawMeasurement({events=[{at:0}],beforeCamera=true,requireRotation=false,expectedHomeMode=true,timeoutMs=1000,lateRead=false,hidden=false}={}) {
+  const identity=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],rotated=[0,0,-1,0,0,1,0,0,1,0,0,0,0,0,0,1];
+  let now=0,serial=0,completed=false,result,error,observing=false,rafRequests=0,draws=0;
+  const timers=new Map(),state={renderCount:0,homeMode:expectedHomeMode,world:identity.slice(),full:true};
+  const camera={projectionMatrix:{toArray:()=>identity.slice()},matrixWorld:{toArray:()=>state.world.slice()}};
+  const env={mainScene:{},performance:{now:()=>now},
+    setTimeout(callback,delay){assert(Number.isFinite(delay)&&delay>=0);const id=++serial;timers.set(id,{at:now+delay,callback});return id;},
+    clearTimeout:id=>timers.delete(id),requestAnimationFrame(){rafRequests++;return ++serial;},
+    requestRender(){throw Error('An observer cannot request a render');},requestModelRender(){throw Error('An observer cannot request a render');},renderModel(){throw Error('An observer cannot request a render');},
+    document:{visibilityState:hidden?'hidden':'visible',hidden,hasFocus:()=>true},
+    floorplan:{get homeMode(){return state.homeMode;},get renderCount(){return state.renderCount;}},
+    renderer:{getRenderTarget:()=>null,info:{render:{calls:8,triangles:12}},domElement:{width:800,height:600},
+      getViewport(value){return value.copy({x:0,y:0,z:state.full?800:400,w:state.full?600:300});},getPixelRatio:()=>1,
+      render(){draws++;state.renderCount++;}},
+    __browserScene(){
+      if(observing&&lateRead&&draws>1)now=timeoutMs+1;
+      return {activePointLights:1,camera:env.__browserCamera,drawingBuffer:[800,600],renderPasses:env.__browserRenderPasses};
+    }};
+  env.window=env;
+  vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer,mainScene);globalThis.wait=${waitForViewerDraw.toString()};`,env);
+  env.renderer.render(env.mainScene,camera);
+  const baseline={beforeRenderCount:state.renderCount,beforeSceneDraws:env.__browserRenderPasses.scene,
+    beforeCamera:beforeCamera?JSON.parse(JSON.stringify(env.__browserCamera)):null,expectedHomeMode,requireRotation,timeoutMs};
+  function draw(event) {
+    state.world=event.camera==='unchanged'?identity.slice():event.camera==='translation'?identity.map((value,index)=>index===12?3:value):rotated.slice();
+    state.homeMode=event.wrongMode?!expectedHomeMode:expectedHomeMode;
+    state.full=event.full!==false;env.renderer.info.render.calls=event.blank?0:8;
+    env.renderer.render(event.copy?{name:'interaction-copy'}:env.mainScene,camera);
+    if(event.staleCount)state.renderCount=baseline.beforeRenderCount;
+  }
+  const queue=events.map(event=>({...event})).sort((a,b)=>a.at-b.at);
+  while(queue[0]?.at===0)draw(queue.shift());
+  observing=true;
+  env.wait(baseline).then(value=>{completed=true;result=value;},failure=>{completed=true;error=failure;});
+  for(let turn=0;!completed&&turn<2000;turn++) {
+    for(let microtask=0;microtask<6;microtask++)await Promise.resolve();
+    if(completed)break;
+    const timer=[...timers].sort((a,b)=>a[1].at-b[1].at||a[0]-b[0])[0],event=queue[0];
+    assert(timer||event,'Observer must make progress without an idle RAF');
+    if(event&&(!timer||event.at<=timer[1].at)){queue.shift();now=Math.max(now,event.at);draw(event);}
+    else{timers.delete(timer[0]);now=Math.max(now,timer[1].at);timer[1].callback();}
+  }
+  assert(completed,'Draw observer must settle under one bounded deadline');
+  assert.equal(rafRequests,0,'Observation cannot depend on an idle animation callback');
+  assert.equal(timers.size,0,'No observer timer survives completion');
+  assert.equal(draws,1+events.length-queue.length,'Observation cannot manufacture application draws');
+  return {result,error,now};
+}
+
+test('draw receipt accepts completed and delayed full scenes while idle RAF is withheld',async()=>{
+  for(const at of [0,50,500])for(const expectedHomeMode of [false,true]) {
+    const {result,error,now}=await viewerDrawMeasurement({events:[{at}],expectedHomeMode,requireRotation:true});
+    assert.ifError(error);assert.equal(result.renderCount,2);assert.equal(result.scene.renderPasses.scene,2);
+    assert.equal(result.homeMode,expectedHomeMode);assert.equal(result.cameraChanged,true);assert.equal(result.cameraRotated,true);
+    assert(now>=at+150&&now<at+200,'A fresh completed scene must remain stable for at least 150 ms');
+    assert.equal(result.waitMs,now);
+  }
+});
+
+test('draw receipt rejects stale, copy-only, blank, partial and wrong-mode output',async()=>{
+  for(const events of [[],[{at:0,copy:true}],[{at:0,blank:true}],[{at:0,full:false}],[{at:0,staleCount:true}],[{at:0,wrongMode:true}]]) {
+    const {error,now}=await viewerDrawMeasurement({events});
+    assert.match(error?.message||'',/Viewer input did not settle/);assert.equal(now,1000,'A rejected receipt does not renew its deadline');
+  }
+});
+
+test('draw receipt cannot certify a completed scene from a hidden document',async()=>{
+  const {error,now}=await viewerDrawMeasurement({hidden:true});
+  assert.match(error?.message||'',/Viewer input did not settle/);assert.equal(now,1000);
+});
+
+test('draw receipt distinguishes a camera change from actual rotation',async()=>{
+  for(const event of [{at:0,camera:'unchanged'},{at:0,camera:'translation'}]) {
+    const {error,now}=await viewerDrawMeasurement({events:[event],requireRotation:true});
+    assert.match(error?.message||'',/Viewer input did not settle/);assert.equal(now,1000);
+  }
+  const unchanged=await viewerDrawMeasurement({events:[{at:0,camera:'unchanged'}]});
+  assert(unchanged.error,'An explicitly supplied baseline camera must change');assert.equal(unchanged.now,1000);
+  const moved=await viewerDrawMeasurement({events:[{at:0,camera:'translation'}]});
+  assert.ifError(moved.error);assert.equal(moved.result.cameraChanged,true);assert.equal(moved.result.cameraRotated,false);
+  const modeOnly=await viewerDrawMeasurement({events:[{at:0,camera:'unchanged'}],beforeCamera:false});
+  assert.ifError(modeOnly.error);assert.equal(modeOnly.result.renderCount,2,'Mode-only waits do not require a camera change');
+});
+
+test('draw receipt restarts stability after a new draw or an intervening copy',async()=>{
+  for(const events of [[{at:0},{at:100}],[{at:0},{at:100,copy:true},{at:125}]]) {
+    const {result,error,now}=await viewerDrawMeasurement({events});
+    assert.ifError(error);const last=events.at(-1).at;
+    assert(now>=last+150&&now<last+200,'Every new receipt restarts the stable post-release window');
+    assert.equal(result.scene.renderPasses.last,'scene');assert.equal(result.waitMs,now);
+  }
+});
+
+test('draw receipt cannot relax the 15-second maximum through its options',async()=>{
+  for(const timeoutMs of [0,-1,15001,Infinity,NaN]) {
+    const {error,now}=await viewerDrawMeasurement({timeoutMs});
+    assert.match(error?.message||'',/15-second interaction budget/);assert.equal(now,0);
+  }
+});
+
+test('draw receipt rejects late draws and bounds repeatedly reset waits',async()=>{
+  for(const options of [{events:[{at:1001}]},{events:[{at:900}]},{events:Array.from({length:10},(_,i)=>({at:i*100}))},{events:[],timeoutMs:15000}]) {
+    const {error,now}=await viewerDrawMeasurement(options);
+    assert.match(error?.message||'',/Viewer input did not settle/);
+    assert.equal(now,options.timeoutMs||1000,'All polls and stability resets share the original absolute deadline');
+  }
+  const late=await viewerDrawMeasurement({lateRead:true});
+  assert.match(late.error?.message||'',/Viewer input did not settle/);assert.equal(late.now,1001,'A late scene getter cannot certify success');
 });
 
 async function lightStateMeasurement({drawAt=50, expectedLights=71, mutation, lateRead=false}={}) {

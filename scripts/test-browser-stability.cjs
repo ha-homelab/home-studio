@@ -15,7 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
-const {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
+const {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerDraw, waitForViewerLightState, assertViewerInteraction, bounded} = require('./browser-stability-diagnostics.cjs');
 const {createStartupDiagnostics} = require('./browser-startup-diagnostics.cjs');
 const {inspectSceneScreenshot} = require('./browser-pixel-evidence.cjs');
 
@@ -190,7 +190,24 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
   const {samples, errors, crashes, consoleErrors} = record;
   phases.start('input-setup');
   const input = await createInputDriver(page, browserName, profile, inputDiagnostics);
-  const dragCanvas = async (locator, child) => {
+  const completeInput = async (child, action, before, expectedHomeMode, requireCamera = false, requireRotation = false) => {
+    const started = performance.now();
+    return bounded(async () => {
+      const inputPhases = await action();
+      const framesStarted = performance.now();
+      if (framesStarted-started >= 15000) throw Error('Viewer input exceeded 15000 ms');
+      const receipt = await child.evaluate(waitForViewerDraw, {
+        beforeRenderCount:before.renderCount, beforeSceneDraws:before.scene.renderPasses.scene,
+        beforeCamera:requireCamera ? before.scene.camera : null, expectedHomeMode, requireRotation,
+        timeoutMs:15000-(framesStarted-started),
+      });
+      const completed = performance.now();
+      if (completed-started >= 15000) throw Error('Viewer input exceeded 15000 ms');
+      return {durationMs:completed-started, receipt,
+        phases:{...inputPhases,framesMs:completed-framesStarted,receiptWaitMs:receipt.waitMs}};
+    }, 15000, 'Viewer input and completed draw');
+  };
+  const dragCanvas = async (locator, child, before, homeMode) => {
     await locator.scrollIntoViewIfNeeded();
     const bounds = await locator.boundingBox();
     const point = await locator.evaluate(canvas => {
@@ -200,13 +217,9 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
       }
       throw Error('No exposed canvas pixel is available for a real drag');
     });
-    const started = Date.now();
-    const phases = await input.drag({x: bounds.x+bounds.width*point.x, y: bounds.y+bounds.height*point.y},
-      {x: bounds.x+bounds.width*(point.x+.15), y: bounds.y+bounds.height*(point.y+.1)});
-    const framesStarted = Date.now();
-    await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-    const completed = Date.now();
-    return {durationMs:completed-started,phases:{...phases,framesMs:completed-framesStarted}};
+    return completeInput(child, () => input.drag({x: bounds.x+bounds.width*point.x, y: bounds.y+bounds.height*point.y},
+      {x: bounds.x+bounds.width*(point.x+.15), y: bounds.y+bounds.height*(point.y+.1)}),
+      before, homeMode, true, homeMode);
   };
     phases.start('dashboard-navigation');
     await page.goto(origin);
@@ -292,8 +305,8 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
       check((await snapshot()).renderCount===idleBefore, 'An idle Home view does not continuously render');
       phases.start('home-drag', {cycle});
       const canvas = frame.locator('#homeStage canvas');
-      const homeCameraBefore = (await snapshot()).scene.camera;
-      const homeDrag = await dragCanvas(canvas,child), dragMs = homeDrag.durationMs;
+      const beforeHomeDrag = await snapshot(), homeCameraBefore = beforeHomeDrag.scene.camera;
+      const homeDrag = await dragCanvas(canvas,child,beforeHomeDrag,true), dragMs = homeDrag.durationMs;
       sample.homeDragPhases = homeDrag.phases;
       sample.dragMs = dragMs;
       sample.readyAfterDragMs = Date.now()-started;
@@ -339,7 +352,7 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
       phases.start('editor-drag', {cycle});
       const beforeEditorDrag = await snapshot();
       const editorCameraBefore = beforeEditorDrag.scene.camera;
-      const editorDrag = await dragCanvas(frame.locator('#view3d canvas'),child), editorDragMs = editorDrag.durationMs;
+      const editorDrag = await dragCanvas(frame.locator('#view3d canvas'),child,beforeEditorDrag,false), editorDragMs = editorDrag.durationMs;
       sample.editorDragPhases = editorDrag.phases;
       sample.editorDragMs = editorDragMs;
       const afterEditorDrag = await snapshot();
@@ -351,9 +364,9 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
       save();
       check(sample.editorCameraChanged, 'Dragging the editor changes the camera used to draw the scene');
       phases.start('home-enter', {cycle});
-      await input.tap(frame.locator('#openHome'));
-      await child.waitForFunction(() => window.floorplan.homeMode);
-      await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      const beforeHomeReturn = await snapshot();
+      const homeReturn = await completeInput(child, () => input.tap(frame.locator('#openHome')), beforeHomeReturn, true);
+      sample.homeReturn = {durationMs:homeReturn.durationMs, phases:homeReturn.phases};
       sample.statePrograms = [(await snapshot()).linkedPrograms];
       const lights = project.floors[0].items.length;
       const allOff = Object.fromEntries(Object.entries(states).map(([key,value])=>[key,{...value,state:'off'}]));
@@ -495,13 +508,12 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
       if(process.env.BROWSER_STABILITY_SCREENSHOT_DIR) {
         phases.start('comparison-screenshot', {cycle});
         if(!await child.evaluate(()=>window.floorplan.homeMode)) {
-          const beforeHome=await child.evaluate(()=>window.floorplan.renderCount);
-          await input.tap(frame.locator('#openHome'));
-          await child.waitForFunction(before=>window.floorplan.homeMode && window.floorplan.renderCount>before,beforeHome);
+          const beforeHome = await snapshot();
+          await completeInput(child, () => input.tap(frame.locator('#openHome')), beforeHome, true);
         }
         fs.mkdirSync(process.env.BROWSER_STABILITY_SCREENSHOT_DIR,{recursive:true});
-        await input.tap(frame.locator('#homeZoomReset'));
-        await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+        const beforeReset = await snapshot();
+        await completeInput(child, () => input.tap(frame.locator('#homeZoomReset')), beforeReset, true);
         await page.screenshot({path:path.join(process.env.BROWSER_STABILITY_SCREENSHOT_DIR,`${browserName}-${cycle+1}.png`)});
       }
       // Browser teardown and Playwright's frame registry update asynchronously.
