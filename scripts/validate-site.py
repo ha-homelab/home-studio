@@ -173,7 +173,7 @@ REPO_FILES = (
               'custom_components/home_floorplan/generated.py',
               'custom_components/home_floorplan/site_frame.py', 'custom_components/home_floorplan/site_calibration.py',
               'custom_components/home_floorplan/runtime_upgrade.py', 'custom_components/home_floorplan/baseline_transaction.py', 'scripts/test-runtime-upgrade.py', 'scripts/fixtures/map-layer-v0.js',
-              'scripts/test-site-calibration.py', 'scripts/test-site-calibration.cjs',
+              'scripts/test-site-calibration.py', 'scripts/test-site-calibration.cjs', 'scripts/test-viewer-runtime-upgrade.cjs',
               'docs/imported-site-calibration.md',
               'custom_components/home_floorplan/permissions.py',
               'custom_components/home_floorplan/config_flow.py',

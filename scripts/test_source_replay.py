@@ -23,6 +23,8 @@ class SourceReplayTests(unittest.TestCase):
             source = work / 'extracted/home-studio'
             self.assertFalse((source / '.git').exists())
             self.assertFalse((source / 'node_modules').exists())
+            self.assertTrue((source / 'scripts/test-viewer-runtime-upgrade.cjs').is_file(),
+                            'The distributed source must include its runtime-upgrade browser acceptance test')
             # Load the tour browser helper from the distributed entry point,
             # without starting Playwright or relying on checkout-only files.
             result = subprocess.run([node, '-e', """
