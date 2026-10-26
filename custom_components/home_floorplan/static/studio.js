@@ -149,6 +149,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this._pagehide = () => {
       this._disposeAi();
       this._resetMapTransport();
+      this._cancelViewerRuntime();
       if (this._exportBusy) {
         this._exportSequence++;
         this._cancelExport?.(new Error('Export download cancelled when leaving the page.'));
@@ -186,6 +187,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
             <button id="export" disabled>Export drawing (JSON)</button>
             <button id="reload" disabled>Load saved draft</button>
             <button id="site-frame" aria-haspopup="dialog" hidden disabled>Calibrate imported site frame</button>
+            <button id="viewer-runtime" aria-haspopup="dialog" hidden disabled>Update imported viewer</button>
           </div></details>
         </div>
         <div id="status" role="status" aria-live="polite" aria-atomic="true">Opening your drawing…</div><button id="retry" aria-describedby="status" hidden>Retry connection</button>
@@ -197,6 +199,15 @@ class HomeFloorplanStudioPanel extends HTMLElement {
         <ul id="site-frame-offsets"></ul>
         <p>Apply saves floor offsets and a private recovery copy. Local rooms, objects, bindings, roof and yard geometry stay fixed. Your published home changes only after Publish to 3D Home.</p>
         <div class="row"><button id="site-frame-apply" class="primary" disabled>Apply floor offsets</button><button id="site-frame-cancel">Cancel</button></div>
+      </dialog>
+      <dialog id="viewer-runtime-dialog" aria-labelledby="viewer-runtime-title">
+        <h2 id="viewer-runtime-title">Update imported viewer</h2>
+        <p>Update the saved viewer so neighboring buildings can appear as outlines.</p>
+        <p><strong>Map renderer: version 0 → version 1.</strong> Only the known map-renderer module is replaced.</p>
+        <ul id="viewer-runtime-files"></ul>
+        <p>This prepares a new private baseline and recovery copy. Rooms, objects, bindings, roof, yard, textures and other geometry are preserved.</p>
+        <p>Your active published home stays unchanged. Use Publish to 3D Home when you are ready to activate the update.</p>
+        <div class="row"><button id="viewer-runtime-apply" class="primary" disabled>Prepare viewer update</button><button id="viewer-runtime-cancel">Cancel</button></div>
       </dialog>
       <dialog id="model-export-dialog" aria-labelledby="model-export-title" aria-describedby="model-export-help">
         <h2 id="model-export-title">Export for Blender</h2>
@@ -239,6 +250,11 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this.$('site-frame-cancel').onclick = () => this.$('site-frame-dialog').close();
     this.$('site-frame-dialog').addEventListener('close', () => { this._siteFramePreview = null; this._buttons(); });
     this.$('site-frame-dialog').addEventListener('cancel', event => { if (this._busy) event.preventDefault(); });
+    this.$('viewer-runtime').onclick = () => this._previewViewerRuntime();
+    this.$('viewer-runtime-apply').onclick = () => this._applyViewerRuntime();
+    this.$('viewer-runtime-cancel').onclick = () => this.$('viewer-runtime-dialog').close();
+    this.$('viewer-runtime-dialog').addEventListener('close', () => { this._viewerRuntimePreview = null; this._buttons(); });
+    this.$('viewer-runtime-dialog').addEventListener('cancel', event => { if (this._busy) event.preventDefault(); });
     this.$('resume').onclick = () => this._resolveRecovery(true);
     this.$('discard').onclick = () => this._resolveRecovery(false);
     this.$('download-recovery').onclick = () => this._download(this._recovery.project, 'recovered-project.json');
@@ -265,6 +281,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     if (!this._connectionState || this._connectionState.connection !== connection) {
       this._connectionEpoch++;
       this._resetMapTransport();
+      this._cancelViewerRuntime();
       this._cancelExport?.(new Error('The Home Assistant connection changed. Nothing was downloaded. Try the export again.'));
       this._stopConnectionTracking();
       const state = this._connectionState = { connection, ready: null };
@@ -281,6 +298,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     if (state.ready === ready) return;
     this._connectionEpoch++;
     this._resetMapTransport();
+    this._cancelViewerRuntime();
     state.ready = ready;
     this.$('connection-notice').hidden = ready || !this._hass;
     if (!ready) { this._siteFramePreview = null; this.$('site-frame-dialog').close(); }
@@ -295,6 +313,8 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   }
   _reset() {
     this._resetMapTransport();
+    this._cancelViewerRuntime();
+    this._viewerRuntimeUnconfirmed = false;
     this._siteFramePreview = null; this.$('site-frame-dialog').close();
     this._closePublishedHome(false);
     this._disposeAi();
@@ -393,6 +413,10 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       this._status(`Home Assistant is disconnected. ${field}Keep this tab open to continue editing. More options → Export drawing (JSON) keeps a copy of the last valid drawing.`, this._edits.invalid);
       return;
     }
+    if (this._viewerRuntimeUnconfirmed) {
+      this._status('The viewer update was interrupted. Load saved draft to check whether it completed before trying again.', true);
+      return;
+    }
     if (this._edits.invalid) this._status(`Correct ${this._edits.field || 'the highlighted field'} before saving or publishing. Save draft will take you to the field.`, true);
     else if (this._edits.pending) this._status('Unsaved field edits · Save draft applies and saves your entered values.');
     else if (this._requiresInitialSave() && !this._dirty()) this._status('Save draft to create a private draft in Home Assistant. Your published home stays unchanged.');
@@ -420,6 +444,12 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this.$('site-frame').disabled = networkDisabled || needsSave || !this._savedRaw;
     this.$('site-frame-apply').disabled = networkDisabled || !this._siteFramePreview || needsSave;
     this.$('site-frame-cancel').disabled = this._busy;
+    const runtimeAllowed = this._canUpgradeViewerRuntime();
+    this.$('viewer-runtime').hidden = !runtimeAllowed;
+    this.$('viewer-runtime').disabled = networkDisabled || !runtimeAllowed || needsSave || !!this._edits.invalid || this._viewerRuntimeUnconfirmed === true || !this._savedRaw || !this._hasPublishedHome();
+    this.$('viewer-runtime').title = needsSave ? 'Save your latest draft before updating the imported viewer.' : '';
+    this.$('viewer-runtime-apply').disabled = this.$('viewer-runtime').disabled || !this._viewerRuntimePreview || this._viewerRuntimePreview.revision !== this._revision;
+    this.$('viewer-runtime-cancel').disabled = this._busy;
     this.$('retry').disabled = !this._online();
     // Unknown publication state must not block access to an existing live home.
     const unpublished = !!this._saved && !this._hasPublishedHome();
@@ -633,6 +663,8 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     else { try { sessionStorage.removeItem(this._key()); } catch {} this._openEditor(this._saved.project); }
   }
   _openEditor(project) {
+    this._cancelViewerRuntime();
+    this._viewerRuntimeUnconfirmed = false;
     this._resetMapTransport();
     this._disposeAi(); this._aiSequence = 0;
     this._clearEditorNavigation(); this._editorLoading = false;
@@ -809,6 +841,88 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       const timer = setTimeout(() => { this._pending.delete(requestId); reject(new Error('The editor did not respond. Your saved copy is unchanged.')); }, 5000);
       this._pending.set(requestId, { resolve, reject, timer }); this._send('snapshot-request', { requestId, allowInvalid, commit });
     });
+  }
+  _canUpgradeViewerRuntime() {
+    return this._hass?.user?.is_admin === true && this._saved?.can_edit !== false &&
+      this._saved?.capabilities?.authoring === true && this._saved?.capabilities?.imported_runtime_upgrade === true &&
+      this._saved?.source?.kind === 'generated';
+  }
+  _cancelViewerRuntime() {
+    if (this._viewerRuntimeOperation?.sentApply) this._viewerRuntimeUnconfirmed = true;
+    if (this._viewerRuntimeOperation) this._busy = false;
+    this._viewerRuntimeOperation = null; this._viewerRuntimePreview = null;
+    this.$('viewer-runtime-dialog').close(); this._buttons();
+  }
+  async _previewViewerRuntime() {
+    if (this.$('viewer-runtime').disabled || !this._canUpgradeViewerRuntime()) return;
+    const operation = { generation: this._generation, connectionEpoch: this._connectionEpoch };
+    const current = () => this._viewerRuntimeOperation === operation && operation.generation === this._generation;
+    this._viewerRuntimeOperation = operation; this._viewerRuntimePreview = null;
+    this._busy = true; this._buttons(); this._status('Checking the saved viewer for a supported update…');
+    try {
+      await this._snapshot(true); if (!current()) return;
+      if (this._unsaved() || this._edits.invalid) throw new Error('Save your latest draft before updating the imported viewer.');
+      this._requireConnection(operation.connectionEpoch);
+      const result = await this._hass.callWS({ type: 'home_floorplan/project_runtime_upgrade_preview', revision: this._revision });
+      if (!current()) return;
+      this._requireConnection(operation.connectionEpoch);
+      await this._snapshot(true); if (!current()) return;
+      if (this._unsaved() || this._edits.invalid || result?.revision !== this._revision) throw new Error('The drawing changed. Save it and preview the viewer update again.');
+      const floors = this._project.floors, files = floors.map(floor => `${floor.id}/index.html`);
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(result.token) || typeof result.token !== 'string' ||
+          result.current_runtime?.version !== 0 || result.target_runtime?.version !== 1 ||
+          !/^[a-f0-9]{64}$/.test(result.current_runtime.sha256) || !/^[a-f0-9]{64}$/.test(result.target_runtime.sha256) ||
+          result.current_runtime.sha256 === result.target_runtime.sha256 ||
+          floors.length < 1 || floors.length > 8 || floors.some(floor => !/^[a-z][a-z0-9_]{0,47}$/.test(floor.id)) ||
+          !Array.isArray(result.files) || result.files.length !== files.length || new Set(result.files).size !== files.length ||
+          result.files.some(file => !files.includes(file)) || result.changed_file_count !== files.length) {
+        throw new Error('The viewer update preview is invalid.');
+      }
+      this.$('viewer-runtime-files').replaceChildren(...floors.map(floor => {
+        const row = document.createElement('li'); row.textContent = `${boundedText(floor.name, 120)}: saved viewer`; return row;
+      }));
+      this._viewerRuntimePreview = result; this.$('viewer-runtime-dialog').showModal();
+      this._status('Review the viewer update. The saved draft and active published home are unchanged.');
+    } catch (error) {
+      if (current()) this._status(`Viewer update preview failed: ${error.message || 'check the saved source and connection'}`, true);
+    } finally {
+      if (current()) { this._viewerRuntimeOperation = null; this._busy = false; this._buttons(); }
+    }
+  }
+  async _applyViewerRuntime() {
+    if (this.$('viewer-runtime-apply').disabled || !this._viewerRuntimePreview || !this._canUpgradeViewerRuntime()) return;
+    const preview = this._viewerRuntimePreview;
+    const operation = { generation: this._generation, connectionEpoch: this._connectionEpoch };
+    const current = () => this._viewerRuntimeOperation === operation && operation.generation === this._generation;
+    this._viewerRuntimeOperation = operation; this._busy = true; this._buttons();
+    this._status('Preparing the private viewer update…');
+    try {
+      await this._snapshot(true); if (!current()) return;
+      if (this._unsaved() || this._edits.invalid || preview.revision !== this._revision) throw new Error('The drawing changed. Save it and preview the viewer update again.');
+      this._requireConnection(operation.connectionEpoch);
+      operation.sentApply = true;
+      const saved = await this._hass.callWS({ type: 'home_floorplan/project_runtime_upgrade_apply', revision: preview.revision, token: preview.token });
+      if (!current()) return;
+      this._requireConnection(operation.connectionEpoch);
+      const raw = projectBytes(saved.project), source = sourceForEditor(saved);
+      if (raw !== this._savedRaw || saved.revision !== preview.revision + 1 ||
+          saved.published_revision !== this._publishedRevision || !source) throw new Error('The saved viewer update returned an unexpected project state.');
+      this._revision = saved.revision; this._publishedRevision = saved.published_revision;
+      this._saved = saved; this._savedRaw = raw; this._source = source;
+      this._viewerRuntimeUnconfirmed = false;
+      // Only baseline metadata changed. Keep the live editor and any newer
+      // local edits instead of replacing it with the earlier saved snapshot.
+      this.$('viewer-runtime-dialog').close(); this._persist();
+      this._status(this._unsaved() ? 'Viewer update prepared. Newer edits remain unsaved; save them before publishing.' :
+        'Viewer update prepared with a recovery copy. Publish to 3D Home when ready to activate it.');
+    } catch (error) {
+      if (current()) {
+        this._viewerRuntimePreview = null; this.$('viewer-runtime-dialog').close();
+        this._status(`Viewer update was not confirmed: ${error.message || 'connection failed'}. Load saved draft before retrying.`, true);
+      }
+    } finally {
+      if (current()) { this._viewerRuntimeOperation = null; this._busy = false; this._buttons(); }
+    }
   }
   async _previewSiteFrame() {
     if (this.$('site-frame').disabled || this._saved?.capabilities?.site_frame_calibration !== true) return;
