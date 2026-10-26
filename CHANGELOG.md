@@ -57,6 +57,11 @@
 
 ### Fixed
 
+- Imported homes reject site publication when their original floor reference
+  levels disagree, before changing a generation. This prevents neighboring
+  shapes from floating at an incorrect height; ordinary indoor edits remain
+  available while the source floor levels are corrected.
+
 - Release contact-shading geometry buffers when a graphics context is lost, so
   Safari can restore rendering and close the view again without stale-buffer
   WebGL errors.
