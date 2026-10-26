@@ -231,10 +231,36 @@ const initialStates={
   assert.equal(await frame.locator('.device-airflow:not([hidden])').count(),0,'a hidden document suppresses effects');
   await view.evaluate(()=>{delete document.hidden;document.dispatchEvent(new Event('visibilitychange'));});
   for(const id of models)await running(id,true);
-  await page.locator('iframe').evaluate(frame=>frame.style.transform='translateY(150vh)');
-  for(const id of models)await running(id,false);
-  await page.locator('iframe').evaluate(frame=>frame.style.transform='');
-  for(const id of models)await running(id,true);
+  // Exercise the card host's real scrolling lifecycle in both motion modes.
+  // Pinned Linux WebKit can defer IO reentry for CSS-translated iframes until
+  // a later paint; that separate embedding limitation is not fixed here.
+  const hostBefore=await page.evaluate(()=>({minHeight:document.body.style.minHeight,scroll:[scrollX,scrollY],
+    reduced:matchMedia('(prefers-reduced-motion: reduce)').matches}));
+  let scrollPreference;
+  try{
+    await page.evaluate(()=>{document.body.style.minHeight='300vh';window.scrollTo(0,0);});
+    for(scrollPreference of ['reduce','no-preference']){
+      await page.emulateMedia({reducedMotion:scrollPreference});
+      for(const id of models)await running(id,true);
+      await page.evaluate(()=>window.scrollTo(0,innerHeight*1.5));
+      await page.waitForFunction(()=>{
+        const rect=document.querySelector('iframe').getBoundingClientRect();
+        return scrollY>0 && rect.bottom<=0;
+      },null,{polling:100});
+      for(const id of models)await running(id,false);
+      await page.evaluate(()=>window.scrollTo(0,0));
+      await page.waitForFunction(()=>{
+        const rect=document.querySelector('iframe').getBoundingClientRect();
+        return scrollY===0 && rect.top>=0 && rect.bottom<=innerHeight;
+      },null,{polling:100});
+      for(const id of models)await running(id,true);
+    }
+  }catch(error){
+    await failureDiagnostics({phase:'host-scroll',preference:scrollPreference,error:String(error)});throw error;
+  }finally{
+    await page.emulateMedia({reducedMotion:hostBefore.reduced?'reduce':'no-preference'});
+    await page.evaluate(before=>{document.body.style.minHeight=before.minHeight;window.scrollTo(...before.scroll);},hostBefore);
+  }
 
   await publish(Object.fromEntries(entities.map(id=>[id,{...initialStates[id],restored:true}])));
   for(const id of models)await running(id,false);
