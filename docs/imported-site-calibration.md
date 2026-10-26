@@ -5,6 +5,13 @@ original models may contain reliable ground offsets while the editable draft
 shows every floor at elevation zero. Adding one shared site in that state can
 misalign the exterior between floors.
 
+If publication also reports that the saved viewer lacks neighborhood-outline
+support, first use **More options → Update imported viewer**. A supported
+previously published home can prepare its bundled map renderer without changing
+the current view, room geometry or devices. Updating an unknown or modified
+renderer requires rebuilding the original source. Calibration itself only
+changes reference metadata; it does not update the renderer.
+
 As an administrator, save your latest draft, then open **More options → Calibrate
 imported site frame**. The preview lists each current and proposed floor offset.
 The proposed offset is the negative of that floor's original ground offset, using

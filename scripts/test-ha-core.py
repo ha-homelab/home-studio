@@ -263,6 +263,109 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, 'stale_preview'):
             await self.request('site_frame_apply', revision=2, token=preview['token'])
 
+    async def test_imported_runtime_upgrade_real_store_and_authority(self):
+        from homeassistant.exceptions import Unauthorized
+
+        generated = sys.modules[self.integration.__package__ + '.generated']
+        project = json.loads((ROOT / 'planner/example-home.json').read_text())
+        await self.request('project_save', revision=0, project=project)
+        await self.request('project_publish', revision=1)
+        state = self.hass.data['home_floorplan']
+        component = Path(self.temp.name) / 'runtime-upgrade-import'
+        shutil.copytree(state['assets'], component / 'assets')
+        current = (ROOT / 'map-layer.js').read_text().rstrip()
+        previous_runtime = (ROOT / 'scripts/fixtures/map-layer-v0.js').read_text().rstrip()
+        (component / 'runtime').mkdir()
+        (component / 'runtime/map-layer.js').write_text(current)
+        for fid in state['site']['floors']:
+            path = component / 'assets' / fid / 'index.html'
+            html = path.read_text()
+            self.assertEqual(html.count(current), 1)
+            path.write_text(html.replace(current, previous_runtime))
+        models, _ = generated.load_models(component / 'assets', state['site']['floors'])
+        adapter = generated.GeneratedProject(self.hass, component, state['site'], models, state['data'])
+        await adapter.load()
+        state['native'] = adapter
+        await self.request('project_save', revision=0, project=adapter.document['project'])
+        await self.request('project_publish', revision=1)
+        previous = copy.deepcopy(adapter.document)
+        store_path = Path(adapter.store.path)
+        previous_bytes = store_path.read_bytes()
+        active_assets, active_data = state['assets'], copy.deepcopy(state['data'])
+        active_hashes = generated._hashes(active_assets)
+        baseline_dirs = set((adapter.root / 'baselines').iterdir())
+        self.assertTrue((await self.request('project_get'))['capabilities']['imported_runtime_upgrade'])
+
+        for command, extra in (('project_runtime_upgrade_preview', {}),
+                               ('project_runtime_upgrade_apply', {'token': 'unused'})):
+            with self.assertRaises(Unauthorized):
+                await self.request(command, user=self.family, revision=1, **extra)
+        async with state['lock']:
+            stale = asyncio.create_task(self.request('project_runtime_upgrade_preview', revision=1))
+            await asyncio.sleep(.01)
+            state['native'] = None
+        try:
+            with self.assertRaisesRegex(ValueError, 'conflict'):
+                await stale
+        finally:
+            state['native'] = adapter
+        queued_admin = await self.hass.auth.async_create_user('Runtime upgrade admin', group_ids=[GROUP_ID_ADMIN])
+        async with state['lock']:
+            revoked = asyncio.create_task(self.request('project_runtime_upgrade_preview', user=queued_admin, revision=1))
+            await asyncio.sleep(.01)
+            await self.hass.auth.async_update_user(queued_admin, group_ids=[GROUP_ID_READ_ONLY])
+        with self.assertRaisesRegex(ValueError, 'unauthorized'):
+            await revoked
+
+        preview = await self.request('project_runtime_upgrade_preview', revision=1)
+        self.assertEqual(preview['changed_file_count'], len(state['site']['floors']))
+        self.assertEqual(store_path.read_bytes(), previous_bytes)
+        failure = WriteError(OSError(errno.ENOSPC, 'No space left on device'))
+        with patch.object(adapter.store, '_write_prepared_data', side_effect=failure):
+            with self.assertRaisesRegex(ValueError, 'save_failed'):
+                await self.request('project_runtime_upgrade_apply', revision=1, token=preview['token'])
+        self.assertEqual(adapter.document, previous)
+        self.assertEqual(store_path.read_bytes(), previous_bytes)
+        self.assertEqual(set((adapter.root / 'baselines').iterdir()), baseline_dirs)
+
+        preview = await self.request('project_runtime_upgrade_preview', revision=1)
+        async with state['lock']:
+            pending = asyncio.create_task(self.request('project_runtime_upgrade_apply', revision=1, token=preview['token']))
+            await asyncio.sleep(.01)
+            self.assertFalse(pending.done(), 'Runtime preparation must acquire the shared project lock')
+        saved = await pending
+        self.assertEqual(saved['revision'], 2)
+        for key in ('project', 'inventory', 'generation', 'published_revision'):
+            self.assertEqual(adapter.document[key], previous[key])
+        self.assertEqual(state['assets'], active_assets)
+        self.assertEqual(state['data'], active_data)
+        self.assertEqual(generated._hashes(active_assets), active_hashes)
+        old = adapter.root / 'baselines' / previous['baseline']
+        new = adapter.root / 'baselines' / adapter.document['baseline']
+        self.assertEqual(json.loads((new / 'previous-document.json').read_text()), previous)
+        before, after = generated._hashes(old / 'assets'), generated._hashes(new / 'assets')
+        changed = {name for name in before if before[name] != after[name]}
+        self.assertEqual(changed, set(preview['files']))
+        for name in changed:
+            html_before = (old / 'assets' / name).read_text()
+            html_after = (new / 'assets' / name).read_text()
+            self.assertEqual(html_after.replace(current, previous_runtime), html_before)
+        reopened = generated.GeneratedProject(self.hass, component, state['site'], models, state['data'])
+        await reopened.load()
+        self.assertEqual(reopened.document, adapter.document)
+        with self.assertRaisesRegex(ValueError, 'stale_preview'):
+            await self.request('project_runtime_upgrade_apply', revision=2, token=preview['token'])
+        adapter._baseline_recovery_required = True
+        for command, data in (
+                ('project_get', {}),
+                ('project_save', {'revision': 2, 'project': adapter.document['project']}),
+                ('project_publish', {'revision': 2}),
+                ('project_runtime_upgrade_preview', {'revision': 2})):
+            with self.assertRaisesRegex(ValueError, 'baseline_recovery_required'):
+                await self.request(command, **data)
+        self.assertEqual(state['assets'], active_assets)
+        self.assertEqual(generated._hashes(active_assets), active_hashes)
+
     async def test_map_real_write_error_does_not_acknowledge_or_mutate(self):
         config = {'enabled': True, 'latitude': 0, 'longitude': 0,
                   'model_x': 0, 'model_z': 0, 'north_deg': 0}

@@ -121,7 +121,8 @@ check dimensions independently.
 
 ## Draft from photos with your own AI
 
-Open the optional AI panel in the relevant site scope. **Neighborhood** limits
+Open the optional AI panel in the relevant site scope; it selects **Site**
+automatically. **Neighborhood** limits
 proposals to neighbors, streets and landscape; **All site features** also allows
 your home's footprint and roof. Select the photos or
 permitted reference images you want to send and identify your home in words.
@@ -148,7 +149,11 @@ existing interiors; it does not redraw your rooms or change entity bindings.
 AI uses the existing [provider connection](ai-planning.md) and photo preparation
 flow. A cloud provider receives your selected photos, instructions and the
 displayed planning context; a local model receives them through its configured
-endpoint. Credentials are session-only. Neither photos nor credentials are
+endpoint. Neighborhood context contains existing exterior shapes or, if none
+exist, an explicitly approximate bounding rectangle. It excludes individual
+room outlines, room names and device bindings. **All site features** also sends
+the room outlines used to align your home's footprint. Credentials are
+session-only. Neither photos nor credentials are
 saved inside the drawing. Applied shapes are saved with the project and exported
 viewer, so keep real neighborhood projects and backups private. Ending the session
 clears Home Studio's selected photos and credentials; it cannot delete provider
@@ -179,6 +184,16 @@ geographic location. Follow the [map alignment guide](map-navigation.md).
 If imported floors disagree on site ground, use the explicit
 [site-frame calibration preview](imported-site-calibration.md) before publishing
 exterior shapes. It preserves the original local geometry and requires review.
+
+An imported home can retain an older viewer inside its saved baseline even after
+the integration is updated. For a supported previously published home, use
+**More options → Update imported viewer**, review the proposed map-renderer
+change and apply it. This prepares a new baseline while retaining the old one;
+it does not publish or alter the current family view. Then calibrate if needed,
+draw the neighbors, and publish. Unknown or modified renderer versions require
+a rebuild from the original source instead of an automatic update. Keep the
+private source and HA backup; a project JSON alone does not contain an imported
+home's custom geometry and assets.
 
 The exterior shapes appear as you move out from the indoor view into the map
 overview. Detailed indoor controls remain the focus at house scale. The site
@@ -215,4 +230,8 @@ feature contains `id`, `name`, `kind`, `polygon`, `height_m`, and `color`.
 `kind` is `home`, `roof`, `building`, `street`, or `landscape`; `polygon` is a
 list of `[x, z]` pairs. Heights are 0–100 m, ground elevation is −100–100 m, and
 colors use `#RRGGBB`. Unknown fields, invalid numbers, and malformed outlines
-are rejected by both the JavaScript editor and the Python compiler.
+are rejected by both the JavaScript editor and the Python compiler. In the
+neighborhood-capable format, buildings may also specify
+`render_style: "outline"` or `render_style: "solid"`. Omitting it preserves the
+legacy solid appearance; the editor explicitly sets `outline` for new neighbors.
+Other feature kinds cannot use this field.

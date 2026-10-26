@@ -24,6 +24,7 @@ from .curtains import async_setup_curtains, PROFILES, BOOT_SECONDS, is_motor_ava
 from .native import NativeError, NativeProject, StudioAssetsView, EDITOR_URL, studio_asset_files, load_models
 from .generated import GeneratedProject
 from .site_calibration import SiteCalibration
+from .runtime_upgrade import ImportedRuntimeUpgrade
 from .permissions import can_read, can_control, floor_entities, model_references, vacuum_source_bindings
 
 DOMAIN = "home_floorplan"
@@ -148,7 +149,8 @@ async def _finish_setup(hass, state):
         if not state.get("ws_registered"):
             for handler in (ws_status, ws_viewer, ws_save, ws_recover, ws_export, ws_curtains, ws_curtain_command,
                             ws_project_get, ws_project_save, ws_project_publish, ws_export_model, ws_entity_catalog,
-                            ws_site_frame_preview, ws_site_frame_apply):
+                            ws_site_frame_preview, ws_site_frame_apply,
+                            ws_runtime_upgrade_preview, ws_runtime_upgrade_apply):
                 websocket_api.async_register_command(hass, handler)
             state["ws_registered"] = True
         await _register_panels(hass, bool(asset_files))
@@ -274,6 +276,7 @@ def _project_result(state, connection):
                 "authoring": bool(native),
                 "architecture_editing": bool(native and not isinstance(native, GeneratedProject)),
                 "site_frame_calibration": isinstance(native, GeneratedProject),
+                "imported_runtime_upgrade": isinstance(native, GeneratedProject),
                 "ai": bool(native and state.get("ai_registered") and state.get("initialized")
                            and not state.get("panels_unloaded") and connection.user and connection.user.is_admin)}}
 
@@ -330,7 +333,13 @@ def ws_status(hass, connection, msg):
 @_when_active
 @websocket_api.require_admin
 def ws_project_get(hass, connection, msg):
-    connection.send_result(msg["id"], _project_result(hass.data[DOMAIN], connection))
+    state = hass.data[DOMAIN]
+    try:
+        if isinstance(state.get("native"), GeneratedProject):
+            state["native"].check_recovery()
+        connection.send_result(msg["id"], _project_result(state, connection))
+    except NativeError as error:
+        connection.send_error(msg["id"], error.code, str(error))
 
 
 @websocket_api.websocket_command({vol.Required("type"): "home_floorplan/project_save",
@@ -375,30 +384,40 @@ async def ws_project_publish(hass, connection, msg):
         connection.send_error(msg["id"], "save_failed", "Publication could not be saved. The previous plan remains active.")
 
 
-async def _site_frame_action(hass, connection, msg, apply=False):
+async def _imported_source_action(hass, connection, msg, apply=False, runtime=False):
     state = hass.data[DOMAIN]
     native = state.get("native")
+    label = "Viewer update" if runtime else "Site-frame calibration"
     if not isinstance(native, GeneratedProject):
-        connection.send_error(msg["id"], "unsupported", "Site-frame calibration requires a saved imported home.")
+        connection.send_error(msg["id"], "unsupported", f"{label} requires a saved imported home.")
         return
+
+    def validate_current():
+        if (hass.data.get(DOMAIN) is not state or state.get("native") is not native or
+                state.get("panels_unloaded") or not state.get("initialized", True)):
+            raise NativeError("conflict", "The active imported home changed. Reload its saved draft and preview again.")
+        if not connection.user or not connection.user.is_admin:
+            raise NativeError("unauthorized", f"{label} requires administrator access.")
+        native.check_recovery()
+
     try:
         async with state["lock"]:
-            if (hass.data.get(DOMAIN) is not state or state.get("native") is not native or
-                    state.get("panels_unloaded") or not state.get("initialized", True)):
-                raise NativeError("conflict", "The active imported home changed. Reload its saved draft before calibration.")
-            if not connection.user or not connection.user.is_admin:
-                raise NativeError("unauthorized", "Site-frame calibration requires administrator access.")
-            service = state.setdefault("site_calibration", SiteCalibration())
+            validate_current()
+            key, factory = ("runtime_upgrade", ImportedRuntimeUpgrade) if runtime else ("site_calibration", SiteCalibration)
+            service = state.setdefault(key, factory())
             if apply:
-                await service.apply(native, msg["revision"], connection.user.id, msg["token"])
+                await service.apply(native, msg["revision"], connection.user.id, msg["token"], validate_current=validate_current)
+                validate_current()
                 result = _project_result(state, connection)
             else:
-                result = await service.preview(native, msg["revision"], connection.user.id)
+                result = await service.preview(native, msg["revision"], connection.user.id, validate_current=validate_current)
+                validate_current()
             connection.send_result(msg["id"], result)
     except NativeError as error:
         connection.send_error(msg["id"], error.code, str(error))
     except (OSError, ValueError, KeyError, TypeError):
-        connection.send_error(msg["id"], "calibration_failed", "Calibration could not be completed. The prior saved draft and original home remain available.")
+        code = "runtime_upgrade_failed" if runtime else "calibration_failed"
+        connection.send_error(msg["id"], code, f"{label} could not be completed. The prior saved draft and original home remain available.")
 
 
 @websocket_api.websocket_command({vol.Required("type"): "home_floorplan/site_frame_preview",
@@ -407,7 +426,7 @@ async def _site_frame_action(hass, connection, msg, apply=False):
 @websocket_api.require_admin
 @websocket_api.async_response
 async def ws_site_frame_preview(hass, connection, msg):
-    await _site_frame_action(hass, connection, msg)
+    await _imported_source_action(hass, connection, msg)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "home_floorplan/site_frame_apply",
@@ -416,7 +435,25 @@ async def ws_site_frame_preview(hass, connection, msg):
 @websocket_api.require_admin
 @websocket_api.async_response
 async def ws_site_frame_apply(hass, connection, msg):
-    await _site_frame_action(hass, connection, msg, apply=True)
+    await _imported_source_action(hass, connection, msg, apply=True)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "home_floorplan/project_runtime_upgrade_preview",
+                                 vol.Required("revision"): cv.positive_int})
+@_when_active
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_runtime_upgrade_preview(hass, connection, msg):
+    await _imported_source_action(hass, connection, msg, runtime=True)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "home_floorplan/project_runtime_upgrade_apply",
+                                 vol.Required("revision"): cv.positive_int, vol.Required("token"): str})
+@_when_active
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_runtime_upgrade_apply(hass, connection, msg):
+    await _imported_source_action(hass, connection, msg, apply=True, runtime=True)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "home_floorplan/export_model",

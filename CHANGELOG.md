@@ -10,6 +10,9 @@
   private alignment and bounded tile loading on the existing 2D canvas.
 - Explicit preview and recovery-backed calibration for imported homes whose
   floors use different local ground datums. Published geometry stays in place.
+- A reviewed map-renderer update for supported imported homes. It prepares a
+  new saved baseline, preserves current objects and geometry, and leaves the
+  family view active until the next explicit publication.
 
 ### Upgrade
 
@@ -17,7 +20,9 @@
   integration and restart Home Assistant. Open **Site & roof → Neighborhood**
   to draw nearby buildings without changing your home or roof.
 - Previously generated homes need a viewer rebuilt with the matching toolkit
-  before publishing outline-style buildings. The new optional `render_style`
+  before publishing outline-style buildings, or a supported update through
+  **More options → Update imported viewer** after installing the integration.
+  The new optional `render_style`
   field cannot be read by older releases; keep your original JSON backup.
 - Enable **Map background** to use the alignment saved in **3D Home → Align
   map**. For imported floors with inconsistent ground offsets, review the
