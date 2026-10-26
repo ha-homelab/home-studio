@@ -201,18 +201,20 @@ function createEditorFloorMaterials(THREE, group, ground, profile) {
 // it is independent of the user cutaway and never clips shadow passes.
 function applyStaticMeshClipping(source,material){if(['walls','frames','doors','windows'].includes(source.kind)){material.clippingPlanes=[clipping];material.clipShadows=false;return}if(!renderProfile.diffuseLighting||source.kind!=='floors'||material.transparent||material.side!==THREE.DoubleSide||!source.vertices?.length)return;let extent=1;for(const vertex of source.vertices){if(!Array.isArray(vertex)||vertex.length!==3||!vertex.every(value=>Number.isFinite(value)&&Number.isFinite(Math.fround(value))))return;for(const value of vertex)extent=Math.max(extent,Math.abs(value))}const far=extent*4;if(!Number.isFinite(Math.fround(far)))return;material.clippingPlanes=[new THREE.Plane(new THREE.Vector3(0,-1,0),far)];material.clipShadows=false}
 function selectRenderProfile(gl){const capacity=getRenderCapacity(gl);const profile=capacity.reduced?{pixels:capacity.diffuseLighting?62500:250000,pointShadows:2,pointShadowSize:128,sunShadowSize:512,diffuseLighting:capacity.diffuseLighting}:{pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048,diffuseLighting:false};if(capacity.rasterProbe)profile.rasterProbe=capacity.rasterProbe;return profile}
-let renderRequest=0,renderDelay=0,renderSuspended=false,renderLost=false,initialMapPending=false;
+let renderRequest=0,renderDelay=0,renderFallback=0,renderEpoch=0,renderSuspended=false,renderLost=false,initialMapPending=false;
 let interactionRenderer=null,interactionPointer=null,coalesceMotion=false;
 let cancelEditorGesture=()=>{};
 let editorFloorMaterials=null,homeArchitectureMaterials=null;
-function cancelRender(){if(renderRequest)cancelAnimationFrame(renderRequest);if(renderDelay)clearTimeout(renderDelay);renderRequest=renderDelay=0}
+function cancelRender(){if(renderRequest)cancelAnimationFrame(renderRequest);if(renderDelay)clearTimeout(renderDelay);if(renderFallback)clearTimeout(renderFallback);renderRequest=renderDelay=renderFallback=0;renderEpoch++}
 // Paint the first moved-pointer frame immediately. Subsequent software frames
 // share a fixed deadline; further input never postpones it. Software motion
 // uses its last successful draw time, bounded to 64–250 ms, per gesture.
 // Non-motion updates
 // and pointer release bypass this delay and still use the ordinary next frame.
 function loadInitialMap(){if(initialMapPending){initialMapPending=false;homeView?.loadMap?.()}}
-function requestRender(motion=false){if(renderSuspended||renderLost)return;if(document.hidden||failed3D){loadInitialMap();return}if(!motion&&renderDelay){clearTimeout(renderDelay);renderDelay=0}if(renderRequest||renderDelay)return;if(motion&&coalesceMotion&&interactionPointer?.moved&&interactionPointer.painted){renderDelay=setTimeout(()=>{renderDelay=0;requestRender()},interactionPointer.frameDelay??64);return}renderRequest=requestAnimationFrame(()=>{renderRequest=0;try{window.renderModel?.()}catch(error){report3DError(error)}})}
+// A visible demand must still paint if the browser suspends RAF delivery.
+// One fixed fallback shares the pending frame; either completion cancels both.
+function requestRender(motion=false){if(renderSuspended||renderLost)return;if(document.hidden||failed3D){loadInitialMap();return}if(!motion&&renderDelay){clearTimeout(renderDelay);renderDelay=0}if(renderRequest||renderDelay)return;if(motion&&coalesceMotion&&interactionPointer?.moved&&interactionPointer.painted){renderDelay=setTimeout(()=>{renderDelay=0;requestRender()},interactionPointer.frameDelay??64);return}const epoch=renderEpoch,draw=()=>{if(epoch!==renderEpoch)return;cancelRender();if(renderSuspended||renderLost||document.hidden||failed3D)return;try{window.renderModel?.()}catch(error){report3DError(error)}};renderRequest=requestAnimationFrame(draw);renderFallback=setTimeout(draw,100)}
 function renderPixelRatio(width,height){return Math.min(Number.isFinite(devicePixelRatio)&&devicePixelRatio>0?devicePixelRatio:1,2,Math.sqrt(renderProfile.pixels/Math.max(1,width*height)))}
 function invalidateShadows(){scene?.traverse(o=>{if(o.shadow){o.shadow.autoUpdate=false;o.shadow.needsUpdate=true}})}
 // Accept only complete rectangular prisms, including the compiler's rotated walls.

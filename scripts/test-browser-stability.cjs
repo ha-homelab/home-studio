@@ -471,10 +471,29 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
         'Native touch drags reach the viewer as trusted touch and pointer movement');
       Object.assign(sample,{recovery,...initial});
       save();
+      // Preserve actual Windows WebKit editor pixels after all timed work.
+      // Enter through the UI and require the same bounded wheel receipt; do
+      // not inject a render or readPixels to make the compositor present.
+      if(process.platform==='win32' && browserName==='webkit' && project.floors[0].rooms.length===24) {
+        phases.start('editor-visual-evidence', {cycle});
+        if(await child.evaluate(()=>window.floorplan.homeMode)) await input.tap(frame.locator('#editLayout'));
+        await child.waitForFunction(()=>!window.floorplan.homeMode);
+        const wheel=await child.evaluate(measureEditorWheelBurst);
+        check(wheel.synchronousDraws<=1 && wheel.totalDraws>0 && wheel.totalDraws<=2 && wheel.sceneDraws>0 && wheel.sceneDraws<=2 && wheel.cameraChanged,
+          'Editor visual evidence follows a bounded complete wheel draw');
+        const screenshot=`${browserName}-editor-${cycle+1}.png`;
+        sample.editorVisual={wheel,screenshot};save();
+        await page.screenshot({path:path.join(diagnostics.directory,screenshot),timeout:5000});
+      }
       // Screenshot readback drains GPU work. Capture after latency checks so it
       // cannot accidentally warm the first interaction being measured.
       if(process.env.BROWSER_STABILITY_SCREENSHOT_DIR) {
         phases.start('comparison-screenshot', {cycle});
+        if(!await child.evaluate(()=>window.floorplan.homeMode)) {
+          const beforeHome=await child.evaluate(()=>window.floorplan.renderCount);
+          await input.tap(frame.locator('#openHome'));
+          await child.waitForFunction(before=>window.floorplan.homeMode && window.floorplan.renderCount>before,beforeHome);
+        }
         fs.mkdirSync(process.env.BROWSER_STABILITY_SCREENSHOT_DIR,{recursive:true});
         await input.tap(frame.locator('#homeZoomReset'));
         await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
