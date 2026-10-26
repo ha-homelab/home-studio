@@ -414,7 +414,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       return;
     }
     if (this._viewerRuntimeUnconfirmed) {
-      this._status('The viewer update was interrupted. Load saved draft to check whether it completed before trying again.', true);
+      this._status('The viewer update was not confirmed. Load saved draft to check whether it completed before trying again.', true);
       return;
     }
     if (this._edits.invalid) this._status(`Correct ${this._edits.field || 'the highlighted field'} before saving or publishing. Save draft will take you to the field.`, true);
@@ -917,8 +917,11 @@ class HomeFloorplanStudioPanel extends HTMLElement {
         'Viewer update prepared with a recovery copy. Publish to 3D Home when ready to activate it.');
     } catch (error) {
       if (current()) {
+        if (operation.sentApply) this._viewerRuntimeUnconfirmed = true;
         this._viewerRuntimePreview = null; this.$('viewer-runtime-dialog').close();
-        this._status(`Viewer update was not confirmed: ${error.message || 'connection failed'}. Load saved draft before retrying.`, true);
+        this._status(operation.sentApply ?
+          `Viewer update was not confirmed: ${error.message || 'connection failed'}. Load saved draft before retrying.` :
+          `Viewer update was not prepared: ${error.message || 'check the current draft and connection'}`, true);
       }
     } finally {
       if (current()) { this._viewerRuntimeOperation = null; this._busy = false; this._buttons(); }

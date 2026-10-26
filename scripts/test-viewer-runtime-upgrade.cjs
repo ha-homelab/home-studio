@@ -114,6 +114,17 @@ window.resetFixture();document.body.append(host);host._buttons();
     await page.locator('#viewer-runtime-apply').click();await page.waitForFunction(()=>!host._busy&&!host._viewerRuntimePreview);
     assert.equal(await page.evaluate(()=>host._revision),1);assert.match(await page.locator('#status').innerText(),/Load saved draft/);
     assert.equal(await dialog.isVisible(),false);
+    assert(await button.isDisabled(),'A rejected dispatched apply requires checking saved state');
+    await page.evaluate(()=>host._drawingStatus());
+    assert.match(await page.locator('#status').innerText(),/Load saved draft/,'Incoming snapshots retain recovery guidance');
+
+    await reset();await preview();await page.evaluate(async()=>{
+      const snapshot=host._snapshot;host._snapshot=async()=>{host._project.title='Edit before dispatch';return snapshot();};
+      try{await host._applyViewerRuntime();}finally{host._snapshot=snapshot;}
+    });
+    assert.equal(await count('_apply'),0,'Local preflight rejection does not dispatch an apply');
+    assert.equal(await page.evaluate(()=>!!host._viewerRuntimeUnconfirmed),false,'Preflight failures remain locally retryable');
+    assert.doesNotMatch(await page.locator('#status').innerText(),/Load saved draft/,'Preflight failure preserves the newer draft for saving');
 
     await reset();await preview();await page.evaluate(()=>window.mode='changed-apply-project');
     await page.locator('#viewer-runtime-apply').click();await page.waitForFunction(()=>!host._busy);
