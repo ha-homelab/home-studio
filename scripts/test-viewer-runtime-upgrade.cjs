@@ -24,14 +24,20 @@ host._hass={user:{id:'fixture-admin',is_admin:true},connection,callWS:async data
   window.saved={...window.saved,project:structuredClone(data.project),revision:data.revision+1};return structuredClone(window.saved);
  }
  if(data.type==='home_floorplan/project_runtime_upgrade_preview'){
-  if(mode==='fail-preview')throw {code:'unsupported_runtime',message:'The saved viewer is not a supported source.'};
-  const reply={token:'fixture-upgrade-token',revision:data.revision,current_runtime:{version:0,sha256:'a'.repeat(64)},target_runtime:{version:1,sha256:'b'.repeat(64)},files:['upper/index.html','ground/index.html'],changed_file_count:2};
+  if(window.saved.revision!==window.saved.published_revision)throw {code:'unpublished_changes',message:'Publish the draft first to continue.'};
+  if(mode==='fail-preview')throw {code:'unsupported_runtime',message:'Publish the draft first to continue.'};
+  if(mode==='fail-rebase')throw {code:'unsupported_rebase',message:'Publish the draft first to continue.'};
+  if(mode==='missing-publication')throw {code:'publish_required',message:'Publish the draft first to continue.'};
+  const reply={token:'fixture-upgrade-token',revision:data.revision,current_runtime:{version:0,sha256:'a'.repeat(64)},target_runtime:{version:1,sha256:'b'.repeat(64)},source:'published_generation',source_file_count:17,files:['upper/index.html','ground/index.html'],changed_file_count:2};
   if(invalid==='files')reply.files=['upper/index.html','other/index.html'];
   if(invalid==='duplicate')reply.files=['upper/index.html','upper/index.html'];
   if(invalid==='token')reply.token='';
   if(invalid==='hash')reply.target_runtime.sha256=reply.current_runtime.sha256;
   if(invalid==='version')reply.target_runtime.version=2;
   if(invalid==='count')reply.changed_file_count=1;
+  if(invalid==='source')reply.source='baseline';
+  if(invalid==='source-count')reply.source_file_count=1;
+  if(invalid==='source-limit')reply.source_file_count=4097;
   if(mode==='pending-preview')return new Promise(resolve=>window.release=()=>resolve(reply));
   return reply;
  }
@@ -81,6 +87,9 @@ window.resetFixture();document.body.append(host);host._buttons();
     await preview();
     assert.match(await dialog.innerText(),/Map renderer: version 0 → version 1/);
     assert.match(await dialog.innerText(),/active published home stays unchanged/);
+    assert.match(await dialog.innerText(),/custom models, exports and textures/);
+    assert.match(await dialog.innerText(),/existing published files and original baseline stay untouched/);
+    assert.equal(await page.locator('#viewer-runtime-source').innerText(),'17 current published files will be copied. 2 copied viewer files will receive renderer changes.');
     assert.match(await page.locator('#viewer-runtime-files').innerText(),/Upper floor: saved viewer/);
     assert.equal(await dialog.locator('input,textarea').count(),0,'No URL, script or source inputs');
     assert.deepEqual(await page.evaluate(()=>Object.keys(calls[0]).sort()),['revision','type']);
@@ -92,24 +101,36 @@ window.resetFixture();document.body.append(host);host._buttons();
     await reset();await page.evaluate(()=>{host._project.title='Edited fictional home';host._buttons();});
     assert(await button.isDisabled(),'Latest draft must be saved first');
     await page.locator('#save').click();await page.waitForFunction(()=>host._revision===2&&!host._busy);
-    await preview();assert.equal(await page.evaluate(()=>calls.find(x=>x.type.endsWith('_preview')).revision),2);
-    await page.locator('#viewer-runtime-apply').click();await page.waitForFunction(()=>host._revision===3&&!host._busy);
+    await button.click();await page.waitForFunction(()=>!host._busy);
+    assert.equal(await dialog.isVisible(),false,'A saved unpublished draft is not eligible for active-source adoption');
     assert.equal(await page.evaluate(()=>host._project.title),'Edited fictional home');
+    assert.equal(await count('_apply'),0);assert.equal(await count('project_publish'),0);
+    assert.match(await page.locator('#status').innerText(),/unpublished changes/);
+    assert.match(await page.locator('#status').innerText(),/Export the drawing \(JSON\).*private backup/);
+    assert.doesNotMatch(await page.locator('#status').innerText(),/Publish.*first/i,'Refusal must not suggest the lossy bypass');
+
+    await reset();await preview();
+    await page.locator('#viewer-runtime-apply').click();await page.waitForFunction(()=>host._revision===2&&!host._busy);
+    assert.equal(await page.evaluate(()=>host._project.title),'Fictional imported home');
     assert.equal(await page.evaluate(()=>host._publishedRevision),1,'Preparation never publishes');
     assert.equal(await page.evaluate(()=>reopened),0,'Preparation keeps the current editor');
     assert.equal(await count('project_publish'),0);
     assert.deepEqual(await page.evaluate(()=>Object.keys(calls.find(x=>x.type.endsWith('_apply'))).sort()),['revision','token','type']);
     assert.match(await page.locator('#status').innerText(),/Publish to 3D Home when ready/);
 
-    for(const invalid of ['files','duplicate','token','hash','version','count']){
+    for(const invalid of ['files','duplicate','token','hash','version','count','source','source-count','source-limit']){
       await reset();await page.evaluate(value=>window.invalid=value,invalid);await button.click();
       await page.waitForFunction(()=>!host._busy);
       assert.equal(await dialog.isVisible(),false,invalid+' preview must fail closed');
       assert.match(await page.locator('#status').innerText(),/preview is invalid/);
       assert.equal(await count('_apply'),0);
     }
-    await reset();await page.evaluate(()=>window.mode='fail-preview');await button.click();await page.waitForFunction(()=>!host._busy);
-    assert.match(await page.locator('#status').innerText(),/not a supported source/);
+    for(const mode of ['fail-preview','fail-rebase','missing-publication']){
+      await reset();await page.evaluate(value=>window.mode=value,mode);await button.click();await page.waitForFunction(()=>!host._busy);
+      assert.match(await page.locator('#status').innerText(),/Export the drawing \(JSON\).*private backup/);
+      assert.doesNotMatch(await page.locator('#status').innerText(),/Publish.*first/i,'Unsupported sources retain non-destructive guidance');
+      assert.equal(await count('_apply'),0);assert.equal(await count('project_publish'),0);
+    }
     await reset();await preview();await page.evaluate(()=>window.mode='fail-apply');
     await page.locator('#viewer-runtime-apply').click();await page.waitForFunction(()=>!host._busy&&!host._viewerRuntimePreview);
     assert.equal(await page.evaluate(()=>host._revision),1);assert.match(await page.locator('#status').innerText(),/Load saved draft/);

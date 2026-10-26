@@ -202,10 +202,11 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       </dialog>
       <dialog id="viewer-runtime-dialog" aria-labelledby="viewer-runtime-title">
         <h2 id="viewer-runtime-title">Update imported viewer</h2>
-        <p>Update the saved viewer so neighboring buildings can appear as outlines.</p>
-        <p><strong>Map renderer: version 0 → version 1.</strong> Only the known map-renderer module is replaced.</p>
+        <p>Preserve the current published home in a new private baseline, including its custom models, exports and textures.</p>
+        <p id="viewer-runtime-source"></p>
+        <p><strong>Map renderer: version 0 → version 1.</strong> Replace the known map renderer in the copied viewer files so neighboring buildings can appear as outlines.</p>
         <ul id="viewer-runtime-files"></ul>
-        <p>This prepares a new private baseline and recovery copy. Rooms, objects, bindings, roof, yard, textures and other geometry are preserved.</p>
+        <p>The existing published files and original baseline stay untouched. A private recovery record keeps the previous saved state. Rooms, objects, bindings, roof, yard and other geometry are preserved.</p>
         <p>Your active published home stays unchanged. Use Publish to 3D Home when you are ready to activate the update.</p>
         <div class="row"><button id="viewer-runtime-apply" class="primary" disabled>Prepare viewer update</button><button id="viewer-runtime-cancel">Cancel</button></div>
       </dialog>
@@ -447,7 +448,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     const runtimeAllowed = this._canUpgradeViewerRuntime();
     this.$('viewer-runtime').hidden = !runtimeAllowed;
     this.$('viewer-runtime').disabled = networkDisabled || !runtimeAllowed || needsSave || !!this._edits.invalid || this._viewerRuntimeUnconfirmed === true || !this._savedRaw || !this._hasPublishedHome();
-    this.$('viewer-runtime').title = needsSave ? 'Save your latest draft before updating the imported viewer.' : '';
+    this.$('viewer-runtime').title = needsSave ? 'This update needs a saved draft matching the published home. Export newer edits for review before updating.' : '';
     this.$('viewer-runtime-apply').disabled = this.$('viewer-runtime').disabled || !this._viewerRuntimePreview || this._viewerRuntimePreview.revision !== this._revision;
     this.$('viewer-runtime-cancel').disabled = this._busy;
     this.$('retry').disabled = !this._online();
@@ -853,6 +854,17 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this._viewerRuntimeOperation = null; this._viewerRuntimePreview = null;
     this.$('viewer-runtime-dialog').close(); this._buttons();
   }
+  _viewerRuntimeError(error) {
+    const reasons = {
+      unpublished_changes: 'The saved draft has unpublished changes.',
+      unsupported_rebase: 'The current publication and editable source cannot be reconciled automatically.',
+      unsupported_runtime: 'The viewer does not match a supported runtime.',
+      publish_required: 'There is no verified current publication to preserve.',
+    };
+    const reason = Object.hasOwn(reasons, error?.code) ? reasons[error.code] : '';
+    return reason ? `${reason} Export the drawing (JSON), keep a private backup of the current home, and review the matching original source before retrying.` :
+      boundedText(error?.message, 600) || 'Check the saved source and connection.';
+  }
   async _previewViewerRuntime() {
     if (this.$('viewer-runtime').disabled || !this._canUpgradeViewerRuntime()) return;
     const operation = { generation: this._generation, connectionEpoch: this._connectionEpoch };
@@ -870,6 +882,8 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       if (this._unsaved() || this._edits.invalid || result?.revision !== this._revision) throw new Error('The drawing changed. Save it and preview the viewer update again.');
       const floors = this._project.floors, files = floors.map(floor => `${floor.id}/index.html`);
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(result.token) || typeof result.token !== 'string' ||
+          result.source !== 'published_generation' || !Number.isSafeInteger(result.source_file_count) ||
+          result.source_file_count < files.length || result.source_file_count > 4096 ||
           result.current_runtime?.version !== 0 || result.target_runtime?.version !== 1 ||
           !/^[a-f0-9]{64}$/.test(result.current_runtime.sha256) || !/^[a-f0-9]{64}$/.test(result.target_runtime.sha256) ||
           result.current_runtime.sha256 === result.target_runtime.sha256 ||
@@ -878,13 +892,14 @@ class HomeFloorplanStudioPanel extends HTMLElement {
           result.files.some(file => !files.includes(file)) || result.changed_file_count !== files.length) {
         throw new Error('The viewer update preview is invalid.');
       }
+      this.$('viewer-runtime-source').textContent = `${result.source_file_count} current published files will be copied. ${result.changed_file_count} copied viewer files will receive renderer changes.`;
       this.$('viewer-runtime-files').replaceChildren(...floors.map(floor => {
         const row = document.createElement('li'); row.textContent = `${boundedText(floor.name, 120)}: saved viewer`; return row;
       }));
       this._viewerRuntimePreview = result; this.$('viewer-runtime-dialog').showModal();
       this._status('Review the viewer update. The saved draft and active published home are unchanged.');
     } catch (error) {
-      if (current()) this._status(`Viewer update preview failed: ${error.message || 'check the saved source and connection'}`, true);
+      if (current()) this._status(`Viewer update preview failed: ${this._viewerRuntimeError(error)}`, true);
     } finally {
       if (current()) { this._viewerRuntimeOperation = null; this._busy = false; this._buttons(); }
     }
@@ -910,18 +925,18 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       this._revision = saved.revision; this._publishedRevision = saved.published_revision;
       this._saved = saved; this._savedRaw = raw; this._source = source;
       this._viewerRuntimeUnconfirmed = false;
-      // Only baseline metadata changed. Keep the live editor and any newer
+      // The prepared baseline changed. Keep the live editor and any newer
       // local edits instead of replacing it with the earlier saved snapshot.
       this.$('viewer-runtime-dialog').close(); this._persist();
       this._status(this._unsaved() ? 'Viewer update prepared. Newer edits remain unsaved; save them before publishing.' :
-        'Viewer update prepared with a recovery copy. Publish to 3D Home when ready to activate it.');
+        'Viewer update prepared from the current published home with a recovery copy. Publish to 3D Home when ready to activate it.');
     } catch (error) {
       if (current()) {
         if (operation.sentApply) this._viewerRuntimeUnconfirmed = true;
         this._viewerRuntimePreview = null; this.$('viewer-runtime-dialog').close();
         this._status(operation.sentApply ?
-          `Viewer update was not confirmed: ${error.message || 'connection failed'}. Load saved draft before retrying.` :
-          `Viewer update was not prepared: ${error.message || 'check the current draft and connection'}`, true);
+          `Viewer update was not confirmed: ${this._viewerRuntimeError(error)} Load saved draft before retrying.` :
+          `Viewer update was not prepared: ${this._viewerRuntimeError(error)}`, true);
       }
     } finally {
       if (current()) { this._viewerRuntimeOperation = null; this._busy = false; this._buttons(); }
