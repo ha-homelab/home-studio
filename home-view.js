@@ -47,7 +47,11 @@ homeView = (() => {
   const receiverSpec=item=>model.receiver_activity?.[item.id];
   const presenceSpec=item=>model.presence_sources?.[item.id];
   const presenceForRoom=room=>model.presence_sources?presenceEvidence(model.presence_sources,items,haStates,haConnected,room):{};
-  const presenceView=Object.keys(model.presence_sources||{}).length?createPresenceView($('homeStage'),model.rooms,model.presence_sources,THREE,xm,zm):null;
+  let channelsByRoom={};
+  let activityDisposed=false;
+  const motionTracks=new Map();
+  const presenceView=Object.keys(model.presence_sources||{}).length||Object.keys(model.room_activity||{}).length?createPresenceView($('homeStage'),model.rooms,model.presence_sources,THREE,xm,zm,model.room_activity):null;
+  const showPresence=()=>!activityDisposed&&active&&!!renderer&&!failed3D&&!renderLost&&!renderSuspended&&!mapCoarse()&&!document.hidden;
   const vacuumView=Array.isArray(model.vacuum_sources)&&model.vacuum_sources.length?createVacuumView($('homeStage'),model.vacuum_sources,model.floor,THREE,{
     onInspect:entityId=>{if(bridge&&haConnected)bridge.postMessage({type:'more_info',entity_id:entityId});},
     onResume:()=>refreshControls()
@@ -57,12 +61,22 @@ homeView = (() => {
   const receiverState=item=>{const spec=receiverSpec(item);return spec.entity_id===item.entity_id&&spec.room===item.room?activityState(spec.sensor):'unbound';};
   const activityText={motion:'Motion detected',presence:'Presence detected',quiet:'No detection',experimental:'Signal activity · room coverage unverified',unverified_motion:'Motion signal · room coverage unverified',unverified_presence:'Presence signal · room coverage unverified',unverified_quiet:'No elevated signal · room coverage unverified',misplaced:'Receiver moved · room sensing disabled',unbound:'Receiver binding changed',unknown:'Activity unknown'};
   const activityRooms=new Map(),activitySources=new Map();
+  const channelText=value=>`${value.presence_configured===false?'Presence not configured':value.presence==='on'?'Presence detected':value.presence==='off'?'No presence detected':'Presence unknown'} · ${value.motion_configured===false?'Motion not configured':value.motion==='on'?'Motion detected':value.motion==='off'?'No motion detected':'Motion unknown'}${value.coverage==='validated'?'':' · room coverage unverified'}`;
   let activityLocation;
   const updateNode=(el,properties={},attributes={})=>{
     for(const [key,value] of Object.entries(properties))if(el[key]!==value)el[key]=value;
     for(const [key,value] of Object.entries(attributes))if(el.getAttribute(key)!==value)el.setAttribute(key,value);
   };
   const roomActivity=room=>{const state=activityState(model.room_activity?.[room]),base=model.room_activity?.[room]?['motion','presence','quiet','experimental'].includes(state)?state:'unknown':null;return model.presence_sources?mergePresenceActivity(base,presenceForRoom(room)):base||'unknown';};
+  const roomActivityText=room=>{
+    const channels=channelsByRoom[room]||{},values=Object.values(channels);
+    if(!values.length)return activityText[roomActivity(room)]||activityText.unknown;
+    const presence=roomPresence(presenceForRoom(room),channels),motion=values.filter(value=>value.motion_configured!==false).map(value=>value.motion);
+    return channelText({presence:presence==='presence'?'on':presence==='quiet'?'off':'unknown',
+      presence_configured:values.some(value=>value.presence_configured!==false)||Object.keys(presenceForRoom(room)).length>0,
+      motion:motion.includes('on')?'on':motion.length&&motion.every(value=>value==='off')?'off':'unknown',motion_configured:motion.length>0,
+      coverage:values.some(value=>value.coverage!=='validated')?'unverified':'validated'});
+  };
   function clearActivityLocation(){
     if(activityLocation)for(const el of [activityLocation.marker,activityLocation.card])el.removeAttribute('data-activity-location');
     activityLocation=null;
@@ -88,7 +102,7 @@ homeView = (() => {
     let detected=0,signalOnly=0,unknown=0;
     for(const [room,button] of activityRooms){
       const value=roomActivity(room);
-      updateNode(button,{textContent:roomName(room)+' · '+(value==='experimental'?'Signal activity':activityText[value])},
+      updateNode(button,{textContent:roomName(room)+' · '+roomActivityText(room)},
         {'data-activity':value,'aria-pressed':String(room===selected)});
       if(['motion','presence'].includes(value))detected++;
       if(value==='experimental')signalOnly++;
@@ -116,7 +130,8 @@ homeView = (() => {
       if(disabled)restoreActivityFocus(details);
       if(!bound)restoreActivityFocus(locate);
       updateNode(row,{hidden:false});
-      updateNode(details,{textContent:item.name+' · '+(bound?activityText[value]:'Source binding changed'),disabled},
+      const channel=channelsByRoom[selected]?.[itemId];
+      updateNode(details,{textContent:item.name+' · '+(bound?channel?channelText(channel):activityText[value]:'Source binding changed'),disabled},
         {'data-activity':bound?value:'unbound'});
       updateNode(locate,{disabled:!bound,textContent:'Show on plan · '+roomName(item.room),title:'Saved device location · '+roomName(item.room)},
         {'aria-label':'Show saved position of '+item.name+' in '+roomName(item.room)});sources++;
@@ -126,7 +141,7 @@ homeView = (() => {
     }
     updateNode($('homeActivityAll'),{},{'aria-pressed':String(!selected)});
     updateNode($('homeActivitySummary'),{textContent:!activityRooms.size?'Room sensing not configured':!haConnected?'Disconnected · activity unavailable':selected?
-      roomName(selected)+' · '+(configured?activityText[roomActivity(selected)]:'Room sensing not configured')+(sources?' · Select a source for details':configured?' · Source details unavailable':''):
+      roomName(selected)+' · '+(configured?roomActivityText(selected):'Room sensing not configured')+(sources?' · Select a source for details':configured?' · Source details unavailable':''):
       `${detected} room${detected===1?'':'s'} with detection · ${signalOnly} signal only · ${unknown} unknown. Select a room for sources.`});
   }
   $('homeActivityAll').onclick=()=>selectHomeRoom('');
@@ -451,7 +466,7 @@ homeView = (() => {
       for (const mesh of root.children) if (['fixtures','stairs'].includes(mesh.userData.category)) mesh.visible = value || $(mesh.userData.category).checked;
     }
     if (overlayGroup) overlayGroup.visible = value;
-    if(!value)for(const point of points)clearTrail(point);
+    if(!value)clearMotion();
     if (!value) showMode(false);
     refreshControls();
     const before=window.floorplan?.renderCount;
@@ -523,7 +538,7 @@ homeView = (() => {
     if(nativePress?.key===nativePointerKey(event))cancelNativePress();
   },true);
   window.addEventListener('blur',()=>{cancelNativePress();nativePressPointers.clear();});
-  window.addEventListener('pagehide',()=>{cancelHomeGesture();cancelNativePress();nativePressPointers.clear();discardMediaControls();});
+  window.addEventListener('pagehide',()=>{presenceView?.setVisible(false);clearMotion();cancelHomeGesture();cancelNativePress();nativePressPointers.clear();discardMediaControls();});
   document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelHomeGesture();cancelNativePress();nativePressPointers.clear();}refreshControls();});
   function rebuildControls() {
     markerMotion.reset();deviceEffects.clear();
@@ -531,7 +546,7 @@ homeView = (() => {
     for(const point of points)for(const cleanup of point.controlCleanup||[])cleanup();
     applyCameraFrames();
     previewTV(null);
-    for(const point of points)clearTrail(point);
+    clearMotion();
     bindings = items.filter(isSupportedControl);
     restoreActivityFocus($('homeActivitySources'));clearActivityLocation();
     activitySources.clear();$('homeActivitySources').replaceChildren();
@@ -640,6 +655,7 @@ homeView = (() => {
   }
 
   function refreshControls() {
+    channelsByRoom=Object.fromEntries(Object.entries(model.room_activity||{}).map(([room,id])=>[room,roomActivityChannels(haStates[id],items,model.inventory,haConnected)]));
     if(mapLoaded)refreshMapControls();
     if(model.assumed_activity){
       assumedZones?.setVisible(active&&!mapCoarse()&&$('homeSignalToggle').checked,$('homeSignals').open);
@@ -718,14 +734,6 @@ homeView = (() => {
           ['unlocked','unlocking','open'].includes(state)?'M8 10V6a4 4 0 0 1 8 0':'M8 10V6a4 4 0 0 1 8 0v4');
       }
       detail.textContent=roomName(item.room)+' · '+(busy ? vt('Waiting for confirmation…') : description);
-      if(isMotion(item)&&!receiverSpec(item)){
-        const zones=model.motion_zones?.[item.id],reading=haStates[zones?.entity_id];
-        const room=zones?item.entity_id===point.original.entity_id?resolveMotionRoom(zones,reading):null:item.room;
-        const next=nextMotionRoom(point,state,room,active);
-        if(next&&(!point.trail||point.trailRoom!==next))startTrail(point,next);
-        if(!enabled||zones&&!room)clearTrail(point);
-        if(point.trail)point.trail.hidden=!!selected&&selected!==point.trailRoom;
-      }
       if (point.overlay) {
         const color=new THREE.Color().setRGB(...appearance.rgb.map(c=>c/255),THREE.SRGBColorSpace);
         // Keep a stable shader slot for every fixture. Hiding a point light
@@ -737,6 +745,7 @@ homeView = (() => {
       }
       if (visible && !counted.has(item.entity_id)) { counted.add(item.entity_id);total++; if(state==='on'){if(isMotion(item)||presenceSpec(item))motion++;else on++;} if(!enabled)unavailable++; }
     }
+    refreshMotion();
     if(nativePress&&!nativePressReady(nativePress))cancelNativePress();
     deviceEffects.sync();
     refreshTVPreviews();
@@ -749,10 +758,10 @@ homeView = (() => {
       label.el.hidden=(!roomLabels&&!selected)||!!selected&&(label.room!==selected||!label.power);
       const value=roomActivity(label.room);
       label.el.dataset.activity=value||'unknown';
-      label.el.title=roomName(label.room)+(label.power?' · '+label.power:'')+' · '+(activityText[value]||activityText.unknown);
+      label.el.title=roomName(label.room)+(label.power?' · '+label.power:'')+' · '+roomActivityText(label.room);
       label.el.setAttribute('aria-description',label.el.title);
     }
-    presenceView?.update(items,haStates,haConnected,active&&!mapCoarse()&&roomLabels&&!document.hidden,selected);
+    presenceView?.update(items,haStates,haConnected,showPresence(),selected,channelsByRoom);
     vacuumView?.update(haStates,haConnected,active&&!mapCoarse());
     $('homeSummary').textContent=vt('{on} on · {total} linked · {motion} active sensors · {unavailable} unavailable',{on,total,motion,unavailable});
     $('homeEmpty').hidden=total>0;
@@ -957,7 +966,7 @@ homeView = (() => {
       if(mapCoarseState!==coarse){
         mapCoarseState=coarse;
         assumedZones?.setVisible(active&&!coarse&&$('homeSignalToggle').checked,$('homeSignals').open);
-        presenceView?.update(items,haStates,haConnected,active&&!coarse&&roomLabels&&!document.hidden,selected);
+        presenceView?.update(items,haStates,haConnected,showPresence(),selected,channelsByRoom);
         vacuumView?.update(haStates,haConnected,active&&!coarse);
       }
       mapLayer?.render(camera,rect,{visible:active,coarse,editing:!!mapDraft,transition:zoom<.65});
@@ -967,7 +976,7 @@ homeView = (() => {
     $('homeFloorContext').disabled=!!selected;
     refreshSignalStatus();
     if(coarse){
-      markerMotion.reset();deviceEffects.sync();
+      clearMotion();markerMotion.reset();deviceEffects.sync();
       const hidden=scene.children.filter(object=>object!==mapLayer.object&&!object.isLight),visibility=hidden.map(object=>object.visible);
       hidden.forEach(object=>object.visible=false);
       try{drawScene(camera);renderCount++;}finally{hidden.forEach((object,index)=>object.visible=visibility[index]);}
@@ -990,12 +999,15 @@ homeView = (() => {
       const p=projectedPosition.project(camera);
       markerMotion.target(point.marker,(p.x+1)*rect.width/2+(offsets.get(point)||0),(1-p.y)*rect.height/2);
     }
-    for(const point of points)for(const step of point.steps||[]){
-      const p=projectedPosition.copy(step.position).project(camera),q=projectedForward.copy(step.forward).project(camera);
-      step.el.style.left=((p.x+1)*rect.width/2)+'px';step.el.style.top=((1-p.y)*rect.height/2)+'px';
-      step.el.style.setProperty('--angle',(Math.atan2(-(q.y-p.y)*rect.height,(q.x-p.x)*rect.width)*180/Math.PI+90)+'deg');
+    for(const point of motionTracks.values()){
+      if(point.trail)point.trail.style.clipPath='polygon('+point.clipVertices.map(vertex=>{const p=projectedPosition.copy(vertex).project(camera);return `${(p.x+1)*rect.width/2}px ${(1-p.y)*rect.height/2}px`;}).join(',')+')';
+      for(const step of point.steps||[]){
+        const p=projectedPosition.copy(step.position).project(camera),q=projectedForward.copy(step.forward).project(camera);
+        step.el.style.left=((p.x+1)*rect.width/2)+'px';step.el.style.top=((1-p.y)*rect.height/2)+'px';
+        step.el.style.setProperty('--angle',(Math.atan2(-(q.y-p.y)*rect.height,(q.x-p.x)*rect.width)*180/Math.PI+90)+'deg');
+      }
     }
-    presenceView?.render(camera,rect);
+    presenceView?.setVisible(showPresence());presenceView?.render(camera,rect);
     vacuumView?.render(camera,rect);
     for(const point of points){
       if(point.flames)positionCooktopFlames(point.flames,point.object,camera,rect,THREE);
@@ -1006,27 +1018,49 @@ homeView = (() => {
   }
 
   function clearTrail(point){clearTimeout(point.trailTimer);point.trail?.remove();point.trail=null;point.steps=[];}
+  function clearMotion(){for(const point of motionTracks.values())clearTrail(point);motionTracks.clear();}
+  function refreshMotion(){
+    const visible=showPresence();
+    if(!visible||!haConnected){clearMotion();return;}
+    const seen=new Set();
+    for(const point of points)for(const reading of motionReadings(point.item,model,haStates,channelsByRoom,haConnected)){
+      if(seen.has(reading.key))continue;
+      seen.add(reading.key);
+      let track=motionTracks.get(reading.key);
+      if(track&&(track.item.id!==point.item.id||track.item.entity_id!==point.item.entity_id||track.item.room!==point.item.room)){clearTrail(track);motionTracks.delete(reading.key);track=null;}
+      if(!track){track={};motionTracks.set(reading.key,track);}
+      track.item={...point.item};track.original=point.original;
+      const next=nextMotionRoom(track,reading.state,reading.room,true);
+      if(next)startTrail(track,next);
+      if(reading.state==='unknown'||!reading.room)clearTrail(track);
+      if(track.trail)track.trail.hidden=!!selected&&selected!==track.trailRoom;
+    }
+    for(const [key,track] of motionTracks)if(!seen.has(key)){clearTrail(track);motionTracks.delete(key);}
+  }
   function startTrail(point,room){
     clearTrail(point);
-    const zones=model.motion_zones?.[point.item.id],sourcePath=zones?.paths[room]||model.motion_paths?.[point.item.id];if(!sourcePath)return;
-    const original=point.original,current=point.item;
-    const rotation=(current.rotation_deg-original.rotation_deg)*Math.PI/180,c=Math.cos(rotation),s=Math.sin(rotation);
-    const path=zones?sourcePath:sourcePath.map(([x,z])=>{x-=original.position_m.x;z-=original.position_m.z;return [current.position_m.x+x*c+z*s,current.position_m.z-x*s+z*c]});
     const polygon=model.rooms.find(r=>r.id===room)?.polygon.map(([x,z])=>[xm(x),zm(z)]);
     if(!polygon)return;
+    const zones=model.motion_zones?.[point.item.id],sourcePath=zones?.paths[room]||model.motion_paths?.[point.item.id];
+    const original=point.original,current=point.item;
+    const rotation=(current.rotation_deg-original.rotation_deg)*Math.PI/180,c=Math.cos(rotation),s=Math.sin(rotation);
+    const path=sourcePath?(zones?sourcePath:sourcePath.map(([x,z])=>{x-=original.position_m.x;z-=original.position_m.z;return [current.position_m.x+x*c+z*s,current.position_m.z-x*s+z*c]})):decorativeMotionPath(polygon);
+    if(!path||path.length<2||!path.flat().every(Number.isFinite)||Math.hypot(path[1][0]-path[0][0],path[1][1]-path[0][1])<.01)return;
     const trail=point.trail=document.createElement('div');trail.dataset.motionTrail=point.item.id;
+    point.clipVertices=polygon.map(([x,z])=>new THREE.Vector3(x,.06,z));
+    trail.setAttribute('aria-hidden','true');
     trail.dataset.room=point.trailRoom=room;
     $('homeMotion').append(trail);
     for(let i=0;i<6;i++){
       const t=i/5,dx=path[1][0]-path[0][0],dz=path[1][1]-path[0][1],length=Math.hypot(dx,dz),side=i%2?1:-1;
       const x=path[0][0]+t*dx+side*dz/length*.065,z=path[0][1]+t*dz-side*dx/length*.065;
       if(!inPoly(x,z,polygon))continue;
-      const el=document.createElement('span');el.className='home-footstep';el.style.setProperty('--delay',i*.28+'s');
+      const el=document.createElement('span');el.className='home-footstep';el.style.setProperty('--delay',i*.12+'s');
       el.innerHTML='<svg viewBox="0 0 14 28"><path d="M7 1C2 1 1 5 2 11c.5 4 2 7 5 7s5-4 5-9c0-5-1-8-5-8ZM4 21h6l1 4c-1 3-7 3-8 0Z"/></svg>';
       if(i%2)el.classList.add('right');trail.append(el);
       point.steps.push({el,position:new THREE.Vector3(x,.06,z),forward:new THREE.Vector3(x+dx/length,.06,z+dz/length)});
     }
-    point.trailTimer=setTimeout(()=>clearTrail(point),7800);
+    point.trailTimer=setTimeout(()=>clearTrail(point),2200);
   }
 
   // Magnify the existing frame; hovering never requests another capture.
@@ -1178,6 +1212,6 @@ homeView = (() => {
     $('homeToggleControls').textContent=vt(controlsCollapsed?'Show controls':'Hide controls');
     for(const label of labels)label.el.setAttribute('aria-label',vt('Focus room')+': '+roomName(label.room));
   }
-  return {get active(){return active},get mapStats(){return mapLayer?.stats;},configureMap,loadMap,exportNavigationState,applyNavigationState,captureTourPose,applyTourPose,releaseGPU(){markerMotion.reset();deviceEffects.sync();roomLighting?.releaseGPU();mapLayer?.releaseGPU();},dispose(){markerMotion.dispose();deviceEffects.dispose();cancelNativePress();roomLighting?.dispose();presenceView?.dispose();vacuumView?.dispose();mapLayer?.dispose();},dismissOverlays,refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
+  return {get active(){return active},get mapStats(){return mapLayer?.stats;},configureMap,loadMap,exportNavigationState,applyNavigationState,captureTourPose,applyTourPose,releaseGPU(){presenceView?.setVisible(false);clearMotion();markerMotion.reset();deviceEffects.sync();roomLighting?.releaseGPU();mapLayer?.releaseGPU();},dispose(){activityDisposed=true;clearMotion();markerMotion.dispose();deviceEffects.dispose();cancelNativePress();roomLighting?.dispose();presenceView?.dispose();vacuumView?.dispose();mapLayer?.dispose();},dismissOverlays,refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,
     get illuminated(){return points.filter(p=>p.overlay?.visible && active).map(p=>p.item.id)}};
 })();

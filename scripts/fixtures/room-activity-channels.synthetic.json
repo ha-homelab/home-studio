@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "purpose": "Synthetic independent-channel examples; no observed device states",
+  "cases": [
+    {"id": "held_presence", "presence": "on", "motion": "off", "expected": {"presence": "on", "motion": "off", "coverage": "unverified", "presence_configured": true, "motion_configured": true}, "legacy": "unverified_presence"},
+    {"id": "presence_with_unavailable_motion", "presence": "on", "motion": "unavailable", "expected": {"presence": "on", "motion": "unknown", "coverage": "unverified", "presence_configured": true, "motion_configured": true}, "legacy": "unknown"},
+    {"id": "motion_with_unavailable_presence", "presence": "unavailable", "motion": "on", "expected": {"presence": "unknown", "motion": "on", "coverage": "unverified", "presence_configured": true, "motion_configured": true}, "legacy": "unknown"},
+    {"id": "motion_with_unknown_presence", "presence": "unknown", "motion": "on", "expected": {"presence": "unknown", "motion": "on", "coverage": "unverified", "presence_configured": true, "motion_configured": true}, "legacy": "unknown"},
+    {"id": "presence_with_missing_motion", "presence": "on", "motion": null, "expected": {"presence": "on", "motion": "unknown", "coverage": "unverified", "presence_configured": true, "motion_configured": true}, "legacy": "unknown"},
+    {"id": "motion_with_missing_presence", "presence": null, "motion": "on", "expected": {"presence": "unknown", "motion": "on", "coverage": "unverified", "presence_configured": true, "motion_configured": true}, "legacy": "unknown"},
+    {"id": "contradictory_independent_reports", "presence": "off", "motion": "on", "expected": {"presence": "off", "motion": "on", "coverage": "unverified", "presence_configured": true, "motion_configured": true}, "legacy": "unknown"},
+    {"id": "both_off", "presence": "off", "motion": "off", "expected": {"presence": "off", "motion": "off", "coverage": "unverified", "presence_configured": true, "motion_configured": true}, "legacy": "unverified_quiet"}
+  ]
+}

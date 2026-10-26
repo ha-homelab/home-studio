@@ -58,7 +58,21 @@ function projectRoomActivity(id, state, attributes, configured = false) {
       }
     }
   }
-  return {activity:{evidence}};
+  const activity={evidence};
+  if(Object.hasOwn(attributes,'channels')){
+    // Preserve unknown entries: omitting a failed source must not imply clear.
+    activity.channels=Object.create(null);
+    const channels=attributes.channels;
+    if(channels&&typeof channels==='object'&&!Array.isArray(channels)&&Object.keys(channels).length<=64){
+      for(const [key,value] of Object.entries(channels)){
+        if(!/^[a-z][a-z0-9_]{0,79}$/.test(key)||['constructor','prototype'].includes(key))continue;
+        const state=name=>['on','off'].includes(value?.[name])?value[name]:'unknown';
+        activity.channels[key]={presence:state('presence'),motion:state('motion'),coverage:value?.coverage==='validated'?'validated':'unverified',
+          presence_configured:value?.presence_configured!==false,motion_configured:value?.motion_configured!==false};
+      }
+    }
+  }
+  return {activity};
 }
 
 function vacuumSourceBindings(value, readable) {

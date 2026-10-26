@@ -127,7 +127,7 @@ vm.runInContext(source, code);
     homeGesture:null,renderRequest:0,renderDelay:0,failed3D:false,renderLost:false,renderSuspended:false,coalesceMotion:false,
     invalidateShadows(){},createDeviceEffects(_three,_container,options){rotor=options;return {};},report3DError(error){throw error;},
     planRadius:10,planBounds:true,xm:x=>x,zm:z=>z,
-    model:{rooms,ceiling_height_m:3},points,labels:[],roomLighting:state.lighting,
+    model:{rooms,ceiling_height_m:3},points,labels:[],motionTracks:new Map(),roomLighting:state.lighting,
     projectedPosition:new THREE.Vector3(),projectedForward:new THREE.Vector3(),
     lowerFloorContext:null,showLowerFloor:true,assumedZones:null,presenceView:null,vacuumView:null,signalZone:'',renderCount:0,
     $:id=>id==='homeStage'?{getBoundingClientRect:()=>rect}:{},isCover:()=>false,

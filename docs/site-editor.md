@@ -163,10 +163,11 @@ map alignment.
 ## Show it on the Home Assistant map
 
 Neighborhood scope, outline appearance, the editor map background and explicit
-imported-frame calibration are newer than the 1.2.0 site editor. Until a release
-containing these additions is published, these controls require a development
-build. Do not expect the older release to load an exported drawing containing
-the new `render_style` field.
+imported-frame calibration are available in the **1.3.0 preview releases,
+starting with beta.2**, including [1.3.0-beta.4](https://github.com/ha-homelab/home-studio/releases/tag/v1.3.0-beta.4).
+Older stable releases may not show these controls or load an exported drawing
+containing the new `render_style` field. The 1.3.0 previews are not a stable
+1.3.0 release.
 
 Drawings with a `site` property require **v1.2.0-beta.6 or newer** in both the
 toolkit and Home Studio integration, even when the site has no shapes. The

@@ -372,7 +372,7 @@ const root = path.resolve(__dirname, '..');
     ]},
     xm: x => x, zm: z => z, $: id => id === 'homeStage' ? {getBoundingClientRect: () => rect} : {},
     roomLighting: null, lowerFloorContext: null, assumedZones: null, presenceView: null, vacuumView: null, signalZone: '', showLowerFloor: true,
-    labels: [label], points: [], roomCode: id => id, roomName: id => id,
+    labels: [label], points: [], motionTracks: new Map(), roomCode: id => id, roomName: id => id,
     refreshSignalStatus() {}, drawScene() {}, positionMediaPreviews() {}, renderCount: 0,
   });
   const home = fs.readFileSync(path.join(root, 'home-view.js'), 'utf8');
