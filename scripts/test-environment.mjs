@@ -190,4 +190,49 @@ const expandedSite = { ...configuredSite, maxX: 14, maxZ: 24 };
 configured.setBounds(expandedSite); checkApproach(expandedSite, 'dusk');
 configured.dispose(); assert.equal(configuredScene.children.length, 0);
 assert([...doc.listeners.values(), ...win.listeners.values(), ...media.listeners.values()].every(set => set.size === 0));
+// Real context is conservative: unknown land is never synthesized around a map.
+// The model's manually placed tree is outside the disposable demo group.
+const realScene = new THREE.Scene(), manual = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
+realScene.add(manual); const manualGeometry = manual.geometry;
+const real = createEnvironmentLayer(THREE, { scene: realScene, bounds: configuredSite, siteContext: true,
+  settings: { enabled: true, motion: true }, document: doc, window: win });
+const demoGroup = realScene.getObjectByName('decorative-surroundings');
+assert.equal(real.stats.siteContext, true); assert.equal(real.stats.actors, 0);
+assert.equal(real.stats.drawCalls, 0); assert.equal(timers.size, 0); assert.equal(demoGroup.children.length, 0);
+real.setSettings({ palette: 'dusk' }); real.setBounds(expandedSite, -2.86);
+assert.equal(demoGroup.children.length, 0, 'Palette and bounds changes cannot synthesize roads or vegetation in real context');
+real.setSiteContext(false);
+assert.equal(real.stats.actors, 5); assert.equal(real.stats.drawCalls, 14); assert.equal(timers.size, 1);
+assert.equal(real.settings.palette, 'dusk'); assert.equal(real.stats.elevation, -2.86);
+const released = new Map();
+for (const mesh of demoGroup.children) for (const resource of [mesh.geometry, mesh.material]) if (!released.has(resource)) {
+  released.set(resource, 0); resource.addEventListener('dispose', () => released.set(resource, released.get(resource) + 1));
+}
+real.setSiteContext(true);
+assert.equal(real.stats.actors, 0); assert.equal(real.stats.drawCalls, 0); assert.equal(real.stats.moving, false);
+assert.equal(timers.size, 0); assert.equal(demoGroup.children.length, 0);
+assert([...released.values()].every(count => count === 1), 'Late map context disposes every generated geometry/material exactly once');
+real.setSiteContext(true); real.setSettings({ enabled: false }); real.setSettings({ enabled: true });
+assert([...released.values()].every(count => count === 1)); assert.equal(timers.size, 0);
+assert.equal(manual.parent, realScene); assert.equal(manual.geometry, manualGeometry, 'Manually placed assets retain ownership and geometry');
+real.dispose(); real.setSiteContext(false); assert.equal(timers.size, 0);
+assert.deepEqual(realScene.children, [manual]); manual.geometry.dispose(); manual.material.dispose();
+// Exercise the actual caller expressions, so the shared module receives context
+// even outside site-edit mode and before an asynchronous map response arrives.
+const editorSource = readFileSync(new URL('../planner/editor.js', import.meta.url), 'utf8');
+const siteFunction = editorSource.slice(editorSource.indexOf('function environmentSite() {'), editorSource.indexOf('let previewDetails='));
+const project = { floors: [{ walls: [], elevation_m: 0 }], site: { features: [] } };
+const editorContext = { displayedProject: () => project, floorBounds: () => bounds, siteEditor: { mapConfigured: false } };
+assert.equal(runInNewContext(siteFunction + '; environmentSite().siteContext', editorContext), false);
+project.site.features.push({ kind: 'building', polygon: [[-3,0],[-1,0],[-1,8],[-3,8]] });
+assert.equal(runInNewContext(siteFunction + '; environmentSite().siteContext', editorContext), true);
+project.site.features = []; editorContext.siteEditor.mapConfigured = true;
+assert.equal(runInNewContext(siteFunction + '; environmentSite().siteContext', editorContext), true);
+const viewerSource = readFileSync(new URL('../viewer.js', import.meta.url), 'utf8');
+const createViewerEnvironment = viewerSource.split('\n').find(line => line.startsWith('environmentLayer=createEnvironmentLayer('));
+for (const features of [[], [{ kind: 'building' }]]) {
+  const context = { THREE, scene: new THREE.Scene(), renderer: { domElement: {} }, environmentConfig: { bounds }, model: { site_context: { features } }, renderProfile: {}, requestRender() {}, createEnvironmentLayer: (_three, options) => options };
+  const options = runInNewContext(createViewerEnvironment + '; environmentLayer', context);
+  assert.equal(options.siteContext, features.length > 0);
+}
 console.log('Environment: lazy batching, obstacle-free seeded traffic on both road sides over repeated 30-minute runs, fixed actor/buffer counts, individual speeds/arrival gaps/colors, settings and bounds rebuilds, visibility/reduced-motion/lifecycle pause and disposal passed.');

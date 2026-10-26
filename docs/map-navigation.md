@@ -44,6 +44,8 @@ The host permits at most four tile calls and one settings call at a time, with 6
 
 The map displays **© OpenStreetMap contributors**. The native HA panel also shows a working [OpenStreetMap copyright link](https://www.openstreetmap.org/copyright) while the map is enabled or being previewed, without relaxing the iframe sandbox. Keep this credit visible in map screenshots or other redistribution. Tile use is subject to the provider's [tile usage policy](https://operations.osmfoundation.org/policies/tiles/).
 
+Authored street and landscape polygons remain visible at detailed, transition and overview scales, at their exact local coordinates and ground elevation. They do not acquire generated lanes or traffic. Coarse home/building solids retain their existing zoom behavior. The map layer remains controlled by map visibility; hiding it does not turn the generic demo garden back on. If no street polygon exists, street shape comes from the calibrated raster, not a guessed offset from the house.
+
 ## Scope and recovery
 
 This is raster map context for one aligned home. It does not provide address search, directions, traffic, satellite imagery, terrain elevation, 3D buildings, or a globe. The local alignment uses a Mercator map with scale set at the home latitude; it is intended for home and surrounding-area context, not survey measurements or accurate continent-scale model placement. Map availability and street/building detail depend on the upstream provider.

@@ -1,6 +1,8 @@
 # Garden surroundings
 
-The planner and compiled Home view have a **Surroundings** dropdown. **Show garden surroundings** adds a small, geometric landscape around the complete site's bounding rectangle. **Sage garden**, **Summer meadow**, and **Blue dusk** change its palette. Scenery never changes the camera fit, room selection, exported architecture, inventory, or Home Assistant entities. Controls are view preferences for the current page; they are not saved into the project.
+The planner and compiled Home view have a **Surroundings** dropdown. For a project without authored site features or a known map alignment, **Show garden surroundings** adds a small, geometric landscape around the complete site's bounding rectangle. **Sage garden**, **Summer meadow**, and **Blue dusk** change its palette. Scenery never changes the camera fit, room selection, exported architecture, inventory, or Home Assistant entities. Controls are view preferences for the current page; they are not saved into the project.
+
+Authored site features and a known geographic alignment take precedence over this demo scenery. In that context the generated road, path, lawns, trees and moving actors are omitted, including when map display is turned off. Manually placed garden objects and authored site polygons are preserved. The calibrated map supplies street context until a real street polygon is traced; the renderer never infers street width, setback or empty planting land from the house bounds.
 
 **Decorative motion** is off by default. It animates two small cars on fixed lanes beyond the site and three rabbits in the side lawn. Passing cars vary their speeds, arrival gaps, and muted body colors. Each car travels at 0.22–0.46 m/s, with a 2–9 second gap before its next pass. The routes are decorative and bounded; they do not represent occupancy, tracked vehicles, or device state. Ordinary placed catalog objects remain static. Motion runs at most once per 180 milliseconds (500 ms on reduced render profiles; 750 ms on diffuse software profiles) and pauses in Plan mode, on a hidden page, outside the viewport, during graphics-context loss, and when the system requests reduced motion. Time pauses too, so returning to a view does not catch up missed animation.
 
@@ -22,6 +24,7 @@ const layer = createEnvironmentLayer(THREE, {
   scene,
   bounds: { minX: -2, maxX: 18, minZ: -3, maxZ: 16 },
   elevation: -3, // Ground Y relative to the active floor; not the active ceiling.
+  siteContext: false, // True when authored site features or a known map alignment exist.
   visibilityElement: renderer.domElement,
   requestRender,
   frameInterval: 1000, // Optional slower pacing for a large scene.
@@ -32,12 +35,13 @@ const layer = createEnvironmentLayer(THREE, {
 layer.setSettings({ motion: true });
 layer.setActive(false); // Switching to an inactive view or losing the GL context.
 layer.setBounds(nextSiteBounds, nextGroundY);
+layer.setSiteContext(true); // A late map response releases all generated scenery.
 layer.dispose();
 ```
 
 The caller supplies bounds covering **all existing rooms, walls, yard structures, equipment and planted items**, not only the building outline. Scenery begins at least 0.5 m outside those bounds. The default viewer derives a full geometry bound; explicit bounds are preferred for legacy sites. `setBounds` rebuilds only when the site or ground level changes. `setActive(true)` resumes only when the other visibility and motion conditions permit it. `dispose()` releases shared materials, geometries, instance buffers, timer and observers.
 
-`roadSide` selects the negative or positive Z edge of those bounds. It moves the
+In demo mode, `roadSide` selects the negative or positive Z edge of those bounds. It moves the
 road, path, adjoining lawn strip and both car lanes together; side planting and
 rabbits remain in place. Traffic keeps the same X direction and timing; the +X
 car stays on the +Z lane on either side. This is
@@ -62,7 +66,9 @@ model.environment = {
 
 Without `enabled: true`, the layer allocates no geometry or materials and has no animation timer. Public compilation emits settings with both toggles off, bounds for all floors, and the lowest floor elevation relative to the current floor. This keeps the same landscape on the ground when switching upstairs. `window.floorplan.surroundings` and `window.planner.getPreviewMetadata().surroundings` expose diagnostic counts, paused/running status, and the traffic seed and current pass settings. A seed supplied to the layer, or through `settings.seed` in the compiled viewer, produces repeatable traffic. Palette or bounds rebuilds restart that sequence; pausing motion preserves its current position and arrival gaps.
 
-The layer uses fourteen shared `InstancedMesh` batches and nine physical material
+`siteContext` is separate from the user's enabled/motion/palette preferences. Setting it to true disposes generated geometry and materials and stops the animation timer; changing bounds or palette does not allocate scenery while it remains true. An accepted transition back to no site/map context restores the saved preferences. Hidden maps and failed or stale map requests do not clear known map authority. When a map transport attaches, the planner reads its saved context once without fetching tiles, and retains it when switching to Preview. Diagnostics expose `siteContext` without geographic coordinates.
+
+In demo mode the layer uses fourteen shared `InstancedMesh` batches and nine physical material
 families. Trees have attached leaves and branches, cars have a continuous painted
 shell and distinct glazing, rubber tyres and metal hubs, and rabbits use the
 catalog's authored anatomy. The standard scene has 64,860 placed triangles.
@@ -85,7 +91,7 @@ its package job, after the existing browser-tool installation. The surrounding
 platform matrix continues to cover general rendering and navigation without
 repeating this dedicated Chromium scenario in every lane.
 
-- `node scripts/test-environment.mjs`: no allocation while off, bounded shared draw batches, full scenery envelopes outside both site edges, repeatable traffic across four seeds and repeated 30-minute simulations, varied speeds/gaps/rendered colors, unchanged actor and GPU buffer counts, preserved road side through settings and bounds rebuilds, visibility/reduced-motion/lifecycle pause, palette replacement and disposal.
+- `node scripts/test-environment.mjs`: no allocation with real site/map context, disposal on late context, preservation of manual assets and saved preferences, no allocation while off, bounded shared draw batches, full scenery envelopes outside both site edges, repeatable traffic across four seeds and repeated 30-minute simulations, varied speeds/gaps/rendered colors, unchanged actor and GPU buffer counts, preserved road side through settings and bounds rebuilds, visibility/reduced-motion/lifecycle pause, palette replacement and disposal.
 - `node scripts/test-environment-browser.cjs`: real garden placement, indoor/outdoor catalog items, unchanged camera fit, static idle rendering, reduced-motion pause, compiler metadata and Home controls. Set `ENVIRONMENT_SCREENSHOT_DIR` to save fictional-example screenshots.
 - `node scripts/test-environment-surfaces.mjs`: material families, draw/triangle bounds, metre UV scales, exact decoded rabbit GPU bytes and material disposal.
 - `python3 scripts/author-environment-animal.py --check`: reproducible catalog-to-scenery geometry; rerun without `--check` after changing the authored rabbit.

@@ -105,11 +105,11 @@ test('underlay uses the exact home map projection, rotation and tile selection',
   }
 });
 function underlayFixture(custom = {}) {
-  const calls = [], images = [], statuses = []; let paints = 0, clock = 0;
+  const calls = [], images = [], statuses = [], contexts = []; let paints = 0, clock = 0;
   const layer = createSiteMapUnderlay({ request: async (action, body, signal) => { calls.push({ action, body }); return custom.request ? custom.request(action, body, signal) : action === 'get' ? host.mapSnapshot(snapshot()) : tile(); },
     decode: custom.decode || (async () => { const image = { width: 256, height: 256, closed: 0, close() { this.closed++; } }; images.push(image); return image; }),
-    now: () => clock, onChange: () => paints++, onStatus: (text, state) => statuses.push(state) });
-  return { layer, calls, images, statuses, paints: () => paints, advance: () => clock += 60001 };
+    onContext: value => contexts.push(value), now: () => clock, onChange: () => paints++, onStatus: (text, state) => statuses.push(state) });
+  return { layer, calls, images, statuses, contexts, paints: () => paints, advance: () => clock += 60001 };
 }
 test('underlay has bounded cache/rate, read-only requests, exact canvas transform and no idle work', async () => {
   const f = underlayFixture(); f.layer.setView(view(0)); await flush(); assert.equal(f.calls.length, 0, 'Disabled underlay performs no reads');
@@ -139,6 +139,40 @@ test('underlay retries only failed tiles and discards stale settings and decodes
   late.layer.setView(view(0)); late.layer.setEnabled(true); await flush(); assert.equal(held.length, 4); late.layer.dispose();
   const images = held.map(() => ({ closed: 0, close() { this.closed++; } })); held.forEach((d, i) => d.resolve(images[i])); const paints = late.paints(); await flush();
   assert(images.every(image => image.closed === 1)); assert.equal(late.paints(), paints); assert.equal(late.layer.stats.inflight, 0);
+});
+test('initial map context can be learned without enabling or fetching the raster', async () => {
+  const f = underlayFixture();
+  f.layer.setView(view(0)); await f.layer.readContext(); await flush();
+  assert.deepEqual(f.contexts, [true]); assert.equal(f.layer.state.enabled, false);
+  assert.deepEqual(f.calls.map(call => call.action), ['get']);
+  assert.equal(f.layer.stats.inflight, 0); assert.equal(f.layer.stats.cached, 0);
+  f.layer.dispose();
+  const pending = deferred(), stale = underlayFixture({ request: () => pending.promise });
+  const read = stale.layer.readContext(); stale.layer.dispose(); pending.resolve(snapshot()); await read;
+  assert.deepEqual(stale.contexts, [], 'Detached context probes cannot affect the replacement preview');
+});
+test('map authority survives hidden/disabled raster and errors, but ignores stale settings', async () => {
+  let result = snapshot(), fail = false;
+  const f = underlayFixture({ request: async action => {
+    if (action !== 'get') return tile();
+    if (fail) throw Error('temporary settings failure');
+    return result;
+  } });
+  f.layer.setEnabled(true); await flush(); assert.deepEqual(f.contexts, [true]);
+  f.layer.setEnabled(false); assert.deepEqual(f.contexts, [true], 'Hiding the raster cannot erase learned authority');
+  result = { ...snapshot(), config: { ...config, enabled: false } };
+  f.layer.setEnabled(true); await flush(); assert.deepEqual(f.contexts, [true, true]);
+  assert.equal(f.layer.state.configured, false, 'A saved disabled map does not request raster tiles');
+  fail = true; await f.layer.reload(); assert.deepEqual(f.contexts, [true, true]);
+  fail = false; result = { ...snapshot(), configured: false, config: null };
+  await f.layer.reload(); assert.deepEqual(f.contexts, [true, true, false], 'Only an accepted unconfigured response clears map authority');
+  f.layer.dispose();
+  for (const dispose of [false, true]) {
+    const pending = deferred(), stale = underlayFixture({ request: () => pending.promise });
+    stale.layer.setEnabled(true); if (dispose) stale.layer.dispose(); else stale.layer.setEnabled(false);
+    pending.resolve(snapshot()); await flush(); assert.deepEqual(stale.contexts, []);
+    stale.layer.dispose();
+  }
 });
 test('image decoding rejects invalid signatures and oversized dimensions before allocation', async () => {
   const previous = globalThis.createImageBitmap; let decodes = 0;

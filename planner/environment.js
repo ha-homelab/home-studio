@@ -1,5 +1,6 @@
 // Optional decorative surroundings. No entities, model edits or network access.
-// All scenery stays outside the supplied bounds, which must include the full site.
+// Demo scenery stays outside the supplied bounds. Authored site/map context
+// suppresses it: uncharted space is not evidence of an empty lawn or a road.
 export const ENVIRONMENT_PALETTES = {
   sage: { label: 'Sage garden', lawn: '#6f8f7a', hedge: '#557463', leaf: '#7f9b78', leafLight: '#a2b595', path: '#afb5a5', road: '#697d75', trunk: '#8e8270', car: '#d6ba92' },
   meadow: { label: 'Summer meadow', lawn: '#c9d3a7', hedge: '#819168', leaf: '#91a477', leafLight: '#b2be87', path: '#e6ddc5', road: '#a9aaa0', trunk: '#97806b', car: '#b4cbd0' },
@@ -190,7 +191,7 @@ function environmentGeometry(THREE, shape) {
   return result;
 }
 
-export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, requestRender = () => {}, decorateMaterial = () => {}, frameInterval = 180, active = true, settings = {}, seed = settings.seed, roadSide = settings.road_side, visibilityElement = null, document: doc = globalThis.document, window: win = globalThis.window } = {}) {
+export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, siteContext = false, requestRender = () => {}, decorateMaterial = () => {}, frameInterval = 180, active = true, settings = {}, seed = settings.seed, roadSide = settings.road_side, visibilityElement = null, document: doc = globalThis.document, window: win = globalThis.window } = {}) {
   const group = new THREE.Group(); group.name = 'decorative-surroundings'; group.visible = false; scene.add(group);
   const media = win?.matchMedia?.('(prefers-reduced-motion: reduce)');
   const state = { enabled: false, motion: false, palette: 'sage' };
@@ -200,6 +201,7 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, re
   // Site configuration is fixed for this layer, independent of UI preferences.
   const roadDirection = roadSide === 'maxZ' ? 1 : -1;
   let randomState = trafficSeed, trafficColors = [];
+  let contextual = siteContext === true;
   let area, base = elevation, timer = 0, elapsed = 0, disposed = false, suspended = false, inViewport = true, dirty = true;
   const tickMs = Math.max(180, Math.min(2000, Number.isFinite(frameInterval) ? frameInterval : 180)); // Never a permanent RAF loop.
   function random() {
@@ -216,7 +218,7 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, re
     return { minX: value.minX - (value.minX === value.maxX ? .25 : 0), maxX: value.maxX + (value.minX === value.maxX ? .25 : 0), minZ: value.minZ - (value.minZ === value.maxZ ? .25 : 0), maxZ: value.maxZ + (value.minZ === value.maxZ ? .25 : 0) };
   }
   function stop() { if (timer) win.clearTimeout(timer); timer = 0; }
-  function running() { return !disposed && !suspended && inViewport && active && state.enabled && state.motion && !doc?.hidden && !media?.matches; }
+  function running() { return !disposed && !contextual && !suspended && inViewport && active && state.enabled && state.motion && !doc?.hidden && !media?.matches; }
   function schedule() {
     stop();
     if (running()) timer = win.setTimeout(() => {
@@ -382,8 +384,8 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, re
     if ('enabled' in next) state.enabled = next.enabled === true;
     if ('motion' in next) state.motion = next.motion === true;
     if (Object.hasOwn(ENVIRONMENT_PALETTES, next.palette) && next.palette !== state.palette) { state.palette = next.palette; dirty = true; }
-    if (state.enabled && dirty) build();
-    group.visible = state.enabled;
+    if (state.enabled && !contextual && dirty) build();
+    group.visible = state.enabled && !contextual;
     schedule(); requestRender();
   }
   function setBounds(next, nextElevation = base) {
@@ -391,7 +393,14 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, re
     if (!Number.isFinite(nextElevation)) throw new Error('Surroundings require finite ground elevation.');
     if (JSON.stringify(candidate) === JSON.stringify(area) && nextElevation === base) return;
     area = candidate; base = nextElevation; dirty = true;
-    if (state.enabled) { build(); requestRender(); }
+    if (state.enabled && !contextual) { build(); requestRender(); }
+  }
+  function setSiteContext(value) {
+    if (disposed || contextual === (value === true)) return;
+    contextual = value === true; dirty = true;
+    // Release demo geometry and its motion immediately when map data arrives.
+    if (contextual) clear();
+    setSettings();
   }
   const visibility = () => schedule(), hide = () => { suspended = true; stop(); }, show = () => { suspended = false; schedule(); };
   const observer = visibilityElement && win?.IntersectionObserver ? new win.IntersectionObserver(entries => {
@@ -402,10 +411,10 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, re
   win?.addEventListener('pagehide', hide); win?.addEventListener('pageshow', show);
   setBounds(bounds, elevation); setSettings(settings);
   return {
-    setSettings, setBounds,
+    setSettings, setBounds, setSiteContext,
     setActive(value) { active = value === true; schedule(); },
     get settings() { return { ...state }; },
-    get stats() { return { enabled: state.enabled, moving: running(), drawCalls: group.visible ? batches.length : 0, actors: actors.length, timerPending: !!timer, frameInterval: tickMs, elapsed, elevation: base, bounds: { ...area }, roadSide: roadDirection === 1 ? 'maxZ' : 'minZ', trafficSeed, traffic: actors.filter(actor => actor.kind === 'car').map(({ speed, entryDelay, color, cycle, visible }) => ({ speed, entryDelay, color, cycle, visible })) }; },
+    get stats() { return { enabled: state.enabled, siteContext: contextual, moving: running(), drawCalls: group.visible ? batches.length : 0, actors: actors.length, timerPending: !!timer, frameInterval: tickMs, elapsed, elevation: base, bounds: { ...area }, roadSide: roadDirection === 1 ? 'maxZ' : 'minZ', trafficSeed, traffic: actors.filter(actor => actor.kind === 'car').map(({ speed, entryDelay, color, cycle, visible }) => ({ speed, entryDelay, color, cycle, visible })) }; },
     dispose() { if (disposed) return; disposed = true; stop(); observer?.disconnect(); clear(); scene.remove(group); doc?.removeEventListener('visibilitychange', visibility); media?.removeEventListener('change', visibility); win?.removeEventListener('pagehide', hide); win?.removeEventListener('pageshow', show); },
   };
 }

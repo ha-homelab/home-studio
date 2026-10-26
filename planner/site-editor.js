@@ -21,7 +21,7 @@ export function createSiteEditor(api) {
   const kindLabel = kind => t(label(kind));
   const featureSummary = feature => t(feature.render_style === 'outline' ? '{kind} · outline · {area} m²' : '{kind} · {area} m²', { kind: kindLabel(feature.kind), area: Math.abs(signedArea(feature.polygon)).toFixed(1) });
   let active = false, selectedId = null, tool = 'select', kind = 'home', scope = 'all', points = [], hover = null, gesture = null;
-  let mapUnderlay = null, mapTransport = null, mapWanted = false, suspended = false;
+  let mapUnderlay = null, mapTransport = null, mapWanted = false, suspended = false, mapConfigured = false;
   const editableKind = value => scope !== 'neighborhood' || !['home', 'roof'].includes(value);
   const current = () => api.getProject().site || createSite();
   const accepted = () => api.getAcceptedProject().site || createSite();
@@ -301,7 +301,11 @@ export function createSiteEditor(api) {
   }
   function setMapTransport(transport) {
     mapUnderlay?.dispose(); mapTransport?.close?.(); mapUnderlay = null; mapTransport = transport; mapWanted = false;
-    if (typeof transport?.request === 'function') mapUnderlay = createSiteMapUnderlay({ request: (...args) => transport.request(...args), onChange: api.render, onStatus: updateMapControls });
+    mapConfigured = false; api.mapContextChanged?.(false);
+    if (typeof transport?.request === 'function') mapUnderlay = createSiteMapUnderlay({ request: (...args) => transport.request(...args), onChange: api.render, onStatus: updateMapControls,
+      onContext(configured) { mapConfigured = configured; api.mapContextChanged?.(configured); } });
+    // The initial editor snapshot must reach the host before this request.
+    if (mapUnderlay) queueMicrotask(mapUnderlay.readContext);
     syncMapUnderlay();
   }
   function setSuspended(value) { suspended = !!value; syncMapUnderlay(); }
@@ -312,7 +316,7 @@ export function createSiteEditor(api) {
   for (const [value,name] of KINDS) { const option = node('option','',t(name)); option.value = value; $('site-kind').append(option); }
   $('site-kind').addEventListener('change', event => { kind = event.target.value; refresh(); });
   $('site-finish').addEventListener('click',finish); $('site-cancel').addEventListener('click',() => { cancel(); refresh(); });
-  return { get active() { return active; }, get neighborhood() { return scope === 'neighborhood'; }, get selectedId() { return selectedId; }, get busy() { return !!gesture || points.length > 0; }, setActive, cancel, updateUI, buildInspector, bounds, render, pointerDown, pointerMove, pointerUp, keyDown, hint, setMapTransport, setSuspended, dispose };
+  return { get active() { return active; }, get mapConfigured() { return mapConfigured; }, get neighborhood() { return scope === 'neighborhood'; }, get selectedId() { return selectedId; }, get busy() { return !!gesture || points.length > 0; }, setActive, cancel, updateUI, buildInspector, bounds, render, pointerDown, pointerMove, pointerUp, keyDown, hint, setMapTransport, setSuspended, dispose };
 }
 
 export function buildSitePreview(THREE, site, material, { showHome = true } = {}) {
