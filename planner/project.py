@@ -625,7 +625,7 @@ def package_ha(output, manifest):
         # Private adapters are deliberately outside this reviewed source list.
         sources = [component / name for name in (
             "__init__.py", "site.py", "validation.py", "curtains.py", "map.py",
-            "manifest.json", "native.py", "generated.py", "site_frame.py", "site_calibration.py", "permissions.py", "config_flow.py",
+            "manifest.json", "native.py", "generated.py", "site_frame.py", "site_calibration.py", "runtime_upgrade.py", "baseline_transaction.py", "permissions.py", "config_flow.py",
             "strings.json", "translations/en.json", "static/panel.js", "static/card.js",
         )]
         for source in sources:

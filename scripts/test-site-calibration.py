@@ -41,6 +41,7 @@ class CalibrationTests(unittest.IsolatedAsyncioTestCase):
             html = html.replace('</body>', '<script>' + (ROOT / 'map-layer.js').read_text() + '</script></body>')
             (folder / "index.html").write_text(html)
         self.hass = support.support.Hass(self.root)
+        self.hass.async_add_executor_job = lambda fn, *args: asyncio.get_running_loop().run_in_executor(None, fn, *args)
         for module in (native, generated):
             handle = patch.object(module, "compiler", return_value=support.compiler)
             handle.start()
@@ -49,6 +50,13 @@ class CalibrationTests(unittest.IsolatedAsyncioTestCase):
         await self.project.load()
         await self.project.save(0, copy.deepcopy(self.project.document["project"]))
         await self.project.publish(1)
+        self.project.store.path = self.root / 'store.json'
+        self.project.store.path.write_text(json.dumps({'data': self.project.document}))
+        save = self.project.store.async_save
+        async def disk_save(document):
+            await save(document)
+            self.project.store.path.write_text(json.dumps({'data': document}))
+        self.project.store.async_save = disk_save
         self.service = calibration.SiteCalibration()
 
     async def preview(self):
@@ -102,10 +110,43 @@ class CalibrationTests(unittest.IsolatedAsyncioTestCase):
         previous = copy.deepcopy(self.project.document)
         before = support.tree_hashes(self.project.root)
         self.hass.fail_save = True
-        with self.assertRaises(OSError):
+        with self.assertRaises(native.NativeError) as error:
             await self.service.apply(self.project, 1, 'admin', preview['token'])
+        self.assertEqual(error.exception.code, 'baseline_save_failed')
         self.assertEqual(self.project.document, previous)
         self.assertEqual(support.tree_hashes(self.project.root), before)
+
+    async def test_post_rename_error_preserves_committed_baseline_and_reload(self):
+        preview = await self.preview()
+        save = self.project.store.async_save
+        async def committed_error(document):
+            await save(document)
+            raise OSError('synthetic directory fsync failure')
+        with patch.object(self.project.store, 'async_save', side_effect=committed_error):
+            with self.assertRaises(native.NativeError) as error:
+                await self.service.apply(self.project, 1, 'admin', preview['token'])
+        self.assertEqual(error.exception.code, 'baseline_commit_saved')
+        reopened = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
+        await reopened.load()
+        self.assertEqual(reopened.document, self.project.document)
+        self.assertEqual([floor['elevation_m'] for floor in reopened.baseline_project['floors']], [3, 0])
+        self.assertEqual(len(list((self.project.root / 'baselines').iterdir())), 2)
+
+    async def test_authority_revoked_after_read_or_copy_rejects_before_write(self):
+        before = support.tree_hashes(self.project.root)
+        previous = copy.deepcopy(self.project.document)
+        for stage in (2, 3):
+            preview = await self.preview()
+            calls = 0
+            def validate_current():
+                nonlocal calls
+                calls += 1
+                if calls == stage:
+                    raise native.NativeError('unavailable', 'The adapter or administrator changed.')
+            with self.subTest(stage=stage), self.assertRaises(native.NativeError):
+                await self.service.apply(self.project, 1, 'admin', preview['token'], validate_current=validate_current)
+            self.assertEqual(self.project.document, previous)
+            self.assertEqual(support.tree_hashes(self.project.root), before)
 
     async def test_cancelled_request_finishes_store_before_releasing_baseline(self):
         preview = await self.preview()

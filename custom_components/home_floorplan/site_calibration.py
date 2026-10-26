@@ -12,6 +12,7 @@ import shutil
 import time
 import uuid
 
+from .baseline_transaction import commit_baseline, settle
 from .generated import GeneratedProject, _embedded, _hashes, _json
 from .native import NativeError, load_models, validate_draft
 from .site_frame import propose_site_frame
@@ -82,9 +83,13 @@ class SiteCalibration:
     def __init__(self):
         self.previews = {}
 
-    async def preview(self, native, revision, owner):
+    async def preview(self, native, revision, owner, *, validate_current=None):
+        if validate_current:
+            validate_current()
         self.previews = {key: value for key, value in self.previews.items() if value["expires"] > time.monotonic()}
         snapshot = await native.hass.async_add_executor_job(_read, native, revision)
+        if validate_current:
+            validate_current()
         if native.document != snapshot["document"]:
             raise NativeError("conflict", "The draft changed while preparing calibration. Preview it again.")
         token = secrets.token_urlsafe(32)
@@ -95,40 +100,35 @@ class SiteCalibration:
                                 "revision": revision, "expires": time.monotonic() + 300}
         return {"token": token, "revision": revision, "global_ground_m": 0, "floors": snapshot["offsets"]}
 
-    async def apply(self, native, revision, owner, token):
+    async def apply(self, native, revision, owner, token, *, validate_current=None):
+        if validate_current:
+            validate_current()
         preview = self.previews.pop(token, None)
         if (not preview or preview["owner"] != owner or preview["native"] is not native or
                 preview["revision"] != revision or preview["expires"] <= time.monotonic()):
             raise NativeError("stale_preview", "The calibration preview expired or belongs to another session. Preview it again.")
         snapshot = await native.hass.async_add_executor_job(_read, native, revision)
+        if validate_current:
+            validate_current()
         if snapshot["signature"] != preview["signature"]:
             raise NativeError("conflict", "The source or saved draft changed after preview. Preview calibration again.")
-        identifier = await native.hass.async_add_executor_job(_copy_baseline, native, snapshot)
+        identifier, cancelled = await settle(native.hass.async_add_executor_job(_copy_baseline, native, snapshot))
         try:
+            if cancelled:
+                raise asyncio.CancelledError
             if native.document != snapshot["document"]:
                 raise NativeError("conflict", "The saved draft changed during calibration. Preview it again.")
             current = await native.hass.async_add_executor_job(_read, native, revision)
             if current["signature"] != snapshot["signature"] or native.document != snapshot["document"]:
                 raise NativeError("source_changed", "The original home changed during calibration. Preview it again.")
+            if validate_current:
+                validate_current()
             updated = {**snapshot["document"], "project": snapshot["project"],
                        "baseline": identifier, "revision": revision + 1}
-            # Store writes can finish in an executor after their caller is
-            # cancelled. Keep this baseline and the lock until the result is
-            # known, then update memory before propagating cancellation.
-            write = asyncio.create_task(native.store.async_save(updated))
-            cancelled = False
-            while True:
-                try:
-                    await asyncio.shield(write)
-                    break
-                except asyncio.CancelledError:
-                    cancelled = True
-                    if write.cancelled():
-                        raise
         except BaseException:
             await native.hass.async_add_executor_job(shutil.rmtree, native.root / "baselines" / identifier)
             raise
-        native.document = updated
-        native._metadata(snapshot["baseline_project"], snapshot["models"])
-        if cancelled:
-            raise asyncio.CancelledError
+        def accept():
+            native.document = updated
+            native._metadata(snapshot["baseline_project"], snapshot["models"])
+        await commit_baseline(native, snapshot["document"], updated, identifier, accept)

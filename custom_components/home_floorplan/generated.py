@@ -446,7 +446,22 @@ class GeneratedProject(NativeProject):
         self.installed_inventory = copy.deepcopy(inventory)
         self.document.update(inventory=copy.deepcopy(inventory), baseline=None)
         self.baseline_project = None
+        self._baseline_recovery_required = False
         self.source = {"kind": "generated", "protected_floors": [], "protected_rooms": {}, "custom_items": {}}
+
+    def check_recovery(self):
+        if self._baseline_recovery_required:
+            raise NativeError("baseline_recovery_required",
+                              "The previous baseline write has an uncertain outcome. Restart Home Assistant "
+                              "before loading or editing this draft. Both baselines are retained.")
+
+    def check_revision(self, revision):
+        self.check_recovery()
+        super().check_revision(revision)
+
+    async def save_inventory(self, inventory):
+        self.check_recovery()
+        await super().save_inventory(inventory)
 
     def _metadata(self, project, models):
         self.baseline_project = project

@@ -14,7 +14,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT_FILES = (
     "__init__.py", "site.py", "validation.py", "curtains.py", "native.py", "generated.py", "permissions.py",
-    "ai.py", "map.py", "site_frame.py", "site_calibration.py", "config_flow.py", "manifest.json", "strings.json", "translations/en.json",
+    "ai.py", "map.py", "site_frame.py", "site_calibration.py", "runtime_upgrade.py", "baseline_transaction.py", "config_flow.py", "manifest.json", "strings.json", "translations/en.json",
     "static/panel.js", "static/card.js", "static/studio.js", "static/map-transport.js",
 )
 RUNTIME_FILES = (

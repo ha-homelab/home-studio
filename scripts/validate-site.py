@@ -172,6 +172,7 @@ REPO_FILES = (
               'docs/map-navigation.md', 'scripts/test-ha-map.py', 'scripts/test-ha-map-bridge.cjs', 'scripts/test-map-scene.cjs',
               'custom_components/home_floorplan/generated.py',
               'custom_components/home_floorplan/site_frame.py', 'custom_components/home_floorplan/site_calibration.py',
+              'custom_components/home_floorplan/runtime_upgrade.py', 'custom_components/home_floorplan/baseline_transaction.py', 'scripts/test-runtime-upgrade.py', 'scripts/fixtures/map-layer-v0.js',
               'scripts/test-site-calibration.py', 'scripts/test-site-calibration.cjs',
               'docs/imported-site-calibration.md',
               'custom_components/home_floorplan/permissions.py',
