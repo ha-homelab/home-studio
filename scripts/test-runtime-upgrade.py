@@ -405,7 +405,8 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
             self.assertFalse(pending.done())
             release.set()
-            with self.assertRaises(asyncio.CancelledError): await pending
+            with self.assertRaises(asyncio.CancelledError):
+                self.assertIsNone(await pending)
         self.assertEqual(self.state(),before)
 
     async def test_cancelled_caller_finishes_store(self):
@@ -423,7 +424,8 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
             self.assertFalse(pending.done())
             release.set()
-            with self.assertRaises(asyncio.CancelledError): await pending
+            with self.assertRaises(asyncio.CancelledError):
+                self.assertIsNone(await pending)
         reopened = generated.GeneratedProject(self.hass,self.component,self.site,self.models,self.inventory)
         await reopened.load()
         self.assertEqual(reopened.document,self.project.document)
@@ -462,7 +464,8 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.to_thread(started.wait,10)
             self.assertTrue(started.is_set())
             pending.cancel()
-            with self.assertRaises(asyncio.CancelledError): await pending
+            with self.assertRaises(asyncio.CancelledError):
+                self.assertIsNone(await pending)
             release.set()
         await self.assert_recovery_blocks_mutation()
         reopened = generated.GeneratedProject(self.hass,self.component,self.site,self.models,self.inventory)

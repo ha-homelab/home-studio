@@ -166,7 +166,7 @@ class CalibrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(pending.done())
             resume.set()
             with self.assertRaises(asyncio.CancelledError):
-                await pending
+                self.assertIsNone(await pending)
         self.assertEqual(self.project.document['revision'], 2)
         self.assertTrue((self.project.root / 'baselines' / self.project.document['baseline']).is_dir())
         reopened = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
@@ -252,7 +252,6 @@ class CalibrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn('lowest_slab_elevation_m', merged['site_context'])
 
     async def test_handlers_require_admin_and_preview_before_apply(self):
-        import asyncio
         integration = support.integration
         self.hass.data[integration.DOMAIN] = {'native': self.project, 'lock': asyncio.Lock()}
         viewer = support.support.Connection(admin=False)

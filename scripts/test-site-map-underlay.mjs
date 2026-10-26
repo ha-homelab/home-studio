@@ -142,7 +142,10 @@ test('underlay retries only failed tiles and discards stale settings and decodes
 });
 test('image decoding rejects invalid signatures and oversized dimensions before allocation', async () => {
   const previous = globalThis.createImageBitmap; let decodes = 0;
-  globalThis.createImageBitmap = async () => { decodes++; throw Error('Not a real PNG'); };
+  globalThis.createImageBitmap = async (source, options) => {
+    assert(source instanceof Blob); assert.equal(source.type, 'image/png');
+    assert.equal(options, undefined); decodes++; throw Error('Not a real PNG');
+  };
   try {
     const header = Buffer.alloc(33); Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(header);
     header.writeUInt32BE(13, 8); header.write('IHDR', 12); header.writeUInt32BE(65536, 16); header.writeUInt32BE(256, 20);
@@ -151,5 +154,10 @@ test('image decoding rejects invalid signatures and oversized dimensions before 
       layer.setView(view(0)); layer.setEnabled(true); await flush(); assert.equal(layer.state.failed, true); assert.equal(layer.stats.loaded, 0); layer.dispose();
     }
     assert.equal(decodes, 0);
+    header.writeUInt32BE(256, 16);
+    const layer = createSiteMapUnderlay({ request: async action => action === 'get' ? snapshot() : { data_url: 'data:image/png;base64,' + header.toString('base64') } });
+    layer.setView(view(0)); layer.setEnabled(true); await flush();
+    assert(decodes > 0, 'A valid bounded header reaches the Blob decoder');
+    assert.equal(layer.state.failed, true); assert.equal(layer.stats.loaded, 0); layer.dispose();
   } finally { if (previous) globalThis.createImageBitmap = previous; else delete globalThis.createImageBitmap; }
 });

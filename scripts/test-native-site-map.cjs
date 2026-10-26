@@ -31,12 +31,22 @@ let server, browser;
       url.pathname.startsWith('/home-floorplan-studio/') ? url.pathname.slice('/home-floorplan-studio/'.length) : null;
     if (!relative || relative.split('/').includes('..')) { response.writeHead(404); response.end(); return; }
     const file = path.join(root, relative);
-    if (!fs.existsSync(file) || !fs.statSync(file).isFile()) { response.writeHead(404); response.end(); return; }
-    response.writeHead(200, { 'Content-Type': ({ '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.json': 'application/json' })[path.extname(file)] || 'application/octet-stream', 'Access-Control-Allow-Origin': '*' });
-    response.end(fs.readFileSync(file));
+    let descriptor;
+    try {
+      descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      if (!fs.fstatSync(descriptor).isFile()) { response.writeHead(404); response.end(); return; }
+      const body = fs.readFileSync(descriptor);
+      response.writeHead(200, { 'Content-Type': ({ '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.json': 'application/json' })[path.extname(file)] || 'application/octet-stream', 'Access-Control-Allow-Origin': '*' });
+      response.end(body);
+    } catch (error) {
+      if (!['ENOENT', 'ENOTDIR', 'ELOOP'].includes(error.code)) throw error;
+      response.writeHead(404); response.end();
+    } finally { if (descriptor !== undefined) fs.closeSync(descriptor); }
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
+  assert.equal((await fetch(origin + '/home-floorplan-studio/planner/not-a-fixture.js')).status, 404);
+  assert.equal((await fetch(origin + '/home-floorplan-studio/planner')).status, 404);
   browser = await engines[engine].launch(browserLaunchOptions(engine, true));
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }); page.setDefaultTimeout(15000);
   const errors = []; page.on('pageerror', error => errors.push(String(error))); page.on('dialog', dialog => dialog.accept());

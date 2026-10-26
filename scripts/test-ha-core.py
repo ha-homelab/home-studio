@@ -212,7 +212,7 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
             state['native'] = None
         try:
             with self.assertRaisesRegex(ValueError, 'conflict'):
-                await stale
+                self.assertIsNone(await stale)
         finally:
             state['native'] = adapter
 
@@ -222,7 +222,7 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(.01)
             await self.hass.auth.async_update_user(queued_admin, group_ids=[GROUP_ID_READ_ONLY])
         with self.assertRaisesRegex(ValueError, 'unauthorized'):
-            await revoked
+            self.assertIsNone(await revoked)
 
         async with state['lock']:
             pending = asyncio.create_task(self.request('site_frame_preview', revision=1))
@@ -308,7 +308,7 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
             state['native'] = None
         try:
             with self.assertRaisesRegex(ValueError, 'conflict'):
-                await stale
+                self.assertIsNone(await stale)
         finally:
             state['native'] = adapter
         queued_admin = await self.hass.auth.async_create_user('Runtime upgrade admin', group_ids=[GROUP_ID_ADMIN])
@@ -317,7 +317,7 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(.01)
             await self.hass.auth.async_update_user(queued_admin, group_ids=[GROUP_ID_READ_ONLY])
         with self.assertRaisesRegex(ValueError, 'unauthorized'):
-            await revoked
+            self.assertIsNone(await revoked)
 
         preview = await self.request('project_runtime_upgrade_preview', revision=1)
         self.assertEqual(preview['changed_file_count'], len(state['site']['floors']))
