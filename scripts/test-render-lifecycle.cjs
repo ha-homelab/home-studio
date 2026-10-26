@@ -498,7 +498,7 @@ const modeEnd=homeSource.indexOf('\n  let nativePressTimer=',modeStart);
 assert(modeStart>=0&&modeEnd>modeStart,'Production Home mode switch is present');
 const modeSource=homeSource.slice(modeStart,modeEnd);
 function modeScheduler(legacy=false,diffuse=false,canEdit=true) {
-  const q=motionScheduler(diffuse,diffuse), c=q.c, elements=new Map(), modes=[], cleanups=[], markerResets=[];
+  const q=motionScheduler(diffuse,diffuse), c=q.c, elements=new Map(), modes=[], cleanups=[], markerResets=[], motionClears=[];
   let width=800;
   const element=id=>{
     if(!elements.has(id))elements.set(id,{checked:true,hidden:false,dataset:{},prepend(){},
@@ -512,7 +512,7 @@ function modeScheduler(legacy=false,diffuse=false,canEdit=true) {
     markerMotion:{reset(){markerResets.push(c.active);}},
     THREE:{Color:class {constructor(value){this.value=value;}}},hemisphere:{},sun:{},ground:{},grid:{},
     clipping:{constant:2.1},reflectionEnvironment:null,contactShading:null,inventoryTextures:{dispose(){},releaseGPU(){},configure(){}},environmentLayer:null,editorFloorMaterials:null,homeArchitectureMaterials:null,setWallOutlineAppearance(){},roomLighting:null,root:{children:[]},objectGroup:{},overlayGroup:null,points:[],
-    clearTrail(){},showMode(){},refreshControls(){},updateFixtureShadows(){},updateHeightCaption(){},$:element});
+    clearMotion(){motionClears.push(c.active);},showMode(){},refreshControls(){},updateFixtureShadows(){},updateHeightCaption(){},$:element});
   c.document.body={classList:{toggle(){}}};
   c.window.floorplan={get renderCount(){return c.renderCount;}};
   c.homeView={get active(){return c.active;},render(){c.drawScene(c.camera);c.renderCount++;}};
@@ -527,7 +527,7 @@ function modeScheduler(legacy=false,diffuse=false,canEdit=true) {
   vm.runInContext(cutaway.slice(0,cutaway.indexOf(';for(const k'))+';',c);
   c.window.resizeModel();
   assert.equal(modes.at(-1),'home','Initial resize populates the Home size cache');
-  return Object.assign(q,{modes,cleanups,markerResets,element,setWidth(value){width=value;},
+  return Object.assign(q,{modes,cleanups,markerResets,motionClears,element,setWidth(value){width=value;},
     // A cancelled callback must not execute later in the same browser frame.
     flush(){for(const [id,fn] of [...q.raf])if(q.raf.delete(id))fn();},
     cutaway(value){element('cutaway').checked=value;element('cutaway').onchange();}});
@@ -535,6 +535,7 @@ function modeScheduler(legacy=false,diffuse=false,canEdit=true) {
 function rapidModeReturn(q) {
   const cleanupStart=q.cleanups.length;
   const resetStart=q.markerResets.length;
+  const motionStart=q.motionClears.length;
   q.c.setActive(false);
   q.cutaway(true);q.cutaway(false);
   assert.equal(q.modes.at(-1),'editor');
@@ -545,6 +546,7 @@ function rapidModeReturn(q) {
     {kind:'media',active:false},{kind:'native',active:false},
   ],'Home and Editor transitions close media controls and cancel native press before changing mode');
   assert.deepEqual(q.markerResets.slice(resetStart),[true,false],'each mode transition clears old marker positions before activating the new mode');
+  assert.deepEqual(q.motionClears.slice(motionStart),[false],'Leaving Home clears every source motion track; returning does not replay it');
   q.flush();q.flush();
   return q.c.renderCount-before;
 }
@@ -562,6 +564,7 @@ assert.equal(familyMode.modes.at(-1),'home');
 assert.equal(familyMode.c.renderCount,familyBefore,'A rejected editor transition does not schedule a redraw');
 assert.deepEqual(familyMode.cleanups,[],'A rejected transition leaves current controls intact');
 assert.deepEqual(familyMode.markerResets,[],'A rejected transition preserves the current marker positions');
+assert.deepEqual(familyMode.motionClears,[],'A rejected transition preserves the active source motion tracks');
 
 // A mode-key resize, a real size change and an earlier ResizeObserver repaint
 // all satisfy the request without creating a duplicate frame.
