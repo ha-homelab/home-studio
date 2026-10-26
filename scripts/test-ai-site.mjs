@@ -70,7 +70,8 @@ test('stale project, forged context and mismatched response cannot apply', () =>
 });
 test('neighborhood scope restricts both provider schema and every reviewed candidate', () => {
   const neighborhood = contextFor(project, { siteScope: 'neighborhood' });
-  assert.deepEqual(Object.keys(neighborhood), Object.keys(context), 'Scope does not add provider context fields');
+  assert.equal(Object.hasOwn(neighborhood, 'floor_footprints'), false, 'Neighborhood does not share interior room polygons');
+  assert.equal(neighborhood.exterior_reference.kind, 'approximate_building_extent');
   assert.deepEqual(draftSchema('site', neighborhood).properties.features.items.properties.kind.enum, ['building', 'street', 'landscape']);
   assert.deepEqual(draftSchema('site', context).properties.features.items.properties.kind.enum, ['home', 'roof', 'building', 'street', 'landscape']);
   for (const kind of ['home', 'roof']) for (const selectedCandidateKeys of [undefined, []]) {
@@ -91,6 +92,34 @@ for profile in PROFILES.values(): dumps(request_payload(profile,'synthetic-model
       instructions: 'Draft only the nearby buildings.', images: [], schema: draftSchema('site', neighborhood) }), encoding: 'utf8' });
   assert.equal(transport.status, 0, transport.stderr);
   fixtures.push(result.project);
+});
+test('neighborhood prefers existing exterior shapes and otherwise shares only one coarse extent', () => {
+  const indoor = clone(project);
+  indoor.floors = [{ id: 'private_floor_id', name: 'PRIVATE_FLOOR_NAME', elevation_m: 3.125, height_m: 2.8,
+    rooms: [
+      { id: 'private_room_a', name: 'PRIVATE_ROOM_A', material: 'floor', polygon: [[2, 4], [5.123, 4], [5.123, 12], [2, 12]] },
+      { id: 'private_room_b', name: 'PRIVATE_ROOM_B', material: 'floor', polygon: [[5.123, 4], [10, 4], [10, 12], [5.123, 12]] },
+    ], walls: [], openings: [], items: [] }];
+  const before = serializeProject(indoor), minimal = contextFor(indoor, { siteScope: 'neighborhood' });
+  assert.deepEqual(minimal.exterior_reference.polygon, [[2, 4], [10, 4], [10, 12], [2, 12]]);
+  assert.match(minimal.exterior_reference.description, /not the actual exterior footprint/);
+  for (const marker of ['private_floor_id', 'PRIVATE_FLOOR_NAME', 'private_room_a', 'private_room_b', 'PRIVATE_ROOM_A', 'PRIVATE_ROOM_B', '5.123', '3.125', 'floor_footprints']) {
+    assert.equal(JSON.stringify(minimal).includes(marker), false, marker);
+  }
+  assert.equal(serializeProject(indoor), before);
+  const home = { id: 'site_home', name: 'My home', kind: 'home', polygon: [[1, 3], [11, 3], [11, 13], [1, 13]], height_m: 6, color: '#aabbcc' };
+  for (const kind of ['home', 'roof']) {
+    indoor.site.features.push({ ...clone(home), kind });
+    const exterior = contextFor(indoor, { siteScope: 'neighborhood' });
+    assert.deepEqual(exterior.site, indoor.site, 'Existing local exterior coordinates remain exact');
+    assert.equal(exterior.exterior_reference.kind, 'site_home_and_roof');
+    assert.equal(Object.hasOwn(exterior.exterior_reference, 'polygon'), false, 'Do not duplicate exterior shapes');
+    assert.equal(Object.hasOwn(exterior, 'floor_footprints'), false);
+    indoor.site.features.pop();
+  }
+  const empty = contextFor(blankProject(), { siteScope: 'neighborhood' });
+  assert.equal(empty.exterior_reference.kind, 'unavailable');
+  assert.equal(Object.hasOwn(empty.exterior_reference, 'polygon'), false, 'Never invent a footprint');
 });
 test('rejects injected actions, geocoordinates, private fields and project IDs', () => {
   for (const name of ['id', 'site', 'ground_elevation_m', 'floors', 'items', 'entity_id', 'url', 'command', 'latitude', 'longitude', 'georeference', 'api_key', 'render_style']) {

@@ -58,6 +58,25 @@ function rectangle(measurements, origin) {
   return [[origin.x, origin.z], [origin.x + measurements.width, origin.z], [origin.x + measurements.width, origin.z + measurements.depth], [origin.x, origin.z + measurements.depth]];
 }
 
+export function neighborhoodReference(project) {
+  if (project.site?.features.some(feature => ['home', 'roof'].includes(feature.kind))) {
+    return { kind: 'site_home_and_roof', description: 'Use the existing home and roof polygons in site.features for alignment.' };
+  }
+  // Share one coarse extent, never the individual room/wall polygons or their
+  // identifiers. This rectangle is an alignment hint, not an inferred footprint.
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  const include = ([x, z]) => { minX = Math.min(minX, x); minZ = Math.min(minZ, z); maxX = Math.max(maxX, x); maxZ = Math.max(maxZ, z); };
+  for (const floor of project.floors) {
+    for (const room of floor.rooms) room.polygon.forEach(include);
+    for (const wall of floor.walls) { include(wall.start); include(wall.end); }
+  }
+  if (minX < maxX && minZ < maxZ) return {
+    kind: 'approximate_building_extent', polygon: [[minX, minZ], [maxX, minZ], [maxX, maxZ], [minX, maxZ]],
+    description: 'Approximate overall bounding rectangle for alignment only. It is not the actual exterior footprint or a measured property boundary; do not trace it as a new building.',
+  };
+  return { kind: 'unavailable', description: 'No exterior alignment geometry is available. Ask for measured dimensions and orientation before placing uncertain features.' };
+}
+
 /** Capture a sanitized provider context and privately bind it to this exact project. */
 export function createDraftContext(project, { floorId, roomId, mode = 'furnish_room', measurements, origin, siteNotes, siteScope = 'all' } = {}) {
   validateProject(project);
@@ -72,7 +91,9 @@ export function createDraftContext(project, { floorId, roomId, mode = 'furnish_r
     }
     const context = freeze({ draft_version: 1, request_id: requestId, mode,
       site: clone(project.site || createSite()), site_notes: clone(siteNotes),
-      floor_footprints: project.floors.map(floor => ({ elevation_m: floor.elevation_m, polygons: floor.rooms.map(room => clone(room.polygon)) })) });
+      ...(siteScope === 'neighborhood' ? { exterior_reference: neighborhoodReference(project) } : {
+        floor_footprints: project.floors.map(floor => ({ elevation_m: floor.elevation_m, polygons: floor.rooms.map(room => clone(room.polygon)) })),
+      }) });
     trustedContexts.set(context, { baseline, mode, siteScope });
     return context;
   }
