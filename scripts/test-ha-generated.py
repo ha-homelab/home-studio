@@ -132,6 +132,111 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
         await self.project.save(0, copy.deepcopy(self.project.document["project"]))
         return await self.project.publish(1)
 
+    async def source_site_frame(self, elevations=(None, None), grounds=(-3, 0), embedded_grounds=None):
+        """Create a synthetic imported home with independent local floor frames."""
+        embedded_grounds = grounds if embedded_grounds is None else embedded_grounds
+        for index, (identifier, model) in enumerate(self.models.items()):
+            if elevations[index] is None:
+                model.pop("elevation_m", None)
+            else:
+                model["elevation_m"] = elevations[index]
+            context = model["site_context"]
+            context.update(roof_outline={"elevation_m": 2.5, "polygons_m": [[[0, 0], [5, 0], [5, 4], [0, 4]]]},
+                           yard={"synthetic_preserve": True}, lowest_slab_elevation_m=(grounds[index] or 0) - .16)
+            if grounds[index] is None:
+                context.pop("ground_elevation_m", None)
+            else:
+                context["ground_elevation_m"] = grounds[index]
+            folder = self.component / "assets" / identifier
+            (folder / "model-data.json").write_text(encoded(model), encoding="utf-8")
+            page = folder / "index.html"
+            embedded = embedded_model(page)
+            embedded.pop("elevation_m", None)
+            if elevations[index] is not None:
+                embedded["elevation_m"] = elevations[index]
+            embedded["site_context"] = copy.deepcopy(context)
+            if embedded_grounds[index] is None:
+                embedded["site_context"].pop("ground_elevation_m", None)
+            else:
+                embedded["site_context"]["ground_elevation_m"] = embedded_grounds[index]
+            page.write_text(MODEL_BLOCK.sub(lambda match: match[1] + encoded(embedded) + match[3],
+                                           page.read_text(encoding="utf-8")).replace(
+                                               "</body>", "<script>" + (ROOT / "map-layer.js").read_text(encoding="utf-8") + "</script></body>"),
+                            encoding="utf-8")
+        self.baseline = tree_hashes(self.component)
+        adapter = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
+        await adapter.load()
+        return adapter
+
+    async def test_ambiguous_site_frames_reject_before_writes_and_allow_indoor_recovery(self):
+        adapter = await self.source_site_frame()
+        source = copy.deepcopy(adapter.document["project"])
+        self.assertNotIn("site", source)
+        self.assertEqual([floor["elevation_m"] for floor in source["floors"]], [0, 0])
+        await adapter.save(0, source)
+        assets, _, models, _, _ = await adapter.publish(1)
+        for identifier, model in models.items():
+            self.assertEqual(model["site_context"], self.models[identifier]["site_context"])
+            self.assertEqual(model["meshes"], self.models[identifier]["meshes"])
+            self.assertEqual(embedded_model(assets / identifier / "index.html")["site_context"], model["site_context"])
+        neighbor = {"id": "neighbor", "name": "Synthetic neighbor", "kind": "building", "height_m": 4,
+                    "color": "#589aa8", "polygon": [[8, 0], [12, 0], [12, 4], [8, 4]]}
+        for features in ([], [neighbor]):
+            with self.subTest(features=len(features)):
+                source["site"] = {"ground_elevation_m": 0, "features": features}
+                await adapter.save(adapter.document["revision"], source)
+                before = copy.deepcopy(adapter.document), copy.deepcopy(self.hass.saved), tree_hashes(adapter.root)
+                with patch.object(generated.shutil, "copytree", side_effect=AssertionError("Must reject before creating a generation")):
+                    with self.assertRaises(native.NativeError) as error:
+                        await adapter.publish(adapter.document["revision"])
+                self.assertEqual(error.exception.code, "inconsistent_site_frame")
+                self.assertIn("remove its top-level site field", str(error.exception))
+                self.assertEqual((adapter.document, self.hass.saved, tree_hashes(adapter.root)), before)
+                self.assert_baseline_unchanged()
+        source.pop("site")
+        source["title"] = "Recovered indoor edit"
+        await adapter.save(adapter.document["revision"], source)
+        _, _, models, _, _ = await adapter.publish(adapter.document["revision"])
+        self.assertEqual([model["site_context"]["ground_elevation_m"] for model in models.values()], [-3, 0])
+        self.assert_baseline_unchanged()
+
+    async def test_consistent_site_frames_allow_intentional_authored_ground(self):
+        adapter = await self.source_site_frame(elevations=(3, 0))
+        source = copy.deepcopy(adapter.document["project"])
+        source["site"] = {"ground_elevation_m": 5, "features": []}
+        await adapter.save(0, source)
+        assets, _, models, _, _ = await adapter.publish(1)
+        for identifier, ground in (("upper", 2), ("ground", 5)):
+            self.assertEqual(models[identifier]["site_context"]["ground_elevation_m"], ground)
+            self.assertEqual(models[identifier]["meshes"], self.models[identifier]["meshes"])
+            for key in ("roof_outline", "yard", "lowest_slab_elevation_m"):
+                self.assertEqual(models[identifier]["site_context"][key], self.models[identifier]["site_context"][key])
+            self.assertEqual(embedded_model(assets / identifier / "index.html")["site_context"], models[identifier]["site_context"])
+        self.assert_baseline_unchanged()
+
+    async def test_conflicting_raw_and_embedded_site_frames_reject_publication(self):
+        adapter = await self.source_site_frame(elevations=(3, 0), embedded_grounds=(-2, 0))
+        source = copy.deepcopy(adapter.document["project"])
+        source["site"] = {"ground_elevation_m": 0, "features": []}
+        await adapter.save(0, source)
+        before = copy.deepcopy(adapter.document), copy.deepcopy(self.hass.saved), tree_hashes(adapter.root)
+        with self.assertRaises(native.NativeError) as error:
+            await adapter.publish(1)
+        self.assertEqual(error.exception.code, "inconsistent_site_frame")
+        self.assertIn("model and viewer disagree", str(error.exception))
+        self.assertEqual((adapter.document, self.hass.saved, tree_hashes(adapter.root)), before)
+
+    async def test_missing_multifloor_site_frames_reject_publication(self):
+        adapter = await self.source_site_frame(grounds=(None, None))
+        source = copy.deepcopy(adapter.document["project"])
+        source["site"] = {"ground_elevation_m": 0, "features": []}
+        await adapter.save(0, source)
+        with self.assertRaises(native.NativeError) as error:
+            await adapter.publish(1)
+        self.assertEqual(error.exception.code, "inconsistent_site_frame")
+        self.assertIn("lack reliable", str(error.exception))
+        self.assert_baseline_unchanged()
+
     async def test_site_publication_preserves_installed_geometry_and_private_extensions(self):
         runtime = (ROOT / "map-layer.js").read_text(encoding="utf-8")
         for floor in self.models:

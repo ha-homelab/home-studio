@@ -52,6 +52,9 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
   async function openTour(frame){
    await frame.locator('#homeCameraTour').click();
    const tour=frame.locator('.camera-tour-host:not([hidden])');
+   // The click handler lazily imports the tour module. count() does not wait
+   // for that asynchronous open, so assert the route only once its UI is ready.
+   await tour.locator('.camera-tour-panel').waitFor({state:'visible'});
    assert.equal(await tour.locator('.camera-tour-view').count(),5,'every viewer starts with a complete default orbit');
    await tour.getByRole('button',{name:'Clear route',exact:true}).click();
    assert.equal(await tour.locator('.camera-tour-view').count(),0,'clear prepares the custom-route fixture');
