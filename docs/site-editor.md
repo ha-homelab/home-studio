@@ -132,6 +132,10 @@ Save and publish the drawing as usual. In the native **3D Home** view, an
 administrator can use **Align map** to align a known drawing point with its
 geographic location. Follow the [map alignment guide](map-navigation.md).
 
+If imported floors disagree on site ground, use the explicit
+[site-frame calibration preview](imported-site-calibration.md) before publishing
+exterior shapes. It preserves the original local geometry and requires review.
+
 The exterior shapes appear as you move out from the indoor view into the map
 overview. Detailed indoor controls remain the focus at house scale. The site
 uses the existing renderer and lightweight geometry; it does not add another

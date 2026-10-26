@@ -23,6 +23,7 @@ from .site import load_site, prepare_inventory, repair_inventory
 from .curtains import async_setup_curtains, PROFILES, BOOT_SECONDS, is_motor_available, read_reported_position
 from .native import NativeError, NativeProject, StudioAssetsView, EDITOR_URL, studio_asset_files, load_models
 from .generated import GeneratedProject
+from .site_calibration import SiteCalibration
 from .permissions import can_read, can_control, floor_entities, model_references, vacuum_source_bindings
 
 DOMAIN = "home_floorplan"
@@ -146,7 +147,8 @@ async def _finish_setup(hass, state):
         await async_setup_map(hass, state)
         if not state.get("ws_registered"):
             for handler in (ws_status, ws_viewer, ws_save, ws_recover, ws_export, ws_curtains, ws_curtain_command,
-                            ws_project_get, ws_project_save, ws_project_publish, ws_export_model, ws_entity_catalog):
+                            ws_project_get, ws_project_save, ws_project_publish, ws_export_model, ws_entity_catalog,
+                            ws_site_frame_preview, ws_site_frame_apply):
                 websocket_api.async_register_command(hass, handler)
             state["ws_registered"] = True
         await _register_panels(hass, bool(asset_files))
@@ -271,6 +273,7 @@ def _project_result(state, connection):
             "editor_url": EDITOR_URL, "capabilities": {
                 "authoring": bool(native),
                 "architecture_editing": bool(native and not isinstance(native, GeneratedProject)),
+                "site_frame_calibration": isinstance(native, GeneratedProject),
                 "ai": bool(native and state.get("ai_registered") and state.get("initialized")
                            and not state.get("panels_unloaded") and connection.user and connection.user.is_admin)}}
 
@@ -370,6 +373,45 @@ async def ws_project_publish(hass, connection, msg):
         connection.send_error(msg["id"], error.code, str(error))
     except OSError:
         connection.send_error(msg["id"], "save_failed", "Publication could not be saved. The previous plan remains active.")
+
+
+async def _site_frame_action(hass, connection, msg, apply=False):
+    state = hass.data[DOMAIN]
+    native = state.get("native")
+    if not isinstance(native, GeneratedProject):
+        connection.send_error(msg["id"], "unsupported", "Site-frame calibration requires a saved imported home.")
+        return
+    try:
+        async with state["lock"]:
+            service = state.setdefault("site_calibration", SiteCalibration())
+            if apply:
+                await service.apply(native, msg["revision"], connection.user.id, msg["token"])
+                result = _project_result(state, connection)
+            else:
+                result = await service.preview(native, msg["revision"], connection.user.id)
+            connection.send_result(msg["id"], result)
+    except NativeError as error:
+        connection.send_error(msg["id"], error.code, str(error))
+    except (OSError, ValueError, KeyError, TypeError):
+        connection.send_error(msg["id"], "calibration_failed", "Calibration could not be completed. The prior saved draft and original home remain available.")
+
+
+@websocket_api.websocket_command({vol.Required("type"): "home_floorplan/site_frame_preview",
+                                 vol.Required("revision"): cv.positive_int})
+@_when_active
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_site_frame_preview(hass, connection, msg):
+    await _site_frame_action(hass, connection, msg)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "home_floorplan/site_frame_apply",
+                                 vol.Required("revision"): cv.positive_int, vol.Required("token"): str})
+@_when_active
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_site_frame_apply(hass, connection, msg):
+    await _site_frame_action(hass, connection, msg, apply=True)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "home_floorplan/export_model",

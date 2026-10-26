@@ -175,11 +175,19 @@ class HomeFloorplanStudioPanel extends HTMLElement {
           <details id="more-options"><summary>More options</summary><div class="options">
             <button id="export" disabled>Export drawing (JSON)</button>
             <button id="reload" disabled>Load saved draft</button>
+            <button id="site-frame" aria-haspopup="dialog" hidden disabled>Calibrate imported site frame</button>
           </div></details>
         </div>
         <div id="status" role="status" aria-live="polite" aria-atomic="true">Opening your drawing…</div><button id="retry" aria-describedby="status" hidden>Retry connection</button>
         <p id="connection-notice" role="status" aria-live="polite" hidden>Home Assistant is disconnected. Keep drawing or export JSON to keep a copy. Saving, publishing, and Blender export will be available after reconnection.</p>
       </header>
+      <dialog id="site-frame-dialog" aria-labelledby="site-frame-title">
+        <h2 id="site-frame-title">Review floor offsets</h2>
+        <p>Use the original model's ground datums to align these floors to global site ground 0 m. Review the proposed offsets before applying.</p>
+        <ul id="site-frame-offsets"></ul>
+        <p>Apply saves floor offsets and a private recovery copy. Local rooms, objects, bindings, roof and yard geometry stay fixed. Your published home changes only after Publish to 3D Home.</p>
+        <div class="row"><button id="site-frame-apply" class="primary" disabled>Apply floor offsets</button><button id="site-frame-cancel">Cancel</button></div>
+      </dialog>
       <dialog id="model-export-dialog" aria-labelledby="model-export-title" aria-describedby="model-export-help">
         <h2 id="model-export-title">Export for Blender</h2>
         <p id="model-export-help">Download your current drawing, including valid unsaved edits. This does not save or publish your home.</p>
@@ -215,6 +223,11 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this.$('model-export-download').onclick = () => this._exportModel();
     this.$('model-export-close').onclick = () => this.$('model-export-dialog').close();
     this.$('reload').onclick = () => this._reload();
+    this.$('site-frame').onclick = () => this._previewSiteFrame();
+    this.$('site-frame-apply').onclick = () => this._applySiteFrame();
+    this.$('site-frame-cancel').onclick = () => this.$('site-frame-dialog').close();
+    this.$('site-frame-dialog').addEventListener('close', () => { this._siteFramePreview = null; this._buttons(); });
+    this.$('site-frame-dialog').addEventListener('cancel', event => { if (this._busy) event.preventDefault(); });
     this.$('resume').onclick = () => this._resolveRecovery(true);
     this.$('discard').onclick = () => this._resolveRecovery(false);
     this.$('download-recovery').onclick = () => this._download(this._recovery.project, 'recovered-project.json');
@@ -257,6 +270,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this._connectionEpoch++;
     state.ready = ready;
     this.$('connection-notice').hidden = ready || !this._hass;
+    if (!ready) { this._siteFramePreview = null; this.$('site-frame-dialog').close(); }
     if (!ready) this._cancelExport?.(new Error('Home Assistant disconnected. Nothing was downloaded. Reconnect and try the export again.'));
     this._buttons();
     if (this._ready && !this._busy) this._drawingStatus();
@@ -267,6 +281,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     if (!this._online() || epoch !== this._connectionEpoch) throw new Error('The Home Assistant connection changed. Keep this tab open and try again after reconnecting.');
   }
   _reset() {
+    this._siteFramePreview = null; this.$('site-frame-dialog').close();
     this._closePublishedHome(false);
     this._disposeAi();
     this._stopConnectionTracking();
@@ -387,6 +402,10 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this.$('save').classList.toggle('primary', needsSave);
     this.$('export').disabled = !this._project || (this._busy && this._online());
     this.$('reload').disabled = networkDisabled;
+    this.$('site-frame').hidden = this._saved?.capabilities?.site_frame_calibration !== true;
+    this.$('site-frame').disabled = networkDisabled || needsSave || !this._savedRaw;
+    this.$('site-frame-apply').disabled = networkDisabled || !this._siteFramePreview || needsSave;
+    this.$('site-frame-cancel').disabled = this._busy;
     this.$('retry').disabled = !this._online();
     // Unknown publication state must not block access to an existing live home.
     const unpublished = !!this._saved && !this._hasPublishedHome();
@@ -767,6 +786,53 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       const timer = setTimeout(() => { this._pending.delete(requestId); reject(new Error('The editor did not respond. Your saved copy is unchanged.')); }, 5000);
       this._pending.set(requestId, { resolve, reject, timer }); this._send('snapshot-request', { requestId, allowInvalid, commit });
     });
+  }
+  async _previewSiteFrame() {
+    if (this.$('site-frame').disabled || this._saved?.capabilities?.site_frame_calibration !== true) return;
+    const generation = this._generation, connectionEpoch = this._connectionEpoch;
+    this._siteFramePreview = null; this._busy = true; this._buttons();
+    try {
+      await this._snapshot(true); if (generation !== this._generation) return;
+      if (this._unsaved()) throw new Error('Save your latest edits before previewing calibration.');
+      this._requireConnection(connectionEpoch);
+      const result = await this._hass.callWS({ type: 'home_floorplan/site_frame_preview', revision: this._revision });
+      if (generation !== this._generation) return;
+      this._requireConnection(connectionEpoch);
+      await this._snapshot(true); if (generation !== this._generation) return;
+      if (this._unsaved() || result.revision !== this._revision) throw new Error('The drawing changed. Save it and preview calibration again.');
+      if (typeof result.token !== 'string' || result.token.length > 128 || result.global_ground_m !== 0 ||
+          !Array.isArray(result.floors) || result.floors.length !== this._project.floors.length ||
+          result.floors.some((floor, index) => floor.id !== this._project.floors[index].id ||
+            typeof floor.name !== 'string' || floor.name.length > 120 ||
+            !['before_m', 'after_m', 'baseline_ground_m'].every(key => Number.isFinite(floor[key]) && Math.abs(floor[key]) <= 100))) {
+        throw new Error('The calibration preview is invalid.');
+      }
+      this.$('site-frame-offsets').replaceChildren(...result.floors.map(floor => {
+        const row = document.createElement('li'); row.textContent = `${floor.name}: ${floor.before_m} m → ${floor.after_m} m (original ground ${floor.baseline_ground_m} m)`; return row;
+      }));
+      this._siteFramePreview = result; this.$('site-frame-dialog').showModal();
+      this._status('Review the floor offsets. Nothing has been changed.');
+    } catch (error) { if (generation === this._generation) this._status(error.message || 'Could not prepare calibration.', true); }
+    finally { if (generation === this._generation) { this._busy = false; this._buttons(); } }
+  }
+  async _applySiteFrame() {
+    if (this.$('site-frame-apply').disabled || !this._siteFramePreview) return;
+    const preview = this._siteFramePreview, generation = this._generation, connectionEpoch = this._connectionEpoch;
+    this._busy = true; this._buttons();
+    try {
+      await this._snapshot(true); if (generation !== this._generation) return;
+      if (this._unsaved() || preview.revision !== this._revision) throw new Error('The drawing changed. Save it and preview calibration again.');
+      this._requireConnection(connectionEpoch);
+      const saved = await this._hass.callWS({ type: 'home_floorplan/site_frame_apply', revision: preview.revision, token: preview.token });
+      if (generation !== this._generation) return;
+      this._requireConnection(connectionEpoch);
+      this._revision = saved.revision; this._publishedRevision = saved.published_revision;
+      this._saved = saved; this._savedRaw = projectBytes(saved.project); this._source = sourceForEditor(saved);
+      this.$('site-frame-dialog').close(); this._openEditor(saved.project); this._persist();
+      this._status('Floor offsets saved with a recovery copy. Review the site, then publish when ready.');
+    } catch (error) {
+      if (generation === this._generation) { this._siteFramePreview = null; this.$('site-frame-dialog').close(); this._status(`Calibration was not confirmed: ${error.message || 'connection failed'}. Load saved draft before retrying.`, true); }
+    } finally { if (generation === this._generation) { this._busy = false; this._buttons(); } }
   }
   async _save() {
     if (this._busy || this._exportBusy || !this._ready || !this._online()) return;

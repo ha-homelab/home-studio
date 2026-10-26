@@ -69,6 +69,7 @@ jobs:
           python3 scripts/test-ha-project-metadata.py
           python3 scripts/test-ha-native.py
           python3 scripts/test-ha-generated.py
+          python3 scripts/test-site-calibration.py
           python3 scripts/test-blender-export.py
           python3 scripts/test-curtain-authoring.py
       - name: Test archive validation, installation, backup and rollback
@@ -144,6 +145,7 @@ jobs:
         run: |
           for engine in chromium firefox webkit; do
             BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-studio.cjs || exit 1
+            BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-site-calibration.cjs || exit 1
             BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-theme.cjs || exit 1
             BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-ai.cjs || exit 1
           done
