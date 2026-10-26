@@ -26,12 +26,12 @@ if __package__ and "." in __package__:
     # package. Relative imports avoid changing the host interpreter's sys.path.
     from ..geometry import MATERIALS, create_geometry, floor_context
     from ..exporters import export_models
-    from ..viewer_locales import load_viewer_i18n
+    from ..viewer_locales import load_viewer_i18n, viewer_i18n_expression
     from ..material_textures import validate_material_textures, material_uv
 else:
     from geometry import MATERIALS, create_geometry, floor_context
     from exporters import export_models
-    from viewer_locales import load_viewer_i18n
+    from viewer_locales import load_viewer_i18n, viewer_i18n_expression
     from material_textures import validate_material_textures, material_uv
 from .furniture import build_furniture_asset, validate_furniture_appearance, supports_curtain, MODELS
 from .site_model import validate_site
@@ -560,10 +560,10 @@ def render_viewer(data, svg):
     # Saved model downloads represent the built project. The editable viewer
     # must not leave those static furniture silhouettes behind after a move.
     viewer_plan = re.sub(r'<g id="furniture">.*?</g>', '', svg, flags=re.S)
-    viewer_i18n = json.dumps(load_viewer_i18n(ROOT), ensure_ascii=False, separators=(",", ":"))
+    viewer_i18n = viewer_i18n_expression(load_viewer_i18n(ROOT))
     replacements = {
         "__VIEWER_I18N_JS__": (ROOT / "viewer-i18n.js").read_text(encoding="utf-8"),
-        "__VIEWER_I18N_DATA__": viewer_i18n.replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"),
+        "__VIEWER_I18N_DATA__": viewer_i18n,
         "__VIEWER_JS__": (ROOT / "viewer.js").read_text(encoding="utf-8"),
         "/*__CAMERA_TOUR_VIEWER_JS__*/": (ROOT / "camera-tour-viewer.js").read_text(encoding="utf-8"),
         "__CAMERA_TOUR_MODULE_B64__": camera_tour_module(),
