@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.3.0] - Editable neighborhoods and shared map context
 
 ### Added
 
