@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.2.0] - Geographic context, physical materials and camera tours
 
 ### Added
 
@@ -23,10 +23,6 @@
 - Cross-language geometry checks and editor, AI, publication, and saved-viewer
   regressions. Older generated viewers request a toolkit rebuild instead of
   silently ignoring a newly published site layer.
-
-## [1.2.0] - Geographic context and physical materials
-
-### Added
 
 - Optional geographic map in the native Home controls view, using the existing
   renderer. Zoom out to an aligned home footprint and surrounding streets;
@@ -74,6 +70,12 @@
 - Geographic alignment lives separately in the private `home_floorplan.map`
   Store. Preserve it with HA backups. Recheck alignment after changing the
   drawing origin, scale, or orientation. See [map setup](docs/map-navigation.md).
+- Back up the project JSON before publishing a drawing. Use **Site & roof**
+  in the native editor for surrounding geometry, and **Camera tour** in the
+  preview or Home view for viewpoints and local recording. A previously
+  generated home must have its viewer rebuilt with the matching toolkit to
+  receive new embedded features; updating the integration alone is insufficient.
+  See [site editing](docs/site-editor.md) and [camera tours](docs/camera-tours.md).
 
 ### Security
 
@@ -83,6 +85,12 @@
 - The map provider sees the viewed area and HA's outbound IP. Geographic
   alignment is not included in portable drawings or model exports. Map
   screenshots and HA backups can still reveal a home's location.
+- Camera recordings stay in the browser until explicitly downloaded; they do
+  not operate devices. Review recordings before sharing because visible room
+  layouts, device names and screen images may contain private information.
+- Photo-assisted site proposals use the same optional AI provider connection
+  as room proposals. Photos and instructions go to the selected provider only
+  when submitted. Review proposed geometry before adding it to the drawing.
 
 ## [1.1.0] - Connected editing, easier setup and Blender export
 
