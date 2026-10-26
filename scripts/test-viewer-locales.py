@@ -120,9 +120,12 @@ console.log(JSON.stringify({locales: actual.locales.length, translations}));
         self.assertEqual(actual.replace(encoded, legacy), previous,
                          "Geometry, model JSON, other runtime modules and HTML stay byte-identical")
         def executable(html):
-            source = "\n".join(body for attrs, body in re.findall(r'<script\b([^>]*)>(.*?)</script>', html, re.S)
-                               if "application/json" not in attrs)
+            source = "\n".join(body for attrs, body in re.findall(
+                r'<script\b([^>]*)>(.*?)</script\s*>', html, re.S | re.I)
+                if "application/json" not in attrs.lower())
             return re.sub(r"(?<=import \* as THREE from 'data:text/javascript;base64,)[^']+", "", source).encode()
+        self.assertEqual(executable('<SCRIPT TYPE="APPLICATION/JSON">{}</SCRIPT >'
+                                    '<ScRiPt>const value = 1;</sCrIpT >'), b'const value = 1;')
         old, new = executable(previous), executable(actual)
         raw_saved = len(old) - len(new)
         gzip_saved = len(gzip.compress(old, mtime=0)) - len(gzip.compress(new, mtime=0))
