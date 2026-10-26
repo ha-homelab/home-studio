@@ -38,7 +38,7 @@ async function decodeTile(url) {
 
 // Coordinates and tile pixels are session state, never part of the drawing.
 // This paints the existing 2D canvas and schedules no frame/timer of its own.
-export function createSiteMapUnderlay({ request, onChange = () => {}, onStatus = () => {}, decode = decodeTile, now = Date.now }) {
+export function createSiteMapUnderlay({ request, onChange = () => {}, onStatus = () => {}, onContext = () => {}, decode = decodeTile, now = Date.now }) {
   let enabled = false, disposed = false, config = null, view = null, desired = [], epoch = 0, inflight = 0, used = 0;
   let settings = null, loadingConfig = false, settingsError = false, budget = false, lastStatus = '';
   const cache = new Map(), times = [];
@@ -106,8 +106,8 @@ export function createSiteMapUnderlay({ request, onChange = () => {}, onStatus =
     }
     pump(); notify();
   }
-  async function reload() {
-    if (disposed || !enabled) return;
+  async function reload(contextOnly = false) {
+    if (disposed || !enabled && !contextOnly) return;
     epoch++; abortPending();
     for (const entry of [...cache.values()]) if (entry.failed) remove(entry);
     const controller = new AbortController(), generation = epoch; settings = controller; loadingConfig = true; settingsError = false; notify();
@@ -116,6 +116,9 @@ export function createSiteMapUnderlay({ request, onChange = () => {}, onStatus =
       if (disposed || generation !== epoch || controller.signal.aborted) return;
       if (!result) throw Error('Invalid map settings');
       config = result.configured && result.config.enabled ? result.config : null;
+      // A hidden raster still has a real alignment. Report only accepted reads;
+      // hide, suspension and transient failures cannot erase that knowledge.
+      onContext(result.configured);
       if (!config) for (const entry of [...cache.values()]) remove(entry);
     } catch {
       if (disposed || generation !== epoch || controller.signal.aborted) return;
@@ -149,7 +152,8 @@ export function createSiteMapUnderlay({ request, onChange = () => {}, onStatus =
         ctx.drawImage(image, 0, 0, 256, 256); ctx.restore();
       }
     },
-    reload,
+    reload() { return reload(); },
+    readContext() { return reload(true); },
     dispose() { if (disposed) return; disposed = true; enabled = false; epoch++; abortPending(); for (const entry of [...cache.values()]) remove(entry); config = null; view = null; desired = []; },
   });
 }

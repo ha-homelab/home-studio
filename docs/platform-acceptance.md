@@ -461,9 +461,17 @@ renderer call containing every expected active fixture. A connection label or
 updated CPU-side light state alone cannot finish the startup measurement.
 Failed renderer calls do not advance the recorded frame state.
 
-Both drivers include two animation frames after pointer release in their drag
-timings. A fast input acknowledgement alone is not rendering responsiveness;
-the native 15-second viewer and 10-second planner limits include this draw wait.
+A fast input acknowledgement alone is not rendering responsiveness. The
+Playwright viewer waits for a fresh, full-resolution scene draw with the changed
+rendered camera (including rotation for Home), then 150 ms without another draw
+or camera change. Timer polling accepts a draw completed during real input;
+it does not require extra animation frames from an already idle document.
+Input and receipt share the existing 15-second limit, enforced both in the
+host and within the frame; the complete scenario still has its 180-second limit.
+Home return and screenshot reset use the same bounded draw receipt without
+requiring a camera change. `framesMs` includes evaluation transport and polling;
+`receiptWaitMs` records only the in-frame wait. Native driver draw waits and the
+15-second viewer / 10-second planner limits are unchanged.
 
 ## Reproducibility and evidence
 

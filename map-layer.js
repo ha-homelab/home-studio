@@ -113,8 +113,8 @@ const homeMapMath = (() => {
   return {validConfig,project,unproject,transform,tiles,context,features};
 })();
 function createHomeMapLayer(THREE,scene,options={}) {
-  const group=new THREE.Group(),tileGroup=new THREE.Group(),footprint=new THREE.Group(),siteGroup=new THREE.Group(),contextGroup=new THREE.Group(),homeObjects=[],cache=new Map(),ray=new THREE.Raycaster(),plane=new THREE.Plane(new THREE.Vector3(0,1,0),-(options.elevation??-.08));
-  group.name='home-geographic-map';group.visible=false;siteGroup.name='home-site-features';siteGroup.visible=false;contextGroup.name='home-site-context';contextGroup.visible=false;group.add(tileGroup,footprint,siteGroup,contextGroup);scene.add(group);
+  const group=new THREE.Group(),tileGroup=new THREE.Group(),footprint=new THREE.Group(),siteGroup=new THREE.Group(),contextGroup=new THREE.Group(),groundGroup=new THREE.Group(),homeObjects=[],cache=new Map(),ray=new THREE.Raycaster(),plane=new THREE.Plane(new THREE.Vector3(0,1,0),-(options.elevation??-.08));
+  group.name='home-geographic-map';group.visible=false;siteGroup.name='home-site-features';siteGroup.visible=false;contextGroup.name='home-site-context';contextGroup.visible=false;groundGroup.name='home-site-ground';group.add(tileGroup,footprint,siteGroup,contextGroup,groundGroup);scene.add(group);
   const floor=options.elevation??-.08,outlineMaterial=new THREE.LineBasicMaterial({color:0x5ad9ff,depthTest:true,depthWrite:false,transparent:true,opacity:.8});
   for(const polygon of options.polygons||[]){
     if(polygon.length<3)continue;
@@ -129,7 +129,7 @@ function createHomeMapLayer(THREE,scene,options={}) {
   }
   for(const feature of authored){
     const p=feature.polygon,top=ground+feature.height_m,volume=feature.kind==='home'||feature.kind==='building',outline=feature.render_style==='outline',positions=[],colors=[],linePositions=[],lineColors=[],color=new THREE.Color(feature.color);
-    const add=object=>{siteGroup.add(object);if(feature.kind==='home'||feature.kind==='roof')homeObjects.push(object);};
+    const add=object=>{(feature.kind==='street'||feature.kind==='landscape'?groundGroup:siteGroup).add(object);if(feature.kind==='home'||feature.kind==='roof')homeObjects.push(object);};
     const vertex=(point,shade)=>{positions.push(...point);colors.push(color.r*shade,color.g*shade,color.b*shade);};
     const edge=(a,b)=>{linePositions.push(...a,...b);lineColors.push(color.r,color.g,color.b,color.r,color.g,color.b);};
     if(outline){
@@ -222,6 +222,8 @@ function createHomeMapLayer(THREE,scene,options={}) {
   function render(camera,rect,{visible=true,coarse=false,editing=false,transition=false}={}){
     active=visible;group.visible=active&&!!config?.enabled;if(!group.visible)return;
     footprint.visible=coarse||editing||transition;siteGroup.visible=coarse||transition;contextGroup.visible=true;marker.visible=markerOutline.visible=coarse;
+    // Authored streets and landscape retain their exact footprint at every
+    // scale. Only coarse building shells wait for the detailed home to hide.
     // The detailed home is still drawn during the transition; its coarse shell
     // must wait until that geometry is hidden. Neighbor contours stay visible.
     for(const object of homeObjects)object.visible=coarse;
@@ -237,7 +239,7 @@ function createHomeMapLayer(THREE,scene,options={}) {
   }
   return {get object(){return group;},setConfig,render,pointAt,setActive(value){active=value;group.visible=value&&!!config?.enabled;},
     clearFailures(){for(const entry of [...cache.values()])if(entry.failed)remove(entry);pump();},
-    get config(){return config;},get stats(){return {cached:cache.size,inflight,visible:desired.length,loaded:[...cache.values()].filter(e=>e.texture).length,siteFeatures:authored.length,siteObjects:siteGroup.children.length+contextGroup.children.length};},
+    get config(){return config;},get stats(){return {cached:cache.size,inflight,visible:desired.length,loaded:[...cache.values()].filter(e=>e.texture).length,siteFeatures:authored.length,siteObjects:siteGroup.children.length+contextGroup.children.length+groundGroup.children.length};},
     releaseGPU(){for(const entry of cache.values())if(entry.texture){entry.texture.dispose();entry.texture.needsUpdate=true;}},
-    dispose(){disposed=true;revision++;for(const entry of [...cache.values()])remove(entry);footprint.children.forEach(line=>line.geometry.dispose());siteGroup.children.forEach(object=>object.geometry.dispose());contextGroup.children.forEach(object=>object.geometry.dispose());siteSurfaceMaterial.dispose();siteLineMaterial.dispose();contextMaterial?.dispose();outlineMaterial.dispose();marker.geometry.dispose();marker.material.dispose();markerOutline.geometry.dispose();markerOutline.material.dispose();scene.remove(group);}};
+    dispose(){disposed=true;revision++;for(const entry of [...cache.values()])remove(entry);footprint.children.forEach(line=>line.geometry.dispose());siteGroup.children.forEach(object=>object.geometry.dispose());contextGroup.children.forEach(object=>object.geometry.dispose());groundGroup.children.forEach(object=>object.geometry.dispose());siteSurfaceMaterial.dispose();siteLineMaterial.dispose();contextMaterial?.dispose();outlineMaterial.dispose();marker.geometry.dispose();marker.material.dispose();markerOutline.geometry.dispose();markerOutline.material.dispose();scene.remove(group);}};
 }

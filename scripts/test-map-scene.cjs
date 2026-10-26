@@ -130,6 +130,32 @@ async function mapSnapshot(page){
   assert.equal(maximumGroup.children.reduce((sum,object)=>sum+object.geometry.attributes.position.count,0),6144,'The full 1024-point budget produces six vertices per corner');
   assert.equal(maximumGroup.children.reduce((sum,object)=>sum+object.geometry.attributes.position.array.byteLength+object.geometry.attributes.color.array.byteLength,0),147456,'Maximum contour attributes stay within 144 KiB');
   maximumContours.dispose();
+  // Authored ground features use their exact local coordinates at all zoom/rotation states.
+  const street={id:'street',name:'Traced street',kind:'street',height_m:0,color:'#777777',polygon:[[-9,15],[11,20],[10,24],[-10,19]]};
+  const landscape={id:'landscape',name:'Traced garden',kind:'landscape',height_m:0,color:'#779977',polygon:[[-9,-4],[-5,-4],[-5,3],[-9,3]]};
+  const groundSource=JSON.stringify([street,landscape]);
+  const groundLayer=context.createHomeMapLayer(THREE,new THREE.Scene(),{groundElevation:-2.86,features:[street,landscape],requestTile:async()=>({data_url:png}),loadTexture:async()=>new THREE.Texture()});
+  groundLayer.setConfig(config);
+  const groundGroup=groundLayer.object.getObjectByName('home-site-ground');
+  assert.equal(groundGroup.children.length,2);assert.equal(groundLayer.stats.siteObjects,2);
+  const beforeGround=groundGroup.children.map(mesh=>({geometry:mesh.geometry,positions:Array.from(mesh.geometry.attributes.position.array)}));
+  for(const angle of [0,Math.PI])for(const state of [{},{transition:true},{coarse:true},{editing:true}]){
+    contourCamera.position.set(Math.sin(angle)*60,60,Math.cos(angle)*60);contourCamera.lookAt(0,0,0);contourCamera.updateMatrixWorld();
+    groundLayer.render(contourCamera,{width:500,height:500},state);
+    assert(groundGroup.visible&&groundLayer.object.visible,'Ground surfaces remain visible in detailed and map views');
+    groundGroup.children.forEach((mesh,i)=>{assert.equal(mesh.geometry,beforeGround[i].geometry);assert.deepEqual(Array.from(mesh.geometry.attributes.position.array),beforeGround[i].positions);});
+  }
+  for(const feature of [street,landscape]){
+    const positions=groundGroup.getObjectByName(feature.id).geometry.attributes.position;
+    for(let i=0;i<positions.count;i++){
+      assert(feature.polygon.some(([x,z])=>Math.fround(x)===positions.getX(i)&&Math.fround(z)===positions.getZ(i)),'No guessed road dimensions or offsets');
+      assert.equal(positions.getY(i),Math.fround(-2.86+(feature.kind==='street'?.015:.005)));
+    }
+  }
+  assert.equal(JSON.stringify([street,landscape]),groundSource);
+  const groundDisposed=new Map();
+  groundGroup.children.forEach(mesh=>{groundDisposed.set(mesh.geometry,0);mesh.geometry.addEventListener('dispose',()=>groundDisposed.set(mesh.geometry,groundDisposed.get(mesh.geometry)+1));});
+  groundLayer.dispose();assert([...groundDisposed.values()].every(count=>count===1));
   const levelLayer=context.createHomeMapLayer(THREE,new THREE.Scene(),{...resolved,requestTile:async()=>({data_url:png}),loadTexture:async()=>new THREE.Texture()});
   const levelCamera=new THREE.OrthographicCamera(-10,10,10,-10,.1,100);levelCamera.position.set(0,20,10);levelCamera.lookAt(0,0,0);levelCamera.updateMatrixWorld();
   assert(Math.abs(levelLayer.pointAt(levelCamera,0,0).y-resolved.elevation)<1e-8,'Navigation ray uses the same physical ground plane');
@@ -183,7 +209,7 @@ async function mapSnapshot(page){
     const nodes=new Map(),held=[],tileAttempts=new Map();let failFirst=scenario==='partial',firstKey;
     const node=id=>{if(!nodes.has(id))nodes.set(id,{hidden:true,textContent:'',setAttribute(){}});return nodes.get(id);};
     const c=vm.createContext({THREE,Promise,Map,Set,Math,Number,Error,$:node,scene:new THREE.Scene(),renderer:{},canEdit:true,zoom:1,panX:0,panY:0,
-      model:{rooms:[]},xm:x=>x,zm:z=>z,updateZoom(){},applyNavigationState(){},window:{}});
+      model:{rooms:[]},environmentLayer:{contexts:[],setSiteContext(value){this.contexts.push(value);}},xm:x=>x,zm:z=>z,updateZoom(){},applyNavigationState(){},window:{}});
     vm.runInContext(fs.readFileSync(path.join(root,'map-layer.js'),'utf8'),c);
     const factory=c.createHomeMapLayer;
     c.createHomeMapLayer=(three,scene,options)=>factory(three,scene,{...options,loadTexture:()=>new Promise(resolve=>held.push(resolve))});
@@ -198,7 +224,7 @@ async function mapSnapshot(page){
       const key=`${tile.z}/${tile.x}/${tile.y}`;firstKey??=key;tileAttempts.set(key,(tileAttempts.get(key)||0)+1);
       if(failFirst&&key===firstKey)throw Error('Tile offline');return {data_url:png};
     };
-    c.configureMap({revision:1,configured:true,config});c.layer().render(camera,{width:1200,height:1200});await tick();
+    c.configureMap({revision:1,configured:true,config});assert.equal(c.environmentLayer.contexts.at(-1),true);c.layer().render(camera,{width:1200,height:1200});await tick();
     assert(held.length>0,'The failure overlaps real pending tile decodes');
     if(scenario==='disabled')c.configureMap({revision:2,configured:false,config:null});
     await c.loadMap();
@@ -209,7 +235,8 @@ async function mapSnapshot(page){
     assertSettingsFailure();
     const drain=async()=>{for(let i=0;i<100&&c.layer().stats.inflight;i++){held.splice(0).forEach(resolve=>resolve(new THREE.Texture()));await tick();}assert.equal(c.layer().stats.inflight,0);};
     await drain();assertSettingsFailure();
-    c.configureMap({revision:0,configured:true,config});assertSettingsFailure();
+    const priorContext=c.environmentLayer.contexts.length;
+    c.configureMap({revision:0,configured:true,config});assertSettingsFailure();assert.equal(c.environmentLayer.contexts.length,priorContext,'Stale map results cannot change scenery authority');
     c.window.homeMapRequest=async(action,tile)=>{
       if(action!=='tile')return {revision:3,configured:scenario!=='disabled',config:scenario==='disabled'?null:config};
       const key=`${tile.z}/${tile.x}/${tile.y}`;tileAttempts.set(key,(tileAttempts.get(key)||0)+1);return {data_url:png};
@@ -221,7 +248,15 @@ async function mapSnapshot(page){
       assert.equal(tileAttempts.get(firstKey),2,'Normal tile retry remains explicit and recovers after settings success');
     }
     assert.equal(node('homeMapStatus').textContent,'','Accepted success clears the settings error even if the tile status is unchanged');
-    assert.equal(node('homeMapRetry').hidden,true);assert.equal(node('homeMapCaption').hidden,scenario==='disabled');c.layer().dispose();
+    assert.equal(node('homeMapRetry').hidden,true);assert.equal(node('homeMapCaption').hidden,scenario==='disabled');
+    c.configureMap({revision:4,configured:true,config:{...config,enabled:false}});
+    assert.equal(c.environmentLayer.contexts.at(-1),true,'A saved disabled map still suppresses generated scenery');
+    c.model.site_context={features:[neighbor]};
+    c.configureMap({revision:5,configured:false,config:null});
+    assert.equal(c.environmentLayer.contexts.at(-1),true,'Removing map alignment cannot erase authored site authority');
+    c.model.site_context.features=[];c.configureMap({revision:6,configured:false,config:null});
+    assert.equal(c.environmentLayer.contexts.at(-1),false,'Without either context, demo mode is available again');
+    c.layer().dispose();
   }
   console.log('PASS: map coordinates, multistorey ground, validated neighbor/roof contours, legacy solids, detail visibility, bounded geometry/materials, LOD, tile recovery and disposal.');
   if(process.argv.includes('--unit-only'))return;

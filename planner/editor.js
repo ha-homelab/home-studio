@@ -1063,7 +1063,7 @@ function environmentSite() {
     const box = floorBounds(f), margin = Math.max(0, ...f.walls.map(wall => wall.thickness_m / 2));
     return { minX: box.minX - margin, maxX: box.maxX + margin, minZ: box.minZ - margin, maxZ: box.maxZ + margin };
   });
-  return { bounds: { minX: Math.min(...boxes.map(b => b.minX)), maxX: Math.max(...boxes.map(b => b.maxX)), minZ: Math.min(...boxes.map(b => b.minZ)), maxZ: Math.max(...boxes.map(b => b.maxZ)) }, elevation: Math.min(...floors.map(f => f.elevation_m)) };
+  return { bounds: { minX: Math.min(...boxes.map(b => b.minX)), maxX: Math.max(...boxes.map(b => b.maxX)), minZ: Math.min(...boxes.map(b => b.minZ)), maxZ: Math.max(...boxes.map(b => b.maxZ)) }, elevation: Math.min(...floors.map(f => f.elevation_m)), siteContext: !!displayedProject().site?.features.length || !!siteEditor?.mapConfigured };
 }
 let previewDetails=null,previewReflections=null,previewContact=null;
 let previewLost = false, previewSize = '', previewPixels = 2000000, previewInitialized = false, previewRendererDisposed = false, previewInstancing = false, previewDiffuseLighting = false;
@@ -1177,7 +1177,9 @@ function instancePreviewCatalog(groups) {
 function rebuildPreview() {
   disposePreviewGeometry();
   previewItemNodes.clear();
-  const surroundings = environmentSite(); previewEnvironment?.setBounds(surroundings.bounds, surroundings.elevation);
+  const surroundings = environmentSite();
+  previewEnvironment?.setSiteContext(surroundings.siteContext);
+  previewEnvironment?.setBounds(surroundings.bounds, surroundings.elevation);
   // Cached asset parts are immutable. Share their geometry only within this
   // rebuild; every mesh keeps its own material, transform and rendering order.
   const catalogGeometries = new Map(), catalogGroups = [];
@@ -1774,6 +1776,7 @@ siteEditor = createSiteEditor({
   toScreen, toWorld, localPoint, snap, viewport: () => ({ map, size }), colors: () => planColors,
   spaceHeld: () => spaceHeld, isCandidate: () => !!candidatePreview,
   transact, status, renderUI, render: requestCanvasRender, changed: editorChanged,
+  mapContextChanged(configured) { previewEnvironment?.setSiteContext(!!displayedProject().site?.features.length || configured); },
   reconcile: reconcileInspector, inspectorValue,
   ensurePlan() { if (view === 'preview') setView('plan'); },
   fit() { fitPlan(); fitPreview(); requestCanvasRender(); },

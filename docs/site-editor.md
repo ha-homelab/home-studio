@@ -81,7 +81,9 @@ map**. Changing the drawing does not change this geographic alignment.
 4. Switch to **Preview 3D** to check the heights, then **Save draft** and
    **Publish to 3D Home** when the placement looks right.
 
-The map is optional. Tiles stop loading when you leave the site drawing or hide
+The editor reads the saved map context once when it connects, so a map-aligned
+home does not receive a generated demo road or garden in Preview. Raster tiles
+remain optional. Tiles stop loading when you leave the site drawing or hide
 the page, and the editor uses its existing 2D canvas. The separate browser editor
 still works with the metric grid; it does not receive your Home Assistant map
 settings. The OpenStreetMap credit links to the data license above the native

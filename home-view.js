@@ -297,6 +297,7 @@ homeView = (() => {
     if(!result||!Number.isSafeInteger(result.revision)||result.revision<mapRevision||typeof homeMapMath==='undefined')return;
     const config=homeMapMath.validConfig(result.config);
     mapRevision=result.revision;mapConfig=config;mapLoaded=true;mapSettingsError=false;
+    environmentLayer?.setSiteContext(!!model.site_context?.features?.length||!!config||!!mapDraft);
     if(!config?.enabled){mapTileStatus='';mapTileRetry=false;}
     if(Number.isFinite(result.reference?.latitude)&&Math.abs(result.reference.latitude)<=90&&Number.isFinite(result.reference?.longitude)&&Math.abs(result.reference.longitude)<=180)mapReference={latitude:Math.max(-85,Math.min(85,result.reference.latitude)),longitude:result.reference.longitude};
     if(!mapLayer&&renderer&&typeof createHomeMapLayer==='function')mapLayer=createHomeMapLayer(THREE,scene,{
@@ -332,7 +333,9 @@ homeView = (() => {
   }
   function cancelMapEdit(){
     if(mapSaving)return;
-    mapDraft=null;mapLayer?.setConfig(mapConfig);selected=mapBeforeRoom;$('homeRoom').value=selected;refreshMapControls();refreshControls();
+    mapDraft=null;mapLayer?.setConfig(mapConfig);
+    environmentLayer?.setSiteContext(!!model.site_context?.features?.length||!!mapConfig);
+    selected=mapBeforeRoom;$('homeRoom').value=selected;refreshMapControls();refreshControls();
     if(mapBeforeEdit){const state=mapBeforeEdit;mapBeforeEdit=null;applyNavigationState(state);}else updateZoom(false);
     window.resizeModel?.();
   }
@@ -342,6 +345,7 @@ homeView = (() => {
     const vertices=model.rooms.flatMap(room=>room.polygon.map(([x,z])=>[xm(x),zm(z)]));
     mapBeforeEdit=exportNavigationState();mapBeforeRoom=selected;mapFraming=null;
     mapDraft=mapConfig?{...mapConfig}:{enabled:true,latitude:mapReference?.latitude??0,longitude:mapReference?.longitude??0,model_x:(Math.min(...vertices.map(v=>v[0]))+Math.max(...vertices.map(v=>v[0])))/2,model_z:(Math.min(...vertices.map(v=>v[1]))+Math.max(...vertices.map(v=>v[1])))/2,north_deg:0};
+    environmentLayer?.setSiteContext(true);
     mapLayer.setConfig({...mapDraft,enabled:true});selected='';$('homeRoom').value='';zoom=.12;panX=panY=0;homeRotation=homeTilt=0;
     $('homeMapEditorStatus').textContent=mapConfig?'':mapReference?'Started at Home Assistant’s location. Adjust the footprint before saving.':'Enter latitude and longitude to place this home.';
     fillMapForm();refreshMapControls();dismissOverlays();updateZoom(false);window.resizeModel?.();

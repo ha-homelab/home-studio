@@ -200,9 +200,19 @@ async function addRectangle(page,kind,x,z,w,d){
  // Actual Home Assistant host bridge carries the complete site and floors.
  await page.goto(origin+'/fixture');await page.waitForFunction(()=>window.host?._ready);
  const frame=await page.locator('iframe').elementHandle().then(handle=>handle.contentFrame());await frame.waitForFunction(()=>window.planner);
- assert.equal(await page.evaluate(()=>mapRequests.length),0,'Opening Studio makes no map requests');
+ await page.waitForFunction(()=>mapRequests.some(request=>request.action==='get'));
+ const contextRead=[{action:'get',hasBody:false}];
+ const requests=()=>page.evaluate(()=>mapRequests.map(({action,body})=>({action,hasBody:body!==undefined})));
+ assert.deepEqual(await requests(),contextRead,'Opening Studio reads saved map context once without requesting tiles');
  await frame.locator('#site-mode').click();
+ assert.deepEqual(await requests(),contextRead,'Entering Site does not fetch the raster or repeat the context read');
  const beforeMap=await frame.evaluate(()=>planner.getProject());
+ assert.equal(beforeMap.site?.features.length||0,0,'This preview has map context without authored site features');
+ await frame.locator('#preview-tab').click();
+ await frame.waitForFunction(()=>planner.getPreviewMetadata().surroundings?.siteContext===true);
+ assert.deepEqual(await requests(),contextRead,'Empty-site Preview learns map authority without raster opt-in');
+ await frame.locator('#plan-tab').click();
+ assert.deepEqual(await requests(),contextRead,'Returning to the drawing does not start map requests');
  await frame.locator('#site-map-toggle').click();
  await page.waitForFunction(()=>mapRequests.some(request=>request.action==='tile'));
  await frame.waitForFunction(()=>document.getElementById('site-map-status').textContent.includes('OpenStreetMap'));
