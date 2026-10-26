@@ -50,6 +50,7 @@
   "planner/site-model.js",
   "planner/site-editor.js",
   "planner/site-editor.css",
+  "planner/site-map-underlay.js",
   "planner/catalog.js",
   "planner/furniture.js",
   "planner/guide.html",

@@ -10,7 +10,7 @@ const load = file => import(pathToFileURL(path.join(root, file)).href);
 const served = new Map([
   ...['pbr-color-data.js','pbr-materials.js','material-textures.js','environment-lighting.js','camera-tour.js','camera-tour-panel.js','camera-tour-session.js','camera-tour-recording.js'].map(name=>['/home-studio/'+name,[name,'text/javascript']]),
   ['/home-studio/planner/', ['planner/index.html', 'text/html']],
-  ...['editor', 'model', 'site-model', 'site-editor', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity', 'interaction-render', 'environment', 'onboarding', 'device-onboarding', 'device-onboarding-ui', 'room-transform', 'draft-storage', 'inspector-dom', 'floor-navigator', 'ha-bridge', 'camera-tour-adapter'].map(name => [`/home-studio/planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
+  ...['editor', 'model', 'site-model', 'site-editor', 'site-map-underlay', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity', 'interaction-render', 'environment', 'onboarding', 'device-onboarding', 'device-onboarding-ui', 'room-transform', 'draft-storage', 'inspector-dom', 'floor-navigator', 'ha-bridge', 'camera-tour-adapter'].map(name => [`/home-studio/planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
   ...fs.readdirSync(path.join(root, 'planner/locales')).filter(name => name.endsWith('.js')).map(name => [`/home-studio/planner/locales/${name}`, [`planner/locales/${name}`, 'text/javascript']]),
   ['/home-studio/camera-tour.css', ['camera-tour.css', 'text/css']],
   ['/home-studio/planner/editor.css', ['planner/editor.css', 'text/css']],
