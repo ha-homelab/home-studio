@@ -67,6 +67,9 @@ def fixture(component):
                  "room_display_ids": {"room_a": "A"}, "tv_entities": {item["id"]: "media_player.synthetic_tv"},
                  "camera_entities": {item["id"]: "camera.synthetic_camera"}, "exterior_rooms": [],
                  "site_context": {"synthetic_context": {"preserve": True},
+                                  "roof_outline": {"polygons_m": [[[0, 0], [5, 0], [5, 4], [0, 4]]],
+                                                   "elevation_m": 6 - (2.8 if floor == "upper" else 0)},
+                                  "yard": {"polygon_m": [[-2, -2], [8, -2], [8, 7], [-2, 7]]},
                                   "lowest_slab_elevation_m": -.35 - (2.8 if floor == "upper" else 0)},
                  "lower_floor_context": {"elevation_m": -2.8, "surfaces": [], "lines": []},
                  "telemetry": [{"entity_id": "sensor.synthetic_energy"}],
@@ -237,6 +240,23 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("lack reliable", str(error.exception))
         self.assert_baseline_unchanged()
 
+    def test_confirmed_floor_frame_is_metadata_only_in_published_model(self):
+        original = copy.deepcopy(self.project.document["project"]["floors"][0])
+        floor = copy.deepcopy(original)
+        floor["elevation_m"] = 3
+        base = self.models[floor["id"]]
+        before = copy.deepcopy(base)
+        for runtime in (False, True):
+            merged = generated._merge_model(base, floor, original, None, runtime=runtime)
+            self.assertEqual(merged["elevation_m"], 3)
+            for mesh in merged["meshes"]:
+                self.assertIs(mesh, next(source for source in base["meshes"] if source["name"] == mesh["name"]))
+            self.assertEqual([mesh for mesh in merged["meshes"] if mesh["kind"] != "inventory"],
+                             [mesh for mesh in base["meshes"] if mesh["kind"] != "inventory"])
+            self.assertEqual(merged["site_context"], base["site_context"])
+            self.assertEqual(merged["inventory"], floor["items"])
+            self.assertEqual(base, before)
+
     async def test_site_publication_preserves_installed_geometry_and_private_extensions(self):
         runtime = (ROOT / "map-layer.js").read_text(encoding="utf-8")
         for floor in self.models:
@@ -263,6 +283,8 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(model["meshes"], self.models[identifier]["meshes"])
             self.assertEqual(model["custom_extension"], self.models[identifier]["custom_extension"])
             self.assertEqual(model["site_context"]["synthetic_context"], {"preserve": True})
+            for key in ("roof_outline", "yard", "lowest_slab_elevation_m"):
+                self.assertEqual(model["site_context"][key], self.models[identifier]["site_context"][key])
             self.assertEqual(model["site_context"]["features"], source["site"]["features"])
             self.assertEqual(model["site_context"]["ground_elevation_m"], -1 - floor["elevation_m"])
             self.assertNotEqual(model["site_context"]["lowest_slab_elevation_m"], model["site_context"]["ground_elevation_m"])

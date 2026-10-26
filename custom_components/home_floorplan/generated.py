@@ -309,6 +309,10 @@ def _merge_model(base, floor, original, additions, runtime=False):
     # Detailed custom meshes can be tens of megabytes. Share their immutable
     # objects; copy only the collections that this merge actually changes.
     model = dict(base)
+    # The protected source project may carry an explicitly confirmed floor-frame
+    # calibration. Preserve it in published metadata without moving local meshes.
+    if base.get("elevation_m", 0) != floor["elevation_m"]:
+        model["elevation_m"] = floor["elevation_m"]
     model["rooms"] = copy.deepcopy(base["rooms"])
     model["inventory"] = copy.deepcopy(floor["items"])
     old_items = {item["id"]: item for item in original["items"]}
