@@ -138,6 +138,49 @@ def _check_site_runtime(html, project):
                           "The current published home is unchanged.")
 
 
+def _check_source_site_frame(project, assets):
+    """Reject ambiguous imported floor origins before changing a site datum."""
+    if "site" not in project:
+        return
+    floors, inferred = project["floors"], []
+
+    def finite(value):
+        return type(value) in (int, float) and math.isfinite(value)
+
+    try:
+        for floor in floors:
+            folder = assets / floor["id"]
+            raw = json.loads((folder / "model-data.json").read_text(encoding="utf-8"))
+            _, embedded = _embedded((folder / "index.html").read_text(encoding="utf-8"))
+            grounds = []
+            for model in (raw, embedded):
+                context = model.get("site_context", {})
+                if not isinstance(context, dict):
+                    raise ValueError("The original site ground reference is invalid.")
+                if "ground_elevation_m" in context:
+                    ground = context["ground_elevation_m"]
+                    if not finite(ground):
+                        raise ValueError("The original site ground reference is invalid.")
+                    grounds.append(ground)
+            if grounds:
+                if any(not math.isclose(value, grounds[0], rel_tol=0, abs_tol=1e-6) for value in grounds[1:]):
+                    raise ValueError("The original model and viewer disagree on site ground.")
+                inferred.append(grounds[0] + floor["elevation_m"])
+            elif len(floors) > 1:
+                levels = [model["elevation_m"] for model in (raw, embedded) if "elevation_m" in model]
+                if not levels or any(not finite(value) or not math.isclose(
+                        value, floor["elevation_m"], rel_tol=0, abs_tol=1e-6) for value in levels):
+                    raise ValueError("The original floors lack reliable shared reference levels.")
+        if inferred and any(not math.isclose(value, inferred[0], rel_tol=0, abs_tol=1e-6) for value in inferred[1:]):
+            raise ValueError("The original floors disagree on site ground.")
+    except ValueError as error:
+        raise NativeError("inconsistent_site_frame",
+                          "Site changes need consistent floor reference levels. Rebuild the original home "
+                          "with matching floor elevations before publishing them. To continue without site changes, "
+                          "export the drawing, remove its top-level site field, and import it again. "
+                          "The saved draft and current published home are unchanged. " + str(error)) from error
+
+
 def _merge_site_context(model, project, floor):
     """Replace authored metric shapes without replacing commissioned geometry."""
     if "site" in project:
@@ -579,6 +622,7 @@ class GeneratedProject(NativeProject):
             raise NativeError("source_changed", "The original home snapshot changed. The published home has been preserved.")
         if self.document["generation"] is None and _hashes(self.component_root / "assets") != metadata["hashes"]:
             raise NativeError("source_changed", "The installed home changed after this draft was saved. The current home has been preserved.")
+        _check_source_site_frame(project, baseline / "assets")
         target = self.root / generation
         try:
             shutil.copytree(baseline / "assets", target, symlinks=True)
