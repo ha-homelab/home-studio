@@ -103,26 +103,37 @@ for (const site of accepted) assert.equal(context.math.features(site.features).l
 for (const site of rejected.filter(site => site?.features && Array.isArray(site.features) && site.ground_elevation_m === 10)) assert.equal(context.math.features(site.features).length, 0, 'Invalid optional runtime features are omitted');
 const neighbor = context.math.context({ site_context: { ground_elevation_m: 0, features: [feature('building')] } }, [feature().polygon]);
 assert.equal(neighbor.polygons.length, 1, 'A neighboring building does not suppress the home fallback outline');
-const scene = new THREE.Scene(), layer = context.createHomeMapLayer(THREE, scene, { ...resolved, requestTile: async () => { throw Error('Offline scene test'); } }), siteGroup = layer.object.getObjectByName('home-site-features');
+const scene = new THREE.Scene(), layer = context.createHomeMapLayer(THREE, scene, { ...resolved, requestTile: async () => { throw Error('Offline scene test'); } });
+const siteGroup = layer.object.getObjectByName('home-site-features'), groundGroup = layer.object.getObjectByName('home-site-ground');
+const siteObjects = [...siteGroup.children, ...groundGroup.children];
 assert.equal(layer.stats.siteFeatures, 5); assert.equal(layer.stats.siteObjects, 7);
-assert.equal(new Set(siteGroup.children.map(object => object.material)).size, 2, 'All authored objects share two materials');
+assert.equal(new Set(siteObjects.map(object => object.material)).size, 2, 'Ground and building objects share the same two materials');
 const ys = object => Array.from(object.geometry.attributes.position.array).filter((_, i) => i % 3 === 1);
 assert.equal(Math.min(...ys(siteGroup.getObjectByName('home_1'))), -6);
 assert.equal(Math.max(...ys(siteGroup.getObjectByName('home_1'))), 0);
 assert.equal(Math.max(...ys(siteGroup.getObjectByName('roof_1-outline'))), 0, 'Roof is ground plus height, relative to this floor');
-assert.equal(Math.min(...ys(siteGroup.getObjectByName('street_1'))), Math.fround(-5.985));
+assert.equal(Math.min(...ys(groundGroup.getObjectByName('street_1'))), Math.fround(-5.985));
+assert.equal(Math.min(...ys(groundGroup.getObjectByName('landscape_1'))), Math.fround(-5.995));
+assert.equal(groundGroup.children.length, 2, 'Only authored street and landscape surfaces use the ground group');
 assert.equal(siteGroup.visible, false);
 layer.setConfig({ enabled: true, latitude: 0, longitude: 0, model_x: 0, model_z: 0, north_deg: 0 });
 const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, .1, 100); camera.position.set(0, 20, 0); camera.up.set(0, 0, -1); camera.lookAt(0, 0, 0); camera.updateMatrixWorld();
 // The real camera is used; synthetic request failures stay inside this scene test.
 layer.render(camera, { width: 500, height: 500 }, { coarse: false, editing: false, transition: false }); assert.equal(siteGroup.visible, false);
+assert.equal(groundGroup.visible, true, 'Authored ground surfaces remain visible at detailed scale');
 layer.render(camera, { width: 500, height: 500 }, { transition: true }); assert.equal(siteGroup.visible, true);
 layer.render(camera, { width: 500, height: 500 }, { coarse: true }); assert.equal(siteGroup.visible, true);
 layer.render(camera, { width: 500, height: 500 }, { editing: true }); assert.equal(siteGroup.visible, false, 'An editing flag alone cannot cover home controls with opaque context');
-let geometryDisposals = 0, materialDisposals = 0;
-for (const object of siteGroup.children) object.geometry.addEventListener('dispose', () => geometryDisposals++);
-for (const material of new Set(siteGroup.children.map(object => object.material))) material.addEventListener('dispose', () => materialDisposals++);
-layer.dispose(); assert.equal(geometryDisposals, 7); assert.equal(materialDisposals, 2); assert.equal(scene.children.length, 0);
+const geometryDisposals = new Map(siteObjects.map(object => [object.geometry, 0]));
+const materialDisposals = new Map(siteObjects.map(object => [object.material, 0]));
+assert.equal(geometryDisposals.size, 7); assert.equal(materialDisposals.size, 2);
+for (const resourceCounts of [geometryDisposals, materialDisposals]) for (const resource of resourceCounts.keys()) {
+  resource.addEventListener('dispose', () => resourceCounts.set(resource, resourceCounts.get(resource) + 1));
+}
+layer.dispose();
+assert([...geometryDisposals.values()].every(count => count === 1), 'Every building and ground geometry is disposed exactly once');
+assert([...materialDisposals.values()].every(count => count === 1), 'Materials shared across ground/building groups are disposed exactly once');
+assert.equal(scene.children.length, 0);
 const maximum = context.createHomeMapLayer(THREE, scene, { groundElevation: 0, features: accepted.find(site => site.features.length === 64).features });
 assert.equal(maximum.stats.siteObjects, 128); maximum.dispose();
 await new Promise(resolve => setImmediate(resolve));
