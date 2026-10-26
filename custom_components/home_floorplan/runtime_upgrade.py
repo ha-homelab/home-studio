@@ -14,7 +14,7 @@ import time
 import uuid
 
 from .baseline_transaction import commit_baseline, settle
-from .generated import GeneratedProject, _ViewerScripts, _embedded, _hashes, _json
+from .generated import APPEARANCE, GeneratedProject, _ViewerScripts, _embedded, _hashes, _json, _merge_model, _point
 from .native import NativeError, load_models
 
 # Public map-layer.js at b4bd8de, excluding trailing whitespace. This is a
@@ -105,6 +105,17 @@ def _replace(html, target):
     return version, result
 
 
+def _check_rooms(model, floor):
+    rooms = {room["id"]: room for room in model["rooms"]}
+    expected = {room["id"]: room for room in floor["rooms"]}
+    if (len(rooms) != len(model["rooms"]) or rooms.keys() != expected.keys() or
+            any([_point(point, model) for point in room["polygon"]] != expected[fid]["polygon"] or
+                room.get("material", "deck" if fid in model.get("exterior_rooms", []) else "floor") != expected[fid]["material"]
+                for fid, room in rooms.items())):
+        raise NativeError("unsupported_rebase", "The published model and saved room geometry do not match. "
+                          "Retain your private backup and reconcile the original source before upgrading.")
+
+
 def _read(native, revision):
     if not isinstance(native, GeneratedProject):
         raise NativeError("unsupported", "Viewer runtime upgrades are available only for imported homes.")
@@ -112,34 +123,75 @@ def _read(native, revision):
     if not native.document.get("baseline"):
         raise NativeError("save_required", "Save the imported draft before previewing its viewer upgrade.")
     if not native.document.get("generation"):
-        raise NativeError("publish_required", "Publish the imported home once before preparing its viewer upgrade. "
-                          "If new site features prevent that publication, export your draft, publish a copy without "
-                          "those features, then restore them after upgrading the viewer.")
+        raise NativeError("publish_required", "This upgrade requires an existing published imported home. "
+                          "Keep a private backup and export your draft; reconcile its original source before upgrading.")
     document = copy.deepcopy(native.document)
     native._validate(document["project"])
+    if document["revision"] != document["published_revision"]:
+        raise NativeError("unpublished_changes", "This upgrade requires the unchanged published draft. "
+                          "Export your pending edits and retain your private backup before reconciling the original source. "
+                          "Do not publish solely to bypass this check.")
     root = native.root / "baselines" / document["baseline"]
     source_bytes = _regular_bytes(root / "source.json", 4 * 1024 * 1024)
     metadata = json.loads(source_bytes)
     hashes = _asset_hashes(root / "assets")
     if hashes != metadata["hashes"] or hashes != native._source_hashes or metadata["project"] != native.baseline_project:
         raise NativeError("source_changed", "The original viewer snapshot changed. Reload its matching source before upgrading.")
+    assets = native.root / document["generation"]
+    active_hashes = _asset_hashes(assets)
+    site = json.loads(_regular_bytes(assets / "site.json", 4 * 1024 * 1024))
+    if (any(site.get(key) != metadata["site"].get(key) for key in
+            ("schema_version", "site_id", "default_floor", "site_features")) or
+            list(site["floors"]) != list(metadata["site"]["floors"]) or
+            any(site["floors"][fid].get("stem") != value.get("stem") for fid, value in metadata["site"]["floors"].items())):
+        raise NativeError("source_changed", "The published home no longer matches its original source. Retain its private backup and reconcile the source before upgrading.")
     target = _target(native)
+    models, _ = load_models(assets, site["floors"])
     changes, versions = {}, set()
-    for floor in document["project"]["floors"]:
+    for floor, original in zip(document["project"]["floors"], metadata["project"]["floors"]):
+        rooms = lambda value: {room["id"]: [room["polygon"], room["material"]] for room in value["rooms"]}
+        if (floor["walls"] or floor["openings"] or rooms(floor) != rooms(original) or
+                floor["items"] != document["inventory"][floor["id"]]["items"]):
+            raise NativeError("unsupported_rebase", "This home has added architecture or unmatched saved placements. "
+                              "Keep its private backup and export the draft for original-source reconciliation before upgrading.")
         relative = floor["id"] + "/index.html"
-        old = _regular_bytes(root / "assets" / relative, MAX_IMPORTED_VIEWER_BYTES)
+        old = _regular_bytes(assets / relative, MAX_IMPORTED_VIEWER_BYTES)
+        text = old.decode("utf-8")
+        block, model = _embedded(text)
+        baseline_text = _regular_bytes(root / "assets" / relative, MAX_IMPORTED_VIEWER_BYTES).decode("utf-8")
+        baseline_block, _ = _embedded(baseline_text)
+        if text[:block.start(2)] + text[block.end(2):] != baseline_text[:baseline_block.start(2)] + baseline_text[baseline_block.end(2):]:
+            raise NativeError("unsupported_rebase", "The original and published viewers contain different executable code or markup. "
+                              "Retain your private backup and reconcile the original source before upgrading.")
+        _check_rooms(models[floor["id"]], floor)
+        _check_rooms(model, floor)
+        for active_model in (models[floor["id"]], model):
+            expected = _merge_model(active_model, floor, original, None).get("control_anchors", {})
+            if expected != active_model.get("control_anchors", {}):
+                raise NativeError("unsupported_rebase", "The published control anchors no longer match the saved placements. "
+                                  "Keep your private backup and reconcile the original source before upgrading.")
+        references = {item["id"]: item for item in model.get("inventory", [])}
+        if (len(references) != len(model.get("inventory", [])) or
+                any(item["id"] not in references or
+                    any(item.get(key) != references[item["id"]].get(key) for key in ("type", *APPEARANCE)) or
+                    item.get("model_id") and item["id"] not in model.get("object_assets", {})
+                    for item in floor["items"])):
+            raise NativeError("unsupported_rebase", "The published viewer does not contain matching saved object references and appearances. "
+                              "Retain your private backup and export the draft for original-source reconciliation before upgrading.")
         version, new = _replace(old, target)
         versions.add(version)
         if new != old:
             changes[relative] = new
     if versions == {1}:
-        raise NativeError("runtime_current", "This imported home's baseline already has the installed map renderer. Publish its saved draft to activate any pending upgrade.")
+        raise NativeError("runtime_current", "This published home already has the installed map renderer.")
     if versions != {0} or not changes:
         raise NativeError("unsupported_runtime", "The imported floors use different map renderer versions. Rebuild their matching original source.")
-    models, _ = load_models(root / "assets", metadata["site"]["floors"])
-    signature = _digest({"document": document, "source": _sha(source_bytes), "hashes": hashes, "target": _sha(target)})
-    return {"document": document, "metadata": metadata, "models": models, "source_bytes": source_bytes,
-            "changes": changes, "signature": signature, "root": root, "target_hash": _sha(target)}
+    signature = _digest({"document": document, "source": _sha(source_bytes), "hashes": hashes,
+                         "active_hashes": active_hashes, "target": _sha(target)})
+    return {"document": document, "metadata": {**metadata, "site": site, "project": copy.deepcopy(document["project"])},
+            "original_hashes": hashes, "active_hashes": active_hashes, "assets": assets,
+            "models": models, "source_bytes": source_bytes, "changes": changes,
+            "signature": signature, "root": root, "target_hash": _sha(target)}
 
 
 def _copy_baseline(native, snapshot):
@@ -147,12 +199,14 @@ def _copy_baseline(native, snapshot):
     target = native.root / "baselines" / identifier
     target.mkdir(mode=0o700)
     try:
-        shutil.copytree(snapshot["root"] / "assets", target / "assets", symlinks=True)
-        if (_asset_hashes(target / "assets") != snapshot["metadata"]["hashes"] or
-                _asset_hashes(snapshot["root"] / "assets") != snapshot["metadata"]["hashes"] or
+        # Start empty: overlaying the old baseline could resurrect obsolete files.
+        shutil.copytree(snapshot["assets"], target / "assets", symlinks=True)
+        if (_asset_hashes(target / "assets") != snapshot["active_hashes"] or
+                _asset_hashes(snapshot["assets"]) != snapshot["active_hashes"] or
+                _asset_hashes(snapshot["root"] / "assets") != snapshot["original_hashes"] or
                 (snapshot["root"] / "source.json").read_bytes() != snapshot["source_bytes"]):
             raise NativeError("source_changed", "The original viewer changed during the upgrade. The saved draft is unchanged.")
-        expected = dict(snapshot["metadata"]["hashes"])
+        expected = dict(snapshot["active_hashes"])
         for relative, contents in snapshot["changes"].items():
             (target / "assets" / relative).write_bytes(contents)
             expected[relative] = _sha(contents)
@@ -160,9 +214,11 @@ def _copy_baseline(native, snapshot):
             raise NativeError("source_changed", "The prepared runtime snapshot did not match its verified files.")
         metadata = {**snapshot["metadata"], "hashes": expected}
         receipt = {"schema": 1, "kind": "imported_map_runtime_upgrade", "previous_baseline": snapshot["document"]["baseline"],
+                   "source_generation": snapshot["document"]["generation"],
+                   "previous_baseline_hashes": snapshot["original_hashes"], "source_hashes": snapshot["active_hashes"],
                    "current_runtime": {"version": 0, "sha256": LEGACY_SHA256},
                    "target_runtime": {"version": 1, "sha256": snapshot["target_hash"]},
-                   "files": {name: {"before": snapshot["metadata"]["hashes"][name], "after": expected[name]}
+                   "files": {name: {"before": snapshot["active_hashes"][name], "after": expected[name]}
                              for name in snapshot["changes"]}}
         for name, value in (("source.json", metadata), ("previous-document.json", snapshot["document"]),
                             ("runtime-upgrade.json", receipt)):
@@ -205,6 +261,7 @@ class ImportedRuntimeUpgrade:
                                 "signature": snapshot["signature"], "expires": time.monotonic() + 300}
         return {"token": token, "revision": revision, "current_runtime": {"version": 0, "sha256": LEGACY_SHA256},
                 "target_runtime": {"version": 1, "sha256": snapshot["target_hash"]},
+                "source": "published_generation", "source_file_count": len(snapshot["active_hashes"]),
                 "files": list(snapshot["changes"]), "changed_file_count": len(snapshot["changes"])}
 
     async def apply(self, native, revision, owner, token, *, validate_current=None):

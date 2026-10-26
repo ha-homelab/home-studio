@@ -28,6 +28,7 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         self.root = Path(tmp.name)
         self.component = self.root/'component'
         self.site, self.models, self.inventory = support.fixture(self.component)
+        (self.component/'assets/upper/obsolete.bin').write_bytes(b'old export texture')
         # Live Store placements and an added item differ from immutable source.
         self.inventory['upper']['revision'] = 19
         self.inventory['upper']['items'][0]['position_m']['x'] = 1.7
@@ -65,6 +66,18 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
     async def apply(self,preview,**kwargs):
         return await self.service.apply(self.project,preview['revision'],'admin',preview['token'],**kwargs)
 
+    def edit_active(self, transform):
+        folder = self.project.root/self.project.document['generation']/'upper'
+        path = folder/'model-data.json'
+        model = json.loads(path.read_text())
+        transform(model, False)
+        path.write_text(support.encoded(model))
+        path = folder/'index.html'
+        html = path.read_text()
+        model = support.embedded_model(path)
+        transform(model, True)
+        path.write_text(support.MODEL_BLOCK.sub(lambda match: match[1]+support.encoded(model)+match[3], html))
+
     def state(self):
         return copy.deepcopy(self.project.document),copy.deepcopy(self.hass.saved),support.tree_hashes(self.project.root)
 
@@ -85,6 +98,7 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         preview = await self.preview()
         self.assertEqual(self.state(),before)
         self.assertEqual(preview['changed_file_count'],2)
+        self.assertEqual(preview['source'],'published_generation')
         self.assertEqual(preview['files'],['upper/index.html','ground/index.html'])
         self.assertEqual(preview['current_runtime']['version'],0)
         self.assertEqual(preview['target_runtime'],{'version':1,'sha256':upgrade._sha(TARGET)})
@@ -93,15 +107,16 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated['revision'],2)
         for key in ('generation','published_revision','inventory','project'):
             self.assertEqual(updated[key],before[0][key])
-        old = self.project.root/'baselines'/before[0]['baseline']
+        old = self.project.root/before[0]['generation']
         new = self.project.root/'baselines'/updated['baseline']
-        old_hashes,new_hashes = support.tree_hashes(old/'assets'),support.tree_hashes(new/'assets')
+        old_hashes,new_hashes = support.tree_hashes(old),support.tree_hashes(new/'assets')
+        self.assertEqual(preview['source_file_count'],len(old_hashes))
         self.assertEqual({k for k in old_hashes if old_hashes[k]!=new_hashes[k]},set(preview['files']))
         self.assertEqual(json.loads((new/'previous-document.json').read_text()),before[0])
         self.assertEqual(self.project._source_hashes,new_hashes)
         self.assertEqual(json.loads((new/'runtime-upgrade.json').read_text())['target_runtime'],preview['target_runtime'])
         for name in preview['files']:
-            prior,current = (old/'assets'/name).read_bytes(),(new/'assets'/name).read_bytes()
+            prior,current = (old/name).read_bytes(),(new/'assets'/name).read_bytes()
             self.assertEqual(current.replace(TARGET,LEGACY,1),prior)
         for name,digest in before[2].items():
             self.assertEqual(support.tree_hashes(self.project.root)[name],digest)
@@ -126,6 +141,120 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
             await self.apply(preview)
         self.assertEqual(error.exception.code,'baseline_save_failed')
         self.assertFalse(self.project._baseline_recovery_required)
+        self.assertEqual(self.state(),before)
+
+    async def test_active_custom_assets_survive_repeated_publication_and_moves(self):
+        active = self.project.root/self.project.document['generation']
+        (active/'upper/obsolete.bin').unlink()
+        (active/'upper/upper_model.glb').write_bytes(b'refreshed current physical export')
+        (active/'upper/current.bin').write_bytes(b'current texture')
+        custom = {'profile':'current_custom','meshes':[support.mesh('current_shape','inventory')]}
+        def refresh(model, runtime):
+            model['object_assets']['later_lamp'] = copy.deepcopy(custom)
+            if not runtime:
+                model['meshes'].append(support.mesh('current_placed','inventory',item_id='later_lamp'))
+        self.edit_active(refresh)
+        raw = json.loads((active/'upper/model-data.json').read_text())
+        embedded = support.embedded_model(active/'upper/index.html')
+        old = copy.deepcopy(self.project.document)
+        active_hashes = support.tree_hashes(active)
+        await self.apply(await self.preview())
+        baseline = self.project.root/'baselines'/self.project.document['baseline']
+        receipt = json.loads((baseline/'runtime-upgrade.json').read_text())
+        self.assertEqual(receipt['source_generation'],old['generation'])
+        self.assertEqual(receipt['previous_baseline'],old['baseline'])
+        self.assertEqual(receipt['source_hashes'],active_hashes)
+        self.assertEqual(json.loads((baseline/'source.json').read_text())['project'],old['project'])
+        for move in (False, True, False):
+            if move:
+                draft = copy.deepcopy(self.project.document['project'])
+                draft['floors'][0]['items'][1]['position_m']['x'] += 1
+                await self.project.save(self.project.document['revision'],draft)
+            assets,_,models,_,_ = await self.project.publish(self.project.document['revision'])
+            self.assertEqual(models['upper']['meshes'],raw['meshes'])
+            self.assertEqual(models['upper']['object_assets'],raw['object_assets'])
+            view = support.embedded_model(assets/'upper/index.html')
+            self.assertEqual(view['inventory'],embedded['inventory'],'Original references must survive moves')
+            self.assertEqual(view['object_assets'],embedded['object_assets'])
+            self.assertEqual(view['motion_paths'],embedded['motion_paths'])
+            self.assertEqual(view['cover_windows'],embedded['cover_windows'])
+            self.assertFalse((assets/'upper/obsolete.bin').exists())
+            self.assertEqual((assets/'upper/current.bin').read_bytes(),b'current texture')
+            self.assertEqual((assets/'upper/upper_model.glb').read_bytes(),b'refreshed current physical export')
+
+    async def test_dirty_architecture_and_inventory_rebase_refuse_without_writes(self):
+        original = copy.deepcopy(self.project.document)
+        for kind in ('dirty','room','wall','inventory'):
+            self.project.document = copy.deepcopy(original)
+            floor = self.project.document['project']['floors'][0]
+            if kind=='dirty': self.project.document['revision'] += 1
+            if kind=='room': floor['rooms'].append({'id':'extra','name':'Extra','polygon':[[8,0],[11,0],[11,3]],'material':'floor'})
+            if kind=='wall': floor['walls'].append({'id':'extra','start':[8,0],'end':[11,0],'thickness_m':.15})
+            if kind=='inventory': floor['items'][0]['position_m']['x'] += 1
+            before = self.state()
+            with self.subTest(kind=kind),self.assertRaises(native.NativeError) as error: await self.preview()
+            self.assertEqual(error.exception.code,'unpublished_changes' if kind=='dirty' else 'unsupported_rebase')
+            self.assertEqual(self.state(),before)
+        self.project.document = original
+
+    async def test_active_missing_or_changed_references_refuse_without_writes(self):
+        active = self.project.root/self.project.document['generation']/'upper'
+        originals = {name:(active/name).read_bytes() for name in ('model-data.json','index.html')}
+        for kind in ('missing','type','appearance','catalog_asset','duplicate'):
+            for name,data in originals.items(): (active/name).write_bytes(data)
+            def mismatch(model, runtime):
+                if kind=='missing': model['inventory'] = []
+                if kind=='type': model['inventory'][0]['type'] = 'sensor'
+                if kind=='appearance': model['inventory'][0]['color'] = '#abcdef'
+                if kind=='catalog_asset':
+                    model['inventory'][0]['model_id'] = 'table_lamp'
+                    model['object_assets'].pop(model['inventory'][0]['id'],None)
+                if kind=='duplicate': model['inventory'].append(copy.deepcopy(model['inventory'][0]))
+            self.edit_active(mismatch)
+            if kind=='catalog_asset':
+                for records in (self.project.document['project']['floors'][0]['items'],self.project.document['inventory']['upper']['items']):
+                    records[0]['model_id'] = 'table_lamp'
+            before = self.state()
+            with self.subTest(kind=kind),self.assertRaises(native.NativeError) as error: await self.preview()
+            self.assertEqual(error.exception.code,'unsupported_rebase')
+            self.assertEqual(self.state(),before)
+            if kind=='catalog_asset':
+                for records in (self.project.document['project']['floors'][0]['items'],self.project.document['inventory']['upper']['items']): records[0].pop('model_id')
+
+    async def test_active_room_or_executable_divergence_refuses_rebase(self):
+        active = self.project.root/self.project.document['generation']/'upper'
+        originals = {name:(active/name).read_bytes() for name in ('model-data.json','index.html')}
+        for kind in ('raw_extra','embedded_missing','polygon','material','executable'):
+            for name,data in originals.items(): (active/name).write_bytes(data)
+            def alter(model, runtime):
+                if kind=='raw_extra' and not runtime:
+                    extra = copy.deepcopy(model['rooms'][0]);extra['id']='extra';model['rooms'].append(extra)
+                if kind=='embedded_missing' and runtime: model['rooms']=[]
+                if kind=='polygon': model['rooms'][0]['polygon'][0][0]+=1
+                if kind=='material': model['rooms'][0]['material']='deck'
+            self.edit_active(alter)
+            if kind=='executable':
+                path=active/'index.html';path.write_bytes(path.read_bytes()+b'<script>window.changed=true;</script>')
+            before=self.state()
+            with self.subTest(kind=kind),self.assertRaises(native.NativeError) as error: await self.preview()
+            self.assertEqual(error.exception.code,'unsupported_rebase')
+            self.assertEqual(self.state(),before)
+
+    async def test_unapplied_control_detachment_refuses_but_joint_movement_is_supported(self):
+        def attach(model, runtime): model['control_anchors']={'custom_lamp':'later_lamp'}
+        self.edit_active(attach)
+        placements=copy.deepcopy(self.project.document['inventory'])
+        placements['upper']['items'][0]['position_m']['x']+=1
+        await self.project.save_inventory(placements)
+        before=self.state()
+        with self.assertRaises(native.NativeError) as error: await self.preview()
+        self.assertEqual(error.exception.code,'unsupported_rebase')
+        self.assertEqual(self.state(),before)
+        placements=copy.deepcopy(self.project.document['inventory'])
+        placements['upper']['items'][1]['position_m']['x']+=1
+        await self.project.save_inventory(placements)
+        before=self.state()
+        await self.preview()
         self.assertEqual(self.state(),before)
 
     async def test_failed_fsync_committed_disk_reconciles(self):
@@ -171,10 +300,11 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(self.state(),before)
 
     async def test_changed_source_and_target(self):
-        for kind in ('source','target'):
+        for kind in ('source','active','target'):
             with self.subTest(kind=kind):
                 preview = await self.preview()
-                path = self.target if kind=='target' else self.project.root/'baselines'/self.project.document['baseline']/'assets/upper/upper_model.glb'
+                source = self.project.root / self.project.document['generation'] if kind=='active' else self.project.root/'baselines'/self.project.document['baseline']/'assets'
+                path = self.target if kind=='target' else source/'upper/upper_model.glb'
                 original = path.read_bytes()
                 path.write_bytes(original+b'\n// changed')
                 before = self.state()
@@ -200,6 +330,9 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_already_current(self):
         await self.apply(await self.preview())
+        with self.assertRaises(native.NativeError) as error: await self.preview()
+        self.assertEqual(error.exception.code,'unpublished_changes')
+        await self.project.publish(self.project.document['revision'])
         before = self.state()
         with self.assertRaises(native.NativeError) as error: await self.preview()
         self.assertEqual(error.exception.code,'runtime_current')
