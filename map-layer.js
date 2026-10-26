@@ -1,4 +1,5 @@
 // Optional geographic context. All tiles share the viewer's scene and renderer.
+const HOME_SITE_RENDER_STYLE_VERSION = 1;
 const homeMapMath = (() => {
   const radius=6378137, circumference=2*Math.PI*radius, maxLatitude=85.05112878;
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -68,10 +69,11 @@ const homeMapMath = (() => {
     if(!Array.isArray(value)||value.length>64)return [];
     const ids=new Set(),result=[],reserved=new Set(['__proto__','prototype','constructor','toString','valueOf','hasOwnProperty','__defineGetter__','__defineSetter__','__lookupGetter__','__lookupSetter__','isPrototypeOf','propertyIsEnumerable','toLocaleString']);let count=0;
     for(const f of value){
-      if(!f||typeof f!=='object'||Array.isArray(f)||Object.keys(f).length!==6||!['id','name','kind','polygon','height_m','color'].every(k=>Object.hasOwn(f,k)))return [];
+      if(!f||typeof f!=='object'||Array.isArray(f)||Object.keys(f).length!==(Object.hasOwn(f,'render_style')?7:6)||!['id','name','kind','polygon','height_m','color'].every(k=>Object.hasOwn(f,k)))return [];
       if(typeof f.id!=='string'||!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(f.id)||reserved.has(f.id)||ids.has(f.id))return [];
       if(typeof f.name!=='string'||!f.name.trim()||[...f.name].length>120||[...f.name].some(c=>c.codePointAt(0)<32||c.codePointAt(0)>=0xd800&&c.codePointAt(0)<=0xdfff))return [];
       if(!['home','roof','building','street','landscape'].includes(f.kind)||typeof f.color!=='string'||!/^#[a-fA-F0-9]{6}$/.test(f.color)||!metric(f.height_m,100)||f.height_m<0)return [];
+      if(Object.hasOwn(f,'render_style')&&(f.kind!=='building'||!['outline','solid'].includes(f.render_style)))return [];
       if(['street','landscape'].includes(f.kind)&&f.height_m!==0)return [];
       if(!Array.isArray(f.polygon)||f.polygon.length>64||(count+=f.polygon.length)>1024)return [];
       const shape=polygons([f.polygon]);if(!shape||Math.abs(area(shape[0]))/2<.01)return [];
@@ -111,8 +113,8 @@ const homeMapMath = (() => {
   return {validConfig,project,unproject,transform,tiles,context,features};
 })();
 function createHomeMapLayer(THREE,scene,options={}) {
-  const group=new THREE.Group(),tileGroup=new THREE.Group(),footprint=new THREE.Group(),siteGroup=new THREE.Group(),cache=new Map(),ray=new THREE.Raycaster(),plane=new THREE.Plane(new THREE.Vector3(0,1,0),-(options.elevation??-.08));
-  group.name='home-geographic-map';group.visible=false;siteGroup.name='home-site-features';siteGroup.visible=false;group.add(tileGroup,footprint,siteGroup);scene.add(group);
+  const group=new THREE.Group(),tileGroup=new THREE.Group(),footprint=new THREE.Group(),siteGroup=new THREE.Group(),contextGroup=new THREE.Group(),homeObjects=[],cache=new Map(),ray=new THREE.Raycaster(),plane=new THREE.Plane(new THREE.Vector3(0,1,0),-(options.elevation??-.08));
+  group.name='home-geographic-map';group.visible=false;siteGroup.name='home-site-features';siteGroup.visible=false;contextGroup.name='home-site-context';contextGroup.visible=false;group.add(tileGroup,footprint,siteGroup,contextGroup);scene.add(group);
   const floor=options.elevation??-.08,outlineMaterial=new THREE.LineBasicMaterial({color:0x5ad9ff,depthTest:true,depthWrite:false,transparent:true,opacity:.8});
   for(const polygon of options.polygons||[]){
     if(polygon.length<3)continue;
@@ -120,12 +122,22 @@ function createHomeMapLayer(THREE,scene,options={}) {
     const line=new THREE.Line(geometry,outlineMaterial);line.renderOrder=5;footprint.add(line);
   }
   const siteSurfaceMaterial=new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide}),siteLineMaterial=new THREE.LineBasicMaterial({vertexColors:true,depthWrite:false,transparent:true,opacity:.9});
-  const authored=Number.isFinite(options.groundElevation)&&Math.abs(options.groundElevation)<=200?homeMapMath.features(options.features):[],ground=options.groundElevation;
+  const authored=Number.isFinite(options.groundElevation)&&Math.abs(options.groundElevation)<=200?homeMapMath.features(options.features):[],ground=options.groundElevation,contextPositions=[],contextColors=[];
+  function makeLine(positions,colors,material,name){
+    const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
+    const line=new THREE.LineSegments(geometry,material);line.name=name;line.renderOrder=5;return line;
+  }
   for(const feature of authored){
-    const p=feature.polygon,top=ground+feature.height_m,volume=feature.kind==='home'||feature.kind==='building',positions=[],colors=[],linePositions=[],lineColors=[],color=new THREE.Color(feature.color);
+    const p=feature.polygon,top=ground+feature.height_m,volume=feature.kind==='home'||feature.kind==='building',outline=feature.render_style==='outline',positions=[],colors=[],linePositions=[],lineColors=[],color=new THREE.Color(feature.color);
+    const add=object=>{siteGroup.add(object);if(feature.kind==='home'||feature.kind==='roof')homeObjects.push(object);};
     const vertex=(point,shade)=>{positions.push(...point);colors.push(color.r*shade,color.g*shade,color.b*shade);};
     const edge=(a,b)=>{linePositions.push(...a,...b);lineColors.push(color.r,color.g,color.b,color.r,color.g,color.b);};
-    if(feature.kind!=='roof'){
+    if(outline){
+      for(let i=0;i<p.length;i++){
+        const a=p[i],b=p[(i+1)%p.length];edge([a[0],ground,a[1]],[b[0],ground,b[1]]);
+        if(feature.height_m>0)edge([a[0],ground,a[1]],[a[0],top,a[1]]);
+      }
+    }else if(feature.kind!=='roof'){
       const y=volume?top:ground+(feature.kind==='street'?.015:.005);
       for(const triangle of THREE.ShapeUtils.triangulateShape(p.map(v=>new THREE.Vector2(...v)),[]))for(const i of triangle)vertex([p[i][0],y,p[i][1]],1);
       if(volume&&feature.height_m>0)for(let i=0;i<p.length;i++){
@@ -134,14 +146,15 @@ function createHomeMapLayer(THREE,scene,options={}) {
         edge(bottomA,topA);
       }
       const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
-      const mesh=new THREE.Mesh(geometry,siteSurfaceMaterial);mesh.name=feature.id;siteGroup.add(mesh);
+      const mesh=new THREE.Mesh(geometry,siteSurfaceMaterial);mesh.name=feature.id;add(mesh);
     }
-    if(volume||feature.kind==='roof')for(let i=0;i<p.length;i++){const a=p[i],b=p[(i+1)%p.length];edge([a[0],top,a[1]],[b[0],top,b[1]]);}
-    if(linePositions.length){
-      const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(linePositions,3));geometry.setAttribute('color',new THREE.Float32BufferAttribute(lineColors,3));
-      const line=new THREE.LineSegments(geometry,siteLineMaterial);line.name=feature.id+'-outline';line.renderOrder=5;siteGroup.add(line);
-    }
+    if((volume||feature.kind==='roof')&&(!outline||feature.height_m>0))for(let i=0;i<p.length;i++){const a=p[i],b=p[(i+1)%p.length];edge([a[0],top,a[1]],[b[0],top,b[1]]);}
+    if(outline){contextPositions.push(...linePositions);contextColors.push(...lineColors);}
+    else if(linePositions.length)add(makeLine(linePositions,lineColors,siteLineMaterial,feature.id+'-outline'));
   }
+  // Context has no per-building interaction; share one draw call at every scale.
+  const contextMaterial=contextPositions.length?new THREE.LineBasicMaterial({vertexColors:true,depthTest:true,depthWrite:false,transparent:true,opacity:.65}):null;
+  if(contextMaterial)contextGroup.add(makeLine(contextPositions,contextColors,contextMaterial,'home-neighbor-contours'));
   const marker=new THREE.Mesh(new THREE.RingGeometry(.55,.85,24),new THREE.MeshBasicMaterial({color:0x5ad9ff,depthTest:false,side:THREE.DoubleSide}));
   const markerOutline=new THREE.Mesh(new THREE.RingGeometry(.48,1.08,24),new THREE.MeshBasicMaterial({color:0x102833,depthTest:false,side:THREE.DoubleSide}));
   marker.rotation.x=markerOutline.rotation.x=-Math.PI/2;marker.renderOrder=6;markerOutline.renderOrder=5;group.add(markerOutline,marker);
@@ -208,7 +221,10 @@ function createHomeMapLayer(THREE,scene,options={}) {
   }
   function render(camera,rect,{visible=true,coarse=false,editing=false,transition=false}={}){
     active=visible;group.visible=active&&!!config?.enabled;if(!group.visible)return;
-    footprint.visible=coarse||editing||transition;siteGroup.visible=coarse||transition;marker.visible=markerOutline.visible=coarse;
+    footprint.visible=coarse||editing||transition;siteGroup.visible=coarse||transition;contextGroup.visible=true;marker.visible=markerOutline.visible=coarse;
+    // The detailed home is still drawn during the transition; its coarse shell
+    // must wait until that geometry is hidden. Neighbor contours stay visible.
+    for(const object of homeObjects)object.visible=coarse;
     const bounds=[[-1,-1],[-1,1],[1,1],[1,-1]].map(p=>pointAt(camera,...p)).filter(Boolean).map(p=>[p.x,p.z]);
     if(bounds.length!==4)return;
     const span=Math.hypot(bounds[0][0]-bounds[3][0],bounds[0][1]-bounds[3][1]);
@@ -221,7 +237,7 @@ function createHomeMapLayer(THREE,scene,options={}) {
   }
   return {get object(){return group;},setConfig,render,pointAt,setActive(value){active=value;group.visible=value&&!!config?.enabled;},
     clearFailures(){for(const entry of [...cache.values()])if(entry.failed)remove(entry);pump();},
-    get config(){return config;},get stats(){return {cached:cache.size,inflight,visible:desired.length,loaded:[...cache.values()].filter(e=>e.texture).length,siteFeatures:authored.length,siteObjects:siteGroup.children.length};},
+    get config(){return config;},get stats(){return {cached:cache.size,inflight,visible:desired.length,loaded:[...cache.values()].filter(e=>e.texture).length,siteFeatures:authored.length,siteObjects:siteGroup.children.length+contextGroup.children.length};},
     releaseGPU(){for(const entry of cache.values())if(entry.texture){entry.texture.dispose();entry.texture.needsUpdate=true;}},
-    dispose(){disposed=true;revision++;for(const entry of [...cache.values()])remove(entry);footprint.children.forEach(line=>line.geometry.dispose());siteGroup.children.forEach(object=>object.geometry.dispose());siteSurfaceMaterial.dispose();siteLineMaterial.dispose();outlineMaterial.dispose();marker.geometry.dispose();marker.material.dispose();markerOutline.geometry.dispose();markerOutline.material.dispose();scene.remove(group);}};
+    dispose(){disposed=true;revision++;for(const entry of [...cache.values()])remove(entry);footprint.children.forEach(line=>line.geometry.dispose());siteGroup.children.forEach(object=>object.geometry.dispose());contextGroup.children.forEach(object=>object.geometry.dispose());siteSurfaceMaterial.dispose();siteLineMaterial.dispose();contextMaterial?.dispose();outlineMaterial.dispose();marker.geometry.dispose();marker.material.dispose();markerOutline.geometry.dispose();markerOutline.material.dispose();scene.remove(group);}};
 }
