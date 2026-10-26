@@ -50,6 +50,9 @@ test('all site kinds can be reviewed and selected independently', () => {
   const features = [feature(), feature({ candidate_key: 'roof', name: 'Roof', kind: 'roof', height_m: 6 }), feature({ candidate_key: 'neighbor', kind: 'building' }), feature({ candidate_key: 'street', kind: 'street', height_m: 0 }), feature({ candidate_key: 'garden', kind: 'landscape', height_m: 0 })];
   const all = prepareDraft(project, context, response(context, { features }));
   assert.equal(all.candidates.length, 5); assert.equal(all.project.site.features.length, 6); fixtures.push(all.project);
+  assert.equal(all.project.site.features.find(value => value.id === 'building_1').render_style, 'outline', 'New AI neighbors use outlines');
+  assert.equal(Object.hasOwn(all.project.site.features[0], 'render_style'), false, 'Existing legacy neighbors keep their appearance');
+  assert(all.project.site.features.filter(value => value.kind !== 'building').every(value => !Object.hasOwn(value, 'render_style')));
   const selected = prepareDraft(project, context, response(context, { features }), { selectedCandidateKeys: ['roof', 'street'] });
   assert.deepEqual(selected.project.site.features.slice(1).map(value => value.kind), ['roof', 'street']);
   assert.deepEqual(prepareDraft(project, context, draft, { selectedCandidateKeys: [] }).project, project);
@@ -66,7 +69,7 @@ test('stale project, forged context and mismatched response cannot apply', () =>
   for (const patch of [{ request_id: 'old_request' }, { kind: 'new_room' }, { draft_version: 2 }]) assert.throws(() => prepareDraft(project, context, { ...draft, ...patch }), /request|version/);
 });
 test('rejects injected actions, geocoordinates, private fields and project IDs', () => {
-  for (const name of ['id', 'site', 'ground_elevation_m', 'floors', 'items', 'entity_id', 'url', 'command', 'latitude', 'longitude', 'georeference', 'api_key']) {
+  for (const name of ['id', 'site', 'ground_elevation_m', 'floors', 'items', 'entity_id', 'url', 'command', 'latitude', 'longitude', 'georeference', 'api_key', 'render_style']) {
     assert.throws(() => prepareDraft(project, context, { ...draft, [name]: 'injected' }), /unknown/);
     assert.throws(() => prepareDraft(project, context, response(context, { features: [feature({ [name]: 'injected' })] })), /unknown/);
   }

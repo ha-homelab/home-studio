@@ -93,6 +93,7 @@ export function mountAiPanel(bridge, sessionOrTransport) {
         <label><span>Neighbors, streets, and landscape to include</span><textarea id="ai-site-include" rows="2" maxlength="1000" placeholder="Add my roof, the garage on the left, the neighbor to the right, and the street in front. Omit other buildings."></textarea></label>
         <label><span>Known dimension and orientation</span><textarea id="ai-site-reference" rows="2" maxlength="1000" placeholder="My front wall is 10 m wide along +X. The street is below it in 2D (+Z). Photo 1 faces the front wall."></textarea></label>
         <p class="ai-note">Additions only: existing site features, ground elevation, rooms, and device bindings stay fixed. X is right and Z is down in 2D. Photos provide approximate visual references, not a survey or exact photogrammetry. Confirm scale, orientation, roof height, and which property is yours. No latitude/longitude or map location is inferred.</p>
+        <p class="ai-note">Choose photos you took or imagery you have permission to share with your connected AI provider. Keep any required source credit. New neighboring buildings start as subdued outlines; you can edit their footprints, heights, colors and appearance after applying.</p>
       </div>
       <div id="ai-measurements" hidden><div class="ai-grid">
         <label><span>Measured width (m)</span><input id="ai-width" type="number" min="0.1" max="100" step="0.01" value="4"></label>

@@ -301,7 +301,8 @@ function prepareSiteDraft(project, context, draft, selectedCandidateKeys) {
     if (keys.has(source.candidate_key)) throw new Error('Candidate keys must be unique across site features.');
     keys.add(source.candidate_key);
     text(source.name, 100, 'Site feature name'); text(source.evidence, 300, 'Site feature evidence', true);
-    proposed.features.push({ id: source.candidate_key, name: source.name, kind: source.kind, polygon: clone(source.polygon), height_m: source.height_m, color: source.color });
+    proposed.features.push({ id: source.candidate_key, name: source.name, kind: source.kind, polygon: clone(source.polygon), height_m: source.height_m, color: source.color,
+      ...(source.kind === 'building' ? { render_style: 'outline' } : {}) });
     candidates.push({ candidate_key: source.candidate_key, kind: 'site', name: source.name, evidence: source.evidence, feature: clone(source) });
   }
   // Validate every candidate, including unchecked ones; selection cannot hide bad data.

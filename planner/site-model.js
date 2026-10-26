@@ -11,10 +11,10 @@ function intersects(a, b, c, d) {
   const opposite = ([x, y]) => x > EPS && y < -EPS || y > EPS && x < -EPS;
   return opposite(ab) && opposite(cd) || onEdge(a, c, d) || onEdge(b, c, d) || onEdge(c, a, b) || onEdge(d, a, b);
 }
-function fields(value, keys, label) {
+function fields(value, keys, label, optional = []) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error(`${label}: expected an object.`);
   if (keys.some(key => !Object.hasOwn(value, key))) throw Error(`${label}: missing fields.`);
-  if (Object.keys(value).some(key => !keys.includes(key))) throw Error(`${label}: unknown fields.`);
+  if (Object.keys(value).some(key => !keys.includes(key) && !optional.includes(key))) throw Error(`${label}: unknown fields.`);
 }
 function number(value, low, high, label) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < low || value > high) throw Error(`${label}: expected a finite number between ${low} and ${high}.`);
@@ -25,12 +25,13 @@ export function validateSite(site) {
   if (!Array.isArray(site.features) || site.features.length > SITE_LIMITS.features) throw Error(`Site: at most ${SITE_LIMITS.features} features are allowed.`);
   const ids = new Set(); let count = 0;
   for (const feature of site.features) {
-    fields(feature, ['id', 'name', 'kind', 'polygon', 'height_m', 'color'], 'Site feature');
+    fields(feature, ['id', 'name', 'kind', 'polygon', 'height_m', 'color'], 'Site feature', ['render_style']);
     if (typeof feature.id !== 'string' || !ID.test(feature.id) || RESERVED.has(feature.id)) throw Error('Site feature: invalid identifier.');
     if (ids.has(feature.id)) throw Error(`Site: duplicate identifier ${feature.id}.`);
     ids.add(feature.id);
     if (typeof feature.name !== 'string' || !feature.name.trim() || [...feature.name].length > 120 || [...feature.name].some(c => c.codePointAt(0) < 32 || c.codePointAt(0) >= 0xd800 && c.codePointAt(0) <= 0xdfff)) throw Error('Site feature: name must be nonempty text of at most 120 characters without control characters or invalid Unicode.');
     if (!SITE_KINDS.includes(feature.kind)) throw Error('Site feature: invalid kind.');
+    if (Object.hasOwn(feature, 'render_style') && (feature.kind !== 'building' || !['outline', 'solid'].includes(feature.render_style))) throw Error('Site feature: render style must be outline or solid, for a neighboring building only.');
     if (typeof feature.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(feature.color)) throw Error('Site feature: color must be #RRGGBB.');
     number(feature.height_m, 0, SITE_LIMITS.height, 'Site feature height');
     if (['street', 'landscape'].includes(feature.kind) && feature.height_m !== 0) throw Error('Street and landscape heights must be zero.');

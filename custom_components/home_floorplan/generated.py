@@ -136,6 +136,13 @@ def _check_site_runtime(html, project):
                           "Rebuild its viewer with the current Home Studio toolkit through the "
                           "original home update process, then publish this saved draft again. "
                           "The current published home is unchanged.")
+    if (any("render_style" in feature for feature in project["site"]["features"]) and
+            "constHOME_SITE_RENDER_STYLE_VERSION=1;" not in code):
+        raise NativeError("unsupported_site_runtime",
+                          "This generated home's saved viewer does not support neighboring building styles. "
+                          "Rebuild its viewer with the current Home Studio toolkit through the "
+                          "original home update process, then publish this saved draft again. "
+                          "The current published home is unchanged.")
 
 
 def _check_source_site_frame(project, assets):

@@ -100,7 +100,31 @@ async function addRectangle(page,kind,x,z,w,d){
  // Escape cancels a partial polygon without history/storage mutation.
  const beforeCancel=await model(page);await page.getByRole('button',{name:'Draw polygon',exact:false}).click();
  await clickPoint(page,[9,1]);await clickPoint(page,[10,2]);await page.keyboard.press('Escape');assert.deepEqual(await model(page),beforeCancel);
+ // Neighborhood uses the existing editor, with the home and shared ground locked.
+ await page.getByRole('button',{name:'Neighborhood',exact:true}).click();
+ assert.equal(await page.locator('#site-kind').inputValue(),'building');
+ assert.equal(await page.getByLabel('Ground elevation (m)',{exact:true}).getAttribute('readonly'),'');
+ assert.equal(await page.locator('#site-list [data-site-id]').count(),0);
+ assert.equal(await page.locator('#site-kind option[value="home"]').getAttribute('disabled'),'');
+ const beforeLockedDrag=await model(page);await dragPoint(page,[4,3],[5,4]);
+ assert.deepEqual(await model(page),beforeLockedDrag,'Dragging the home reference cannot edit it');
  await addRectangle(page,'building',11,0,4,5);await field(page,'Feature name','Neighbor');
+ assert.equal((await model(page)).site.features.at(-1).render_style,'outline');
+ assert.equal(await page.getByLabel('Neighbor appearance',{exact:true}).inputValue(),'outline');
+ await page.getByLabel('Neighbor appearance',{exact:true}).selectOption('solid');
+ assert.equal((await model(page)).site.features.at(-1).render_style,'solid');
+ await page.getByRole('button',{name:'Undo',exact:true}).click();
+ assert.equal((await model(page)).site.features.at(-1).render_style,'outline');
+ await page.getByLabel('Feature type',{exact:true}).selectOption('street');
+ assert.equal(Object.hasOwn((await model(page)).site.features.at(-1),'render_style'),false);
+ await page.getByRole('button',{name:'Undo',exact:true}).click();
+ assert.equal((await model(page)).site.features.at(-1).render_style,'outline');
+ await page.getByRole('button',{name:'All site features',exact:true}).click();
+ assert.equal(await page.locator('#site-list [data-site-id]').count(),3);
+ await page.locator('#build-project').click();
+ assert.equal(await page.locator('#build-site-compatibility').isVisible(),false);
+ assert.match(await page.locator('#build-neighbor-compatibility').innerText(),/support for neighbor outlines/);
+ await page.getByRole('button',{name:'Close build instructions',exact:true}).click();
  await addRectangle(page,'street',-4,9,22,3);await field(page,'Feature name','Willow lane');
  assert.equal((await model(page)).site.features.at(-1).height_m,0);
  await addRectangle(page,'landscape',-4,-5,22,3);await field(page,'Feature name','Garden');

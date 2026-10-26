@@ -1242,7 +1242,7 @@ function rebuildPreview() {
       }
     }
   }
-  if (siteEditor?.active && displayedProject().site) worldGroup.add(buildSitePreview(THREE, displayedProject().site, createPreviewMaterial));
+  if (siteEditor?.active && displayedProject().site) worldGroup.add(buildSitePreview(THREE, displayedProject().site, createPreviewMaterial, { showHome: !siteEditor.neighborhood }));
   const activeItem = selection?.kind === 'items' ? selected() : null;
   if (activeItem && orbit.mode === 'edit') {
     const p = activeItem.position_m, d = activeItem.dimensions_m;
@@ -1691,7 +1691,14 @@ $('help-button').addEventListener('click', () => $('help-dialog').showModal());
 document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => $(b.dataset.close).close()));
 $('build-project').addEventListener('click', () => {
   const needsSiteSupport = Object.hasOwn(project, 'site');
-  $('build-site-compatibility').hidden = !needsSiteSupport;
+  const needsNeighborSupport = project.site?.features.some(feature => Object.hasOwn(feature, 'render_style'));
+  $('build-site-compatibility').hidden = !needsSiteSupport || needsNeighborSupport;
+  let neighborCompatibility = $('build-neighbor-compatibility');
+  if (!neighborCompatibility) {
+    neighborCompatibility = node('p', 'callout', 'This drawing includes neighbor appearance settings. Use a toolkit and integration release with support for neighbor outlines; earlier Site & roof releases cannot read it. Keep your exported JSON until a matching release is available.');
+    neighborCompatibility.id = 'build-neighbor-compatibility'; $('build-site-compatibility').after(neighborCompatibility);
+  }
+  neighborCompatibility.hidden = !needsNeighborSupport;
   $('build-toolkit-link').href = `https://github.com/ha-homelab/home-studio/releases${needsSiteSupport ? '' : '/latest'}`;
   translatedText('build-toolkit-link', needsSiteSupport ? 'Choose a compatible release ↗' : 'Download the complete ZIP ↗');
   const label = $('build-validation');

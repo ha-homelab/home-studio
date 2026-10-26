@@ -252,7 +252,7 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
             {"id": "home_1", "name": "Fictional home", "kind": "home", "height_m": 6,
              "color": "#46a0aa", "polygon": [[0, 0], [5, 0], [5, 4], [0, 4]]},
             {"id": "neighbor_1", "name": "Fictional neighbor", "kind": "building", "height_m": 5,
-             "color": "#aa9cb4", "polygon": [[8, 0], [12, 0], [12, 4], [8, 4]]},
+             "color": "#aa9cb4", "polygon": [[8, 0], [12, 0], [12, 4], [8, 4]], "render_style": "outline"},
         ]}
         await adapter.save(0, source)
         assets, _, models, _, _ = await adapter.publish(1)
@@ -358,6 +358,19 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
                        '<script type="application/json">"homeMapMath.features(options.features) home-site-features"</script>'):
             with self.subTest(markup=markup), self.assertRaises(native.NativeError):
                 generated._check_site_runtime(markup, source)
+
+    def test_neighbor_styles_require_the_saved_viewers_explicit_capability(self):
+        legacy = '<script>homeMapMath.features(options.features);"home-site-features";</script>'
+        marker = 'const HOME_SITE_RENDER_STYLE_VERSION = 1;'
+        for style in ("outline", "solid"):
+            source = {"site": {"features": [{"kind": "building", "render_style": style}]}}
+            for markup in (legacy, legacy + '<p>' + marker + '</p>',
+                           legacy + '<script type="application/json">' + json.dumps(marker) + '</script>'):
+                with self.subTest(style=style, markup=markup), self.assertRaises(native.NativeError) as error:
+                    generated._check_site_runtime(markup, source)
+                self.assertEqual(error.exception.code, "unsupported_site_runtime")
+            generated._check_site_runtime(legacy + '<script>' + marker + '</script>', source)
+        generated._check_site_runtime(legacy, {"site": {"features": [{"kind": "building"}]}})
 
     async def test_seed_preserves_ids_calibration_and_current_stored_inventory(self):
         current = copy.deepcopy(self.inventory)

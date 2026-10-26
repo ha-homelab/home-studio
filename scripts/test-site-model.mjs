@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { validateSite, createSite, siteBounds, nextSiteId, SITE_KINDS, SITE_LIMITS } from '../planner/site-model.js';
 import { blankProject, validateProject } from '../planner/model.js';
+import { buildSitePreview } from '../planner/site-editor.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const clone = value => structuredClone(value);
 const feature = (kind = 'home', index = 1) => ({ id: `${kind}_${index}`, name: `Site ${kind}`, kind, polygon: [[0, 0], [4, 0], [4, 3], [0, 3]], height_m: ['street', 'landscape'].includes(kind) ? 0 : 6, color: '#8A9bAF' });
@@ -22,6 +23,7 @@ validPatch(site => site.features[0].name = '🏡'.repeat(120));
 validPatch(site => site.features[0].name = '\u0085');
 validPatch(site => site.features[0].height_m = 0);
 validPatch(site => site.features[0].height_m = 100);
+for (const render_style of ['outline', 'solid']) validPatch(site => site.features = [{ ...feature('building'), render_style }]);
 validPatch(site => site.features = Array.from({ length: 64 }, (_, i) => feature('building', i)));
 validPatch(site => site.features = Array.from({ length: 16 }, (_, i) => ({ ...feature('building', i), polygon: regular(64) })));
 const rejected = [null, [], {}, { ...createSite(), latitude: 0 }, { ground_elevation_m: 0 }, { features: [] }];
@@ -33,6 +35,8 @@ invalidPatch(site => site.features = Array.from({ length: 17 }, (_, i) => ({ ...
 invalidPatch(site => site.features.push(clone(site.features[0])));
 for (const key of Object.keys(feature())) invalidPatch(site => delete site.features[0][key]);
 invalidPatch(site => site.features[0].latitude = 10);
+for (const render_style of ['', 'wireframe', null, true, 1, {}, []]) invalidPatch(site => site.features[2].render_style = render_style);
+for (const index of [0, 1, 3, 4]) invalidPatch(site => site.features[index].render_style = 'outline');
 for (const id of ['', '1home', '__proto__', 'constructor', 'a'.repeat(65), 'home-neighbor', true, null]) invalidPatch(site => site.features[0].id = id);
 for (const name of ['', '  ', '\ufeff', 'a'.repeat(121), '🏡'.repeat(121), '\u0000', '\ud800', null, 1]) invalidPatch(site => site.features[0].name = name);
 for (const kind of ['garage', '', null, [], {}]) invalidPatch(site => site.features[0].kind = kind);
@@ -68,6 +72,26 @@ print(json.dumps(results))`], { cwd: root, input: JSON.stringify([...accepted, .
 assert.equal(python.status, 0, python.stderr);
 assert.deepEqual(JSON.parse(python.stdout), [...accepted.map(() => true), ...rejected.map(() => false)], 'Python and JS accept the same fixtures');
 const THREE = await import('data:text/javascript;base64,' + fs.readFileSync(new URL('../vendor/three.module.min.js', import.meta.url)).toString('base64'));
+const previewSite = { ground_elevation_m: -2, features: [feature('home'), feature('roof'), feature('building'),
+  { ...feature('building', 2), render_style: 'outline' }, { ...feature('building', 3), render_style: 'outline', height_m: 0 }] };
+const preview = buildSitePreview(THREE, previewSite, options => new THREE.MeshStandardMaterial(options));
+assert.equal(preview.getObjectByName('building_1').isMesh, true, 'Legacy neighbors remain solid');
+const contour = preview.getObjectByName('building_2'), flatContour = preview.getObjectByName('building_3');
+assert.equal(contour.isLineSegments, true); assert.equal(flatContour.isLineSegments, true);
+assert.equal(contour.geometry.attributes.position.count, 24, 'Four bottom, four top and four vertical edges');
+assert.equal(flatContour.geometry.attributes.position.count, 8, 'Zero-height contours do not duplicate edges');
+assert.equal(contour.material, flatContour.material, 'Preview contours share one material');
+assert.equal(contour.material.depthTest, true); assert.equal(contour.material.depthWrite, false);
+assert.equal(contour.material.opacity, .65);
+assert.deepEqual([...new Set(Array.from(contour.geometry.attributes.position.array).filter((_, i) => i % 3 === 1))].sort((a, b) => a - b), [-2, 4]);
+const neighborhoodPreview = buildSitePreview(THREE, previewSite, options => new THREE.MeshStandardMaterial(options), { showHome: false });
+assert.equal(neighborhoodPreview.getObjectByName('home_1'), undefined);
+assert.equal(neighborhoodPreview.getObjectByName('roof_1'), undefined);
+assert.equal(neighborhoodPreview.children.length, 3, 'Neighborhood preview leaves detailed indoor geometry unobscured');
+for (const group of [preview, neighborhoodPreview]) {
+  const materials = new Set(); group.traverse(object => { object.geometry?.dispose(); if (object.material) materials.add(object.material); });
+  for (const material of materials) material.dispose();
+}
 const context = vm.createContext({ THREE, Promise, Map, Set, Math, Number, Error });
 vm.runInContext(fs.readFileSync(new URL('../map-layer.js', import.meta.url), 'utf8') + '\nthis.math = homeMapMath;', context);
 const model = { elevation_m: 16, site_context: { ground_elevation_m: -6, features: base.features, roof_outline: { elevation_m: 2, polygons_m: [feature().polygon] } } };
