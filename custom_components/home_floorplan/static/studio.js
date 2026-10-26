@@ -1,4 +1,5 @@
 /* Trusted Home Assistant authoring host. Credentials never enter the editor. */
+import { createStudioMapTransport } from './map-transport.js';
 const STUDIO_PROTOCOL = 'home-studio-editor-v1';
 const MAX_PROJECT_BYTES = 2000000;
 const AI_RESPONSE_LIMIT = 2 * 1024 * 1024;
@@ -147,6 +148,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this._aiPending = new Map(); this._aiEpoch = 0; this._aiSequence = 0; this._aiSession = null; this._aiSessionPromise = null;
     this._pagehide = () => {
       this._disposeAi();
+      this._resetMapTransport();
       if (this._exportBusy) {
         this._exportSequence++;
         this._cancelExport?.(new Error('Export download cancelled when leaving the page.'));
@@ -157,6 +159,14 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     };
     this._edits = {}; this._startupTimer = null; this._startupFailed = false;
     this._exportBusy = false; this._exportSequence = 0; this._currentFloor = null; this._connectionEpoch = 0;
+    this._mapTransport = createStudioMapTransport({
+      getContext: () => ({ hass: this._hass, ready: this._ready, connected: this.isConnected && this._online(),
+        frame: this._frame?.contentWindow, channel: this._channel, generation: this._generation, connectionEpoch: this._connectionEpoch }),
+      send: (type, payload) => {
+        if (type === 'map-response' && payload.result?.data_url) this.$('studio-map-credit').hidden = false;
+        this._send(type, payload);
+      },
+    });
     this._receive = event => this._onMessage(event);
     this._beforeUnload = event => { if (this._unsaved() || this._busy) { event.preventDefault(); event.returnValue = ''; } };
     this.shadowRoot.innerHTML = `
@@ -206,6 +216,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       </details>
       <section id="recovery" hidden><strong>Unsaved drawing found in this tab</strong><p id="recovery-description"></p><div class="row"><button id="resume">Resume recovered drawing</button><button id="download-recovery">Export recovered JSON</button><button id="discard">Use saved drawing</button></div></section>
       <section id="published-view" hidden><div class="published-heading"><button id="back-to-editor">Back to editing</button><h2>Published home</h2><p>This is the current published home. Draft changes appear here only after you publish. Device controls and layout editing are disabled.</p></div><div id="published-canvas"></div></section>
+      <p id="studio-map-credit" class="muted" style="padding:0 20px" hidden>© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a></p>
       <p id="loading">Loading the local editor…</p>`;
     this.$('menu').onclick = () => this.dispatchEvent(new Event('hass-toggle-menu', { bubbles: true, composed: true }));
     for (const action of ['room', 'devices', 'preview', 'photos']) this.$('guide-' + action).onclick = () => this._guideAction(action);
@@ -253,6 +264,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     const connection = this._hass?.connection;
     if (!this._connectionState || this._connectionState.connection !== connection) {
       this._connectionEpoch++;
+      this._resetMapTransport();
       this._cancelExport?.(new Error('The Home Assistant connection changed. Nothing was downloaded. Try the export again.'));
       this._stopConnectionTracking();
       const state = this._connectionState = { connection, ready: null };
@@ -268,6 +280,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     if (state !== this._connectionState || !this.isConnected) return;
     if (state.ready === ready) return;
     this._connectionEpoch++;
+    this._resetMapTransport();
     state.ready = ready;
     this.$('connection-notice').hidden = ready || !this._hass;
     if (!ready) { this._siteFramePreview = null; this.$('site-frame-dialog').close(); }
@@ -281,6 +294,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     if (!this._online() || epoch !== this._connectionEpoch) throw new Error('The Home Assistant connection changed. Keep this tab open and try again after reconnecting.');
   }
   _reset() {
+    this._resetMapTransport();
     this._siteFramePreview = null; this.$('site-frame-dialog').close();
     this._closePublishedHome(false);
     this._disposeAi();
@@ -619,6 +633,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     else { try { sessionStorage.removeItem(this._key()); } catch {} this._openEditor(this._saved.project); }
   }
   _openEditor(project) {
+    this._resetMapTransport();
     this._disposeAi(); this._aiSequence = 0;
     this._clearEditorNavigation(); this._editorLoading = false;
     this._ready = false; this._sequence = 0; this._edits = {}; this._startupFailed = false; this.$('retry').hidden = true;
@@ -645,6 +660,10 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   _onMessage(event) {
     const data = event.data;
     if (event.source !== this._frame?.contentWindow || event.origin !== 'null' || data?.protocol !== STUDIO_PROTOCOL || data.channel !== this._channel) return;
+    if (this._mapTransport.handle(data)) {
+      if (data.type === 'map-close') this.$('studio-map-credit').hidden = true;
+      return;
+    }
     if (data.type === 'loading' || data.type === 'ready') { this._editorLoading = true; this._clearEditorNavigation(); }
     if (data.type === 'ready' && !this._ready) {
       this._refreshTheme();
@@ -681,6 +700,10 @@ class HomeFloorplanStudioPanel extends HTMLElement {
       const pending = this._pending.get(data.requestId);
       if (pending) { clearTimeout(pending.timer); this._pending.delete(data.requestId); pending.resolve(clone(this._project)); }
     } catch { this._status('The editor returned an invalid drawing. Your saved copy is unchanged.', true); }
+  }
+  _resetMapTransport() {
+    this._mapTransport.reset();
+    this.$('studio-map-credit').hidden = true;
   }
   _disposeAi() {
     this._aiEpoch++;

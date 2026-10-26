@@ -31,7 +31,10 @@ host._openEditor=project=>{host._project=structuredClone(project);host._ready=tr
 document.body.append(host);host._buttons();
 </script></body></html>`;
 (async()=>{
- const server=http.createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/studio.js'?'text/javascript':'text/html');res.end(req.url==='/studio.js'?source:html);});
+ const server=http.createServer((req,res)=>{
+  const script=req.url==='/studio.js'?source:req.url==='/map-transport.js'?fs.readFileSync(path.join(root,'custom_components/home_floorplan/static/map-transport.js')):null;
+  res.setHeader('Content-Type',script?'text/javascript':'text/html');res.end(script||html);
+ });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const browser=await ({chromium,firefox,webkit}[engine]).launch(browserLaunchOptions(engine));
  try {
