@@ -1,6 +1,7 @@
 """Preserve viewer translations while reducing the actual compiled runtime."""
 import copy
 import gzip
+from html.parser import HTMLParser
 import json
 from pathlib import Path
 import re
@@ -120,12 +121,34 @@ console.log(JSON.stringify({locales: actual.locales.length, translations}));
         self.assertEqual(actual.replace(encoded, legacy), previous,
                          "Geometry, model JSON, other runtime modules and HTML stay byte-identical")
         def executable(html):
-            source = "\n".join(body for attrs, body in re.findall(
-                r'<script\b([^>]*)>(.*?)</script\s*>', html, re.S | re.I)
-                if "application/json" not in attrs.lower())
+            class Scripts(HTMLParser):
+                def __init__(self):
+                    super().__init__(convert_charrefs=False)
+                    self.bodies = []
+                    self.active = False
+
+                def handle_starttag(self, tag, attrs):
+                    if tag == "script":
+                        self.active = (dict(attrs).get("type") or "").lower() != "application/json"
+                        if self.active:
+                            self.bodies.append("")
+
+                def handle_data(self, data):
+                    if self.active:
+                        self.bodies[-1] += data
+
+                def handle_endtag(self, tag):
+                    if tag == "script":
+                        self.active = False
+
+            parser = Scripts()
+            parser.feed(html)
+            parser.close()
+            source = "\n".join(parser.bodies)
             return re.sub(r"(?<=import \* as THREE from 'data:text/javascript;base64,)[^']+", "", source).encode()
         self.assertEqual(executable('<SCRIPT TYPE="APPLICATION/JSON">{}</SCRIPT >'
                                     '<ScRiPt>const value = 1;</sCrIpT >'), b'const value = 1;')
+        self.assertEqual(executable('<script>const value = 1;</script\t\n bar>'), b'const value = 1;')
         old, new = executable(previous), executable(actual)
         raw_saved = len(old) - len(new)
         gzip_saved = len(gzip.compress(old, mtime=0)) - len(gzip.compress(new, mtime=0))
