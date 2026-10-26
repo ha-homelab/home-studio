@@ -293,6 +293,8 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
         previous_bytes = store_path.read_bytes()
         active_assets, active_data = state['assets'], copy.deepcopy(state['data'])
         active_hashes = generated._hashes(active_assets)
+        old = adapter.root / 'baselines' / previous['baseline']
+        old_hashes = generated._hashes(old / 'assets')
         baseline_dirs = set((adapter.root / 'baselines').iterdir())
         self.assertTrue((await self.request('project_get'))['capabilities']['imported_runtime_upgrade'])
 
@@ -319,6 +321,8 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
 
         preview = await self.request('project_runtime_upgrade_preview', revision=1)
         self.assertEqual(preview['changed_file_count'], len(state['site']['floors']))
+        self.assertEqual(preview['source'], 'published_generation')
+        self.assertEqual(preview['source_file_count'], len(active_hashes))
         self.assertEqual(store_path.read_bytes(), previous_bytes)
         failure = WriteError(OSError(errno.ENOSPC, 'No space left on device'))
         with patch.object(adapter.store, '_write_prepared_data', side_effect=failure):
@@ -340,14 +344,18 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state['assets'], active_assets)
         self.assertEqual(state['data'], active_data)
         self.assertEqual(generated._hashes(active_assets), active_hashes)
-        old = adapter.root / 'baselines' / previous['baseline']
         new = adapter.root / 'baselines' / adapter.document['baseline']
         self.assertEqual(json.loads((new / 'previous-document.json').read_text()), previous)
-        before, after = generated._hashes(old / 'assets'), generated._hashes(new / 'assets')
+        self.assertEqual(generated._hashes(old / 'assets'), old_hashes)
+        receipt = json.loads((new / 'runtime-upgrade.json').read_text())
+        self.assertEqual(receipt['source_generation'], previous['generation'])
+        self.assertEqual(receipt['source_hashes'], active_hashes)
+        before, after = active_hashes, generated._hashes(new / 'assets')
+        self.assertEqual(before.keys(), after.keys())
         changed = {name for name in before if before[name] != after[name]}
         self.assertEqual(changed, set(preview['files']))
         for name in changed:
-            html_before = (old / 'assets' / name).read_text()
+            html_before = (active_assets / name).read_text()
             html_after = (new / 'assets' / name).read_text()
             self.assertEqual(html_after.replace(current, previous_runtime), html_before)
         reopened = generated.GeneratedProject(self.hass, component, state['site'], models, state['data'])
