@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Neighborhood editing with locked home and roof geometry, configurable building
+  contours and solid volumes, and matching reviewed AI proposals.
+- An optional map background inside the Home Assistant site editor, using saved
+  private alignment and bounded tile loading on the existing 2D canvas.
+- Explicit preview and recovery-backed calibration for imported homes whose
+  floors use different local ground datums. Published geometry stays in place.
+
 ## [1.2.0] - Geographic context, physical materials and camera tours
 
 ### Added

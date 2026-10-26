@@ -44,6 +44,11 @@ no real home's location or private device data.
 
 ## Add the neighborhood
 
+Choose **Neighborhood** in the site toolbar to work on the surroundings while
+your own home, roof and shared ground elevation stay locked. **All site features**
+returns to editing the entire site. This is an editing scope, not another copy
+of your home or another floor.
+
 Select **Neighbor** for another building, **Street** for the paved road outline,
 or **Landscape** for a garden or green space. Name shapes so they are easy to
 find again. A street is a closed outline of the road surface, rather than a
@@ -53,6 +58,34 @@ Start with the nearest few buildings. Simple outlines with four to ten corners
 usually provide enough context. You can select a shape from the list, adjust
 its color and height, or delete it without changing any indoor objects or
 Home Assistant entity bindings.
+
+New neighboring buildings use **Subdued outline**: upper and lower perimeters
+and vertical corners, with no solid walls hiding your home. Their contours remain
+visible around the detailed house when the map is enabled. Select a building and
+change **Neighbor appearance** to **Solid volume** if desired. Existing buildings
+keep their saved appearance. Drag the entire footprint to move it, drag a corner
+to reshape it, and hold **Alt** to bypass grid snapping for fine adjustments.
+
+### Draw over the saved map
+
+In the Home Assistant editor, select **Map background**. It uses the same saved
+alignment as **3D Home**. If no map has been aligned yet, open **3D Home → Align
+map**, align your home and save, then return to the editor and select **Reload
+map**. Changing the drawing does not change this geographic alignment.
+
+1. Select **Neighborhood**, enable **Map background**, and find your home.
+2. Choose **Neighbor** and **Draw polygon**. Click the corners of the next
+   building and press **Enter** to finish; **Escape** cancels.
+3. Set its approximate height and outline color in the inspector. Check a known
+   distance before drawing the rest of the block.
+4. Switch to **Preview 3D** to check the heights, then **Save draft** and
+   **Publish to 3D Home** when the placement looks right.
+
+The map is optional. Tiles stop loading when you leave the site drawing or hide
+the page, and the editor uses its existing 2D canvas. The separate browser editor
+still works with the metric grid; it does not receive your Home Assistant map
+settings. The OpenStreetMap credit links to the data license above the native
+editor. Keep that attribution in screenshots containing map tiles.
 
 You can draw these outlines manually from known measurements and permitted
 references, without an AI account or key. Check their position on the shared
@@ -88,7 +121,9 @@ check dimensions independently.
 
 ## Draft from photos with your own AI
 
-Open the optional AI panel and choose the site/roof mode. Select the photos or
+Open the optional AI panel in the relevant site scope. **Neighborhood** limits
+proposals to neighbors, streets and landscape; **All site features** also allows
+your home's footprint and roof. Select the photos or
 permitted reference images you want to send and identify your home in words.
 Include a measured distance, the relationship to the existing drawing, and which
 nearby objects to include. For example:
@@ -118,6 +153,12 @@ records. No AI result sets GPS coordinates or silently changes the Home Assistan
 map alignment.
 
 ## Show it on the Home Assistant map
+
+Neighborhood scope, outline appearance, the editor map background and explicit
+imported-frame calibration are newer than the 1.2.0 site editor. Until a release
+containing these additions is published, these controls require a development
+build. Do not expect the older release to load an exported drawing containing
+the new `render_style` field.
 
 Drawings with a `site` property require **v1.2.0-beta.6 or newer** in both the
 toolkit and Home Studio integration, even when the site has no shapes. The

@@ -40,7 +40,7 @@ class SourceReplayTests(unittest.TestCase):
                         ['scripts/test-viewer-geometry-context.cjs'], ['scripts/test-viewer-texture-context.cjs'], ['scripts/test-native-draw-diagnostic.cjs'], ['scripts/test-native-viewer-programs.cjs'], ['scripts/test-glass-wall-program.cjs'],
                         ['scripts/test-zero-point-block.cjs'], ['scripts/test-point-decay-two.cjs'], ['scripts/test-cached-shadow-transmission.cjs'], ['scripts/test-literal-lambert-directional.cjs'], ['scripts/test-fallback-shared-program.cjs'],
                         ['scripts/test-point-texture-current.cjs'], ['scripts/test-point-run-texture.cjs'], ['scripts/test-static-geometry-atlas.cjs'], ['scripts/test-point-signal-texture.cjs'], ['scripts/test-signal-texture-decay-two.cjs'], ['scripts/test-literal-lambert-point-body.cjs'], ['scripts/test-scalar-shadow-point.cjs'], ['scripts/test-scalar-indirect-lambert.cjs'], ['scripts/test-direct-shadow-uniforms.cjs'], ['scripts/test-scalar-lambert-accumulators.cjs']]
-            commands.extend([['scripts/test-site-model.mjs'], ['scripts/test-ai-site.mjs'],
+            commands.extend([['scripts/test-site-model.mjs'], ['scripts/test-ai-site.mjs'], ['scripts/test-site-map-underlay.mjs'],
                              ['scripts/test-camera-tour.mjs', 'scripts/test-camera-tour-recording.mjs',
                               'scripts/test-camera-tour-session-contract.mjs', 'scripts/test-camera-tour-hosts.cjs']])
             for paths in commands:
