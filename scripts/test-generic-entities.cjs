@@ -6,7 +6,7 @@ const {browserLaunchOptions}=require('./browser-stability-diagnostics.cjs');
 const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tmpdir(),'home-generic-'));
 const screenshotDir=process.env.INDICATOR_QA_DIR;
 if(screenshotDir)fs.mkdirSync(screenshotDir,{recursive:true});
-const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_sensor.entry',thermostat:'climate.zone',vacuum:'vacuum.cleaner',action:'button.example',future:'custom_thing.future',fan:'fan.study',light:'light.fixture',missing:'sensor.missing',injected:'sensor.injected',range:'binary_sensor.cooktop',alarm:'binary_sensor.smoke',presence:'binary_sensor.presence'};
+const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_sensor.entry',thermostat:'climate.zone',vacuum:'vacuum.cleaner',action:'button.example',future:'custom_thing.future',fan:'fan.study',light:'light.fixture',missing:'sensor.missing',injected:'sensor.injected',range:'binary_sensor.cooktop',alarm:'binary_sensor.smoke',presence:'binary_sensor.presence',receiver1:'binary_sensor.receiver1',receiver2:'binary_sensor.receiver2'};
 (async()=>{
  let browser,server;
  try{
@@ -20,6 +20,8 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   const model=JSON.parse(plain.match(/<script id="modelData" type="application\/json">([\s\S]*?)<\/script>/)[1]);
   model.appliance_status={range:{kind:'cooktop',room:template.room,entity_id:bindings.range,oven_entity_id:'sensor.oven',burners:[[0,.925,0,.15]]},alarm:{kind:'smoke',room:template.room,entity_id:bindings.alarm,battery_entity_id:'sensor.smoke_battery'}};
   model.presence_sources={presence:{room:template.room,entity_id:bindings.presence}};
+  model.room_activity={[template.room]:'sensor.room_activity'};
+  model.receiver_activity=Object.fromEntries(['receiver1','receiver2'].map(id=>[id,{room:template.room,entity_id:bindings[id],sensor:'sensor.'+id+'_activity'}]));
   plain=plain.replace(/(<script id="modelData" type="application\/json">)[\s\S]*?(<\/script>)/,(_,a,b)=>a+JSON.stringify(model).replaceAll('<','\\u003c')+b);
   const html=plain.replace('<head>','<head><script>window.__HOME_FLOORPLAN_EMBED__=true;</script>');
   server=http.createServer((request,response)=>{
@@ -57,6 +59,7 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
     'fan.study':{state:'on'},'light.fixture':{state:'on',light:{brightness:128}},
     'sensor.injected':{state:'<img src=x onerror=alert(2)>',unit:'<svg onload=alert(3)>',device_class:'temperature'},
    };
+   states['sensor.room_activity']={state:'unknown',activity:{evidence:{receiver1:'unknown',receiver2:'unknown'},channels:{receiver1:{presence:'off',motion:'off',coverage:'unverified'},receiver2:{presence:'off',motion:'off',coverage:'unverified'}}}};
    window.publish=(connected=true)=>channel.port1.postMessage({type:'states',states,connected});
   },project.floors[0].items);
   await page.waitForFunction(()=>messages.some(m=>m.type==='model_config'));
@@ -94,7 +97,7 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   assert.equal(await frame.locator('[data-motion-trail="presence"]').count(),0,'held presence never creates footsteps');
   await frame.locator('#homeRoomLabels').click();
   await frame.locator('.home-presence-indicator[data-state="presence"]').waitFor();
-  assert.equal(await frame.locator('.home-presence-indicator circle').first().getAttribute('r'),'10','presence remains a compact badge');
+  assert.equal(await frame.locator('.home-presence-indicator').evaluate(el=>el.tagName),'polygon','presence follows the room outline');
   if(screenshotDir)await page.screenshot({path:path.join(screenshotDir,'indicators-active.png')});
   await page.evaluate(()=>{states['binary_sensor.cooktop'].state='off';states['sensor.oven'].state='running';publish();});
   await card('range').filter({hasText:'Cooktop off · Oven on'}).waitFor();
@@ -102,6 +105,82 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   assert.equal(await frame.locator('.oven-glow').getAttribute('hidden'),null,'oven does not depend on cooktop state');
 
   const view=await (await page.locator('iframe').elementHandle()).contentFrame();
+  // Separate room presence from per-source movement, using the shipped viewer.
+  const glow=frame.locator('.home-presence-indicator'),trails=frame.locator('[data-motion-trail]');
+  const channelValue=(presence,motion)=>({presence,motion,coverage:'unverified'});
+  const sendActivity=async(changes={},connected=true)=>{
+   await page.evaluate(({changes,connected})=>{Object.assign(states['sensor.room_activity'].activity.channels,changes);publish(connected);},{changes,connected});
+   await view.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  };
+  await page.evaluate(()=>{states['binary_sensor.presence'].state='off';publish(false);});
+  await sendActivity({receiver1:channelValue('on','on'),receiver2:channelValue('off','off')});
+  assert.equal(await trails.count(),0,'initial or reconnect ON never creates footsteps');
+  assert.equal(await glow.getAttribute('data-state'),'presence');
+  assert.equal(await glow.evaluate(el=>getComputedStyle(el).fill),'rgb(57, 154, 255)','presence stays blue');
+  assert.equal(await glow.getAttribute('data-coverage'),'unverified');
+  await frame.locator('#homeRoomLabels').click();
+  assert.equal(await frame.locator('#homeRoomLabels').getAttribute('aria-pressed'),'false');
+  assert.equal(await glow.isVisible(),true,'room glow is independent of room labels');
+  await sendActivity({receiver2:channelValue('on','off')});
+  await sendActivity({receiver1:channelValue('off','off')});
+  assert.equal(await glow.getAttribute('data-state'),'presence','one source OFF cannot erase another ON');
+  await sendActivity({receiver2:channelValue('unknown','off')});
+  assert.equal(await glow.getAttribute('data-state'),'unknown');
+  assert.equal(await glow.evaluate(el=>getComputedStyle(el).opacity),'0','unknown withdraws the glow immediately');
+  await sendActivity({receiver2:channelValue('off','off')});
+  assert.equal(await glow.getAttribute('data-state'),'quiet');
+  assert.equal(await glow.evaluate(el=>getComputedStyle(el).transitionDuration),'0s','OFF does not leave a fading presence claim');
+  await sendActivity({receiver1:{...channelValue('unknown','unknown'),presence_configured:false}});
+  assert.equal(await glow.getAttribute('data-state'),'quiet','motion-only unknown is not unavailable presence');
+  await frame.locator('#homeToggleActivity').click();await frame.locator('#homeRoom').selectOption(template.room);
+  await frame.locator('#homeActivitySummary').filter({hasText:'No presence detected · Motion unknown'}).waitFor();
+  await frame.locator('[data-activity-source="receiver1"]').filter({hasText:'Presence not configured'}).waitFor();
+  await frame.locator('#homeRoom').selectOption('');await frame.locator('#homeToggleActivity').click();
+  await sendActivity({receiver1:channelValue('off','off')});
+  await sendActivity({receiver1:channelValue('on','on')});assert.equal(await trails.count(),1);
+  await sendActivity({receiver2:channelValue('on','on')});assert.equal(await trails.count(),2,'each source owns its edge');
+  assert((await trails.first().evaluate(el=>getComputedStyle(el).clipPath)).startsWith('polygon('),'full footprint stays inside the projected room');
+  const projected=await glow.getAttribute('points');
+  await frame.locator('#homeStage canvas').focus();await page.keyboard.press('ArrowRight');
+  await view.waitForFunction(before=>document.querySelector('.home-presence-indicator').getAttribute('points')!==before,projected);
+  await page.waitForTimeout(100);
+  const movingIdle=await view.evaluate(()=>window.floorplan.renderCount);await page.waitForTimeout(180);
+  assert.equal(await view.evaluate(()=>window.floorplan.renderCount),movingIdle,'footsteps do not add a WebGL rendering loop');
+  await page.waitForTimeout(2300);assert.equal(await trails.count(),0,'brief bursts expire during held presence');
+  await sendActivity();assert.equal(await trails.count(),0,'repeated ON never restarts the deadline');
+  await sendActivity({receiver1:channelValue('on','off')});await sendActivity({receiver1:channelValue('on','on')});
+  assert.equal(await trails.count(),1,'a new edge works while presence remains ON');
+  await sendActivity({receiver1:channelValue('on','unknown')});assert.equal(await trails.count(),0);
+  assert.equal(await glow.getAttribute('data-state'),'presence','motion unavailable does not erase current presence');
+  await sendActivity({receiver1:channelValue('unknown','off'),receiver2:channelValue('off','off')});
+  await sendActivity({receiver1:channelValue('unknown','on')});assert.equal(await trails.count(),1,'motion survives unknown presence');
+  assert.equal(await glow.getAttribute('data-state'),'unknown');
+  await sendActivity({},false);assert.equal(await trails.count(),0);assert.equal(await glow.getAttribute('data-state'),'unknown');
+  await sendActivity({receiver1:channelValue('on','on')});assert.equal(await trails.count(),0,'reconnect restores glow without replay');
+  await sendActivity({receiver1:channelValue('on','off')});await sendActivity({receiver1:channelValue('on','on')});
+  await view.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,value:true});document.dispatchEvent(new Event('visibilitychange'));});
+  assert.equal(await trails.count(),0);assert.equal(await frame.locator('.home-presence-layer').isVisible(),false);
+  await view.evaluate(()=>{delete document.hidden;document.dispatchEvent(new Event('visibilitychange'));});
+  assert.equal(await trails.count(),0,'showing the page does not replay held motion');
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await sendActivity({receiver1:channelValue('on','off')});await sendActivity({receiver1:channelValue('on','on')});
+  assert.equal(await trails.first().locator('.home-footstep').first().evaluate(el=>getComputedStyle(el).animationName),'none');
+  await page.emulateMedia({reducedMotion:'no-preference'});
+  await view.evaluate(()=>{
+   const gl=document.querySelector('#homeStage canvas').getContext('webgl2');
+   window.activityContextLoss=gl.getExtension('WEBGL_lose_context');
+   if(!window.activityContextLoss)throw Error('Context loss extension is required for lifecycle verification');
+   window.activityContextLoss.loseContext();
+  });
+  await view.waitForFunction(()=>getComputedStyle(document.querySelector('.home-presence-layer')).display==='none');
+  assert.equal(await trails.count(),0,'GPU loss clears movement');
+  await sendActivity();assert.equal(await frame.locator('.home-presence-layer').isVisible(),false,'new HA states cannot show an orphan glow after GPU loss');
+  await view.evaluate(()=>window.activityContextLoss.restoreContext());
+  await view.waitForFunction(()=>getComputedStyle(document.querySelector('.home-presence-layer')).display!=='none');
+  assert.equal(await trails.count(),0,'GPU restore does not replay motion');
+  await sendActivity({receiver1:channelValue('off','off'),receiver2:channelValue('off','off')},false);
+  await page.evaluate(()=>{states['binary_sensor.presence'].state='on';publish();});
+  await frame.locator('#homeRoomLabels').click();
   await view.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   const idleCount=await view.evaluate(()=>window.floorplan.renderCount);
   await page.waitForTimeout(150);
@@ -151,7 +230,7 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   assert.doesNotMatch(await card('thermostat').textContent(),/Current:|Target:|<svg>|<img>/);
   await frame.locator('#homeToggleActivity').click();
   await frame.locator('#homeRoom').selectOption(template.room);
-  assert.deepEqual(await frame.locator('#homeActivitySources [data-activity-source]:visible').evaluateAll(nodes=>nodes.map(node=>node.dataset.activitySource)),['presence'],'only the configured direct source is shown');
+  assert.deepEqual(await frame.locator('#homeActivitySources [data-activity-source]:visible').evaluateAll(nodes=>nodes.map(node=>node.dataset.activitySource)),['receiver1','receiver2','presence'],'only configured sources are shown');
   await page.evaluate(()=>publish(false));await card('cold').filter({hasText:'Disconnected'}).waitFor();
   assert.equal(await frame.locator('#homeActivitySources button:visible').count(),0,'disconnection withholds all source rows');
   assert.equal(await card('cold').isDisabled(),true);assert.equal(await frame.locator('[data-home-details="light"]').isDisabled(),true);
@@ -186,8 +265,12 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   assert.equal(await view.evaluate(()=>window.floorplan.illuminated.includes('presence')),false);
   assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='toggle').length),2,'rebound indicators do not add toggle commands');
   assert.deepEqual(await page.evaluate(()=>messages.filter(m=>['media_command','curtain_command'].includes(m.type))),[],'no specialized commands escape the read-only path');
+  await sendActivity({receiver1:channelValue('on','off')});await sendActivity({receiver1:channelValue('on','on')});
+  assert.equal(await trails.count(),1);
   await view.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:false})));
-  assert.equal(await frame.locator('.home-presence-layer').count(),0,'page disposal removes the compact layer');
+  assert.equal(await trails.count(),0,'page disposal clears every motion timer and trail');
+  await sendActivity();assert.equal(await trails.count(),0,'disposed view cannot recreate motion');
+  assert.equal(await frame.locator('.home-presence-layer').count(),0,'page disposal removes the presence layer');
   await page.goto(origin+'/offline');await page.locator('#openHome').click();
   await page.locator('[data-home-device="cold"]').filter({hasText:'Offline preview'}).waitFor();
   assert.equal(await page.locator('[data-home-device="cold"]').isDisabled(),true);

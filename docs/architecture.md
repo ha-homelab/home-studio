@@ -202,8 +202,8 @@ Optional `appliance_status` and `presence_sources` metadata attach read-only
 indicators to an exact item, entity, and room binding. Rebinding invalidates
 the old association. Unknown or disconnected readings cannot produce a smoke
 all-clear, heating animation, or presence claim. Appliance overlays reuse camera
-renders; held presence appears as a fixed-size room badge, without a new WebGL
-loop or an inferred person location. See [indicator contracts](indicators.md)
+renders; held presence appears as a blue overlay of the saved room outline,
+without a new WebGL loop or an inferred person location. See [indicator contracts](indicators.md)
 for supported states, lifecycle rules, and generated-installation setup.
 
 The shared Python `viewer_locales.py` loader compacts generated language data

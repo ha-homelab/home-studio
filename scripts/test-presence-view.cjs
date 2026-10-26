@@ -1,8 +1,27 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {presenceState,presenceEvidence,mergePresenceActivity}=require('../presence-view.js');
+const {presenceState,presenceEvidence,mergePresenceActivity,roomActivityChannels,roomPresence}=require('../presence-view.js');
 const item={id:'presence',room:'living',entity_id:'binary_sensor.presence'};
 const spec={room:item.room,entity_id:item.entity_id};
 const reading=(state,restored=false)=>({[item.entity_id]:{state,restored}});
+test('independent room sources preserve positives and never call unknown inputs clear',()=>{
+  const on={presence:'on',motion:'off',coverage:'unverified',presence_configured:true,motion_configured:true},off={...on,presence:'off'},unknown={...on,presence:'unknown'};
+  assert.equal(roomPresence({}, {a:on,b:off}),'presence');
+  assert.equal(roomPresence({}, {a:on,b:unknown}),'presence');
+  assert.equal(roomPresence({}, {a:off,b:unknown}),'unknown');
+  assert.equal(roomPresence({}, {a:off,b:off}),'quiet');
+  assert.equal(roomPresence({}, {}),'unknown');
+  assert.equal(roomPresence({direct:'presence'}, {a:unknown}),'presence');
+  assert.equal(roomPresence({direct:'quiet'}, {a:unknown}),'unknown');
+  assert.equal(roomPresence({direct:'quiet'}, {a:{...unknown,presence_configured:false}}),'quiet','motion-only sources do not claim missing presence');
+  assert.equal(roomPresence({}, {a:{...unknown,presence_configured:false}}),'unknown','no presence sources is not an all-clear');
+  const source={state:'unknown',last_updated:'2000-01-01',activity:{channels:{presence:on}}};
+  assert.deepEqual(roomActivityChannels(source,[item],[item],true),{presence:on},'an independently known channel survives an unknown summary and old HA update timestamp');
+  assert.deepEqual(roomActivityChannels(source,[item],[item],false),{});
+  for(const state of ['unavailable','off','invalid'])assert.deepEqual(roomActivityChannels({...source,state},[item],[item],true),{});
+  assert.deepEqual(roomActivityChannels({...source,restored:true},[item],[item],true),{});
+  const moved=roomActivityChannels(source,[{...item,room:'other'}],[item],true).presence;
+  assert.equal(moved.presence,'unknown');assert.equal(moved.motion,'unknown');
+});
 test('a held occupancy signal remains presence without inventing motion or vital signs',()=>{
   assert.equal(presenceState(item,spec,reading('on'),true),'presence');
   assert.equal(presenceState(item,spec,{[item.entity_id]:{state:'on',last_updated:'2000-01-01'}},true),'presence');
@@ -32,7 +51,7 @@ test('room captions and inspector merge direct presence without promoting quiet 
     assert.equal(mergePresenceActivity('motion',{presence}),'motion','positive current evidence remains visible');
   }
 });
-test('compact presence badge follows the room label without filling or scaling with the room',()=>{
+test('presence follows the saved room polygon and clears promptly without a render loop',()=>{
   class Element {
     constructor(tag){this.tag=tag;this.attributes={};this.children=[];this.dataset={};this.style={};this.classList={add(){}};this.writes=0;}
     append(...nodes){this.children.push(...nodes);}
@@ -49,26 +68,24 @@ test('compact presence badge follows the room label without filling or scaling w
   try{
     const container=new Element();
     const {createPresenceView}=require('../presence-view.js');
-    // No polygon is needed: presence belongs to the room caption, not its floor.
-    const view=createPresenceView(container,[{id:'living',label:[.25,-.5]},{id:'dining',label:[0,0]}],{presence:spec},{Vector3},x=>x,z=>z);
+    // Real room vertices are projected through the same camera as the floor.
+    const view=createPresenceView(container,[{id:'living',label:[.25,-.5],polygon:[[0,0],[1,0],[1,1],[0,1]]},{id:'dining',label:[0,0]}],{presence:spec},{Vector3},x=>x,z=>z);
     const svg=container.children[0],indicator=svg.children[0];
-    assert.equal(svg.children.length,1,'only the configured room has a badge');
+    assert.equal(svg.children.length,1,'only the configured room has a glow');
     assert.equal(svg.getAttribute('aria-hidden'),'true','the existing room caption provides the text alternative');
-    assert.equal(indicator.tag,'g');
-    assert.deepEqual(indicator.children.map(node=>node.tag),['circle','circle','path'],'no floor polygon, gradient or trail is created');
-    assert.equal(indicator.children[0].getAttribute('r'),10,'the badge is only 20 screen pixels across');
+    assert.equal(indicator.tag,'polygon');
+    assert.deepEqual(indicator.children,[],'a single polygon needs no animation or extra WebGL pass');
     assert.equal(indicator.style.opacity,'0','nothing is shown before current evidence arrives');
     view.update([item],reading('on'),true,true,'');
     assert.equal(indicator.style.opacity,'1');assert.equal(indicator.dataset.state,'presence');
     view.render({x:0},{width:200,height:100});
-    assert.equal(indicator.getAttribute('transform'),'translate(125 97)','the badge stays 22 screen pixels below the label');
+    assert.equal(indicator.getAttribute('points'),'100,50 200,50 200,0 100,0');
     const writes=indicator.writes;view.render({x:0},{width:200,height:100});
     assert.equal(indicator.writes,writes,'an unchanged camera does not repaint attributes');
     view.render({x:1},{width:200,height:100});
-    assert.equal(indicator.getAttribute('transform'),'translate(225 97)');
+    assert.equal(indicator.getAttribute('points'),'200,50 300,50 300,0 200,0');
     view.render({x:0},{width:400,height:200});
-    assert.equal(indicator.getAttribute('transform'),'translate(250 172)');
-    assert.equal(indicator.children[0].getAttribute('r'),10,'resizing moves the badge without enlarging it');
+    assert.equal(indicator.getAttribute('points'),'200,100 400,100 400,0 200,0','resizing preserves alignment with the room');
     view.update([item],reading('off'),true,true,'');
     assert.equal(indicator.dataset.state,'quiet');assert.equal(indicator.style.opacity,'0');
     view.update([item],reading('on'),true,true,'');
