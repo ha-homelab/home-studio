@@ -53,7 +53,7 @@ class SourceReplayTests(unittest.TestCase):
             result = subprocess.run([node, '--test', 'scripts/test-device-onboarding.mjs'], cwd=source,
                                     capture_output=True, text=True, timeout=60)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            for script in ('scripts/test-ai-companion.py', 'scripts/test-native-draw-diagnostic.py', 'scripts/test-intel-macos-ci.py', 'scripts/test-ubuntu-apt.py', 'scripts/test-waterfox-tooling.py', 'scripts/test-site-calibration.py', 'scripts/test-runtime-upgrade.py'):
+            for script in ('scripts/test-ai-companion.py', 'scripts/test-native-draw-diagnostic.py', 'scripts/test-intel-macos-ci.py', 'scripts/test-ubuntu-apt.py', 'scripts/test-waterfox-tooling.py', 'scripts/test-site-calibration.py', 'scripts/test-runtime-upgrade.py', 'scripts/test-viewer-locales.py'):
                 result = subprocess.run([sys.executable, script], cwd=source,
                                         capture_output=True, text=True, timeout=60)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

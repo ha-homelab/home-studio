@@ -129,7 +129,9 @@ assert.equal(context.viewerStateLabel('on'), 'On');
     assert.ok(html.includes("connect-src 'none'"));
     assert.ok(!html.includes('planner/locales/'), 'editor translations are not embedded');
     assert.ok(!html.includes('__VIEWER_I18N_JS__'));
-    assert.deepEqual(JSON.parse(html.match(/^const viewerI18n=createViewerI18n\((.+)\),vt=/m)[1]), compactData, 'the compiler embeds the compact payload');
+    const catalogExpression=html.match(/^const viewerI18n=createViewerI18n\((.+)\),vt=/m)[1];
+    const decodedCatalog=JSON.parse(JSON.stringify(vm.runInNewContext(catalogExpression, {}, {timeout:1000})));
+    assert.deepEqual(decodedCatalog, compactData, 'the generated decoder preserves the complete compact catalog');
     assert.ok(html.includes('User &lt;room&gt; __VIEWER_I18N_DATA__ /*__ENVIRONMENT_JS__*/'), 'user tokens are not expanded');
     browser = await browserTypes[engine].launch({ headless: true, ...(engine === 'chromium' ? {
       executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,

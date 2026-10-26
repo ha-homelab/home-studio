@@ -99,7 +99,7 @@ REPO_FILES = (
               'scripts/test-floor-navigator.cjs', 'scripts/test-planner-navigation.cjs', 'scripts/test-floor-navigation.cjs',
               'scripts/test-i18n.mjs', 'scripts/test-i18n-browser.cjs', 'scripts/test-validation-i18n.mjs',
               'scripts/test-help-i18n.cjs', 'scripts/test-panel-language.cjs', 'scripts/test-viewer-i18n.cjs', 'scripts/test-lock-control.cjs',
-              'viewer-i18n.js', 'viewer_locales.py', 'viewer-locales/index.json',
+              'viewer-i18n.js', 'viewer_locales.py', 'viewer-locales/index.json', 'scripts/test-viewer-locales.py',
               *(f'viewer-locales/{code}.json' for code in LOCALE_CODES),
               'README.md', 'LICENSE', 'CONTRIBUTING.md', 'SECURITY.md',
               'GOVERNANCE.md', 'CODE_OF_CONDUCT.md', 'ROADMAP.md', 'docs/quality.md',
