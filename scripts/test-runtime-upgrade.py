@@ -222,6 +222,38 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(error.exception.code,code)
             self.project.document[key]=old
 
+    def test_large_known_import_keeps_native_budget_separate(self):
+        path = self.component / 'assets/upper/index.html'
+        source = path.read_bytes() + b'<!--' + b' ' * native.MAX_VIEWER_BYTES + b'-->'
+        path.write_bytes(source)
+        bounded = upgrade._regular_bytes(path, upgrade.MAX_IMPORTED_VIEWER_BYTES)
+        version, updated = upgrade._replace(bounded, TARGET)
+        self.assertEqual(version, 0)
+        self.assertEqual(updated.replace(TARGET, LEGACY, 1), source)
+        self.assertGreater(len(updated), native.MAX_VIEWER_BYTES)
+        self.assertEqual(native.MAX_VIEWER_BYTES, 16 * 1024 * 1024)
+        self.assertEqual(upgrade.MAX_IMPORTED_VIEWER_BYTES, 64 * 1024 * 1024)
+
+    def test_oversized_import_refuses_before_read_and_rechecks_output(self):
+        path = self.root / 'oversized.html'
+        with path.open('wb') as stream:
+            stream.truncate(upgrade.MAX_IMPORTED_VIEWER_BYTES + 1)
+        with patch.object(Path, 'open', side_effect=AssertionError('oversized input must not be read')):
+            with self.assertRaises(native.NativeError):
+                upgrade._regular_bytes(path, upgrade.MAX_IMPORTED_VIEWER_BYTES)
+        source = (self.component / 'assets/upper/index.html').read_bytes()
+        with patch.object(upgrade, 'MAX_IMPORTED_VIEWER_BYTES', len(source)):
+            with self.assertRaises(native.NativeError):
+                upgrade._replace(source, TARGET)
+        # A file that grows after stat still uses one bounded read, not read_bytes.
+        small = self.root / 'growing.html'
+        small.write_bytes(b'ok')
+        with patch.object(Path, 'open') as opened:
+            opened.return_value.__enter__.return_value.read.return_value = b'x' * 9
+            with self.assertRaises(native.NativeError):
+                upgrade._regular_bytes(small, 8)
+            opened.return_value.__enter__.return_value.read.assert_called_once_with(9)
+
     async def test_cancelled_copy_settles_and_cleans(self):
         preview,before = await self.preview(),self.state()
         started,release = threading.Event(),threading.Event()

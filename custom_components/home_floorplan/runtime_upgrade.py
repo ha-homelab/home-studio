@@ -15,7 +15,7 @@ import uuid
 
 from .baseline_transaction import commit_baseline, settle
 from .generated import GeneratedProject, _ViewerScripts, _embedded, _hashes, _json
-from .native import MAX_VIEWER_BYTES, NativeError, load_models
+from .native import NativeError, load_models
 
 # Public map-layer.js at b4bd8de, excluding trailing whitespace. This is a
 # compatibility fingerprint, not executable code or an arbitrary replacement.
@@ -23,6 +23,7 @@ LEGACY_SIZE = 18394
 LEGACY_SHA256 = "3bc86903ee91040f08627688ce2860c633a71b6c6bb653991892d4073aa796d4"
 HEADER = b"// Optional geographic context. All tiles share the viewer's scene and renderer."
 MAX_TARGET_BYTES = 256 * 1024
+MAX_IMPORTED_VIEWER_BYTES = 64 * 1024 * 1024
 MAX_ASSET_BYTES = 512 * 1024 * 1024
 MAX_ASSET_FILES = 4096
 
@@ -99,7 +100,7 @@ def _replace(html, target):
     result = html[:start] + target + html[start + len(candidate):]
     before, _ = _embedded(text)
     after, _ = _embedded(result.decode("utf-8"))
-    if before.group(2) != after.group(2) or len(result) > MAX_VIEWER_BYTES:
+    if before.group(2) != after.group(2) or len(result) > MAX_IMPORTED_VIEWER_BYTES:
         raise NativeError("unsupported_runtime", "The runtime upgrade would change model data or exceed the viewer size limit.")
     return version, result
 
@@ -126,7 +127,7 @@ def _read(native, revision):
     changes, versions = {}, set()
     for floor in document["project"]["floors"]:
         relative = floor["id"] + "/index.html"
-        old = _regular_bytes(root / "assets" / relative, MAX_VIEWER_BYTES)
+        old = _regular_bytes(root / "assets" / relative, MAX_IMPORTED_VIEWER_BYTES)
         version, new = _replace(old, target)
         versions.add(version)
         if new != old:
