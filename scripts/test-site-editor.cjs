@@ -15,6 +15,15 @@ const fixture = { schema_version:1, id:'site_fixture', title:'Fictional Willow H
 const hostFixture = `<!doctype html><html style="height:100%"><body style="margin:0;height:100%"><home-floorplan-studio-panel></home-floorplan-studio-panel><script type="module">
 await import('/custom_components/home_floorplan/static/studio.js');
 window.host=document.querySelector('home-floorplan-studio-panel'); window.saved=null;
+window.mapRequests=[];window.mapCloses=0;
+window.addEventListener('message',event=>{
+ const data=event.data;if(data?.protocol!=='home-studio-editor-v1')return;
+ if(data.type==='map-close'){window.mapCloses++;return;}if(data.type!=='map-request')return;
+ window.mapRequests.push({action:data.action,body:data.body});
+ let result={revision:0,configured:true,config:{enabled:true,latitude:0,longitude:0,model_x:0,model_z:0,north_deg:0}};
+ if(data.action==='tile'){const canvas=document.createElement('canvas');canvas.width=canvas.height=256;const ctx=canvas.getContext('2d');ctx.fillStyle='#ccd5cf';ctx.fillRect(0,0,256,256);ctx.fillStyle='#62756b';ctx.fillText('Synthetic map',32,128);result={data_url:canvas.toDataURL('image/png')};}
+ event.source.postMessage({protocol:data.protocol,channel:data.channel,type:'map-response',requestId:data.requestId,result},'*');
+});
 const initial=${JSON.stringify(fixture)}; let revision=1; const generated=location.search.includes('generated');
 host.hass={user:{id:'fictional_admin',is_admin:true},callWS:async data=>{
  if(data.type.endsWith('entity_catalog'))return {floors:[],areas:[],entities:[]};
@@ -171,7 +180,28 @@ async function addRectangle(page,kind,x,z,w,d){
  // Actual Home Assistant host bridge carries the complete site and floors.
  await page.goto(origin+'/fixture');await page.waitForFunction(()=>window.host?._ready);
  const frame=await page.locator('iframe').elementHandle().then(handle=>handle.contentFrame());await frame.waitForFunction(()=>window.planner);
- await frame.locator('#site-mode').click();await frame.getByRole('button',{name:'Add site rectangle',exact:true}).click();
+ assert.equal(await page.evaluate(()=>mapRequests.length),0,'Opening Studio makes no map requests');
+ await frame.locator('#site-mode').click();
+ const beforeMap=await frame.evaluate(()=>planner.getProject());
+ await frame.locator('#site-map-toggle').click();
+ await page.waitForFunction(()=>mapRequests.some(request=>request.action==='tile'));
+ await frame.waitForFunction(()=>document.getElementById('site-map-status').textContent.includes('OpenStreetMap'));
+ assert.deepEqual(await frame.evaluate(()=>planner.getProject()),beforeMap,'Map pixels and alignment never enter project data');
+ await frame.locator('#preview-tab').click();
+ await page.waitForFunction(()=>mapCloses>0);
+ const previewStopped=await page.evaluate(()=>mapRequests.length);await page.waitForTimeout(150);
+ assert.equal(await page.evaluate(()=>mapRequests.length),previewStopped,'Full 3D preview suspends map requests');
+ await frame.locator('#plan-tab').click();
+ await page.waitForFunction(count=>mapRequests.length>count,previewStopped);
+ await frame.locator('#inside-mode').click();
+ const stopped=await page.evaluate(()=>mapRequests.length);await page.waitForTimeout(150);
+ assert.equal(await page.evaluate(()=>mapRequests.length),stopped,'Leaving Site stops map requests');
+ await frame.locator('#site-mode').click();
+ await page.waitForFunction(count=>mapRequests.length>count,stopped);
+ await frame.locator('#site-map-toggle').click();
+ assert.equal(await frame.locator('#site-map-toggle').getAttribute('aria-pressed'),'false');
+ assert.deepEqual(await frame.evaluate(()=>planner.getProject()),beforeMap);
+ await frame.getByRole('button',{name:'Add site rectangle',exact:true}).click();
  await page.evaluate(()=>host._save());await page.waitForFunction(()=>window.saved?.site?.features.length===1);
  assert.deepEqual(await page.evaluate(()=>saved.floors),fixture.floors);
  await page.goto(origin+'/fixture?generated');await page.waitForFunction(()=>window.host?._ready);

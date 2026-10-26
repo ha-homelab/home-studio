@@ -1,5 +1,6 @@
 import { createSite, nextSiteId, siteBounds, SITE_LIMITS } from './site-model.js';
 import { clone, round, pointInPolygon, signedArea, floorBounds } from './model.js';
+import { createSiteMapUnderlay } from './site-map-underlay.js';
 
 const KINDS = [ ['home', 'My home', '#bca88a', 3], ['roof', 'Roof', '#9b7768', 3], ['building', 'Neighbor', '#589aa8', 3], ['street', 'Street', '#9a9b94', 0], ['landscape', 'Landscape', '#a9bd91', 0] ];
 const label = kind => KINDS.find(entry => entry[0] === kind)?.[1] || kind;
@@ -11,6 +12,7 @@ const flat = kind => kind === 'street' || kind === 'landscape';
 export function createSiteEditor(api) {
   const { canvas, ctx, $, node, button, field, row, section, t } = api;
   let active = false, selectedId = null, tool = 'select', kind = 'home', scope = 'all', points = [], hover = null, gesture = null;
+  let mapUnderlay = null, mapTransport = null, mapWanted = false, suspended = false;
   const editableKind = value => scope !== 'neighborhood' || !['home', 'roof'].includes(value);
   const current = () => api.getProject().site || createSite();
   const accepted = () => api.getAcceptedProject().site || createSite();
@@ -33,6 +35,7 @@ export function createSiteEditor(api) {
   function setActive(next) {
     next = !!next; if (active === next) return;
     api.beforeModeChange(); cancel(); active = next; selectedId = null; tool = 'select';
+    syncMapUnderlay();
     document.body.classList.toggle('site-mode', active);
     $('site-tools').hidden = !active;
     const previewNote = document.querySelector('.preview-note');
@@ -63,6 +66,7 @@ export function createSiteEditor(api) {
   function remove() { if (!selected()) return; const id = selectedId; cancel(); api.transact(project => { project.site.features = project.site.features.filter(feature => feature.id !== id); selectedId = null; }, 'Site feature deleted. Undo is available.'); }
   function updateUI() {
     if (!active) return;
+    syncMapUnderlay();
     document.querySelector('.preview-note').textContent = 'Site shapes · approximate exterior';
     if (selectedId && !selected()) selectedId = null;
     $('empty-state').hidden = true; $('floor-caption').textContent = `${scope === 'neighborhood' ? 'Neighborhood' : 'Site & roof'} · meters`;
@@ -140,6 +144,11 @@ export function createSiteEditor(api) {
   function render() {
     const colors = api.colors(), scale = api.viewport().map.scale;
     ctx.save();
+    if (mapUnderlay?.state.enabled) {
+      const { width, height } = api.viewport().size;
+      mapUnderlay.setView({ width, height, toWorld: api.toWorld });
+      mapUnderlay.draw(ctx, { worldToCanvas: api.toScreen });
+    }
     // Every floor is a reference only; this layer never changes indoor geometry.
     ctx.globalAlpha = .24;
     for (const floor of api.getProject().floors) {
@@ -187,6 +196,11 @@ export function createSiteEditor(api) {
     const sx = 18, sy = size.height - 76;
     ctx.strokeStyle = colors.scale; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sx,sy-3); ctx.lineTo(sx,sy+3); ctx.moveTo(sx,sy); ctx.lineTo(sx+meters*scale,sy); ctx.lineTo(sx+meters*scale,sy-3); ctx.moveTo(sx+meters*scale,sy); ctx.lineTo(sx+meters*scale,sy+3); ctx.stroke();
     ctx.fillStyle = colors.scaleText; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`${meters} m · local coordinates`,sx,sy-9);
+    if (mapUnderlay?.state.attribution) {
+      const text = mapUnderlay.state.attribution, width = ctx.measureText(text).width, x = size.width - 12, y = size.height - (size.width < 380 ? 101 : 76);
+      ctx.fillStyle = colors.background; ctx.globalAlpha = .9; ctx.fillRect(x-width-5,y-13,width+10,18); ctx.globalAlpha = 1;
+      ctx.fillStyle = colors.scaleText; ctx.textAlign = 'right'; ctx.fillText(text,x,y);
+    }
     ctx.restore();
   }
   function rectangle(a,b) { return [a,[b[0],a[1]],b,[a[0],b[1]]]; }
@@ -255,13 +269,38 @@ export function createSiteEditor(api) {
     const control = button(title, () => setScope(value)); control.dataset.siteScope = value; control.setAttribute('aria-pressed', String(value === scope)); scopes.append(control); return control;
   });
   $('site-tools').insertBefore(scopes, $('site-settings'));
+  const mapControls = node('section', 'site-map-controls'); mapControls.hidden = true; mapControls.setAttribute('aria-label', 'Map background');
+  const mapToggle = button('Map background', () => { mapWanted = !mapWanted; syncMapUnderlay(); }); mapToggle.id = 'site-map-toggle'; mapToggle.setAttribute('aria-pressed', 'false');
+  const mapReload = button('Reload map', () => { void mapUnderlay?.reload(); }); mapReload.id = 'site-map-reload';
+  const mapStatus = node('p', 'site-map-status'); mapStatus.id = 'site-map-status'; mapStatus.setAttribute('role', 'status');
+  mapControls.append(mapToggle, mapReload, mapStatus); $('site-tools').insertBefore(mapControls, $('site-settings'));
+  function updateMapControls() {
+    const state = mapUnderlay?.state;
+    mapControls.hidden = !mapUnderlay;
+    mapToggle.setAttribute('aria-pressed', String(mapWanted));
+    mapReload.hidden = !mapWanted; mapReload.disabled = !state?.enabled || state.loading;
+    mapStatus.textContent = mapWanted ? state?.status || state?.attribution || '' : 'Show your saved Home Assistant map alignment beneath this drawing.';
+  }
+  function syncMapUnderlay() {
+    const wasEnabled = mapUnderlay?.state.enabled, enabled = active && mapWanted && api.getView() !== 'preview' && !suspended && !document.hidden;
+    mapUnderlay?.setEnabled(enabled);
+    if (wasEnabled && !enabled) mapTransport?.close?.();
+    updateMapControls();
+  }
+  function setMapTransport(transport) {
+    mapUnderlay?.dispose(); mapTransport?.close?.(); mapUnderlay = null; mapTransport = transport; mapWanted = false;
+    if (typeof transport?.request === 'function') mapUnderlay = createSiteMapUnderlay({ request: (...args) => transport.request(...args), onChange: api.render, onStatus: updateMapControls });
+    syncMapUnderlay();
+  }
+  function setSuspended(value) { suspended = !!value; syncMapUnderlay(); }
+  function dispose() { mapUnderlay?.dispose(); mapTransport?.close?.(); mapUnderlay = null; mapTransport = null; }
   $('site-settings').addEventListener('click', () => choose(null));
   $('inside-mode').addEventListener('click', () => setActive(false)); $('site-mode').addEventListener('click', () => setActive(true));
   for (const control of document.querySelectorAll('[data-site-tool]')) control.addEventListener('click', () => setTool(control.dataset.siteTool));
   for (const [value,name] of KINDS) { const option = node('option','',t(name)); option.value = value; $('site-kind').append(option); }
   $('site-kind').addEventListener('change', event => { kind = event.target.value; refresh(); });
   $('site-finish').addEventListener('click',finish); $('site-cancel').addEventListener('click',() => { cancel(); refresh(); });
-  return { get active() { return active; }, get neighborhood() { return scope === 'neighborhood'; }, get selectedId() { return selectedId; }, get busy() { return !!gesture || points.length > 0; }, setActive, cancel, updateUI, buildInspector, bounds, render, pointerDown, pointerMove, pointerUp, keyDown, hint };
+  return { get active() { return active; }, get neighborhood() { return scope === 'neighborhood'; }, get selectedId() { return selectedId; }, get busy() { return !!gesture || points.length > 0; }, setActive, cancel, updateUI, buildInspector, bounds, render, pointerDown, pointerMove, pointerUp, keyDown, hint, setMapTransport, setSuspended, dispose };
 }
 
 export function buildSitePreview(THREE, site, material, { showHome = true } = {}) {
