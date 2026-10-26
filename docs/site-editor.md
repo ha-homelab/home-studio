@@ -54,18 +54,44 @@ usually provide enough context. You can select a shape from the list, adjust
 its color and height, or delete it without changing any indoor objects or
 Home Assistant entity bindings.
 
+You can draw these outlines manually from known measurements and permitted
+references, without an AI account or key. Check their position on the shared
+grid before using the separate Home Assistant map alignment.
+
 The supported envelope is 64 shapes, 64 corners per shape and 1,024 corners in
 total. Coordinates extend 1,000 metres each side of the drawing origin. Keep
 individual polygons simple: their edges must not cross, fold back, or repeat
 the first point at the end. Separate polygons may overlap, for example a roof
 over a house or a garden beside a street.
 
+## Choose reference imagery
+
+Use your own photos or references licensed for your intended use, including
+submission to your selected AI provider. Keep required source attribution when
+showing or sharing imagery. A private project or personal API key does not grant
+additional rights to someone else's images.
+
+- **Google Maps screenshots:** Google's [image-use guidelines](https://about.google/brand-resource-center/products-and-services/geo-guidelines/)
+  permit adding labels and graphics to ordinary Maps screenshots with attribution.
+  That permission is not a general license for automated geometry extraction.
+- **Google Street View:** the same guidelines prohibit screenshotting Street View
+  and using applications to extract information from it. Use your own street-level
+  photographs for this workflow.
+- **Google Maps Platform imagery:** the [API terms](https://cloud.google.com/maps-platform/terms)
+  prohibit deriving building outlines from its satellite imagery. Home Studio does
+  not fetch Google imagery or provide a Google footprint-extraction service.
+
+[OpenStreetMap data](https://www.openstreetmap.org/copyright) can provide an open
+reference; retain its attribution and license notices and review the ODbL terms
+before redistributing derived data. Draw only the local context you need and
+check dimensions independently.
+
 ## Draft from photos with your own AI
 
-Open the optional AI panel and choose the site/roof mode. Select the photos you
-want to send and identify your home in words. Include a measured distance, the
-relationship to the existing drawing, and which nearby objects to include.
-For example:
+Open the optional AI panel and choose the site/roof mode. Select the photos or
+permitted reference images you want to send and identify your home in words.
+Include a measured distance, the relationship to the existing drawing, and which
+nearby objects to include. For example:
 
 > My home is the white building in the center of photo 1. Its front wall is
 > 8 metres wide and runs along X from 0 to 8; the street is on the negative-Z
@@ -85,8 +111,11 @@ AI uses the existing [provider connection](ai-planning.md) and photo preparation
 flow. A cloud provider receives your selected photos, instructions and the
 displayed planning context; a local model receives them through its configured
 endpoint. Credentials are session-only. Neither photos nor credentials are
-saved inside the drawing. No AI result sets GPS coordinates or silently changes
-the Home Assistant map alignment.
+saved inside the drawing. Applied shapes are saved with the project and exported
+viewer, so keep real neighborhood projects and backups private. Ending the session
+clears Home Studio's selected photos and credentials; it cannot delete provider
+records. No AI result sets GPS coordinates or silently changes the Home Assistant
+map alignment.
 
 ## Show it on the Home Assistant map
 

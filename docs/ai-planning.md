@@ -103,6 +103,11 @@ to include, and supply any known dimension and orientation. For example: “The 
 house in photo 1 is mine; its front wall is 10 m along +X. Include its roof, the
 neighbor to the right, and the street toward +Z.” X points right and Z down in 2D.
 
+Choose your own photos or [permitted reference imagery](site-editor.md#choose-reference-imagery).
+Keep required attribution and check that you may submit the images to your selected
+provider. A screenshot is not automatically licensed for AI extraction. You can
+always draw the same exterior shapes manually in **Site & roof** without an AI key.
+
 Review the disclosed context before **Generate draft**: this scope sends existing
 site features and floor footprint polygons/elevations for alignment, plus your
 site descriptions, instructions and selected processed photos. It excludes room
@@ -119,6 +124,11 @@ visual references, not a survey or exact photogrammetry. Roofs are flat outlines
 the specified height; pitch and facets are not represented. No latitude, longitude
 or map location is inferred from photos. See the [site editor guide](site-editor.md)
 for manual adjustments and map alignment.
+
+Selected photos remain session inputs and are excluded from the saved drawing.
+Applied site geometry persists in project backups and generated viewers. Even
+without GPS coordinates, a recognizable neighborhood can reveal its location;
+keep real projects private and use fictional geometry in public examples.
 
 ## Where the key and photos go
 
@@ -158,7 +168,9 @@ opaque iframe, or in a worker for the companion. The shared decoder receives no
 credentials and makes no network requests. It resizes and re-encodes images to
 strip metadata. This does not remove people,
 readable documents or private possessions from the visible image. Crop those before
-selecting the file. The HA backend and companion do not decode pixels or write photographs to disk.
+selecting the file, while preserving required imagery attribution. The HA backend
+and companion do not decode pixels or write photographs to disk. Ending the session
+clears Home Studio's selected photos; it cannot delete copies retained by a provider.
 
 ## Bounds and failure behavior
 
