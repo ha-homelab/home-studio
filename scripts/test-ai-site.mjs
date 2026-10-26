@@ -68,6 +68,30 @@ test('stale project, forged context and mismatched response cannot apply', () =>
   assert.throws(() => prepareDraft(changedSite, context, draft), /project changed/);
   for (const patch of [{ request_id: 'old_request' }, { kind: 'new_room' }, { draft_version: 2 }]) assert.throws(() => prepareDraft(project, context, { ...draft, ...patch }), /request|version/);
 });
+test('neighborhood scope restricts both provider schema and every reviewed candidate', () => {
+  const neighborhood = contextFor(project, { siteScope: 'neighborhood' });
+  assert.deepEqual(Object.keys(neighborhood), Object.keys(context), 'Scope does not add provider context fields');
+  assert.deepEqual(draftSchema('site', neighborhood).properties.features.items.properties.kind.enum, ['building', 'street', 'landscape']);
+  assert.deepEqual(draftSchema('site', context).properties.features.items.properties.kind.enum, ['home', 'roof', 'building', 'street', 'landscape']);
+  for (const kind of ['home', 'roof']) for (const selectedCandidateKeys of [undefined, []]) {
+    assert.throws(() => prepareDraft(project, neighborhood, response(neighborhood, { features: [feature({ kind })] }), { selectedCandidateKeys }), /Neighborhood drafts/);
+  }
+  const features = ['building', 'street', 'landscape'].map((kind, index) => feature({ kind, candidate_key: `context_${index}`, height_m: kind === 'building' ? 4 : 0 }));
+  const result = prepareDraft(project, neighborhood, response(neighborhood, { features }));
+  assert.deepEqual(result.project.floors, project.floors);
+  assert.deepEqual(result.project.site.features[0], project.site.features[0]);
+  assert.equal(result.project.site.features[1].render_style, 'outline');
+  assert.throws(() => contextFor(project, { siteScope: 'unknown' }), /scope/);
+  const transport = spawnSync('python3', ['-c', `import json,sys
+from ai_companion.protocol import dumps,validate_generate
+from ai_companion.providers import PROFILES,request_payload
+request=json.load(sys.stdin);validate_generate(request)
+for profile in PROFILES.values(): dumps(request_payload(profile,'synthetic-model',request))`], {
+    cwd: root, input: JSON.stringify({ request_id: neighborhood.request_id, mode: 'site', context: neighborhood,
+      instructions: 'Draft only the nearby buildings.', images: [], schema: draftSchema('site', neighborhood) }), encoding: 'utf8' });
+  assert.equal(transport.status, 0, transport.stderr);
+  fixtures.push(result.project);
+});
 test('rejects injected actions, geocoordinates, private fields and project IDs', () => {
   for (const name of ['id', 'site', 'ground_elevation_m', 'floors', 'items', 'entity_id', 'url', 'command', 'latitude', 'longitude', 'georeference', 'api_key', 'render_style']) {
     assert.throws(() => prepareDraft(project, context, { ...draft, [name]: 'injected' }), /unknown/);

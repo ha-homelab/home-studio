@@ -1901,7 +1901,7 @@ export const editorBridge = Object.freeze({
   revision: () => editorRevision,
   editingMode: () => siteEditor.active ? 'site' : 'floor',
   setEditingMode(mode) { if (!['site', 'floor'].includes(mode)) throw new Error('Unknown editing mode.'); siteEditor.setActive(mode === 'site'); },
-  selectionContext: () => ({ mode: siteEditor.active ? 'site' : 'floor', siteFeatureId: siteEditor.active ? siteEditor.selectedId : null, floorId: activeFloorId, roomId: selection?.kind === 'rooms' ? selection.id : selection?.kind === 'items' ? selected()?.room : null }),
+  selectionContext: () => ({ mode: siteEditor.active ? 'site' : 'floor', siteScope: siteEditor.neighborhood ? 'neighborhood' : 'all', siteFeatureId: siteEditor.active ? siteEditor.selectedId : null, floorId: activeFloorId, roomId: selection?.kind === 'rooms' ? selection.id : selection?.kind === 'items' ? selected()?.room : null }),
   subscribe(listener) { editorListeners.add(listener); return () => editorListeners.delete(listener); },
   previewProject(candidate) {
     validateProject(candidate); validateSourcePolicy(candidate); serializeProject(candidate); candidatePreview = clone(candidate); previewDirty = true;

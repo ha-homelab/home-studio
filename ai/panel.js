@@ -215,11 +215,12 @@ export function mountAiPanel(bridge, sessionOrTransport) {
     $('cancel-request').hidden = !pending;
     $('connection').textContent = active ? `Connected session · ${connection.provider} · ${connection.model} · ${connection.endpoint || provider?.default_endpoint || ''}. Connection does not test model vision capability.` : 'Disconnected. Connect a session before generating.';
     const siteMode = $('mode').value === 'site';
+    const neighborhood = siteMode && bridge.selectionContext().siteScope === 'neighborhood';
     $('measurements').hidden = $('mode').value !== 'new_room'; $('site-fields').hidden = !siteMode;
     $('instructions').placeholder = siteMode ? 'Describe photo directions, roof shape, features to add, and uncertain details. Any language is welcome.' : 'Describe the furniture, photo directions, reference wall, and measurements. Any language is welcome.';
     const selected = bridge.selectionContext(), project = bridge.snapshot();
     const floor = project.floors.find(value => value.id === selected.floorId), room = floor?.rooms.find(value => value.id === selected.roomId);
-    $('target').textContent = siteMode ? `Add approximate exterior features to the site (${project.site?.features.length || 0} existing). The context includes existing site features and floor footprint polygons for alignment; no device bindings or private notes.` : $('mode').value === 'new_room' ? `New measured room on ${floor?.name || 'the current floor'}.` : room ? `Selected room: ${room.name}. Measured walls and existing objects remain fixed.` : 'Select an existing room in the plan, or choose Create a measured rectangular room.';
+    $('target').textContent = siteMode ? `${neighborhood ? 'Neighborhood: add only neighboring buildings, streets and landscape. Your home and roof stay fixed.' : 'Add approximate exterior features to the site.'} ${project.site?.features.length || 0} existing features. The context includes existing site features and floor footprint polygons for alignment; no device bindings or private notes.` : $('mode').value === 'new_room' ? `New measured room on ${floor?.name || 'the current floor'}.` : room ? `Selected room: ${room.name}. Measured walls and existing objects remain fixed.` : 'Select an existing room in the plan, or choose Create a measured rectangular room.';
     const contextKey = [bridge.revision(), $('mode').value, ...['width', 'depth', 'height', 'origin-x', 'origin-z', 'site-home', 'site-include', 'site-reference'].map(id => $(id).value)].join('|');
     if (contextKey !== contextPreviewKey) {
       contextPreviewKey = contextKey;
@@ -362,7 +363,7 @@ export function mountAiPanel(bridge, sessionOrTransport) {
       }
       if (epoch !== requestEpoch) return;
       const instructions = $('instructions').value + (lastDraftIssue ? `\n\nPrevious draft validation feedback:\n${lastDraftIssue}` : '');
-      const result = await api('generate', { request_id: draftContext.request_id, mode: $('mode').value, context: draftContext, instructions, images, schema: draftSchema($('mode').value) }, signal);
+      const result = await api('generate', { request_id: draftContext.request_id, mode: $('mode').value, context: draftContext, instructions, images, schema: draftSchema($('mode').value, draftContext) }, signal);
       if (epoch !== requestEpoch || bridge.revision() !== revision || !connection) return;
       let prepared;
       try { prepared = prepareDraft(baseProject, draftContext, result.draft); }

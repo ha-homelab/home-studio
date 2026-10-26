@@ -111,6 +111,7 @@ async function addRectangle(page,kind,x,z,w,d){
  await clickPoint(page,[9,1]);await clickPoint(page,[10,2]);await page.keyboard.press('Escape');assert.deepEqual(await model(page),beforeCancel);
  // Neighborhood uses the existing editor, with the home and shared ground locked.
  await page.getByRole('button',{name:'Neighborhood',exact:true}).click();
+ assert.equal(await page.evaluate(async()=>(await import('/planner/editor.js')).editorBridge.selectionContext().siteScope),'neighborhood');
  assert.equal(await page.locator('#site-kind').inputValue(),'building');
  assert.equal(await page.getByLabel('Ground elevation (m)',{exact:true}).getAttribute('readonly'),'');
  assert.equal(await page.locator('#site-list [data-site-id]').count(),0);
@@ -129,6 +130,7 @@ async function addRectangle(page,kind,x,z,w,d){
  await page.getByRole('button',{name:'Undo',exact:true}).click();
  assert.equal((await model(page)).site.features.at(-1).render_style,'outline');
  await page.getByRole('button',{name:'All site features',exact:true}).click();
+ assert.equal(await page.evaluate(async()=>(await import('/planner/editor.js')).editorBridge.selectionContext().siteScope),'all');
  assert.equal(await page.locator('#site-list [data-site-id]').count(),3);
  await page.locator('#build-project').click();
  assert.equal(await page.locator('#build-site-compatibility').isVisible(),false);
