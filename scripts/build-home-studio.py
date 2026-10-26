@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 COMPONENT_FILES = (
     "__init__.py", "site.py", "validation.py", "curtains.py", "native.py", "generated.py", "permissions.py",
     "ai.py", "map.py", "config_flow.py", "manifest.json", "strings.json", "translations/en.json",
-    "static/panel.js", "static/card.js", "static/studio.js",
+    "static/panel.js", "static/card.js", "static/studio.js", "static/map-transport.js",
 )
 RUNTIME_FILES = (
     'camera-tour.js', 'camera-tour-panel.js', 'camera-tour-recording.js', 'camera-tour-session.js', 'camera-tour.css', 'camera-tour-viewer.js',

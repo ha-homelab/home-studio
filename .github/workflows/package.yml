@@ -87,6 +87,7 @@ jobs:
       - name: Verify site geometry, compilation and isolated AI drafts
         run: |
           node scripts/test-site-model.mjs
+          node --test scripts/test-site-map-underlay.mjs
           python3 scripts/test-site-compiler.py
           node scripts/test-ai-site.mjs
       - name: Replay fuzz regression inputs without mutation campaigns
@@ -153,6 +154,7 @@ jobs:
         run: |
           for engine in chromium firefox webkit; do
             SITE_EDITOR_ENGINE="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-site-editor.cjs || exit 1
+            BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-site-map.cjs || exit 1
           done
       - name: Test optional albedo surfaces in the compiled viewer
         run: |
