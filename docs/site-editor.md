@@ -130,10 +130,13 @@ nearby objects to include. For example:
 
 > My home is the white building in the center of photo 1. Its front wall is
 > 8 metres wide and runs along X from 0 to 8; the street is on the negative-Z
-> side. Draw my home's footprint and roof edge, the two buildings immediately
-> to its left and right, and the street in front. Do not include buildings in
-> the distance. The eaves are about 6 metres above ground. Mark uncertain
-> dimensions as estimates.
+> side. Keep my home unchanged. Draw the two buildings immediately to its left
+> and right, and the street in front. Do not include buildings in the distance.
+> The neighbors' eaves are about 6 metres above ground. Mark uncertain dimensions
+> as estimates.
+
+This example works in **Neighborhood** scope. Switch to **All site features**
+if you also want a proposal for your own building footprint or roof.
 
 A street-level photo does not reveal hidden roof edges, exact distances, or
 surveyed property boundaries. Review the proposed shapes and the AI's stated
