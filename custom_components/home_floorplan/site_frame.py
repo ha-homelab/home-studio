@@ -1,4 +1,4 @@
-"""Pure checks and explicit proposals for imported floor coordinate frames."""
+"""Explicit calibration proposals for imported floor coordinate frames."""
 import copy
 import math
 
@@ -7,29 +7,6 @@ TOLERANCE = 1e-6
 
 def finite(value):
     return type(value) in (int, float) and math.isfinite(value)
-
-
-def check_site_frame(project, models):
-    """Reject inconsistent imported ground datums before authoring a site."""
-    if "site" not in project:
-        return
-    floors = project["floors"]
-    inferred = []
-    for floor in floors:
-        model = models.get(floor["id"], {})
-        context = model.get("site_context", {})
-        ground = context.get("ground_elevation_m") if isinstance(context, dict) else None
-        if isinstance(context, dict) and "ground_elevation_m" in context and not finite(ground):
-            raise ValueError("The original site ground datum is invalid. Restore or rebuild the original home before adding site shapes.")
-        if finite(ground) and finite(floor.get("elevation_m")):
-            inferred.append(ground + floor["elevation_m"])
-        elif len(floors) > 1 and not (finite(model.get("elevation_m")) and
-                finite(floor.get("elevation_m")) and math.isclose(
-                    model["elevation_m"], floor["elevation_m"], abs_tol=TOLERANCE, rel_tol=0)):
-            raise ValueError("The imported floors lack a reliable shared site frame. Calibrate the site frame or rebuild the original home before adding site shapes.")
-    if inferred and any(not math.isclose(value, inferred[0], abs_tol=TOLERANCE, rel_tol=0)
-                        for value in inferred[1:]):
-        raise ValueError("The imported floors disagree on site ground. Preview and apply site-frame calibration before adding site shapes.")
 
 
 def propose_site_frame(project, baseline_project, models, embedded):

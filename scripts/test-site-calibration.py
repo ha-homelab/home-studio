@@ -78,7 +78,7 @@ class CalibrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restarted.document, after)
         proposed = copy.deepcopy(after['project'])
         proposed['site'] = {'ground_elevation_m': 0, 'features': []}
-        frame.check_site_frame(proposed, self.models)
+        generated._check_source_site_frame(proposed, new / 'assets')
         await restarted.save(2, proposed)
         assets, published_site, models, _, _ = await restarted.publish(3)
         for fid in models:
@@ -93,7 +93,7 @@ class CalibrationTests(unittest.IsolatedAsyncioTestCase):
         fresh = generated.seed_project(published_site, models, restarted.document['inventory'])
         self.assertEqual([floor['elevation_m'] for floor in fresh['floors']], [3, 0])
         self.assertEqual(fresh['site'], proposed['site'])
-        frame.check_site_frame(fresh, models)
+        generated._check_source_site_frame(fresh, assets)
         for path, digest in before.items():
             self.assertEqual(support.tree_hashes(self.project.root)[path], digest)
 
@@ -176,14 +176,14 @@ class CalibrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.project.document['revision'], 2)
         self.assertEqual(len(list((self.project.root / 'baselines').iterdir())), 1)
 
-    async def test_pure_guard_and_proposal_reject_uncertain_sources(self):
+    async def test_publication_guard_and_proposal_reject_uncertain_sources(self):
         project = copy.deepcopy(self.project.document['project'])
         project['site'] = {'ground_elevation_m': 0, 'features': []}
-        with self.assertRaisesRegex(ValueError, 'disagree'):
-            frame.check_site_frame(project, self.models)
+        with self.assertRaisesRegex(native.NativeError, 'disagree'):
+            generated._check_source_site_frame(project, self.component / 'assets')
         corrected, _, _ = frame.propose_site_frame(project, project, self.models, self.models)
         corrected['site']['ground_elevation_m'] = -1
-        frame.check_site_frame(corrected, self.models)  # authored ground may intentionally differ
+        generated._check_source_site_frame(corrected, self.component / 'assets')  # authored ground may intentionally differ
         for value in (None, True, float('nan'), 101):
             models = copy.deepcopy(self.models)
             models['upper']['site_context']['ground_elevation_m'] = value
@@ -196,13 +196,6 @@ class CalibrationTests(unittest.IsolatedAsyncioTestCase):
         project['site']['ground_elevation_m'] = 1
         with self.assertRaisesRegex(ValueError, 'nonzero'):
             frame.propose_site_frame(project, project, self.models, self.models)
-        legacy = copy.deepcopy(self.models)
-        for model in legacy.values():
-            model.pop('site_context')
-        frame.check_site_frame(project, legacy)
-        legacy['upper'].pop('elevation_m')
-        with self.assertRaises(ValueError):
-            frame.check_site_frame(project, legacy)
 
     async def test_context_merge_preserves_absent_slab_fallback_and_private_fields(self):
         project = copy.deepcopy(self.project.document['project'])

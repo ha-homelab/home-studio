@@ -193,7 +193,7 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
                     with self.assertRaises(native.NativeError) as error:
                         await adapter.publish(adapter.document["revision"])
                 self.assertEqual(error.exception.code, "inconsistent_site_frame")
-                self.assertIn("remove its top-level site field", str(error.exception))
+                self.assertIn("Calibrate imported site frame", str(error.exception))
                 self.assertEqual((adapter.document, self.hass.saved, tree_hashes(adapter.root)), before)
                 self.assert_baseline_unchanged()
         source.pop("site")
@@ -239,6 +239,50 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.exception.code, "inconsistent_site_frame")
         self.assertIn("lack reliable", str(error.exception))
         self.assert_baseline_unchanged()
+
+    async def test_conflicting_explicit_elevations_cannot_be_hidden_by_source_merge(self):
+        adapter = await self.source_site_frame(elevations=(3, 0), grounds=(None, None))
+        source = copy.deepcopy(adapter.document["project"])
+        source["site"] = {"ground_elevation_m": 0, "features": []}
+        assets = self.component / "assets"
+        generated._check_source_site_frame(source, assets)  # Matching explicit levels remain supported.
+        raw_path, page = assets / "upper/model-data.json", assets / "upper/index.html"
+        raw, embedded = json.loads(raw_path.read_text()), embedded_model(page)
+        for raw_level, embedded_level in ((2, 3), (3, 2)):
+            with self.subTest(raw=raw_level, embedded=embedded_level):
+                # Exercise the guard directly: normal initial import also uses
+                # the raw level, while a confirmed frame can supply a new one.
+                raw["elevation_m"], embedded["elevation_m"] = raw_level, embedded_level
+                raw_path.write_text(encoded(raw), encoding="utf-8")
+                page.write_text(MODEL_BLOCK.sub(lambda match: match[1] + encoded(embedded) + match[3],
+                                               page.read_text(encoding="utf-8")), encoding="utf-8")
+                before = tree_hashes(assets)
+                with self.assertRaises(native.NativeError) as error:
+                    generated._check_source_site_frame(source, assets)
+                self.assertEqual(error.exception.code, "inconsistent_site_frame")
+                self.assertIn("lack reliable", str(error.exception))
+                self.assertEqual(tree_hashes(assets), before)
+
+    async def test_explicit_null_ground_cannot_be_hidden_by_other_source(self):
+        adapter = await self.source_site_frame(elevations=(3, 0))
+        source = copy.deepcopy(adapter.document["project"])
+        source["site"] = {"ground_elevation_m": 0, "features": []}
+        assets = self.component / "assets"
+        raw_path, page = assets / "upper/model-data.json", assets / "upper/index.html"
+        raw, embedded = json.loads(raw_path.read_text()), embedded_model(page)
+        for raw_ground, embedded_ground in ((None, -3), (-3, None)):
+            with self.subTest(raw=raw_ground, embedded=embedded_ground):
+                raw["site_context"]["ground_elevation_m"] = raw_ground
+                embedded["site_context"]["ground_elevation_m"] = embedded_ground
+                raw_path.write_text(encoded(raw), encoding="utf-8")
+                page.write_text(MODEL_BLOCK.sub(lambda match: match[1] + encoded(embedded) + match[3],
+                                               page.read_text(encoding="utf-8")), encoding="utf-8")
+                before = tree_hashes(assets)
+                with self.assertRaises(native.NativeError) as error:
+                    generated._check_source_site_frame(source, assets)
+                self.assertEqual(error.exception.code, "inconsistent_site_frame")
+                self.assertIn("ground reference is invalid", str(error.exception))
+                self.assertEqual(tree_hashes(assets), before)
 
     def test_confirmed_floor_frame_is_metadata_only_in_published_model(self):
         original = copy.deepcopy(self.project.document["project"]["floors"][0])
@@ -315,42 +359,6 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.exception.code, "unsupported_site_runtime")
         self.assertEqual(self.project.document["generation"], previous)
         self.assertTrue((self.project.root / previous / "upper/index.html").is_file())
-        self.assert_baseline_unchanged()
-
-    async def test_ambiguous_imported_floor_datums_reject_site_publish_without_changing_home(self):
-        for identifier, model in self.models.items():
-            model.pop("elevation_m", None)
-            model["site_context"]["ground_elevation_m"] = -2.86 if identifier == "upper" else 0
-            folder = self.component / "assets" / identifier
-            (folder / "model-data.json").write_text(encoded(model), encoding="utf-8")
-            page = folder / "index.html"
-            embedded = embedded_model(page)
-            embedded.pop("elevation_m", None)
-            embedded["site_context"]["ground_elevation_m"] = model["site_context"]["ground_elevation_m"]
-            page.write_text(MODEL_BLOCK.sub(lambda match: match[1] + encoded(embedded) + match[3],
-                                           page.read_text(encoding="utf-8")), encoding="utf-8")
-        self.baseline = tree_hashes(self.component)
-        adapter = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
-        await adapter.load()
-        source = copy.deepcopy(adapter.document["project"])
-        self.assertEqual([floor["elevation_m"] for floor in source["floors"]], [0, 0])
-        await adapter.save(0, source)
-        await adapter.publish(1)  # Existing indoor publication remains available without a site.
-        previous = adapter.document["generation"]
-        previous_hashes = tree_hashes(adapter.root / previous)
-        source["site"] = {"ground_elevation_m": 0, "features": [
-            {"id": "neighbor", "name": "Neighbor", "kind": "building", "height_m": 3,
-             "color": "#589aa8", "polygon": [[8, 0], [12, 0], [12, 4], [8, 4]]},
-        ]}
-        await adapter.save(1, source)
-        with self.assertRaises(native.NativeError) as error:
-            await adapter.publish(2)
-        self.assertEqual(error.exception.code, "inconsistent_site_frame")
-        self.assertIn("calibration", str(error.exception))
-        self.assertEqual(adapter.document["generation"], previous)
-        self.assertEqual(tree_hashes(adapter.root / previous), previous_hashes)
-        self.assertEqual(adapter.document["project"], source, "The saved draft remains recoverable")
-        self.assertEqual([floor["elevation_m"] for floor in source["floors"]], [0, 0])
         self.assert_baseline_unchanged()
 
     async def test_omitting_site_does_not_resurrect_baseline_features(self):
