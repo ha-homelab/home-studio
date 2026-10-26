@@ -14,6 +14,7 @@ import errno
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 import struct
 import subprocess
 import sys
@@ -161,6 +162,106 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
             await self.request('map_save', revision=0, config=config)
         with self.assertRaisesRegex(ValueError, 'invalid_map'):
             await self.request('map_save', revision=True, config=config)
+
+    async def test_site_calibration_real_permissions_lock_and_store(self):
+        from homeassistant.exceptions import Unauthorized
+
+        generated = sys.modules[self.integration.__package__ + '.generated']
+        project = json.loads((ROOT / 'planner/example-home.json').read_text())
+        floor = project['floors'][0]
+        project['floors'] = [{**copy.deepcopy(floor), 'id': fid, 'name': fid.title(), 'elevation_m': 0}
+                             for fid in ('upper', 'ground')]
+        await self.request('project_save', revision=0, project=project)
+        await self.request('project_publish', revision=1)
+        state = self.hass.data['home_floorplan']
+        component = Path(self.temp.name) / 'synthetic-import'
+        shutil.copytree(state['assets'], component / 'assets')
+        for fid in ('upper', 'ground'):
+            folder = component / 'assets' / fid
+            model = json.loads((folder / 'model-data.json').read_text())
+            model['site_context'] = {'ground_elevation_m': -3 if fid == 'upper' else 0,
+                                     'roof_outline': {'synthetic': True}, 'yard': {'synthetic': True}}
+            (folder / 'model-data.json').write_text(json.dumps(model))
+            html = (folder / 'index.html').read_text()
+            match, embedded = generated._embedded(html)
+            embedded['site_context'] = copy.deepcopy(model['site_context'])
+            (folder / 'index.html').write_text(html[:match.start(2)] + generated._json(embedded) + html[match.end(2):])
+        models, _ = generated.load_models(component / 'assets', state['site']['floors'])
+        adapter = generated.GeneratedProject(self.hass, component, state['site'], models, state['data'])
+        await adapter.load()
+        state['native'] = adapter
+        await self.request('project_save', revision=0, project=adapter.document['project'])
+        await self.request('project_publish', revision=1)
+        previous = copy.deepcopy(adapter.document)
+        store_path = Path(adapter.store.path)
+        previous_bytes = store_path.read_bytes()
+        before_assets = state['assets']
+        before_inventory = copy.deepcopy(state['data'])
+        self.assertTrue((await self.request('project_get'))['capabilities']['site_frame_calibration'])
+
+        readonly = await self.hass.auth.async_create_user('Read-only calibration user', group_ids=[GROUP_ID_READ_ONLY])
+        for user in (self.family, readonly):
+            for command, extra in (('site_frame_preview', {}), ('site_frame_apply', {'token': 'unused'})):
+                with self.assertRaises(Unauthorized):
+                    await self.request(command, user=user, revision=1, **extra)
+        self.assertEqual(adapter.document, previous)
+
+        async with state['lock']:
+            stale = asyncio.create_task(self.request('site_frame_preview', revision=1))
+            await asyncio.sleep(.01)
+            state['native'] = None
+        try:
+            with self.assertRaisesRegex(ValueError, 'conflict'):
+                await stale
+        finally:
+            state['native'] = adapter
+
+        queued_admin = await self.hass.auth.async_create_user('Queued calibration admin', group_ids=[GROUP_ID_ADMIN])
+        async with state['lock']:
+            revoked = asyncio.create_task(self.request('site_frame_preview', user=queued_admin, revision=1))
+            await asyncio.sleep(.01)
+            await self.hass.auth.async_update_user(queued_admin, group_ids=[GROUP_ID_READ_ONLY])
+        with self.assertRaisesRegex(ValueError, 'unauthorized'):
+            await revoked
+
+        async with state['lock']:
+            pending = asyncio.create_task(self.request('site_frame_preview', revision=1))
+            await asyncio.sleep(.01)
+            self.assertFalse(pending.done(), 'preview must acquire the shared project lock')
+        preview = await pending
+        self.assertEqual([row['after_m'] for row in preview['floors']], [3, 0])
+        self.assertEqual(store_path.read_bytes(), previous_bytes, 'preview does not write the Store')
+
+        failure = WriteError(OSError(errno.ENOSPC, 'No space left on device'))
+        baseline_dirs = set((adapter.root / 'baselines').iterdir())
+        with patch.object(adapter.store, '_write_prepared_data', side_effect=failure):
+            with self.assertRaisesRegex(ValueError, 'save_failed'):
+                await self.request('site_frame_apply', revision=1, token=preview['token'])
+        self.assertEqual(adapter.document, previous)
+        self.assertEqual(store_path.read_bytes(), previous_bytes)
+        self.assertEqual(set((adapter.root / 'baselines').iterdir()), baseline_dirs)
+
+        preview = await self.request('site_frame_preview', revision=1)
+        async with state['lock']:
+            pending = asyncio.create_task(self.request('site_frame_apply', revision=1, token=preview['token']))
+            await asyncio.sleep(.01)
+            self.assertFalse(pending.done(), 'apply must acquire the shared project lock')
+            self.assertEqual(adapter.document, previous)
+        saved = await pending
+        self.assertEqual(saved['revision'], 2)
+        self.assertEqual([value['elevation_m'] for value in saved['project']['floors']], [3, 0])
+        self.assertEqual(adapter.document['generation'], previous['generation'])
+        self.assertEqual(state['assets'], before_assets)
+        self.assertEqual(state['data'], before_inventory)
+        old = adapter.root / 'baselines' / previous['baseline']
+        new = adapter.root / 'baselines' / adapter.document['baseline']
+        self.assertEqual(generated._hashes(old / 'assets'), generated._hashes(new / 'assets'))
+        self.assertEqual(json.loads((new / 'previous-document.json').read_text()), previous)
+        reopened = generated.GeneratedProject(self.hass, component, state['site'], models, state['data'])
+        await reopened.load()
+        self.assertEqual(reopened.document, adapter.document)
+        with self.assertRaisesRegex(ValueError, 'stale_preview'):
+            await self.request('site_frame_apply', revision=2, token=preview['token'])
 
     async def test_map_real_write_error_does_not_acknowledge_or_mutate(self):
         config = {'enabled': True, 'latitude': 0, 'longitude': 0,

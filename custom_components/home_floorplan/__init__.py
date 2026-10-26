@@ -383,6 +383,11 @@ async def _site_frame_action(hass, connection, msg, apply=False):
         return
     try:
         async with state["lock"]:
+            if (hass.data.get(DOMAIN) is not state or state.get("native") is not native or
+                    state.get("panels_unloaded") or not state.get("initialized", True)):
+                raise NativeError("conflict", "The active imported home changed. Reload its saved draft before calibration.")
+            if not connection.user or not connection.user.is_admin:
+                raise NativeError("unauthorized", "Site-frame calibration requires administrator access.")
             service = state.setdefault("site_calibration", SiteCalibration())
             if apply:
                 await service.apply(native, msg["revision"], connection.user.id, msg["token"])

@@ -3,6 +3,7 @@
 Call preview/apply while holding the integration project lock. A transaction
 creates a metadata baseline and keeps the old Store document beside it.
 """
+import asyncio
 import copy
 import hashlib
 import json
@@ -111,9 +112,23 @@ class SiteCalibration:
                 raise NativeError("source_changed", "The original home changed during calibration. Preview it again.")
             updated = {**snapshot["document"], "project": snapshot["project"],
                        "baseline": identifier, "revision": revision + 1}
-            await native.store.async_save(updated)
+            # Store writes can finish in an executor after their caller is
+            # cancelled. Keep this baseline and the lock until the result is
+            # known, then update memory before propagating cancellation.
+            write = asyncio.create_task(native.store.async_save(updated))
+            cancelled = False
+            while True:
+                try:
+                    await asyncio.shield(write)
+                    break
+                except asyncio.CancelledError:
+                    cancelled = True
+                    if write.cancelled():
+                        raise
         except BaseException:
             await native.hass.async_add_executor_job(shutil.rmtree, native.root / "baselines" / identifier)
             raise
         native.document = updated
         native._metadata(snapshot["baseline_project"], snapshot["models"])
+        if cancelled:
+            raise asyncio.CancelledError

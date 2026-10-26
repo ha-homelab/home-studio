@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Synthetic imported-home calibration, transaction and authority regressions."""
+import asyncio
 import copy
 import importlib.util
 import json
@@ -79,13 +80,20 @@ class CalibrationTests(unittest.IsolatedAsyncioTestCase):
         proposed['site'] = {'ground_elevation_m': 0, 'features': []}
         frame.check_site_frame(proposed, self.models)
         await restarted.save(2, proposed)
-        assets, _, models, _, _ = await restarted.publish(3)
+        assets, published_site, models, _, _ = await restarted.publish(3)
         for fid in models:
+            expected_elevation = 3 if fid == 'upper' else 0
+            self.assertEqual(models[fid]['elevation_m'], expected_elevation)
+            self.assertEqual(support.embedded_model(assets / fid / 'index.html')['elevation_m'], expected_elevation)
             for key in ('meshes', 'object_assets', 'control_anchors', 'motion_paths', 'cover_windows'):
                 self.assertEqual(models[fid][key], self.models[fid][key])
             for key in ('ground_elevation_m', 'lowest_slab_elevation_m', 'roof_outline', 'yard'):
                 self.assertEqual(models[fid]['site_context'][key], self.models[fid]['site_context'][key])
                 self.assertEqual(support.embedded_model(assets / fid / 'index.html')['site_context'][key], self.models[fid]['site_context'][key])
+        fresh = generated.seed_project(published_site, models, restarted.document['inventory'])
+        self.assertEqual([floor['elevation_m'] for floor in fresh['floors']], [3, 0])
+        self.assertEqual(fresh['site'], proposed['site'])
+        frame.check_site_frame(fresh, models)
         for path, digest in before.items():
             self.assertEqual(support.tree_hashes(self.project.root)[path], digest)
 
@@ -98,6 +106,31 @@ class CalibrationTests(unittest.IsolatedAsyncioTestCase):
             await self.service.apply(self.project, 1, 'admin', preview['token'])
         self.assertEqual(self.project.document, previous)
         self.assertEqual(support.tree_hashes(self.project.root), before)
+
+    async def test_cancelled_request_finishes_store_before_releasing_baseline(self):
+        preview = await self.preview()
+        started, resume = asyncio.Event(), asyncio.Event()
+        save = self.project.store.async_save
+
+        async def paused_save(document):
+            started.set()
+            await resume.wait()
+            await save(document)
+
+        with patch.object(self.project.store, 'async_save', side_effect=paused_save):
+            pending = asyncio.create_task(self.service.apply(self.project, 1, 'admin', preview['token']))
+            await started.wait()
+            pending.cancel()
+            await asyncio.sleep(0)
+            self.assertFalse(pending.done())
+            resume.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await pending
+        self.assertEqual(self.project.document['revision'], 2)
+        self.assertTrue((self.project.root / 'baselines' / self.project.document['baseline']).is_dir())
+        reopened = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
+        await reopened.load()
+        self.assertEqual(reopened.document, self.project.document)
 
     async def test_existing_zero_ground_site_features_are_preserved(self):
         project = copy.deepcopy(self.project.document['project'])
