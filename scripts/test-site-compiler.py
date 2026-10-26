@@ -45,6 +45,7 @@ class SiteCompilerTests(unittest.TestCase):
 
     def test_compiled_roundtrip_and_embedded_runtime_match_for_each_floor(self):
         project = fixture()
+        project["site"]["features"][2]["render_style"] = "outline"
         source = copy.deepcopy(project)
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "authored"

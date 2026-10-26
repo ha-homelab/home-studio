@@ -69,6 +69,8 @@ jobs:
           python3 scripts/test-ha-project-metadata.py
           python3 scripts/test-ha-native.py
           python3 scripts/test-ha-generated.py
+          python3 scripts/test-site-calibration.py
+          python3 scripts/test-runtime-upgrade.py
           python3 scripts/test-blender-export.py
           python3 scripts/test-curtain-authoring.py
       - name: Test archive validation, installation, backup and rollback
@@ -87,6 +89,7 @@ jobs:
       - name: Verify site geometry, compilation and isolated AI drafts
         run: |
           node scripts/test-site-model.mjs
+          node --test scripts/test-site-map-underlay.mjs
           python3 scripts/test-site-compiler.py
           node scripts/test-ai-site.mjs
       - name: Replay fuzz regression inputs without mutation campaigns
@@ -131,8 +134,32 @@ jobs:
       - name: Test camera tours and local video in three browser engines
         run: |
           for engine in chromium firefox webkit; do
-            CAMERA_TOUR_ENGINE="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-camera-tour-browser.cjs || exit 1
+            CAMERA_TOUR_ENGINE="$engine" CAMERA_TOUR_ARTIFACTS="$RUNNER_TEMP/camera-tour-artifacts/$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-camera-tour-browser.cjs || exit 1
           done
+      - name: Preserve synthetic Chromium camera-tour evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: camera-tour-chromium-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/camera-tour-artifacts/chromium/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Preserve synthetic Firefox camera-tour evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: camera-tour-firefox-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/camera-tour-artifacts/firefox/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Preserve synthetic WebKit camera-tour evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: camera-tour-webkit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/camera-tour-artifacts/webkit/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Test geographic map navigation in three browser engines
         run: |
           node --test scripts/test-ha-map-bridge.cjs
@@ -143,6 +170,8 @@ jobs:
         run: |
           for engine in chromium firefox webkit; do
             BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-studio.cjs || exit 1
+            BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-site-calibration.cjs || exit 1
+            BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-viewer-runtime-upgrade.cjs || exit 1
             BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-theme.cjs || exit 1
             BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-ai.cjs || exit 1
           done
@@ -153,6 +182,7 @@ jobs:
         run: |
           for engine in chromium firefox webkit; do
             SITE_EDITOR_ENGINE="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-site-editor.cjs || exit 1
+            BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-site-map.cjs || exit 1
           done
       - name: Test optional albedo surfaces in the compiled viewer
         run: |

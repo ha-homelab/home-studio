@@ -1,5 +1,47 @@
 # Changelog
 
+## [1.3.0] - Editable neighborhoods and shared map context
+
+### Added
+
+- Neighborhood editing with locked home and roof geometry, configurable building
+  contours and solid volumes, and matching reviewed AI proposals.
+- An optional map background inside the Home Assistant site editor, using saved
+  private alignment and bounded tile loading on the existing 2D canvas.
+- Explicit preview and recovery-backed calibration for imported homes whose
+  floors use different local ground datums. Published geometry stays in place.
+- A reviewed map-renderer update for supported imported homes. It prepares a
+  new saved baseline, preserves current objects and geometry, and leaves the
+  family view active until the next explicit publication.
+
+### Upgrade
+
+- Back up your project and Home Assistant storage before updating. Install the
+  integration and restart Home Assistant. Open **Site & roof → Neighborhood**
+  to draw nearby buildings without changing your home or roof.
+- Previously generated homes need a viewer rebuilt with the matching toolkit
+  before publishing outline-style buildings, or a supported update through
+  **More options → Update imported viewer** after installing the integration.
+  The new optional `render_style`
+  field cannot be read by older releases; keep your original JSON backup.
+- Enable **Map background** to use the alignment saved in **3D Home → Align
+  map**. For imported floors with inconsistent ground offsets, review the
+  [calibration preview](docs/imported-site-calibration.md) before publishing.
+  Calibration and publication are separate, explicit actions.
+
+### Security
+
+- Map alignment and tile pixels stay in the editor session, outside portable
+  project JSON and AI requests. Tile retrieval uses the authenticated HA host;
+  the map provider can see the requested area and HA's outbound IP.
+- AI receives the photos and planning context selected for submission to your
+  provider. Neighborhood proposals cannot alter the house, roof, floor ground,
+  room geometry or device bindings. Review estimated dimensions before applying.
+- Applied outlines are saved and exported with your project. A real neighborhood
+  may reveal its location even without GPS coordinates; use fictional geometry
+  in public examples. See the [site guide](docs/site-editor.md) for image-source
+  restrictions and attribution.
+
 ## [1.2.0] - Geographic context, physical materials and camera tours
 
 ### Added

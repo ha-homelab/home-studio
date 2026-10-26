@@ -1242,7 +1242,7 @@ function rebuildPreview() {
       }
     }
   }
-  if (siteEditor?.active && displayedProject().site) worldGroup.add(buildSitePreview(THREE, displayedProject().site, createPreviewMaterial));
+  if (siteEditor?.active && displayedProject().site) worldGroup.add(buildSitePreview(THREE, displayedProject().site, createPreviewMaterial, { showHome: !siteEditor.neighborhood }));
   const activeItem = selection?.kind === 'items' ? selected() : null;
   if (activeItem && orbit.mode === 'edit') {
     const p = activeItem.position_m, d = activeItem.dimensions_m;
@@ -1691,7 +1691,14 @@ $('help-button').addEventListener('click', () => $('help-dialog').showModal());
 document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => $(b.dataset.close).close()));
 $('build-project').addEventListener('click', () => {
   const needsSiteSupport = Object.hasOwn(project, 'site');
-  $('build-site-compatibility').hidden = !needsSiteSupport;
+  const needsNeighborSupport = project.site?.features.some(feature => Object.hasOwn(feature, 'render_style'));
+  $('build-site-compatibility').hidden = !needsSiteSupport || needsNeighborSupport;
+  let neighborCompatibility = $('build-neighbor-compatibility');
+  if (!neighborCompatibility) {
+    neighborCompatibility = node('p', 'callout', 'This drawing includes neighbor appearance settings. Use a toolkit and integration release with support for neighbor outlines; earlier Site & roof releases cannot read it. Keep your exported JSON until a matching release is available.');
+    neighborCompatibility.id = 'build-neighbor-compatibility'; $('build-site-compatibility').after(neighborCompatibility);
+  }
+  neighborCompatibility.hidden = !needsNeighborSupport;
   $('build-toolkit-link').href = `https://github.com/ha-homelab/home-studio/releases${needsSiteSupport ? '' : '/latest'}`;
   translatedText('build-toolkit-link', needsSiteSupport ? 'Choose a compatible release ↗' : 'Download the complete ZIP ↗');
   const label = $('build-validation');
@@ -1755,12 +1762,12 @@ function resizeCanvases(rect) {
 }
 const canvasObserver = new ResizeObserver(entries => resizeCanvases(entries[0].contentRect));
 canvasObserver.observe(document.querySelector('.canvas-shell'));
-document.addEventListener('visibilitychange', () => { if (document.hidden) { siteEditor?.cancel(); spaceHeld = false; if (drag) finishPointer(null, true); releasePreviewPointer(); cancelCanvasRender(); } else { resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); } });
+document.addEventListener('visibilitychange', () => { siteEditor?.setSuspended(document.hidden); if (document.hidden) { siteEditor?.cancel(); spaceHeld = false; if (drag) finishPointer(null, true); releasePreviewPointer(); cancelCanvasRender(); } else { resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); } });
 window.addEventListener('pagehide', event => {
-  canvasSuspended = true; siteEditor?.cancel(); if (drag) finishPointer(null, true); releasePreviewPointer(); cancelCanvasRender();
-  if (!event.persisted) { canvasObserver.disconnect(); previewEvents.abort(); releasePreviewPointer(); floorNavigator.destroy(); disposePreviewRenderer(); renderer?.forceContextLoss(); }
+  canvasSuspended = true; siteEditor?.setSuspended(true); siteEditor?.cancel(); if (drag) finishPointer(null, true); releasePreviewPointer(); cancelCanvasRender();
+  if (!event.persisted) { siteEditor?.dispose(); canvasObserver.disconnect(); previewEvents.abort(); releasePreviewPointer(); floorNavigator.destroy(); disposePreviewRenderer(); renderer?.forceContextLoss(); }
 });
-window.addEventListener('pageshow', () => { canvasSuspended = false; resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); });
+window.addEventListener('pageshow', () => { canvasSuspended = false; siteEditor?.setSuspended(document.hidden); resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); });
 siteEditor = createSiteEditor({
   canvas: planCanvas, ctx, $, node, button, field, row, section, t,
   getProject: displayedProject, getAcceptedProject: () => project, getView: () => view,
@@ -1774,8 +1781,8 @@ siteEditor = createSiteEditor({
   modeChanged() {
     orbit.mode = 'orbit'; selection = null; inspectorScope = ''; previewDirty = true;
     if (haSourcePolicy) {
-      $('preview-tab').textContent = siteEditor.active ? 'Preview 3D' : 'Published home';
-      $('preview-tab').setAttribute('aria-label', siteEditor.active ? 'Preview 3D' : 'Published home');
+      $('preview-tab').textContent = t(siteEditor.active ? 'Preview 3D' : 'Published home');
+      $('preview-tab').setAttribute('aria-label', t(siteEditor.active ? 'Preview 3D' : 'Published home'));
     }
     setView('plan');
   },
@@ -1789,7 +1796,10 @@ function renderLocale() {
   // Switching a presentation preference must not discard an unfinished form.
   const drafts = [...$('inspector-body').querySelectorAll('input,select,textarea')].map(input => ({ value: input.value, checked: input.checked, draft: input.inspectorDraft, invalid: input.getAttribute('aria-invalid') }));
   translateStatic();
-  if (haSourcePolicy) $('preview-tab').textContent = siteEditor?.active ? 'Preview 3D' : 'Published home';
+  if (haSourcePolicy) {
+    const label = t(siteEditor?.active ? 'Preview 3D' : 'Published home');
+    $('preview-tab').textContent = label; $('preview-tab').setAttribute('aria-label', label);
+  }
   $('language-select').value = getLocale();
   document.querySelectorAll('[data-tool]').forEach(element => {
     const label = element.querySelector('span:nth-child(2)').textContent;
@@ -1894,7 +1904,7 @@ export const editorBridge = Object.freeze({
   revision: () => editorRevision,
   editingMode: () => siteEditor.active ? 'site' : 'floor',
   setEditingMode(mode) { if (!['site', 'floor'].includes(mode)) throw new Error('Unknown editing mode.'); siteEditor.setActive(mode === 'site'); },
-  selectionContext: () => ({ mode: siteEditor.active ? 'site' : 'floor', siteFeatureId: siteEditor.active ? siteEditor.selectedId : null, floorId: activeFloorId, roomId: selection?.kind === 'rooms' ? selection.id : selection?.kind === 'items' ? selected()?.room : null }),
+  selectionContext: () => ({ mode: siteEditor.active ? 'site' : 'floor', siteScope: siteEditor.neighborhood ? 'neighborhood' : 'all', siteFeatureId: siteEditor.active ? siteEditor.selectedId : null, floorId: activeFloorId, roomId: selection?.kind === 'rooms' ? selection.id : selection?.kind === 'items' ? selected()?.room : null }),
   subscribe(listener) { editorListeners.add(listener); return () => editorListeners.delete(listener); },
   previewProject(candidate) {
     validateProject(candidate); validateSourcePolicy(candidate); serializeProject(candidate); candidatePreview = clone(candidate); previewDirty = true;
@@ -1922,12 +1932,13 @@ if (haContext) {
     initialize(value, catalog, aiTransport, policy, hostActions) {
       const next = value || blankProject(); validateProject(next); serializeProject(next);
       installSourcePolicy(next, policy, hostActions);
+      siteEditor.setMapTransport(hostActions?.mapTransport);
       if (haSourcePolicy) {
         $('split-tab').hidden = true;
         for (const id of ['plan-tab', 'preview-tab']) { $(id).setAttribute('role', 'button'); $(id).removeAttribute('aria-selected'); $(id).removeAttribute('aria-controls'); $(id).tabIndex = 0; }
         $('plan-tab').parentElement.setAttribute('role', 'group');
         $('plan-tab').parentElement.setAttribute('aria-label', 'Drawing and published home');
-        $('preview-tab').textContent = 'Published home'; $('preview-tab').lang = 'en';
+        $('preview-tab').textContent = t('Published home'); $('preview-tab').removeAttribute('lang');
         const helpPreview = document.querySelector('.native-help [data-guide-action="preview"]');
         helpPreview.textContent = 'Published home';
         helpPreview.parentElement.querySelector('p').textContent = 'Use Published home to inspect the current installed details. Changes to your drawing appear there only after Save draft and Publish to 3D Home. Back to editing returns to this drawing.';

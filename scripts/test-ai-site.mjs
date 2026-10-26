@@ -50,6 +50,9 @@ test('all site kinds can be reviewed and selected independently', () => {
   const features = [feature(), feature({ candidate_key: 'roof', name: 'Roof', kind: 'roof', height_m: 6 }), feature({ candidate_key: 'neighbor', kind: 'building' }), feature({ candidate_key: 'street', kind: 'street', height_m: 0 }), feature({ candidate_key: 'garden', kind: 'landscape', height_m: 0 })];
   const all = prepareDraft(project, context, response(context, { features }));
   assert.equal(all.candidates.length, 5); assert.equal(all.project.site.features.length, 6); fixtures.push(all.project);
+  assert.equal(all.project.site.features.find(value => value.id === 'building_1').render_style, 'outline', 'New AI neighbors use outlines');
+  assert.equal(Object.hasOwn(all.project.site.features[0], 'render_style'), false, 'Existing legacy neighbors keep their appearance');
+  assert(all.project.site.features.filter(value => value.kind !== 'building').every(value => !Object.hasOwn(value, 'render_style')));
   const selected = prepareDraft(project, context, response(context, { features }), { selectedCandidateKeys: ['roof', 'street'] });
   assert.deepEqual(selected.project.site.features.slice(1).map(value => value.kind), ['roof', 'street']);
   assert.deepEqual(prepareDraft(project, context, draft, { selectedCandidateKeys: [] }).project, project);
@@ -65,8 +68,61 @@ test('stale project, forged context and mismatched response cannot apply', () =>
   assert.throws(() => prepareDraft(changedSite, context, draft), /project changed/);
   for (const patch of [{ request_id: 'old_request' }, { kind: 'new_room' }, { draft_version: 2 }]) assert.throws(() => prepareDraft(project, context, { ...draft, ...patch }), /request|version/);
 });
+test('neighborhood scope restricts both provider schema and every reviewed candidate', () => {
+  const neighborhood = contextFor(project, { siteScope: 'neighborhood' });
+  assert.equal(Object.hasOwn(neighborhood, 'floor_footprints'), false, 'Neighborhood does not share interior room polygons');
+  assert.equal(neighborhood.exterior_reference.kind, 'approximate_building_extent');
+  assert.deepEqual(draftSchema('site', neighborhood).properties.features.items.properties.kind.enum, ['building', 'street', 'landscape']);
+  assert.deepEqual(draftSchema('site', context).properties.features.items.properties.kind.enum, ['home', 'roof', 'building', 'street', 'landscape']);
+  for (const kind of ['home', 'roof']) for (const selectedCandidateKeys of [undefined, []]) {
+    assert.throws(() => prepareDraft(project, neighborhood, response(neighborhood, { features: [feature({ kind })] }), { selectedCandidateKeys }), /Neighborhood drafts/);
+  }
+  const features = ['building', 'street', 'landscape'].map((kind, index) => feature({ kind, candidate_key: `context_${index}`, height_m: kind === 'building' ? 4 : 0 }));
+  const result = prepareDraft(project, neighborhood, response(neighborhood, { features }));
+  assert.deepEqual(result.project.floors, project.floors);
+  assert.deepEqual(result.project.site.features[0], project.site.features[0]);
+  assert.equal(result.project.site.features[1].render_style, 'outline');
+  assert.throws(() => contextFor(project, { siteScope: 'unknown' }), /scope/);
+  const transport = spawnSync('python3', ['-c', `import json,sys
+from ai_companion.protocol import dumps,validate_generate
+from ai_companion.providers import PROFILES,request_payload
+request=json.load(sys.stdin);validate_generate(request)
+for profile in PROFILES.values(): dumps(request_payload(profile,'synthetic-model',request))`], {
+    cwd: root, input: JSON.stringify({ request_id: neighborhood.request_id, mode: 'site', context: neighborhood,
+      instructions: 'Draft only the nearby buildings.', images: [], schema: draftSchema('site', neighborhood) }), encoding: 'utf8' });
+  assert.equal(transport.status, 0, transport.stderr);
+  fixtures.push(result.project);
+});
+test('neighborhood prefers existing exterior shapes and otherwise shares only one coarse extent', () => {
+  const indoor = clone(project);
+  indoor.floors = [{ id: 'private_floor_id', name: 'PRIVATE_FLOOR_NAME', elevation_m: 3.125, height_m: 2.8,
+    rooms: [
+      { id: 'private_room_a', name: 'PRIVATE_ROOM_A', material: 'floor', polygon: [[2, 4], [5.123, 4], [5.123, 12], [2, 12]] },
+      { id: 'private_room_b', name: 'PRIVATE_ROOM_B', material: 'floor', polygon: [[5.123, 4], [10, 4], [10, 12], [5.123, 12]] },
+    ], walls: [], openings: [], items: [] }];
+  const before = serializeProject(indoor), minimal = contextFor(indoor, { siteScope: 'neighborhood' });
+  assert.deepEqual(minimal.exterior_reference.polygon, [[2, 4], [10, 4], [10, 12], [2, 12]]);
+  assert.match(minimal.exterior_reference.description, /not the actual exterior footprint/);
+  for (const marker of ['private_floor_id', 'PRIVATE_FLOOR_NAME', 'private_room_a', 'private_room_b', 'PRIVATE_ROOM_A', 'PRIVATE_ROOM_B', '5.123', '3.125', 'floor_footprints']) {
+    assert.equal(JSON.stringify(minimal).includes(marker), false, marker);
+  }
+  assert.equal(serializeProject(indoor), before);
+  const home = { id: 'site_home', name: 'My home', kind: 'home', polygon: [[1, 3], [11, 3], [11, 13], [1, 13]], height_m: 6, color: '#aabbcc' };
+  for (const kind of ['home', 'roof']) {
+    indoor.site.features.push({ ...clone(home), kind });
+    const exterior = contextFor(indoor, { siteScope: 'neighborhood' });
+    assert.deepEqual(exterior.site, indoor.site, 'Existing local exterior coordinates remain exact');
+    assert.equal(exterior.exterior_reference.kind, 'site_home_and_roof');
+    assert.equal(Object.hasOwn(exterior.exterior_reference, 'polygon'), false, 'Do not duplicate exterior shapes');
+    assert.equal(Object.hasOwn(exterior, 'floor_footprints'), false);
+    indoor.site.features.pop();
+  }
+  const empty = contextFor(blankProject(), { siteScope: 'neighborhood' });
+  assert.equal(empty.exterior_reference.kind, 'unavailable');
+  assert.equal(Object.hasOwn(empty.exterior_reference, 'polygon'), false, 'Never invent a footprint');
+});
 test('rejects injected actions, geocoordinates, private fields and project IDs', () => {
-  for (const name of ['id', 'site', 'ground_elevation_m', 'floors', 'items', 'entity_id', 'url', 'command', 'latitude', 'longitude', 'georeference', 'api_key']) {
+  for (const name of ['id', 'site', 'ground_elevation_m', 'floors', 'items', 'entity_id', 'url', 'command', 'latitude', 'longitude', 'georeference', 'api_key', 'render_style']) {
     assert.throws(() => prepareDraft(project, context, { ...draft, [name]: 'injected' }), /unknown/);
     assert.throws(() => prepareDraft(project, context, response(context, { features: [feature({ [name]: 'injected' })] })), /unknown/);
   }

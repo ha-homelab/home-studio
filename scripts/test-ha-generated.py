@@ -67,6 +67,9 @@ def fixture(component):
                  "room_display_ids": {"room_a": "A"}, "tv_entities": {item["id"]: "media_player.synthetic_tv"},
                  "camera_entities": {item["id"]: "camera.synthetic_camera"}, "exterior_rooms": [],
                  "site_context": {"synthetic_context": {"preserve": True},
+                                  "roof_outline": {"polygons_m": [[[0, 0], [5, 0], [5, 4], [0, 4]]],
+                                                   "elevation_m": 6 - (2.8 if floor == "upper" else 0)},
+                                  "yard": {"polygon_m": [[-2, -2], [8, -2], [8, 7], [-2, 7]]},
                                   "lowest_slab_elevation_m": -.35 - (2.8 if floor == "upper" else 0)},
                  "lower_floor_context": {"elevation_m": -2.8, "surfaces": [], "lines": []},
                  "telemetry": [{"entity_id": "sensor.synthetic_energy"}],
@@ -190,7 +193,7 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
                     with self.assertRaises(native.NativeError) as error:
                         await adapter.publish(adapter.document["revision"])
                 self.assertEqual(error.exception.code, "inconsistent_site_frame")
-                self.assertIn("remove its top-level site field", str(error.exception))
+                self.assertIn("Calibrate imported site frame", str(error.exception))
                 self.assertEqual((adapter.document, self.hass.saved, tree_hashes(adapter.root)), before)
                 self.assert_baseline_unchanged()
         source.pop("site")
@@ -237,6 +240,67 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("lack reliable", str(error.exception))
         self.assert_baseline_unchanged()
 
+    async def test_conflicting_explicit_elevations_cannot_be_hidden_by_source_merge(self):
+        adapter = await self.source_site_frame(elevations=(3, 0), grounds=(None, None))
+        source = copy.deepcopy(adapter.document["project"])
+        source["site"] = {"ground_elevation_m": 0, "features": []}
+        assets = self.component / "assets"
+        generated._check_source_site_frame(source, assets)  # Matching explicit levels remain supported.
+        raw_path, page = assets / "upper/model-data.json", assets / "upper/index.html"
+        raw, embedded = json.loads(raw_path.read_text()), embedded_model(page)
+        for raw_level, embedded_level in ((2, 3), (3, 2)):
+            with self.subTest(raw=raw_level, embedded=embedded_level):
+                # Exercise the guard directly: normal initial import also uses
+                # the raw level, while a confirmed frame can supply a new one.
+                raw["elevation_m"], embedded["elevation_m"] = raw_level, embedded_level
+                raw_path.write_text(encoded(raw), encoding="utf-8")
+                page.write_text(MODEL_BLOCK.sub(lambda match: match[1] + encoded(embedded) + match[3],
+                                               page.read_text(encoding="utf-8")), encoding="utf-8")
+                before = tree_hashes(assets)
+                with self.assertRaises(native.NativeError) as error:
+                    generated._check_source_site_frame(source, assets)
+                self.assertEqual(error.exception.code, "inconsistent_site_frame")
+                self.assertIn("lack reliable", str(error.exception))
+                self.assertEqual(tree_hashes(assets), before)
+
+    async def test_explicit_null_ground_cannot_be_hidden_by_other_source(self):
+        adapter = await self.source_site_frame(elevations=(3, 0))
+        source = copy.deepcopy(adapter.document["project"])
+        source["site"] = {"ground_elevation_m": 0, "features": []}
+        assets = self.component / "assets"
+        raw_path, page = assets / "upper/model-data.json", assets / "upper/index.html"
+        raw, embedded = json.loads(raw_path.read_text()), embedded_model(page)
+        for raw_ground, embedded_ground in ((None, -3), (-3, None)):
+            with self.subTest(raw=raw_ground, embedded=embedded_ground):
+                raw["site_context"]["ground_elevation_m"] = raw_ground
+                embedded["site_context"]["ground_elevation_m"] = embedded_ground
+                raw_path.write_text(encoded(raw), encoding="utf-8")
+                page.write_text(MODEL_BLOCK.sub(lambda match: match[1] + encoded(embedded) + match[3],
+                                               page.read_text(encoding="utf-8")), encoding="utf-8")
+                before = tree_hashes(assets)
+                with self.assertRaises(native.NativeError) as error:
+                    generated._check_source_site_frame(source, assets)
+                self.assertEqual(error.exception.code, "inconsistent_site_frame")
+                self.assertIn("ground reference is invalid", str(error.exception))
+                self.assertEqual(tree_hashes(assets), before)
+
+    def test_confirmed_floor_frame_is_metadata_only_in_published_model(self):
+        original = copy.deepcopy(self.project.document["project"]["floors"][0])
+        floor = copy.deepcopy(original)
+        floor["elevation_m"] = 3
+        base = self.models[floor["id"]]
+        before = copy.deepcopy(base)
+        for runtime in (False, True):
+            merged = generated._merge_model(base, floor, original, None, runtime=runtime)
+            self.assertEqual(merged["elevation_m"], 3)
+            for mesh in merged["meshes"]:
+                self.assertIs(mesh, next(source for source in base["meshes"] if source["name"] == mesh["name"]))
+            self.assertEqual([mesh for mesh in merged["meshes"] if mesh["kind"] != "inventory"],
+                             [mesh for mesh in base["meshes"] if mesh["kind"] != "inventory"])
+            self.assertEqual(merged["site_context"], base["site_context"])
+            self.assertEqual(merged["inventory"], floor["items"])
+            self.assertEqual(base, before)
+
     async def test_site_publication_preserves_installed_geometry_and_private_extensions(self):
         runtime = (ROOT / "map-layer.js").read_text(encoding="utf-8")
         for floor in self.models:
@@ -252,7 +316,7 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
             {"id": "home_1", "name": "Fictional home", "kind": "home", "height_m": 6,
              "color": "#46a0aa", "polygon": [[0, 0], [5, 0], [5, 4], [0, 4]]},
             {"id": "neighbor_1", "name": "Fictional neighbor", "kind": "building", "height_m": 5,
-             "color": "#aa9cb4", "polygon": [[8, 0], [12, 0], [12, 4], [8, 4]]},
+             "color": "#aa9cb4", "polygon": [[8, 0], [12, 0], [12, 4], [8, 4]], "render_style": "outline"},
         ]}
         await adapter.save(0, source)
         assets, _, models, _, _ = await adapter.publish(1)
@@ -263,6 +327,8 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(model["meshes"], self.models[identifier]["meshes"])
             self.assertEqual(model["custom_extension"], self.models[identifier]["custom_extension"])
             self.assertEqual(model["site_context"]["synthetic_context"], {"preserve": True})
+            for key in ("roof_outline", "yard", "lowest_slab_elevation_m"):
+                self.assertEqual(model["site_context"][key], self.models[identifier]["site_context"][key])
             self.assertEqual(model["site_context"]["features"], source["site"]["features"])
             self.assertEqual(model["site_context"]["ground_elevation_m"], -1 - floor["elevation_m"])
             self.assertNotEqual(model["site_context"]["lowest_slab_elevation_m"], model["site_context"]["ground_elevation_m"])
@@ -358,6 +424,19 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
                        '<script type="application/json">"homeMapMath.features(options.features) home-site-features"</script>'):
             with self.subTest(markup=markup), self.assertRaises(native.NativeError):
                 generated._check_site_runtime(markup, source)
+
+    def test_neighbor_styles_require_the_saved_viewers_explicit_capability(self):
+        legacy = '<script>homeMapMath.features(options.features);"home-site-features";</script>'
+        marker = 'const HOME_SITE_RENDER_STYLE_VERSION = 1;'
+        for style in ("outline", "solid"):
+            source = {"site": {"features": [{"kind": "building", "render_style": style}]}}
+            for markup in (legacy, legacy + '<p>' + marker + '</p>',
+                           legacy + '<script type="application/json">' + json.dumps(marker) + '</script>'):
+                with self.subTest(style=style, markup=markup), self.assertRaises(native.NativeError) as error:
+                    generated._check_site_runtime(markup, source)
+                self.assertEqual(error.exception.code, "unsupported_site_runtime")
+            generated._check_site_runtime(legacy + '<script>' + marker + '</script>', source)
+        generated._check_site_runtime(legacy, {"site": {"features": [{"kind": "building"}]}})
 
     async def test_seed_preserves_ids_calibration_and_current_stored_inventory(self):
         current = copy.deepcopy(self.inventory)

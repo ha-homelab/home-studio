@@ -15,6 +15,15 @@ const fixture = { schema_version:1, id:'site_fixture', title:'Fictional Willow H
 const hostFixture = `<!doctype html><html style="height:100%"><body style="margin:0;height:100%"><home-floorplan-studio-panel></home-floorplan-studio-panel><script type="module">
 await import('/custom_components/home_floorplan/static/studio.js');
 window.host=document.querySelector('home-floorplan-studio-panel'); window.saved=null;
+window.mapRequests=[];window.mapCloses=0;
+window.addEventListener('message',event=>{
+ const data=event.data;if(data?.protocol!=='home-studio-editor-v1')return;
+ if(data.type==='map-close'){window.mapCloses++;return;}if(data.type!=='map-request')return;
+ window.mapRequests.push({action:data.action,body:data.body});
+ let result={revision:0,configured:true,config:{enabled:true,latitude:0,longitude:0,model_x:0,model_z:0,north_deg:0}};
+ if(data.action==='tile'){const canvas=document.createElement('canvas');canvas.width=canvas.height=256;const ctx=canvas.getContext('2d');ctx.fillStyle='#ccd5cf';ctx.fillRect(0,0,256,256);ctx.fillStyle='#62756b';ctx.fillText('Synthetic map',32,128);result={data_url:canvas.toDataURL('image/png')};}
+ event.source.postMessage({protocol:data.protocol,channel:data.channel,type:'map-response',requestId:data.requestId,result},'*');
+});
 const initial=${JSON.stringify(fixture)}; let revision=1; const generated=location.search.includes('generated');
 host.hass={user:{id:'fictional_admin',is_admin:true},callWS:async data=>{
  if(data.type.endsWith('entity_catalog'))return {floors:[],areas:[],entities:[]};
@@ -100,7 +109,51 @@ async function addRectangle(page,kind,x,z,w,d){
  // Escape cancels a partial polygon without history/storage mutation.
  const beforeCancel=await model(page);await page.getByRole('button',{name:'Draw polygon',exact:false}).click();
  await clickPoint(page,[9,1]);await clickPoint(page,[10,2]);await page.keyboard.press('Escape');assert.deepEqual(await model(page),beforeCancel);
+ // Neighborhood uses the existing editor, with the home and shared ground locked.
+ await page.getByRole('button',{name:'Neighborhood',exact:true}).click();
+ assert.equal(await page.evaluate(async()=>(await import('/planner/editor.js')).editorBridge.selectionContext().siteScope),'neighborhood');
+ assert.equal(await page.locator('#site-kind').inputValue(),'building');
+ assert.equal(await page.getByLabel('Ground elevation (m)',{exact:true}).getAttribute('readonly'),'');
+ assert.equal(await page.locator('#site-list [data-site-id]').count(),0);
+ assert.equal(await page.locator('#site-kind option[value="home"]').getAttribute('disabled'),'');
+ const beforeLockedDrag=await model(page);await dragPoint(page,[4,3],[5,4]);
+ assert.deepEqual(await model(page),beforeLockedDrag,'Dragging the home reference cannot edit it');
  await addRectangle(page,'building',11,0,4,5);await field(page,'Feature name','Neighbor');
+ assert.equal((await model(page)).site.features.at(-1).render_style,'outline');
+ assert.equal(await page.getByLabel('Neighbor appearance',{exact:true}).inputValue(),'outline');
+ // Locale changes while Site is active translate controls, never saved names or geometry.
+ const beforeLocale=await model(page);
+ await page.locator('#language-select').selectOption('ru');
+ await page.waitForFunction(()=>document.documentElement.lang==='ru');
+ assert.equal(await page.locator('[data-site-scope="neighborhood"]').innerText(),'Окружение');
+ assert.equal(await page.locator('#site-mode').innerText(),'Участок и крыша');
+ assert.equal(await page.locator('#site-kind option[value="building"]').innerText(),'Соседний дом');
+ assert.match(await page.locator('#plan-canvas').getAttribute('aria-label'),/^План участка в метрах/);
+ assert.equal(await page.getByLabel('Вид соседнего дома',{exact:true}).inputValue(),'outline');
+ assert.equal(await page.getByLabel('Название объекта',{exact:true}).inputValue(),'Neighbor','User names matching UI keys remain literal');
+ assert.equal(await page.locator('#site-list strong').innerText(),'Neighbor');
+ assert.deepEqual(await model(page),beforeLocale);
+ const localizedDownloadPromise=page.waitForEvent('download');await page.locator('#export-project').click();
+ const localizedDownload=await localizedDownloadPromise;const localizedPath=path.join(temp,'site-ru.json');await localizedDownload.saveAs(localizedPath);
+ assert.deepEqual(JSON.parse(fs.readFileSync(localizedPath,'utf8')),beforeLocale,'Localized export preserves every project field');
+ await page.locator('#language-select').selectOption('en');await page.waitForFunction(()=>document.documentElement.lang==='en');
+ assert.equal(await page.getByLabel('Neighbor appearance',{exact:true}).inputValue(),'outline');
+ assert.deepEqual(await model(page),beforeLocale);
+ await page.getByLabel('Neighbor appearance',{exact:true}).selectOption('solid');
+ assert.equal((await model(page)).site.features.at(-1).render_style,'solid');
+ await page.getByRole('button',{name:'Undo',exact:true}).click();
+ assert.equal((await model(page)).site.features.at(-1).render_style,'outline');
+ await page.getByLabel('Feature type',{exact:true}).selectOption('street');
+ assert.equal(Object.hasOwn((await model(page)).site.features.at(-1),'render_style'),false);
+ await page.getByRole('button',{name:'Undo',exact:true}).click();
+ assert.equal((await model(page)).site.features.at(-1).render_style,'outline');
+ await page.getByRole('button',{name:'All site features',exact:true}).click();
+ assert.equal(await page.evaluate(async()=>(await import('/planner/editor.js')).editorBridge.selectionContext().siteScope),'all');
+ assert.equal(await page.locator('#site-list [data-site-id]').count(),3);
+ await page.locator('#build-project').click();
+ assert.equal(await page.locator('#build-site-compatibility').isVisible(),false);
+ assert.match(await page.locator('#build-neighbor-compatibility').innerText(),/support for neighbor outlines/);
+ await page.getByRole('button',{name:'Close build instructions',exact:true}).click();
  await addRectangle(page,'street',-4,9,22,3);await field(page,'Feature name','Willow lane');
  assert.equal((await model(page)).site.features.at(-1).height_m,0);
  await addRectangle(page,'landscape',-4,-5,22,3);await field(page,'Feature name','Garden');
@@ -147,7 +200,28 @@ async function addRectangle(page,kind,x,z,w,d){
  // Actual Home Assistant host bridge carries the complete site and floors.
  await page.goto(origin+'/fixture');await page.waitForFunction(()=>window.host?._ready);
  const frame=await page.locator('iframe').elementHandle().then(handle=>handle.contentFrame());await frame.waitForFunction(()=>window.planner);
- await frame.locator('#site-mode').click();await frame.getByRole('button',{name:'Add site rectangle',exact:true}).click();
+ assert.equal(await page.evaluate(()=>mapRequests.length),0,'Opening Studio makes no map requests');
+ await frame.locator('#site-mode').click();
+ const beforeMap=await frame.evaluate(()=>planner.getProject());
+ await frame.locator('#site-map-toggle').click();
+ await page.waitForFunction(()=>mapRequests.some(request=>request.action==='tile'));
+ await frame.waitForFunction(()=>document.getElementById('site-map-status').textContent.includes('OpenStreetMap'));
+ assert.deepEqual(await frame.evaluate(()=>planner.getProject()),beforeMap,'Map pixels and alignment never enter project data');
+ await frame.locator('#preview-tab').click();
+ await page.waitForFunction(()=>mapCloses>0);
+ const previewStopped=await page.evaluate(()=>mapRequests.length);await page.waitForTimeout(150);
+ assert.equal(await page.evaluate(()=>mapRequests.length),previewStopped,'Full 3D preview suspends map requests');
+ await frame.locator('#plan-tab').click();
+ await page.waitForFunction(count=>mapRequests.length>count,previewStopped);
+ await frame.locator('#inside-mode').click();
+ const stopped=await page.evaluate(()=>mapRequests.length);await page.waitForTimeout(150);
+ assert.equal(await page.evaluate(()=>mapRequests.length),stopped,'Leaving Site stops map requests');
+ await frame.locator('#site-mode').click();
+ await page.waitForFunction(count=>mapRequests.length>count,stopped);
+ await frame.locator('#site-map-toggle').click();
+ assert.equal(await frame.locator('#site-map-toggle').getAttribute('aria-pressed'),'false');
+ assert.deepEqual(await frame.evaluate(()=>planner.getProject()),beforeMap);
+ await frame.getByRole('button',{name:'Add site rectangle',exact:true}).click();
  await page.evaluate(()=>host._save());await page.waitForFunction(()=>window.saved?.site?.features.length===1);
  assert.deepEqual(await page.evaluate(()=>saved.floors),fixture.floors);
  await page.goto(origin+'/fixture?generated');await page.waitForFunction(()=>window.host?._ready);

@@ -23,7 +23,19 @@ const report = { engine, root, fixture: 'planner/guide-assets/practice-home.json
 let server, browser, activePage, failed = false;
 
 function instrument() {
-  const stats = window.__cameraTourBrowser = { commands: [], permissionRequests: [], streams: [], recordings: [], unhandled: [] };
+  const stats = window.__cameraTourBrowser = { commands: [], permissionRequests: [], streams: [], recordings: [], unhandled: [],
+    recorderEvents: [], renderFrames: [], droppedRecorderEvents: 0, droppedRenderFrames: 0 };
+  const append = (key, dropped, limit, value) => {
+    if (stats[key].length === limit) { stats[key].shift(); stats[dropped]++; }
+    stats[key].push(value);
+  };
+  const requestFrame = window.requestAnimationFrame;
+  window.requestAnimationFrame = callback => requestFrame.call(window, time => {
+    const recording = stats.recordings.some(recorder => recorder.state === 'recording');
+    callback(time);
+    if (recording) append('renderFrames', 'droppedRenderFrames', 512, { time,
+      renderCount: window.planner?.getPreviewMetadata().renderCount ?? window.floorplan?.renderCount ?? null });
+  });
   window.addEventListener('unhandledrejection', event => stats.unhandled.push(String(event.reason)));
   const observe = data => {
     if (data && typeof data === 'object' && (/^(toggle|tv_power|.*_command|call_service|service_call)$/.test(data.type || '') || data.service)) {
@@ -49,7 +61,13 @@ function instrument() {
   if (window.MediaRecorder) {
     const Recorder = window.MediaRecorder;
     window.MediaRecorder = class extends Recorder {
-      constructor(...args) { super(...args); stats.recordings.push(this); }
+      constructor(...args) {
+        super(...args); const recorder = stats.recordings.length; stats.recordings.push(this);
+        for (const event of ['start', 'dataavailable', 'stop', 'error']) this.addEventListener(event, value => {
+          append('recorderEvents', 'droppedRecorderEvents', 128, { recorder, event, time: performance.now(),
+            state: this.state, bytes: value.data?.size ?? null, visibility: document.visibilityState });
+        });
+      }
     };
   }
 }
@@ -62,6 +80,18 @@ async function download(page, action, filename) {
   const output = path.join(artifacts, filename || item.suggestedFilename());
   await item.saveAs(output);
   return { item, output, bytes: fs.readFileSync(output) };
+}
+
+async function saveRecordingDiagnostics(page, name, detail) {
+  const observed = await page.evaluate(() => {
+    const stats = window.__cameraTourBrowser;
+    return { recorderEvents: stats.recorderEvents, renderFrames: stats.renderFrames,
+      droppedRecorderEvents: stats.droppedRecorderEvents, droppedRenderFrames: stats.droppedRenderFrames,
+      recorders: stats.recordings.map(recorder => ({ state: recorder.state, mimeType: recorder.mimeType })),
+      visibility: document.visibilityState };
+  });
+  fs.writeFileSync(path.join(artifacts, `${name}-recording-diagnostics.json`),
+    JSON.stringify({ engine, name, ...detail, observed }, null, 2) + '\n');
 }
 
 async function decodeVideo(page, bytes, mimeType) {
@@ -223,11 +253,19 @@ async function exercise(context, origin, name) {
     await page.screenshot({path:path.join(artifacts, `${name}-recorded-preview.png`),fullPage:true});
     const recorded = await download(page, () => link.click(), `${name}-video`);
     const extension = path.extname(recorded.item.suggestedFilename());
+    const recordingDetail = { bytes: recorded.bytes.length, extension };
+    await saveRecordingDiagnostics(page, name, recordingDetail);
     assert.equal(extension, '.mp4', 'recording is downloaded as MP4');
     assert(recorded.bytes.length > 100 && recorded.bytes.length <= 64 * 1024 * 1024, 'download has bounded, nonempty video data');
     assert.equal(recorded.bytes.subarray(4, 8).toString(), 'ftyp', 'genuine MP4 file-type header, never renamed WebM');
     const output = recorded.output + extension; fs.renameSync(recorded.output, output);
-    const decoded = await decodeVideo(page, recorded.bytes, 'video/mp4');
+    let decoded;
+    try { decoded = await decodeVideo(page, recorded.bytes, 'video/mp4'); }
+    catch (error) {
+      await saveRecordingDiagnostics(page, name, { ...recordingDetail, decodeError: String(error).slice(0, 1000) });
+      throw error;
+    }
+    await saveRecordingDiagnostics(page, name, { ...recordingDetail, decoded });
     assert(decoded.width > 0 && decoded.height > 0 && decoded.readyState >= 2, 'recorded video decodes a complete frame');
     assert(decoded.colors > 1, 'the first recorded frame contains rendered canvas content');
     assert(decoded.changedPixels > 20, 'decoded frames show camera movement, not a static view');
@@ -290,6 +328,7 @@ async function exercise(context, origin, name) {
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   const origin = `http://127.0.0.1:${server.address().port}`;
   browser = await playwright[engine].launch(browserLaunchOptions(engine, true));
+  report.browserVersion = browser.version();
   await require('./test-camera-tour-native-downloads.cjs').checkNativeTourDownloads(browser, root);
   for (const name of ['planner', 'editor', 'home']) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, locale: 'en-US', acceptDownloads: true });

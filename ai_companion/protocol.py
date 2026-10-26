@@ -166,7 +166,7 @@ def validate_generate(value):
     context = value["context"]
     context_fields = {"draft_version", "request_id", "mode", "floor_id", "room_id", "ceiling_height_m", "room", "walls", "openings", "existing_items", "measurements", "origin", "catalog"}
     if value["mode"] == "site":
-        context_fields = {"draft_version", "request_id", "mode", "site", "site_notes", "floor_footprints"}
+        context_fields = {"draft_version", "request_id", "mode", "site", "site_notes", "floor_footprints", "exterior_reference"}
     if not isinstance(context, dict) or set(context) - context_fields or len(dumps(context)) > MAX_CONTEXT_BYTES:
         reject("Invalid or oversized sanitized planning context.")
     bounded_tree(context, forbid_private=True)

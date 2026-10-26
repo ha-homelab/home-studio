@@ -1,4 +1,4 @@
-import { createDraftContext, draftSchema, prepareDraft } from './draft.js';
+import { createDraftContext, draftSchema, neighborhoodReference, prepareDraft } from './draft.js';
 import { processPhotoFile } from './photo-processing.js';
 
 const PHOTO_LIMIT = 6, TOTAL_BYTES = 30 * 1024 * 1024;
@@ -93,6 +93,7 @@ export function mountAiPanel(bridge, sessionOrTransport) {
         <label><span>Neighbors, streets, and landscape to include</span><textarea id="ai-site-include" rows="2" maxlength="1000" placeholder="Add my roof, the garage on the left, the neighbor to the right, and the street in front. Omit other buildings."></textarea></label>
         <label><span>Known dimension and orientation</span><textarea id="ai-site-reference" rows="2" maxlength="1000" placeholder="My front wall is 10 m wide along +X. The street is below it in 2D (+Z). Photo 1 faces the front wall."></textarea></label>
         <p class="ai-note">Additions only: existing site features, ground elevation, rooms, and device bindings stay fixed. X is right and Z is down in 2D. Photos provide approximate visual references, not a survey or exact photogrammetry. Confirm scale, orientation, roof height, and which property is yours. No latitude/longitude or map location is inferred.</p>
+        <p class="ai-note">Choose photos you took or imagery you have permission to share with your connected AI provider. Keep any required source credit. New neighboring buildings start as subdued outlines; you can edit their footprints, heights, colors and appearance after applying.</p>
       </div>
       <div id="ai-measurements" hidden><div class="ai-grid">
         <label><span>Measured width (m)</span><input id="ai-width" type="number" min="0.1" max="100" step="0.01" value="4"></label>
@@ -124,6 +125,7 @@ export function mountAiPanel(bridge, sessionOrTransport) {
   const previewBadge = el('div', 'AI preview · not saved', 'ai-preview-badge'); previewBadge.hidden = true; document.querySelector('.canvas-shell').append(previewBadge);
   let providers = [], connection = null, photos = [], photoEpoch = 0, photoWorker = null, cancelPhoto = null, processing = false;
   let contextPreviewKey = null, lastDraftIssue = '';
+  let roomMode = 'furnish_room';
   let controller = null, requestEpoch = 0, pending = null, review = null, connecting = false, connectionEpoch = 0, expiryTimer = null, disconnectPromise = null, connectPromise = null, cancelPromise = null;
   const selectedProvider = () => providers.find(provider => provider.id === $('provider').value);
   const setStatus = (text, error = false) => { if (disposed) return; $('status').textContent = text; $('status').classList.toggle('ai-error', error); };
@@ -214,12 +216,16 @@ export function mountAiPanel(bridge, sessionOrTransport) {
     $('cancel-request').hidden = !pending;
     $('connection').textContent = active ? `Connected session · ${connection.provider} · ${connection.model} · ${connection.endpoint || provider?.default_endpoint || ''}. Connection does not test model vision capability.` : 'Disconnected. Connect a session before generating.';
     const siteMode = $('mode').value === 'site';
+    const neighborhood = siteMode && bridge.selectionContext().siteScope === 'neighborhood';
     $('measurements').hidden = $('mode').value !== 'new_room'; $('site-fields').hidden = !siteMode;
     $('instructions').placeholder = siteMode ? 'Describe photo directions, roof shape, features to add, and uncertain details. Any language is welcome.' : 'Describe the furniture, photo directions, reference wall, and measurements. Any language is welcome.';
     const selected = bridge.selectionContext(), project = bridge.snapshot();
     const floor = project.floors.find(value => value.id === selected.floorId), room = floor?.rooms.find(value => value.id === selected.roomId);
-    $('target').textContent = siteMode ? `Add approximate exterior features to the site (${project.site?.features.length || 0} existing). The context includes existing site features and floor footprint polygons for alignment; no device bindings or private notes.` : $('mode').value === 'new_room' ? `New measured room on ${floor?.name || 'the current floor'}.` : room ? `Selected room: ${room.name}. Measured walls and existing objects remain fixed.` : 'Select an existing room in the plan, or choose Create a measured rectangular room.';
-    const contextKey = [bridge.revision(), $('mode').value, ...['width', 'depth', 'height', 'origin-x', 'origin-z', 'site-home', 'site-include', 'site-reference'].map(id => $(id).value)].join('|');
+    const reference = neighborhood ? neighborhoodReference(project) : null;
+    const referenceText = reference?.kind === 'site_home_and_roof' ? 'Alignment uses the existing home and roof outlines.' : reference?.kind === 'approximate_building_extent' ? 'Alignment shares only one approximate overall bounding rectangle, not the actual exterior footprint.' : 'No exterior reference geometry is available; provide measured dimensions and orientation.';
+    $('site-include').placeholder = neighborhood ? 'Add the neighbor to the right and the street in front. Keep my home unchanged; omit other buildings.' : 'Add my roof, the garage on the left, the neighbor to the right, and the street in front. Omit other buildings.';
+    $('target').textContent = siteMode ? `${neighborhood ? 'Neighborhood: add only neighboring buildings, streets and landscape. Your home and roof stay fixed.' : 'Add approximate exterior features to the site.'} ${project.site?.features.length || 0} existing site features are shared. ${neighborhood ? `${referenceText} Individual room outlines, names, IDs and elevations are excluded.` : 'Alignment includes every room outline and floor elevation, so the provider can see the indoor layout; room names and IDs are excluded.'} No device bindings or private notes are included.` : $('mode').value === 'new_room' ? `New measured room on ${floor?.name || 'the current floor'}.` : room ? `Selected room: ${room.name}. Measured walls and existing objects remain fixed.` : 'Select an existing room in the plan, or choose Create a measured rectangular room.';
+    const contextKey = [bridge.revision(), $('mode').value, selected.siteScope, ...['width', 'depth', 'height', 'origin-x', 'origin-z', 'site-home', 'site-include', 'site-reference'].map(id => $(id).value)].join('|');
     if (contextKey !== contextPreviewKey) {
       contextPreviewKey = contextKey;
       try { const preview = context(); $('context').textContent = JSON.stringify(preview.catalog ? { ...preview, catalog: { version: preview.catalog.version, model_count: preview.catalog.models.length, description: 'Built-in catalog names, dimensions, styles, and patterns; no private project data.' } } : preview, null, 2); $('context').dataset.valid = 'true'; }
@@ -227,7 +233,7 @@ export function mountAiPanel(bridge, sessionOrTransport) {
     }
     if ($('context').dataset.valid !== 'true') $('generate').disabled = true;
     const bytes = photos.reduce((total, photo) => total + photo.blob.size, 0);
-    $('send-summary').textContent = `Generate sends the ${photos.length} photos shown (${(bytes / 1024).toFixed(0)} KiB after processing), your instructions, the ${siteMode ? 'site description, existing site and floor footprints' : 'limited room context and catalog'} above, and the response schema to ${active ? connection.provider + ' / ' + connection.model : 'the destination you connect'}. Photos are not sent when selected or when connecting.`;
+    $('send-summary').textContent = `Generate sends the ${photos.length} photos shown (${(bytes / 1024).toFixed(0)} KiB after processing), your instructions, the ${siteMode ? neighborhood ? 'site description, existing site shapes and exterior alignment reference' : 'site description, existing site shapes, all room outlines and floor elevations' : 'limited room context and catalog'} above, and the response schema to ${active ? connection.provider + ' / ' + connection.model : 'the destination you connect'}. Photos are not sent when selected or when connecting.`;
     $('retry-hint').hidden = !lastDraftIssue;
     $('retry-hint').textContent = lastDraftIssue ? `Next Generate includes this correction: ${lastDraftIssue}` : '';
     $('apply').disabled = !review || !$('review-confirm').checked || Boolean(review.invalid);
@@ -361,7 +367,7 @@ export function mountAiPanel(bridge, sessionOrTransport) {
       }
       if (epoch !== requestEpoch) return;
       const instructions = $('instructions').value + (lastDraftIssue ? `\n\nPrevious draft validation feedback:\n${lastDraftIssue}` : '');
-      const result = await api('generate', { request_id: draftContext.request_id, mode: $('mode').value, context: draftContext, instructions, images, schema: draftSchema($('mode').value) }, signal);
+      const result = await api('generate', { request_id: draftContext.request_id, mode: $('mode').value, context: draftContext, instructions, images, schema: draftSchema($('mode').value, draftContext) }, signal);
       if (epoch !== requestEpoch || bridge.revision() !== revision || !connection) return;
       let prepared;
       try { prepared = prepareDraft(baseProject, draftContext, result.draft); }
@@ -415,11 +421,18 @@ export function mountAiPanel(bridge, sessionOrTransport) {
   for (const id of ['model', 'endpoint']) $(id).addEventListener('input', () => { if (connection || connecting) void endSession('Connection settings changed. Connect a new session before sending.'); });
   for (const id of ['mode', 'width', 'depth', 'height', 'origin-x', 'origin-z', 'instructions', 'site-home', 'site-include', 'site-reference']) $(id).addEventListener('input', () => {
     invalidate('Request inputs changed. Generate a fresh draft.');
-    if (id === 'mode') bridge.setEditingMode?.($('mode').value === 'site' ? 'site' : 'floor');
+    if (id === 'mode') {
+      if ($('mode').value !== 'site') roomMode = $('mode').value;
+      bridge.setEditingMode?.($('mode').value === 'site' ? 'site' : 'floor');
+    }
     update();
   });
   const unsubscribe = bridge.subscribe(() => invalidate('The plan or selection changed. Generate a fresh draft for the current scope.'));
-  open.addEventListener('click', () => { void loadProviders(); panel.hidden = false; open.setAttribute('aria-expanded', 'true'); $('title').focus(); update(); });
+  open.addEventListener('click', () => {
+    const mode = (bridge.editingMode?.() || bridge.selectionContext().mode) === 'site' ? 'site' : roomMode;
+    if ($('mode').value !== mode) { $('mode').value = mode; invalidate('The editing mode changed. Generate a fresh draft for the current scope.'); }
+    void loadProviders(); panel.hidden = false; open.setAttribute('aria-expanded', 'true'); $('title').focus(); update();
+  });
   function closePanel() { invalidate(); clearPhotos(); $('key').value = ''; panel.hidden = true; open.setAttribute('aria-expanded', 'false'); open.focus(); }
   $('close').addEventListener('click', closePanel);
   panel.addEventListener('keydown', event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); closePanel(); } });
