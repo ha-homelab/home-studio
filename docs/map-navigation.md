@@ -44,7 +44,7 @@ The host permits at most four tile calls and one settings call at a time, with 6
 
 The map displays **© OpenStreetMap contributors**. The native HA panel also shows a working [OpenStreetMap copyright link](https://www.openstreetmap.org/copyright) while the map is enabled or being previewed, without relaxing the iframe sandbox. Keep this credit visible in map screenshots or other redistribution. Tile use is subject to the provider's [tile usage policy](https://operations.osmfoundation.org/policies/tiles/).
 
-Authored street and landscape polygons remain visible at detailed, transition and overview scales, at their exact local coordinates and ground elevation. They do not acquire generated lanes or traffic. Coarse home/building solids retain their existing zoom behavior. The map layer remains controlled by map visibility; hiding it does not turn the generic demo garden back on. If no street polygon exists, street shape comes from the calibrated raster, not a guessed offset from the house.
+While the map layer is enabled, authored street and landscape polygons remain visible at detailed, transition and overview scales, at their exact local coordinates and ground elevation. They do not acquire generated lanes or traffic. Coarse home/building solids retain their existing zoom behavior. The map layer remains controlled by map visibility; hiding it does not turn the generic demo garden back on. If no street polygon exists, street shape comes from the calibrated raster, not a guessed offset from the house. In the planner, **Site Preview** renders authored site geometry without a map configuration. In the native or exported **Home** view, these surfaces retain the existing requirement for an enabled map layer.
 
 ## Scope and recovery
 
