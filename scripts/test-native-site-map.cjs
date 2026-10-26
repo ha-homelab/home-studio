@@ -48,7 +48,7 @@ let server, browser;
     const drawImage = CanvasRenderingContext2D.prototype.drawImage;
     CanvasRenderingContext2D.prototype.drawImage = function (...args) { if (this.canvas.id === 'plan-canvas') mapTilePaints++; return drawImage.apply(this, args); };
   });
-  await page.goto(origin + '/fixture'); await page.waitForFunction(() => host?._ready);
+  await page.goto(origin + '/fixture'); await page.waitForFunction(() => window.host?._ready);
   const frame = page.frames().find(value => value.url().includes('embed=home-assistant')); assert(frame);
   const initial = await frame.evaluate(() => ({ project: planner.getProject(), contexts: mapWebGLCanvases.size, canvases: document.querySelectorAll('canvas').length }));
   await frame.locator('#site-mode').click();
