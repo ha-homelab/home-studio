@@ -134,8 +134,32 @@ jobs:
       - name: Test camera tours and local video in three browser engines
         run: |
           for engine in chromium firefox webkit; do
-            CAMERA_TOUR_ENGINE="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-camera-tour-browser.cjs || exit 1
+            CAMERA_TOUR_ENGINE="$engine" CAMERA_TOUR_ARTIFACTS="$RUNNER_TEMP/camera-tour-artifacts/$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-camera-tour-browser.cjs || exit 1
           done
+      - name: Preserve synthetic Chromium camera-tour evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: camera-tour-chromium-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/camera-tour-artifacts/chromium/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Preserve synthetic Firefox camera-tour evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: camera-tour-firefox-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/camera-tour-artifacts/firefox/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Preserve synthetic WebKit camera-tour evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: camera-tour-webkit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/camera-tour-artifacts/webkit/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Test geographic map navigation in three browser engines
         run: |
           node --test scripts/test-ha-map-bridge.cjs
