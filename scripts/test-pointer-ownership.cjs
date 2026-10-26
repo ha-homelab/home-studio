@@ -37,7 +37,7 @@ class Target {
 }
 function fixture(homeMode, navigationMode = 'rotate') {
   const canvas = new Target(), document = new Target(), window = new Target();
-  const actions = [], renders = [], tourSyncs = [], markerResets = [];
+  const actions = [], renders = [], tourSyncs = [], markerResets = [], motionClears = [], presenceVisibility = [];
   const nodes = new Map();
   const getNode = id => {
     if (!nodes.has(id)) nodes.set(id, {style: {}, attributes: {}, classList: {toggle() {}}, prepend() {}, checked: true,
@@ -69,6 +69,8 @@ function fixture(homeMode, navigationMode = 'rotate') {
     editorFloorMaterials: null, homeArchitectureMaterials: null, setWallOutlineAppearance() {}, attachRoomLighting() {}, updateFixtureShadows() {}, refreshControls() {},
     nativePressPointers:new Set(), hideMediaControls() {}, cancelNativePress() {}, discardMediaControls() {}, previewTV() {},
     markerMotion: {reset() { markerResets.push(c.active); }},
+    clearMotion() { motionClears.push(c.active); },
+    presenceView: {setVisible(value) { presenceVisibility.push(value); }},
   });
   c.homeView = {get active() { return c.active; }};
   const code = [
@@ -80,7 +82,7 @@ function fixture(homeMode, navigationMode = 'rotate') {
     line(home, 'let navigationMode='), line(home, 'let mapSettingsError='),
     between(home, '  function resetZoom()', '  function applyViewPreferences('),
     between(home, '  function setActive(value) {', '  let nativePressTimer='),
-    line(home, "window.addEventListener('pagehide',()=>{cancelHomeGesture();"),
+    line(home, "window.addEventListener('pagehide',()=>{presenceView?.setVisible(false);"),
     line(home, "document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelHomeGesture();"),
     between(home, '  if(renderer) {\n    renderer.domElement.tabIndex', '  const signalText='),
   ].join('\n');
@@ -96,7 +98,7 @@ function fixture(homeMode, navigationMode = 'rotate') {
     canvas.emit('keydown', event); return event;
   };
   if (navigationMode === 'move') getNode('homeMove').onclick();
-  return {c, canvas, document, window, actions, renders, tourSyncs, markerResets, pointer, position, rotation, key, getNode};
+  return {c, canvas, document, window, actions, renders, tourSyncs, markerResets, motionClears, presenceVisibility, pointer, position, rotation, key, getNode};
 }
 
 for (const [homeMode, navigationMode] of [[true, 'rotate'], [true, 'move'], [false, 'rotate']]) {
@@ -139,6 +141,11 @@ for (const [homeMode, navigationMode] of [[true, 'rotate'], [true, 'move'], [fal
     assert.deepEqual(g.actions, [], `${cancellation}: cancelled gesture cannot tap a device`);
     assert.equal(g.canvas.captures.size, 0, `${cancellation}: capture is released`);
     if(cancellation==='mode')assert.deepEqual(g.markerResets,[homeMode,!homeMode],'both view transitions reset floating marker positions before switching mode');
+    if(cancellation==='mode')assert.deepEqual(g.motionClears,[false],'Leaving Home clears source motion during gesture cancellation');
+    if(cancellation==='pagehide'){
+      assert.deepEqual(g.presenceVisibility,[false],'Page hiding also hides the presence overlay');
+      assert.deepEqual(g.motionClears,[homeMode],'Page hiding clears source motion in either view');
+    }
     g.pointer('pointerdown');g.pointer('pointermove', 1, 140, 120);g.pointer('pointerup', 1, 140, 120);
     assert.notDeepEqual(g.position(), initial, `${cancellation}: a fresh gesture works`);
   }
