@@ -1781,8 +1781,8 @@ siteEditor = createSiteEditor({
   modeChanged() {
     orbit.mode = 'orbit'; selection = null; inspectorScope = ''; previewDirty = true;
     if (haSourcePolicy) {
-      $('preview-tab').textContent = siteEditor.active ? 'Preview 3D' : 'Published home';
-      $('preview-tab').setAttribute('aria-label', siteEditor.active ? 'Preview 3D' : 'Published home');
+      $('preview-tab').textContent = t(siteEditor.active ? 'Preview 3D' : 'Published home');
+      $('preview-tab').setAttribute('aria-label', t(siteEditor.active ? 'Preview 3D' : 'Published home'));
     }
     setView('plan');
   },
@@ -1796,7 +1796,10 @@ function renderLocale() {
   // Switching a presentation preference must not discard an unfinished form.
   const drafts = [...$('inspector-body').querySelectorAll('input,select,textarea')].map(input => ({ value: input.value, checked: input.checked, draft: input.inspectorDraft, invalid: input.getAttribute('aria-invalid') }));
   translateStatic();
-  if (haSourcePolicy) $('preview-tab').textContent = siteEditor?.active ? 'Preview 3D' : 'Published home';
+  if (haSourcePolicy) {
+    const label = t(siteEditor?.active ? 'Preview 3D' : 'Published home');
+    $('preview-tab').textContent = label; $('preview-tab').setAttribute('aria-label', label);
+  }
   $('language-select').value = getLocale();
   document.querySelectorAll('[data-tool]').forEach(element => {
     const label = element.querySelector('span:nth-child(2)').textContent;
@@ -1935,7 +1938,7 @@ if (haContext) {
         for (const id of ['plan-tab', 'preview-tab']) { $(id).setAttribute('role', 'button'); $(id).removeAttribute('aria-selected'); $(id).removeAttribute('aria-controls'); $(id).tabIndex = 0; }
         $('plan-tab').parentElement.setAttribute('role', 'group');
         $('plan-tab').parentElement.setAttribute('aria-label', 'Drawing and published home');
-        $('preview-tab').textContent = 'Published home'; $('preview-tab').lang = 'en';
+        $('preview-tab').textContent = t('Published home'); $('preview-tab').removeAttribute('lang');
         const helpPreview = document.querySelector('.native-help [data-guide-action="preview"]');
         helpPreview.textContent = 'Published home';
         helpPreview.parentElement.querySelector('p').textContent = 'Use Published home to inspect the current installed details. Changes to your drawing appear there only after Save draft and Publish to 3D Home. Back to editing returns to this drawing.';

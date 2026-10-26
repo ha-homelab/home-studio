@@ -10,7 +10,16 @@ const flat = kind => kind === 'street' || kind === 'landscape';
 // host saves and browser drafts remain one document. Gestures keep detached
 // working polygons until pointerup, so an interrupted drag cannot leak a draft.
 export function createSiteEditor(api) {
-  const { canvas, ctx, $, node, button, field, row, section, t } = api;
+  const { canvas, ctx, $, node, button: makeButton, field: makeField, row, section: makeSection, t } = api;
+  // Translate presentation only; stored feature names and identifiers stay literal.
+  const button = (key, ...args) => { const control = makeButton(t(key), ...args); if (key) control.dataset.i18n = key; return control; };
+  const field = (parent, key, value, change, options = {}) => makeField(parent, t(key), value, change, {
+    ...options, help: options.help ? t(options.help) : undefined,
+    options: options.options?.map(entry => typeof entry === 'string' ? { value: entry, label: t(entry) } : { ...entry, label: t(entry.label) }),
+  });
+  const section = (parent, key) => makeSection(parent, t(key));
+  const kindLabel = kind => t(label(kind));
+  const featureSummary = feature => t(feature.render_style === 'outline' ? '{kind} · outline · {area} m²' : '{kind} · {area} m²', { kind: kindLabel(feature.kind), area: Math.abs(signedArea(feature.polygon)).toFixed(1) });
   let active = false, selectedId = null, tool = 'select', kind = 'home', scope = 'all', points = [], hover = null, gesture = null;
   let mapUnderlay = null, mapTransport = null, mapWanted = false, suspended = false;
   const editableKind = value => scope !== 'neighborhood' || !['home', 'roof'].includes(value);
@@ -18,7 +27,7 @@ export function createSiteEditor(api) {
   const accepted = () => api.getAcceptedProject().site || createSite();
   const selected = () => accepted().features.find(feature => feature.id === selectedId && editableKind(feature.kind));
   const refresh = (revision = false) => { if (revision) api.changed(); api.renderUI(); api.render(); };
-  const options = () => KINDS.filter(([value]) => editableKind(value)).map(([value, name]) => ({ value, label: t(name) }));
+  const options = () => KINDS.filter(([value]) => editableKind(value)).map(([value, name]) => ({ value, label: name }));
   const point = event => api.toWorld(api.localPoint(event)).map(value => api.snap(value, event.altKey));
   function cancel() {
     const previous = gesture; gesture = null; points = []; hover = null;
@@ -39,9 +48,9 @@ export function createSiteEditor(api) {
     document.body.classList.toggle('site-mode', active);
     $('site-tools').hidden = !active;
     const previewNote = document.querySelector('.preview-note');
-    previewNote.textContent = active ? 'Site shapes · approximate exterior' : t('Real wall openings · geometry preview');
+    previewNote.textContent = t(active ? 'Site shapes · approximate exterior' : 'Real wall openings · geometry preview');
     $('inside-mode').setAttribute('aria-pressed', String(!active)); $('site-mode').setAttribute('aria-pressed', String(active));
-    canvas.setAttribute('aria-label', active ? 'Site plan in meters. Draw polygon corners, Enter to finish, Escape to cancel. Select features in Site layers to edit coordinates.' : t('Metric floor plan. Draw with pointer tools or use Add room by dimensions for keyboard input. Select objects from the On this floor list to edit precise coordinates.'));
+    canvas.setAttribute('aria-label', t(active ? 'Site plan in meters. Draw polygon corners, Enter to finish, Escape to cancel. Select features in Site layers to edit coordinates.' : 'Metric floor plan. Draw with pointer tools or use Add room by dimensions for keyboard input. Select objects from the On this floor list to edit precise coordinates.'));
     api.modeChanged(); api.changed(); api.fit(); refresh();
   }
   function choose(id) { cancel(); tool = 'select'; selectedId = accepted().features.some(feature => feature.id === id && editableKind(feature.kind)) ? id : null; refresh(true); }
@@ -54,51 +63,53 @@ export function createSiteEditor(api) {
       project.site.features.push({ id, name: label(kind), kind, polygon: clone(polygon), height_m: height, color,
         ...(kind === 'building' ? { render_style: 'outline' } : {}) });
       selectedId = id;
-    }, 'Site feature added. Drag its corners or edit the exact points.');
+    }, () => t('Site feature added. Drag its corners or edit the exact points.'));
     if (ok) { cancel(); tool = 'select'; refresh(); }
     return ok;
   }
   function finish() {
-    if (points.length < 3) { api.status('Choose at least three corners to finish a polygon.', true); return; }
+    if (points.length < 3) { api.status(() => t('Choose at least three corners to finish a polygon.'), true); return; }
     commitPolygon(points);
   }
-  function edit(change) { const id = selectedId; return api.transact(project => { const feature = project.site?.features.find(entry => entry.id === id); if (feature) change(feature); }, 'Site feature updated.'); }
-  function remove() { if (!selected()) return; const id = selectedId; cancel(); api.transact(project => { project.site.features = project.site.features.filter(feature => feature.id !== id); selectedId = null; }, 'Site feature deleted. Undo is available.'); }
+  function edit(change) { const id = selectedId; return api.transact(project => { const feature = project.site?.features.find(entry => entry.id === id); if (feature) change(feature); }, () => t('Site feature updated.')); }
+  function remove() { if (!selected()) return; const id = selectedId; cancel(); api.transact(project => { project.site.features = project.site.features.filter(feature => feature.id !== id); selectedId = null; }, () => t('Site feature deleted. Undo is available.')); }
   function updateUI() {
     if (!active) return;
     syncMapUnderlay();
-    document.querySelector('.preview-note').textContent = 'Site shapes · approximate exterior';
+    document.querySelector('.preview-note').textContent = t('Site shapes · approximate exterior');
+    canvas.setAttribute('aria-label', t('Site plan in meters. Draw polygon corners, Enter to finish, Escape to cancel. Select features in Site layers to edit coordinates.'));
+    scopes.setAttribute('aria-label', t('Site editing scope'));
     if (selectedId && !selected()) selectedId = null;
-    $('empty-state').hidden = true; $('floor-caption').textContent = `${scope === 'neighborhood' ? 'Neighborhood' : 'Site & roof'} · meters`;
+    $('empty-state').hidden = true; $('floor-caption').textContent = t('{scope} · meters', { scope: t(scope === 'neighborhood' ? 'Neighborhood' : 'Site & roof') });
     for (const element of scopeButtons) element.setAttribute('aria-pressed', String(element.dataset.siteScope === scope));
-    for (const option of $('site-kind').options) { option.hidden = !editableKind(option.value); option.disabled = !editableKind(option.value); }
+    for (const option of $('site-kind').options) { option.textContent = kindLabel(option.value); option.hidden = !editableKind(option.value); option.disabled = !editableKind(option.value); }
     $('site-kind').value = kind;
     for (const element of document.querySelectorAll('[data-site-tool]')) element.setAttribute('aria-pressed', String(element.dataset.siteTool === tool));
     $('site-finish').disabled = points.length < 3; $('site-cancel').disabled = !points.length && !gesture;
-    $('site-progress').textContent = points.length ? `${points.length} corners · Enter to finish · Escape to cancel` : scope === 'neighborhood' ? 'Draw neighboring buildings, streets and landscape. Your home stays a locked reference.' : 'Trace your home, roof and surroundings in meters.';
+    $('site-progress').textContent = points.length ? t('{count} corners · Enter to finish · Escape to cancel', { count: points.length }) : t(scope === 'neighborhood' ? 'Draw neighboring buildings, streets and landscape. Your home stays a locked reference.' : 'Trace your home, roof and surroundings in meters.');
     const list = node('div');
     const visibleFeatures = accepted().features.filter(feature => editableKind(feature.kind));
     for (const feature of visibleFeatures) {
       const item = button('', () => choose(feature.id), 'site-feature');
       item.dataset.inspectorKey = `site:${feature.id}`; item.dataset.siteId = feature.id;
-      item.setAttribute('aria-pressed', String(feature.id === selectedId)); item.setAttribute('aria-label', `${label(feature.kind)}: ${feature.name}`);
+      item.setAttribute('aria-pressed', String(feature.id === selectedId)); item.setAttribute('aria-label', t('{kind}: {name}', { kind: kindLabel(feature.kind), name: feature.name }));
       const swatch = node('span', 'site-swatch'); swatch.style.backgroundColor = feature.color; swatch.setAttribute('aria-hidden', 'true');
-      const text = node('span', 'site-feature-text'); text.append(node('strong', '', feature.name), node('small', '', `${label(feature.kind)}${feature.render_style === 'outline' ? ' · outline' : ''} · ${Math.abs(signedArea(feature.polygon)).toFixed(1)} m²`)); item.append(swatch, text); list.append(item);
+      const text = node('span', 'site-feature-text'); text.append(node('strong', '', feature.name), node('small', '', featureSummary(feature))); item.append(swatch, text); list.append(item);
     }
-    if (!visibleFeatures.length) list.append(node('p', 'site-empty', scope === 'neighborhood' ? 'Draw your first neighbor. Existing home and roof shapes stay visible as locked references.' : 'Choose a type, then draw a polygon or rectangle. Your floors stay visible as a reference.'));
+    if (!visibleFeatures.length) list.append(node('p', 'site-empty', t(scope === 'neighborhood' ? 'Draw your first neighbor. Existing home and roof shapes stay visible as locked references.' : 'Choose a type, then draw a polygon or rectangle. Your floors stay visible as a reference.')));
     api.reconcile($('site-list'), list); $('site-count').textContent = String(visibleFeatures.length);
     if (api.getView() !== 'preview') $('tool-hint').textContent = hint();
   }
-  function hint() { return tool === 'polygon' ? 'Click corners · click the first corner or Enter to finish · Escape cancels' : tool === 'rectangle' ? 'Drag opposite corners to draw a rectangle · Alt bypasses snap' : 'Select a shape · drag to move · drag corners to reshape · Space + drag pans'; }
+  function hint() { return t(tool === 'polygon' ? 'Click corners · click the first corner or Enter to finish · Escape cancels' : tool === 'rectangle' ? 'Drag opposite corners to draw a rectangle · Alt bypasses snap' : 'Select a shape · drag to move · drag corners to reshape · Space + drag pans'); }
   function buildInspector(parent) {
     const feature = selected();
     $('selected-item-details').hidden = true;
-    $('inspector-title').textContent = feature ? feature.name : scope === 'neighborhood' ? 'Neighborhood' : 'Site & roof';
-    $('inspector-subtitle').textContent = feature ? `${label(feature.kind)} · ${Math.abs(signedArea(feature.polygon)).toFixed(1)} m²` : scope === 'neighborhood' ? 'Edit surroundings on the same drawing grid.' : 'A shared exterior around all your floors.';
+    $('inspector-title').textContent = feature ? feature.name : t(scope === 'neighborhood' ? 'Neighborhood' : 'Site & roof');
+    $('inspector-subtitle').textContent = feature ? featureSummary(feature) : t(scope === 'neighborhood' ? 'Edit surroundings on the same drawing grid.' : 'A shared exterior around all your floors.');
     if (feature) {
       field(parent, 'Feature name', feature.name, value => edit(entry => { entry.name = value; }));
       field(parent, 'Feature type', feature.kind, value => edit(entry => {
-        if (!editableKind(value)) throw new Error('Switch to All site features to edit your home and roof.');
+        if (!editableKind(value)) throw new Error(t('Switch to All site features to edit your home and roof.'));
         const previous = entry.kind; entry.kind = value;
         if (flat(value)) entry.height_m = 0;
         if (value !== 'building') delete entry.render_style;
@@ -112,15 +123,15 @@ export function createSiteEditor(api) {
       section(parent, 'Exact outline');
       field(parent, 'Polygon points (x, z meters)', feature.polygon.map(pair => pair.join(', ')).join('\n'), value => edit(entry => {
         entry.polygon = value.trim().split(/\n/).filter(line => line.trim()).map(line => {
-          const values = line.trim().split(/[\s,]+/); if (values.length !== 2 || values.some(v => !v.trim() || !Number.isFinite(Number(v)))) throw new Error('Each point needs two numbers: x, z.');
+          const values = line.trim().split(/[\s,]+/); if (values.length !== 2 || values.some(v => !v.trim() || !Number.isFinite(Number(v)))) throw new Error(t('Each point needs two numbers: x, z.'));
           return values.map(Number);
         });
       }), { rows: Math.min(7, feature.polygon.length + 1), help: 'One x, z pair per line. Add or remove lines to change corners. You can also drag corner handles on the plan.' });
       parent.append(button('Delete feature', remove, 'danger'));
-      parent.append(node('p', 'property-id', `ID: ${feature.id}`));
+      parent.append(node('p', 'property-id', t('ID: {id}', { id: feature.id })));
     } else {
-      field(parent, 'Ground elevation (m)', accepted().ground_elevation_m, scope === 'neighborhood' ? null : value => api.transact(project => { project.site ||= createSite(); project.site.ground_elevation_m = value; }, 'Site ground elevation updated.'), { type: 'number', min: -SITE_LIMITS.groundElevation, max: SITE_LIMITS.groundElevation, readOnly: scope === 'neighborhood', help: scope === 'neighborhood' ? 'Shared with your home. Change it in All site features.' : 'Uses the same vertical origin as floor elevations.' });
-      parent.append(node('p', 'callout', scope === 'neighborhood' ? 'Draw neighboring footprints, then set their heights and outline colors. Your home and roof stay locked; choose All site features to edit them.' : 'Draw the outline of your own home and roof, then add neighboring buildings, streets and landscape. Choose Neighborhood to edit surroundings with your home locked.'));
+      field(parent, 'Ground elevation (m)', accepted().ground_elevation_m, scope === 'neighborhood' ? null : value => api.transact(project => { project.site ||= createSite(); project.site.ground_elevation_m = value; }, () => t('Site ground elevation updated.')), { type: 'number', min: -SITE_LIMITS.groundElevation, max: SITE_LIMITS.groundElevation, readOnly: scope === 'neighborhood', help: scope === 'neighborhood' ? 'Shared with your home. Change it in All site features.' : 'Uses the same vertical origin as floor elevations.' });
+      parent.append(node('p', 'callout', t(scope === 'neighborhood' ? 'Draw neighboring footprints, then set their heights and outline colors. Your home and roof stay locked; choose All site features to edit them.' : 'Draw the outline of your own home and roof, then add neighboring buildings, streets and landscape. Choose Neighborhood to edit surroundings with your home locked.')));
       section(parent, 'Add a rectangle by dimensions');
       const origin = row(parent), dimensions = row(parent);
       const x = field(origin, 'Site x (m)', 0, null, { type: 'number', min: -1000, max: 1000 });
@@ -129,11 +140,11 @@ export function createSiteEditor(api) {
       const depth = field(dimensions, 'Site depth (m)', 6, null, { type: 'number', min: .05, max: 2000 });
       parent.append(button('Add site rectangle', () => {
         const values = [x,z,width,depth].map(input => api.inspectorValue(input)).map(value => value.trim() ? Number(value) : NaN);
-        if (!values.every(Number.isFinite) || values[2] <= 0 || values[3] <= 0) { api.status('Enter a valid origin and positive width and depth.', true); return; }
+        if (!values.every(Number.isFinite) || values[2] <= 0 || values[3] <= 0) { api.status(() => t('Enter a valid origin and positive width and depth.'), true); return; }
         const [a,b,w,d] = values; if (commitPolygon([[a,b],[round(a+w),b],[round(a+w),round(b+d)],[a,round(b+d)]])) api.fit();
       }, 'quiet'));
-      parent.append(node('p', 'field-note', `Creates the type selected in the Site tools: ${label(kind)}.`));
-      parent.append(node('p', 'field-note', 'These are local drawing coordinates. Use Align map in Home Assistant separately for geographic placement.'));
+      parent.append(node('p', 'field-note', t('Creates the type selected in the Site tools: {kind}.', { kind: kindLabel(kind) })));
+      parent.append(node('p', 'field-note', t('These are local drawing coordinates. Use Align map in Home Assistant separately for geographic placement.')));
     }
   }
   function bounds() {
@@ -213,7 +224,7 @@ export function createSiteEditor(api) {
     else if (tool === 'polygon') {
       if (points.length >= 3 && Math.hypot(...api.toScreen(points[0]).map((value,index) => value-screen[index])) < 12) finish();
       else if (points.length < SITE_LIMITS.points) { points.push(world); hover = null; refresh(true); }
-      else api.status(`A polygon can have up to ${SITE_LIMITS.points} corners.`, true);
+      else api.status(() => t('A polygon can have up to {count} corners.', { count: SITE_LIMITS.points }), true);
       return true;
     } else if (tool === 'rectangle') gesture = { type: 'rectangle', start: world, end: world };
     else {
@@ -232,7 +243,7 @@ export function createSiteEditor(api) {
   }
   function pointerMove(event) {
     if (!active || api.getView() === 'preview') return false;
-    const world = point(event); $('pointer-position').textContent = `x ${world[0].toFixed(2)} · z ${world[1].toFixed(2)} m`;
+    const world = point(event); $('pointer-position').textContent = t('x {x} · z {z} m', { x: world[0].toFixed(2), z: world[1].toFixed(2) });
     if (gesture && gesture.pointerId !== event.pointerId) return true;
     if (gesture && !event.buttons) { pointerUp(event,true); return true; }
     if (!gesture) { if (points.length) { hover = world; api.render(); } canvas.style.cursor = tool === 'select' ? 'default' : 'crosshair'; return true; }
@@ -264,12 +275,12 @@ export function createSiteEditor(api) {
     else if (event.key.toLowerCase() === 'r') setTool('rectangle');
     return true;
   }
-  const scopes = node('div', 'site-scopes'); scopes.setAttribute('role', 'group'); scopes.setAttribute('aria-label', 'Site editing scope');
+  const scopes = node('div', 'site-scopes'); scopes.setAttribute('role', 'group'); scopes.setAttribute('aria-label', t('Site editing scope'));
   const scopeButtons = [['all', 'All site features'], ['neighborhood', 'Neighborhood']].map(([value, title]) => {
     const control = button(title, () => setScope(value)); control.dataset.siteScope = value; control.setAttribute('aria-pressed', String(value === scope)); scopes.append(control); return control;
   });
   $('site-tools').insertBefore(scopes, $('site-settings'));
-  const mapControls = node('section', 'site-map-controls'); mapControls.hidden = true; mapControls.setAttribute('aria-label', 'Map background');
+  const mapControls = node('section', 'site-map-controls'); mapControls.hidden = true; mapControls.setAttribute('aria-label', t('Map background'));
   const mapToggle = button('Map background', () => { mapWanted = !mapWanted; syncMapUnderlay(); }); mapToggle.id = 'site-map-toggle'; mapToggle.setAttribute('aria-pressed', 'false');
   const mapReload = button('Reload map', () => { void mapUnderlay?.reload(); }); mapReload.id = 'site-map-reload';
   const mapStatus = node('p', 'site-map-status'); mapStatus.id = 'site-map-status'; mapStatus.setAttribute('role', 'status');
@@ -277,9 +288,10 @@ export function createSiteEditor(api) {
   function updateMapControls() {
     const state = mapUnderlay?.state;
     mapControls.hidden = !mapUnderlay;
+    mapControls.setAttribute('aria-label', t('Map background'));
     mapToggle.setAttribute('aria-pressed', String(mapWanted));
     mapReload.hidden = !mapWanted; mapReload.disabled = !state?.enabled || state.loading;
-    mapStatus.textContent = mapWanted ? state?.status || state?.attribution || '' : 'Show your saved Home Assistant map alignment beneath this drawing.';
+    mapStatus.textContent = mapWanted ? state?.status ? t(state.status) : state?.attribution || '' : t('Show your saved Home Assistant map alignment beneath this drawing.');
   }
   function syncMapUnderlay() {
     const wasEnabled = mapUnderlay?.state.enabled, enabled = active && mapWanted && api.getView() !== 'preview' && !suspended && !document.hidden;

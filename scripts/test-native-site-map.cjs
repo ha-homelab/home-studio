@@ -9,14 +9,14 @@ const fixture = `<!doctype html><html><head><meta charset="utf-8"></head><body s
 await import('/home-floorplan-static/studio.js');
 window.calls=[];window.runningTiles=0;window.maxTiles=0;window.heldTiles=[];window.holdTiles=false;
 window.saved={project:${JSON.stringify(project)},revision:0};
-window.mapConfig={enabled:true,latitude:0,longitude:0,model_x:3,model_z:2,north_deg:27};
+window.mapAvailable=true;window.mapConfig={enabled:true,latitude:0,longitude:0,model_x:3,model_z:2,north_deg:27};
 const tile=document.createElement('canvas');tile.width=tile.height=256;const context=tile.getContext('2d');context.fillStyle='#1fa0ae';context.fillRect(0,0,256,256);context.strokeStyle='#e3f0c2';context.lineWidth=10;context.beginPath();context.moveTo(0,128);context.lineTo(256,128);context.stroke();const png=tile.toDataURL('image/png');
 window.host=document.querySelector('home-floorplan-studio-panel');
 window.connection=Object.assign(new EventTarget(),{connected:true});
 window.hass={connection:window.connection,user:{id:'fictional-map-admin',is_admin:true},auth:{accessToken:'PRIVATE_SYNTHETIC_TOKEN'},callWS:async request=>{
 calls.push(structuredClone(request));
 if(request.type==='home_floorplan/entity_catalog')return {floors:[],areas:[],entities:[]};
-if(request.type==='home_floorplan/map_get')return {revision:1,configured:true,config:structuredClone(mapConfig),reference:{latitude:0,longitude:0},token:'PRIVATE_SYNTHETIC_SERVER_TOKEN'};
+if(request.type==='home_floorplan/map_get')return {revision:1,configured:mapAvailable,config:mapAvailable?structuredClone(mapConfig):null,reference:{latitude:0,longitude:0},token:'PRIVATE_SYNTHETIC_SERVER_TOKEN'};
 if(request.type==='home_floorplan/map_tile'){maxTiles=Math.max(maxTiles,++runningTiles);try{if(holdTiles)await new Promise(resolve=>heldTiles.push(resolve));return {data_url:png,token:'PRIVATE_SYNTHETIC_TILE_TOKEN'};}finally{runningTiles--;}}
 if(request.type==='home_floorplan/project_save'){saved={project:request.project,revision:saved.revision+1};}
 return {...structuredClone(saved),can_edit:true,has_saved_draft:true,has_published:false,editor_url:'/home-floorplan-studio/planner/index.html',capabilities:{authoring:true,ai:false}};
@@ -88,6 +88,29 @@ let server, browser;
   assert.equal(await page.evaluate(() => calls.length), stopped, 'Leaving Site stops map work');
   await frame.locator('#site-mode').click(); await page.waitForFunction(() => calls.length > 0 && runningTiles === 0);
   await frame.waitForFunction(() => !document.querySelector('#site-map-status').textContent.includes('Loading'));
+  await frame.locator('#site-map-toggle').click();
+  // An unavailable map stays usable across live language changes in native Site mode.
+  await page.evaluate(()=>{mapAvailable=false;});await frame.locator('#site-map-toggle').click();
+  await frame.waitForFunction(()=>document.querySelector('#site-map-status').textContent==='Align and enable the map in Home Assistant first, then retry.');
+  await frame.locator('[data-site-scope="neighborhood"]').click();
+  const beforeLocale=await frame.evaluate(()=>planner.getProject());
+  const beforeLocaleRequests=await page.evaluate(()=>calls.filter(call=>/\/map_/.test(call.type)).length);
+  await frame.locator('#language-select').selectOption('ru');await frame.waitForFunction(()=>document.documentElement.lang==='ru');
+  assert.equal(await frame.locator('[data-site-scope="neighborhood"]').innerText(),'Окружение');
+  assert.equal(await frame.locator('#site-map-toggle').innerText(),'Карта на фоне');
+  assert.equal(await frame.locator('#site-map-reload').innerText(),'Перезагрузить карту');
+  assert.equal(await frame.locator('#site-map-reload').isEnabled(),true);
+  assert.match(await frame.locator('#site-map-status').innerText(),/^Сначала выровняйте и включите карту/);
+  assert.match(await frame.locator('#plan-canvas').getAttribute('aria-label'),/^План участка в метрах/);
+  assert.equal(await frame.getByLabel('Отметка земли (м)',{exact:true}).getAttribute('readonly'),'');
+  const localizedDownloadPromise=page.waitForEvent('download');await frame.locator('#export-project').click();
+  const localizedDownload=await localizedDownloadPromise;const chunks=[];
+  for await(const chunk of await localizedDownload.createReadStream())chunks.push(chunk);
+  assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString('utf8')),beforeLocale,'Native localized export preserves the project');
+  await frame.locator('#language-select').selectOption('en');await frame.waitForFunction(()=>document.documentElement.lang==='en');
+  assert.equal(await frame.locator('#site-map-status').innerText(),'Align and enable the map in Home Assistant first, then retry.');
+  assert.deepEqual(await frame.evaluate(()=>planner.getProject()),beforeLocale);
+  assert.equal(await page.evaluate(()=>calls.filter(call=>/\/map_/.test(call.type)).length),beforeLocaleRequests,'Language changes do not reload the map or add transport listeners');
   await frame.locator('#site-map-toggle').click();
   // Exercise the actual host origin guard and read-only action boundary after
   // normal operations, so synthetic high request IDs cannot disrupt the UI.

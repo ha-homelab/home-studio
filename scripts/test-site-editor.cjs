@@ -121,6 +121,24 @@ async function addRectangle(page,kind,x,z,w,d){
  await addRectangle(page,'building',11,0,4,5);await field(page,'Feature name','Neighbor');
  assert.equal((await model(page)).site.features.at(-1).render_style,'outline');
  assert.equal(await page.getByLabel('Neighbor appearance',{exact:true}).inputValue(),'outline');
+ // Locale changes while Site is active translate controls, never saved names or geometry.
+ const beforeLocale=await model(page);
+ await page.locator('#language-select').selectOption('ru');
+ await page.waitForFunction(()=>document.documentElement.lang==='ru');
+ assert.equal(await page.locator('[data-site-scope="neighborhood"]').innerText(),'Окружение');
+ assert.equal(await page.locator('#site-mode').innerText(),'Участок и крыша');
+ assert.equal(await page.locator('#site-kind option[value="building"]').innerText(),'Соседний дом');
+ assert.match(await page.locator('#plan-canvas').getAttribute('aria-label'),/^План участка в метрах/);
+ assert.equal(await page.getByLabel('Вид соседнего дома',{exact:true}).inputValue(),'outline');
+ assert.equal(await page.getByLabel('Название объекта',{exact:true}).inputValue(),'Neighbor','User names matching UI keys remain literal');
+ assert.equal(await page.locator('#site-list strong').innerText(),'Neighbor');
+ assert.deepEqual(await model(page),beforeLocale);
+ const localizedDownloadPromise=page.waitForEvent('download');await page.locator('#export-project').click();
+ const localizedDownload=await localizedDownloadPromise;const localizedPath=path.join(temp,'site-ru.json');await localizedDownload.saveAs(localizedPath);
+ assert.deepEqual(JSON.parse(fs.readFileSync(localizedPath,'utf8')),beforeLocale,'Localized export preserves every project field');
+ await page.locator('#language-select').selectOption('en');await page.waitForFunction(()=>document.documentElement.lang==='en');
+ assert.equal(await page.getByLabel('Neighbor appearance',{exact:true}).inputValue(),'outline');
+ assert.deepEqual(await model(page),beforeLocale);
  await page.getByLabel('Neighbor appearance',{exact:true}).selectOption('solid');
  assert.equal((await model(page)).site.features.at(-1).render_style,'solid');
  await page.getByRole('button',{name:'Undo',exact:true}).click();
