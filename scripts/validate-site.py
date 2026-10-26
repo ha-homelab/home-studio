@@ -130,7 +130,7 @@ REPO_FILES = (
               'scripts/test-light-state.cjs', 'scripts/test-tv-screen.cjs', 'scripts/test-media-preview.cjs',
               'scripts/test-install-home-assistant.py', 'scripts/test-public-package.py', 'scripts/test-wall-tops.cjs',
               'scripts/test-rounded-walls.cjs', 'scripts/test-wall-sheen.cjs', 'scripts/test-wall-motion.cjs', 'scripts/test-wall-outline-materials.cjs', 'scripts/test-unlit-architectural-walls.cjs', 'scripts/test-flat-editor-floors.cjs', 'docs/rounded-walls.md',
-              'scripts/test-browser-stability.cjs', 'scripts/browser-stability-diagnostics.cjs',
+              'scripts/test-browser-stability.cjs', 'scripts/browser-stability-diagnostics.cjs', 'scripts/browser-pixel-evidence.cjs',
               'scripts/browser-startup-diagnostics.cjs', 'scripts/test-browser-startup-diagnostics.cjs',
               'scripts/test-browser-stability-diagnostics.cjs', 'scripts/test-home-render-budget.cjs',
               'scripts/test-packed-room-lighting.cjs', 'scripts/test-zero-point-block.cjs', 'scripts/test-point-decay-two.cjs', 'scripts/test-cached-shadow-transmission.cjs', 'scripts/test-literal-lambert-directional.cjs', 'docs/literal-lambert-directional.md', 'docs/point-decay-two.md', 'scripts/test-glass-wall-program.cjs', 'scripts/test-fallback-shared-program.cjs',
@@ -160,11 +160,14 @@ REPO_FILES = (
               'scripts/test-furniture-profiles.py', 'docs/catalog-material-authoring.md',
               'scripts/test-inventory-appearance.cjs', 'scripts/test-inventory-appearance.py',
               'scripts/test-furniture-patterns.mjs', 'scripts/test-furniture-patterns.py',
+              'scripts/test-fixture-animation.cjs', 'scripts/test-fixture-animation.py',
+              'scripts/test-climate-state.cjs', 'scripts/test-marker-motion.cjs',
+              'scripts/test-device-effects.cjs', 'scripts/test-device-feedback.cjs',
               'scripts/test-furniture-editor.cjs', 'package.json', 'package-lock.json',
               'planner/example-home.json', 'geometry.py', 'exporters.py', 'physical_exports.py', 'material_textures.py', 'material-textures.js', 'pbr-color-data.js','pbr-materials.js', 'pbr_materials.py', 'environment-lighting.js',
               'scripts/test-material-textures.py', 'scripts/test-material-textures.cjs', 'scripts/test-pbr-materials.py', 'scripts/test-pbr-materials.cjs', 'scripts/test-pbr-lighting.cjs', 'scripts/test-physical-exports.py', 'docs/material-textures.md', 'docs/material-color-provenance.json',
               'viewer.template.html', 'viewer.js', 'home-view.html', 'home-view.css',
-              'curtain-state.js', 'motion-state.js', 'appliance-state.js', 'presence-view.js', 'vacuum-state.js', 'vacuum-view.js', 'tv-screen.js', 'camera-preview.js', 'media-preview.js',
+              'curtain-state.js', 'motion-state.js', 'appliance-state.js', 'climate-state.js', 'marker-motion.js', 'device-effects.js', 'presence-view.js', 'vacuum-state.js', 'vacuum-view.js', 'tv-screen.js', 'camera-preview.js', 'media-preview.js',
               'assumed-zone-view.js', 'map-layer.js', 'home-view.js', 'light-state.js', 'room-lighting.js',
               'custom_components/home_floorplan/__init__.py',
               'custom_components/home_floorplan/site.py',
@@ -194,7 +197,7 @@ REPO_FILES = (
               'scripts/test-dashboard-card.cjs', 'scripts/test-media-artwork-host.cjs',
               'scripts/test-media-artwork-browser.cjs', 'docs/images/dashboard-media-example.png',
               'scripts/test-media-command-host.cjs', 'scripts/test-media-controls.cjs',
-              'scripts/test-generic-entities.cjs', 'scripts/test-device-interactions.cjs', 'docs/device-controls.md')
+              'scripts/test-generic-entities.cjs', 'scripts/test-device-interactions.cjs', 'docs/device-controls.md', 'docs/images/device-feedback.png')
 # Supplementary tripwires, not a substitute for reviewing source and image pixels.
 PRIVATE = re.compile(r'\bunit\d{3}\b|/Users/|-----BEGIN .*PRIVATE KEY|'
                      r'\b(?:192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3})\b', re.I)
@@ -253,7 +256,7 @@ def validate(root):
             validate_website_media(path)
             if path.suffix != '.vtt':
                 continue
-        if path.suffix == '.jpg' or relative in ('docs/images/dashboard-media-example.png', 'docs/images/native-editor.png', 'docs/images/garden-surroundings.png'):
+        if path.suffix == '.jpg' or relative in ('docs/images/dashboard-media-example.png', 'docs/images/native-editor.png', 'docs/images/garden-surroundings.png', 'docs/images/device-feedback.png'):
             continue
         text = path.read_text(encoding='utf-8')
         # The validator intentionally contains its own private-pattern tripwires.

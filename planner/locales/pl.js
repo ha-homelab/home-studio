@@ -796,4 +796,9 @@ export default {
   "Loading map…": "Wczytywanie mapy…",
   "Preview 3D": "Podgląd 3D",
   "Published home": "Opublikowany dom",
+  "model.ceiling_fan": "Wentylator sufitowy z czterema łopatkami",
+  "model.standing_fan": "Wentylator stojący",
+  "model.desk_fan": "Wentylator biurkowy",
+  "model.wall_air_conditioner": "Klimatyzator ścienny",
+  "model.panel_heater": "Grzejnik panelowy",
 };

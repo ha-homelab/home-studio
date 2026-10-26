@@ -796,4 +796,9 @@ export default {
   "Loading map…": "지도를 불러오는 중…",
   "Preview 3D": "3D 미리 보기",
   "Published home": "게시된 집",
+  "model.ceiling_fan": "4날 천장 선풍기",
+  "model.standing_fan": "스탠드 선풍기",
+  "model.desk_fan": "탁상용 선풍기",
+  "model.wall_air_conditioner": "벽걸이 에어컨",
+  "model.panel_heater": "패널 히터",
 };

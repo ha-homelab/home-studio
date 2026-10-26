@@ -796,4 +796,9 @@ export default {
   "Loading map…": "Memuat peta…",
   "Preview 3D": "Pratinjau 3D",
   "Published home": "Rumah yang diterbitkan",
+  "model.ceiling_fan": "Kipas plafon empat bilah",
+  "model.standing_fan": "Kipas angin berdiri",
+  "model.desk_fan": "Kipas meja",
+  "model.wall_air_conditioner": "AC dinding",
+  "model.panel_heater": "Pemanas panel",
 };

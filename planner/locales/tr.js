@@ -796,4 +796,9 @@ export default {
   "Loading map…": "Harita yükleniyor…",
   "Preview 3D": "3B önizleme",
   "Published home": "Yayımlanan ev",
+  "model.ceiling_fan": "Dört kanatlı tavan vantilatörü",
+  "model.standing_fan": "Ayaklı vantilatör",
+  "model.desk_fan": "Masa vantilatörü",
+  "model.wall_air_conditioner": "Duvar tipi klima",
+  "model.panel_heater": "Panel ısıtıcı",
 };

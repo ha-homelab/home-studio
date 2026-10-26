@@ -137,6 +137,56 @@ commands stay disabled while unavailable, restored, disconnected or already
 waiting for a command. A successful service response means HA accepted the
 request; the displayed state still comes from HA, not a simulated success.
 
+## Fan and climate activity
+
+In **Home Studio** inside Home Assistant, open the furniture library and search
+for **fan**, **air conditioner**, or **heater**. Add a four-blade ceiling fan,
+standing fan, desk fan, wall air conditioner, or panel heater. Position and rotate
+it in the editor, link its HA entity, then publish **3D Home**. These models also
+work in the optional separate editor and portable compiler.
+
+![Three fans, a cooling air conditioner and a heating panel in a fictional test home](images/device-feedback.png)
+
+The illustration uses fictional live readings: blue dashed lines show cooling,
+warm lines show heating, and the badges show current room temperatures.
+Airflow follows the fixture's placement and rotation; it is a status symbol,
+not a prediction of where air will travel.
+
+Bind a fan object to `fan.example` to show movement while the fan is on.
+When the integration reports a speed percentage, zero stops movement even if
+the fan remains powered on. A fan that reports only on/off can still show its
+running state. A saved speed on an off fan does not create movement.
+A library fan connected to a `switch` or `input_boolean` uses that entity's
+on/off state. Other switch-controlled items retain their normal appearance.
+
+For `climate.example`, the selected mode and actual activity are separate.
+Reported cooling or drying produces blue airflow; reported heating or
+preheating produces warm airflow. Fan-only activity uses neutral airflow.
+Idle and off stop these effects. Defrosting does not imply heat delivery into
+the room, so it does not produce warm airflow. If an integration does not
+report `hvac_action`, the device shows its mode and temperatures without
+assuming that it is actively heating or cooling.
+
+The temperature indicator prefers the current reading, then the target, then
+a valid target range. It uses the reported temperature unit. Missing or invalid
+values do not become zero readings. Unavailable, restored or disconnected
+devices stop their activity effects and hide live temperature indicators.
+These effects describe HA's reports; they do not estimate airflow, heat output,
+or physical fan speed.
+
+## Smooth device markers
+
+When you rotate or move the plan, device buttons follow with a small amount of
+smoothing. Their clickable area moves with the visible button. Room labels,
+fixtures and airflow stay attached to their actual positions. Lag is capped at
+24 screen pixels and the buttons settle within 320 ms of the last camera
+change. Switching floors or rooms, resizing, or resetting the view snaps them
+to the new view immediately.
+
+Your system's **Reduce motion** setting disables marker smoothing and fan
+rotation. Airflow becomes a static colored indicator. No special HA setting
+or animation configuration is needed.
+
 ## Performance and privacy
 
 There is no new polling loop, history download or per-frame device request. New
@@ -181,3 +231,10 @@ See [dashboard and artwork setup](dashboard-and-media.md),
 [Dry run](dry-run.md), and HA's references for
 [native card features](https://www.home-assistant.io/dashboards/features/) and
 [media-player capabilities](https://developers.home-assistant.io/docs/core/entity/media-player/).
+
+Fan rotors share one adaptive scene timer, capped at approximately 12 updates
+per second; slow renders lower that rate. Software rendering keeps 3D geometry
+still and uses the lightweight fan icon and airflow instead. Marker smoothing
+only updates DOM transforms and never requests a 3D render. Effects stop while
+the view is hidden, outside the visible page, disconnected, or no longer
+reporting activity. They do not send device commands or poll HA.

@@ -4,7 +4,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const lines = fs.readFileSync(path.join(__dirname, '../viewer.js'), 'utf8').split('\n');
-const frames = new Map(), listeners = {}, events = {};
+const frames = new Map(), fallbackTimers = new Map(), listeners = {}, events = {};
 let serial = 0, draws = 0, invalidations = 0, disposals = 0, losses = 0, disconnects = 0;
 let box = {width:3840, height:2160};
 const buffers = [];
@@ -15,6 +15,8 @@ const context = vm.createContext({
   window: {addEventListener(type, fn) { events[type] = fn; }},
   requestAnimationFrame(fn) { frames.set(++serial, fn); return serial; },
   cancelAnimationFrame(id) { frames.delete(id); },
+  setTimeout(fn,delay) { fallbackTimers.set(++serial,{fn,delay}); return serial; },
+  clearTimeout(id) { fallbackTimers.delete(id); },
   devicePixelRatio: 3,
   renderProfile: {pixels: 2000000},
   wallSheenMotion: {beforeRender() {}, afterRender() {}},
@@ -252,7 +254,9 @@ function motionScheduler(diffuse = true, reduced = diffuse) {
   vm.runInContext(lines.find(line=>line.startsWith('coalesceMotion=')),c);
   const input=source.slice(source.indexOf('if(coalesceMotion){\nrenderer.domElement.addEventListener'),source.indexOf('let drag=null;'));
   vm.runInContext(input,c);
-  return {c,raf,timers,handlers,painted,errors,paths,
+  return {c,raf,allTimers:timers,
+    get delayTimers(){return new Map([...timers].filter(([key])=>key!==vm.runInContext("typeof renderFallback==='undefined'?0:renderFallback",c)));},
+    handlers,painted,errors,paths,
     read:expression=>vm.runInContext(expression,c),
     start(){handlers.pointerdown?.({button:0,pointerId:1,clientX:0,clientY:0});},
     move(position){c.camera.position=position;handlers.pointermove?.({pointerId:1,clientX:position,clientY:0});c.requestRender(true);},
@@ -262,40 +266,85 @@ function motionScheduler(diffuse = true, reduced = diffuse) {
     duration(ms){drawDuration=ms;},clockReads:()=>clockReads,now:()=>time,afterNextDraw(callback){afterDraw=callback;},
   };
 }
+// A pending demand is bounded even when the browser stops delivering RAF.
+for(const reduced of [false,true]) {
+  const q=motionScheduler(false,reduced);
+  q.start();q.move(1);
+  const staleFrame=[...q.raf.values()][0];
+  for(let ms=0;ms<99;ms++){q.advance(1);q.move(ms+2);}
+  assert.equal(q.painted.length,0,'The fallback must not render before its fixed deadline');
+  q.advance(1);
+  assert.equal(q.painted.length,1,'Withheld RAF cannot strand a visible demand');
+  assert.equal(q.painted[0].position,100,'A burst paints its newest state without extending the deadline');
+  assert.equal(q.raf.size,0);assert.equal(q.allTimers.size,0);
+  staleFrame();q.advance(1000);q.flush();
+  assert.equal(q.painted.length,1,'A late RAF cannot duplicate the fallback or start an idle loop');
+}
+for(const transition of ['hidden','lost','suspended','failed','explicit','cancel']) {
+  const q=motionScheduler(false,false);q.move(1);
+  const staleFrame=[...q.raf.values()][0],staleTimer=[...q.allTimers.values()][0].fn;
+  if(transition==='hidden')q.c.document.hidden=true;
+  else if(transition==='lost')vm.runInContext('renderLost=true',q.c);
+  else if(transition==='suspended')vm.runInContext('renderSuspended=true',q.c);
+  else if(transition==='failed')q.c.failed3D=true;
+  else if(transition==='explicit')q.c.render();
+  else q.c.cancelRender();
+  q.advance(100);staleFrame();staleTimer();q.flush();
+  assert.equal(q.painted.length,transition==='explicit'?1:0,transition+' rejects stale or invalid fallback work');
+  assert.equal(q.raf.size,0);assert.equal(q.allTimers.size,0);
+}
+for(const winner of ['timer','raf']) {
+  const q=motionScheduler(false,false);q.move(1);
+  const oldFrame=[...q.raf.values()][0],oldTimer=[...q.allTimers.values()][0].fn;
+  if(winner==='timer')q.advance(100);else q.flush();
+  q.move(2);
+  const pendingFrame=[...q.raf.keys()][0],pendingTimer=[...q.allTimers.keys()][0];
+  oldFrame();oldTimer();
+  assert.equal(q.painted.length,1,'Old callbacks cannot draw while a newer demand is pending');
+  assert(q.raf.has(pendingFrame)&&q.allTimers.has(pendingTimer),'Old callbacks cannot cancel the newer demand');
+  q.flush();q.advance(1000);
+  assert.deepEqual(q.painted.map(frame=>frame.position),[1,2],'The newer demand paints its latest state exactly once');
+  assert.equal(q.raf.size,0);assert.equal(q.allTimers.size,0);
+}
+const timely=motionScheduler(false,false);timely.move(1);timely.flush();timely.advance(1000);
+assert.equal(timely.painted.length,1,'Ordinary RAF delivery cancels its timer');
+assert.equal(timely.allTimers.size,0);
+console.log('PASS: fixed demand deadline, withheld/late RAF, burst coalescing and lifecycle cancellation');
+
 // Both software profiles share scheduling and bounded motion rendering.
 // Their resting resolution and material choice remain independent.
 for(const diffuse of [true,false]) {
 const scheduled=motionScheduler(diffuse,true);
 scheduled.start();scheduled.move(20);
 assert.equal(scheduled.raf.size,1,'The first moved-pointer frame retains ordinary RAF latency');
-assert.equal(scheduled.timers.size,0);
+assert.equal(scheduled.delayTimers.size,0);
 scheduled.flush();assert.equal(scheduled.read('interactionPointer.painted'),true);
 assert.deepEqual(scheduled.painted,[{time:0,position:20,moving:true}]);
 scheduled.advance(10);scheduled.move(30);
-const [timer]=scheduled.timers.values();assert.equal(timer.due,74);
+const [timer]=scheduled.delayTimers.values();assert.equal(timer.due,74);
 scheduled.advance(20);scheduled.move(40);scheduled.move(50);
-assert.equal(scheduled.timers.size,1);assert.equal([...scheduled.timers.values()][0],timer,
+assert.equal(scheduled.delayTimers.size,1);assert.equal([...scheduled.delayTimers.values()][0],timer,
   'Later input shares the original deadline rather than debouncing it');
 scheduled.advance(43);assert.equal(scheduled.raf.size,0);
 scheduled.advance(1);assert.equal(scheduled.raf.size,1);scheduled.flush();
 assert.deepEqual(scheduled.painted.at(-1),{time:74,position:50,moving:true},
   'A held drag paints the latest camera before pointerup');
 assert(scheduled.read('interactionPointer'),'The held-pointer frame does not end the gesture');
-assert.equal(scheduled.timers.size,0);assert.equal(scheduled.raf.size,0,'No self-sustaining motion loop');
-scheduled.move(60);assert.equal(scheduled.timers.size,1);
+assert.equal(scheduled.delayTimers.size,0);assert.equal(scheduled.raf.size,0,'No self-sustaining motion loop');
+scheduled.move(60);assert.equal(scheduled.delayTimers.size,1);
 scheduled.handlers.pointerup({pointerId:1});
-assert.equal(scheduled.timers.size,0);assert.equal(scheduled.raf.size,1);
+assert.equal(scheduled.delayTimers.size,0);assert.equal(scheduled.raf.size,1);
 scheduled.flush();assert.deepEqual(scheduled.painted.at(-1),{time:74,position:60,moving:false},
   'Release cancels the deadline and paints the latest camera at full quality');
-scheduled.advance(1000);assert.equal(scheduled.raf.size,0);assert.equal(scheduled.timers.size,0);
+scheduled.advance(1000);assert.equal(scheduled.raf.size,0);assert.equal(scheduled.delayTimers.size,0);
 assert(scheduled.paths.every(path=>path==='copy'));
 assert.equal(scheduled.c.renderProfile.pixels,diffuse?62500:250000,'Motion preserves the selected resting pixel budget');
 assert(scheduled.read('interactionRenderer'),'Both software profiles reuse the motion helper');
 
 for(const release of ['pointerup','pointercancel','lostpointercapture']) {
   const q=motionScheduler(diffuse,true);q.start();q.move(20);q.flush();q.move(30);
-  q.handlers[release]({pointerId:2});assert.equal(q.timers.size,1,'Unrelated pointers cannot cancel a pending frame');
-  q.handlers[release]({pointerId:1});assert.equal(q.timers.size,0);q.flush();
+  q.handlers[release]({pointerId:2});assert.equal(q.delayTimers.size,1,'Unrelated pointers cannot cancel a pending frame');
+  q.handlers[release]({pointerId:1});assert.equal(q.delayTimers.size,0);q.flush();
   assert.equal(q.painted.at(-1).moving,false);q.advance(100);assert.equal(q.raf.size,0);
 }
 for(const change of ['live','explicit','resize']) {
@@ -303,7 +352,7 @@ for(const change of ['live','explicit','resize']) {
   if(change==='live')q.c.requestRender();
   else if(change==='explicit')q.c.render();
   else q.c.window.resizeModel();
-  assert.equal(q.timers.size,0,change+' does not wait for the motion deadline');q.flush();
+  assert.equal(q.delayTimers.size,0,change+' does not wait for the motion deadline');q.flush();
   assert.equal(q.painted.at(-1).position,30);q.advance(100);assert.equal(q.raf.size,0);
 }
 for(const transition of ['visibility','context','bfcache','dispose']) {
@@ -311,7 +360,7 @@ for(const transition of ['visibility','context','bfcache','dispose']) {
   if(transition==='visibility'){q.c.document.hidden=true;q.handlers.visibilitychange();}
   else if(transition==='context')q.handlers.webglcontextlost({preventDefault(){}});
   else q.handlers.pagehide({persisted:transition==='bfcache'});
-  assert.equal(q.timers.size,0);assert.equal(q.raf.size,0);assert.equal(q.read('interactionPointer'),null);
+  assert.equal(q.delayTimers.size,0);assert.equal(q.raf.size,0);assert.equal(q.read('interactionPointer'),null);
   q.advance(1000);q.flush();assert.equal(q.painted.length,1,'Suspension leaves no delayed GPU work');
   if(transition==='visibility'){q.c.document.hidden=false;q.handlers.visibilitychange();}
   else if(transition==='context')q.handlers.webglcontextrestored();
@@ -321,11 +370,11 @@ for(const transition of ['visibility','context','bfcache','dispose']) {
 const failed=motionScheduler(diffuse,true);failed.start();failed.failNextDraw();failed.move(20);failed.flush();
 assert.equal(failed.errors.length,1);assert.notEqual(failed.read('interactionPointer.painted'),true,
   'An unsuccessful draw cannot mark the first motion frame complete');
-failed.move(30);assert.equal(failed.raf.size,1);assert.equal(failed.timers.size,0);failed.flush();
+failed.move(30);assert.equal(failed.raf.size,1);assert.equal(failed.delayTimers.size,0);failed.flush();
 assert.equal(failed.read('interactionPointer.painted'),true);
 const zero=motionScheduler(diffuse,true);zero.start();zero.hideStage();zero.move(20);zero.flush();
 assert.equal(zero.painted.length,0);assert.notEqual(zero.read('interactionPointer.painted'),true);
-zero.showStage();zero.move(30);assert.equal(zero.timers.size,0);zero.flush();assert.equal(zero.painted.length,1);
+zero.showStage();zero.move(30);assert.equal(zero.delayTimers.size,0);zero.flush();assert.equal(zero.painted.length,1);
 
 // An arbitrarily dense stream cannot debounce the fixed deadline forever.
 // Continue moving without release through three deadlines and verify that
@@ -341,7 +390,7 @@ assert(held.read('interactionPointer'),'Continuous input must not end the held g
 held.advance(1000);held.flush();assert.equal(held.painted.length,4);
 }
 const normal=motionScheduler(false,false);normal.start();normal.move(20);normal.flush();normal.move(30);
-assert.equal(normal.raf.size,1);assert.equal(normal.timers.size,0,'Hardware rendering never receives the software delay');
+assert.equal(normal.raf.size,1);assert.equal(normal.delayTimers.size,0,'Hardware rendering never receives the software delay');
 normal.flush();assert.equal(normal.painted.length,2);
 assert.equal(normal.read('interactionPointer'),null,'Hardware keeps its original pointer path');
 assert.deepEqual(normal.paths,['direct','direct']);
@@ -360,20 +409,20 @@ console.log('PASS: first motion RAF, fixed held-drag deadlines, latest camera, f
 // the real draw helper, while timers and RAF remain independently controlled.
 for(const diffuse of [false,true]) for(const [duration,expected] of [[0,64],[1,64],[63,64],[64,64],[125.5,125.5],[250,250],[1600,250]]) {
   const q=motionScheduler(diffuse,true);q.duration(duration);q.start();q.move(20);
-  assert.equal(q.timers.size,0,'First motion remains immediate even on a slow renderer');q.flush();
+  assert.equal(q.delayTimers.size,0,'First motion remains immediate even on a slow renderer');q.flush();
   assert.equal(q.read('interactionPointer.frameDelay'),expected);
   assert.equal(q.clockReads(),2,'Motion timing reads only the monotonic clock');
-  q.move(30);const timer=[...q.timers.values()][0];
+  q.move(30);const timer=[...q.delayTimers.values()][0];
   assert.equal(timer.due,duration+expected,'Draw duration selects the next fixed deadline');
   q.advance(expected/2);q.move(40);q.move(50);
-  assert.equal([...q.timers.values()][0],timer,'Later input cannot postpone an adaptive deadline');
+  assert.equal([...q.delayTimers.values()][0],timer,'Later input cannot postpone an adaptive deadline');
   q.advance(expected/2);q.flush();
   assert.equal(q.painted.at(-1).position,50,'The scheduled draw uses the latest camera');
   assert.equal(q.painted.at(-1).time,duration+expected);
 }
 for(const release of ['pointerup','pointercancel','lostpointercapture']) {
   const q=motionScheduler();q.duration(1600);q.start();q.move(20);q.flush();q.move(30);
-  const completed=q.now();q.handlers[release]({pointerId:1});assert.equal(q.timers.size,0);
+  const completed=q.now();q.handlers[release]({pointerId:1});assert.equal(q.delayTimers.size,0);
   q.duration(0);q.flush();assert.deepEqual(q.painted.at(-1),{time:completed,position:30,moving:false});
   assert.equal(q.clockReads(),2,'The full release draw does not become a motion timing sample');
   q.advance(1000);q.flush();assert.equal(q.painted.length,2);
@@ -392,15 +441,15 @@ dense.advance(1000);dense.flush();assert.equal(dense.painted.length,4,'No autono
 const adapting=motionScheduler();adapting.duration(1800);adapting.start();adapting.move(20);adapting.flush();
 adapting.duration(100);adapting.move(30);adapting.advance(250);adapting.flush();
 assert.equal(adapting.read('interactionPointer.frameDelay'),100,'A later fast successful draw replaces the cold cost');
-adapting.move(40);assert.equal([...adapting.timers.values()][0].due,adapting.now()+100);
+adapting.move(40);assert.equal([...adapting.delayTimers.values()][0].due,adapting.now()+100);
 adapting.handlers.pointerup({pointerId:1});adapting.flush();
 assert.equal(adapting.painted.at(-1).moving,false,'Adaptive pacing never defers the full release draw');
-adapting.start();adapting.move(20);assert.equal(adapting.timers.size,0,'New gestures do not inherit cold duration');
+adapting.start();adapting.move(20);assert.equal(adapting.delayTimers.size,0,'New gestures do not inherit cold duration');
 adapting.duration(0);adapting.flush();assert.equal(adapting.read('interactionPointer.frameDelay'),64);
 for(const diffuse of [false,true]) for(const change of ['live','explicit','resize']) {
   const q=motionScheduler(diffuse,true);q.duration(1600);q.start();q.move(20);q.flush();q.move(30);
   if(change==='live')q.c.requestRender();else if(change==='explicit')q.c.render();else q.c.window.resizeModel();
-  assert.equal(q.timers.size,0,'Non-motion '+change+' bypasses even the maximum adaptive wait');q.flush();
+  assert.equal(q.delayTimers.size,0,'Non-motion '+change+' bypasses even the maximum adaptive wait');q.flush();
   assert.equal(q.painted.at(-1).position,30);
 }
 for(const transition of ['visibility','context','bfcache','dispose']) {
@@ -408,13 +457,13 @@ for(const transition of ['visibility','context','bfcache','dispose']) {
   if(transition==='visibility'){q.c.document.hidden=true;q.handlers.visibilitychange();}
   else if(transition==='context')q.handlers.webglcontextlost({preventDefault(){}});
   else q.handlers.pagehide({persisted:transition==='bfcache'});
-  assert.equal(q.timers.size,0);assert.equal(q.read('interactionPointer'),null);
+  assert.equal(q.delayTimers.size,0);assert.equal(q.read('interactionPointer'),null);
   if(transition==='visibility'){q.c.document.hidden=false;q.handlers.visibilitychange();}
   else if(transition==='context')q.handlers.webglcontextrestored();
   else if(transition==='bfcache')q.handlers.pageshow({persisted:true});
-  q.flush();q.advance(1000);assert.equal(q.timers.size,0);
+  q.flush();q.advance(1000);assert.equal(q.delayTimers.size,0);
   if(transition!=='dispose') {
-    q.duration(0);q.start();q.move(20);assert.equal(q.timers.size,0);q.flush();
+    q.duration(0);q.start();q.move(20);assert.equal(q.delayTimers.size,0);q.flush();
     assert.equal(q.read('interactionPointer.frameDelay'),64,'Resumed gestures cannot inherit stale duration');
   }
 }
@@ -431,7 +480,7 @@ assert.notEqual(stale.read('interactionPointer.painted'),true);
 {
   const q=motionScheduler(false,false);q.duration(1600);q.start();q.move(20);q.flush();q.move(30);
   assert.equal(q.clockReads(),0,'Hardware does not sample motion duration');
-  assert.equal(q.timers.size,0);assert.equal(q.raf.size,1);
+  assert.equal(q.delayTimers.size,0);assert.equal(q.raf.size,1);
 }
 for(const elapsed of [NaN,Infinity,-10]) {
   const q=motionScheduler();let calls=0;q.c.performance.now=()=>calls++?elapsed:0;
@@ -449,7 +498,7 @@ const modeEnd=homeSource.indexOf('\n  let nativePressTimer=',modeStart);
 assert(modeStart>=0&&modeEnd>modeStart,'Production Home mode switch is present');
 const modeSource=homeSource.slice(modeStart,modeEnd);
 function modeScheduler(legacy=false,diffuse=false,canEdit=true) {
-  const q=motionScheduler(diffuse,diffuse), c=q.c, elements=new Map(), modes=[], cleanups=[];
+  const q=motionScheduler(diffuse,diffuse), c=q.c, elements=new Map(), modes=[], cleanups=[], markerResets=[];
   let width=800;
   const element=id=>{
     if(!elements.has(id))elements.set(id,{checked:true,hidden:false,dataset:{},prepend(){},
@@ -460,6 +509,7 @@ function modeScheduler(legacy=false,diffuse=false,canEdit=true) {
     cancelHomeGesture(){},cancelEditorGesture(){},syncViewerTours(){},
     hideMediaControls(){cleanups.push({kind:'media',active:c.active});},
     cancelNativePress(){cleanups.push({kind:'native',active:c.active});},
+    markerMotion:{reset(){markerResets.push(c.active);}},
     THREE:{Color:class {constructor(value){this.value=value;}}},hemisphere:{},sun:{},ground:{},grid:{},
     clipping:{constant:2.1},reflectionEnvironment:null,contactShading:null,inventoryTextures:{dispose(){},releaseGPU(){},configure(){}},environmentLayer:null,editorFloorMaterials:null,homeArchitectureMaterials:null,setWallOutlineAppearance(){},roomLighting:null,root:{children:[]},objectGroup:{},overlayGroup:null,points:[],
     clearTrail(){},showMode(){},refreshControls(){},updateFixtureShadows(){},updateHeightCaption(){},$:element});
@@ -477,13 +527,14 @@ function modeScheduler(legacy=false,diffuse=false,canEdit=true) {
   vm.runInContext(cutaway.slice(0,cutaway.indexOf(';for(const k'))+';',c);
   c.window.resizeModel();
   assert.equal(modes.at(-1),'home','Initial resize populates the Home size cache');
-  return Object.assign(q,{modes,cleanups,element,setWidth(value){width=value;},
+  return Object.assign(q,{modes,cleanups,markerResets,element,setWidth(value){width=value;},
     // A cancelled callback must not execute later in the same browser frame.
     flush(){for(const [id,fn] of [...q.raf])if(q.raf.delete(id))fn();},
     cutaway(value){element('cutaway').checked=value;element('cutaway').onchange();}});
 }
 function rapidModeReturn(q) {
   const cleanupStart=q.cleanups.length;
+  const resetStart=q.markerResets.length;
   q.c.setActive(false);
   q.cutaway(true);q.cutaway(false);
   assert.equal(q.modes.at(-1),'editor');
@@ -493,6 +544,7 @@ function rapidModeReturn(q) {
     {kind:'media',active:true},{kind:'native',active:true},
     {kind:'media',active:false},{kind:'native',active:false},
   ],'Home and Editor transitions close media controls and cancel native press before changing mode');
+  assert.deepEqual(q.markerResets.slice(resetStart),[true,false],'each mode transition clears old marker positions before activating the new mode');
   q.flush();q.flush();
   return q.c.renderCount-before;
 }
@@ -509,6 +561,7 @@ assert.equal(familyMode.c.active,true,'A locked session stays in Home view');
 assert.equal(familyMode.modes.at(-1),'home');
 assert.equal(familyMode.c.renderCount,familyBefore,'A rejected editor transition does not schedule a redraw');
 assert.deepEqual(familyMode.cleanups,[],'A rejected transition leaves current controls intact');
+assert.deepEqual(familyMode.markerResets,[],'A rejected transition preserves the current marker positions');
 
 // A mode-key resize, a real size change and an earlier ResizeObserver repaint
 // all satisfy the request without creating a duplicate frame.

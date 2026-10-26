@@ -24,7 +24,7 @@ Bạn có thể dùng trình biên tập riêng trên trình duyệt khi đang c
 
 Vẽ ngôi nhà của bạn trong trình duyệt mà không cần tài khoản. Chọn ngôn ngữ ở đầu trình biên tập.
 
-1. Thêm phòng, tường, cửa ra vào và cửa sổ. Thư viện có 206 mô hình. Chọn bảng màu và hoa văn bề mặt cho các vật dụng được hỗ trợ.
+1. Thêm phòng, tường, cửa ra vào và cửa sổ. Thư viện có 211 mô hình. Chọn bảng màu và hoa văn bề mặt cho các vật dụng được hỗ trợ.
 2. Xuất JSON để giữ bản sao có thể chỉnh sửa. Bản nháp chỉ được lưu trong trình duyệt này. Đổi ngôn ngữ không làm thay đổi sơ đồ.
 
 ### Tùy chọn: bộ công cụ di động và trình biên dịch Python

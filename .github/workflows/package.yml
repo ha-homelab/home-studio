@@ -103,6 +103,8 @@ jobs:
           python3 scripts/test-furniture-profiles.py
           python3 scripts/test-furniture-patterns.py
           node scripts/test-furniture-patterns.mjs
+          python3 scripts/test-fixture-animation.py
+          node scripts/test-fixture-animation.cjs
           python3 scripts/test-inventory-appearance.py
           node --test scripts/test-inventory-appearance.cjs
           python3 scripts/test-material-textures.py
@@ -256,7 +258,7 @@ jobs:
         run: node --test scripts/test-tv-screen.cjs
       - name: Test linked media previews and bounded TV power commands
         run: |
-          node --test scripts/test-media-preview.cjs scripts/test-media-artwork-host.cjs scripts/test-media-command-host.cjs scripts/test-appliance-state.cjs scripts/test-presence-view.cjs scripts/test-vacuum-state.cjs scripts/test-vacuum-view.cjs scripts/test-vacuum-position-host.cjs
+          node --test scripts/test-climate-state.cjs scripts/test-marker-motion.cjs scripts/test-device-effects.cjs scripts/test-media-preview.cjs scripts/test-media-artwork-host.cjs scripts/test-media-command-host.cjs scripts/test-appliance-state.cjs scripts/test-presence-view.cjs scripts/test-vacuum-state.cjs scripts/test-vacuum-view.cjs scripts/test-vacuum-position-host.cjs
           node --test scripts/test-dashboard-card.cjs
           for engine in chromium firefox webkit; do
             MEDIA_ARTWORK_ENGINE="$engine" node scripts/test-media-artwork-browser.cjs
@@ -266,8 +268,19 @@ jobs:
         run: |
           node scripts/test-generic-entities.cjs
           for engine in chromium firefox webkit; do
+            DEVICE_FEEDBACK_ENGINE="$engine" DEVICE_FEEDBACK_QA_DIR="$RUNNER_TEMP/device-feedback/$engine" DEVICE_FEEDBACK_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-device-feedback.cjs
+          done
+          for engine in chromium firefox webkit; do
             DEVICE_INTERACTIONS_ENGINE="$engine" DEVICE_INTERACTIONS_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-device-interactions.cjs
           done
+      - name: Preserve synthetic device-feedback evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: device-feedback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/device-feedback/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Test muted lower-floor context and independent camera focus
         run: python3 scripts/test-floor-context.py && node --test scripts/test-floor-context.cjs
       - name: Test read-only vacuum positions, freshness and render lifecycle

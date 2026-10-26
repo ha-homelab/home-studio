@@ -796,4 +796,9 @@ export default {
   "Loading map…": "Načítání mapy…",
   "Preview 3D": "3D náhled",
   "Published home": "Zveřejněný domov",
+  "model.ceiling_fan": "Stropní ventilátor se čtyřmi lopatkami",
+  "model.standing_fan": "Stojanový ventilátor",
+  "model.desk_fan": "Stolní ventilátor",
+  "model.wall_air_conditioner": "Nástěnná klimatizace",
+  "model.panel_heater": "Panelové topidlo",
 };

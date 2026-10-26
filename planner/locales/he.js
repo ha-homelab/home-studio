@@ -795,4 +795,9 @@ export default {
   "Loading map…": "המפה נטענת…",
   "Preview 3D": "תצוגה מקדימה בתלת־ממד",
   "Published home": "הבית שפורסם",
+  "model.ceiling_fan": "מאוורר תקרה עם ארבעה להבים",
+  "model.standing_fan": "מאוורר עומד",
+  "model.desk_fan": "מאוורר שולחני",
+  "model.wall_air_conditioner": "מזגן קיר",
+  "model.panel_heater": "תנור חימום פנל",
 };

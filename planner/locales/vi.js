@@ -797,4 +797,9 @@ export default {
   "Loading map…": "Đang tải bản đồ…",
   "Preview 3D": "Xem trước 3D",
   "Published home": "Nhà đã xuất bản",
+  "model.ceiling_fan": "Quạt trần bốn cánh",
+  "model.standing_fan": "Quạt đứng",
+  "model.desk_fan": "Quạt để bàn",
+  "model.wall_air_conditioner": "Máy điều hòa treo tường",
+  "model.panel_heater": "Máy sưởi dạng tấm",
 };

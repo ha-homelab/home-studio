@@ -796,4 +796,9 @@ export default {
   "Loading map…": "Loading map…",
   "Preview 3D": "Preview 3D",
   "Published home": "Published home",
+  "model.ceiling_fan": "Four-blade ceiling fan",
+  "model.standing_fan": "Standing fan",
+  "model.desk_fan": "Desk fan",
+  "model.wall_air_conditioner": "Wall air conditioner",
+  "model.panel_heater": "Panel heater",
 };

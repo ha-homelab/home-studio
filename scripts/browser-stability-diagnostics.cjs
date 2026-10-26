@@ -145,12 +145,14 @@ function selectedEngines(value = 'chromium,firefox') {
   return engines;
 }
 
-function browserLaunchOptions(engine, headless) {
+function browserLaunchOptions(engine, headless, platform=process.platform) {
   const channel = process.env.HOME_STUDIO_BROWSER_CHANNEL || undefined;
   assert(!channel || ['chrome', 'chrome-beta', 'msedge', 'msedge-beta'].includes(channel),
     'HOME_STUDIO_BROWSER_CHANNEL must be chrome, chrome-beta, msedge or msedge-beta');
   assert(!channel || engine === 'chromium', 'Browser channels require the Chromium engine');
-  if (engine === 'webkit') return {headless};
+  // Windows WebKit's non-composited canvas becomes transparent after resize
+  // (Playwright #42885). Retain real compositing on the pinned stable builds.
+  if (engine === 'webkit') return {headless,...(platform==='win32' ? {ignoreDefaultArgs:['--disable-accelerated-compositing']} : {})};
   if (engine === 'chromium') {
     const backend = process.env.CHROMIUM_ANGLE_BACKEND || 'swiftshader';
     assert(['metal', 'swiftshader'].includes(backend), 'CHROMIUM_ANGLE_BACKEND must be metal or swiftshader');
@@ -483,6 +485,7 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       profile: options.profile || {name: 'desktop', emulated: false, realMobileOS: false}, identity: null,
       launch: {headless: options.launch.headless, channel: options.launch.channel || null,
         executablePath: options.launch.executablePath || null, args: options.launch.args || [],
+        ignoreDefaultArgs: options.launch.ignoreDefaultArgs || [],
         firefoxUserPrefs: options.launch.firefoxUserPrefs || {}},
       browserContext: options.context, gpu: null, samples: [], errors: [], crashes: [], consoleErrors: [],
       consoleErrorDetails: [], httpErrors: [], requestFailures: [],

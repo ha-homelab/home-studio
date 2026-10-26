@@ -796,4 +796,9 @@ export default {
   "Loading map…": "地図を読み込み中…",
   "Preview 3D": "3Dプレビュー",
   "Published home": "公開済みの住まい",
+  "model.ceiling_fan": "4枚羽根のシーリングファン",
+  "model.standing_fan": "スタンド扇風機",
+  "model.desk_fan": "卓上扇風機",
+  "model.wall_air_conditioner": "壁掛けエアコン",
+  "model.panel_heater": "パネルヒーター",
 };

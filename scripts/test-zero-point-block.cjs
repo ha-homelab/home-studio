@@ -117,11 +117,15 @@ vm.runInContext(source, code);
   assert.equal(fallback.shader.fragmentShader,build({}).shader.fragmentShader);
   assert(!('homePointLightingRequired' in fallback.shader.uniforms));
 
-  // Execute both actual Home draw functions. The signal path must update a
-  // just-mutated light before drawing without waiting for a scheduled full frame.
+  // Execute all actual Home draw paths. Signal and bounded rotor frames must
+  // sample a just-mutated light before drawing, ahead of a full layout frame.
   const captures=[], rect={width:1200,height:700}; let blocked=false, statusIntensity=0;
-  const draw = vm.createContext({THREE,active:true,renderer:{},camera:new THREE.OrthographicCamera(-1,1,1,-1,.1,150),
+  let rotor;
+  const draw = vm.createContext({THREE,active:true,renderer:{domElement:{dataset:{}}},mapCoarse:()=>false,camera:new THREE.OrthographicCamera(-1,1,1,-1,.1,150),
     cameraFit:undefined, houseFitBounds: undefined, root: new THREE.Group(),selected:'',zoom:1,panX:0,panY:0,homeRotation:0,homeTilt:0,
+    markerViewport:'',markerMotion:{reset(){},target(){}},deviceEffects:{project(){}},
+    homeGesture:null,renderRequest:0,renderDelay:0,failed3D:false,renderLost:false,renderSuspended:false,coalesceMotion:false,
+    invalidateShadows(){},createDeviceEffects(_three,_container,options){rotor=options;return {};},report3DError(error){throw error;},
     planRadius:10,planBounds:true,xm:x=>x,zm:z=>z,
     model:{rooms,ceiling_height_m:3},points,labels:[],roomLighting:state.lighting,
     projectedPosition:new THREE.Vector3(),projectedForward:new THREE.Vector3(),
@@ -131,6 +135,7 @@ vm.runInContext(source, code);
     drawScene(){if(!blocked)captures.push(flag.value);}
   });
   vm.runInContext(home.slice(home.indexOf('  function drawSignalFrame('),home.indexOf('  function clearTrail(')),draw);
+  vm.runInContext(home.slice(home.indexOf('  const deviceEffects=createDeviceEffects('),home.indexOf('\n  function cancelHomeGesture')).replace('const deviceEffects=',''),draw);
   statusIntensity=1; draw.drawSignalFrame(false); assert.equal(captures.length,0);
   draw.drawSignalFrame(true); assert.equal(captures.at(-1),true);
   statusIntensity=0; draw.drawSignalFrame(true); assert.equal(captures.at(-1),false);
@@ -143,7 +148,20 @@ vm.runInContext(source, code);
   draw.roomLighting=replacement.lighting; statusIntensity=0;
   draw.drawScene=()=>captures.push(replacement.shader.uniforms.homePointLightingRequired.value);
   draw.drawSignalFrame(true); assert.equal(captures.at(-1),false,'A replacement controller is refreshed at the same draw boundary');
+  for(const intensity of [4,0]){
+    points[0].light.intensity=intensity;rotor.draw();
+    assert.equal(captures.at(-1),intensity!==0,'Rotor-only draws refresh the current point-light guard without relaying through full layout');
+  }
+  for(const [key,value] of [['homeGesture',{moved:true}],['renderRequest',1],['renderDelay',1]]){
+    const count=captures.length,renders=draw.renderCount;draw[key]=value;rotor.draw();
+    assert.equal(captures.length,count,'Rotor draw yields to active navigation and already scheduled scene work');assert.equal(draw.renderCount,renders);
+    draw[key]=key==='homeGesture'?null:0;
+  }
+  assert.equal(rotor.canDraw(),true);assert.equal(rotor.allowRotor(),true);
+  for(const key of ['failed3D','renderLost','renderSuspended']){draw[key]=true;assert.equal(rotor.canDraw(),false,key+' disables rotor scene work');draw[key]=false;}
+  draw.active=false;assert.equal(rotor.canDraw(),false);draw.active=true;
+  draw.coalesceMotion=true;assert.equal(rotor.allowRotor(),false,'Reduced-capacity rendering keeps the rotor static');draw.coalesceMotion=false;
   for(const value of [state,replacement,fallback]) value.group.traverse(mesh=>{mesh.material?.dispose();mesh.geometry?.dispose();});
   console.log(JSON.stringify({status:'passed',numericInputCases:cases,drawBoundaryCaptures:captures.length,
-    scope:'One shared runtime guard; stable light/shadow/program identity; malformed/roomless fallback; signal/full/recovery/replacement draws; explicit uniform boundary.'}));
+    scope:'One shared runtime guard; stable light/shadow/program identity; malformed/roomless fallback; signal/full/rotor/recovery/replacement draws; explicit uniform boundary.'}));
 })().catch(error=>{console.error(error);process.exitCode=1;});

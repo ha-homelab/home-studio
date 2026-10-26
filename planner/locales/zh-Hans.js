@@ -796,4 +796,9 @@ export default {
   "Loading map…": "正在加载地图…",
   "Preview 3D": "3D 预览",
   "Published home": "已发布的住宅",
+  "model.ceiling_fan": "四叶吊扇",
+  "model.standing_fan": "落地扇",
+  "model.desk_fan": "台扇",
+  "model.wall_air_conditioner": "壁挂式空调",
+  "model.panel_heater": "板式取暖器",
 };

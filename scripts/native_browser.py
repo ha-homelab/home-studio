@@ -12,6 +12,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from download_tls import open_download
@@ -35,21 +36,43 @@ def platform_key():
 
 
 def download(entry, destination):
-    digest = hashlib.sha512()
+    """Retry only interrupted transfers, within one deadline and checksum pin."""
     deadline = time.monotonic() + 240
-    with open_download(entry['url'], timeout=60) as source, destination.open('wb') as target:
-        total = 0
-        while chunk := source.read(1024 * 1024):
+    for attempt in range(1, 4):
+        complete = False
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError('Browser download exceeded four minutes')
+            digest = hashlib.sha512()
+            with open_download(entry['url'], timeout=min(60, remaining)) as source, destination.open('wb') as target:
+                total = 0
+                while chunk := source.read(1024 * 1024):
+                    if time.monotonic() > deadline:
+                        raise TimeoutError('Browser download exceeded four minutes')
+                    total += len(chunk)
+                    if total > 1024 * 1024 * 1024:
+                        raise RuntimeError('Download exceeded the 1 GiB safety limit')
+                    digest.update(chunk)
+                    target.write(chunk)
             if time.monotonic() > deadline:
                 raise TimeoutError('Browser download exceeded four minutes')
-            total += len(chunk)
-            if total > 1024 * 1024 * 1024:
-                raise RuntimeError('Download exceeded the 1 GiB safety limit')
-            digest.update(chunk)
-            target.write(chunk)
-    if digest.hexdigest() != entry['sha512']:
-        destination.unlink()
-        raise RuntimeError('Official browser download failed pinned SHA-512 verification')
+            if digest.hexdigest() != entry['sha512']:
+                raise RuntimeError('Official browser download failed pinned SHA-512 verification')
+            complete = True
+            return
+        except (ConnectionResetError, urllib.error.URLError) as error:
+            # urllib wraps a reset during connection setup, while a reset while
+            # reading the response propagates directly. TLS, HTTP and checksum
+            # failures are not transient transport evidence and never retry.
+            reason = error.reason if isinstance(error, urllib.error.URLError) else error
+            if not isinstance(reason, ConnectionResetError) or attempt == 3:
+                raise
+            print(f'Native browser download connection reset; retrying transfer ({attempt + 1}/3).', file=sys.stderr)
+            time.sleep(min(attempt, max(0, deadline - time.monotonic())))
+        finally:
+            if not complete:
+                destination.unlink(missing_ok=True)
 
 
 def read_ini(path):

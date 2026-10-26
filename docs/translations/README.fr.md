@@ -24,7 +24,7 @@ L’éditeur web séparé peut servir pendant la préparation de HA. Il n’a au
 
 Dessinez votre logement dans le navigateur. Aucun compte n’est nécessaire. Choisissez votre langue en haut de l’éditeur.
 
-1. Ajoutez des pièces, des murs, des portes et des fenêtres. La bibliothèque contient 206 modèles. Choisissez une palette de couleurs et, pour les objets compatibles, un motif de surface.
+1. Ajoutez des pièces, des murs, des portes et des fenêtres. La bibliothèque contient 211 modèles. Choisissez une palette de couleurs et, pour les objets compatibles, un motif de surface.
 2. Exportez le JSON pour conserver une copie modifiable. Les brouillons restent uniquement dans ce navigateur. Changer de langue ne modifie pas votre plan.
 
 ### Facultatif : outils portables et compilateur Python

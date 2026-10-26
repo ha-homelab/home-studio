@@ -201,18 +201,20 @@ function createEditorFloorMaterials(THREE, group, ground, profile) {
 // it is independent of the user cutaway and never clips shadow passes.
 function applyStaticMeshClipping(source,material){if(['walls','frames','doors','windows'].includes(source.kind)){material.clippingPlanes=[clipping];material.clipShadows=false;return}if(!renderProfile.diffuseLighting||source.kind!=='floors'||material.transparent||material.side!==THREE.DoubleSide||!source.vertices?.length)return;let extent=1;for(const vertex of source.vertices){if(!Array.isArray(vertex)||vertex.length!==3||!vertex.every(value=>Number.isFinite(value)&&Number.isFinite(Math.fround(value))))return;for(const value of vertex)extent=Math.max(extent,Math.abs(value))}const far=extent*4;if(!Number.isFinite(Math.fround(far)))return;material.clippingPlanes=[new THREE.Plane(new THREE.Vector3(0,-1,0),far)];material.clipShadows=false}
 function selectRenderProfile(gl){const capacity=getRenderCapacity(gl);const profile=capacity.reduced?{pixels:capacity.diffuseLighting?62500:250000,pointShadows:2,pointShadowSize:128,sunShadowSize:512,diffuseLighting:capacity.diffuseLighting}:{pixels:2000000,pointShadows:8,pointShadowSize:512,sunShadowSize:2048,diffuseLighting:false};if(capacity.rasterProbe)profile.rasterProbe=capacity.rasterProbe;return profile}
-let renderRequest=0,renderDelay=0,renderSuspended=false,renderLost=false,initialMapPending=false;
+let renderRequest=0,renderDelay=0,renderFallback=0,renderEpoch=0,renderSuspended=false,renderLost=false,initialMapPending=false;
 let interactionRenderer=null,interactionPointer=null,coalesceMotion=false;
 let cancelEditorGesture=()=>{};
 let editorFloorMaterials=null,homeArchitectureMaterials=null;
-function cancelRender(){if(renderRequest)cancelAnimationFrame(renderRequest);if(renderDelay)clearTimeout(renderDelay);renderRequest=renderDelay=0}
+function cancelRender(){if(renderRequest)cancelAnimationFrame(renderRequest);if(renderDelay)clearTimeout(renderDelay);if(renderFallback)clearTimeout(renderFallback);renderRequest=renderDelay=renderFallback=0;renderEpoch++}
 // Paint the first moved-pointer frame immediately. Subsequent software frames
 // share a fixed deadline; further input never postpones it. Software motion
 // uses its last successful draw time, bounded to 64–250 ms, per gesture.
 // Non-motion updates
 // and pointer release bypass this delay and still use the ordinary next frame.
 function loadInitialMap(){if(initialMapPending){initialMapPending=false;homeView?.loadMap?.()}}
-function requestRender(motion=false){if(renderSuspended||renderLost)return;if(document.hidden||failed3D){loadInitialMap();return}if(!motion&&renderDelay){clearTimeout(renderDelay);renderDelay=0}if(renderRequest||renderDelay)return;if(motion&&coalesceMotion&&interactionPointer?.moved&&interactionPointer.painted){renderDelay=setTimeout(()=>{renderDelay=0;requestRender()},interactionPointer.frameDelay??64);return}renderRequest=requestAnimationFrame(()=>{renderRequest=0;try{window.renderModel?.()}catch(error){report3DError(error)}})}
+// A visible demand must still paint if the browser suspends RAF delivery.
+// One fixed fallback shares the pending frame; either completion cancels both.
+function requestRender(motion=false){if(renderSuspended||renderLost)return;if(document.hidden||failed3D){loadInitialMap();return}if(!motion&&renderDelay){clearTimeout(renderDelay);renderDelay=0}if(renderRequest||renderDelay)return;if(motion&&coalesceMotion&&interactionPointer?.moved&&interactionPointer.painted){renderDelay=setTimeout(()=>{renderDelay=0;requestRender()},interactionPointer.frameDelay??64);return}const epoch=renderEpoch,draw=()=>{if(epoch!==renderEpoch)return;cancelRender();if(renderSuspended||renderLost||document.hidden||failed3D)return;try{window.renderModel?.()}catch(error){report3DError(error)}};renderRequest=requestAnimationFrame(draw);renderFallback=setTimeout(draw,100)}
 function renderPixelRatio(width,height){return Math.min(Number.isFinite(devicePixelRatio)&&devicePixelRatio>0?devicePixelRatio:1,2,Math.sqrt(renderProfile.pixels/Math.max(1,width*height)))}
 function invalidateShadows(){scene?.traverse(o=>{if(o.shadow){o.shadow.autoUpdate=false;o.shadow.needsUpdate=true}})}
 // Accept only complete rectangular prisms, including the compiler's rotated walls.
@@ -424,7 +426,7 @@ const wallSheenMotion=createWallSheenMotion();
 function drawScene(camera){if(renderSuspended||renderLost||document.hidden)return;wallSheenMotion.beforeRender();try{reflectionEnvironment?.update(hemisphere?.intensity);const pointer=interactionPointer,touring=renderer.domElement?.dataset?.cameraTourPlaying==='true',started=coalesceMotion&&pointer?.moved?performance.now():null;if(coalesceMotion){interactionRenderer??=createInteractionRenderer(THREE,renderer,renderProfile.diffuseLighting?31250:62500);interactionRenderer.draw(scene,camera,pointer?.moved===true||touring)}else renderer.render(scene,camera);if(!pointer?.moved&&!touring&&$('homeStage')?.dataset.mapCoarse!=='true')contactShading?.apply(scene,camera);if(pointer?.moved&&interactionPointer===pointer){pointer.painted=true;if(started!==null){const elapsed=performance.now()-started;pointer.frameDelay=Number.isFinite(elapsed)?Math.min(250,Math.max(64,elapsed)):64}}}finally{wallSheenMotion.afterRender()}}
 // Keep the recovery controls outside both view modes. A failed renderer stays
 // paused until reload; editing or saving the 2D plan must not retry that draw.
-function report3DError(e){reflectionEnvironment?.dispose();contactShading?.dispose();failed3D=true;initialViewReady=false;environmentLayer?.dispose();cancelRender();$('loadError').style.display='block';$('mode3d').disabled=true;$('openHome').disabled=true;requestRender();console.error(e)}
+function report3DError(e){reflectionEnvironment?.dispose();contactShading?.dispose();failed3D=true;initialViewReady=false;homeView?.releaseGPU?.();environmentLayer?.dispose();cancelRender();$('loadError').style.display='block';$('mode3d').disabled=true;$('openHome').disabled=true;requestRender();console.error(e);}
 $('recoverPlan').onclick=()=>{if(!canEdit)return;homeView?.setActive(false);showMode(true);$('loadError').style.display='none';setEditorStatus('3D view could not start. Plan editing and JSON export are still available.');$('modePlan').focus();};
 // Decode before material creation so static and inventory lighting owners see
 // the final map from their first registration. Failures retain palette colors.
@@ -503,8 +505,32 @@ const li=document.createElement('li'),label=document.createElement('span');label
 if(objectGroup){
 const size=it.dimensions_m,candidate=model.object_assets?.[it.id],asset=candidate?.model_id&&candidate.model_id!==it.model_id?null:candidate;let o;
 if(asset){
-o=new THREE.Group();const batches=inventoryMaterialBatches(asset,size,model.materials,inventoryTextures);
-for(const batch of batches){const material=batch.material;const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(batch.vertices,3));geo.setAttribute('normal',new THREE.Float32BufferAttribute(batch.normals,3));geo.setIndex(batch.indices);if(batch.mapped)geo.setAttribute('uv',new THREE.Float32BufferAttribute(batch.uv,2));const col=model.materials[material];const mat=createSceneMaterial({color:new THREE.Color(...col.slice(0,3)),roughness:.8,transparent:col[3]<1,opacity:col[3],depthWrite:col[3]===1,side:THREE.DoubleSide},undefined,material,batch.surfaceFinish);applyMaterialPBR(THREE,mat,batch.mapped);const child=new THREE.Mesh(geo,mat);child.castShadow=col[3]===1;child.receiveShadow=true;child.userData.curtainFabric=!!model.cover_windows?.[it.id] && (batch.curtainFabric||/curtain|safety_mesh/.test(material));child.userData.curtainPanel=batch.curtainPanel;o.add(child)}
+o=new THREE.Group();const batches=inventoryMaterialBatches(asset,size,model.materials,inventoryTextures),animation=asset.device_animation;
+// Moving pieces retain the same material/texture ownership as fixed batches.
+let rotor=null;
+if(animation){
+  o.userData.deviceAnimation=animation;o.userData.deviceRotors=[];
+  if(animation.rotor){
+    const mount=new THREE.Group();mount.position.fromArray(animation.rotor.pivot);
+    // Cancel the item's nonuniform scale before rotation to keep blades rigid.
+    mount.scale.set(1/size.width,1/size.height,1/size.depth);o.add(mount);
+    rotor=new THREE.Group();mount.add(rotor);
+    rotor.userData.axis=animation.rotor.axis;o.userData.deviceRotors.push(rotor);
+  }
+}
+for(const batch of batches){
+  let vertices=batch.vertices,normals=batch.normals;
+  if(batch.fanRotor){
+    const pivot=animation.rotor.pivot,dimensions=[size.width,size.height,size.depth];
+    vertices=vertices.map((value,index)=>(value-pivot[index%3])*dimensions[index%3]);
+    normals=[];
+    for(let index=0;index<batch.normals.length;index+=3){const scaled=batch.normals.slice(index,index+3).map((value,axis)=>value/dimensions[axis]),length=Math.hypot(...scaled);normals.push(...scaled.map(value=>value/length));}
+  }
+  const material=batch.material,geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));geo.setAttribute('normal',new THREE.Float32BufferAttribute(normals,3));geo.setIndex(batch.indices);if(batch.mapped)geo.setAttribute('uv',new THREE.Float32BufferAttribute(batch.uv,2));
+  const col=model.materials[material],mat=createSceneMaterial({color:new THREE.Color(...col.slice(0,3)),roughness:.8,transparent:col[3]<1,opacity:col[3],depthWrite:col[3]===1,side:THREE.DoubleSide},undefined,material,batch.surfaceFinish);applyMaterialPBR(THREE,mat,batch.mapped);
+  const child=new THREE.Mesh(geo,mat);child.castShadow=col[3]===1;child.receiveShadow=true;child.userData.curtainFabric=!!model.cover_windows?.[it.id] && (batch.curtainFabric||/curtain|safety_mesh/.test(material));child.userData.curtainPanel=batch.curtainPanel;
+  (batch.fanRotor?rotor:o).add(child);
+}
 if(tvEntities[it.id]&&it.entity_id===tvEntities[it.id]){const screen=new THREE.Mesh(new THREE.PlaneGeometry(.968,.948),new THREE.MeshBasicMaterial({toneMapped:false}));screen.position.set(0,.515,.393);screen.visible=false;o.userData.screen=screen;o.add(screen)}
 o.scale.set(size.width,size.height,size.depth);o.position.set(it.position_m.x,it.position_m.y,it.position_m.z);
 }else{const geo=new THREE.BoxGeometry(size.width,size.height,size.depth);const mat=createSceneMaterial({color:it.type==='tv'?0x273239:0xb87637,roughness:.7});o=new THREE.Mesh(geo,mat);o.position.set(it.position_m.x,it.position_m.y+size.height/2,it.position_m.z);o.castShadow=true;o.receiveShadow=true;registerFallbackBoxProgram(THREE,o,renderProfile.diffuseLighting)}

@@ -424,6 +424,8 @@ def make_floor(project, floor, next_floor):
                 d["depth"], p["y"], p["y"] + d["height"], "dark" if item["type"] == "tv" else "added", "inventory", item_id=item["id"], entity_id=item["entity_id"])
             continue
         object_assets[item["id"]] = {"model_id": item["model_id"], "meshes": asset["meshes"]}
+        if "device_animation" in asset:
+            object_assets[item["id"]]["device_animation"] = asset["device_animation"]
         materials.update(asset["materials"])
         cosine, sine = math.cos(angle), math.sin(angle)
         for part in asset["meshes"]:
@@ -568,7 +570,7 @@ def render_viewer(data, svg):
         "__CAMERA_TOUR_CSS__": (ROOT / "camera-tour.css").read_text(encoding="utf-8"),
         "__HOME_HTML__": (ROOT / "home-view.html").read_text(encoding="utf-8"),
         "__HOME_CSS__": (ROOT / "home-view.css").read_text(encoding="utf-8"),
-        "__HOME_JS__": "\n".join((ROOT / name).read_text(encoding="utf-8") for name in ("curtain-state.js", "motion-state.js", "appliance-state.js", "presence-view.js", "vacuum-state.js", "vacuum-view.js", "tv-screen.js", "camera-preview.js", "media-preview.js", "assumed-zone-view.js", "map-layer.js", "home-view.js")),
+        "__HOME_JS__": "\n".join((ROOT / name).read_text(encoding="utf-8") for name in ("curtain-state.js", "motion-state.js", "appliance-state.js", "climate-state.js", "marker-motion.js", "device-effects.js", "presence-view.js", "vacuum-state.js", "vacuum-view.js", "tv-screen.js", "camera-preview.js", "media-preview.js", "assumed-zone-view.js", "map-layer.js", "home-view.js")),
         "__LIGHT_STATE_JS__": (ROOT / "light-state.js").read_text(encoding="utf-8"),
         "__RENDER_CAPACITY_JS__": (ROOT / "planner/render-capacity.js").read_text(encoding="utf-8").replace("export function getRenderCapacity", "function getRenderCapacity"),
         "/*__ENVIRONMENT_JS__*/": (ROOT / "planner/environment.js").read_text(encoding="utf-8").replace("export ", ""),

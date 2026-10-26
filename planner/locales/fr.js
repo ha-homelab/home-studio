@@ -796,4 +796,9 @@ export default {
   "Loading map…": "Chargement de la carte…",
   "Preview 3D": "Aperçu 3D",
   "Published home": "Maison publiée",
+  "model.ceiling_fan": "Ventilateur de plafond à quatre pales",
+  "model.standing_fan": "Ventilateur sur pied",
+  "model.desk_fan": "Ventilateur de bureau",
+  "model.wall_air_conditioner": "Climatiseur mural",
+  "model.panel_heater": "Radiateur panneau",
 };

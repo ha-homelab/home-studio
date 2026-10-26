@@ -25,6 +25,7 @@ jobs:
         run: |
           python3 scripts/test-browser-matrix.py
           python3 scripts/test-browser-install.py
+          python3 scripts/test-native-browser-download.py
           python3 scripts/test-ubuntu-apt.py
       - name: Expand all required targets
         id: matrix

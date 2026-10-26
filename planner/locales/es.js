@@ -796,4 +796,9 @@ export default {
   "Loading map…": "Cargando mapa…",
   "Preview 3D": "Vista previa 3D",
   "Published home": "Hogar publicado",
+  "model.ceiling_fan": "Ventilador de techo de cuatro aspas",
+  "model.standing_fan": "Ventilador de pie",
+  "model.desk_fan": "Ventilador de mesa",
+  "model.wall_air_conditioner": "Aire acondicionado de pared",
+  "model.panel_heater": "Calefactor de panel",
 };

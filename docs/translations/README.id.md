@@ -24,7 +24,7 @@ Editor browser terpisah dapat dipakai saat menyiapkan HA. Editor ini tidak memil
 
 Gambar rumah Anda di browser. Tidak perlu akun. Pilih bahasa di bagian atas editor.
 
-1. Tambahkan ruangan, dinding, pintu, dan jendela. Pustaka berisi 206 model. Pilih palet warna dan, untuk objek yang mendukungnya, pola permukaan.
+1. Tambahkan ruangan, dinding, pintu, dan jendela. Pustaka berisi 211 model. Pilih palet warna dan, untuk objek yang mendukungnya, pola permukaan.
 2. Ekspor JSON untuk menyimpan salinan yang bisa diedit. Draf hanya tersimpan di browser ini. Mengganti bahasa tidak mengubah denah Anda.
 
 ### Opsional: perangkat alat portabel dan kompiler Python

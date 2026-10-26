@@ -795,4 +795,9 @@ export default {
   "Loading map…": "جارٍ تحميل الخريطة…",
   "Preview 3D": "معاينة ثلاثية الأبعاد",
   "Published home": "المنزل المنشور",
+  "model.ceiling_fan": "مروحة سقف بأربع شفرات",
+  "model.standing_fan": "مروحة عمودية",
+  "model.desk_fan": "مروحة مكتب",
+  "model.wall_air_conditioner": "مكيف هواء جداري",
+  "model.panel_heater": "مدفأة لوحية",
 };

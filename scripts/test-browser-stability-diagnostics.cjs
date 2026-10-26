@@ -6,6 +6,7 @@ const path = require('node:path');
 const {EventEmitter} = require('node:events');
 const vm = require('node:vm');
 const {test, after} = require('node:test');
+const {sceneScreenshotRegion,analyzeScenePixels,inspectSceneScreenshot} = require('./browser-pixel-evidence.cjs');
 const {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
 
 test('host phase timing closes sequential phases and preserves the timeout observation', () => {
@@ -566,7 +567,7 @@ test('Firefox software WebGL2 preferences reach the browser and its diagnostic r
   assert.equal(chromium.headless, true);
   assert.equal(chromium.firefoxUserPrefs, undefined);
   assert(chromium.args.includes('--use-angle=swiftshader'));
-  assert.deepEqual(browserLaunchOptions('webkit', true), {headless: true});
+  assert.deepEqual(browserLaunchOptions('webkit', true, 'linux'), {headless: true});
 });
 
 test('launch failures persist and do not prevent the next selected engine from running', async () => {
@@ -617,7 +618,7 @@ test('software compositor opt-in reaches Firefox and its receipt without changin
     assert.deepEqual(launched.firefoxUserPrefs, launch.firefoxUserPrefs);
     assert.deepEqual(read(diagnostics).launch.firefoxUserPrefs, launch.firefoxUserPrefs);
     assert.equal(browserLaunchOptions('chromium', false).firefoxUserPrefs, undefined);
-    assert.deepEqual(browserLaunchOptions('webkit', false), {headless: false});
+    assert.deepEqual(browserLaunchOptions('webkit', false, 'linux'), {headless: false});
     process.env.FIREFOX_COMPOSITOR_BACKEND = 'typo';
     assert.throws(() => browserLaunchOptions('firefox', false), /must be default or software/);
   } finally {
@@ -661,7 +662,7 @@ test('GPU process opt-in permits parent WebGL and retains both preferences in it
       process.env.FIREFOX_GPU_PROCESS = invalid;
       assert.throws(() => browserLaunchOptions('firefox', false), /must be default or disabled/);
       assert.equal(browserLaunchOptions('chromium', false).firefoxUserPrefs, undefined);
-      assert.deepEqual(browserLaunchOptions('webkit', false), {headless: false});
+      assert.deepEqual(browserLaunchOptions('webkit', false, 'linux'), {headless: false});
     }
   } finally {
     for (const name of names) {
@@ -736,7 +737,7 @@ test('Chromium ANGLE selection preserves software coverage and rejects an unconf
     }
     process.env.CHROMIUM_ANGLE_BACKEND = 'typo';
     assert.throws(() => browserLaunchOptions('chromium', false), /must be metal or swiftshader/);
-    assert.deepEqual(browserLaunchOptions('webkit', false), {headless: false});
+    assert.deepEqual(browserLaunchOptions('webkit', false, 'linux'), {headless: false});
     assert.equal(browserLaunchOptions('firefox', false).args, undefined);
   } finally {
     if (previous === undefined) delete process.env.CHROMIUM_ANGLE_BACKEND;
@@ -2101,4 +2102,69 @@ test('planner framing chooses visible canvas input without hiding floating contr
   assert.equal(result.action,'blocked');assert.match(result.reason,/No visible, unobstructed/);
   assert.equal(inspect([1,1],[1.01,1]).action,'zoom','The native-touch minimum distance remains 28 pixels');
   assert.equal(document.getElementById('plan-canvas'),canvas,'Measurement leaves controls and canvas intact');
+});
+
+
+test('Windows WebKit keeps compositing while other platforms and launch defaults stay scoped', () => {
+  for(const headless of [false,true]) {
+    const windows=browserLaunchOptions('webkit',headless,'win32');
+    assert.deepEqual(windows,{headless,ignoreDefaultArgs:['--disable-accelerated-compositing']});
+    for(const platform of ['darwin','linux']) assert.deepEqual(browserLaunchOptions('webkit',headless,platform),{headless});
+    assert.deepEqual(browserLaunchOptions('webkit',headless),browserLaunchOptions('webkit',headless,process.platform));
+  }
+});
+
+test('scene pixel evidence rejects every flat color, transparency and sparse isolated marks', () => {
+  const width=64,height=64;
+  const image=(pixel)=>({width,height,data:Uint8Array.from(Array.from({length:width*height},(_,i)=>pixel(i)).flat())});
+  for(const color of [[0,0,0],[255,255,255],[239,238,232],[231,232,223],[20,80,180]]) {
+    assert.equal(analyzeScenePixels(image(()=>[...color,255])).nonflat,false);
+  }
+  assert.equal(analyzeScenePixels(image(i=>[i%256,(i*3)%256,(i*7)%256,0])).nonflat,false);
+  assert.equal(analyzeScenePixels(image(i=>i<20?[i*12,i*9,i*5,255]:[240,240,240,255])).nonflat,false);
+  assert.equal(analyzeScenePixels(image(i=>[127+i%3,127+(i>>2)%3,127+(i>>3)%3,255])).nonflat,false,
+    'Small quantization noise near bin boundaries is not scene detail');
+  const detail=analyzeScenePixels(image(i=>[32+(i%64)*3,50+Math.floor(i/64)*2,80+(i%16)*8,255]));
+  assert.equal(detail.nonflat,true,'Broad scene detail survives color quantization');
+  assert.throws(()=>analyzeScenePixels({width:64,height:64,data:[]}),/complete RGBA/);
+});
+
+test('screenshot evidence samples only the visible canvas center, excluding edge UI', () => {
+  assert.deepEqual(sceneScreenshotRegion({x:10,y:200,width:900,height:500},{width:1280,height:800}),
+    {x:190,y:300,width:540,height:300});
+  assert.deepEqual(sceneScreenshotRegion({x:-100,y:200,width:500,height:500},{width:300,height:500}),
+    {x:0,y:300,width:300,height:200});
+  assert.deepEqual(sceneScreenshotRegion({x:0,y:200,width:390,height:250},{width:390,height:800},
+    [{x:22,y:350,width:250,height:80},{x:325,y:380,width:50,height:50}]),
+    {x:78,y:250,width:234,height:100},'Wrapped mobile help text is excluded even when it extends into the center');
+  assert.throws(()=>sceneScreenshotRegion({x:0,y:900,width:900,height:500},{width:1280,height:800}),/visible canvas interior/);
+  assert.throws(()=>sceneScreenshotRegion(null,{width:1280,height:800}),/finite/);
+});
+
+
+test('PNG evidence decodes only the saved image, scales CSS bounds and always clears its deadline', async () => {
+  for(const outcome of ['load','error','timeout']) {
+    const timers=new Map(),calls=[];let image;
+    class SavedImage {
+      constructor(){image=this;this.naturalWidth=640;this.naturalHeight=480;}
+      set src(value){calls.push(['source',value]);if(outcome==='load')this.onload();if(outcome==='error')this.onerror();}
+    }
+    const context={
+      drawImage(...args){calls.push(['draw',...args.slice(1)]);},
+      getImageData(x,y,width,height){return {data:Uint8Array.from(Array.from({length:width*height},(_,i)=>[32+(i%64)*3,50+Math.floor(i/64)%64*2,80+(i%16)*8,255]).flat())};}
+    };
+    const canvas={getContext(type){assert.equal(type,'2d');return context;}};
+    const page={evaluate(fn,args){return vm.runInNewContext('('+fn.toString()+')(args)',{
+      args,Image:SavedImage,document:{createElement(tag){assert.equal(tag,'canvas');return canvas;}},
+      setTimeout(callback,ms){assert.equal(ms,5000);timers.set(1,callback);return 1;},clearTimeout(id){timers.delete(id);}
+    });}};
+    const pending=inspectSceneScreenshot(page,Buffer.from('saved PNG'),{x:20,y:20,width:200,height:200},{width:320,height:240},[]);
+    if(outcome==='timeout'){assert.equal(timers.size,1);timers.get(1)();}
+    if(outcome==='load') {
+      const result=await pending;assert.equal(result.nonflat,true);
+      assert.deepEqual(calls[1],['draw',120,120,240,240,0,0,120,120],'PNG pixels scale from the same CSS canvas region');
+    } else await assert.rejects(pending,outcome==='error'?/did not decode/:/exceeded 5s/);
+    assert.equal(timers.size,0);assert.equal(image.onload,null);assert.equal(image.onerror,null);
+    assert.equal(calls[0][1],'data:image/png;base64,'+Buffer.from('saved PNG').toString('base64'));
+  }
 });

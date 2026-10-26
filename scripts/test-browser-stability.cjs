@@ -17,6 +17,7 @@ const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
 const {createStartupDiagnostics} = require('./browser-startup-diagnostics.cjs');
+const {inspectSceneScreenshot} = require('./browser-pixel-evidence.cjs');
 
 const root = path.resolve(process.env.HOME_STUDIO_SOURCE_ROOT || path.join(__dirname, '..'));
 const sourceFiles = Object.fromEntries(['viewer.js','home-view.js','room-lighting.js','planner/render-capacity.js','planner/interaction-render.js'].filter(name=>fs.existsSync(path.join(root,name))).map(name=>[name,crypto.createHash('sha256').update(fs.readFileSync(path.join(root,name))).digest('hex')]));
@@ -471,10 +472,33 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
         'Native touch drags reach the viewer as trusted touch and pointer movement');
       Object.assign(sample,{recovery,...initial});
       save();
+      // Preserve actual Windows WebKit editor pixels after all timed work.
+      // Enter through the UI and require the same bounded wheel receipt; do
+      // not inject a render or readPixels to make the compositor present.
+      if(process.platform==='win32' && browserName==='webkit' && project.floors[0].rooms.length===24) {
+        phases.start('editor-visual-evidence', {cycle});
+        if(await child.evaluate(()=>window.floorplan.homeMode)) await input.tap(frame.locator('#editLayout'));
+        await child.waitForFunction(()=>!window.floorplan.homeMode);
+        const wheel=await child.evaluate(measureEditorWheelBurst);
+        check(wheel.synchronousDraws<=1 && wheel.totalDraws>0 && wheel.totalDraws<=2 && wheel.sceneDraws>0 && wheel.sceneDraws<=2 && wheel.cameraChanged,
+          'Editor visual evidence follows a bounded complete wheel draw');
+        const screenshot=`${browserName}-editor-${cycle+1}.png`;
+        sample.editorVisual={wheel,screenshot};save();
+        const bounds=await frame.locator('#view3d canvas').boundingBox(), viewport=page.viewportSize();
+        const overlays=await Promise.all(['.caption','.zoom-controls'].map(selector=>frame.locator('#view3d '+selector).boundingBox()));
+        const png=await page.screenshot({path:path.join(diagnostics.directory,screenshot),timeout:5000});
+        sample.editorVisual.pixels=await inspectSceneScreenshot(page,png,bounds,viewport,overlays);save();
+        check(sample.editorVisual.pixels.nonflat,'The natural editor screenshot contains scene detail inside the canvas');
+      }
       // Screenshot readback drains GPU work. Capture after latency checks so it
       // cannot accidentally warm the first interaction being measured.
       if(process.env.BROWSER_STABILITY_SCREENSHOT_DIR) {
         phases.start('comparison-screenshot', {cycle});
+        if(!await child.evaluate(()=>window.floorplan.homeMode)) {
+          const beforeHome=await child.evaluate(()=>window.floorplan.renderCount);
+          await input.tap(frame.locator('#openHome'));
+          await child.waitForFunction(before=>window.floorplan.homeMode && window.floorplan.renderCount>before,beforeHome);
+        }
         fs.mkdirSync(process.env.BROWSER_STABILITY_SCREENSHOT_DIR,{recursive:true});
         await input.tap(frame.locator('#homeZoomReset'));
         await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));

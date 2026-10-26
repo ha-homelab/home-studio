@@ -24,7 +24,7 @@ Puoi usare l’editor web separato mentre prepari HA. Non ha una connessione in 
 
 Disegna la tua casa nel browser. Non serve un account. Scegli la lingua nella parte superiore dell’editor.
 
-1. Aggiungi stanze, pareti, porte e finestre. La libreria include 206 modelli. Scegli una tavolozza di colori e, per gli oggetti compatibili, un motivo della superficie.
+1. Aggiungi stanze, pareti, porte e finestre. La libreria include 211 modelli. Scegli una tavolozza di colori e, per gli oggetti compatibili, un motivo della superficie.
 2. Esporta JSON per conservare una copia modificabile. Le bozze restano solo in questo browser. Cambiare lingua non modifica la pianta.
 
 ### Facoltativo: strumenti portabili e compilatore Python

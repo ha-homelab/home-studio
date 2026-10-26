@@ -796,4 +796,9 @@ export default {
   "Loading map…": "मानचित्र लोड हो रहा है…",
   "Preview 3D": "3D पूर्वावलोकन",
   "Published home": "प्रकाशित घर",
+  "model.ceiling_fan": "चार पंखों वाला छत का पंखा",
+  "model.standing_fan": "स्टैंड वाला पंखा",
+  "model.desk_fan": "टेबल पंखा",
+  "model.wall_air_conditioner": "दीवार पर लगा एयर कंडीशनर",
+  "model.panel_heater": "पैनल हीटर",
 };
