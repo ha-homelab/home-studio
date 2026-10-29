@@ -15,6 +15,16 @@
 
 - Climate devices no longer show a stale heating/cooling action while off.
 
+## [1.3.1] - Bounded viewer loading
+
+### Fixed
+
+- Stop stalled floor loads after three minutes, including delayed browser
+  timers, and allow an explicit retry without losing unsaved edits.
+- Cancel obsolete external-host transfers on navigation, disconnection or
+  account changes. Hosts can isolate large model responses from device-state
+  traffic while preserving Home Assistant's authorization and viewer sandbox.
+
 ## [1.3.0] - Editable neighborhoods and shared map context
 
 ### Added
