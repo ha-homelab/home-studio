@@ -139,6 +139,30 @@ projects receive the local client, whose contracts run in the toolkit. Update th
 add `--check` to detect drift without writing files. The installer is not vendored
 into consumer repositories.
 
+### Bounded release downloads
+
+The release engine and its callers are updated together from
+[Toolkit #312](https://github.com/victron-venus/venus-os-ci-toolkit/pull/312).
+Promotion, public release resolution for closed builds, versioned verification
+and upload readback require the validated size and SHA-256 before opening an
+exclusive output file. Each write must fit the expected size and the shared
+inventory byte budget. A shorter, longer or different response is rejected;
+failure stops the transfer and removes only its own incomplete output.
+
+The byte budget counts cumulative downloads, even when completed files are
+removed between transfers. An explicitly supplied `reserve_bytes` also preserves
+a free-space floor throughout the transfer, including silent waiting; its
+default is zero. Existing operator capacity checks remain necessary and are not
+reduced by this update. The single transfer deadline also covers stderr and
+waiting for the process to exit. Existing release identity, provenance and
+signature checks remain required.
+
+The mandatory release contract suite includes the offline streaming checks in
+`.github/release-tests/test_release_download.py`. Keep this contract and the
+installed release engine/callers in the same update; an older caller cannot use
+the new bounded transport API. This scoped backport preserves the project's
+release policy and other existing consumer differences.
+
 References: [GitHub schedules](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule),
 [protected environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments),
 [artifact provenance](https://docs.github.com/en/rest/actions/artifacts).
