@@ -22,12 +22,14 @@ import tarfile
 import tempfile
 import time
 import traceback
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 import zipfile
 
 from closed_envelope import canonical, decode_json, digest, open_envelope, seal, verify_envelope, b64, unb64, MAX_ENVELOPE
+import closed_upload_control as upload_control
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "ha-homelab/home-studio"
@@ -118,8 +120,9 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise Rejected()
 
 
-def transport(url, *, data=None, suffix=None, create_only=False):
+def transport(url, *, data=None, suffix=None, create_only=False, maximum=MAX_ENVELOPE, timeout=60, not_after=None):
     """Capabilities never cross redirects or enter subprocess argv/logs."""
+    require(type(maximum) is int and 0 < maximum <= MAX_ENVELOPE and 0 < timeout <= 60)
     parsed = urllib.parse.urlsplit(url)
     require(parsed.scheme == "https" and parsed.hostname and not parsed.username
             and not parsed.password and not parsed.fragment and parsed.port in {None, 443})
@@ -132,12 +135,70 @@ def transport(url, *, data=None, suffix=None, create_only=False):
         headers["If-None-Match"] = "*"
     request = urllib.request.Request(url, data=data, method="PUT" if data is not None else "GET",
                                      headers=headers)
-    with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(
-            request, timeout=60) as response:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    if not_after is not None:
+        require(type(not_after) is int and not_after > time.time())
+        timeout = min(timeout, not_after - time.time())
+        require(timeout > 0)
+    with opener.open(request, timeout=timeout) as response:
         require(response.status in ({200, 201, 204} if data is not None else {200}))
-        result = response.read(MAX_ENVELOPE + 1)
-        require(len(result) <= MAX_ENVELOPE)
+        result = response.read(maximum + 1)
+        require(len(result) <= maximum)
+        require(not_after is None or time.time() < not_after)
         return result
+
+
+
+def upload_candidate(envelope, object_name, input_sha256, request_id, limits, *, action):
+    """Preserve release uploads; require fresh admission for closed rebuilds."""
+    require(action in {"build", "rebuild"})
+    if action == "build":
+        # The normal-release coordinator has a separate migration. Keep its
+        # existing transport exactly; no intent, permit or fallback is involved.
+        transport(os.environ["CLOSED_OUTPUT_WRITE_URL"], data=envelope,
+                  suffix=object_name, create_only=True)
+        return
+    upload_control.policy(limits)
+    operation = "closed-rebuild"
+    worker_job = upload_control.worker_job(operation)
+    intent = upload_control.validate_intent({
+        "schema": 1, "kind": "closed-upload-intent", "request_id": request_id,
+        "run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+        "build_source_sha": os.environ["GITHUB_SHA"], "input_sha256": input_sha256,
+        "candidate_object": object_name, "candidate_sha256": digest(envelope),
+        "candidate_bytes": len(envelope),
+        "output_capability_sha256": digest(os.environ["CLOSED_OUTPUT_WRITE_URL"].encode()),
+        "nonce": uuid.uuid4().hex, "created_at": int(time.time()),
+        "operation": operation, "worker_job": worker_job,
+    }, limits)
+    intent_wire = seal(canonical(intent), os.environ["CLOSED_OUTPUT_ENCRYPT_KEY"],
+                       os.environ["CLOSED_OUTPUT_SIGN_KEY"], purpose="upload-intent")
+    require(len(intent_wire) <= upload_control.CONTROL_MAX)
+    transport(os.environ["CLOSED_OUTPUT_WRITE_URL"], data=intent_wire,
+              suffix=upload_control.object_suffix(intent, "upload-intent"), create_only=True,
+              maximum=upload_control.CONTROL_MAX)
+    deadline = time.monotonic() + limits["wait_seconds"]
+    while True:
+        remaining = deadline - time.monotonic()
+        require(remaining > 0)
+        try:
+            wire = transport(os.environ["CLOSED_OUTPUT_READ_URL"],
+                             suffix=upload_control.object_suffix(intent, "upload-permit"),
+                             maximum=upload_control.CONTROL_MAX, timeout=min(5, remaining))
+            permit = upload_control.control(open_envelope(wire, os.environ["CLOSED_INPUT_DECRYPT_KEY"],
+                                    os.environ["CLOSED_INPUT_VERIFY_KEY"], purpose="upload-permit"))
+            break
+        except urllib.error.HTTPError as error:
+            status = error.code
+            error.close()
+            require(status == 404)
+            time.sleep(min(2, max(0, deadline - time.monotonic())))
+    require(time.monotonic() < deadline)
+    upload_control.validate_permit(permit, intent, intent_wire, limits)
+    # No renewal or retry: an ambiguous PUT is reconciled by the operator.
+    transport(os.environ["CLOSED_OUTPUT_WRITE_URL"], data=envelope,
+              suffix=object_name, create_only=True, maximum=upload_control.CONTROL_MAX,
+              not_after=permit["expires_at"])
 
 
 def gate_environment(environment):
@@ -432,6 +493,7 @@ def pack_candidate(payload, manifest, installer):
 def policy():
     value = decode_json(regular(ROOT / ".closed-build-policy.json", 100_000))
     require(value["schema"] == 1 and IMAGE.fullmatch(value["worker_image"]) is not None)
+    upload_control.policy(value["upload_admission"])
     return value
 
 
@@ -532,7 +594,8 @@ def execute(args, temporary):
                     os.environ["CLOSED_OUTPUT_SIGN_KEY"], purpose="candidate")
     # Run/attempt object identity prevents an interrupted attempt overwriting another.
     object_name = args.closed_request + "/" + os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"] + ".candidate.json"
-    transport(os.environ["CLOSED_OUTPUT_WRITE_URL"], data=envelope, suffix=object_name, create_only=True)
+    upload_candidate(envelope, object_name, digest(encrypted), args.closed_request,
+                     configured["upload_admission"], action=args.action)
     return "CLOSED_CANDIDATE_STORED"
 
 

@@ -18,8 +18,10 @@ jobs:
           python-version: '3.12'
       - name: Install locked transport test dependencies
         run: 'python3 -m pip install --require-hashes --only-binary=:all: -r requirements-closed-build.txt'
-      - name: Verify synthetic transport and failure confidentiality
-        run: python3 scripts/test_closed_build.py
+      - name: Verify synthetic transport, upload admission and failure confidentiality
+        run: |
+          python3 scripts/test_closed_build.py
+          python3 scripts/test_closed_upload_control.py
       - name: Preload public toolchain
         run: python3 scripts/closed_build.py --action prepare --prepared-root "$RUNNER_TEMP/closed-synthetic-public"
       - name: Verify real unprivileged network-disabled container with fictional input
