@@ -130,7 +130,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
         self.assertEqual(set(jobs), {'package', 'platforms', 'native-core', 'closed-contracts'})
         self.assertEqual(jobs['platforms'], {'uses': './.github/workflows/platform-acceptance.yml'})
         job = jobs['package']
-        self.assertEqual(job['timeout-minutes'], '30')
+        self.assertEqual(job['timeout-minutes'], '45')
         self.assertNotIn('if', job)
         self.assertNotIn('continue-on-error', job)
         steps = job['steps']
