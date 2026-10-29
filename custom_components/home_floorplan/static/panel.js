@@ -985,9 +985,23 @@ class HomeFloorplanPanel extends HTMLElement {
     this.resetModelConfig();
     this.serverCanEdit=false;this.readableEntities=new Set();this.controllableEntities=new Set();this.updateAccessUI();
     const generation = this.generation, hass = this._hass;
-    let cancel;
-    const cancelled = new Promise(resolve => { cancel = () => resolve(null); });
+    const controller = new AbortController(), deadline = Date.now() + 180000;
+    let cancel, expire;
+    const cancelled = new Promise((resolve, reject) => {
+      cancel = () => { resolve(null); controller.abort(); };
+      expire = () => {
+        if (!this.isCurrent(generation)) return;
+        const error = Error('Loading the plan timed out. Reload the saved plan to try again.');
+        reject(error);
+        controller.abort();
+        // A registration without a reply must not strand an explicit retry.
+        this.clearCurtainSubscription();
+        return error;
+      };
+    });
     this.cancelViewerRequest = cancel;
+    // One deadline covers subscription readiness, queued saves and the reply.
+    const timer = setTimeout(expire, 180000);
     try {
       if (!this.curtainSubscription && this._hass.connection?.subscribeMessage) {
         // The panel recreates this subscription on ready. Disable HAWS replay
@@ -1004,11 +1018,21 @@ class HomeFloorplanPanel extends HTMLElement {
           throw error;
         });
       }
-      await Promise.race([Promise.resolve(this.curtainSubscription?.ready).then(() => this.queue), cancelled]);
+      await Promise.race([this.curtainSubscription?.ready, cancelled]);
       if (!this.isCurrent(generation)) return;
+      if (Date.now() >= deadline) throw expire();
+      await Promise.race([this.queue, cancelled]);
+      if (!this.isCurrent(generation)) return;
+      if (Date.now() >= deadline) throw expire();
       this.failed=false;
-      const result = await Promise.race([hass.callWS({type:'home_floorplan/viewer', ...(floor ? {floor} : {})}), cancelled]);
+      const message = {type:'home_floorplan/viewer', ...(floor ? {floor} : {})};
+      const response = typeof hass.loadFloorplanViewer === 'function'
+        ? hass.loadFloorplanViewer(message, {signal:controller.signal})
+        : hass.callWS(message);
+      const result = await Promise.race([response, cancelled]);
       if (!this.isCurrent(generation)) return;
+      // A background tab or a large response may postpone the timer callback.
+      if (Date.now() >= deadline) throw expire();
       this.serverCanEdit = result.can_edit === true;
       this.runtimeMode = result.mode;this.hasEditor = result.has_editor === true;
       this.updateAccessUI();
@@ -1076,6 +1100,7 @@ class HomeFloorplanPanel extends HTMLElement {
       }, 8000);
     } catch (error) { if (this.isCurrent(generation)) this.notice(`Cannot load plan: ${planLoadError(error)}`, true); }
     finally {
+      clearTimeout(timer);
       if (this.cancelViewerRequest === cancel) this.cancelViewerRequest = null;
       this.notifySaveStatus();
     }

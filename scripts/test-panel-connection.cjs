@@ -46,11 +46,16 @@ function connection({subscribe, viewer, eventOnly = false} = {}) {
 
 function fixture() {
   let Panel;
-  const notices=[], nodes=new Map();
+  let clock=0, nextTimer=0;
+  const notices=[], nodes=new Map(), timers=new Map();
   const document={addEventListener() {}, removeEventListener() {}};
   const context=vm.createContext({
     HTMLElement:class {}, customElements:{get() {}, define(_name, type) {Panel=type;}},
-    URL, Blob, clearTimeout, document, removeEventListener() {},
+    URL, Blob, AbortController, document, addEventListener() {}, removeEventListener() {},
+    Date:class extends Date {static now() {return clock;}},
+    MessageChannel:class {constructor() {this.port1={postMessage() {}, close() {}}; this.port2={};}},
+    setTimeout(callback, delay) {const id=++nextTimer; timers.set(id, {callback, at:clock+delay}); return id;},
+    clearTimeout(id) {timers.delete(id);},
   });
   vm.runInContext(source, context);
   const panel=Object.assign(Object.create(Panel.prototype), {
@@ -70,7 +75,15 @@ function fixture() {
     return {user:{id:'fixture-admin', is_admin:true}, connected:true, connection:conn.value,
       states:{}, callWS:request => conn.value.callWS(request), ...overrides};
   }
-  return {panel, notices, nodes, hass, error:value => context.planLoadError(value)};
+  function advance(milliseconds, {runTimers=true}={}) {
+    clock+=milliseconds;
+    if (!runTimers) return;
+    for (const [id, timer] of [...timers]) {
+      if (timer.at>clock) continue;
+      timers.delete(id); timer.callback();
+    }
+  }
+  return {panel, notices, nodes, timers, advance, hass, error:value => context.planLoadError(value)};
 }
 
 // Only the transport is synthetic: HAWS owns command IDs, pending requests,
@@ -201,6 +214,242 @@ test('ordinary HA state updates never reload a successful or rejected viewer rea
     assert.equal(c.registrations.length, 1);
     assert.equal(f.panel.started, true);
     if (viewer) assert.match(f.notices.at(-1), /Connection lost/);
+  }
+});
+
+test('an isolated viewer hook leaves curtain traffic on the shared connection', async () => {
+  const response=deferred(), calls=[], f=fixture(), c=connection();
+  const hass=f.hass(c, {loadFloorplanViewer(message, options) {
+    assert.equal(this, hass, 'the host method retains its receiver');
+    calls.push({message, ...options});
+    return response.promise;
+  }});
+  f.panel.initialFloor='upper';
+  f.panel.hass=hass;
+  await flush();
+  assert.equal(calls.length, 1);
+  assert.equal(JSON.stringify(calls[0].message), JSON.stringify({type:'home_floorplan/viewer', floor:'upper'}));
+  assert.ok(calls[0].signal instanceof AbortSignal);
+  assert.equal(calls[0].signal.aborted, false);
+  assert.equal(c.reads.length, 0, 'large viewer replies must not use shared callWS');
+  assert.equal(c.registrations.length, 1);
+  c.registrations[0]({fixture:'live while loading'});
+  for (let i=0; i<20; i++) f.panel.hass=hass;
+  assert.equal(f.panel.curtains.fixture, 'live while loading');
+  assert.equal(calls.length, 1);
+  response.resolve(emptyPlan('isolated'));
+  await flush();
+  assert.equal(f.panel.floor, 'isolated');
+  assert.equal(f.panel.cancelViewerRequest, null);
+  assert.equal(f.timers.size, 0, 'successful responses clear the deadline');
+});
+
+test('an isolated viewer rejection never falls back or retries on entity updates', async () => {
+  const f=fixture(), c=connection();
+  let calls=0;
+  const hass=f.hass(c, {loadFloorplanViewer() {
+    calls++;
+    return Promise.reject({error:{code:'unauthorized', message:'Access denied'}});
+  }});
+  f.panel.hass=hass;
+  await flush();
+  for (let i=0; i<20; i++) f.panel.hass=hass;
+  await flush();
+  assert.equal(calls, 1);
+  assert.equal(c.reads.length, 0);
+  assert.match(f.notices.at(-1), /Access denied/);
+  assert.equal(f.timers.size, 0);
+});
+
+test('one deadline includes subscription readiness, the save queue and isolated transfer', async () => {
+  const registration=deferred(), save=deferred(), response=deferred(), calls=[];
+  const f=fixture(), c=connection({subscribe:() => registration.promise});
+  f.panel.queue=save.promise;
+  const hass=f.hass(c, {loadFloorplanViewer(message, options) {calls.push(options); return response.promise;}});
+  f.panel.hass=hass;
+  f.advance(70000);
+  registration.resolve(() => {});
+  await flush();
+  assert.equal(calls.length, 0, 'a pending save still gates the viewer read');
+  f.advance(70000);
+  save.resolve();
+  await flush();
+  assert.equal(calls.length, 1);
+  f.advance(39999);
+  await flush();
+  assert.equal(calls[0].signal.aborted, false);
+  f.advance(1);
+  await flush();
+  assert.equal(calls[0].signal.aborted, true, 'the transfer does not receive a fresh deadline');
+  assert.match(f.notices.at(-1), /timed out.*Reload the saved plan/);
+  assert.equal(f.panel.curtainSubscription, null);
+  assert.equal(f.panel.cancelViewerRequest, null);
+  assert.equal(f.timers.size, 0);
+  const notice=f.notices.at(-1);
+  response.resolve({...emptyPlan('obsolete'), html:'<head></head>'});
+  await flush();
+  assert.equal(f.panel.floor, undefined);
+  assert.equal(f.panel.$('iframe').src, undefined);
+  assert.equal(f.notices.at(-1), notice);
+  for (let i=0; i<20; i++) f.panel.hass=hass;
+  await flush();
+  assert.equal(calls.length, 1, 'a timeout does not start a state-update retry loop');
+});
+
+test('a timed-out curtain registration is released late and explicit retry registers afresh', async () => {
+  const registration=deferred(), f=fixture();
+  let attempts=0, released=0;
+  const c=connection({subscribe:() => ++attempts===1 ? registration.promise : Promise.resolve(() => {})});
+  f.panel.hass=f.hass(c);
+  f.advance(180000);
+  await flush();
+  assert.equal(f.panel.curtainSubscription, null);
+  assert.equal(c.reads.length, 0);
+  assert.match(f.notices.at(-1), /timed out/);
+  await f.panel.loadFloor('retried');
+  assert.equal(attempts, 2);
+  assert.equal(f.panel.floor, 'retried');
+  const active=f.panel.curtainSubscription;
+  c.registrations[1]({fixture:'current'});
+  c.registrations[0]({fixture:'obsolete'});
+  registration.resolve(() => {released++;});
+  await flush();
+  assert.equal(released, 1);
+  assert.equal(f.panel.curtains.fixture, 'current');
+  assert.equal(f.panel.curtainSubscription, active);
+  assert.equal(f.timers.size, 0);
+});
+
+test('timeout keeps its useful error when the isolated transport rejects on abort', async () => {
+  const f=fixture(), c=connection();
+  let attempts=0;
+  const loadFloorplanViewer=(_message, {signal}) => {
+    if (++attempts>1) return Promise.resolve(emptyPlan('retried'));
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(Error('Transport aborted')), {once:true});
+    });
+  };
+  f.panel.hass=f.hass(c, {loadFloorplanViewer});
+  await flush();
+  f.advance(180000);
+  await flush();
+  assert.match(f.notices.at(-1), /timed out.*Reload the saved plan/);
+  await f.panel.loadFloor('retried');
+  assert.equal(attempts, 2);
+  assert.equal(f.panel.floor, 'retried');
+  assert.equal(c.registrations.length, 2);
+  assert.equal(c.reads.length, 0);
+  assert.equal(f.timers.size, 0);
+});
+
+test('native viewer requests are bounded without changing their transport', async () => {
+  const response=deferred(), f=fixture();
+  const c=connection({viewer:() => response.promise});
+  f.panel.hass=f.hass(c);
+  await flush();
+  assert.equal(c.reads.length, 1);
+  f.advance(180000);
+  await flush();
+  assert.match(f.notices.at(-1), /timed out/);
+  const notice=f.notices.at(-1), generation=f.panel.generation;
+  response.resolve({...emptyPlan('late native reply'), html:'<head></head>', can_edit:true});
+  await flush();
+  assert.equal(f.panel.floor, undefined);
+  assert.equal(f.panel.serverCanEdit, false);
+  assert.equal(f.panel.$('iframe').src, undefined);
+  assert.equal(f.panel.$('iframe').srcdoc, undefined);
+  assert.equal(f.panel.generation, generation, 'timeout safety does not depend on another invalidation');
+  assert.equal(f.notices.at(-1), notice);
+  assert.equal(c.reads.length, 1);
+  assert.equal(f.timers.size, 0);
+});
+
+test('wall-clock expiry rejects late readiness and replies even while timer callbacks are withheld', async () => {
+  for (const phase of ['curtain', 'save', 'native reply', 'isolated reply']) {
+    const pending=deferred(), f=fixture(), signals=[];
+    const c=connection({
+      ...(phase==='curtain' ? {subscribe:() => pending.promise} : {}),
+      ...(phase==='native reply' ? {viewer:() => pending.promise} : {}),
+    });
+    if (phase==='save') f.panel.queue=pending.promise;
+    if (phase==='curtain') f.panel.queue=new Promise(() => {});
+    const isolated=phase==='isolated reply' ? {loadFloorplanViewer(_message, {signal}) {
+      signals.push(signal); return pending.promise;
+    }} : {};
+    f.panel.hass=f.hass(c, isolated);
+    await flush();
+    assert.equal(c.reads.length, phase==='native reply' ? 1 : 0, phase);
+    f.advance(180001, {runTimers:false});
+    assert.equal(f.timers.size, 1, 'the timeout callback has not executed');
+    pending.resolve(phase==='curtain' ? () => {} : phase==='save' ? undefined
+      : {...emptyPlan('too late'), html:'<head></head>', can_edit:true});
+    await flush();
+    assert.match(f.notices.at(-1), /timed out.*Reload the saved plan/, phase);
+    assert.equal(c.reads.length, phase==='native reply' ? 1 : 0, phase);
+    assert.equal(f.panel.floor, undefined, phase);
+    assert.equal(f.panel.serverCanEdit, false, phase);
+    assert.equal(f.panel.$('iframe').src, undefined, phase);
+    assert.equal(f.panel.curtainSubscription, null, phase);
+    assert.equal(f.timers.size, 0, phase);
+    if (signals.length) assert.equal(signals[0].aborted, true);
+  }
+});
+
+test('a settled native reply clears its deadline before iframe initialization', async () => {
+  const f=fixture(), c=connection({viewer:() => ({...emptyPlan('rendered'), html:'<html><head></head></html>'})});
+  f.panel.hass=f.hass(c);
+  await flush();
+  const iframe=f.panel.$('iframe'), url=iframe.src;
+  assert.match(url, /^blob:/);
+  assert.equal(f.timers.size, 1);
+  assert.equal([...f.timers.values()][0].at, 8000, 'only the existing navigation fallback remains');
+  iframe.contentWindow={postMessage() {}};
+  iframe.onload();
+  assert.equal(f.timers.size, 0);
+  const notice=f.notices.at(-1);
+  f.advance(180000);
+  await flush();
+  assert.equal(f.panel.floor, 'rendered');
+  assert.equal(iframe.src, url);
+  assert.equal(f.notices.at(-1), notice);
+  assert.equal(c.registrations.length, 1);
+  f.panel.disconnectedCallback();
+});
+
+test('supersession, disconnect, replacement, account change and detach abort an isolated viewer', async () => {
+  for (const change of ['supersession', 'disconnect', 'replacement', 'account', 'detach']) {
+    const response=deferred(), calls=[], f=fixture(), c=connection();
+    const loadFloorplanViewer=(message, options) => {
+      calls.push(options);
+      return calls.length===1 ? response.promise : Promise.resolve(emptyPlan('current'));
+    };
+    f.panel.hass=f.hass(c, {loadFloorplanViewer});
+    await flush();
+    if (change==='supersession') {
+      await f.panel.loadFloor('current');
+    } else if (change==='disconnect') {
+      c.value.emit('disconnected');
+      assert.equal(calls[0].signal.aborted, true);
+      c.value.emit('ready');
+    } else if (change==='replacement') {
+      f.panel.hass=f.hass(connection(), {loadFloorplanViewer});
+    } else if (change==='account') {
+      f.panel.hass=f.hass(c, {user:{id:'different-admin', is_admin:true}, loadFloorplanViewer});
+    } else {
+      f.panel.isConnected=false;
+      f.panel.disconnectedCallback();
+    }
+    await flush();
+    assert.equal(calls[0].signal.aborted, true, change);
+    assert.equal(f.timers.size, 0, `${change} clears the obsolete deadline`);
+    const notice=f.notices.at(-1), generation=f.panel.generation;
+    response.resolve({...emptyPlan('obsolete'), html:'<head></head>'});
+    await flush();
+    assert.equal(f.panel.floor, change==='detach' ? undefined : 'current', change);
+    assert.equal(f.panel.$('iframe').src, undefined, change);
+    assert.equal(f.panel.generation, generation, change);
+    assert.equal(f.notices.at(-1), notice, change);
+    assert.equal(c.reads.length, 0, change);
   }
 });
 
