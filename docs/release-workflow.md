@@ -142,7 +142,8 @@ into consumer repositories.
 ### Bounded release downloads
 
 The release engine and its callers are updated together from
-[Toolkit #312](https://github.com/victron-venus/venus-os-ci-toolkit/pull/312).
+[Toolkit #312](https://github.com/victron-venus/venus-os-ci-toolkit/pull/312) at commit
+[`cc418ee79dd55b13d83b7f74f31904cd90a444a0`](https://github.com/victron-venus/venus-os-ci-toolkit/commit/cc418ee79dd55b13d83b7f74f31904cd90a444a0).
 Promotion, public release resolution for closed builds, versioned verification
 and upload readback require the validated size and SHA-256 before opening an
 exclusive output file. Each write must fit the expected size and the shared
