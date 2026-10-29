@@ -90,6 +90,11 @@ canonical CI and fleet validators use this wrapper; no linter warnings are ignor
 CLI file selections are limited to regular YAML files in the current repository's
 `.github/workflows` directory; symlinks and files outside that directory are rejected.
 
+The concrete worker also requires a [fresh signed upload permit](closed-build.md#fresh-admission-before-a-candidate-upload)
+from its local operator immediately before storing a new candidate. This uses the
+existing eight secrets and closed object prefix; no encrypted private bytes are
+allowed in Actions artifacts.
+
 A stored closed candidate is not install approval. The deployment client must
 verify matching actual public publication and successful final run/attempt before
 acceptance. This includes publisher or post-job failures after the closed build,

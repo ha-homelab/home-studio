@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -452,6 +453,7 @@ class BoundaryTests(unittest.TestCase):
                        "RUNNER_ENVIRONMENT": "github-hosted", "GITHUB_RUN_ID": "10", "GITHUB_RUN_ATTEMPT": "1",
                        "GITHUB_SHA": "b" * 40,
                        "CLOSED_INPUT_READ_URL": "https://storage.invalid/input", "CLOSED_OUTPUT_WRITE_URL": "https://storage.invalid/output/",
+                       "CLOSED_OUTPUT_READ_URL": "https://storage.invalid/output/",
                        "CLOSED_INPUT_DECRYPT_KEY": ci_decrypt, "CLOSED_INPUT_VERIFY_KEY": operator_verify,
                        "CLOSED_OUTPUT_ENCRYPT_KEY": deploy_encrypt, "CLOSED_OUTPUT_SIGN_KEY": worker_sign}
         def public_inputs(args, temporary):
@@ -482,9 +484,19 @@ class BoundaryTests(unittest.TestCase):
                 changed_manifest["target"]["source_sha"] = "f" * 40
                 selected_input = envelope.seal(archive({**files, "closed-build.json": envelope.canonical(changed_manifest)}),
                                                ci_encrypt, operator_sign, purpose="input")
-            def transport(url, *, data=None, suffix=None, create_only=False):
+            def transport(url, *, data=None, suffix=None, create_only=False, maximum=None, timeout=None, not_after=None):
                 if data is None:
-                    return selected_input
+                    if suffix is None:
+                        return selected_input
+                    self.assertTrue(suffix.endswith(".upload-permit.json"))
+                    wire = next(v for k, v in stored.items() if k.endswith(".upload-intent.json"))
+                    intent = envelope.decode_json(envelope.open_envelope(wire, deploy_decrypt, worker_verify, purpose="upload-intent"))
+                    capacity = {"ok": True, "all_buckets_complete": True, "all_versions_complete": True,
+                                "multipart_accounted": True, "mutations": False, "started_at_epoch": time.time(),
+                                "limits_available_bytes": 10 * 1024**3, "regional_limit_bytes": 20 * 1024**3,
+                                "version_inclusive_bytes": 10 * 1024**3, "safe_available_bytes": 10 * 1024**3}
+                    permit = build.upload_control.make_permit(intent, wire, capacity, build.policy()["upload_admission"])
+                    return envelope.seal(envelope.canonical(permit), ci_encrypt, operator_sign, purpose="upload-permit")
                 self.assertNotIn(MARKER.encode(), data)
                 if failure == "candidate-upload" and suffix.endswith(".candidate.json"):
                     raise RuntimeError(MARKER)

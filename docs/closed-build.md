@@ -159,9 +159,46 @@ attestations. Detailed failures are encrypted to closed diagnostics. Public
 stdout contains fixed status codes only. Interrupted runners may lose
 diagnostics; confidentiality does not depend on cleanup succeeding.
 
+## Fresh admission before a candidate upload
+
+A build can outlive its initial storage check. Immediately before uploading the
+large encrypted candidate, the host therefore writes a small encrypted and signed
+`upload-intent` to the existing output prefix and waits up to 120 seconds for an
+operator `upload-permit`. Both control envelopes are limited to 8 KiB. They bind
+the exact request, workflow source, run and attempt, input digest, target object,
+candidate ciphertext digest and size, output capability digest and a fresh random
+nonce. The operator uses the existing request keys; the worker gains no OCI SDK
+credentials, list access or additional Actions secrets.
+
+The reviewed local operator authenticates the live run and collects a new complete
+version-inclusive inventory and regional Limits response. Available space is the
+smaller of the two measurements. The policy requires room for the maximum candidate
+plus 144 MiB of remaining reserve. Unknown, incomplete or insufficient capacity
+produces no permit. An environment approval or an earlier green snapshot is not a
+substitute. The permit expires within 30 seconds of both issuance and the start of
+the capacity snapshot, whichever is earlier.
+
+The worker verifies the operator signature, exact bindings and freshness, then
+makes one create-only candidate PUT. It bounds the socket timeout by remaining
+permit life and rejects a response received after expiry. This is an admission
+check, **not a storage reservation** or server-enforced expiry: concurrent writers
+can still consume the space, and an interrupted or late PUT may already have
+created an object. Reconcile the exact object and journal before further action;
+never blindly retry, renew the permit or overwrite a candidate. No private payload
+or encrypted control envelope is staged in Actions artifacts.
+
+A new workflow/helper source needs a newly prepared request and pinned helper
+hashes. Keep old request evidence and keys for recovery; do not rebind an exported
+request to a new source. Already accepted immutable candidates remain installable
+under their retained protocol and acceptance proof. `action=validate` does not
+rebuild or re-upload them. Operators must implement admission before dispatching
+a new build from this workflow; an unavailable coordinator makes that build fail
+closed.
+
 ## Validation and recovery
 
-Run `python3 scripts/test_closed_build.py` for transport, source policy,
+Run `python3 scripts/test_closed_build.py` and
+`python3 scripts/test_closed_upload_control.py` for transport, upload admission, source policy,
 archive safety, exact component and failure-output tests. With a prepared
 public image and an available Docker daemon, set `CLOSED_DOCKER_TEST=1` for
 the real synthetic container success/failure and isolation checks. The public

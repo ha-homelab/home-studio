@@ -6,5 +6,12 @@
     "onvif_room_direction": {"repository": "https://github.com/ha-homelab/ha-onvif-room-direction.git", "commit": "8c5aa149ececab788229299d1ed8727d3e547816"},
     "access_session": {"repository": "https://github.com/ha-homelab/ha-access-session.git", "commit": "6fd08a807247f30d1036d6ec17049c817ed03a1a"},
     "sensing_evidence": {"repository": "https://github.com/ha-homelab/sensing-evidence-kit.git", "commit": "a82465dfcaa453fe3cf8a9a59e46044f6c18839e"}
+  },
+  "upload_admission": {
+    "candidate_max_bytes": 178957417,
+    "post_candidate_reserve_bytes": 150994944,
+    "permit_ttl_seconds": 30,
+    "capacity_max_age_seconds": 30,
+    "wait_seconds": 120
   }
 }
