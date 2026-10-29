@@ -3,8 +3,12 @@
 import argparse
 import json
 from pathlib import Path
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from viewer_locales import viewer_i18n_expression
+
 PANEL = ROOT / 'custom_components/home_floorplan/static/panel.js'
 BEGIN = '// BEGIN GENERATED PANEL MESSAGES (scripts/build-panel-locales.py)'
 END = '// END GENERATED PANEL MESSAGES'
@@ -43,8 +47,8 @@ def generate():
     for locale in locales:
         dictionary = json.loads((ROOT / 'viewer-locales' / (locale['code'] + '.json')).read_text(encoding='utf-8'))
         messages[locale['code']] = {key: dictionary[key] for key in KEYS}
-    # These are external JS bytes, never innerHTML or an inline script.
-    return BEGIN + '\nconst panelMessages = ' + json.dumps(messages, ensure_ascii=False, separators=(',', ':')) + ';\n' + END
+    expression = viewer_i18n_expression({'locales': [], 'dictionaries': messages})
+    return BEGIN + '\nconst panelMessages = ' + expression + '.dictionaries;\n' + END
 
 
 def main():
