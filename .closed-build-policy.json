@@ -8,6 +8,7 @@
     "sensing_evidence": {"repository": "https://github.com/ha-homelab/sensing-evidence-kit.git", "commit": "a82465dfcaa453fe3cf8a9a59e46044f6c18839e"}
   },
   "upload_admission": {
+    "action": "rebuild",
     "candidate_max_bytes": 178957417,
     "post_candidate_reserve_bytes": 150994944,
     "permit_ttl_seconds": 30,

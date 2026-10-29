@@ -7,7 +7,7 @@ import time
 from closed_envelope import MAX_ENVELOPE, canonical, decode_json, digest
 
 CONTROL_MAX = 8192
-POLICY_FIELDS = {"candidate_max_bytes", "post_candidate_reserve_bytes", "permit_ttl_seconds",
+POLICY_FIELDS = {"action", "candidate_max_bytes", "post_candidate_reserve_bytes", "permit_ttl_seconds",
                  "capacity_max_age_seconds", "wait_seconds"}
 INTENT_FIELDS = {"schema", "kind", "request_id", "run_id", "run_attempt", "build_source_sha",
                  "input_sha256", "candidate_object", "candidate_sha256", "candidate_bytes",
@@ -15,7 +15,7 @@ INTENT_FIELDS = {"schema", "kind", "request_id", "run_id", "run_attempt", "build
 PERMIT_FIELDS = {"schema", "kind", "intent", "intent_sha256", "capacity_snapshot_sha256",
                  "capacity_observed_at", "safe_available_bytes", "required_bytes", "issued_at", "expires_at"}
 SHA = re.compile(r"[0-9a-f]{64}\Z")
-WORKER_JOBS = {"release": "closed_build / package", "closed-rebuild": "closed_rebuild / package"}
+WORKER_JOBS = {"closed-rebuild": "closed_rebuild / package"}
 
 
 def require(value):
@@ -30,6 +30,7 @@ def integer(value, minimum=1, maximum=None):
 
 def policy(value):
     require(isinstance(value, dict) and set(value) == POLICY_FIELDS)
+    require(value["action"] == "rebuild")
     integer(value["candidate_max_bytes"], maximum=MAX_ENVELOPE)
     integer(value["post_candidate_reserve_bytes"], minimum=8 * 1024**2)
     integer(value["permit_ttl_seconds"], maximum=30)

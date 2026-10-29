@@ -71,15 +71,19 @@ class UploadAdmissionTests(unittest.TestCase):
         self.assertEqual(failed,bool(mutation))
         if candidates:
             self.assertEqual(candidates[0][1],b'ciphertext')
-            self.assertEqual(candidates[0][2]['not_after'],NOW+30)
+            if action=='rebuild':self.assertEqual(candidates[0][2]['not_after'],NOW+30)
+            else:self.assertNotIn('not_after',candidates[0][2])
         return writes
 
     def test_exact_single_create_only_upload(self):
         writes=self.exercise()
         self.assertEqual(len(writes),2)
 
-    def test_normal_release_uses_the_same_guard(self):
-        self.assertEqual(len(self.exercise(action='build')),2)
+    def test_normal_release_preserves_direct_transport_without_controls(self):
+        writes=self.exercise(action='build')
+        self.assertEqual(len(writes),1)
+        self.assertEqual(writes[0][0],'fixture/12-1.candidate.json')
+        self.assertEqual(writes[0][2],{})
 
     def test_wrong_or_stale_permit_never_uploads_candidate(self):
         cases=['absent','expired','future','long_ttl','stale_capacity','low_capacity','unknown_field',

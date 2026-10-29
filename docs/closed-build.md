@@ -159,42 +159,46 @@ attestations. Detailed failures are encrypted to closed diagnostics. Public
 stdout contains fixed status codes only. Interrupted runners may lose
 diagnostics; confidentiality does not depend on cleanup succeeding.
 
-## Fresh admission before a candidate upload
+## Fresh admission before a closed rebuild upload
 
-A build can outlive its initial storage check. Immediately before uploading the
-large encrypted candidate, the host therefore writes a small encrypted and signed
-`upload-intent` to the existing output prefix and waits up to 120 seconds for an
-operator `upload-permit`. Both control envelopes are limited to 8 KiB. They bind
-the exact request, workflow source, run and attempt, input digest, target object,
-candidate ciphertext digest and size, reviewed operation and its exact worker job,
-output capability digest and a fresh random
-nonce. The operator uses the existing request keys; the worker gains no OCI SDK
-credentials, list access or additional Actions secrets.
+For `action=rebuild` only, a long build can outlive its initial storage check.
+Immediately before uploading the encrypted candidate, the host writes a small
+encrypted and signed `upload-intent` to the existing output prefix and waits up
+to 120 seconds for an operator `upload-permit`. Both envelopes are limited to
+8 KiB. They bind the request, workflow source, run and attempt, input digest,
+target object, ciphertext digest and size, exact rebuild operation and worker
+job, output capability digest and a fresh random nonce. No additional Actions
+secrets, list access or broad OCI credentials are given to the worker.
 
-The reviewed local operator authenticates the live run and collects a new complete
-version-inclusive inventory and regional Limits response. Available space is the
-smaller of the two measurements. The policy requires room for the maximum candidate
-plus 144 MiB of remaining reserve and 8 KiB for the not-yet-stored permit. Unknown, incomplete or insufficient capacity
-produces no permit. An environment approval or an earlier green snapshot is not a
-substitute. The permit expires within 30 seconds of both issuance and the start of
-the capacity snapshot, whichever is earlier.
+The reviewed local operator authenticates the live run and collects a complete
+version-inclusive inventory and regional Limits response. Available space is
+the smaller measurement. The required headroom is the maximum candidate size
+plus 144 MiB of remaining reserve and 8 KiB for the not-yet-stored permit.
+Unknown, incomplete or insufficient capacity produces no permit. Earlier
+approval or a previous green snapshot is insufficient. The permit expires
+within 30 seconds of both issuance and the start of the snapshot, whichever
+is earlier.
 
-The worker verifies the operator signature, exact bindings and freshness, then
-makes one create-only candidate PUT. It bounds the socket timeout by remaining
-permit life and rejects a response received after expiry. This is an admission
-check, **not a storage reservation** or server-enforced expiry: concurrent writers
-can still consume the space, and an interrupted or late PUT may already have
-created an object. Reconcile the exact object and journal before further action;
-never blindly retry, renew the permit or overwrite a candidate. No private payload
-or encrypted control envelope is staged in Actions artifacts.
+The rebuild verifies the operator signature, exact bindings and freshness,
+then makes one create-only candidate PUT. Its socket timeout is bounded by
+remaining permit life; a response after expiry is rejected. This is admission,
+**not a storage reservation** or server-enforced expiry. Concurrent writers can
+still consume capacity, and a late or interrupted PUT may have created an
+object. Reconcile the exact object and journal; do not retry, renew or overwrite
+automatically. No private payload or encrypted control is staged in Actions
+artifacts.
 
-A new workflow/helper source needs a newly prepared request and pinned helper
-hashes. Keep old request evidence and keys for recovery; do not rebind an exported
-request to a new source. Already accepted immutable candidates remain installable
-under their retained protocol and acceptance proof. `action=validate` does not
-rebuild or re-upload them. Operators must implement admission before dispatching
-a new build from this workflow; an unavailable coordinator makes that build fail
-closed.
+A changed workflow/helper needs a newly prepared rebuild request with pinned
+helper hashes. Retain old request evidence and keys rather than rebinding an
+exported request. Start the coordinator immediately after approving the rebuild;
+browser-only approval without its permit loop makes the rebuild time out.
+
+Normal `action=build` releases retain their existing single create-only upload,
+without an intent or permit. Migrating their manual, push/beta and
+schedule/nightly coordinators is tracked in [issue #97](https://github.com/ha-homelab/home-studio/issues/97).
+`action=validate` continues to verify and reuse accepted bytes without a new
+candidate upload. Retained accepted candidates remain installable under their
+original protocol and acceptance proof.
 
 ## Validation and recovery
 

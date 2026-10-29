@@ -150,9 +150,16 @@ def transport(url, *, data=None, suffix=None, create_only=False, maximum=MAX_ENV
 
 
 def upload_candidate(envelope, object_name, input_sha256, request_id, limits, *, action):
-    """Keep private bytes here while the operator grants one fresh upload permit."""
+    """Preserve release uploads; require fresh admission for closed rebuilds."""
+    require(action in {"build", "rebuild"})
+    if action == "build":
+        # The normal-release coordinator has a separate migration. Keep its
+        # existing transport exactly; no intent, permit or fallback is involved.
+        transport(os.environ["CLOSED_OUTPUT_WRITE_URL"], data=envelope,
+                  suffix=object_name, create_only=True)
+        return
     upload_control.policy(limits)
-    operation = {"build": "release", "rebuild": "closed-rebuild"}.get(action)
+    operation = "closed-rebuild"
     worker_job = upload_control.worker_job(operation)
     intent = upload_control.validate_intent({
         "schema": 1, "kind": "closed-upload-intent", "request_id": request_id,
