@@ -851,6 +851,7 @@ function captureViewerFrames(renderer, mainScene) {
 // Serialized into the viewer frame. A real input may finish drawing before its
 // protocol reply arrives. Observe that receipt without asking an idle document
 // for more RAF callbacks, and require a quiet released view before continuing.
+// A full frame during the drag is not final while application draw work remains.
 async function waitForViewerDraw({beforeRenderCount, beforeSceneDraws, beforeCamera = null,
   expectedHomeMode, requireRotation = false, timeoutMs = 15000}) {
   if (!(Number.isFinite(timeoutMs) && timeoutMs > 0 && timeoutMs <= 15000)) {
@@ -860,6 +861,8 @@ async function waitForViewerDraw({beforeRenderCount, beforeSceneDraws, beforeCam
   let latest = null, stableKey = null, stableSince = started;
   while (performance.now() < deadline) {
     const scene = window.__browserScene(), passes = scene.renderPasses;
+    const renderIdle = scene.renderState?.request === 0 && scene.renderState?.delay === 0 &&
+      scene.renderState?.fallback === 0;
     const cameraChanged = Boolean(beforeCamera && scene.camera &&
       JSON.stringify(beforeCamera) !== JSON.stringify(scene.camera));
     const cameraRotated = Boolean(beforeCamera?.world && scene.camera?.world &&
@@ -868,7 +871,7 @@ async function waitForViewerDraw({beforeRenderCount, beforeSceneDraws, beforeCam
       scene, cameraChanged, cameraRotated};
     const now = performance.now();
     if (now >= deadline) break;
-    const complete = !document.hidden && latest.homeMode === expectedHomeMode && latest.renderCount > beforeRenderCount &&
+    const complete = renderIdle && !document.hidden && latest.homeMode === expectedHomeMode && latest.renderCount > beforeRenderCount &&
       passes.scene > beforeSceneDraws && passes.last === 'scene' && passes.sceneDrawCalls > 0 &&
       scene.drawingBuffer.length === 2 && scene.drawingBuffer.every(value => Number.isFinite(value) && value > 0) &&
       JSON.stringify(passes.sceneViewport) === JSON.stringify([0, 0, ...scene.drawingBuffer]) &&
@@ -882,7 +885,7 @@ async function waitForViewerDraw({beforeRenderCount, beforeSceneDraws, beforeCam
     elapsedMs:performance.now()-started, timeoutMs, expectedHomeMode, requireRotation,
     beforeRenderCount, beforeSceneDraws, renderCount:latest?.renderCount, homeMode:latest?.homeMode,
     cameraChanged:latest?.cameraChanged, cameraRotated:latest?.cameraRotated,
-    renderPasses:latest?.scene.renderPasses, drawingBuffer:latest?.scene.drawingBuffer,
+    renderPasses:latest?.scene.renderPasses, renderState:latest?.scene.renderState, drawingBuffer:latest?.scene.drawingBuffer,
     visibility:document.visibilityState, hidden:document.hidden, focused:document.hasFocus(),
   }));
 }

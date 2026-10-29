@@ -266,6 +266,51 @@ test('host rejects late native or protocol completion before the overdue timer f
   }
 });
 
+test('Home orbit failures retain camera evidence and keep strict idle and position assertions',async()=>{
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  const start=source.indexOf("      phases.start('home-drag', {cycle});"),end=source.indexOf("      phases.start('editor-enter', {cycle});",start);
+  assert(start>0&&end>start);
+  const scene=(count,pose)=>({renderCount:count,homeMode:true,errors:[],gpu:{renderer:'native'},scene:{
+    camera:{world:[pose,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],projection:[1]},drawingBuffer:[800,600],
+    renderPasses:{scene:count,copy:0,last:'scene',sceneViewport:[0,0,800,600]},renderState:{request:0,delay:0,fallback:0}}});
+  for(const failure of ['input','snapshot','idle','camera']) {
+    const before=scene(1,1),after=scene(2,2),idle=scene(2,2),final=scene(failure==='idle'?3:2,failure==='camera'?3:2);
+    const snapshots=[before,after,idle,final],sample={},saved=[],waits=[];
+    const env={cycle:0,phases:{start(){}},frame:{locator:()=>({})},child:{},sample,started:0,browserName:'synthetic',console:{log(){}},
+      snapshot:async()=>{if(failure==='snapshot'&&snapshots.length===3)throw Error('snapshot failed');return snapshots.shift();},initial:before,idleBefore:1,assertViewerInteraction,check:assert,
+      dragCanvas:async()=>{if(failure==='input')throw Error('native input failed');return {durationMs:200,phases:{},receipt:after};},
+      page:{waitForTimeout:async ms=>waits.push(ms),evaluate:async()=>[]},save:()=>saved.push(JSON.parse(JSON.stringify(sample)))};
+    const message=failure==='input'?/native input failed/:failure==='snapshot'?/snapshot failed/:failure==='idle'?/returns to idle without continuous rendering/:/remains at its released camera position/;
+    await assert.rejects(vm.runInNewContext('(async()=>{'+source.slice(start,end)+'})()',env),message);
+    const evidence=saved.at(-1).homeOrbit;
+    assert.deepEqual(Object.keys(evidence),failure==='input'?['before']:failure==='snapshot'?['before','receipt']:['before','receipt','after','idle','final']);
+    assert.equal(evidence.before.camera.world[0],1);
+    if(failure==='snapshot')assert.equal(evidence.receipt.camera.world[0],2,'A failed next snapshot cannot erase the completed draw receipt');
+    if(failure==='idle'||failure==='camera') {
+      assert.deepEqual(waits,[200,350],'The independent idle observation windows stay unchanged');
+      assert.equal(evidence.receipt.camera.world[0],2);assert.equal(evidence.after.camera.world[0],2);
+      assert.equal(evidence.idle.renderCount,2);assert.equal(evidence.final.renderCount,final.renderCount);
+      assert.equal(evidence.final.camera.world[0],final.scene.camera.world[0]);
+      for(const item of Object.values(evidence))assert.deepEqual(item.renderState,{request:0,delay:0,fallback:0});
+    }
+  }
+});
+
+test('viewer scene diagnostics read live scheduler handles from the viewer closure',()=>{
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  const start=source.indexOf('window.__browserScene=()=>'),end=source.indexOf(';\\n</script></body>',start);
+  assert(start>0&&end>start);
+  const env={renderProfile:{},scene:{traverse(){}},__browserCamera:{world:[1]},__browserRenderPasses:{scene:1},
+    renderer:{shadowMap:{type:2},domElement:{width:800,height:600},getPixelRatio:()=>1,
+      info:{programs:[],memory:{textures:0,geometries:0},render:{triangles:0,calls:0}}}};
+  env.window=env;
+  vm.runInNewContext('let renderRequest=11,renderDelay=12,renderFallback=13;'+source.slice(start,end+1)+
+    ';globalThis.setHandles=(request,delay,fallback)=>{renderRequest=request;renderDelay=delay;renderFallback=fallback;};',env);
+  assert.deepEqual({...env.__browserScene().renderState},{request:11,delay:12,fallback:13});
+  env.setHandles(0,0,0);
+  assert.deepEqual({...env.__browserScene().renderState},{request:0,delay:0,fallback:0},'Reads are live, not values captured at installation');
+});
+
 test('Home viewport waits for the observer frame and rejects stale or incomplete restoration receipts', async () => {
   const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
   const start=source.indexOf('async function waitForHomeViewport('),end=source.indexOf('\nasync function run(',start);
@@ -430,9 +475,9 @@ test('viewer receipts exclude real offscreen depth and fullscreen contact draws'
 // Use the production recorder and serialized observer together. Only scheduled
 // application draws advance receipts; the fixture never delivers idle RAF.
 async function viewerDrawMeasurement({events=[{at:0}],beforeCamera=true,requireRotation=false,expectedHomeMode=true,timeoutMs=1000,lateRead=false,hidden=false}={}) {
-  const identity=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],rotated=[0,0,-1,0,0,1,0,0,1,0,0,0,0,0,0,1];
+  const identity=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],rotated=[0,0,-1,0,0,1,0,0,1,0,0,0,0,0,0,1],finalRotation=[-1,0,0,0,0,1,0,0,0,0,-1,0,0,0,0,1];
   let now=0,serial=0,completed=false,result,error,observing=false,rafRequests=0,draws=0;
-  const timers=new Map(),state={renderCount:0,homeMode:expectedHomeMode,world:identity.slice(),full:true};
+  const timers=new Map(),state={renderCount:0,homeMode:expectedHomeMode,world:identity.slice(),full:true,renderState:{request:0,delay:0,fallback:0}};
   const camera={projectionMatrix:{toArray:()=>identity.slice()},matrixWorld:{toArray:()=>state.world.slice()}};
   const env={mainScene:{},performance:{now:()=>now},
     setTimeout(callback,delay){assert(Number.isFinite(delay)&&delay>=0);const id=++serial;timers.set(id,{at:now+delay,callback});return id;},
@@ -445,22 +490,24 @@ async function viewerDrawMeasurement({events=[{at:0}],beforeCamera=true,requireR
       render(){draws++;state.renderCount++;}},
     __browserScene(){
       if(observing&&lateRead&&draws>1)now=timeoutMs+1;
-      return {activePointLights:1,camera:env.__browserCamera,drawingBuffer:[800,600],renderPasses:env.__browserRenderPasses};
+      return {activePointLights:1,camera:env.__browserCamera,drawingBuffer:[800,600],renderPasses:env.__browserRenderPasses,renderState:state.renderState};
     }};
   env.window=env;
   vm.runInNewContext(`(${captureViewerFrames.toString()})(renderer,mainScene);globalThis.wait=${waitForViewerDraw.toString()};`,env);
   env.renderer.render(env.mainScene,camera);
   const baseline={beforeRenderCount:state.renderCount,beforeSceneDraws:env.__browserRenderPasses.scene,
     beforeCamera:beforeCamera?JSON.parse(JSON.stringify(env.__browserCamera)):null,expectedHomeMode,requireRotation,timeoutMs};
-  function draw(event) {
-    state.world=event.camera==='unchanged'?identity.slice():event.camera==='translation'?identity.map((value,index)=>index===12?3:value):rotated.slice();
+  function applyEvent(event) {
+    state.renderState=Object.hasOwn(event,'renderState')?event.renderState:{request:0,delay:0,fallback:0};
+    if(event.stateOnly)return;
+    state.world=event.camera==='unchanged'?identity.slice():event.camera==='translation'?identity.map((value,index)=>index===12?3:value):event.camera==='final'?finalRotation.slice():rotated.slice();
     state.homeMode=event.wrongMode?!expectedHomeMode:expectedHomeMode;
     state.full=event.full!==false;env.renderer.info.render.calls=event.blank?0:8;
     env.renderer.render(event.copy?{name:'interaction-copy'}:env.mainScene,camera);
     if(event.staleCount)state.renderCount=baseline.beforeRenderCount;
   }
   const queue=events.map(event=>({...event})).sort((a,b)=>a.at-b.at);
-  while(queue[0]?.at===0)draw(queue.shift());
+  while(queue[0]?.at===0)applyEvent(queue.shift());
   observing=true;
   env.wait(baseline).then(value=>{completed=true;result=value;},failure=>{completed=true;error=failure;});
   for(let turn=0;!completed&&turn<2000;turn++) {
@@ -468,13 +515,13 @@ async function viewerDrawMeasurement({events=[{at:0}],beforeCamera=true,requireR
     if(completed)break;
     const timer=[...timers].sort((a,b)=>a[1].at-b[1].at||a[0]-b[0])[0],event=queue[0];
     assert(timer||event,'Observer must make progress without an idle RAF');
-    if(event&&(!timer||event.at<=timer[1].at)){queue.shift();now=Math.max(now,event.at);draw(event);}
+    if(event&&(!timer||event.at<=timer[1].at)){queue.shift();now=Math.max(now,event.at);applyEvent(event);}
     else{timers.delete(timer[0]);now=Math.max(now,timer[1].at);timer[1].callback();}
   }
   assert(completed,'Draw observer must settle under one bounded deadline');
   assert.equal(rafRequests,0,'Observation cannot depend on an idle animation callback');
   assert.equal(timers.size,0,'No observer timer survives completion');
-  assert.equal(draws,1+events.length-queue.length,'Observation cannot manufacture application draws');
+  assert.equal(draws,1+events.filter(event=>!event.stateOnly).length-queue.filter(event=>!event.stateOnly).length,'Observation cannot manufacture application draws');
   return {result,error,now};
 }
 
@@ -485,6 +532,50 @@ test('draw receipt accepts completed and delayed full scenes while idle RAF is w
     assert.equal(result.homeMode,expectedHomeMode);assert.equal(result.cameraChanged,true);assert.equal(result.cameraRotated,true);
     assert(now>=at+150&&now<at+200,'A fresh completed scene must remain stable for at least 150 ms');
     assert.equal(result.waitMs,now);
+  }
+});
+
+test('draw receipt waits for a pending final camera draw beyond the quiet window',async()=>{
+  for(const handle of ['request','delay','fallback']) {
+    const {result,error,now}=await viewerDrawMeasurement({requireRotation:true,events:[
+      {at:0,renderState:{request:0,delay:0,fallback:0,[handle]:17}},
+      {at:500,camera:'final'},
+    ]});
+    assert.ifError(error);
+    assert.equal(result.renderCount,3,'An intermediate full frame cannot certify the released camera');
+    assert.equal(result.scene.camera.world[0],-1,'The receipt retains the final camera pose');
+    assert.equal(now,650,'The final draw must complete before the unchanged 150 ms stability window');
+  }
+});
+
+test('pending render work restarts the entire quiet window without manufacturing a draw',async()=>{
+  for(const handle of ['request','delay','fallback']) {
+    const {result,error,now}=await viewerDrawMeasurement({events:[{at:0},
+      {at:100,stateOnly:true,renderState:{request:0,delay:0,fallback:0,[handle]:17}},
+      {at:200,stateOnly:true},
+    ]});
+    assert.ifError(error);assert.equal(result.renderCount,2);
+    assert.equal(now,350,'Even work cancelled without drawing invalidates the earlier quiet interval');
+  }
+});
+
+test('draw receipt requires complete numeric idle render diagnostics',async()=>{
+  for(const renderState of [undefined,null,{}, {request:0,delay:0},
+    {request:false,delay:0,fallback:0},{request:0,delay:'0',fallback:0},
+    {request:0,delay:0,fallback:NaN}]) {
+    const {error,now}=await viewerDrawMeasurement({events:[{at:0,renderState}]});
+    assert.match(error?.message||'',/Viewer input did not settle/);
+    assert.equal(now,1000,'Missing or malformed diagnostics never certify a completed draw');
+  }
+});
+
+test('pending final draws retain the absolute 15-second interaction budget',async()=>{
+  const neverClearing=['request','delay','fallback'].map(handle=>[{at:0,renderState:{request:0,delay:0,fallback:0,[handle]:17}}]);
+  for(const events of [...neverClearing,
+    [{at:0,renderState:{request:1,delay:0,fallback:1}},{at:14900,camera:'final'}]]) {
+    const {error,now}=await viewerDrawMeasurement({events,timeoutMs:15000});
+    assert.match(error?.message||'',/Viewer input did not settle/);
+    assert.equal(now,15000,'Pending work and a late final draw cannot renew the original deadline');
   }
 });
 

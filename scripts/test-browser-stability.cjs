@@ -305,14 +305,22 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
       check((await snapshot()).renderCount===idleBefore, 'An idle Home view does not continuously render');
       phases.start('home-drag', {cycle});
       const canvas = frame.locator('#homeStage canvas');
+      const cameraEvidence = value => ({renderCount:value.renderCount,homeMode:value.homeMode,
+        camera:value.scene.camera,renderPasses:value.scene.renderPasses,renderState:value.scene.renderState});
       const beforeHomeDrag = await snapshot(), homeCameraBefore = beforeHomeDrag.scene.camera;
+      const homeOrbit = sample.homeOrbit = {before:cameraEvidence(beforeHomeDrag)};
+      save();
       const homeDrag = await dragCanvas(canvas,child,beforeHomeDrag,true), dragMs = homeDrag.durationMs;
+      homeOrbit.receipt = cameraEvidence(homeDrag.receipt);
       sample.homeDragPhases = homeDrag.phases;
       sample.dragMs = dragMs;
       sample.readyAfterDragMs = Date.now()-started;
+      save();
       console.log(`${browserName}: Home drag and frame completion in ${dragMs} ms`);
       const afterHomeDrag = await snapshot();
+      homeOrbit.after = cameraEvidence(afterHomeDrag);
       sample.homeInteraction = afterHomeDrag.scene.renderPasses;
+      save();
       assertViewerInteraction(initial, afterHomeDrag);
       sample.homeCameraChanged = Boolean(homeCameraBefore && afterHomeDrag.scene.camera &&
         JSON.stringify(homeCameraBefore) !== JSON.stringify(afterHomeDrag.scene.camera));
@@ -330,8 +338,12 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
       check(sample.homeDragCommands.length===0, 'A real Home orbit never issues a device or write command, or opens native details');
       await page.waitForTimeout(200);
       const orbitIdle = await snapshot();
+      homeOrbit.idle = cameraEvidence(orbitIdle);
+      save();
       await page.waitForTimeout(350);
       const orbitSettled = await snapshot();
+      homeOrbit.final = cameraEvidence(orbitSettled);
+      save();
       check(orbitSettled.renderCount===orbitIdle.renderCount, 'A released Home orbit returns to idle without continuous rendering');
       check(JSON.stringify(orbitSettled.scene.camera)===JSON.stringify(afterHomeDrag.scene.camera),
         'The orbited Home view remains at its released camera position');
@@ -563,7 +575,9 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
   html = instrumented;
   html = html.replace('<head>',`<head><script>window.__HOME_FLOORPLAN_EMBED__=true;(${installViewerLoadDiagnostics.toString()})({role:'frame',expectedLights:${project.floors[0].items.length}});(${instrumentation.toString()})(${deferViewerShaderChecks.toString()});</script>`);
   html = startup.checkpointSource(html, 'renderProfile=selectRenderProfile(renderer.getContext());', 'renderProfile');
-  html = html.replace('</script></body>', `if(renderer)(${captureViewerFrames.toString()})(renderer,scene);window.__browserScene=()=>({rasterProbe:renderProfile.rasterProbe||null,shadowType:renderer.shadowMap.type,materialTypes:(()=>{const types=new Set();scene.traverse(o=>{for(const m of (Array.isArray(o.material)?o.material:[o.material]))if(m)types.add(m.type)});return [...types].sort()})(),camera:window.__browserCamera,renderPasses:window.__browserRenderPasses,drawingBuffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),programs:renderer.info.programs.length,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,triangles:renderer.info.render.triangles,drawCalls:renderer.info.render.calls,shadowMaps:(()=>{const sizes=[];scene.traverse(o=>{if(o.castShadow&&o.shadow)sizes.push([o.type,o.shadow.mapSize.x,o.shadow.mapSize.y])});return sizes})(),pointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible)n++});return n})(),activePointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible&&o.intensity>0)n++});return n})()});\n</script></body>`);
+  // Read the viewer's actual pending handles on every observation; missing
+  // scheduler diagnostics must never be treated as an idle renderer.
+  html = html.replace('</script></body>', `if(renderer)(${captureViewerFrames.toString()})(renderer,scene);window.__browserScene=()=>({rasterProbe:renderProfile.rasterProbe||null,shadowType:renderer.shadowMap.type,materialTypes:(()=>{const types=new Set();scene.traverse(o=>{for(const m of (Array.isArray(o.material)?o.material:[o.material]))if(m)types.add(m.type)});return [...types].sort()})(),camera:window.__browserCamera,renderPasses:window.__browserRenderPasses,renderState:{request:renderRequest,delay:renderDelay,fallback:renderFallback},drawingBuffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),programs:renderer.info.programs.length,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,triangles:renderer.info.render.triangles,drawCalls:renderer.info.render.calls,shadowMaps:(()=>{const sizes=[];scene.traverse(o=>{if(o.castShadow&&o.shadow)sizes.push([o.type,o.shadow.mapSize.x,o.shadow.mapSize.y])});return sizes})(),pointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible)n++});return n})(),activePointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible&&o.intensity>0)n++});return n})()});\n</script></body>`);
   let sourceHash = crypto.createHash('sha256').update(html).digest('hex');
   const server = http.createServer((request,response) => {
     if(startup.handle(request,response,sourceHash))return;
