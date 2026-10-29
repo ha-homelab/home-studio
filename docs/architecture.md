@@ -156,6 +156,28 @@ A role/account change tears down the old viewer and capabilities. An unpublished
 native source draft cannot be silently overwritten by a placement save from
 an older published viewer.
 
+### Viewer loading and host transport
+
+The panel waits for curtain subscription readiness and pending layout writes
+before requesting a floor. This complete pre-navigation operation has a
+three-minute deadline; the separate eight-second iframe fallback starts only
+after the response becomes a Blob URL. A stalled transfer therefore produces
+a recoverable load error instead of leaving an indefinite loading message.
+
+Native HA uses its existing authenticated `hass.callWS` connection. An external
+host can implement `hass.loadFloorplanViewer(message, {signal})` to isolate the
+large viewer response from its device-state connection. The request is still
+`home_floorplan/viewer` and the response retains the same server-issued
+permissions and pinned publication. The hook is a transport boundary, not an
+alternative permission check or a public model URL.
+
+The host must stop its transfer when the supplied signal is aborted and must
+reject obsolete sessions. Navigation, detach, connection replacement and the
+deadline cancel the current operation; generation checks also reject late
+responses from transports that cannot cancel. Native `callWS` cannot retract
+work already submitted to HA. No credentials or transport objects are passed
+to the opaque viewer iframe, and state updates do not retry a failed load.
+
 ## Device feedback and screen-space motion
 
 The catalog keeps optional `device_animation` metadata beside the five fan and

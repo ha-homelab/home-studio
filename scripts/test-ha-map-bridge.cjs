@@ -18,7 +18,7 @@ function fixture({callWS,admin=true,dryRun=false}={}) {
   class MessageChannel {constructor(){this.port1=makePort();this.port2={};}}
   const document={hidden:false,addEventListener(){},removeEventListener(){}};
   const context=vm.createContext({HTMLElement:class{},customElements:{get(){},define(name,type){Panel=type;}},
-    Blob,URL:{createObjectURL(){return 'blob:fictional-viewer';},revokeObjectURL(){}},MessageChannel,document,
+    AbortController,Blob,URL:{createObjectURL(){return 'blob:fictional-viewer';},revokeObjectURL(){}},MessageChannel,document,
     addEventListener(){},removeEventListener(){},setTimeout(fn){timers.set(++timer,fn);return timer;},clearTimeout(id){timers.delete(id);}});
   vm.runInContext(source,context);
   const panel=Object.assign(Object.create(Panel.prototype),{generation:1,isConnected:true,serverCanEdit:admin,
