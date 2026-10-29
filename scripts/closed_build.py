@@ -149,9 +149,11 @@ def transport(url, *, data=None, suffix=None, create_only=False, maximum=MAX_ENV
 
 
 
-def upload_candidate(envelope, object_name, input_sha256, request_id, limits):
+def upload_candidate(envelope, object_name, input_sha256, request_id, limits, *, action):
     """Keep private bytes here while the operator grants one fresh upload permit."""
     upload_control.policy(limits)
+    operation = {"build": "release", "rebuild": "closed-rebuild"}.get(action)
+    worker_job = upload_control.worker_job(operation)
     intent = upload_control.validate_intent({
         "schema": 1, "kind": "closed-upload-intent", "request_id": request_id,
         "run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
@@ -160,6 +162,7 @@ def upload_candidate(envelope, object_name, input_sha256, request_id, limits):
         "candidate_bytes": len(envelope),
         "output_capability_sha256": digest(os.environ["CLOSED_OUTPUT_WRITE_URL"].encode()),
         "nonce": uuid.uuid4().hex, "created_at": int(time.time()),
+        "operation": operation, "worker_job": worker_job,
     }, limits)
     intent_wire = seal(canonical(intent), os.environ["CLOSED_OUTPUT_ENCRYPT_KEY"],
                        os.environ["CLOSED_OUTPUT_SIGN_KEY"], purpose="upload-intent")
@@ -584,7 +587,8 @@ def execute(args, temporary):
                     os.environ["CLOSED_OUTPUT_SIGN_KEY"], purpose="candidate")
     # Run/attempt object identity prevents an interrupted attempt overwriting another.
     object_name = args.closed_request + "/" + os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"] + ".candidate.json"
-    upload_candidate(envelope, object_name, digest(encrypted), args.closed_request, configured["upload_admission"])
+    upload_candidate(envelope, object_name, digest(encrypted), args.closed_request,
+                     configured["upload_admission"], action=args.action)
     return "CLOSED_CANDIDATE_STORED"
 
 

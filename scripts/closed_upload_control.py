@@ -11,10 +11,11 @@ POLICY_FIELDS = {"candidate_max_bytes", "post_candidate_reserve_bytes", "permit_
                  "capacity_max_age_seconds", "wait_seconds"}
 INTENT_FIELDS = {"schema", "kind", "request_id", "run_id", "run_attempt", "build_source_sha",
                  "input_sha256", "candidate_object", "candidate_sha256", "candidate_bytes",
-                 "output_capability_sha256", "nonce", "created_at"}
+                 "output_capability_sha256", "nonce", "created_at", "operation", "worker_job"}
 PERMIT_FIELDS = {"schema", "kind", "intent", "intent_sha256", "capacity_snapshot_sha256",
                  "capacity_observed_at", "safe_available_bytes", "required_bytes", "issued_at", "expires_at"}
 SHA = re.compile(r"[0-9a-f]{64}\Z")
+WORKER_JOBS = {"release": "closed_build / package", "closed-rebuild": "closed_rebuild / package"}
 
 
 def require(value):
@@ -42,10 +43,22 @@ def control(data):
     return decode_json(data)
 
 
+def required_capacity(limits):
+    policy(limits)
+    # The intent is already stored; the permit still needs its own small PUT.
+    return limits["candidate_max_bytes"] + limits["post_candidate_reserve_bytes"] + CONTROL_MAX
+
+
+def worker_job(operation):
+    require(isinstance(operation, str) and operation in WORKER_JOBS)
+    return WORKER_JOBS[operation]
+
+
 def validate_intent(value, limits):
     policy(limits)
     require(isinstance(value, dict) and set(value) == INTENT_FIELDS)
     require(type(value["schema"]) is int and value["schema"] == 1 and value["kind"] == "closed-upload-intent")
+    require(value["worker_job"] == worker_job(value["operation"]))
     require(isinstance(value["request_id"], str) and re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}", value["request_id"]))
     for key in ("run_id", "run_attempt"):
         require(isinstance(value[key], str) and re.fullmatch(r"[1-9][0-9]*", value[key]))
@@ -79,7 +92,7 @@ def validate_permit(value, intent, intent_wire, limits, *, now=None):
     require(now - observed < limits["capacity_max_age_seconds"])
     require(expires <= observed + limits["capacity_max_age_seconds"])
     require(0 <= issued - intent["created_at"] <= limits["wait_seconds"])
-    required = limits["candidate_max_bytes"] + limits["post_candidate_reserve_bytes"]
+    required = required_capacity(limits)
     require(integer(value["required_bytes"]) == required and integer(value["safe_available_bytes"], minimum=0) >= required)
     return value
 
@@ -100,7 +113,7 @@ def make_permit(intent, intent_wire, capacity, limits, *, now=None):
     permit = {"schema": 1, "kind": "closed-upload-permit", "intent": intent,
               "intent_sha256": digest(intent_wire), "capacity_snapshot_sha256": digest(canonical(capacity)),
               "capacity_observed_at": int(observed), "safe_available_bytes": available,
-              "required_bytes": limits["candidate_max_bytes"] + limits["post_candidate_reserve_bytes"],
+              "required_bytes": required_capacity(limits),
               "issued_at": now, "expires_at": min(now + limits["permit_ttl_seconds"],
                                                    int(observed) + limits["capacity_max_age_seconds"])}
     return validate_permit(permit, intent, intent_wire, limits, now=now)

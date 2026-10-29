@@ -166,14 +166,15 @@ large encrypted candidate, the host therefore writes a small encrypted and signe
 `upload-intent` to the existing output prefix and waits up to 120 seconds for an
 operator `upload-permit`. Both control envelopes are limited to 8 KiB. They bind
 the exact request, workflow source, run and attempt, input digest, target object,
-candidate ciphertext digest and size, output capability digest and a fresh random
+candidate ciphertext digest and size, reviewed operation and its exact worker job,
+output capability digest and a fresh random
 nonce. The operator uses the existing request keys; the worker gains no OCI SDK
 credentials, list access or additional Actions secrets.
 
 The reviewed local operator authenticates the live run and collects a new complete
 version-inclusive inventory and regional Limits response. Available space is the
 smaller of the two measurements. The policy requires room for the maximum candidate
-plus 144 MiB of remaining reserve. Unknown, incomplete or insufficient capacity
+plus 144 MiB of remaining reserve and 8 KiB for the not-yet-stored permit. Unknown, incomplete or insufficient capacity
 produces no permit. An environment approval or an earlier green snapshot is not a
 substitute. The permit expires within 30 seconds of both issuance and the start of
 the capacity snapshot, whichever is earlier.
