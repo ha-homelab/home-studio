@@ -4,6 +4,7 @@ import importlib.util
 import json
 import io
 import http.client
+import subprocess
 from unittest.mock import Mock, patch
 import contextlib
 import tempfile
@@ -581,6 +582,349 @@ class HostedPreparationTests(unittest.TestCase):
                     self.assertEqual(summary['cases'], [])
                 else:
                     self.assertEqual(summary['cases'][0]['status'], 'failed')
+
+
+class PlannerDiagnosticTests(unittest.TestCase):
+    def test_real_fixture_instrumentation_preserves_failures_and_completed_paints(self):
+        javascript = r"""
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const functions=source.slice(source.indexOf('function instrument() {'),source.indexOf('\nconst server=http.createServer'));
+const events={},errors=[],canvasContext=new Map();let time=0;
+class Canvas {
+  constructor(id){this.id=id;this.isConnected=true;this._width=400;this._height=300;}
+  get width(){return this._width;} set width(v){this._width=v;}
+  get height(){return this._height;} set height(v){this._height=v;}
+  getContext(){return canvasContext.get(this);}
+}
+const plan=new Canvas('plan-canvas'),thumbnail=new Canvas('');let lost=false,readError=null,clearError=null;
+const pixels={data:new Uint8Array([1,2,3,4])};
+function context(canvas){return {canvas,isContextLost:()=>lost,
+  clearRect(){if(clearError)throw clearError;return 42;},
+  getImageData(...args){assert.equal(this.canvas,canvas);assert.deepEqual(args,[0,0,2,2]);if(readError)throw readError;return pixels;}};}
+canvasContext.set(plan,context(plan));canvasContext.set(thumbnail,context(thumbnail));
+const env={assert,HTMLCanvasElement:Canvas,document:{getElementById:()=>plan},performance:{now:()=>++time},
+  console:{error:(...args)=>errors.push(args)},addEventListener:(type,fn)=>events[type]=fn};env.window=env;
+vm.createContext(env);vm.runInContext(functions+'\ninstrument();',env);
+const ctx=plan.getContext('2d'),thumb=thumbnail.getContext('2d');env.ctx=ctx;env.skip=false;env.fail=false;
+const body='function renderPlan() { if(skip)return 7;ctx.clearRect(0,0,400,300);if(fail)throw failure;return 42; }';
+vm.runInContext(env.instrumentPlanRenderer(body),env);
+assert.equal(env.renderPlan(),42);assert.equal(env.__plannerStats.planPaints,1);
+assert.equal(env.__plannerPlanState().lastPaint.resizeSequence,0);
+env.skip=true;assert.equal(env.renderPlan(),7);assert.equal(env.__plannerStats.planPaints,1);env.skip=false;
+const failure=new Error('original render failure');env.failure=failure;env.fail=true;
+assert.throws(()=>env.renderPlan(),e=>e===failure);assert.equal(env.__plannerStats.planPaints,1);
+assert.equal(env.__plannerStats.planDraws,2,'A clear attempt does not certify a complete render');env.fail=false;
+clearError=failure;assert.throws(()=>env.renderPlan(),e=>e===failure);assert.equal(env.__plannerStats.planPaints,1);clearError=null;
+plan.width=0;env.renderPlan();assert.equal(env.__plannerStats.planPaints,1,'Zero bitmap cannot certify a paint');
+plan.width=400;assert.notEqual(env.__plannerPlanState().lastPaint.resizeSequence,env.__plannerPlanState().resizeSequence);
+lost=true;env.renderPlan();assert.equal(env.__plannerStats.planPaints,1);lost=false;
+env.renderPlan();assert.equal(env.__plannerStats.planPaints,2);
+assert.equal(env.__plannerPlanState().lastPaint.resizeSequence,env.__plannerPlanState().resizeSequence);
+assert.equal(thumb.getImageData(0,0,2,2),pixels,'Pixel data and original receiver are unchanged');
+readError=Object.assign(new Error('pixels unavailable'),{name:'InvalidStateError'});
+const uncaughtBefore=env.__plannerStats.errorCount;
+assert.throws(()=>thumb.getImageData(0,0,2,2),e=>e===readError);
+assert.equal(env.__plannerStats.errorCount,uncaughtBefore,'A handled optional failure is not an uncaught error');
+const pixelFailure=env.__plannerStats.canvasReadErrors.at(-1);
+assert.equal(pixelFailure.kind,'2d-getImageData');assert.equal(pixelFailure.canvas.width,400);
+assert.equal(pixelFailure.name,'InvalidStateError');assert.match(pixelFailure.stack,/pixels unavailable/);
+events.error({error:readError,message:'uncaught pixel failure',filename:'http://fixture/editor.js',lineno:338,colno:12});
+const uncaught=env.__plannerStats.errorDetails.at(-1);assert.equal(uncaught.line,338);assert.equal(uncaught.column,12);
+assert.equal(uncaught.file,'http://fixture/editor.js');assert.ok(uncaught.time>pixelFailure.time);
+const countedUncaught=env.__plannerStats.errorCount;
+for(let i=0;i<100;i++)assert.throws(()=>thumb.getImageData(0,0,2,2),e=>e===readError);
+assert.equal(env.__plannerStats.canvasReadErrors.length,32);assert.equal(env.__plannerStats.canvasReadErrorCount,101);
+assert.equal(env.__plannerStats.errorCount,countedUncaught);
+for(let i=0;i<100;i++)env.__plannerRecordError({message:'x'.repeat(5000),stack:'y'.repeat(9000),name:'z'.repeat(300)});
+assert.equal(env.__plannerStats.errors.length,32);assert.equal(env.__plannerStats.errorDetails.length,32);
+assert.ok(env.__plannerStats.errorCount>100);assert.ok(env.__plannerStats.errorDetails.every(e=>e.message.length<=2048&&e.stack.length<=4096&&e.name.length<=128));
+assert.throws(()=>env.instrumentPlanRenderer('function wrong() {}'));
+assert.throws(()=>env.instrumentPlanRenderer(body+body));
+const position={x:1,y:0,z:1},hits=[];plan.getBoundingClientRect=()=>({x:10.2,y:20.2,width:400,height:300});
+env.innerWidth=1000;env.innerHeight=800;env.document.hasFocus=()=>true;env.document.visibilityState='visible';
+env.document.elementFromPoint=(x,y)=>{hits.push([x,y]);return plan;};
+env.planner={getProject:()=>({floors:[{items:[{id:'first',position_m:position}]}]}),getSelection:()=>null,worldToScreen:([x,y])=>[x*10,y*10]};
+const diagnostics=JSON.parse(fs.readFileSync(0,'utf8'));
+const snapshot=vm.runInContext('(function(){'+diagnostics.snapshot+'})()',env);
+assert.deepEqual(hits,[[20,30],[25,30]],'Hit tests use the rounded coordinates sent to WebDriver');
+assert.equal(snapshot.position.x,1);position.x=5;assert.equal(snapshot.position.x,1,'Before-drag evidence is a copy');
+assert.equal(snapshot.canvas.width,400);assert.equal(snapshot.endpointHits[0].canvas,true);
+assert.equal(snapshot.errorDetails.length,32);assert.equal(snapshot.documentFocused,true);
+const readPixels=()=>vm.runInContext('(function(){'+diagnostics.pixels+'})()',env);let reads=0;
+plan.width=2;plan.height=2;ctx.getImageData=()=>{reads++;return {data:new Uint8Array([1,2,3,255,1,2,3,255,4,5,6,255,4,5,6,255])};};
+const detail=readPixels();assert.equal(detail.distinctVisibleRGBColorsAtLeast,2);assert.equal(detail.complete,true);assert.equal(reads,1);
+assert.equal(detail.resizeSequence,env.__plannerPlanState().resizeSequence);assert.equal(detail.readbackBytes,16);
+ctx.getImageData=()=>({data:new Uint8Array([1,2,3,255,1,2,3,255,1,2,3,255,1,2,3,255])});
+assert.equal(readPixels().distinctVisibleRGBColorsAtLeast,1,'Uniform opaque pixels are blank');
+ctx.getImageData=()=>({data:new Uint8Array([1,2,3,0,4,5,6,0,7,8,9,0,10,11,12,0])});
+assert.equal(readPixels().distinctVisibleRGBColorsAtLeast,0,'Invisible RGB differences do not prove content');
+ctx.getImageData=()=>({data:new Uint8Array([1,2,3,1,1,2,3,80,1,2,3,160,1,2,3,255])});
+assert.equal(readPixels().distinctVisibleRGBColorsAtLeast,1,'Alpha changes alone do not prove RGB diversity');
+ctx.getImageData=()=>({data:new Uint8Array(15)});
+assert.equal(readPixels().status,'readback-failed','Incomplete readback is rejected');
+ctx.getImageData=()=>{throw readError;};assert.equal(readPixels().name,'InvalidStateError');
+plan.width=4000001;assert.equal(readPixels().status,'outside-readback-bound');
+"""
+        result = subprocess.run(['node', '-e', javascript, str(Path(__file__).with_name('test-planner-stability.cjs'))],
+                                input=json.dumps({'snapshot': safari.native.PLANNER_INPUT_SNAPSHOT,
+                                                  'pixels': safari.native.PLANNER_2D_PIXELS}),
+                                text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def snapshot(self, x=1):
+        return {'canvas': {'attached': True, 'width': 400, 'height': 300, 'contextAvailable': True,
+                           'contextLost': False, 'paintCount': 1, 'resizeSequence': 2,
+                           'lastPaint': {'width': 400, 'height': 300, 'resizeSequence': 2}},
+                'rect': {'x': 0, 'y': 0, 'width': 400, 'height': 300},
+                'points': [[10, 10], [20, 10]], 'endpointHits': [{'canvas': True, 'visible': True}] * 2,
+                'position': {'x': x, 'y': 0, 'z': 1}, 'errorCount': 0, 'errors': [], 'errorDetails': []}
+
+    def pixels(self):
+        return {'status': 'pixels-read', 'width': 400, 'height': 300, 'resizeSequence': 2,
+                'readbackBytes': 400 * 300 * 4, 'distinctVisibleRGBColorsAtLeast': 2}
+
+    def run_planner_prefix(self, before, after, *, loaded=None, on_snapshot=None, on_pixels=None,
+                           initial_pixels=None, screenshot_error=None, on_screenshot=None,
+                           drag_error=None, wait_error=None, capture_error=None, drag_ms=332):
+        class ReachedPreview(Exception):
+            pass
+        snapshots = [loaded if loaded is not None else before, before, after]
+        client = Mock()
+        client.drag.side_effect = drag_error
+        client.drag.return_value = drag_ms
+        def screenshot(_path):
+            if screenshot_error:
+                raise screenshot_error
+            if on_screenshot:
+                on_screenshot()
+        client.screenshot.side_effect = screenshot
+        def execute(script, *_args):
+            if script == safari.native.PLANNER_INPUT_SNAPSHOT:
+                if capture_error:
+                    raise capture_error
+                if on_snapshot:
+                    on_snapshot(4 - len(snapshots))
+                return snapshots.pop(0)
+            if script == safari.native.PLANNER_2D_PIXELS:
+                if on_pixels:
+                    on_pixels()
+                return initial_pixels if initial_pixels is not None else self.pixels()
+            if 'floors.reduce' in script:
+                return 256
+            if 'position_m.x;' in script:
+                return after['position']['x']
+            if "#preview-tab" in script:
+                raise ReachedPreview()
+            return True
+        def wait(_expression, **kwargs):
+            if kwargs:
+                self.assertGreater(kwargs['timeout'], 0)
+                self.assertLessEqual(kwargs['timeout'], 30)
+                if wait_error:
+                    raise wait_error
+        client.execute.side_effect = execute
+        client.wait.side_effect = wait
+        record = {'samples': [], 'output': '/synthetic/planner-output'}
+        saved = []
+        try:
+            safari.native.planner(client, 'http://fixture', {}, record,
+                                  lambda: saved.append(json.loads(json.dumps(record))))
+        except Exception as error:
+            return error, client, record, saved, ReachedPreview
+        self.fail('The prefix should stop before exercising the separate preview suite')
+
+    def test_preexisting_application_error_stops_before_real_input_with_evidence(self):
+        before = self.snapshot()
+        before.update(errorCount=1, errors=['draw failed'], errorDetails=[{'kind': 'plan-render', 'stack': 'original'}])
+        error, client, record, saved, _ = self.run_planner_prefix(before, self.snapshot(1.5))
+        self.assertIn('application error before input', str(error));client.drag.assert_not_called()
+        self.assertEqual(saved[-1]['samples'][0]['beforeDrag']['errorDetails'], before['errorDetails'])
+
+    def test_zero_lost_and_stale_bitmaps_cannot_pass_paint_readiness(self):
+        for change in ({'width': 0}, {'contextLost': True}, {'paintCount': 0}, {'resizeSequence': 3}):
+            before = self.snapshot();before['canvas'].update(change)
+            with self.subTest(change=change):
+                error, client, *_ = self.run_planner_prefix(before, self.snapshot(1.5))
+                self.assertIn('completed paint', str(error));client.drag.assert_not_called()
+
+    def test_post_drag_application_error_and_position_are_saved_before_failure(self):
+        after = self.snapshot()
+        after.update(errorCount=1, errors=['InvalidStateError'], errorDetails=[{'kind': '2d-getImageData', 'line': 338}])
+        error, client, record, saved, _ = self.run_planner_prefix(self.snapshot(), after)
+        self.assertIn('application error during input', str(error));client.drag.assert_called_once_with([10, 10], [20, 10])
+        self.assertEqual(saved[-1]['samples'][0]['afterDrag'], after)
+
+    def test_exact_position_and_original_time_limit_are_not_relaxed(self):
+        for x in (1, 1.49, 1.500001):
+            error, _, _, saved, _ = self.run_planner_prefix(self.snapshot(), self.snapshot(x))
+            self.assertEqual(str(error), 'Real pointer input moves the intended furniture')
+            self.assertEqual(saved[-1]['samples'][0]['afterDrag']['position']['x'], x)
+        error, _, _, _, reached = self.run_planner_prefix(self.snapshot(), self.snapshot(1.5))
+        self.assertIsInstance(error, reached)
+        error, _, _, _, _ = self.run_planner_prefix(self.snapshot(), self.snapshot(1.5), drag_ms=10000)
+        self.assertEqual(str(error), 'Planner furniture drag exceeded 10 seconds')
+
+    def test_obstructed_endpoint_stops_without_forced_input(self):
+        before = self.snapshot();before['endpointHits'] = [{'canvas': False, 'visible': True}]
+        error, client, _, saved, _ = self.run_planner_prefix(before, self.snapshot(1.5))
+        self.assertIn('visible plan canvas', str(error));client.drag.assert_not_called()
+        self.assertEqual(saved[-1]['samples'][0]['beforeDrag']['endpointHits'], before['endpointHits'])
+
+    def test_nonblank_main_bitmap_and_initial_screenshot_are_required(self):
+        for changed in ({'distinctVisibleRGBColorsAtLeast': 0}, {'distinctVisibleRGBColorsAtLeast': 1},
+                        {'readbackBytes': 0}, {'status': 'readback-failed', 'name': 'InvalidStateError'},
+                        {'status': 'outside-readback-bound'}):
+            pixels = self.pixels(); pixels.update(changed)
+            with self.subTest(changed=changed):
+                error, client, _, saved, _ = self.run_planner_prefix(
+                    self.snapshot(), self.snapshot(1.5), initial_pixels=pixels)
+                self.assertIn('Planner 2D', str(error))
+                client.drag.assert_not_called()
+                self.assertEqual(saved[-1]['samples'][0]['initial2D'], pixels)
+        error, client, _, saved, reached = self.run_planner_prefix(self.snapshot(), self.snapshot(1.5))
+        self.assertIsInstance(error, reached)
+        sample = saved[-1]['samples'][0]
+        self.assertEqual(sample['initial2D']['distinctVisibleRGBColorsAtLeast'], 2)
+        self.assertEqual(sample['initial2DScreenshot'], 'planner-initial-2d.png')
+        client.screenshot.assert_called_once_with(Path('/synthetic/planner-output/planner-initial-2d.png'))
+        original = RuntimeError('screenshot failed')
+        error, client, _, saved, _ = self.run_planner_prefix(
+            self.snapshot(), self.snapshot(1.5), screenshot_error=original)
+        self.assertIs(error, original)
+        client.drag.assert_not_called()
+        self.assertNotIn('initial2DScreenshot', saved[-1]['samples'][0])
+        self.assertFalse(saved[-1]['samples'][0]['loadCompleted'])
+
+    def test_nonblank_readback_must_match_final_bitmap_dimensions_and_generation(self):
+        for changed in ('width', 'height', 'resizeSequence'):
+            before = self.snapshot()
+            before['canvas'][changed] += 1
+            before['canvas']['lastPaint'][changed] += 1
+            with self.subTest(changed=changed):
+                error, client, _, saved, _ = self.run_planner_prefix(before, self.snapshot(1.5))
+                self.assertEqual(str(error), 'Planner 2D bitmap changed after its nonblank readback')
+                client.drag.assert_not_called()
+                self.assertEqual(saved[-1]['samples'][0]['initial2D'], self.pixels())
+
+    def test_nonblank_readback_and_screenshot_share_the_original_load_deadline(self):
+        for operation in ('on_pixels', 'on_screenshot'):
+            now = [0.0]
+            def late(): now[0] = 30
+            with self.subTest(operation=operation), patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]):
+                error, client, _, saved, _ = self.run_planner_prefix(
+                    self.snapshot(), self.snapshot(1.5), **{operation: late})
+            self.assertIsInstance(error, TimeoutError)
+            client.drag.assert_not_called()
+            self.assertEqual(saved[-1]['samples'][0]['loadMs'], 30000)
+            self.assertFalse(saved[-1]['samples'][0]['loadCompleted'])
+
+    def test_final_geometry_is_checked_after_setup_and_immediately_before_drag(self):
+        error, client, _, _, reached = self.run_planner_prefix(self.snapshot(), self.snapshot(1.5))
+        self.assertIsInstance(error, reached)
+        calls = client.method_calls
+        drag_index = next(i for i, call in enumerate(calls) if call[0] == 'drag')
+        self.assertEqual([(call[0], call.args) for call in calls[drag_index-2:drag_index]],
+                         [('execute', (safari.native.PLANNER_INPUT_SNAPSHOT,))] * 2)
+        for changed in ('rect', 'points', 'resizeSequence'):
+            before = self.snapshot()
+            if changed == 'rect':
+                before['rect']['x'] = 20
+            elif changed == 'points':
+                before['points'][1][0] = 30
+            else:
+                before['canvas']['resizeSequence'] = 3
+                before['canvas']['lastPaint']['resizeSequence'] = 3
+            with self.subTest(changed=changed):
+                error, client, _, saved, _ = self.run_planner_prefix(before, self.snapshot(1.5), loaded=self.snapshot())
+                self.assertIn('geometry changed immediately before input', str(error))
+                client.drag.assert_not_called()
+                self.assertEqual(saved[-1]['samples'][0]['beforeDrag'], before)
+
+    def test_late_final_snapshot_is_not_certified_by_an_earlier_load_time(self):
+        for finished in (29.999, 30, 31):
+            now = [0.0]
+            def on_snapshot(index):
+                if index == 2:
+                    now[0] = finished
+            with self.subTest(finished=finished), patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]):
+                error, client, record, saved, reached = self.run_planner_prefix(
+                    self.snapshot(), self.snapshot(1.5), on_snapshot=on_snapshot)
+            sample = record['samples'][0]
+            self.assertAlmostEqual(sample['loadMs'], finished * 1000, places=3)
+            self.assertEqual(sample['loadCompleted'], finished < 30)
+            self.assertEqual(sample['loadTimedOut'], finished >= 30)
+            self.assertIsNone(client._cold_load_deadline)
+            if finished < 30:
+                self.assertIsInstance(error, reached)
+                client.drag.assert_called_once()
+            else:
+                self.assertIsInstance(error, TimeoutError)
+                client.drag.assert_not_called()
+                self.assertEqual(saved[-1]['samples'][0]['loadMs'], sample['loadMs'])
+
+    def test_planner_scope_bounds_http_headers_and_body_and_restores_prior_deadline(self):
+        for header_finished in (29, 30):
+            now, sample = [0.0], {}
+            class Socket:
+                def __init__(self): self.values = []
+                def makefile(self, _mode):
+                    class Reader(io.BytesIO): pass
+                    body = b'{"value":true}'
+                    reader = Reader(b'HTTP/1.1 200 OK\r\nContent-Length: ' + str(len(body)).encode() + b'\r\n\r\n' + body)
+                    reader.raw = type('Raw', (), {'_sock': self})()
+                    return reader
+                def settimeout(self, value): self.values.append(value)
+            sock = Socket()
+            response = http.client.HTTPResponse(sock); response.begin()
+            client = safari.SafariWebDriver('http://fixture'); client.session_id = 'owned'
+            client._cold_load_deadline = 100
+            def opened(_request, timeout):
+                self.assertEqual(timeout, 2)
+                now[0] = header_finished
+                return response
+            with self.subTest(header_finished=header_finished), \
+                 patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]), \
+                 patch.object(safari.urllib.request, 'urlopen', side_effect=opened) as opening:
+                try:
+                    with safari.native.planner_load_scope(client, sample):
+                        now[0] = 28
+                        self.assertTrue(client.execute(safari.native.PLANNER_INPUT_SNAPSHOT))
+                except TimeoutError:
+                    self.assertEqual(header_finished, 30)
+                else:
+                    self.assertEqual(header_finished, 29)
+                opening.assert_called_once()
+            self.assertEqual(sock.values, [1] if header_finished == 29 else [])
+            self.assertTrue(response.isclosed())
+            self.assertEqual(client._cold_load_deadline, 100)
+            self.assertEqual(sample['loadCompleted'], header_finished < 30)
+
+    def test_planner_scope_respects_outer_deadlines_and_preserves_original_failure(self):
+        for cold, browser, expected in ((9, 8, 8), (8, 9, 8), (None, None, 30)):
+            client = Mock(); client._cold_load_deadline = cold; client._browser_deadline = browser
+            original = RuntimeError('original scoped failure')
+            sample = {}
+            with self.subTest(cold=cold, browser=browser), patch.object(safari.time, 'monotonic', return_value=0):
+                with self.assertRaises(RuntimeError) as caught:
+                    with safari.native.planner_load_scope(client, sample) as remaining:
+                        self.assertEqual(remaining(), expected)
+                        raise original
+            self.assertIs(caught.exception, original)
+            self.assertEqual(client._cold_load_deadline, cold)
+            self.assertFalse(sample['loadCompleted'])
+            self.assertFalse(sample['loadTimedOut'])
+
+    def test_readiness_and_action_exceptions_retain_evidence_without_masking(self):
+        original = RuntimeError('original driver failure')
+        for keyword, field in [('wait_error', 'beforeDrag'), ('drag_error', 'afterDrag')]:
+            error, _, _, saved, _ = self.run_planner_prefix(self.snapshot(), self.snapshot(), **{keyword: original})
+            self.assertIs(error, original);self.assertIn(field, saved[-1]['samples'][0])
+            self.assertEqual(saved[-1]['samples'][0]['failure2D']['distinctVisibleRGBColorsAtLeast'], 2)
+        error, _, _, saved, _ = self.run_planner_prefix(self.snapshot(), self.snapshot(),
+            wait_error=original, capture_error=RuntimeError('snapshot unavailable'))
+        self.assertIs(error, original)
+        self.assertEqual(saved[-1]['samples'][0]['beforeDragCaptureError'], 'snapshot unavailable')
 
 
 if __name__ == '__main__':

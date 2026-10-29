@@ -320,9 +320,12 @@ jobs:
           node scripts/test-native-viewer-programs.cjs
           node --test scripts/test-render-capacity.cjs
           node --test scripts/test-browser-stability-diagnostics.cjs
+          node --test scripts/test-browser-tap-diagnostics.cjs
           node --test scripts/test-browser-startup-diagnostics.cjs
       - name: Test planner drawing and preview resource budgets
-        run: node scripts/test-planner-render-budget.cjs
+        run: |
+          node scripts/test-planner-render-budget.cjs
+          node --test scripts/test-planner-thumbnail.cjs
       - name: Test bounded native draw diagnostics without a browser
         run: |
           python3 scripts/test-native-draw-diagnostic.py

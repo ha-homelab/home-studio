@@ -312,7 +312,19 @@ function renderLibrary(append = false) {
   if (append) firstNewCard?.focus();
 }
 function drawItemThumbnail(canvas, model, appearance = { model_id: model.id, style_id: model.default_style, type: model.type }) {
-  const context = canvas.getContext('2d');
+  // This optional preview must not interrupt selection or its pointer gesture
+  // when the browser cannot provide a usable 2D backing store.
+  try {
+    const context = canvas.getContext('2d');
+    if (!context) { canvas.hidden = true; return; }
+    paintItemThumbnail(canvas, context, model, appearance);
+    canvas.hidden = false;
+  } catch (error) {
+    if (error?.name !== 'InvalidStateError') throw error;
+    canvas.hidden = true;
+  }
+}
+function paintItemThumbnail(canvas, context, model, appearance) {
   const key = JSON.stringify([appearance.model_id, appearance.style_id, appearance.color, appearance.pattern_id, appearance.pattern_color]);
   if (thumbnailCache.has(key)) { context.putImageData(thumbnailCache.get(key), 0, 0); return; }
   const asset = itemAsset(appearance);
@@ -351,8 +363,9 @@ function drawItemThumbnail(canvas, model, appearance = { model_id: model.id, sty
       pixels.data[offset] = triangle.color[0]; pixels.data[offset + 1] = triangle.color[1]; pixels.data[offset + 2] = triangle.color[2]; pixels.data[offset + 3] = 255;
     }
   }
+  context.putImageData(pixels, 0, 0);
   if (thumbnailCache.size >= THUMBNAIL_CACHE_LIMIT) thumbnailCache.delete(thumbnailCache.keys().next().value);
-  thumbnailCache.set(key, pixels); context.putImageData(pixels, 0, 0);
+  thumbnailCache.set(key, pixels);
 }
 function itemPlanShapes(item) {
   const key = `${item.model_id}|${item.style_id || ''}|${item.color || ''}|${item.pattern_id || ''}|${item.pattern_color || ''}|${item.dimensions_m?.width}|${item.dimensions_m?.height}|${item.dimensions_m?.depth}`;

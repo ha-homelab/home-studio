@@ -728,6 +728,30 @@ geometric hit testing. Iframe locator bounds provide main-frame CSS coordinates;
 the hit test runs in the target document. No synthetic click, `trial:true` input,
 extra attempt or relaxed timeout is used.
 
+The editor-entry tap also records its target bounds, hit test, and frame
+lifecycle before sending the original input. If that input fails, a bounded
+500 ms probe records timer and animation-frame progress and the target's final
+state. This probe runs only **after failure**: it cannot wake an idle compositor
+to make the original actionability check pass. Its evidence describes recovery,
+not scheduling during the preceding timeout. Diagnostic collection and handle
+cleanup are bounded, and neither replaces the original input error.
+
+Native planner acceptance waits for a completed draw of the current nonempty
+2D bitmap, rather than treating entry into `clearRect` as a completed paint.
+Load, setup, and final geometry snapshots share the original 30-second budget.
+Before input, one bounded readback must find more than one visible RGB color in
+the current bitmap; uniform or fully transparent output fails. The initial 2D
+screenshot is retained separately from the later 3D preview. Readback and the
+screenshot stay inside that same load budget, and subsequent geometry evidence
+must match the bitmap's dimensions and resize generation.
+The final snapshots must agree before a real drag, which must still place the
+item at exactly 1.5 m within 10 seconds. Failure artifacts retain bounded error
+stacks, bitmap dimensions, and a bounded pixel summary. A successful draw call
+alone does not prove visible pixels; nonblank pixels alone do not prove every
+fixture item or compositor presentation. Optional catalog thumbnails tolerate an
+unavailable 2D backing store without interrupting selection or dragging; this
+does not suppress errors from the main drawing canvas or unrelated exceptions.
+
 If a Chromium phone/tablet viewer check fails, the job repeats only that viewer
 size in two fixed diagnostic modes: the original Playwright tap, then
 `Input.synthesizeTapGesture` with a 50 ms press. Each runs the original two full
