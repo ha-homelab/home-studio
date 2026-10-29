@@ -5,6 +5,7 @@ from html.parser import HTMLParser
 import json
 from pathlib import Path
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -105,6 +106,33 @@ console.log(JSON.stringify({locales: actual.locales.length, translations}));
         _, result = self.roundtrip(compact, full)
         self.assertEqual(result["locales"], 24)
         self.assertGreater(result["translations"], 3000)
+
+    def test_generated_panel_keeps_all_552_source_strings(self):
+        generator = runpy.run_path(str(ROOT / "scripts/build-panel-locales.py"))
+        locales = json.loads((ROOT / "viewer-locales/index.json").read_text())
+        expected = {}
+        for locale in locales:
+            dictionary = json.loads((ROOT / "viewer-locales" / (locale["code"] + ".json")).read_text())
+            expected[locale["code"]] = {key: dictionary[key] for key in generator["KEYS"]}
+        generated = generator["generate"]()
+        panel = generator["PANEL"].read_text()
+        self.assertEqual(panel.split(generator["BEGIN"], 1)[1].split(generator["END"], 1)[0],
+                         generated.split(generator["BEGIN"], 1)[1].split(generator["END"], 1)[0],
+                         "The checked-in panel must use the current generated messages")
+        node = shutil.which("node")
+        self.assertIsNotNone(node, "Node.js is required to execute the generated panel messages")
+        script = r"""
+const assert = require('node:assert/strict'), vm = require('node:vm');
+const input = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const messages = vm.runInNewContext(input.generated + '\npanelMessages', {}, {timeout: 1000});
+assert.deepEqual(JSON.parse(JSON.stringify(messages)), input.expected);
+assert.equal(Object.keys(messages).length, 24);
+assert.equal(Object.values(messages).reduce((sum, dictionary) => sum + Object.keys(dictionary).length, 0), 552);
+"""
+        result = subprocess.run([node, "-e", script], input=json.dumps({
+            "generated": generated, "expected": expected}),
+            text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_actual_render_changes_only_catalog_encoding_and_reduces_runtime(self):
         fixture = project.validate_project(json.loads((ROOT / "planner/example-home.json").read_text()))
