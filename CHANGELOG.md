@@ -25,6 +25,19 @@
   account changes. Hosts can isolate large model responses from device-state
   traffic while preserving Home Assistant's authorization and viewer sandbox.
 
+### Upgrade
+
+- Update the integration, restart Home Assistant and reload the browser to use
+  the new panel. Existing projects and published plans need no conversion.
+  External hosts can implement the optional cancellable viewer transport; native
+  Home Assistant continues to use its authenticated WebSocket connection.
+
+### Security
+
+- Authentication, entity permissions and the opaque iframe sandbox remain
+  unchanged. Session changes cancel obsolete host transfers, and late replies
+  cannot install a plan or its capabilities. No public model endpoint is added.
+
 ## [1.3.0] - Editable neighborhoods and shared map context
 
 ### Added
