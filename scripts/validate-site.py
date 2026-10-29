@@ -131,6 +131,7 @@ REPO_FILES = (
               'scripts/test-install-home-assistant.py', 'scripts/test-public-package.py', 'scripts/test-wall-tops.cjs',
               'scripts/test-rounded-walls.cjs', 'scripts/test-wall-sheen.cjs', 'scripts/test-wall-motion.cjs', 'scripts/test-wall-outline-materials.cjs', 'scripts/test-unlit-architectural-walls.cjs', 'scripts/test-flat-editor-floors.cjs', 'docs/rounded-walls.md',
               'scripts/test-browser-stability.cjs', 'scripts/browser-stability-diagnostics.cjs', 'scripts/browser-pixel-evidence.cjs',
+              'scripts/browser-tap-diagnostics.cjs', 'scripts/test-browser-tap-diagnostics.cjs', 'scripts/test-planner-thumbnail.cjs',
               'scripts/browser-startup-diagnostics.cjs', 'scripts/test-browser-startup-diagnostics.cjs',
               'scripts/test-browser-stability-diagnostics.cjs', 'scripts/test-home-render-budget.cjs',
               'scripts/test-packed-room-lighting.cjs', 'scripts/test-zero-point-block.cjs', 'scripts/test-point-decay-two.cjs', 'scripts/test-cached-shadow-transmission.cjs', 'scripts/test-literal-lambert-directional.cjs', 'docs/literal-lambert-directional.md', 'docs/point-decay-two.md', 'scripts/test-glass-wall-program.cjs', 'scripts/test-fallback-shared-program.cjs',

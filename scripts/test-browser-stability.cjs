@@ -18,6 +18,7 @@ const { spawnSync } = require('node:child_process');
 const {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerDraw, waitForViewerLightState, assertViewerInteraction, bounded} = require('./browser-stability-diagnostics.cjs');
 const {createStartupDiagnostics} = require('./browser-startup-diagnostics.cjs');
 const {inspectSceneScreenshot} = require('./browser-pixel-evidence.cjs');
+const {tapWithDiagnostics} = require('./browser-tap-diagnostics.cjs');
 
 const root = path.resolve(process.env.HOME_STUDIO_SOURCE_ROOT || path.join(__dirname, '..'));
 const sourceFiles = Object.fromEntries(['viewer.js','home-view.js','room-lighting.js','planner/render-capacity.js','planner/interaction-render.js'].filter(name=>fs.existsSync(path.join(root,name))).map(name=>[name,crypto.createHash('sha256').update(fs.readFileSync(path.join(root,name))).digest('hex')]));
@@ -348,7 +349,9 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
       check(JSON.stringify(orbitSettled.scene.camera)===JSON.stringify(afterHomeDrag.scene.camera),
         'The orbited Home view remains at its released camera position');
       phases.start('editor-enter', {cycle});
-      await input.tap(frame.locator('#editLayout'));
+      sample.editorTap = {};
+      try { await tapWithDiagnostics(frame.locator('#editLayout'), input, sample.editorTap, bounded); }
+      finally { save(); }
       await child.waitForFunction(() => !window.floorplan.homeMode);
       // Exercise a burst of editor wheel events in a single task, as high-frequency
       // trackpad input must not perform an unbounded number of synchronous draws.
