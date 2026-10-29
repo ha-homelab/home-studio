@@ -653,13 +653,22 @@ assert.equal(snapshot.canvas.width,400);assert.equal(snapshot.endpointHits[0].ca
 assert.equal(snapshot.errorDetails.length,32);assert.equal(snapshot.documentFocused,true);
 const readPixels=()=>vm.runInContext('(function(){'+diagnostics.pixels+'})()',env);let reads=0;
 plan.width=2;plan.height=2;ctx.getImageData=()=>{reads++;return {data:new Uint8Array([1,2,3,255,1,2,3,255,4,5,6,255,4,5,6,255])};};
-const detail=readPixels();assert.equal(detail.distinctColorsAtLeast,2);assert.equal(detail.complete,true);assert.equal(reads,1);
+const detail=readPixels();assert.equal(detail.distinctVisibleRGBColorsAtLeast,2);assert.equal(detail.complete,true);assert.equal(reads,1);
+assert.equal(detail.resizeSequence,env.__plannerPlanState().resizeSequence);assert.equal(detail.readbackBytes,16);
+ctx.getImageData=()=>({data:new Uint8Array([1,2,3,255,1,2,3,255,1,2,3,255,1,2,3,255])});
+assert.equal(readPixels().distinctVisibleRGBColorsAtLeast,1,'Uniform opaque pixels are blank');
+ctx.getImageData=()=>({data:new Uint8Array([1,2,3,0,4,5,6,0,7,8,9,0,10,11,12,0])});
+assert.equal(readPixels().distinctVisibleRGBColorsAtLeast,0,'Invisible RGB differences do not prove content');
+ctx.getImageData=()=>({data:new Uint8Array([1,2,3,1,1,2,3,80,1,2,3,160,1,2,3,255])});
+assert.equal(readPixels().distinctVisibleRGBColorsAtLeast,1,'Alpha changes alone do not prove RGB diversity');
+ctx.getImageData=()=>({data:new Uint8Array(15)});
+assert.equal(readPixels().status,'readback-failed','Incomplete readback is rejected');
 ctx.getImageData=()=>{throw readError;};assert.equal(readPixels().name,'InvalidStateError');
 plan.width=4000001;assert.equal(readPixels().status,'outside-readback-bound');
 """
         result = subprocess.run(['node', '-e', javascript, str(Path(__file__).with_name('test-planner-stability.cjs'))],
                                 input=json.dumps({'snapshot': safari.native.PLANNER_INPUT_SNAPSHOT,
-                                                  'pixels': safari.native.PLANNER_FAILURE_PIXELS}),
+                                                  'pixels': safari.native.PLANNER_2D_PIXELS}),
                                 text=True, capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -671,7 +680,12 @@ plan.width=4000001;assert.equal(readPixels().status,'outside-readback-bound');
                 'points': [[10, 10], [20, 10]], 'endpointHits': [{'canvas': True, 'visible': True}] * 2,
                 'position': {'x': x, 'y': 0, 'z': 1}, 'errorCount': 0, 'errors': [], 'errorDetails': []}
 
-    def run_planner_prefix(self, before, after, *, loaded=None, on_snapshot=None,
+    def pixels(self):
+        return {'status': 'pixels-read', 'width': 400, 'height': 300, 'resizeSequence': 2,
+                'readbackBytes': 400 * 300 * 4, 'distinctVisibleRGBColorsAtLeast': 2}
+
+    def run_planner_prefix(self, before, after, *, loaded=None, on_snapshot=None, on_pixels=None,
+                           initial_pixels=None, screenshot_error=None, on_screenshot=None,
                            drag_error=None, wait_error=None, capture_error=None, drag_ms=332):
         class ReachedPreview(Exception):
             pass
@@ -679,6 +693,12 @@ plan.width=4000001;assert.equal(readPixels().status,'outside-readback-bound');
         client = Mock()
         client.drag.side_effect = drag_error
         client.drag.return_value = drag_ms
+        def screenshot(_path):
+            if screenshot_error:
+                raise screenshot_error
+            if on_screenshot:
+                on_screenshot()
+        client.screenshot.side_effect = screenshot
         def execute(script, *_args):
             if script == safari.native.PLANNER_INPUT_SNAPSHOT:
                 if capture_error:
@@ -686,8 +706,10 @@ plan.width=4000001;assert.equal(readPixels().status,'outside-readback-bound');
                 if on_snapshot:
                     on_snapshot(4 - len(snapshots))
                 return snapshots.pop(0)
-            if script == safari.native.PLANNER_FAILURE_PIXELS:
-                return {'status': 'pixels-read', 'distinctColorsAtLeast': 1}
+            if script == safari.native.PLANNER_2D_PIXELS:
+                if on_pixels:
+                    on_pixels()
+                return initial_pixels if initial_pixels is not None else self.pixels()
             if 'floors.reduce' in script:
                 return 256
             if 'position_m.x;' in script:
@@ -703,7 +725,7 @@ plan.width=4000001;assert.equal(readPixels().status,'outside-readback-bound');
                     raise wait_error
         client.execute.side_effect = execute
         client.wait.side_effect = wait
-        record = {'samples': []}
+        record = {'samples': [], 'output': '/synthetic/planner-output'}
         saved = []
         try:
             safari.native.planner(client, 'http://fixture', {}, record,
@@ -748,6 +770,54 @@ plan.width=4000001;assert.equal(readPixels().status,'outside-readback-bound');
         error, client, _, saved, _ = self.run_planner_prefix(before, self.snapshot(1.5))
         self.assertIn('visible plan canvas', str(error));client.drag.assert_not_called()
         self.assertEqual(saved[-1]['samples'][0]['beforeDrag']['endpointHits'], before['endpointHits'])
+
+    def test_nonblank_main_bitmap_and_initial_screenshot_are_required(self):
+        for changed in ({'distinctVisibleRGBColorsAtLeast': 0}, {'distinctVisibleRGBColorsAtLeast': 1},
+                        {'readbackBytes': 0}, {'status': 'readback-failed', 'name': 'InvalidStateError'},
+                        {'status': 'outside-readback-bound'}):
+            pixels = self.pixels(); pixels.update(changed)
+            with self.subTest(changed=changed):
+                error, client, _, saved, _ = self.run_planner_prefix(
+                    self.snapshot(), self.snapshot(1.5), initial_pixels=pixels)
+                self.assertIn('Planner 2D', str(error))
+                client.drag.assert_not_called()
+                self.assertEqual(saved[-1]['samples'][0]['initial2D'], pixels)
+        error, client, _, saved, reached = self.run_planner_prefix(self.snapshot(), self.snapshot(1.5))
+        self.assertIsInstance(error, reached)
+        sample = saved[-1]['samples'][0]
+        self.assertEqual(sample['initial2D']['distinctVisibleRGBColorsAtLeast'], 2)
+        self.assertEqual(sample['initial2DScreenshot'], 'planner-initial-2d.png')
+        client.screenshot.assert_called_once_with(Path('/synthetic/planner-output/planner-initial-2d.png'))
+        original = RuntimeError('screenshot failed')
+        error, client, _, saved, _ = self.run_planner_prefix(
+            self.snapshot(), self.snapshot(1.5), screenshot_error=original)
+        self.assertIs(error, original)
+        client.drag.assert_not_called()
+        self.assertNotIn('initial2DScreenshot', saved[-1]['samples'][0])
+        self.assertFalse(saved[-1]['samples'][0]['loadCompleted'])
+
+    def test_nonblank_readback_must_match_final_bitmap_dimensions_and_generation(self):
+        for changed in ('width', 'height', 'resizeSequence'):
+            before = self.snapshot()
+            before['canvas'][changed] += 1
+            before['canvas']['lastPaint'][changed] += 1
+            with self.subTest(changed=changed):
+                error, client, _, saved, _ = self.run_planner_prefix(before, self.snapshot(1.5))
+                self.assertEqual(str(error), 'Planner 2D bitmap changed after its nonblank readback')
+                client.drag.assert_not_called()
+                self.assertEqual(saved[-1]['samples'][0]['initial2D'], self.pixels())
+
+    def test_nonblank_readback_and_screenshot_share_the_original_load_deadline(self):
+        for operation in ('on_pixels', 'on_screenshot'):
+            now = [0.0]
+            def late(): now[0] = 30
+            with self.subTest(operation=operation), patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]):
+                error, client, _, saved, _ = self.run_planner_prefix(
+                    self.snapshot(), self.snapshot(1.5), **{operation: late})
+            self.assertIsInstance(error, TimeoutError)
+            client.drag.assert_not_called()
+            self.assertEqual(saved[-1]['samples'][0]['loadMs'], 30000)
+            self.assertFalse(saved[-1]['samples'][0]['loadCompleted'])
 
     def test_final_geometry_is_checked_after_setup_and_immediately_before_drag(self):
         error, client, _, _, reached = self.run_planner_prefix(self.snapshot(), self.snapshot(1.5))
@@ -850,7 +920,7 @@ plan.width=4000001;assert.equal(readPixels().status,'outside-readback-bound');
         for keyword, field in [('wait_error', 'beforeDrag'), ('drag_error', 'afterDrag')]:
             error, _, _, saved, _ = self.run_planner_prefix(self.snapshot(), self.snapshot(), **{keyword: original})
             self.assertIs(error, original);self.assertIn(field, saved[-1]['samples'][0])
-            self.assertEqual(saved[-1]['samples'][0]['failure2D']['distinctColorsAtLeast'], 1)
+            self.assertEqual(saved[-1]['samples'][0]['failure2D']['distinctVisibleRGBColorsAtLeast'], 2)
         error, _, _, saved, _ = self.run_planner_prefix(self.snapshot(), self.snapshot(),
             wait_error=original, capture_error=RuntimeError('snapshot unavailable'))
         self.assertIs(error, original)

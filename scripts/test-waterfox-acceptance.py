@@ -662,20 +662,23 @@ return {time:performance.now(),canvas:window.__plannerPlanState(),
 """
 
 
-PLANNER_FAILURE_PIXELS = r"""
+PLANNER_2D_PIXELS = r"""
 const canvas=document.getElementById('plan-canvas'),width=canvas?.width,height=canvas?.height;
 if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||width*height>4000000)
   return {status:'outside-readback-bound',width:width??null,height:height??null};
 try {
+  const resizeSequence=window.__plannerPlanState().resizeSequence;
   const pixels=canvas.getContext('2d').getImageData(0,0,width,height).data,colors=new Set();
   if(pixels.length!==width*height*4)throw Error('Incomplete canvas readback');
-  let scanned=0;
+  let scanned=0,visible=0;
   for(let i=0;i<pixels.length;i+=4) {
-    colors.add(((pixels[i]<<24)|(pixels[i+1]<<16)|(pixels[i+2]<<8)|pixels[i+3])>>>0);scanned++;
+    if(pixels[i+3]>0) { colors.add((pixels[i]<<16)|(pixels[i+1]<<8)|pixels[i+2]);visible++; }
+    scanned++;
     if(colors.size>=257)break;
   }
-  return {status:'pixels-read',width,height,pixelCount:width*height,scannedPixels:scanned,
-    distinctColorsAtLeast:colors.size,complete:scanned===width*height,colorSample:[...colors].slice(0,8)};
+  return {status:'pixels-read',width,height,resizeSequence,time:performance.now(),
+    readbackBytes:pixels.length,pixelCount:width*height,scannedPixels:scanned,visiblePixelsScanned:visible,
+    distinctVisibleRGBColorsAtLeast:colors.size,complete:scanned===width*height,visibleRGBSample:[...colors].slice(0,8)};
 } catch(error) {
   return {status:'readback-failed',width,height,name:String(error?.name||'').slice(0,128),
     message:String(error?.message||error).slice(0,2048),stack:String(error?.stack||'').slice(0,4096)};
@@ -694,6 +697,15 @@ def assert_planner_painted(snapshot):
             paint['resizeSequence'] == canvas['resizeSequence'] and
             paint['width'] == canvas['width'] and paint['height'] == canvas['height'],
             'Planner requires a completed paint of the current nonempty 2D bitmap')
+
+
+def assert_planner_pixels(pixels, snapshot):
+    require(pixels['status'] == 'pixels-read', 'Planner 2D readback failed: ' + json.dumps(pixels))
+    require(pixels['readbackBytes'] == pixels['width'] * pixels['height'] * 4 and
+            pixels['distinctVisibleRGBColorsAtLeast'] > 1,
+            'Planner 2D bitmap must contain more than one visible RGB color')
+    require(all(pixels[key] == snapshot['canvas'][key] for key in ('width', 'height', 'resizeSequence')),
+            'Planner 2D bitmap changed after its nonblank readback')
 
 
 @contextlib.contextmanager
@@ -740,6 +752,9 @@ def planner(client, origin, project, record, save):
             client.execute(NATIVE_GL_DIAGNOSTICS)
             client.execute("sessionStorage.removeItem('home-studio.native-gl-teardown');return true;")
             require(client.execute('return window.planner.getProject().floors.reduce((n,f)=>n+f.items.length,0);') == 256, 'All 256 furniture items load')
+            sample['initial2D'] = client.execute(PLANNER_2D_PIXELS)
+            client.screenshot(Path(record['output']) / 'planner-initial-2d.png')
+            sample['initial2DScreenshot'] = 'planner-initial-2d.png'
             sample['loaded'] = client.execute(PLANNER_INPUT_SNAPSHOT)
             sample['beforeDrag'] = client.execute(PLANNER_INPUT_SNAPSHOT)
             # Revalidate the projection and target after setup, immediately
@@ -750,6 +765,7 @@ def planner(client, origin, project, record, save):
                     'Planner drag geometry changed immediately before input')
             require(all(hit['canvas'] and hit['visible'] for hit in sample['beforeDrag']['endpointHits']),
                     'Planner drag endpoints must reach the visible plan canvas')
+            assert_planner_pixels(sample['initial2D'], sample['beforeDrag'])
         require(sample['loadMs'] < 30000, 'Planner load exceeded 30 seconds')
         save()
         try:
@@ -773,10 +789,9 @@ def planner(client, origin, project, record, save):
                 sample['beforeDrag'] = client.execute(PLANNER_INPUT_SNAPSHOT)
             except Exception as error:
                 sample['beforeDragCaptureError'] = str(error)[:1024]
-        # Read pixels only after failure. A returned render call alone cannot
-        # prove a nonblank backing store; never let diagnostics mask the cause.
+        # Retain the bitmap at failure as well; never let diagnostics mask the cause.
         try:
-            sample['failure2D'] = client.execute(PLANNER_FAILURE_PIXELS)
+            sample['failure2D'] = client.execute(PLANNER_2D_PIXELS)
         except Exception as error:
             sample['failure2DCaptureError'] = str(error)[:1024]
         save()
