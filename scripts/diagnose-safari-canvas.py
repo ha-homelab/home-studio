@@ -18,6 +18,8 @@ original_execute = safari.SafariWebDriver.execute
 original_fixture_server = safari.fixture_server
 fixture_identity = {}
 current_output = None
+capture_before_readback = False
+capture_number = 0
 
 
 def write(path, value):
@@ -32,15 +34,17 @@ def fixture_server(name, log):
 
 
 def execute(self, script, *args):
-    if script == safari.native.PLANNER_2D_PIXELS:
-        self.screenshot(current_output / 'planner-before-readback.png')
+    global capture_number
+    if capture_before_readback and script == safari.native.PLANNER_2D_PIXELS:
+        capture_number += 1
+        self.screenshot(current_output / f'planner-before-readback-{capture_number}.png')
         state = original_execute(self, """
           const c=document.getElementById('plan-canvas'),ctx=c.getContext('2d');
-          return {phase:'before-first-acceptance-readback',state:window.__plannerPlanState(),
+          return {phase:'before-acceptance-readback',state:window.__plannerPlanState(),
             attributes:ctx.getContextAttributes?.()??null,lost:ctx.isContextLost?.()??null,
             source:'post-load snapshot; no claim about earlier context events'};
         """)
-        write(current_output / 'planner-before-readback.json', state)
+        write(current_output / f'planner-before-readback-{capture_number}.json', state)
     return original_execute(self, script, *args)
 
 
@@ -86,11 +90,14 @@ def matrix(client, origin, project, record, save):
             record['samples'].append(sample)
             sample['context'] = client.execute(SETUP, alpha, mode)
             save()
-            for number, (width, height) in enumerate(((934, 772), (772, 934), (934, 772))):
+            for number, (width, height) in enumerate(((934, 772), (772, 934), (1868, 1544), (2000, 2000), (600, 3000), (3000, 600))):
                 phase = client.execute(RESIZE, width, height)
                 sample['phases'].append(phase)
-                client.screenshot(Path(record['output']) / f'{alpha}-{mode}-{number}-before-readback.png')
+                if capture_before_readback:
+                    client.screenshot(Path(record['output']) / f'{alpha}-{mode}-{number}-before-readback.png')
                 phase['readback'] = client.execute(READ)
+                if not capture_before_readback:
+                    client.screenshot(Path(record['output']) / f'{alpha}-{mode}-{number}-after-readback.png')
                 save()
 
 
@@ -135,13 +142,15 @@ def source_variant(variant):
                 os.environ['PLANNER_STABILITY_SOURCE_ROOT'] = previous
 
 
-def run(output, label, name='planner-256', variant='original'):
-    global current_output
+def run(output, label, name='planner-256', variant='original', capture=False):
+    global current_output, capture_before_readback, capture_number
     current_output = output / label
+    capture_before_readback, capture_number = capture, 0
     with source_variant(variant):
         record = safari.run_case(current_output, name, '/usr/bin/safaridriver')
     record['diagnosticLabel'] = label
     record['diagnosticSourceVariant'] = variant
+    record['diagnosticPreReadbackObservation'] = capture
     record['sourceHashScope'] = fixture_identity.get('sourceHashScope')
     record['sourceFiles'] = fixture_identity.get('sourceFiles')
     write(current_output / 'report.json', record)
@@ -163,8 +172,10 @@ def main():
         return 1
     # Run the original planner before any viewer workload; its assertions are unchanged.
     summary['cases'].append(run(output, 'fresh-original'))
+    summary['cases'].append(run(output, 'observed-original', capture=True))
     safari.native.planner = matrix
-    summary['cases'].append(run(output, 'canvas-matrix'))
+    summary['cases'].append(run(output, 'canvas-matrix-plain'))
+    summary['cases'].append(run(output, 'canvas-matrix-observed', capture=True))
     safari.native.planner = original_planner
     for variant in ('default-alpha', 'one-pixel', 'shrink-first'):
         summary['cases'].append(run(output, variant, variant=variant))
