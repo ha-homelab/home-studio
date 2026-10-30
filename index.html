@@ -10,24 +10,32 @@
   <link rel="stylesheet" href="./planner/guide.css">
   <link rel="stylesheet" href="./site.css">
 </head>
-<body>
+<body class="home-landing">
   <a class="skip-link" href="#start">Skip to the introduction</a>
   <header class="site-header">
     <a class="wordmark" href="./">Home<span>studio</span><small>ROOM TO IMAGINE</small></a>
+    <nav class="site-nav" aria-label="Main navigation"><a href="#native-ha-demo">See it in action</a><a href="./planner/guide.html">Drawing guide</a><a href="https://github.com/ha-homelab/home-studio">GitHub <span aria-hidden="true">↗</span></a></nav>
     <a class="button button-small" href="./install.html#native-studio">Get started <span aria-hidden="true">↗</span></a>
   </header>
   <main id="start">
-    <section class="hero">
-      <p class="eyebrow">DRAW IT. MAKE IT YOURS. BRING IT HOME.</p>
-      <h1>Your home.<br>In 3D. In Home Assistant.</h1>
-      <p class="lead">Draw your rooms inside Home Assistant. Start by hand or with a photo-assisted AI draft, refine the details, link your devices, and publish your 3D Home.</p>
-      <p>Start with Home Assistant 2026.10 or newer and an administrator account. Install through HACS, restart HA, then add the Home Studio integration. No terminal build, YAML entry, or pasted access token is needed for a new installation.</p>
-      <div class="hero-actions">
-        <a class="button" href="./install.html#native-studio">Get started in Home Assistant <span aria-hidden="true">→</span></a>
-        <a class="text-link" href="#native-ha-demo">Watch the Home Assistant demo ↓</a>
+    <section class="hero landing-hero" aria-labelledby="home-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="status-mark" aria-hidden="true"></span> YOUR HOME, DRAWN BY YOU</p>
+        <h1 id="home-title">A home you can<br><em>make your own.</em></h1>
+        <p class="lead">Draw your rooms. Add the details you love. Bring it all to life in Home Assistant.</p>
+        <p>Start by hand or from a photo-assisted AI draft. Refine the plan, link your devices, and publish your own interactive 3D Home.</p>
+        <div class="hero-actions">
+          <a class="button" href="./install.html#native-studio">Get started in Home Assistant <span aria-hidden="true">↗</span></a>
+          <a class="text-link" href="#native-ha-demo">Watch the walkthrough <span aria-hidden="true">↓</span></a>
+        </div>
+        <p class="small hero-requirements">Home Assistant 2026.10+ · Administrator account<br>Install through HACS. No terminal build or pasted access token.</p>
       </div>
-      <ul class="hero-facts" aria-label="Included in Home Studio"><li>Free &amp; open source</li><li>24 editor languages</li><li>206 built-in designs</li><li>Saved in your Home Assistant</li></ul>
-      <p class="small">Your draft and published view stay in HA. Export JSON for an extra backup. <a href="./privacy.html">How your data is handled</a></p>
+      <figure class="hero-visual">
+        <div class="visual-label"><span>THE POSSIBILITIES START HERE</span><span aria-hidden="true">01 / STUDIO</span></div>
+        <a href="./planner/?example=patterns" aria-label="Open the fictional color and pattern studio in the optional browser editor"><img src="./planner/guide-assets/11-pattern-studio.jpg" width="1440" height="1000" fetchpriority="high" alt="Home Studio's editor showing a fictional room with patterned rugs, sofas, plants and furniture."></a>
+        <figcaption><span>Made with Home Studio</span>Fictional example · Open it in the separate browser editor <span aria-hidden="true">↗</span></figcaption>
+      </figure>
+      <ul class="hero-facts" aria-label="Included in Home Studio"><li><strong>Open source</strong><span>Free to use. Yours to shape.</span></li><li><strong>24 languages</strong><span>An editor that speaks yours.</span></li><li><strong>206 designs</strong><span>Furniture, finishes and details.</span></li><li><strong>Saved in your HA</strong><span><a href="./privacy.html">Your design and your data ↗</a></span></li></ul>
     </section>
     <section class="preview-section native-demo" id="native-ha-demo" aria-labelledby="native-demo-title">
       <div class="preview-heading"><p class="eyebrow">RECORDED INSIDE HOME ASSISTANT</p><h2 id="native-demo-title">From a photo to your 3D Home.</h2><p>Give the AI a room photo and your measurements. Review its draft, then move, resize, and raise or lower items by hand. Link your Home Assistant entities and publish when it looks right.</p></div>
@@ -52,6 +60,7 @@
       <div><p class="eyebrow">A NEW WAY TO BEGIN</p><h2 id="ai-title">Your photos.<br>Your model. Your home.</h2><p>Let a vision model sketch a measured room or suggest furniture for one you have already drawn. Preview its proposal, choose what to keep, and make the final edits yourself.</p><a class="button" href="./ai-setup.html">Plan from photos <span aria-hidden="true">→</span></a></div>
       <div class="ai-steps"><ol><li><strong>Show the room</strong><span>Add photos, dimensions and your instructions.</span></li><li><strong>Choose your AI</strong><span>Use your own cloud provider or a local vision model.</span></li><li><strong>Make it yours</strong><span>Review the draft in 2D and 3D, then apply or discard it.</span></li></ol><p class="small">Inside Home Assistant or the optional desktop companion · Session-only credentials. Cloud generation sends selected data to your provider. <a href="./privacy.html">Privacy details</a></p></div>
     </section>
+    <div class="feature-pair">
     <section class="preview-section" id="blender-export" aria-labelledby="blender-export-title">
       <div class="preview-heading"><p class="eyebrow">NEW IN THE 1.1 BETA LINE</p><h2 id="blender-export-title">Your drawing, ready for Blender.</h2><p>Refine furniture placement inside Home Assistant, then choose Export for Blender. Download one floor or the whole home as GLB or an OBJ + materials ZIP. GLB keeps furniture parts grouped so you can move each complete item.</p></div>
       <figure class="demo-player"><img loading="lazy" src="./docs/media/blender-export-dialog.jpg" width="1440" height="1000" alt="Home Studio's native Export for Blender dialog, with all floors selected."><figcaption>A fictional home in the native editor with a simulated HA connection. Export includes current valid edits without saving or publishing your drawing.</figcaption></figure>
@@ -64,6 +73,7 @@
       <figure class="demo-player"><img loading="lazy" src="./docs/media/site-editor.jpg" width="1440" height="1000" alt="Site and roof editing tools around a fictional home's footprint, roof, neighbor, street and garden."><figcaption>A separate exterior workspace with measured drawing tools, shared undo and a 3D preview. Example geometry is fictional.</figcaption></figure>
       <div class="demo-links"><a href="https://github.com/ha-homelab/home-studio/blob/main/docs/site-editor.md">Read the site drawing guide →</a><a href="./ai-setup.html">Connect your own AI →</a></div>
     </section>
+    </div>
     <section class="closing-note" id="hosted-fallback">
       <p class="eyebrow">OPTIONAL HELP WHILE YOU SET UP HOME ASSISTANT</p>
       <h2>Keep drawing if setup gets stuck.</h2>
