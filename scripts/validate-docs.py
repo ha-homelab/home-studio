@@ -9,7 +9,7 @@ from urllib.parse import unquote, urlsplit
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-GUIDES = ('docs/camera-tours.md', 'README.md', 'CHANGELOG.md', 'docs/dry-run.md', 'docs/i18n.md', 'docs/architecture.md',
+GUIDES = ('docs/site-experience.md', 'docs/camera-tours.md', 'README.md', 'CHANGELOG.md', 'docs/dry-run.md', 'docs/i18n.md', 'docs/architecture.md',
           'docs/first-session.md', 'docs/home-assistant-editor.md', 'docs/blender-export.md', 'docs/dashboard-and-media.md', 'docs/process-and-results.md', 'docs/quality-and-release.md', 'docs/quality.md',
           'docs/fuzzing.md', 'docs/browser-compatibility.md', 'docs/release-workflow.md',
           'docs/VERSIONING.md', 'docs/translations/README.md', 'docs/site-editor.md',

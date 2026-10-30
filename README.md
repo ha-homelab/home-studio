@@ -467,7 +467,10 @@ stage proves, how to inspect its public evidence, and which environments still
 need testing on real hardware.
 
 The public repository contains the full package. GitHub Pages publishes only an
-explicit website allowlist, so the website stays a static editor and guide.
+explicit website allowlist. The overview and guides add motion, public repository
+activity and client-side page transitions on top of those static files. See the
+[website operating guide](docs/site-experience.md) for accessibility, privacy,
+packaging, browser checks and troubleshooting.
 Validation checks links, browser imports, symlinks, and common private-data
 patterns. These checks supplement review; they do not prove all future text or
 image pixels are free of personal information.

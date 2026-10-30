@@ -233,6 +233,10 @@ jobs:
           for engine in chromium firefox webkit; do
             PLANNER_NAVIGATION_ENGINES="$engine" PLANNER_NAVIGATION_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-floor-navigation.cjs
           done
+      - name: Test site navigation, motion, metadata and recovery
+        run: |
+          node --test scripts/test-site-experience.mjs
+          node scripts/test-site-experience.cjs
       - name: Test localized help and offline installed viewer
         run: |
           node scripts/test-help-i18n.cjs
