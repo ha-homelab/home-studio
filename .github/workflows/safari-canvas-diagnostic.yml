@@ -1,4 +1,4 @@
-name: Isolated Safari canvas diagnostic
+name: Safari runner architecture control
 on:
   push:
     branches: [diagnostic/safari-canvas-20261030]
@@ -6,7 +6,11 @@ permissions:
   contents: read
 jobs:
   probe:
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -19,13 +23,40 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Record graphics environment
+        run: |
+          mkdir -p acceptance-artifacts/environment
+          sw_vers > acceptance-artifacts/environment/os.txt
+          /usr/bin/safaridriver --version > acceptance-artifacts/environment/safari.txt
+          system_profiler SPDisplaysDataType -json > acceptance-artifacts/environment/displays.json
+          stat -f '%Su' /dev/console > acceptance-artifacts/environment/console-user.txt
+          pgrep -fl 'WindowServer|Safari|WebKit' > acceptance-artifacts/environment/processes-before.txt || true
       - run: sudo /usr/bin/safaridriver --enable
-      - run: python3 scripts/diagnose-safari-canvas.py --output acceptance-artifacts/safari-canvas
+      - name: Test standalone tiny canvas independently
+        id: tiny
+        continue-on-error: true
+        run: python3 scripts/diagnose-safari-canvas.py --tiny-only --output acceptance-artifacts/tiny
+      - name: Run unchanged Safari acceptance
+        run: python3 scripts/test-safari-acceptance.py --prepare-hosted-safari --output acceptance-artifacts/acceptance
+      - name: Preserve bounded graphics logs
+        if: ${{ always() }}
+        run: |
+          python3 - <<'PY'
+          import pathlib, subprocess
+          out = pathlib.Path('acceptance-artifacts/environment')
+          out.mkdir(parents=True, exist_ok=True)
+          command = ['log', 'show', '--last', '10m', '--style', 'compact', '--predicate', '(process CONTAINS "WebKit" OR process == "Safari" OR process == "WindowServer") AND (messageType == error OR messageType == fault)']
+          try:
+              result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+              (out / 'graphics-log.txt').write_text((result.stdout + result.stderr)[-131072:])
+          except subprocess.TimeoutExpired:
+              (out / 'graphics-log.txt').write_text('System log query exceeded its 30-second diagnostic bound.\n')
+          PY
       - name: Preserve diagnostic evidence
         if: ${{ always() }}
         uses: ./.github/actions/upload-acceptance-artifact
         with:
-          name: safari-canvas-diagnostic
-          path: acceptance-artifacts/safari-canvas/
+          name: safari-runner-control-${{ matrix.runner }}
+          path: acceptance-artifacts/
           if-no-files-found: error
           retention-days: 14

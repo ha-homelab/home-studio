@@ -2,6 +2,7 @@
 """Disposable hosted-runner diagnostic; never changes acceptance assertions."""
 import argparse
 import contextlib
+import hashlib
 import importlib.util
 import json
 import os
@@ -80,6 +81,38 @@ try{
  return {status:'pixels-read',bytes:data.length,colors:[...colors],lost:ctx.isContextLost?.()??null,events};
 }catch(e){return {status:'readback-failed',name:e.name,message:e.message,lost:ctx.isContextLost?.()??null,events};}
 """
+
+TINY = r"""
+document.body.replaceChildren();
+const results=[];
+for(const alpha of ['default','opaque']) {
+ const c=document.createElement('canvas');c.width=32;c.height=32;document.body.append(c);
+ const events=[];for(const name of ['contextlost','contextrestored'])c.addEventListener(name,e=>events.push(e.type));
+ const ctx=alpha==='default'?c.getContext('2d'):c.getContext('2d',{alpha:false});
+ const result={alpha,dimensions:[c.width,c.height],events,contextCreated:!!ctx};results.push(result);
+ try {
+  ctx.fillStyle='#ff0000';ctx.fillRect(0,0,16,32);ctx.fillStyle='#00ff00';ctx.fillRect(16,0,16,32);
+  const pixels=ctx.getImageData(0,0,32,32).data;
+  result.left=Array.from(pixels.slice(0,4));result.right=Array.from(pixels.slice(16*4,16*4+4));
+  result.bytes=pixels.length;result.status='pixels-read';
+ } catch(e) { result.status='failed';result.name=e.name;result.message=e.message; }
+ result.attributes=ctx?.getContextAttributes?.()??null;
+}
+return results;
+"""
+
+
+def tiny(client, origin, project, record, save):
+    client.call('WebDriver:Navigate', {'url': 'about:blank'})
+    record['standaloneCanvasProbe'] = {'sha256': hashlib.sha256(TINY.encode()).hexdigest(),
+                                     'scope': '32px-canvas-before-context-creation; no application'}
+    record['samples'] = client.execute(TINY)
+    save()
+    client.screenshot(Path(record['output']) / 'tiny-after-readback.png')
+    safari.native.require(all(sample.get('left') == [255, 0, 0, 255]
+                              and sample.get('right') == [0, 255, 0, 255]
+                              and sample.get('bytes') == 4096 for sample in record['samples']),
+                          'Standalone 32px 2D canvas must render both colors before testing the application')
 
 
 def matrix(client, origin, project, record, save):
@@ -161,7 +194,9 @@ def run(output, label, name='planner-256', variant='original', capture=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
-    output = parser.parse_args().output.resolve()
+    parser.add_argument('--tiny-only', action='store_true')
+    args = parser.parse_args()
+    output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     summary = {'sourceRevision': os.environ.get('GITHUB_SHA'), 'diagnosticOnly': True,
                'osVersion': subprocess.check_output(['sw_vers'], text=True), 'cases': []}
@@ -170,6 +205,12 @@ def main():
     if preparation['status'] != 'passed':
         write(output / 'diagnostic-summary.json', summary)
         return 1
+    if args.tiny_only:
+        safari.native.planner = tiny
+        case = run(output, 'tiny-canvas')
+        summary['cases'].append(case)
+        write(output / 'diagnostic-summary.json', summary)
+        return int(case['status'] != 'passed')
     # Run the original planner before any viewer workload; its assertions are unchanged.
     summary['cases'].append(run(output, 'fresh-original'))
     summary['cases'].append(run(output, 'observed-original', capture=True))
