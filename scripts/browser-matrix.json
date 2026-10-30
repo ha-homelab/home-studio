@@ -141,7 +141,7 @@
     ]
   },
   "safari": [
-    "macos-15"
+    "macos-26"
   ],
   "chrome_for_testing": {
     "catalog": "https://googlechromelabs.github.io/chrome-for-testing/latest-versions-per-milestone-with-downloads.json",

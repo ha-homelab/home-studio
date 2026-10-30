@@ -303,8 +303,8 @@ jobs:
           retention-days: 14
 
   safari:
-    name: Safari (macos-15, installed stable)
-    runs-on: macos-15
+    name: Safari (macos-26, installed stable)
+    runs-on: macos-26
     timeout-minutes: 25
     env:
       PYTHONUTF8: '1'
@@ -330,7 +330,7 @@ jobs:
         if: ${{ always() }}
         uses: ./.github/actions/upload-acceptance-artifact
         with:
-          name: acceptance-macos-15-safari
+          name: acceptance-macos-26-safari
           path: acceptance-artifacts/safari/
           if-no-files-found: error
           retention-days: 14

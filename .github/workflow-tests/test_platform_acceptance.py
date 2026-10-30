@@ -100,7 +100,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
         expected = {
             'browser': ('acceptance-${{ matrix.os }}-${{ matrix.id }}', 'acceptance-artifacts/'),
             'native-browser': ('acceptance-${{ matrix.os }}-${{ matrix.id }}', '${{ env.NATIVE_BROWSER_DIAGNOSTICS_DIR }}'),
-            'safari': ('acceptance-macos-15-safari', 'acceptance-artifacts/safari/'),
+            'safari': ('acceptance-macos-26-safari', 'acceptance-artifacts/safari/'),
         }
         for name, job in jobs.items():
             self.assertNotIn('continue-on-error', job)
@@ -117,7 +117,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
                                                      'if-no-files-found': 'error', 'retention-days': '14'})
         rows = inventory()
         names = [f"acceptance-{row['os']}-{row['id']}" for group in rows.values() for row in group['include']]
-        names.append('acceptance-macos-15-safari')
+        names.append('acceptance-macos-26-safari')
         self.assertEqual(len(names), 74)
         self.assertEqual(len(set(names)), len(names))
         spec = importlib.util.spec_from_file_location('upload_inventory', ROOT / 'scripts/validate-site.py')
@@ -653,11 +653,32 @@ class PlatformAcceptanceTests(unittest.TestCase):
 
     def test_safari_uses_the_actual_macos_browser(self):
         job = workflow('platform-acceptance.yml')['jobs']['safari']
-        self.assertEqual(job['runs-on'], 'macos-15')
+        self.assertEqual(job['runs-on'], 'macos-26')
         runs = '\n'.join(step.get('run', '') for step in job['steps'])
         self.assertIn('sudo /usr/bin/safaridriver --enable', runs)
         self.assertIn('scripts/test-safari-tooling.py', runs)
         self.assertIn('scripts/test-safari-acceptance.py --prepare-hosted-safari --output acceptance-artifacts/safari', runs)
+
+    def test_safari_macos15_observation_retains_real_failures(self):
+        observation = workflow('safari-macos15-observation.yml')
+        self.assertEqual(set(observation['on']), {'workflow_dispatch', 'schedule'})
+        self.assertEqual(observation['on']['schedule'], [{'cron': '37 4 * * 2'}])
+        self.assertEqual(observation['permissions'], {'contents': 'read'})
+        job = observation['jobs']['safari']
+        self.assertEqual(job['runs-on'], 'macos-15')
+        self.assertNotIn('continue-on-error', job)
+        self.assertNotIn('if', job)
+        self.assertEqual(int(job['timeout-minutes']), 25)
+        for step in job['steps']:
+            self.assertNotIn('continue-on-error', step)
+        runs = '\n'.join(step.get('run', '') for step in job['steps'])
+        self.assertIn('sudo /usr/bin/safaridriver --enable', runs)
+        self.assertIn('scripts/test-safari-tooling.py', runs)
+        self.assertIn('scripts/test-safari-acceptance.py --prepare-hosted-safari --output acceptance-artifacts/safari', runs)
+        upload = job['steps'][-1]
+        self.assertEqual(upload['if'], '${{ always() }}')
+        self.assertEqual(upload['uses'], './.github/actions/upload-acceptance-artifact')
+        self.assertEqual(upload['with']['name'], 'acceptance-macos-15-safari-observation')
 
     def test_macos_gecko_backends_are_scoped_to_the_supported_versions(self):
         jobs = workflow('platform-acceptance.yml')['jobs']

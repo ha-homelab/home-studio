@@ -1,0 +1,40 @@
+name: Safari macOS 15 compatibility observation
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '37 4 * * 2'
+permissions:
+  contents: read
+jobs:
+  safari:
+    name: Safari (macos-15, installed stable observation)
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+      - name: Install fixture tooling and check Safari protocol support
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          python3 scripts/test-safari-tooling.py
+      - name: Enable WebDriver on this disposable hosted runner
+        run: sudo /usr/bin/safaridriver --enable
+      - name: Test installed Safari with both viewers and the 256-item planner
+        run: python3 scripts/test-safari-acceptance.py --prepare-hosted-safari --output acceptance-artifacts/safari
+      - name: Preserve actual Safari identity and diagnostics
+        if: ${{ always() }}
+        uses: ./.github/actions/upload-acceptance-artifact
+        with:
+          name: acceptance-macos-15-safari-observation
+          path: acceptance-artifacts/safari/
+          if-no-files-found: error
+          retention-days: 14

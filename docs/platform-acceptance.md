@@ -506,6 +506,30 @@ disposable CI hosts. The Safari job enables remote automation only on its
 disposable runner. Local focused runs should use an existing browser or an
 isolated pinned download.
 
+Required Safari acceptance runs on the `macos-26` ARM runner. In the
+[October 30, 2026 runner control](https://github.com/ha-homelab/home-studio/actions/runs/41049097250),
+its installed Safari 26.6.2 on macOS 26.6.2 passed both viewers and the 256-item
+planner with the unchanged application and pixel, input, and recovery checks.
+This qualifies that recorded browser/OS combination; it does not establish
+Safari 27.2 compatibility. The runner remains rolling coverage and records its
+actual browser and OS identity on every run.
+
+The `macos-15` ARM image with Safari 27.2 on macOS 15.8.2 currently has a
+[reproduced 2D canvas failure](https://github.com/ha-homelab/home-studio/actions/runs/41048491989):
+even a standalone 32-by-32 canvas throws `InvalidStateError` during pixel
+readback before the application loads. Its system log reports IOSurface
+allocation failures. Changing the application's alpha or resize strategy did
+not resolve the failure. The precise image/WebKit cause remains unconfirmed.
+The same control's Intel runner used Safari 26.6 on macOS 15.7.9 and failed
+WebGL startup, so it is not a qualified substitute.
+
+`Safari macOS 15 compatibility observation` retains the unchanged Safari
+acceptance on `macos-15`, running weekly and on manual dispatch. It is separate
+from PR/release qualification, reports real failures without suppressing them,
+and preserves the normal browser diagnostics. It does not open issues
+automatically. A future image update must pass that complete observation before
+we claim this combination has recovered.
+
 Every browser job uploads a distinct `acceptance-<OS>-<target>` artifact for
 14 days, including failed test runs. Playwright artifacts separate the small
 viewer, large viewer, and planner; they also retain the installed toolchain
