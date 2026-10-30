@@ -48,7 +48,7 @@ WEBSITE_MEDIA_FILES = (
 SITE_FILES = (
     'camera-tour.js', 'camera-tour-panel.js', 'camera-tour-recording.js', 'camera-tour-session.js', 'camera-tour.css', 'planner/camera-tour-adapter.js',
     'pbr-color-data.js','pbr-materials.js','material-textures.js','environment-lighting.js',
-    'index.html', 'site.css', 'docs/images/native-editor.png', 'privacy.html', 'install.html', 'ai-setup.html', '404.html', '.nojekyll',
+    'index.html', 'site.css', 'site-experience.js', 'docs/images/native-editor.png', 'privacy.html', 'install.html', 'ai-setup.html', '404.html', '.nojekyll',
     *WEBSITE_MEDIA_FILES,
     'planner/index.html', 'planner/editor.css', 'planner/editor.js', 'planner/floor-navigator.js', 'planner/floor-navigator.css', 'planner/render-capacity.js', 'planner/interaction-render.js', 'planner/environment.js',
     'planner/i18n.js', 'planner/validation.js', 'planner/locales/index.js',
@@ -72,6 +72,7 @@ SITE_FILES = (
 # the website landing page and its promotional media out of both editor bundles.
 EDITOR_FILES = tuple(name for name in SITE_FILES if name not in ('index.html', *WEBSITE_MEDIA_FILES))
 REPO_FILES = (
+    'docs/site-experience.md', 'scripts/test-site-experience.mjs', 'scripts/test-site-experience.cjs',
     'camera-tour-viewer.js', 'docs/camera-tours.md', 'docs/images/camera-tour-workflow.svg', 'scripts/test-camera-tour.mjs', 'scripts/test-camera-tour-recording.mjs', 'scripts/test-camera-tour-session-contract.mjs', 'scripts/test-camera-tour-browser.cjs', 'scripts/test-camera-tour-native-downloads.cjs', 'scripts/test-camera-tour-hosts.cjs','scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'THIRD_PARTY_NOTICES.md',
               'docs/closed-build.md', '.closed-build-policy.json', 'requirements-closed-build.txt',
               '.github/workflows/closed-build.yml', 'docker/closed-worker.Dockerfile',

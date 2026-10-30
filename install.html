@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self'; font-src 'self'; connect-src 'self' https://api.github.com; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Install Home Studio in Home Assistant through HACS, draw and link your devices, then publish 3D Home. Step-by-step setup and troubleshooting.">
@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="./planner/help.css">
   <link rel="stylesheet" href="./site.css">
   <script type="module" src="./planner/help.js"></script>
+  <script type="module" src="./site-experience.js"></script>
 </head>
 <body>
   <a lang="en" dir="ltr" class="skip-link" href="#installation">Skip to installation</a>

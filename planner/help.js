@@ -2,8 +2,7 @@ import { LOCALES, getDirection, getLocale, initI18n, onLocaleChange, setLocale, 
 import { HELP_MESSAGES } from './help-locales.js';
 import { updateLanguageLinks } from './language-links.js';
 
-const root = document.getElementById('quick-route');
-const topic = root.dataset.topic;
+let root = null, topic = null, unsubscribe = null, mounted = null;
 const toolkit = new URL('../', import.meta.url);
 const local = path => new URL(path, toolkit).href;
 const commands = Object.freeze({
@@ -113,11 +112,13 @@ function render({ loaded = true } = {}) {
   }
   select.value = locale;
   select.addEventListener('change', async () => {
+    const activeRoot = root;
     const result = await setLocale(select.value);
-    if (result.applied) {
+    if (result.applied && root === activeRoot && activeRoot.isConnected) {
       // Keep a deep link in sync with an explicit user choice, including reloads.
       const url = new URL(location.href); url.searchParams.set('lang', result.locale);
-      try { history.replaceState(null, '', url); } catch { /* Files or restricted hosts may deny history. */ }
+      try { history.replaceState(history.state, '', url); } catch { /* Files or restricted hosts may deny history. */ }
+      document.dispatchEvent(new CustomEvent('site:language-changed'));
     }
   });
   control.append(select); bar.append(control); root.append(bar);
@@ -151,5 +152,28 @@ function render({ loaded = true } = {}) {
   if (focusLanguage) select.focus();
 }
 
-onLocaleChange(render);
-await initI18n();
+// Direct loads and progressive navigation share this lifecycle. Detached pages
+// must not retain a locale listener or steal focus after a language download.
+export function disposeHelp() {
+  unsubscribe?.();
+  unsubscribe = null;
+  root = null;
+  topic = null;
+  mounted = null;
+}
+
+export function mountHelp() {
+  const next = typeof document === 'undefined' ? null : document.getElementById('quick-route');
+  if (next && next === root && mounted) return mounted;
+  disposeHelp();
+  if (!next) return Promise.resolve();
+  root = next;
+  topic = next.dataset.topic;
+  unsubscribe = onLocaleChange(result => {
+    if (root === next && next.isConnected) render(result);
+  });
+  mounted = initI18n();
+  return mounted;
+}
+
+export const initialHelp = mountHelp();

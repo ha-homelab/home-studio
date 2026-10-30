@@ -335,6 +335,14 @@ The public source archive includes them and the translated README quick starts.
 See [language coverage and contribution rules](i18n.md) for the supported scope
 and the contract and browser checks enforced by CI.
 
+### Website presentation and navigation
+
+The overview and five help pages share a progressive presentation and navigation
+layer, with public GitHub metadata on the overview only. The editor and viewer
+keep their separate runtime and network boundaries. See the
+[website operating guide](site-experience.md) for the lifecycle, packaging,
+accessibility and failure-recovery contracts.
+
 ### Help pages and the installed viewer
 
 `planner/help.js` adds a localized, illustrated quick route above the existing
