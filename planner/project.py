@@ -26,12 +26,12 @@ if __package__ and "." in __package__:
     # package. Relative imports avoid changing the host interpreter's sys.path.
     from ..geometry import MATERIALS, create_geometry, floor_context
     from ..exporters import export_models
-    from ..viewer_locales import load_viewer_i18n
+    from ..viewer_locales import load_viewer_i18n, viewer_i18n_expression
     from ..material_textures import validate_material_textures, material_uv
 else:
     from geometry import MATERIALS, create_geometry, floor_context
     from exporters import export_models
-    from viewer_locales import load_viewer_i18n
+    from viewer_locales import load_viewer_i18n, viewer_i18n_expression
     from material_textures import validate_material_textures, material_uv
 from .furniture import build_furniture_asset, validate_furniture_appearance, supports_curtain, MODELS
 from .site_model import validate_site
@@ -424,6 +424,8 @@ def make_floor(project, floor, next_floor):
                 d["depth"], p["y"], p["y"] + d["height"], "dark" if item["type"] == "tv" else "added", "inventory", item_id=item["id"], entity_id=item["entity_id"])
             continue
         object_assets[item["id"]] = {"model_id": item["model_id"], "meshes": asset["meshes"]}
+        if "device_animation" in asset:
+            object_assets[item["id"]]["device_animation"] = asset["device_animation"]
         materials.update(asset["materials"])
         cosine, sine = math.cos(angle), math.sin(angle)
         for part in asset["meshes"]:
@@ -558,17 +560,17 @@ def render_viewer(data, svg):
     # Saved model downloads represent the built project. The editable viewer
     # must not leave those static furniture silhouettes behind after a move.
     viewer_plan = re.sub(r'<g id="furniture">.*?</g>', '', svg, flags=re.S)
-    viewer_i18n = json.dumps(load_viewer_i18n(ROOT), ensure_ascii=False, separators=(",", ":"))
+    viewer_i18n = viewer_i18n_expression(load_viewer_i18n(ROOT))
     replacements = {
         "__VIEWER_I18N_JS__": (ROOT / "viewer-i18n.js").read_text(encoding="utf-8"),
-        "__VIEWER_I18N_DATA__": viewer_i18n.replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"),
+        "__VIEWER_I18N_DATA__": viewer_i18n,
         "__VIEWER_JS__": (ROOT / "viewer.js").read_text(encoding="utf-8"),
         "/*__CAMERA_TOUR_VIEWER_JS__*/": (ROOT / "camera-tour-viewer.js").read_text(encoding="utf-8"),
         "__CAMERA_TOUR_MODULE_B64__": camera_tour_module(),
         "__CAMERA_TOUR_CSS__": (ROOT / "camera-tour.css").read_text(encoding="utf-8"),
         "__HOME_HTML__": (ROOT / "home-view.html").read_text(encoding="utf-8"),
         "__HOME_CSS__": (ROOT / "home-view.css").read_text(encoding="utf-8"),
-        "__HOME_JS__": "\n".join((ROOT / name).read_text(encoding="utf-8") for name in ("curtain-state.js", "motion-state.js", "appliance-state.js", "presence-view.js", "vacuum-state.js", "vacuum-view.js", "tv-screen.js", "camera-preview.js", "media-preview.js", "assumed-zone-view.js", "map-layer.js", "home-view.js")),
+        "__HOME_JS__": "\n".join((ROOT / name).read_text(encoding="utf-8") for name in ("curtain-state.js", "motion-state.js", "appliance-state.js", "climate-state.js", "marker-motion.js", "device-effects.js", "presence-view.js", "vacuum-state.js", "vacuum-view.js", "tv-screen.js", "camera-preview.js", "media-preview.js", "assumed-zone-view.js", "map-layer.js", "home-view.js")),
         "__LIGHT_STATE_JS__": (ROOT / "light-state.js").read_text(encoding="utf-8"),
         "__RENDER_CAPACITY_JS__": (ROOT / "planner/render-capacity.js").read_text(encoding="utf-8").replace("export function getRenderCapacity", "function getRenderCapacity"),
         "/*__ENVIRONMENT_JS__*/": (ROOT / "planner/environment.js").read_text(encoding="utf-8").replace("export ", ""),
@@ -625,7 +627,7 @@ def package_ha(output, manifest):
         # Private adapters are deliberately outside this reviewed source list.
         sources = [component / name for name in (
             "__init__.py", "site.py", "validation.py", "curtains.py", "map.py",
-            "manifest.json", "native.py", "generated.py", "permissions.py", "config_flow.py",
+            "manifest.json", "native.py", "generated.py", "site_frame.py", "site_calibration.py", "runtime_upgrade.py", "baseline_transaction.py", "permissions.py", "config_flow.py",
             "strings.json", "translations/en.json", "static/panel.js", "static/card.js",
         )]
         for source in sources:

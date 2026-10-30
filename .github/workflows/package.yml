@@ -18,8 +18,10 @@ jobs:
           python-version: '3.12'
       - name: Install locked transport test dependencies
         run: 'python3 -m pip install --require-hashes --only-binary=:all: -r requirements-closed-build.txt'
-      - name: Verify synthetic transport and failure confidentiality
-        run: python3 scripts/test_closed_build.py
+      - name: Verify synthetic transport, upload admission and failure confidentiality
+        run: |
+          python3 scripts/test_closed_build.py
+          python3 scripts/test_closed_upload_control.py
       - name: Preload public toolchain
         run: python3 scripts/closed_build.py --action prepare --prepared-root "$RUNNER_TEMP/closed-synthetic-public"
       - name: Verify real unprivileged network-disabled container with fictional input
@@ -49,7 +51,7 @@ jobs:
     uses: ./.github/workflows/platform-acceptance.yml
   package:
     runs-on: ${{ fromJSON((vars.CI_RUNNER_MODE == 'self-hosted' || vars.CI_RUNNER_MODE == 'k3s') && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))) && (vars.CI_RUNNER_LABELS || '[]') || '["ubuntu-latest"]') }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -69,6 +71,8 @@ jobs:
           python3 scripts/test-ha-project-metadata.py
           python3 scripts/test-ha-native.py
           python3 scripts/test-ha-generated.py
+          python3 scripts/test-site-calibration.py
+          python3 scripts/test-runtime-upgrade.py
           python3 scripts/test-blender-export.py
           python3 scripts/test-curtain-authoring.py
       - name: Test archive validation, installation, backup and rollback
@@ -87,12 +91,15 @@ jobs:
       - name: Verify site geometry, compilation and isolated AI drafts
         run: |
           node scripts/test-site-model.mjs
+          node --test scripts/test-site-map-underlay.mjs
           python3 scripts/test-site-compiler.py
           node scripts/test-ai-site.mjs
       - name: Replay fuzz regression inputs without mutation campaigns
         run: node --test fuzz/*.test.mjs
       - name: Run bundled CPU regressions from the extracted public source ZIP
         run: python3 scripts/test_source_replay.py
+      - name: Test compact viewer locale encoding and rendered source size
+        run: python3 scripts/test-viewer-locales.py
       - name: Check generated catalog and furniture export parity
         run: |
           python3 scripts/generate-furniture-catalog.py --check
@@ -100,6 +107,8 @@ jobs:
           python3 scripts/test-furniture-profiles.py
           python3 scripts/test-furniture-patterns.py
           node scripts/test-furniture-patterns.mjs
+          python3 scripts/test-fixture-animation.py
+          node scripts/test-fixture-animation.cjs
           python3 scripts/test-inventory-appearance.py
           node --test scripts/test-inventory-appearance.cjs
           python3 scripts/test-material-textures.py
@@ -131,8 +140,32 @@ jobs:
       - name: Test camera tours and local video in three browser engines
         run: |
           for engine in chromium firefox webkit; do
-            CAMERA_TOUR_ENGINE="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-camera-tour-browser.cjs || exit 1
+            CAMERA_TOUR_ENGINE="$engine" CAMERA_TOUR_ARTIFACTS="$RUNNER_TEMP/camera-tour-artifacts/$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-camera-tour-browser.cjs || exit 1
           done
+      - name: Preserve synthetic Chromium camera-tour evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: camera-tour-chromium-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/camera-tour-artifacts/chromium/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Preserve synthetic Firefox camera-tour evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: camera-tour-firefox-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/camera-tour-artifacts/firefox/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Preserve synthetic WebKit camera-tour evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: camera-tour-webkit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/camera-tour-artifacts/webkit/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Test geographic map navigation in three browser engines
         run: |
           node --test scripts/test-ha-map-bridge.cjs
@@ -143,6 +176,8 @@ jobs:
         run: |
           for engine in chromium firefox webkit; do
             BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-studio.cjs || exit 1
+            BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-site-calibration.cjs || exit 1
+            BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-viewer-runtime-upgrade.cjs || exit 1
             BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-theme.cjs || exit 1
             BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-ai.cjs || exit 1
           done
@@ -153,6 +188,7 @@ jobs:
         run: |
           for engine in chromium firefox webkit; do
             SITE_EDITOR_ENGINE="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-site-editor.cjs || exit 1
+            BROWSER="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-native-site-map.cjs || exit 1
           done
       - name: Test optional albedo surfaces in the compiled viewer
         run: |
@@ -226,7 +262,7 @@ jobs:
         run: node --test scripts/test-tv-screen.cjs
       - name: Test linked media previews and bounded TV power commands
         run: |
-          node --test scripts/test-media-preview.cjs scripts/test-media-artwork-host.cjs scripts/test-media-command-host.cjs scripts/test-appliance-state.cjs scripts/test-presence-view.cjs scripts/test-vacuum-state.cjs scripts/test-vacuum-view.cjs scripts/test-vacuum-position-host.cjs
+          node --test scripts/test-climate-state.cjs scripts/test-marker-motion.cjs scripts/test-device-effects.cjs scripts/test-media-preview.cjs scripts/test-media-artwork-host.cjs scripts/test-media-command-host.cjs scripts/test-appliance-state.cjs scripts/test-presence-view.cjs scripts/test-motion-state.cjs scripts/test-activity-channels.cjs scripts/test-vacuum-state.cjs scripts/test-vacuum-view.cjs scripts/test-vacuum-position-host.cjs
           node --test scripts/test-dashboard-card.cjs
           for engine in chromium firefox webkit; do
             MEDIA_ARTWORK_ENGINE="$engine" node scripts/test-media-artwork-browser.cjs
@@ -236,8 +272,19 @@ jobs:
         run: |
           node scripts/test-generic-entities.cjs
           for engine in chromium firefox webkit; do
+            DEVICE_FEEDBACK_ENGINE="$engine" DEVICE_FEEDBACK_QA_DIR="$RUNNER_TEMP/device-feedback/$engine" DEVICE_FEEDBACK_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-device-feedback.cjs
+          done
+          for engine in chromium firefox webkit; do
             DEVICE_INTERACTIONS_ENGINE="$engine" DEVICE_INTERACTIONS_HEADED=1 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-device-interactions.cjs
           done
+      - name: Preserve synthetic device-feedback evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: device-feedback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/device-feedback/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Test muted lower-floor context and independent camera focus
         run: python3 scripts/test-floor-context.py && node --test scripts/test-floor-context.cjs
       - name: Test read-only vacuum positions, freshness and render lifecycle
@@ -273,9 +320,12 @@ jobs:
           node scripts/test-native-viewer-programs.cjs
           node --test scripts/test-render-capacity.cjs
           node --test scripts/test-browser-stability-diagnostics.cjs
+          node --test scripts/test-browser-tap-diagnostics.cjs
           node --test scripts/test-browser-startup-diagnostics.cjs
       - name: Test planner drawing and preview resource budgets
-        run: node scripts/test-planner-render-budget.cjs
+        run: |
+          node scripts/test-planner-render-budget.cjs
+          node --test scripts/test-planner-thumbnail.cjs
       - name: Test bounded native draw diagnostics without a browser
         run: |
           python3 scripts/test-native-draw-diagnostic.py

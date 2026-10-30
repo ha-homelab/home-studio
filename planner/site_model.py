@@ -13,12 +13,12 @@ RESERVED = {"__proto__", "prototype", "constructor", "toString", "valueOf", "has
             "isPrototypeOf", "propertyIsEnumerable", "toLocaleString"}
 
 
-def _fields(value, keys, label):
+def _fields(value, keys, label, optional=()):
     if not isinstance(value, dict):
         raise ValueError(f"{label}: expected an object")
     if set(keys) - value.keys():
         raise ValueError(f"{label}: missing fields")
-    if value.keys() - set(keys):
+    if value.keys() - set(keys) - set(optional):
         raise ValueError(f"{label}: unknown fields")
 
 
@@ -55,7 +55,7 @@ def validate_site(site):
         raise ValueError("Site: at most 64 features are allowed")
     ids, count = set(), 0
     for feature in features:
-        _fields(feature, ("id", "name", "kind", "polygon", "height_m", "color"), "Site feature")
+        _fields(feature, ("id", "name", "kind", "polygon", "height_m", "color"), "Site feature", ("render_style",))
         identifier = feature["id"]
         if not isinstance(identifier, str) or not ID.fullmatch(identifier) or identifier in RESERVED:
             raise ValueError("Site feature: invalid identifier")
@@ -67,6 +67,8 @@ def validate_site(site):
             raise ValueError("Site feature: name must be nonempty text of at most 120 characters without control characters or invalid Unicode")
         if feature["kind"] not in SITE_KINDS:
             raise ValueError("Site feature: invalid kind")
+        if "render_style" in feature and (feature["kind"] != "building" or feature["render_style"] not in ("outline", "solid")):
+            raise ValueError("Site feature: render style must be outline or solid, for a neighboring building only")
         if not isinstance(feature["color"], str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", feature["color"]):
             raise ValueError("Site feature: color must be #RRGGBB")
         _number(feature["height_m"], 0, SITE_LIMITS["height"], "Site feature height")

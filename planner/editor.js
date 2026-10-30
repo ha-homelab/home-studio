@@ -312,7 +312,19 @@ function renderLibrary(append = false) {
   if (append) firstNewCard?.focus();
 }
 function drawItemThumbnail(canvas, model, appearance = { model_id: model.id, style_id: model.default_style, type: model.type }) {
-  const context = canvas.getContext('2d');
+  // This optional preview must not interrupt selection or its pointer gesture
+  // when the browser cannot provide a usable 2D backing store.
+  try {
+    const context = canvas.getContext('2d');
+    if (!context) { canvas.hidden = true; return; }
+    paintItemThumbnail(canvas, context, model, appearance);
+    canvas.hidden = false;
+  } catch (error) {
+    if (error?.name !== 'InvalidStateError') throw error;
+    canvas.hidden = true;
+  }
+}
+function paintItemThumbnail(canvas, context, model, appearance) {
   const key = JSON.stringify([appearance.model_id, appearance.style_id, appearance.color, appearance.pattern_id, appearance.pattern_color]);
   if (thumbnailCache.has(key)) { context.putImageData(thumbnailCache.get(key), 0, 0); return; }
   const asset = itemAsset(appearance);
@@ -351,8 +363,9 @@ function drawItemThumbnail(canvas, model, appearance = { model_id: model.id, sty
       pixels.data[offset] = triangle.color[0]; pixels.data[offset + 1] = triangle.color[1]; pixels.data[offset + 2] = triangle.color[2]; pixels.data[offset + 3] = 255;
     }
   }
+  context.putImageData(pixels, 0, 0);
   if (thumbnailCache.size >= THUMBNAIL_CACHE_LIMIT) thumbnailCache.delete(thumbnailCache.keys().next().value);
-  thumbnailCache.set(key, pixels); context.putImageData(pixels, 0, 0);
+  thumbnailCache.set(key, pixels);
 }
 function itemPlanShapes(item) {
   const key = `${item.model_id}|${item.style_id || ''}|${item.color || ''}|${item.pattern_id || ''}|${item.pattern_color || ''}|${item.dimensions_m?.width}|${item.dimensions_m?.height}|${item.dimensions_m?.depth}`;
@@ -1063,7 +1076,7 @@ function environmentSite() {
     const box = floorBounds(f), margin = Math.max(0, ...f.walls.map(wall => wall.thickness_m / 2));
     return { minX: box.minX - margin, maxX: box.maxX + margin, minZ: box.minZ - margin, maxZ: box.maxZ + margin };
   });
-  return { bounds: { minX: Math.min(...boxes.map(b => b.minX)), maxX: Math.max(...boxes.map(b => b.maxX)), minZ: Math.min(...boxes.map(b => b.minZ)), maxZ: Math.max(...boxes.map(b => b.maxZ)) }, elevation: Math.min(...floors.map(f => f.elevation_m)) };
+  return { bounds: { minX: Math.min(...boxes.map(b => b.minX)), maxX: Math.max(...boxes.map(b => b.maxX)), minZ: Math.min(...boxes.map(b => b.minZ)), maxZ: Math.max(...boxes.map(b => b.maxZ)) }, elevation: Math.min(...floors.map(f => f.elevation_m)), siteContext: !!displayedProject().site?.features.length || !!siteEditor?.mapConfigured };
 }
 let previewDetails=null,previewReflections=null,previewContact=null;
 let previewLost = false, previewSize = '', previewPixels = 2000000, previewInitialized = false, previewRendererDisposed = false, previewInstancing = false, previewDiffuseLighting = false;
@@ -1177,7 +1190,9 @@ function instancePreviewCatalog(groups) {
 function rebuildPreview() {
   disposePreviewGeometry();
   previewItemNodes.clear();
-  const surroundings = environmentSite(); previewEnvironment?.setBounds(surroundings.bounds, surroundings.elevation);
+  const surroundings = environmentSite();
+  previewEnvironment?.setSiteContext(surroundings.siteContext);
+  previewEnvironment?.setBounds(surroundings.bounds, surroundings.elevation);
   // Cached asset parts are immutable. Share their geometry only within this
   // rebuild; every mesh keeps its own material, transform and rendering order.
   const catalogGeometries = new Map(), catalogGroups = [];
@@ -1242,7 +1257,7 @@ function rebuildPreview() {
       }
     }
   }
-  if (siteEditor?.active && displayedProject().site) worldGroup.add(buildSitePreview(THREE, displayedProject().site, createPreviewMaterial));
+  if (siteEditor?.active && displayedProject().site) worldGroup.add(buildSitePreview(THREE, displayedProject().site, createPreviewMaterial, { showHome: !siteEditor.neighborhood }));
   const activeItem = selection?.kind === 'items' ? selected() : null;
   if (activeItem && orbit.mode === 'edit') {
     const p = activeItem.position_m, d = activeItem.dimensions_m;
@@ -1691,7 +1706,14 @@ $('help-button').addEventListener('click', () => $('help-dialog').showModal());
 document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => $(b.dataset.close).close()));
 $('build-project').addEventListener('click', () => {
   const needsSiteSupport = Object.hasOwn(project, 'site');
-  $('build-site-compatibility').hidden = !needsSiteSupport;
+  const needsNeighborSupport = project.site?.features.some(feature => Object.hasOwn(feature, 'render_style'));
+  $('build-site-compatibility').hidden = !needsSiteSupport || needsNeighborSupport;
+  let neighborCompatibility = $('build-neighbor-compatibility');
+  if (!neighborCompatibility) {
+    neighborCompatibility = node('p', 'callout', 'This drawing includes neighbor appearance settings. Use a toolkit and integration release with support for neighbor outlines; earlier Site & roof releases cannot read it. Keep your exported JSON until a matching release is available.');
+    neighborCompatibility.id = 'build-neighbor-compatibility'; $('build-site-compatibility').after(neighborCompatibility);
+  }
+  neighborCompatibility.hidden = !needsNeighborSupport;
   $('build-toolkit-link').href = `https://github.com/ha-homelab/home-studio/releases${needsSiteSupport ? '' : '/latest'}`;
   translatedText('build-toolkit-link', needsSiteSupport ? 'Choose a compatible release ↗' : 'Download the complete ZIP ↗');
   const label = $('build-validation');
@@ -1755,18 +1777,19 @@ function resizeCanvases(rect) {
 }
 const canvasObserver = new ResizeObserver(entries => resizeCanvases(entries[0].contentRect));
 canvasObserver.observe(document.querySelector('.canvas-shell'));
-document.addEventListener('visibilitychange', () => { if (document.hidden) { siteEditor?.cancel(); spaceHeld = false; if (drag) finishPointer(null, true); releasePreviewPointer(); cancelCanvasRender(); } else { resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); } });
+document.addEventListener('visibilitychange', () => { siteEditor?.setSuspended(document.hidden); if (document.hidden) { siteEditor?.cancel(); spaceHeld = false; if (drag) finishPointer(null, true); releasePreviewPointer(); cancelCanvasRender(); } else { resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); } });
 window.addEventListener('pagehide', event => {
-  canvasSuspended = true; siteEditor?.cancel(); if (drag) finishPointer(null, true); releasePreviewPointer(); cancelCanvasRender();
-  if (!event.persisted) { canvasObserver.disconnect(); previewEvents.abort(); releasePreviewPointer(); floorNavigator.destroy(); disposePreviewRenderer(); renderer?.forceContextLoss(); }
+  canvasSuspended = true; siteEditor?.setSuspended(true); siteEditor?.cancel(); if (drag) finishPointer(null, true); releasePreviewPointer(); cancelCanvasRender();
+  if (!event.persisted) { siteEditor?.dispose(); canvasObserver.disconnect(); previewEvents.abort(); releasePreviewPointer(); floorNavigator.destroy(); disposePreviewRenderer(); renderer?.forceContextLoss(); }
 });
-window.addEventListener('pageshow', () => { canvasSuspended = false; resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); });
+window.addEventListener('pageshow', () => { canvasSuspended = false; siteEditor?.setSuspended(document.hidden); resizeCanvases(document.querySelector('.canvas-shell').getBoundingClientRect()); requestCanvasRender(); });
 siteEditor = createSiteEditor({
   canvas: planCanvas, ctx, $, node, button, field, row, section, t,
   getProject: displayedProject, getAcceptedProject: () => project, getView: () => view,
   toScreen, toWorld, localPoint, snap, viewport: () => ({ map, size }), colors: () => planColors,
   spaceHeld: () => spaceHeld, isCandidate: () => !!candidatePreview,
   transact, status, renderUI, render: requestCanvasRender, changed: editorChanged,
+  mapContextChanged(configured) { previewEnvironment?.setSiteContext(!!displayedProject().site?.features.length || configured); },
   reconcile: reconcileInspector, inspectorValue,
   ensurePlan() { if (view === 'preview') setView('plan'); },
   fit() { fitPlan(); fitPreview(); requestCanvasRender(); },
@@ -1774,8 +1797,8 @@ siteEditor = createSiteEditor({
   modeChanged() {
     orbit.mode = 'orbit'; selection = null; inspectorScope = ''; previewDirty = true;
     if (haSourcePolicy) {
-      $('preview-tab').textContent = siteEditor.active ? 'Preview 3D' : 'Published home';
-      $('preview-tab').setAttribute('aria-label', siteEditor.active ? 'Preview 3D' : 'Published home');
+      $('preview-tab').textContent = t(siteEditor.active ? 'Preview 3D' : 'Published home');
+      $('preview-tab').setAttribute('aria-label', t(siteEditor.active ? 'Preview 3D' : 'Published home'));
     }
     setView('plan');
   },
@@ -1789,7 +1812,10 @@ function renderLocale() {
   // Switching a presentation preference must not discard an unfinished form.
   const drafts = [...$('inspector-body').querySelectorAll('input,select,textarea')].map(input => ({ value: input.value, checked: input.checked, draft: input.inspectorDraft, invalid: input.getAttribute('aria-invalid') }));
   translateStatic();
-  if (haSourcePolicy) $('preview-tab').textContent = siteEditor?.active ? 'Preview 3D' : 'Published home';
+  if (haSourcePolicy) {
+    const label = t(siteEditor?.active ? 'Preview 3D' : 'Published home');
+    $('preview-tab').textContent = label; $('preview-tab').setAttribute('aria-label', label);
+  }
   $('language-select').value = getLocale();
   document.querySelectorAll('[data-tool]').forEach(element => {
     const label = element.querySelector('span:nth-child(2)').textContent;
@@ -1894,7 +1920,7 @@ export const editorBridge = Object.freeze({
   revision: () => editorRevision,
   editingMode: () => siteEditor.active ? 'site' : 'floor',
   setEditingMode(mode) { if (!['site', 'floor'].includes(mode)) throw new Error('Unknown editing mode.'); siteEditor.setActive(mode === 'site'); },
-  selectionContext: () => ({ mode: siteEditor.active ? 'site' : 'floor', siteFeatureId: siteEditor.active ? siteEditor.selectedId : null, floorId: activeFloorId, roomId: selection?.kind === 'rooms' ? selection.id : selection?.kind === 'items' ? selected()?.room : null }),
+  selectionContext: () => ({ mode: siteEditor.active ? 'site' : 'floor', siteScope: siteEditor.neighborhood ? 'neighborhood' : 'all', siteFeatureId: siteEditor.active ? siteEditor.selectedId : null, floorId: activeFloorId, roomId: selection?.kind === 'rooms' ? selection.id : selection?.kind === 'items' ? selected()?.room : null }),
   subscribe(listener) { editorListeners.add(listener); return () => editorListeners.delete(listener); },
   previewProject(candidate) {
     validateProject(candidate); validateSourcePolicy(candidate); serializeProject(candidate); candidatePreview = clone(candidate); previewDirty = true;
@@ -1922,12 +1948,13 @@ if (haContext) {
     initialize(value, catalog, aiTransport, policy, hostActions) {
       const next = value || blankProject(); validateProject(next); serializeProject(next);
       installSourcePolicy(next, policy, hostActions);
+      siteEditor.setMapTransport(hostActions?.mapTransport);
       if (haSourcePolicy) {
         $('split-tab').hidden = true;
         for (const id of ['plan-tab', 'preview-tab']) { $(id).setAttribute('role', 'button'); $(id).removeAttribute('aria-selected'); $(id).removeAttribute('aria-controls'); $(id).tabIndex = 0; }
         $('plan-tab').parentElement.setAttribute('role', 'group');
         $('plan-tab').parentElement.setAttribute('aria-label', 'Drawing and published home');
-        $('preview-tab').textContent = 'Published home'; $('preview-tab').lang = 'en';
+        $('preview-tab').textContent = t('Published home'); $('preview-tab').removeAttribute('lang');
         const helpPreview = document.querySelector('.native-help [data-guide-action="preview"]');
         helpPreview.textContent = 'Published home';
         helpPreview.parentElement.querySelector('p').textContent = 'Use Published home to inspect the current installed details. Changes to your drawing appear there only after Save draft and Publish to 3D Home. Back to editing returns to this drawing.';

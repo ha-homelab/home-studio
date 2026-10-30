@@ -461,9 +461,17 @@ renderer call containing every expected active fixture. A connection label or
 updated CPU-side light state alone cannot finish the startup measurement.
 Failed renderer calls do not advance the recorded frame state.
 
-Both drivers include two animation frames after pointer release in their drag
-timings. A fast input acknowledgement alone is not rendering responsiveness;
-the native 15-second viewer and 10-second planner limits include this draw wait.
+A fast input acknowledgement alone is not rendering responsiveness. The
+Playwright viewer waits for a fresh, full-resolution scene draw with the changed
+rendered camera (including rotation for Home), then 150 ms without another draw
+or camera change. Timer polling accepts a draw completed during real input;
+it does not require extra animation frames from an already idle document.
+Input and receipt share the existing 15-second limit, enforced both in the
+host and within the frame; the complete scenario still has its 180-second limit.
+Home return and screenshot reset use the same bounded draw receipt without
+requiring a camera change. `framesMs` includes evaluation transport and polling;
+`receiptWaitMs` records only the in-frame wait. Native driver draw waits and the
+15-second viewer / 10-second planner limits are unchanged.
 
 ## Reproducibility and evidence
 
@@ -719,6 +727,30 @@ Target checks retain visibility, enabled state, Playwright's stable scrolling an
 geometric hit testing. Iframe locator bounds provide main-frame CSS coordinates;
 the hit test runs in the target document. No synthetic click, `trial:true` input,
 extra attempt or relaxed timeout is used.
+
+The editor-entry tap also records its target bounds, hit test, and frame
+lifecycle before sending the original input. If that input fails, a bounded
+500 ms probe records timer and animation-frame progress and the target's final
+state. This probe runs only **after failure**: it cannot wake an idle compositor
+to make the original actionability check pass. Its evidence describes recovery,
+not scheduling during the preceding timeout. Diagnostic collection and handle
+cleanup are bounded, and neither replaces the original input error.
+
+Native planner acceptance waits for a completed draw of the current nonempty
+2D bitmap, rather than treating entry into `clearRect` as a completed paint.
+Load, setup, and final geometry snapshots share the original 30-second budget.
+Before input, one bounded readback must find more than one visible RGB color in
+the current bitmap; uniform or fully transparent output fails. The initial 2D
+screenshot is retained separately from the later 3D preview. Readback and the
+screenshot stay inside that same load budget, and subsequent geometry evidence
+must match the bitmap's dimensions and resize generation.
+The final snapshots must agree before a real drag, which must still place the
+item at exactly 1.5 m within 10 seconds. Failure artifacts retain bounded error
+stacks, bitmap dimensions, and a bounded pixel summary. A successful draw call
+alone does not prove visible pixels; nonblank pixels alone do not prove every
+fixture item or compositor presentation. Optional catalog thumbnails tolerate an
+unavailable 2D backing store without interrupting selection or dragging; this
+does not suppress errors from the main drawing canvas or unrelated exceptions.
 
 If a Chromium phone/tablet viewer check fails, the job repeats only that viewer
 size in two fixed diagnostic modes: the original Playwright tap, then

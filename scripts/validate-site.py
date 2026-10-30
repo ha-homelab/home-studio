@@ -55,7 +55,7 @@ SITE_FILES = (
     'planner/ha-bridge.js', 'planner/draft-storage.js', 'planner/inspector-dom.js', 'planner/onboarding.js', 'planner/device-onboarding.js', 'planner/room-transform.js', 'planner/device-onboarding-ui.js', *(f'planner/examples/{name}.js' for name in ('practice', 'decor', 'patterns', 'garage')),
     'planner/help.js', 'planner/help.css', 'planner/help-locales.js', 'planner/language-links.js',
     *(f'planner/locales/{code}.js' for code in LOCALE_CODES),
-    'planner/model.js', 'planner/site-model.js', 'planner/site-editor.js', 'planner/site-editor.css', 'planner/catalog.js', 'planner/furniture.js', 'planner/guide.html', 'planner/guide.css',
+    'planner/model.js', 'planner/site-model.js', 'planner/site-editor.js', 'planner/site-editor.css', 'planner/site-map-underlay.js', 'planner/catalog.js', 'planner/furniture.js', 'planner/guide.html', 'planner/guide.css',
     'planner/publishing.html', 'planner/guide-assets/practice-home.json',
     'planner/guide-assets/01-room.jpg', 'planner/guide-assets/02-rooms.jpg',
     'planner/guide-assets/03-door.jpg', 'planner/guide-assets/04-window.jpg',
@@ -75,8 +75,8 @@ REPO_FILES = (
     'camera-tour-viewer.js', 'docs/camera-tours.md', 'docs/images/camera-tour-workflow.svg', 'scripts/test-camera-tour.mjs', 'scripts/test-camera-tour-recording.mjs', 'scripts/test-camera-tour-session-contract.mjs', 'scripts/test-camera-tour-browser.cjs', 'scripts/test-camera-tour-native-downloads.cjs', 'scripts/test-camera-tour-hosts.cjs','scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'THIRD_PARTY_NOTICES.md',
               'docs/closed-build.md', '.closed-build-policy.json', 'requirements-closed-build.txt',
               '.github/workflows/closed-build.yml', 'docker/closed-worker.Dockerfile',
-              'scripts/closed_build.py', 'scripts/closed_envelope.py', 'scripts/closed_worker.py',
-              'scripts/closed_synthetic.py', 'scripts/test_closed_build.py',
+              'scripts/closed_build.py', 'scripts/closed_envelope.py', 'scripts/closed_upload_control.py', 'scripts/closed_worker.py',
+              'scripts/closed_synthetic.py', 'scripts/test_closed_build.py', 'scripts/test_closed_upload_control.py',
               'scripts/download_tls.py', 'scripts/test-download-tls.py', 'requirements-tls-test.txt',
               'requirements-strict-tls.txt', 'docs/transport-security.md',
               'docs/vacuum-position.md', 'scripts/test-vacuum-state.cjs', 'scripts/test-vacuum-view.cjs', 'scripts/test-vacuum-position-host.cjs', 'scripts/test-vacuum-browser.cjs',
@@ -99,7 +99,7 @@ REPO_FILES = (
               'scripts/test-floor-navigator.cjs', 'scripts/test-planner-navigation.cjs', 'scripts/test-floor-navigation.cjs',
               'scripts/test-i18n.mjs', 'scripts/test-i18n-browser.cjs', 'scripts/test-validation-i18n.mjs',
               'scripts/test-help-i18n.cjs', 'scripts/test-panel-language.cjs', 'scripts/test-viewer-i18n.cjs', 'scripts/test-lock-control.cjs',
-              'viewer-i18n.js', 'viewer_locales.py', 'viewer-locales/index.json',
+              'viewer-i18n.js', 'viewer_locales.py', 'viewer-locales/index.json', 'scripts/test-viewer-locales.py',
               *(f'viewer-locales/{code}.json' for code in LOCALE_CODES),
               'README.md', 'LICENSE', 'CONTRIBUTING.md', 'SECURITY.md',
               'GOVERNANCE.md', 'CODE_OF_CONDUCT.md', 'ROADMAP.md', 'docs/quality.md',
@@ -130,7 +130,8 @@ REPO_FILES = (
               'scripts/test-light-state.cjs', 'scripts/test-tv-screen.cjs', 'scripts/test-media-preview.cjs',
               'scripts/test-install-home-assistant.py', 'scripts/test-public-package.py', 'scripts/test-wall-tops.cjs',
               'scripts/test-rounded-walls.cjs', 'scripts/test-wall-sheen.cjs', 'scripts/test-wall-motion.cjs', 'scripts/test-wall-outline-materials.cjs', 'scripts/test-unlit-architectural-walls.cjs', 'scripts/test-flat-editor-floors.cjs', 'docs/rounded-walls.md',
-              'scripts/test-browser-stability.cjs', 'scripts/browser-stability-diagnostics.cjs',
+              'scripts/test-browser-stability.cjs', 'scripts/browser-stability-diagnostics.cjs', 'scripts/browser-pixel-evidence.cjs',
+              'scripts/browser-tap-diagnostics.cjs', 'scripts/test-browser-tap-diagnostics.cjs', 'scripts/test-planner-thumbnail.cjs',
               'scripts/browser-startup-diagnostics.cjs', 'scripts/test-browser-startup-diagnostics.cjs',
               'scripts/test-browser-stability-diagnostics.cjs', 'scripts/test-home-render-budget.cjs',
               'scripts/test-packed-room-lighting.cjs', 'scripts/test-zero-point-block.cjs', 'scripts/test-point-decay-two.cjs', 'scripts/test-cached-shadow-transmission.cjs', 'scripts/test-literal-lambert-directional.cjs', 'docs/literal-lambert-directional.md', 'docs/point-decay-two.md', 'scripts/test-glass-wall-program.cjs', 'scripts/test-fallback-shared-program.cjs',
@@ -154,27 +155,36 @@ REPO_FILES = (
               'planner/project.py', 'planner/site_model.py', 'planner/package.json', 'planner/catalog.json', 'planner/furniture.py',
               'docs/site-editor.md', 'docs/images/site-editor-layers.svg',
               'scripts/test-site-model.mjs', 'scripts/test-site-compiler.py', 'scripts/test-site-editor.cjs', 'scripts/test-ai-site.mjs',
+              'scripts/test-site-map-underlay.mjs', 'scripts/test-native-site-map.cjs',
               'scripts/generate-furniture-catalog.py', 'scripts/test-furniture.mjs', 'scripts/test-furniture.py',
               'planner/anatomy.json', 'planner/vehicle_authoring.py', 'planner/bath_authoring.py', 'scripts/author-furniture-profiles.py',
               'scripts/test-furniture-profiles.py', 'docs/catalog-material-authoring.md',
               'scripts/test-inventory-appearance.cjs', 'scripts/test-inventory-appearance.py',
               'scripts/test-furniture-patterns.mjs', 'scripts/test-furniture-patterns.py',
+              'scripts/test-fixture-animation.cjs', 'scripts/test-fixture-animation.py',
+              'scripts/test-climate-state.cjs', 'scripts/test-marker-motion.cjs',
+              'scripts/test-device-effects.cjs', 'scripts/test-device-feedback.cjs',
               'scripts/test-furniture-editor.cjs', 'package.json', 'package-lock.json',
               'planner/example-home.json', 'geometry.py', 'exporters.py', 'physical_exports.py', 'material_textures.py', 'material-textures.js', 'pbr-color-data.js','pbr-materials.js', 'pbr_materials.py', 'environment-lighting.js',
               'scripts/test-material-textures.py', 'scripts/test-material-textures.cjs', 'scripts/test-pbr-materials.py', 'scripts/test-pbr-materials.cjs', 'scripts/test-pbr-lighting.cjs', 'scripts/test-physical-exports.py', 'docs/material-textures.md', 'docs/material-color-provenance.json',
               'viewer.template.html', 'viewer.js', 'home-view.html', 'home-view.css',
-              'curtain-state.js', 'motion-state.js', 'appliance-state.js', 'presence-view.js', 'vacuum-state.js', 'vacuum-view.js', 'tv-screen.js', 'camera-preview.js', 'media-preview.js',
+              'curtain-state.js', 'motion-state.js', 'appliance-state.js', 'climate-state.js', 'marker-motion.js', 'device-effects.js', 'presence-view.js', 'vacuum-state.js', 'vacuum-view.js', 'tv-screen.js', 'camera-preview.js', 'media-preview.js',
               'assumed-zone-view.js', 'map-layer.js', 'home-view.js', 'light-state.js', 'room-lighting.js',
               'custom_components/home_floorplan/__init__.py',
               'custom_components/home_floorplan/site.py',
               'custom_components/home_floorplan/native.py', 'custom_components/home_floorplan/ai.py', 'custom_components/home_floorplan/map.py',
               'docs/map-navigation.md', 'scripts/test-ha-map.py', 'scripts/test-ha-map-bridge.cjs', 'scripts/test-map-scene.cjs',
               'custom_components/home_floorplan/generated.py',
+              'custom_components/home_floorplan/site_frame.py', 'custom_components/home_floorplan/site_calibration.py',
+              'custom_components/home_floorplan/runtime_upgrade.py', 'custom_components/home_floorplan/baseline_transaction.py', 'scripts/test-runtime-upgrade.py', 'scripts/fixtures/map-layer-v0.js',
+              'scripts/test-site-calibration.py', 'scripts/test-site-calibration.cjs', 'scripts/test-viewer-runtime-upgrade.cjs',
+              'docs/imported-site-calibration.md',
               'custom_components/home_floorplan/permissions.py',
               'custom_components/home_floorplan/config_flow.py',
               'custom_components/home_floorplan/strings.json',
               'custom_components/home_floorplan/translations/en.json',
               'custom_components/home_floorplan/static/studio.js',
+              'custom_components/home_floorplan/static/map-transport.js',
               'hacs.json', 'requirements-ha-test.txt',
               'scripts/build-home-studio.py', 'scripts/test-ha-native.py', 'scripts/test-blender-export.py', 'scripts/test-blender-import.py',
               'scripts/test-ha-generated.py',
@@ -188,7 +198,7 @@ REPO_FILES = (
               'scripts/test-dashboard-card.cjs', 'scripts/test-media-artwork-host.cjs',
               'scripts/test-media-artwork-browser.cjs', 'docs/images/dashboard-media-example.png',
               'scripts/test-media-command-host.cjs', 'scripts/test-media-controls.cjs',
-              'scripts/test-generic-entities.cjs', 'scripts/test-device-interactions.cjs', 'docs/device-controls.md')
+              'scripts/test-generic-entities.cjs', 'scripts/test-device-interactions.cjs', 'docs/device-controls.md', 'docs/images/device-feedback.png')
 # Supplementary tripwires, not a substitute for reviewing source and image pixels.
 PRIVATE = re.compile(r'\bunit\d{3}\b|/Users/|-----BEGIN .*PRIVATE KEY|'
                      r'\b(?:192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3})\b', re.I)
@@ -247,7 +257,7 @@ def validate(root):
             validate_website_media(path)
             if path.suffix != '.vtt':
                 continue
-        if path.suffix == '.jpg' or relative in ('docs/images/dashboard-media-example.png', 'docs/images/native-editor.png', 'docs/images/garden-surroundings.png'):
+        if path.suffix == '.jpg' or relative in ('docs/images/dashboard-media-example.png', 'docs/images/native-editor.png', 'docs/images/garden-surroundings.png', 'docs/images/device-feedback.png'):
             continue
         text = path.read_text(encoding='utf-8')
         # The validator intentionally contains its own private-pattern tripwires.

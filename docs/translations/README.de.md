@@ -24,7 +24,7 @@ Den separaten Browser-Editor kannst du während der HA-Einrichtung nutzen. Er ha
 
 Zeichne dein Zuhause im Browser. Du brauchst kein Konto. Die Sprache wählst du oben im Editor.
 
-1. Füge Räume, Wände, Türen und Fenster hinzu. Die Bibliothek enthält 206 Modelle. Wähle eine Farbpalette und bei geeigneten Objekten ein Oberflächenmuster.
+1. Füge Räume, Wände, Türen und Fenster hinzu. Die Bibliothek enthält 211 Modelle. Wähle eine Farbpalette und bei geeigneten Objekten ein Oberflächenmuster.
 2. Exportiere JSON, um eine bearbeitbare Kopie zu sichern. Entwürfe bleiben nur in diesem Browser. Ein Sprachwechsel verändert deinen Grundriss nicht.
 
 ### Optional: Portables Werkzeugpaket und Python-Compiler

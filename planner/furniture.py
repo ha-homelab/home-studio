@@ -724,6 +724,8 @@ def build_furniture_asset(item):
         materials[material] = linear_color(color, opacity)
         fabric = supports_curtain(model) and part['material'] in ('body', 'accent')
         tags = {'curtain_fabric': True, 'curtain_panel': 'left' if part['center'][0] < 0 else 'right'} if fabric else {}
+        if part.get('fan_rotor') is True and model.get('device_animation', {}).get('rotor'):
+            tags['fan_rotor'] = True
         mesh = {'name': 'part_' + str(index), **primitive(part, bool(pattern and part.get('pattern_face'))), 'material': material, 'kind': 'inventory', **tags}
         if pattern and part.get('pattern_face'):
             background, accent = pattern_surface(part, pattern)
@@ -747,4 +749,5 @@ def build_furniture_asset(item):
             mesh.update(surface_finish=pattern_finish, material_family=pattern_finish)
         chart_uv(mesh, item.get('dimensions_m', model['dimensions_m']))
         if any(p.get('geometry_profile') for p in model['parts']): compact_mesh(mesh)
-    return {'meshes': meshes, 'materials': materials}
+    return {'meshes': meshes, 'materials': materials,
+            **({'device_animation': model['device_animation']} if 'device_animation' in model else {})}

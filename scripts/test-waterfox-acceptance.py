@@ -647,24 +647,155 @@ def viewer(client, origin, project, record, save):
         assert_native_graphics(sample['teardownGraphics'], teardown=True)
 
 
+PLANNER_INPUT_SNAPSHOT = r"""
+const canvas=document.getElementById('plan-canvas'),rect=canvas.getBoundingClientRect();
+const points=[[1,1],[1.5,1]].map(p=>window.planner.worldToScreen(p).map((v,i)=>v+(i?rect.y:rect.x)));
+const item=window.planner.getProject().floors[0].items[0],stats=window.__plannerStats;
+return {time:performance.now(),canvas:window.__plannerPlanState(),
+  rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},viewport:[innerWidth,innerHeight],
+  documentFocused:document.hasFocus(),visibilityState:document.visibilityState,points,
+  endpointHits:points.map(([x,y])=>{const e=document.elementFromPoint(Math.round(x),Math.round(y));
+    return {tag:e?.tagName||null,id:e?.id||null,canvas:e===canvas,visible:x>=0&&y>=0&&x<innerWidth&&y<innerHeight};}),
+  itemId:item.id,position:{...item.position_m},selection:window.planner.getSelection(),
+  errorCount:stats.errorCount,errors:stats.errors.slice(0,32),errorDetails:stats.errorDetails.slice(0,32),
+  canvasReadErrorCount:stats.canvasReadErrorCount,canvasReadErrors:stats.canvasReadErrors.slice(0,32)};
+"""
+
+
+PLANNER_2D_PIXELS = r"""
+const canvas=document.getElementById('plan-canvas'),width=canvas?.width,height=canvas?.height;
+if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||width*height>4000000)
+  return {status:'outside-readback-bound',width:width??null,height:height??null};
+try {
+  const resizeSequence=window.__plannerPlanState().resizeSequence;
+  const pixels=canvas.getContext('2d').getImageData(0,0,width,height).data,colors=new Set();
+  if(pixels.length!==width*height*4)throw Error('Incomplete canvas readback');
+  let scanned=0,visible=0;
+  for(let i=0;i<pixels.length;i+=4) {
+    if(pixels[i+3]>0) { colors.add((pixels[i]<<16)|(pixels[i+1]<<8)|pixels[i+2]);visible++; }
+    scanned++;
+    if(colors.size>=257)break;
+  }
+  return {status:'pixels-read',width,height,resizeSequence,time:performance.now(),
+    readbackBytes:pixels.length,pixelCount:width*height,scannedPixels:scanned,visiblePixelsScanned:visible,
+    distinctVisibleRGBColorsAtLeast:colors.size,complete:scanned===width*height,visibleRGBSample:[...colors].slice(0,8)};
+} catch(error) {
+  return {status:'readback-failed',width,height,name:String(error?.name||'').slice(0,128),
+    message:String(error?.message||error).slice(0,2048),stack:String(error?.stack||'').slice(0,4096)};
+}
+"""
+
+
+def assert_planner_painted(snapshot):
+    require(snapshot['errorCount'] == 0 and snapshot['errors'] == [],
+            'Planner application error before input: ' + json.dumps(snapshot['errorDetails']))
+    canvas = snapshot['canvas']
+    paint = canvas['lastPaint']
+    require(canvas['attached'] and canvas['width'] > 0 and canvas['height'] > 0 and
+            canvas['contextAvailable'] and canvas['contextLost'] is not True and
+            canvas['paintCount'] > 0 and isinstance(paint, dict) and
+            paint['resizeSequence'] == canvas['resizeSequence'] and
+            paint['width'] == canvas['width'] and paint['height'] == canvas['height'],
+            'Planner requires a completed paint of the current nonempty 2D bitmap')
+
+
+def assert_planner_pixels(pixels, snapshot):
+    require(pixels['status'] == 'pixels-read', 'Planner 2D readback failed: ' + json.dumps(pixels))
+    require(pixels['readbackBytes'] == pixels['width'] * pixels['height'] * 4 and
+            pixels['distinctVisibleRGBColorsAtLeast'] > 1,
+            'Planner 2D bitmap must contain more than one visible RGB color')
+    require(all(pixels[key] == snapshot['canvas'][key] for key in ('width', 'height', 'resizeSequence')),
+            'Planner 2D bitmap changed after its nonblank readback')
+
+
+@contextlib.contextmanager
+def planner_load_scope(client, sample):
+    started = time.monotonic()
+    previous = client.__dict__.get('_cold_load_deadline')
+    deadlines = [started + 30]
+    deadlines.extend(value for value in (previous, client.__dict__.get('_browser_deadline')) if value is not None)
+    deadline = min(deadlines)
+    client._cold_load_deadline = deadline
+    sample.update(loadBudgetMs=30000, loadCompleted=False)
+    def remaining():
+        value = deadline - time.monotonic()
+        if value <= 0:
+            raise TimeoutError('Planner load exceeded 30 seconds or its remaining browser deadline')
+        return value
+    try:
+        yield remaining
+        remaining()  # A final snapshot returning after the deadline cannot pass.
+        sample['loadCompleted'] = True
+    finally:
+        finished = time.monotonic()
+        sample['loadMs'] = math.floor((finished - started) * 1000000) / 1000
+        sample['loadTimedOut'] = finished >= deadline
+        client._cold_load_deadline = previous
+
+
 def planner(client, origin, project, record, save):
     url = origin + '/planner/?lang=en'
     client.call('WebDriver:Navigate', {'url': url})
     client.wait('window.planner')
     client.execute("localStorage.setItem('home-studio.project.v1',JSON.stringify(arguments[0]));return true;", project)
-    started = time.monotonic()
-    client.call('WebDriver:Navigate', {'url': url})
-    client.wait('window.planner')
-    sample = {'loadMs': round((time.monotonic() - started) * 1000)}
+    sample = {}
     record['samples'].append(sample)
-    require(sample['loadMs'] < 30000, 'Planner load exceeded 30 seconds')
-    client.execute(NATIVE_GL_DIAGNOSTICS)
-    client.execute("sessionStorage.removeItem('home-studio.native-gl-teardown');return true;")
-    require(client.execute('return window.planner.getProject().floors.reduce((n,f)=>n+f.items.length,0);') == 256, 'All 256 furniture items load')
-    points = client.execute("const c=document.querySelector('#plan-canvas').getBoundingClientRect();return [[1,1],[1.5,1]].map(p=>window.planner.worldToScreen(p).map((v,i)=>v+(i?c.y:c.x)));")
-    sample['itemDragMs'] = client.drag(*points)
-    require(sample['itemDragMs'] < 10000, 'Planner furniture drag exceeded 10 seconds')
-    require(client.execute('return window.planner.getProject().floors[0].items[0].position_m.x;') == 1.5, 'Real pointer input moves the intended furniture')
+    try:
+        # All load/setup/snapshot calls share the original 30-second budget,
+        # including the transport's in-flight header and body reads.
+        with planner_load_scope(client, sample) as remaining:
+            client.call('WebDriver:Navigate', {'url': url})
+            client.wait('window.planner', timeout=remaining())
+            client.wait("window.__plannerStats.errors.length || (()=>{const s=window.__plannerPlanState();"
+                        "return s.paintCount>0&&s.lastPaint.resizeSequence===s.resizeSequence;})()",
+                        timeout=remaining())
+            client.execute(NATIVE_GL_DIAGNOSTICS)
+            client.execute("sessionStorage.removeItem('home-studio.native-gl-teardown');return true;")
+            require(client.execute('return window.planner.getProject().floors.reduce((n,f)=>n+f.items.length,0);') == 256, 'All 256 furniture items load')
+            sample['initial2D'] = client.execute(PLANNER_2D_PIXELS)
+            client.screenshot(Path(record['output']) / 'planner-initial-2d.png')
+            sample['initial2DScreenshot'] = 'planner-initial-2d.png'
+            sample['loaded'] = client.execute(PLANNER_INPUT_SNAPSHOT)
+            sample['beforeDrag'] = client.execute(PLANNER_INPUT_SNAPSHOT)
+            # Revalidate the projection and target after setup, immediately
+            # before real input. An intervening resize is a failure, not a retry.
+            assert_planner_painted(sample['beforeDrag'])
+            require(all(sample['loaded'][key] == sample['beforeDrag'][key] for key in ('rect', 'points')) and
+                    sample['loaded']['canvas']['resizeSequence'] == sample['beforeDrag']['canvas']['resizeSequence'],
+                    'Planner drag geometry changed immediately before input')
+            require(all(hit['canvas'] and hit['visible'] for hit in sample['beforeDrag']['endpointHits']),
+                    'Planner drag endpoints must reach the visible plan canvas')
+            assert_planner_pixels(sample['initial2D'], sample['beforeDrag'])
+        require(sample['loadMs'] < 30000, 'Planner load exceeded 30 seconds')
+        save()
+        try:
+            sample['itemDragMs'] = client.drag(*sample['beforeDrag']['points'])
+        except Exception:
+            try:
+                sample['afterDrag'] = client.execute(PLANNER_INPUT_SNAPSHOT)
+            except Exception as error:
+                sample['afterDragCaptureError'] = str(error)[:1024]
+            save()
+            raise
+        sample['afterDrag'] = client.execute(PLANNER_INPUT_SNAPSHOT)
+        save()
+        require(sample['itemDragMs'] < 10000, 'Planner furniture drag exceeded 10 seconds')
+        require(sample['afterDrag']['errorCount'] == 0 and sample['afterDrag']['errors'] == [],
+                'Planner application error during input: ' + json.dumps(sample['afterDrag']['errorDetails']))
+        require(client.execute('return window.planner.getProject().floors[0].items[0].position_m.x;') == 1.5, 'Real pointer input moves the intended furniture')
+    except Exception:
+        if 'beforeDrag' not in sample:
+            try:
+                sample['beforeDrag'] = client.execute(PLANNER_INPUT_SNAPSHOT)
+            except Exception as error:
+                sample['beforeDragCaptureError'] = str(error)[:1024]
+        # Retain the bitmap at failure as well; never let diagnostics mask the cause.
+        try:
+            sample['failure2D'] = client.execute(PLANNER_2D_PIXELS)
+        except Exception as error:
+            sample['failure2DCaptureError'] = str(error)[:1024]
+        save()
+        raise
     started = time.monotonic()
     client.execute("document.querySelector('#preview-tab').click();document.querySelector('#all-floors').click();return true;")
     client.wait('window.planner.getPreviewMetadata().items===256 && window.planner.getPreviewMetadata().renderCount>0')

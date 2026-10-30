@@ -56,7 +56,8 @@ for a remote browser connection to HA; the masked field alone does not encrypt i
 Selected photos, instructions, and required plan context go to that provider.
 With a gateway, that gateway receives the request and routes its content to an upstream
 provider. Memory-only handling does not mean nothing is transmitted or retained by
-the provider. Review the overview's privacy requirements before using room photos.
+the provider. Review the overview's privacy requirements before using room or
+neighborhood photos, and use only [imagery permitted for this workflow](site-editor.md#choose-reference-imagery).
 
 Direct browser requests are not implemented. A future direct mode would require a dedicated trusted origin: the endpoint must support
 the browser's CORS requests, and page scripts or extensions can access exposed secrets.
@@ -137,6 +138,16 @@ The implemented profile uses `https://generativelanguage.googleapis.com/v1beta/o
    [billing guide](https://ai.google.dev/gemini-api/docs/billing).
 4. Choose a model using the [catalog](https://ai.google.dev/gemini-api/docs/models),
    checking availability, modalities, schema support, and free/paid-tier differences.
+
+Before sending private photos, check the [Gemini data-use terms](https://ai.google.dev/gemini-api/terms).
+Unpaid inputs and outputs may be used to improve Google products and reviewed by
+people; those terms prohibit submitting sensitive, confidential or personal
+information. For paid Gemini API service, the request's Cloud project must have
+an active billing account. Under paid-service data handling, prompts
+and responses are not used to improve products, but limited safety/security logging
+still applies. The terms apply paid-service data handling to users in the EEA,
+Switzerland and UK even for unpaid services. Home Studio cannot verify your billing
+status or applicable treatment from the key; confirm it before sending private data.
 
 Current native image and schema examples use
 `https://generativelanguage.googleapis.com/v1beta/interactions` with `x-goog-api-key`.

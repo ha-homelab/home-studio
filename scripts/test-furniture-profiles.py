@@ -32,7 +32,7 @@ def area(mesh):
 
 class AuthoredProfiles(unittest.TestCase):
     def test_every_stock_part_has_closed_oriented_refined_geometry(self):
-        self.assertEqual(len(CATALOG['models']),206)
+        self.assertEqual(len(CATALOG['models']),211)
         for model in CATALOG['models']:
             for index,part in enumerate(model['parts']):
                 with self.subTest(model=model['id'],part=index):

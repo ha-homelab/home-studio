@@ -14,7 +14,7 @@ function exercise(embedded, {hidden = false, initialRoom = null, failRender = fa
     reflectionEnvironment: null, contactShading: null, hemisphere: null,
     viewerI18n: {locale: 'en'}, items: [], root: null, objectGroup: null,
     document: {hidden: false}, renderSuspended: false, renderLost: false, devicePixelRatio: 1, renderProfile: {pixels: 2000000},
-    requestRender() {}, initialMapPending: false, renderRequest: 0, renderDelay: 0, interactionPointer: null, coalesceMotion: false, cancelAnimationFrame() {}, clearTimeout() {},
+    requestRender() {}, initialMapPending: false, renderRequest: 0, renderDelay: 0, renderFallback: 0, renderEpoch: 0, interactionPointer: null, coalesceMotion: false, cancelAnimationFrame() {}, clearTimeout() {},
     model: {initial_room: initialRoom}, camera: {updateProjectionMatrix() {}},
     console: {error(error) { errors.push(error.message); }},
     requestAnimationFrame(callback) { frames.push(callback); },
@@ -227,7 +227,7 @@ function exerciseInitialMap({changed = false, hidden = false, failed = false, lo
     Object.assign(c, {
       embedded: true, initialViewReady: true, failed3D: failed, renderLost: lost,
       renderSuspended: suspended, renderCount: bootDraws, renderRequest: 0,
-      renderDelay: 0, coalesceMotion: false, interactionPointer: null,
+      renderDelay: 0, renderFallback: 0, renderEpoch: 0, coalesceMotion: false, interactionPointer: null,
       reflectionEnvironment: null, contactShading: null, environmentLayer: null,
       editorFloorMaterials: null, interactionRenderer: null, scene: {}, camera: {},
       updateWallOutlines() {}, updateEditorCamera() {}, invalidateShadows() {},
@@ -280,6 +280,7 @@ function exerciseInitialMap({changed = false, hidden = false, failed = false, lo
     vm.runInContext(source.slice(rpcStart, rpcEnd), c);
   });
   return {...host, raf, timers, events, loads, draws, errors,
+    get rpcTimers() { return new Map([...timers].filter(([id]) => id !== host.c.renderFallback)); },
     flush() { const queue = [...raf.values()]; raf.clear(); queue.forEach(fn => fn()); },
     expireDue() { for (const [id, timer] of timers) if (timer.due <= clock) { timers.delete(id); timer.fn(); } },
   };
@@ -289,7 +290,7 @@ for (const changed of [false, true]) {
   const cold = exerciseInitialMap({changed, bootDraws: 5});
   assert.equal(cold.calls.sent[0].type, 'model_config', 'Metadata is delivered before deferred map work');
   assert.deepEqual(cold.loads, [], 'Even a previous successful boot draw cannot start this init RPC');
-  assert.equal(cold.timers.size, 0, 'The map deadline must not include cold compilation');
+  assert.equal(cold.rpcTimers.size, 0, 'The map deadline must not include cold compilation');
   assert.equal(cold.calls.builds, Number(changed));
   if (changed) assert.deepEqual(cold.calls.pendingAtRebuild, [false], 'Arm only after inventory rebuild');
   cold.port.onmessage({data: {type: 'states', connected: true, states: {light: 'on'}}});

@@ -83,7 +83,7 @@ const server = http.createServer(async (req, res) => {
     const errors=[], external=[];page.on('pageerror',e=>errors.push(String(e)));
     page.on('request',req=>{if(!req.url().startsWith(origin)&&!req.url().startsWith('blob:'))external.push(req.url());});
     await page.addInitScript(()=>{window.received=[];window.addEventListener('message',event=>{if(event.data?.protocol==='home-studio-editor-v1')window.received.push(event.data);});});
-    await page.goto(origin+'/fixture');await page.waitForFunction(()=>host._ready);
+    await page.goto(origin+'/fixture');await page.waitForFunction(()=>window.host?._ready);
     assert.equal(await page.evaluate(()=>host.getBoundingClientRect().height),1100,'Native host fills the viewport even when its parent has auto height');
     assert.equal(await page.evaluate(()=>host._frame.getBoundingClientRect().bottom),1100);
     // A stale error belongs to its old token, even when a new session was
@@ -119,6 +119,31 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await frame.locator('#ai-panel').isVisible(),true,'The guide opens the existing AI panel');
     assert.equal(await frame.locator('#ai-panel').count(),1);
     assert.equal(calls.slice(beforePhotoGuide).some(call=>['connect','generate'].includes(call.action)),false,'Opening photo guidance must not connect a provider or generate a draft');
+    assert.equal(await frame.locator('#ai-mode').inputValue(),'furnish_room','Inside opens the room workflow');
+    await frame.locator('#ai-close').click();
+    await frame.locator('#site-mode').click();
+    await frame.getByRole('button',{name:'Neighborhood',exact:true}).click();
+    await frame.locator('#ai-open').click();
+    assert.equal(await frame.locator('#ai-mode').inputValue(),'site','Opening from Site automatically selects exterior planning');
+    assert.equal(await frame.locator('#ai-site-fields').isVisible(),true);
+    assert.match(await frame.locator('#ai-target').innerText(),/Neighborhood: add only neighboring/);
+    await frame.locator('#ai-site-home').fill('My home is the center building.');
+    const siteContext=JSON.parse(await frame.locator('#ai-context').textContent());
+    assert.equal(Object.hasOwn(siteContext,'floor_footprints'),false);
+    assert.equal(siteContext.exterior_reference.kind,'unavailable','An empty draft does not invent exterior geometry');
+    await frame.locator('#ai-close').click();
+    await frame.locator('#inside-mode').click();
+    await frame.locator('#ai-open').click();
+    assert.equal(await frame.locator('#ai-mode').inputValue(),'furnish_room','Returning Inside restores the previous room mode');
+    await frame.locator('#ai-mode').selectOption('new_room');
+    await frame.locator('#ai-close').click();
+    await frame.locator('#site-mode').click();
+    await frame.locator('#ai-open').click();
+    assert.equal(await frame.locator('#ai-mode').inputValue(),'site');
+    await frame.locator('#ai-close').click();
+    await frame.locator('#inside-mode').click();
+    await frame.locator('#ai-open').click();
+    assert.equal(await frame.locator('#ai-mode').inputValue(),'new_room','An explicitly chosen measured-room workflow survives a Site visit');
     assert.equal(nextSession,1);
     assert.equal(await frame.locator('#ai-key').getAttribute('type'),'password');
     assert.equal(await frame.getByRole('button',{name:/reveal|show.*key/i}).count(),0);
@@ -224,7 +249,7 @@ const server = http.createServer(async (req, res) => {
     releaseGenerations();await page.waitForTimeout(100);assert.equal(await page.locator('iframe').count(),0);assert.equal(await page.evaluate(()=>host._aiPending.size),0);assert.equal(await page.evaluate(()=>host._aiSession),null);
     assert.equal(sessions.size,0);
     await page.evaluate(()=>sessionStorage.clear());
-    await page.goto(origin+'/fixture?ai=0');await page.waitForFunction(()=>host._ready);frame=page.frames().find(value=>value.url().includes('embed='));assert.equal(await frame.locator('#ai-open').count(),0);
+    await page.goto(origin+'/fixture?ai=0');await page.waitForFunction(()=>window.host?._ready);frame=page.frames().find(value=>value.url().includes('embed='));assert.equal(await frame.locator('#ai-open').count(),0);
     assert.equal(await page.locator('#guide-photos').isVisible(),false,'Photo guidance is absent when the server disables AI');
     // Narrow screens keep the viewport-sized host and can scroll to the full editor.
     await page.setViewportSize({width:390,height:844});
@@ -234,7 +259,7 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await page.evaluate(()=>host._frame.getBoundingClientRect().bottom),1100);
     // A session created after its iframe has gone away is immediately closed.
     await page.evaluate(()=>sessionStorage.clear());
-    slowSession=true;await page.goto(origin+'/fixture');await page.waitForFunction(()=>host._ready);
+    slowSession=true;await page.goto(origin+'/fixture');await page.waitForFunction(()=>window.host?._ready);
     frame=page.frames().find(value=>value.url().includes('embed='));await frame.locator('#ai-open').click();
     await page.waitForFunction(()=>host._aiSessionPromise!==null);
     await waitForPending(pendingSessions);

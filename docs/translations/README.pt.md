@@ -24,7 +24,7 @@ O editor web separado pode ajudar enquanto o HA é preparado. Ele não tem conex
 
 Desenhe sua casa no navegador. Não é necessário criar uma conta. Escolha o idioma na parte superior do editor.
 
-1. Adicione cômodos, paredes, portas e janelas. A biblioteca inclui 206 modelos. Escolha uma paleta de cores e, nos objetos compatíveis, um padrão de superfície.
+1. Adicione cômodos, paredes, portas e janelas. A biblioteca inclui 211 modelos. Escolha uma paleta de cores e, nos objetos compatíveis, um padrão de superfície.
 2. Exporte JSON para guardar uma cópia editável. Os rascunhos ficam apenas neste navegador. Mudar o idioma não altera sua planta.
 
 ### Opcional: ferramentas portáteis e compilador Python

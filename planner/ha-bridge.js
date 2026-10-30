@@ -33,6 +33,7 @@ export function memoryDraftOptions() {
 }
 export function connectHost(context, { initialize, snapshot, currentFloor, editState, subscribe, flush, failed, guideAction, theme }, win = window) {
   const ai = createNativeAiTransport(context, win);
+  const map = createNativeMapTransport(context, win);
   let initialized = false, previous = '', previousState = '', sequence = 0;
   const send = (type, payload = {}) => win.parent.postMessage({ protocol: PROTOCOL, channel: context.channel, type, ...payload }, context.origin);
   const changed = (requestId) => {
@@ -52,7 +53,7 @@ export function connectHost(context, { initialize, snapshot, currentFloor, editS
         theme?.(data.theme);
         initialize(data.project, data.catalog, data.capabilities?.ai === true ? ai : null,
           { architectureEditing: data.capabilities?.architecture_editing !== false, source: data.source },
-          { publishedPreview: () => { if (initialized) send('published-preview'); } });
+          { publishedPreview: () => { if (initialized) send('published-preview'); }, mapTransport: map });
         initialized = true; changed();
       }
       catch { failed(); send('error', { message: 'The saved drawing could not be opened. Export its JSON from Home Assistant for recovery.' }); }
@@ -70,7 +71,73 @@ export function connectHost(context, { initialize, snapshot, currentFloor, editS
   // Transactions refresh inspector controls before the host reads field state.
   const unsubscribe = subscribe(() => queueMicrotask(() => changed()));
   send('ready');
-  return () => { unsubscribe(); ai.dispose(); win.removeEventListener('message', receive); };
+  return () => { unsubscribe(); ai.dispose(); map.dispose(); win.removeEventListener('message', receive); };
+}
+
+export function validMapRequest(action, body) {
+  if (action === 'get') return body === undefined;
+  return action === 'tile' && body && typeof body === 'object' && !Array.isArray(body) && Object.keys(body).length === 3 &&
+    ['z', 'x', 'y'].every(key => Object.hasOwn(body, key)) && Number.isInteger(body.z) && body.z >= 0 && body.z <= 19 &&
+    Number.isInteger(body.x) && Number.isInteger(body.y) && body.x >= 0 && body.y >= 0 && body.x < 2 ** body.z && body.y < 2 ** body.z;
+}
+export function mapReadResult(action, value) {
+  if (action === 'tile') {
+    const url = value?.data_url;
+    if (typeof url !== 'string' || url.length > 699074 || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(url)) return null;
+    const body = url.slice(22), bytes = body.length / 4 * 3 - (body.endsWith('==') ? 2 : body.endsWith('=') ? 1 : 0);
+    return body.length % 4 || bytes > 524288 ? null : { data_url: url, attribution: '© OpenStreetMap contributors', attribution_url: 'https://www.openstreetmap.org/copyright' };
+  }
+  if (action !== 'get' || !Number.isSafeInteger(value?.revision) || value.revision < 0 || typeof value.configured !== 'boolean') return null;
+  if (!value.configured) return value.config === null ? { revision: value.revision, configured: false, config: null } : null;
+  const config = value.config, number = (key, min, max) => typeof config?.[key] === 'number' && Number.isFinite(config[key]) && config[key] >= min && config[key] <= max;
+  if (!config || typeof config.enabled !== 'boolean' || !number('latitude', -85, 85) || !number('longitude', -180, 180) ||
+      !number('model_x', -10000, 10000) || !number('model_z', -10000, 10000) || !number('north_deg', 0, 360)) return null;
+  return { revision: value.revision, configured: true, config: Object.fromEntries(['enabled', 'latitude', 'longitude', 'model_x', 'model_z', 'north_deg'].map(key => [key, config[key]])) };
+}
+export function createNativeMapTransport(context, win = window) {
+  let sequence = 0, disposed = false;
+  const pending = new Map();
+  const send = (type, payload = {}) => win.parent.postMessage({ protocol: PROTOCOL, channel: context.channel, type, ...payload }, context.origin);
+  const finish = (id, error, result) => {
+    const entry = pending.get(id); if (!entry) return;
+    pending.delete(id); clearTimeout(entry.timer); entry.signal?.removeEventListener('abort', entry.abort);
+    error ? entry.reject(error) : entry.resolve(result);
+  };
+  const receive = event => {
+    const data = event.data, entry = pending.get(data?.requestId);
+    if (!entry || event.source !== win.parent || event.origin !== context.origin || data?.protocol !== PROTOCOL || data.channel !== context.channel || data.type !== 'map-response') return;
+    try {
+      if (new Blob([JSON.stringify(data)]).size > 700000) throw Error();
+      if (data.error) {
+        const code = ['map_disabled', 'access_denied', 'busy', 'invalid_request', 'invalid_response'].includes(data.error.code) ? data.error.code : 'unavailable';
+        finish(data.requestId, Object.assign(new Error('Map request failed'), { code }));
+      } else {
+        const result = mapReadResult(entry.action, data.result); if (!result) throw Error();
+        finish(data.requestId, null, result);
+      }
+    } catch { finish(data.requestId, Object.assign(new Error('Invalid map response'), { code: 'invalid_response' })); }
+  };
+  const close = () => {
+    if (disposed) return;
+    send('map-close');
+    for (const id of [...pending.keys()]) finish(id, new DOMException('Map session closed.', 'AbortError'));
+  };
+  win.addEventListener('message', receive); win.addEventListener('pagehide', close);
+  return Object.freeze({
+    request(action, body, signal) {
+      if (disposed || signal?.aborted) return Promise.reject(new DOMException('Map request aborted.', 'AbortError'));
+      if (!validMapRequest(action, body) || [...pending.values()].filter(entry => entry.action === action).length >= (action === 'tile' ? 4 : 1)) return Promise.reject(new Error('Map request unavailable'));
+      const id = `map-${++sequence}`;
+      return new Promise((resolve, reject) => {
+        const abort = () => { send('map-abort', { requestId: id }); finish(id, new DOMException('Map request aborted.', 'AbortError')); };
+        const timer = setTimeout(() => { send('map-abort', { requestId: id }); finish(id, Object.assign(new Error('Map request timed out'), { code: 'timeout' })); }, 30000);
+        pending.set(id, { action, resolve, reject, timer, signal, abort }); signal?.addEventListener('abort', abort, { once: true });
+        send('map-request', { requestId: id, action, ...(body === undefined ? {} : { body: { z: body.z, x: body.x, y: body.y } }) });
+      });
+    },
+    close,
+    dispose() { if (disposed) return; close(); disposed = true; win.removeEventListener('message', receive); win.removeEventListener('pagehide', close); },
+  });
 }
 
 // This is an RPC for the AI service only, never a general URL/fetch proxy. The

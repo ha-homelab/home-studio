@@ -15,8 +15,10 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
-const {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction} = require('./browser-stability-diagnostics.cjs');
+const {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerDraw, waitForViewerLightState, assertViewerInteraction, bounded} = require('./browser-stability-diagnostics.cjs');
 const {createStartupDiagnostics} = require('./browser-startup-diagnostics.cjs');
+const {inspectSceneScreenshot} = require('./browser-pixel-evidence.cjs');
+const {tapWithDiagnostics} = require('./browser-tap-diagnostics.cjs');
 
 const root = path.resolve(process.env.HOME_STUDIO_SOURCE_ROOT || path.join(__dirname, '..'));
 const sourceFiles = Object.fromEntries(['viewer.js','home-view.js','room-lighting.js','planner/render-capacity.js','planner/interaction-render.js'].filter(name=>fs.existsSync(path.join(root,name))).map(name=>[name,crypto.createHash('sha256').update(fs.readFileSync(path.join(root,name))).digest('hex')]));
@@ -189,7 +191,24 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
   const {samples, errors, crashes, consoleErrors} = record;
   phases.start('input-setup');
   const input = await createInputDriver(page, browserName, profile, inputDiagnostics);
-  const dragCanvas = async (locator, child) => {
+  const completeInput = async (child, action, before, expectedHomeMode, requireCamera = false, requireRotation = false) => {
+    const started = performance.now();
+    return bounded(async () => {
+      const inputPhases = await action();
+      const framesStarted = performance.now();
+      if (framesStarted-started >= 15000) throw Error('Viewer input exceeded 15000 ms');
+      const receipt = await child.evaluate(waitForViewerDraw, {
+        beforeRenderCount:before.renderCount, beforeSceneDraws:before.scene.renderPasses.scene,
+        beforeCamera:requireCamera ? before.scene.camera : null, expectedHomeMode, requireRotation,
+        timeoutMs:15000-(framesStarted-started),
+      });
+      const completed = performance.now();
+      if (completed-started >= 15000) throw Error('Viewer input exceeded 15000 ms');
+      return {durationMs:completed-started, receipt,
+        phases:{...inputPhases,framesMs:completed-framesStarted,receiptWaitMs:receipt.waitMs}};
+    }, 15000, 'Viewer input and completed draw');
+  };
+  const dragCanvas = async (locator, child, before, homeMode) => {
     await locator.scrollIntoViewIfNeeded();
     const bounds = await locator.boundingBox();
     const point = await locator.evaluate(canvas => {
@@ -199,13 +218,9 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
       }
       throw Error('No exposed canvas pixel is available for a real drag');
     });
-    const started = Date.now();
-    const phases = await input.drag({x: bounds.x+bounds.width*point.x, y: bounds.y+bounds.height*point.y},
-      {x: bounds.x+bounds.width*(point.x+.15), y: bounds.y+bounds.height*(point.y+.1)});
-    const framesStarted = Date.now();
-    await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-    const completed = Date.now();
-    return {durationMs:completed-started,phases:{...phases,framesMs:completed-framesStarted}};
+    return completeInput(child, () => input.drag({x: bounds.x+bounds.width*point.x, y: bounds.y+bounds.height*point.y},
+      {x: bounds.x+bounds.width*(point.x+.15), y: bounds.y+bounds.height*(point.y+.1)}),
+      before, homeMode, true, homeMode);
   };
     phases.start('dashboard-navigation');
     await page.goto(origin);
@@ -291,14 +306,22 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
       check((await snapshot()).renderCount===idleBefore, 'An idle Home view does not continuously render');
       phases.start('home-drag', {cycle});
       const canvas = frame.locator('#homeStage canvas');
-      const homeCameraBefore = (await snapshot()).scene.camera;
-      const homeDrag = await dragCanvas(canvas,child), dragMs = homeDrag.durationMs;
+      const cameraEvidence = value => ({renderCount:value.renderCount,homeMode:value.homeMode,
+        camera:value.scene.camera,renderPasses:value.scene.renderPasses,renderState:value.scene.renderState});
+      const beforeHomeDrag = await snapshot(), homeCameraBefore = beforeHomeDrag.scene.camera;
+      const homeOrbit = sample.homeOrbit = {before:cameraEvidence(beforeHomeDrag)};
+      save();
+      const homeDrag = await dragCanvas(canvas,child,beforeHomeDrag,true), dragMs = homeDrag.durationMs;
+      homeOrbit.receipt = cameraEvidence(homeDrag.receipt);
       sample.homeDragPhases = homeDrag.phases;
       sample.dragMs = dragMs;
       sample.readyAfterDragMs = Date.now()-started;
+      save();
       console.log(`${browserName}: Home drag and frame completion in ${dragMs} ms`);
       const afterHomeDrag = await snapshot();
+      homeOrbit.after = cameraEvidence(afterHomeDrag);
       sample.homeInteraction = afterHomeDrag.scene.renderPasses;
+      save();
       assertViewerInteraction(initial, afterHomeDrag);
       sample.homeCameraChanged = Boolean(homeCameraBefore && afterHomeDrag.scene.camera &&
         JSON.stringify(homeCameraBefore) !== JSON.stringify(afterHomeDrag.scene.camera));
@@ -316,13 +339,19 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
       check(sample.homeDragCommands.length===0, 'A real Home orbit never issues a device or write command, or opens native details');
       await page.waitForTimeout(200);
       const orbitIdle = await snapshot();
+      homeOrbit.idle = cameraEvidence(orbitIdle);
+      save();
       await page.waitForTimeout(350);
       const orbitSettled = await snapshot();
+      homeOrbit.final = cameraEvidence(orbitSettled);
+      save();
       check(orbitSettled.renderCount===orbitIdle.renderCount, 'A released Home orbit returns to idle without continuous rendering');
       check(JSON.stringify(orbitSettled.scene.camera)===JSON.stringify(afterHomeDrag.scene.camera),
         'The orbited Home view remains at its released camera position');
       phases.start('editor-enter', {cycle});
-      await input.tap(frame.locator('#editLayout'));
+      sample.editorTap = {};
+      try { await tapWithDiagnostics(frame.locator('#editLayout'), input, sample.editorTap, bounded); }
+      finally { save(); }
       await child.waitForFunction(() => !window.floorplan.homeMode);
       // Exercise a burst of editor wheel events in a single task, as high-frequency
       // trackpad input must not perform an unbounded number of synchronous draws.
@@ -338,7 +367,7 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
       phases.start('editor-drag', {cycle});
       const beforeEditorDrag = await snapshot();
       const editorCameraBefore = beforeEditorDrag.scene.camera;
-      const editorDrag = await dragCanvas(frame.locator('#view3d canvas'),child), editorDragMs = editorDrag.durationMs;
+      const editorDrag = await dragCanvas(frame.locator('#view3d canvas'),child,beforeEditorDrag,false), editorDragMs = editorDrag.durationMs;
       sample.editorDragPhases = editorDrag.phases;
       sample.editorDragMs = editorDragMs;
       const afterEditorDrag = await snapshot();
@@ -350,9 +379,9 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
       save();
       check(sample.editorCameraChanged, 'Dragging the editor changes the camera used to draw the scene');
       phases.start('home-enter', {cycle});
-      await input.tap(frame.locator('#openHome'));
-      await child.waitForFunction(() => window.floorplan.homeMode);
-      await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      const beforeHomeReturn = await snapshot();
+      const homeReturn = await completeInput(child, () => input.tap(frame.locator('#openHome')), beforeHomeReturn, true);
+      sample.homeReturn = {durationMs:homeReturn.durationMs, phases:homeReturn.phases};
       sample.statePrograms = [(await snapshot()).linkedPrograms];
       const lights = project.floors[0].items.length;
       const allOff = Object.fromEntries(Object.entries(states).map(([key,value])=>[key,{...value,state:'off'}]));
@@ -471,13 +500,35 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
         'Native touch drags reach the viewer as trusted touch and pointer movement');
       Object.assign(sample,{recovery,...initial});
       save();
+      // Preserve actual Windows WebKit editor pixels after all timed work.
+      // Enter through the UI and require the same bounded wheel receipt; do
+      // not inject a render or readPixels to make the compositor present.
+      if(process.platform==='win32' && browserName==='webkit' && project.floors[0].rooms.length===24) {
+        phases.start('editor-visual-evidence', {cycle});
+        if(await child.evaluate(()=>window.floorplan.homeMode)) await input.tap(frame.locator('#editLayout'));
+        await child.waitForFunction(()=>!window.floorplan.homeMode);
+        const wheel=await child.evaluate(measureEditorWheelBurst);
+        check(wheel.synchronousDraws<=1 && wheel.totalDraws>0 && wheel.totalDraws<=2 && wheel.sceneDraws>0 && wheel.sceneDraws<=2 && wheel.cameraChanged,
+          'Editor visual evidence follows a bounded complete wheel draw');
+        const screenshot=`${browserName}-editor-${cycle+1}.png`;
+        sample.editorVisual={wheel,screenshot};save();
+        const bounds=await frame.locator('#view3d canvas').boundingBox(), viewport=page.viewportSize();
+        const overlays=await Promise.all(['.caption','.zoom-controls'].map(selector=>frame.locator('#view3d '+selector).boundingBox()));
+        const png=await page.screenshot({path:path.join(diagnostics.directory,screenshot),timeout:5000});
+        sample.editorVisual.pixels=await inspectSceneScreenshot(page,png,bounds,viewport,overlays);save();
+        check(sample.editorVisual.pixels.nonflat,'The natural editor screenshot contains scene detail inside the canvas');
+      }
       // Screenshot readback drains GPU work. Capture after latency checks so it
       // cannot accidentally warm the first interaction being measured.
       if(process.env.BROWSER_STABILITY_SCREENSHOT_DIR) {
         phases.start('comparison-screenshot', {cycle});
+        if(!await child.evaluate(()=>window.floorplan.homeMode)) {
+          const beforeHome = await snapshot();
+          await completeInput(child, () => input.tap(frame.locator('#openHome')), beforeHome, true);
+        }
         fs.mkdirSync(process.env.BROWSER_STABILITY_SCREENSHOT_DIR,{recursive:true});
-        await input.tap(frame.locator('#homeZoomReset'));
-        await child.evaluate(() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+        const beforeReset = await snapshot();
+        await completeInput(child, () => input.tap(frame.locator('#homeZoomReset')), beforeReset, true);
         await page.screenshot({path:path.join(process.env.BROWSER_STABILITY_SCREENSHOT_DIR,`${browserName}-${cycle+1}.png`)});
       }
       // Browser teardown and Playwright's frame registry update asynchronously.
@@ -527,7 +578,9 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
   html = instrumented;
   html = html.replace('<head>',`<head><script>window.__HOME_FLOORPLAN_EMBED__=true;(${installViewerLoadDiagnostics.toString()})({role:'frame',expectedLights:${project.floors[0].items.length}});(${instrumentation.toString()})(${deferViewerShaderChecks.toString()});</script>`);
   html = startup.checkpointSource(html, 'renderProfile=selectRenderProfile(renderer.getContext());', 'renderProfile');
-  html = html.replace('</script></body>', `if(renderer)(${captureViewerFrames.toString()})(renderer,scene);window.__browserScene=()=>({rasterProbe:renderProfile.rasterProbe||null,shadowType:renderer.shadowMap.type,materialTypes:(()=>{const types=new Set();scene.traverse(o=>{for(const m of (Array.isArray(o.material)?o.material:[o.material]))if(m)types.add(m.type)});return [...types].sort()})(),camera:window.__browserCamera,renderPasses:window.__browserRenderPasses,drawingBuffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),programs:renderer.info.programs.length,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,triangles:renderer.info.render.triangles,drawCalls:renderer.info.render.calls,shadowMaps:(()=>{const sizes=[];scene.traverse(o=>{if(o.castShadow&&o.shadow)sizes.push([o.type,o.shadow.mapSize.x,o.shadow.mapSize.y])});return sizes})(),pointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible)n++});return n})(),activePointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible&&o.intensity>0)n++});return n})()});\n</script></body>`);
+  // Read the viewer's actual pending handles on every observation; missing
+  // scheduler diagnostics must never be treated as an idle renderer.
+  html = html.replace('</script></body>', `if(renderer)(${captureViewerFrames.toString()})(renderer,scene);window.__browserScene=()=>({rasterProbe:renderProfile.rasterProbe||null,shadowType:renderer.shadowMap.type,materialTypes:(()=>{const types=new Set();scene.traverse(o=>{for(const m of (Array.isArray(o.material)?o.material:[o.material]))if(m)types.add(m.type)});return [...types].sort()})(),camera:window.__browserCamera,renderPasses:window.__browserRenderPasses,renderState:{request:renderRequest,delay:renderDelay,fallback:renderFallback},drawingBuffer:[renderer.domElement.width,renderer.domElement.height],pixelRatio:renderer.getPixelRatio(),programs:renderer.info.programs.length,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,triangles:renderer.info.render.triangles,drawCalls:renderer.info.render.calls,shadowMaps:(()=>{const sizes=[];scene.traverse(o=>{if(o.castShadow&&o.shadow)sizes.push([o.type,o.shadow.mapSize.x,o.shadow.mapSize.y])});return sizes})(),pointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible)n++});return n})(),activePointLights:(()=>{let n=0;scene.traverse(o=>{if(o.isPointLight&&o.visible&&o.intensity>0)n++});return n})()});\n</script></body>`);
   let sourceHash = crypto.createHash('sha256').update(html).digest('hex');
   const server = http.createServer((request,response) => {
     if(startup.handle(request,response,sourceHash))return;

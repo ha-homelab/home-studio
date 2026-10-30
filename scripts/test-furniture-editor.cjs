@@ -12,7 +12,7 @@ const catalog = JSON.parse(fs.readFileSync(path.join(root, 'planner/catalog.json
 const files = new Map([
   ...['pbr-color-data.js','pbr-materials.js','material-textures.js','environment-lighting.js','camera-tour.js','camera-tour-panel.js','camera-tour-session.js','camera-tour-recording.js'].map(name=>[name,[name,'text/javascript']]),
   ['planner/', ['planner/index.html', 'text/html']],
-  ...['editor', 'model', 'site-model', 'site-editor', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity', 'interaction-render', 'environment', 'onboarding', 'device-onboarding', 'device-onboarding-ui', 'room-transform', 'draft-storage', 'inspector-dom', 'floor-navigator', 'ha-bridge', 'camera-tour-adapter'].map(name => [`planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
+  ...['editor', 'model', 'site-model', 'site-editor', 'site-map-underlay', 'catalog', 'furniture', 'i18n', 'validation', 'language-links', 'render-capacity', 'interaction-render', 'environment', 'onboarding', 'device-onboarding', 'device-onboarding-ui', 'room-transform', 'draft-storage', 'inspector-dom', 'floor-navigator', 'ha-bridge', 'camera-tour-adapter'].map(name => [`planner/${name}.js`, [`planner/${name}.js`, 'text/javascript']]),
   ...fs.readdirSync(path.join(root, 'planner/locales')).filter(name => name.endsWith('.js')).map(name => [`planner/locales/${name}`, [`planner/locales/${name}`, 'text/javascript']]),
   ['camera-tour.css', ['camera-tour.css', 'text/css']],
   ['planner/editor.css', ['planner/editor.css', 'text/css']],

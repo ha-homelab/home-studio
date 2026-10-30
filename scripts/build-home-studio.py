@@ -14,14 +14,14 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT_FILES = (
     "__init__.py", "site.py", "validation.py", "curtains.py", "native.py", "generated.py", "permissions.py",
-    "ai.py", "map.py", "config_flow.py", "manifest.json", "strings.json", "translations/en.json",
-    "static/panel.js", "static/card.js", "static/studio.js",
+    "ai.py", "map.py", "site_frame.py", "site_calibration.py", "runtime_upgrade.py", "baseline_transaction.py", "config_flow.py", "manifest.json", "strings.json", "translations/en.json",
+    "static/panel.js", "static/card.js", "static/studio.js", "static/map-transport.js",
 )
 RUNTIME_FILES = (
     'camera-tour.js', 'camera-tour-panel.js', 'camera-tour-recording.js', 'camera-tour-session.js', 'camera-tour.css', 'camera-tour-viewer.js',
     "geometry.py", "exporters.py", "physical_exports.py", "material_textures.py", "material-textures.js", "pbr-color-data.js", "pbr-materials.js", "pbr_materials.py", "environment-lighting.js", "viewer_locales.py", "planner/project.py", "planner/site_model.py", "planner/furniture.py", "planner/catalog.json",
     "viewer.template.html", "viewer.js", "viewer-i18n.js", "home-view.html", "home-view.css", "home-view.js",
-    "curtain-state.js", "motion-state.js", "appliance-state.js", "presence-view.js", "vacuum-state.js", "vacuum-view.js", "tv-screen.js", "camera-preview.js", "media-preview.js",
+    "curtain-state.js", "motion-state.js", "appliance-state.js", "climate-state.js", "marker-motion.js", "device-effects.js", "presence-view.js", "vacuum-state.js", "vacuum-view.js", "tv-screen.js", "camera-preview.js", "media-preview.js",
     "assumed-zone-view.js", "map-layer.js", "light-state.js", "planner/render-capacity.js", "planner/interaction-render.js",
     "room-lighting.js", "vendor/three.module.min.js", "planner/environment.js",
     "ai_companion/__init__.py", "ai_companion/protocol.py", "ai_companion/providers.py",

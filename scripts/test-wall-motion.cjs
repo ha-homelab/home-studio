@@ -99,7 +99,8 @@ const cycle = harness();
 for (let i = 0; i <= 6000; i++) cycle.frame(i * 15);
 assert.ok(cycle.uniform.value < 1e-8 || Math.PI * 2 - cycle.uniform.value < 1e-8, 'Phase wraps after 90 seconds of active frames');
 
-// The shared draw helper covers the editor, direct Home renders and signal fades.
+// The shared draw helper covers the editor, direct Home renders, signal fades
+// and the bounded device rotor updates.
 const viewer = fs.readFileSync(path.join(root, 'viewer.js'), 'utf8');
 const home = fs.readFileSync(path.join(root, 'home-view.js'), 'utf8');
 const draw = viewer.split('\n').find(line => line.startsWith('function drawScene('));
@@ -149,24 +150,33 @@ async function testHomeDrawPaths() {
   const mapObject = {visible:true}, house = {visible:true}, hiddenHouse = {visible:false}, light = {visible:true,isLight:true};
   const children = [mapObject,house,hiddenHouse,light], visibility = () => children.map(object => object.visible);
   const stage = {dataset:{},getBoundingClientRect:() => ({width:1200,height:700})};
-  const trace = [], masks = [];
+  const trace = [], masks = [], clearedTimers = [];
   const c = vm.createContext({
     THREE, active:true, camera:undefined, cameraFit:undefined, houseFitBounds: undefined, root: new THREE.Group(), projectedPosition:new THREE.Vector3(),
+    markerViewport:'',markerMotion:{reset(){},target(){}},deviceEffects:{project(){},sync(){}},
     selected:'', planRadius:10, planBounds:true, zoom:1, panX:0, panY:0, homeRotation:0, homeTilt:0,
     model:{ceiling_height_m:3,rooms:[{id:'A',polygon:[[0,0],[4,0],[4,4],[0,4]]}]},
     xm:x => x, zm:z => z, $:id => id==='homeStage' ? stage : {firstElementChild:{style:{}}},
     mapLayer:{object:mapObject,config:{enabled:true,north_deg:0},render() {}}, mapDraft:null, mapFraming:null, mapCoarseState:false,
     environmentLayer:null, roomLighting:null, lowerFloorContext:null, assumedZones:null, presenceView:null, vacuumView:null,
     reflectionEnvironment:null, contactShading:null, hemisphere:null,
-    roomLabels:true, signalZone:'', showLowerFloor:true, labels:[], points:[], refreshSignalStatus() {}, positionMediaPreviews() {},
+    roomLabels:true, signalZone:'', showLowerFloor:true, labels:[], points:[], motionTracks:new Map(), refreshSignalStatus() {}, positionMediaPreviews() {},
     scene:{children}, renderCount:0, renderSuspended:false, renderLost:false, document:{hidden:false},
-    coalesceMotion:false, interactionPointer:null,
+    coalesceMotion:false, interactionPointer:null, clearTimeout:id => clearedTimers.push(id),
     wallSheenMotion:{beforeRender:() => trace.push('before'),afterRender:() => trace.push('after')},
-    renderer:{render:() => {trace.push('draw');masks.push(visibility());}},
+    renderer:{domElement:{dataset:{}},render:() => {trace.push('draw');masks.push(visibility());}},
   });
   c.mapCoarse = () => c.zoom < .22;
+  let rotor;
+  Object.assign(c,{homeGesture:null,renderRequest:0,renderDelay:0,failed3D:false,
+    invalidateShadows(){},createDeviceEffects(_three,_container,options){rotor=options;return {};},
+    report3DError(error){throw error;}});
+  const rotorStart=home.indexOf('  const deviceEffects=createDeviceEffects(');
+  const rotorEnd=home.indexOf('\n  function cancelHomeGesture',rotorStart);
+  assert(rotorStart>=0&&rotorEnd>rotorStart);
+  vm.runInContext(home.slice(rotorStart,rotorEnd).replace('const deviceEffects=',''),c);
   const signalStart = home.indexOf('  function drawSignalFrame('), renderStart = home.indexOf('  function render() {');
-  const renderEnd = home.indexOf('  function clearTrail(', renderStart);
+  const renderEnd = home.indexOf('  function refreshMotion(', renderStart);
   assert(signalStart>=0 && renderStart>signalStart && renderEnd>renderStart, 'Exercise the actual Home draw functions');
   vm.runInContext(draw + '\n' + home.slice(signalStart,renderEnd), c);
   const expectDraw = (action,mask) => {
@@ -177,8 +187,22 @@ async function testHomeDrawPaths() {
   expectDraw(() => c.render(),[true,true,false,true]);
   expectDraw(() => c.drawSignalFrame(true),[true,true,false,true]);
   trace.length=0;c.drawSignalFrame(false);assert.deepEqual(trace,[],'A status-only signal update does not draw');
-  c.zoom=.1;
+  expectDraw(() => rotor.draw(),[true,true,false,true]);
+  for(const [key,value] of [['homeGesture',{moved:true}],['renderRequest',1],['renderDelay',1]]){
+    const previous=c[key];c[key]=value;trace.length=0;rotor.draw();
+    assert.deepEqual(trace,[],key+' owns the scene instead of rotor drawing');c[key]=previous;
+  }
+  c.renderer.domElement.dataset.cameraTourPlaying='true';trace.length=0;rotor.draw();
+  assert.deepEqual(trace,[],'Camera tours own the shared scene draw');
+  delete c.renderer.domElement.dataset.cameraTourPlaying;
+  assert.equal(rotor.canDraw(),true);assert.equal(rotor.allowRotor(),true);
+  c.coalesceMotion=true;assert.equal(rotor.allowRotor(),false);c.coalesceMotion=false;
+  c.zoom=.1;assert.equal(rotor.canDraw(),false,'Coarse maps suppress house rotor work');
+  let removedTrails=0;
+  c.motionTracks.set('source',{trailTimer:37,trail:{remove(){removedTrails++;}},steps:[]});
   expectDraw(() => c.render(),[true,false,false,true]);
+  assert.equal(c.motionTracks.size,0,'Coarse-map rendering clears source motion tracks');
+  assert.equal(removedTrails,1);assert.deepEqual(clearedTimers,[37],'Coarse-map rendering cancels the removed trail deadline');
   assert.deepEqual(visibility(),[true,true,false,true],'Coarse-map drawing restores every original visibility');
   trace.length=0;c.drawSignalFrame(true);assert.deepEqual(trace,[],'Coarse maps suppress house-only signal redraws');
   c.renderer.render = () => {trace.push('draw');throw Error('Map draw failed');};

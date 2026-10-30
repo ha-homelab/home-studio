@@ -14,7 +14,7 @@
 #homeMotion>div{position:absolute;inset:0}
 /* Keep the whole floor visible as the number of linked devices grows. */
 @media(min-width:951px){.home-map{min-height:0}#homeStage{min-height:0}.home-controls{min-height:0;overflow-y:auto;overscroll-behavior:contain}}
-#homeMotion{position:absolute;inset:0;pointer-events:none;z-index:1}.home-footstep{position:absolute;width:10px;height:21px;transform:translate(-50%,-50%) rotate(var(--angle));opacity:0;animation:footstep-arrive 6s var(--delay) ease-out both;filter:drop-shadow(0 1px 2px #000)}.home-footstep svg{width:100%;height:100%;fill:#e8dfcb;stroke:#51483c;stroke-width:.5}.home-footstep.right svg{transform:scaleX(-1)}@keyframes footstep-arrive{0%{opacity:0}7%,65%{opacity:.92}100%{opacity:0}}#homeView .home-marker[data-kind="motion"]{width:20px;height:20px;padding:3px;border-radius:7px;opacity:.8}#homeView .home-marker[data-kind="motion"] svg{width:12px;height:12px}#homeView [data-kind="motion"][data-state="on"]{background:#37524e;border-color:#b8d9cc;color:#effaf4;box-shadow:0 0 14px #badbce55}#homeView [data-kind="tv"][data-state="on"]{background:#304052;border-color:#afcee5;color:#e2f1ff;box-shadow:0 0 16px #81b9e433}#homeView .home-device[data-kind="motion"] .home-device-icon{color:#c4e6d9}#homeView .home-device[data-kind="tv"] .home-device-icon{color:#b3d8fa}@media(prefers-reduced-motion:reduce){.home-footstep{animation:none;opacity:.8}}
+#homeMotion{position:absolute;inset:0;pointer-events:none;z-index:1}.home-footstep{position:absolute;width:10px;height:21px;transform:translate(-50%,-50%) rotate(var(--angle));opacity:0;animation:footstep-arrive 1.5s var(--delay) ease-out both;filter:drop-shadow(0 1px 2px #000)}.home-footstep svg{width:100%;height:100%;fill:#e8dfcb;stroke:#51483c;stroke-width:.5}.home-footstep.right svg{transform:scaleX(-1)}@keyframes footstep-arrive{0%{opacity:0}7%,65%{opacity:.92}100%{opacity:0}}#homeView .home-marker[data-kind="motion"]{width:20px;height:20px;padding:3px;border-radius:7px;opacity:.8}#homeView .home-marker[data-kind="motion"] svg{width:12px;height:12px}#homeView [data-kind="motion"][data-state="on"]{background:#37524e;border-color:#b8d9cc;color:#effaf4;box-shadow:0 0 14px #badbce55}#homeView [data-kind="tv"][data-state="on"]{background:#304052;border-color:#afcee5;color:#e2f1ff;box-shadow:0 0 16px #81b9e433}#homeView .home-device[data-kind="motion"] .home-device-icon{color:#c4e6d9}#homeView .home-device[data-kind="tv"] .home-device-icon{color:#b3d8fa}@media(prefers-reduced-motion:reduce){.home-footstep{animation:none;opacity:.8}}
 #homeView .home-marker[data-kind="motion"]{min-height:20px}#homeView .home-marker[data-kind="tv"][data-state="on"]:hover:not(:disabled){background:#304052;color:#e2f1ff}#homeView .home-marker[data-kind="motion"][data-state="on"]:hover:not(:disabled){background:#37524e;color:#effaf4}
 
 /* One compact toolbar leaves the plan the full height of the panel. */
@@ -162,15 +162,14 @@ body.control-only>header,body.control-only>main,body.control-only #editLayout,bo
 .cooktop-flames{position:absolute;inset:0;pointer-events:none}.cooktop-flames[hidden]{display:none}.cooktop-flame{position:absolute;left:0;top:0;width:64px;height:64px;transform-origin:0 0;pointer-events:none}.cooktop-flame svg{width:100%;height:100%;overflow:visible}.gas-jets{animation:gas-flicker .8s ease-in-out infinite alternate;transform-origin:32px 32px}.cooktop-flame:nth-child(even) .gas-jets{animation-delay:-.37s}@keyframes gas-flicker{from{opacity:.65;transform:scale(.94)}to{opacity:1;transform:scale(1.04)}}@media(prefers-reduced-motion:reduce){.gas-jets{animation:none}}
 .oven-glow{position:absolute;left:0;top:0;width:64px;height:64px;transform-origin:0 0;pointer-events:none}.oven-glow[hidden]{display:none}.oven-glow>span{display:block;width:100%;height:100%;border-radius:6px;background:radial-gradient(ellipse at 50% 65%,#ffc45cb0,#ff5d1b88 42%,#b4270620 85%);box-shadow:inset 0 -3px 4px #ff933ca0;animation:oven-heat 2.8s ease-in-out infinite alternate}@keyframes oven-heat{from{opacity:.6}to{opacity:1}}@media(prefers-reduced-motion:reduce){.oven-glow>span{animation:none}}
 
-/* Held occupancy uses a compact room-label badge, never a trail or inferred heartbeat. */
+/* Current presence fills the saved room outline; it does not drive HA lighting. */
 .home-presence-layer{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;overflow:hidden}
 .home-vacuum-layer{position:absolute;inset:0;z-index:3;pointer-events:none}.home-vacuum-layer[hidden]{display:none}
 #homeView .home-vacuum-marker{position:absolute;transform:translate(-50%,-50%);width:32px;height:32px;min-height:32px;padding:0;border:1px solid #a8e2ef;border-radius:50%;background:#15343c;box-shadow:0 2px 7px #0009;color:#d4f5ff;pointer-events:auto;cursor:pointer}
 #homeView .home-vacuum-marker[hidden]{display:none}.home-vacuum-marker svg{display:block;width:30px;height:30px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round}
 #homeView .home-vacuum-marker[data-position-state="last_known"]{background:#333b3f;color:#c8cfd2;border-color:#a9b5b9;border-style:dashed}
 #homeView .home-vacuum-marker:focus-visible{outline:2px solid #fff;outline-offset:3px}.home-vacuum-caption{position:absolute;top:calc(100% + 4px);left:50%;transform:translateX(-50%);padding:3px 5px;border-radius:4px;background:#17242ce8;color:#dce4e8;font:10px/1.3 system-ui;white-space:nowrap;pointer-events:none}.home-vacuum-caption[hidden]{display:none}
-.home-presence-indicator{transition:none;pointer-events:none}
-.home-presence-indicator[data-state="quiet"]{transition:opacity 15s ease-out}
+.home-presence-indicator{fill:#399aff;fill-opacity:.25;stroke:#65baff;stroke-opacity:.65;stroke-width:1.5;transition:none;pointer-events:none}
 #homeView [data-kind="presence"]{color:#95e9df;background:#213e40;border-color:#568a89}
 #homeView [data-kind="presence"][data-state="on"]{color:#cefff8;background:#245650;border-color:#61e0cc;box-shadow:0 0 10px #36e7df55}
 @media(prefers-reduced-motion:reduce){.home-presence-indicator[data-state="quiet"]{transition:none}}
@@ -184,3 +183,18 @@ body.control-only>header,body.control-only>main,body.control-only #editLayout,bo
 @media(max-width:600px){#homeMapEditor{max-height:38vh}#homeMapForm input[type=number]{width:100px}.map-editor-heading span{font-size:10px}#homeMapStatus{margin-inline-start:0}}
 
 #homeStage[data-map-coarse="true"]>svg:not(#homeMediaLinks){display:none!important}
+
+/* Device feedback stays attached to geometry; only the control buttons ease. */
+.device-airflow{position:absolute;inset:0;pointer-events:none;color:#5de0ff;overflow:hidden}
+.device-airflow[data-effect="heat"]{color:#ffb266}
+.device-airflow svg{display:block;width:100%;height:100%;overflow:visible}
+.device-airflow path{fill:none;stroke:currentColor;stroke-width:4;stroke-linecap:round;stroke-opacity:.62;stroke-dasharray:12 20;animation:device-airflow 1.7s linear infinite}
+@keyframes device-airflow{to{stroke-dashoffset:-64}}
+#homeView .home-marker[data-kind="fan"],#homeView .home-marker[data-kind="climate"]{background:#243b48;color:#c2dce8;border-color:#7196a9;box-shadow:0 2px 7px #0006}
+#homeView [data-kind="fan"][data-running="true"],#homeView [data-kind="climate"][data-effect="cool"]{color:#6be3ff;border-color:#4dc9f0}
+#homeView [data-kind="climate"][data-effect="heat"]{color:#ffc181;border-color:#ed9d54}
+#homeView [data-kind="fan"][data-running="true"] .fan-blades{transform-origin:12px 12px;animation:device-fan var(--fan-period,1.8s) linear infinite}
+@keyframes device-fan{to{transform:rotate(360deg)}}
+.climate-reading{position:absolute;left:50%;bottom:calc(100% + 5px);transform:translateX(-50%);white-space:nowrap;padding:3px 6px;border-radius:7px;background:#152733ed;border:1px solid #658a9c80;font-size:11px;line-height:1.1;color:#e0f5ff;font-variant-numeric:tabular-nums;pointer-events:none}
+.climate-reading[data-source="target"],.climate-reading[data-source="range"]{border-style:dashed}
+@media(prefers-reduced-motion:reduce){.device-airflow path,#homeView [data-kind="fan"][data-running="true"] .fan-blades{animation:none}}

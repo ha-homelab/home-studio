@@ -145,12 +145,14 @@ function selectedEngines(value = 'chromium,firefox') {
   return engines;
 }
 
-function browserLaunchOptions(engine, headless) {
+function browserLaunchOptions(engine, headless, platform=process.platform) {
   const channel = process.env.HOME_STUDIO_BROWSER_CHANNEL || undefined;
   assert(!channel || ['chrome', 'chrome-beta', 'msedge', 'msedge-beta'].includes(channel),
     'HOME_STUDIO_BROWSER_CHANNEL must be chrome, chrome-beta, msedge or msedge-beta');
   assert(!channel || engine === 'chromium', 'Browser channels require the Chromium engine');
-  if (engine === 'webkit') return {headless};
+  // Windows WebKit's non-composited canvas becomes transparent after resize
+  // (Playwright #42885). Retain real compositing on the pinned stable builds.
+  if (engine === 'webkit') return {headless,...(platform==='win32' ? {ignoreDefaultArgs:['--disable-accelerated-compositing']} : {})};
   if (engine === 'chromium') {
     const backend = process.env.CHROMIUM_ANGLE_BACKEND || 'swiftshader';
     assert(['metal', 'swiftshader'].includes(backend), 'CHROMIUM_ANGLE_BACKEND must be metal or swiftshader');
@@ -483,6 +485,7 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
       profile: options.profile || {name: 'desktop', emulated: false, realMobileOS: false}, identity: null,
       launch: {headless: options.launch.headless, channel: options.launch.channel || null,
         executablePath: options.launch.executablePath || null, args: options.launch.args || [],
+        ignoreDefaultArgs: options.launch.ignoreDefaultArgs || [],
         firefoxUserPrefs: options.launch.firefoxUserPrefs || {}},
       browserContext: options.context, gpu: null, samples: [], errors: [], crashes: [], consoleErrors: [],
       consoleErrorDetails: [], httpErrors: [], requestFailures: [],
@@ -845,6 +848,48 @@ function captureViewerFrames(renderer, mainScene) {
   };
 }
 
+// Serialized into the viewer frame. A real input may finish drawing before its
+// protocol reply arrives. Observe that receipt without asking an idle document
+// for more RAF callbacks, and require a quiet released view before continuing.
+// A full frame during the drag is not final while application draw work remains.
+async function waitForViewerDraw({beforeRenderCount, beforeSceneDraws, beforeCamera = null,
+  expectedHomeMode, requireRotation = false, timeoutMs = 15000}) {
+  if (!(Number.isFinite(timeoutMs) && timeoutMs > 0 && timeoutMs <= 15000)) {
+    throw Error('Viewer draw wait must fit within the 15-second interaction budget');
+  }
+  const started = performance.now(), deadline = started + timeoutMs;
+  let latest = null, stableKey = null, stableSince = started;
+  while (performance.now() < deadline) {
+    const scene = window.__browserScene(), passes = scene.renderPasses;
+    const renderIdle = scene.renderState?.request === 0 && scene.renderState?.delay === 0 &&
+      scene.renderState?.fallback === 0;
+    const cameraChanged = Boolean(beforeCamera && scene.camera &&
+      JSON.stringify(beforeCamera) !== JSON.stringify(scene.camera));
+    const cameraRotated = Boolean(beforeCamera?.world && scene.camera?.world &&
+      [0,1,2,4,5,6,8,9,10].some(index => Math.abs(beforeCamera.world[index]-scene.camera.world[index]) > 1e-7));
+    latest = {renderCount:window.floorplan.renderCount, homeMode:window.floorplan.homeMode,
+      scene, cameraChanged, cameraRotated};
+    const now = performance.now();
+    if (now >= deadline) break;
+    const complete = renderIdle && !document.hidden && latest.homeMode === expectedHomeMode && latest.renderCount > beforeRenderCount &&
+      passes.scene > beforeSceneDraws && passes.last === 'scene' && passes.sceneDrawCalls > 0 &&
+      scene.drawingBuffer.length === 2 && scene.drawingBuffer.every(value => Number.isFinite(value) && value > 0) &&
+      JSON.stringify(passes.sceneViewport) === JSON.stringify([0, 0, ...scene.drawingBuffer]) &&
+      (!beforeCamera || cameraChanged) && (!requireRotation || cameraRotated);
+    const key = complete ? JSON.stringify([latest.renderCount, passes.scene, scene.camera]) : null;
+    if (key === null || key !== stableKey) { stableKey = key; stableSince = now; }
+    if (complete && now - stableSince >= 150) return {...latest, waitMs:now-started};
+    await new Promise(resolve => setTimeout(resolve, Math.min(25, Math.max(0, deadline-performance.now()))));
+  }
+  throw Error('Viewer input did not settle with a fresh complete scene draw: ' + JSON.stringify({
+    elapsedMs:performance.now()-started, timeoutMs, expectedHomeMode, requireRotation,
+    beforeRenderCount, beforeSceneDraws, renderCount:latest?.renderCount, homeMode:latest?.homeMode,
+    cameraChanged:latest?.cameraChanged, cameraRotated:latest?.cameraRotated,
+    renderPasses:latest?.scene.renderPasses, renderState:latest?.scene.renderState, drawingBuffer:latest?.scene.drawingBuffer,
+    visibility:document.visibilityState, hidden:document.hidden, focused:document.hasFocus(),
+  }));
+}
+
 // Serialized into the viewer frame. Observe a completed application draw with
 // timers: an idle viewer need not deliver additional animation frames afterward.
 // The outer scenario deadline still owns the whole test; this retains the
@@ -976,4 +1021,4 @@ function assertViewerScenarioComplete(record) {
   record.viewerCompletion = {version: 1, cycles: 2, postRestoreModes: modes};
 }
 
-module.exports = {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, VIEWER_LOAD_BUDGET_MS, createViewerLoadDeadline, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, assertViewerInteraction};
+module.exports = {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, VIEWER_LOAD_BUDGET_MS, createViewerLoadDeadline, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerDraw, waitForViewerLightState, assertViewerInteraction, bounded};

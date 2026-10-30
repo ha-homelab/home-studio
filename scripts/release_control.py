@@ -18,14 +18,17 @@ import hashlib
 import io
 import json
 import os
+import queue
 import random
 import re
+import shutil
 import stat
 
 # Subprocess calls below use argument vectors with shell=False.
 import subprocess  # nosec B404
 import sys
 import tempfile
+import threading
 import time
 import zipfile
 from collections.abc import Iterable, Iterator, Sequence
@@ -107,6 +110,7 @@ NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,199}\Z")
 REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 ASSET_CHUNK_SIZE = 1024 * 1024
 ASSET_DOWNLOAD_TIMEOUT = 900
+ASSET_UPLOAD_TIMEOUT = 900
 API_READ_TIMEOUT = 30
 API_READ_ATTEMPTS = 3
 EXECUTING_RUN_WAIT_SECONDS = 300
@@ -196,19 +200,178 @@ def stream_identity(
     return {"size": size, "sha256": checksum.hexdigest()}
 
 
-def download_asset(gh: GitHub, asset_id: object, destination: Path) -> AssetIdentity:
-    """Stage one asset exclusively and discard incomplete or failed downloads."""
+class DownloadBudget:
+    """Count cumulative transfer bytes separately from the live free-space floor.
+
+    Reuse one budget across a sequential release inventory, even when each verified file is
+    deleted before the next. Hashing or reading a completed file does not debit
+    it again. ``reserve_bytes`` is an operator-selected filesystem floor; it is
+    not a new release-size policy or a reservation against other processes.
+    """
+
+    def __init__(self, max_bytes: int, *, reserve_bytes: int = 0):
+        require(type(max_bytes) is int and max_bytes >= 0, "Invalid download byte budget")
+        require(type(reserve_bytes) is int and reserve_bytes >= 0, "Invalid download disk reserve")
+        self.max_bytes = max_bytes
+        self.reserve_bytes = reserve_bytes
+        self.written = 0
+
+    def check(self, directory: Path, size: int) -> None:
+        """Refuse a transfer/write before it consumes either remaining bound."""
+        require(type(size) is int and size >= 0, "Invalid download write size")
+        require(size <= self.max_bytes - self.written, "Release download byte budget exceeded")
+        require(shutil.disk_usage(directory).free >= self.reserve_bytes + size,
+                "Release download disk reserve would be exceeded")
+
+
+class _AssetWriter:
+    """A write-only sink: the subprocess never receives the destination fd."""
+
+    def __init__(self, output: BinaryIO, destination: Path, expected: AssetIdentity,
+                 budget: DownloadBudget):
+        self.output = output
+        self.name = str(destination)
+        self.directory = destination.parent
+        self.expected = expected
+        self.budget = budget
+        self.size = 0
+        self.checksum = hashlib.sha256()
+
+    def check(self, size: int = 0) -> None:
+        require(size <= self.expected["size"] - self.size, "Release asset exceeds expected size")
+        self.budget.check(self.directory, size)
+
+    def write(self, chunk: bytes) -> int:
+        """Check before writing; hash and debit only bytes actually written."""
+        self.check(len(chunk))
+        written = self.output.write(chunk)
+        require(isinstance(written, int) and 0 <= written <= len(chunk), "Invalid asset write result")
+        self.size += written
+        self.budget.written += written
+        self.checksum.update(chunk[:written])
+        require(written == len(chunk), "Incomplete asset write")
+        return written
+
+    def identity(self) -> AssetIdentity:
+        """Exact EOF and digest are both required before accepting the file."""
+        actual: AssetIdentity = {"size": self.size, "sha256": self.checksum.hexdigest()}
+        require(actual == self.expected, "Release asset size or checksum mismatch")
+        return actual
+
+
+def download_asset(gh: GitHub, asset_id: object, destination: Path, *,
+                   expected: AssetIdentity, budget: DownloadBudget) -> AssetIdentity:
+    """Stage one bounded asset exclusively; remove only its own failed output."""
     path = f"releases/assets/{positive(asset_id, 'asset ID')}"
-    output = destination.open("xb+")
+    require(isinstance(expected, dict) and set(expected) == {"size", "sha256"}
+            and type(expected.get("size")) is int and expected["size"] >= 0
+            and isinstance(expected.get("sha256"), str)
+            and re.fullmatch(SHA256_PATTERN, expected["sha256"]), "Invalid expected asset identity")
+    require(isinstance(budget, DownloadBudget), "A release download budget is required")
+    budget.check(destination.parent, expected["size"])
+    output = destination.open("xb", buffering=0)
+    owned = os.fstat(output.fileno())
     try:
         with output:
-            gh.download_asset(path, output)
-            output.seek(0)
-            return stream_identity(output)
+            writer = _AssetWriter(output, destination, cast(AssetIdentity, dict(expected)), budget)
+            gh.download_asset(path, writer)
+            writer.check()
+            current = destination.lstat()
+            require((current.st_dev, current.st_ino) == (owned.st_dev, owned.st_ino),
+                    "Asset destination changed during transfer")
+            return writer.identity()
     except BaseException:
-        destination.unlink()
+        try:
+            current = destination.lstat()
+            if (current.st_dev, current.st_ino) == (owned.st_dev, owned.st_ino):
+                destination.unlink()
+        except FileNotFoundError:
+            pass
         raise
 
+
+def _stream_asset(command: list[str], output: _AssetWriter) -> subprocess.CompletedProcess[bytes]:
+    """Pump bounded chunks portably, including silent/stderr-heavy transfers."""
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)  # nosec B603
+    require(process.stdout is not None and process.stderr is not None, "Missing transfer pipes")
+    events: queue.Queue[tuple[str, bytes | BaseException | None]] = queue.Queue(maxsize=2)
+    stopped = threading.Event()
+    deadline = time.monotonic() + ASSET_DOWNLOAD_TIMEOUT
+
+    def send(kind: str, value: bytes | BaseException | None) -> None:
+        while not stopped.is_set():
+            try:
+                events.put((kind, value), timeout=0.1)
+                return
+            except queue.Full:
+                continue
+
+    def read(pipe: BinaryIO, kind: str) -> None:
+        try:
+            while not stopped.is_set():
+                chunk = os.read(pipe.fileno(), ASSET_CHUNK_SIZE)
+                if not chunk:
+                    send(kind, None)
+                    return
+                send(kind, chunk)
+        except (OSError, ValueError) as error:
+            send(kind, error)
+
+    threads = [threading.Thread(target=read, args=(pipe, kind), daemon=True)
+               for pipe, kind in [(process.stdout, "stdout"), (process.stderr, "stderr")]]
+    stderr = bytearray()
+    try:
+        for thread in threads:
+            thread.start()
+        ended = set()
+        while len(ended) != 2:
+            output.check()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(command, ASSET_DOWNLOAD_TIMEOUT)
+            try:
+                kind, value = events.get(timeout=min(0.2, remaining))
+            except queue.Empty:
+                continue
+            if value is None:
+                ended.add(kind)
+            elif isinstance(value, BaseException):
+                raise value
+            elif kind == "stdout":
+                output.write(value)
+            else:
+                # Diagnostics never spill into another unbounded disk file.
+                stderr.extend(value[:max(0, 65536 - len(stderr))])
+        while True:
+            # A child may close both pipes before exiting. Keep checking the
+            # same deadline and disk floor while waiting for its exit status.
+            output.check()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(command, ASSET_DOWNLOAD_TIMEOUT)
+            try:
+                returncode = process.wait(timeout=min(0.2, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                continue
+        if time.monotonic() > deadline:
+            raise subprocess.TimeoutExpired(command, ASSET_DOWNLOAD_TIMEOUT)
+        return subprocess.CompletedProcess(command, returncode, b"", bytes(stderr))
+    finally:
+        stopped.set()
+        try:
+            if process.poll() is None:
+                process.kill()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired as error:
+                raise GitHubError("Asset transfer process could not be reaped within five seconds") from error
+        finally:
+            for thread in threads:
+                if thread.ident is not None:
+                    thread.join(timeout=1)
+            process.stdout.close()
+            process.stderr.close()
 
 def json_bytes(value: object) -> bytes:
     """Encode deterministic UTF-8 JSON for manifests and request bodies."""
@@ -514,42 +677,30 @@ class GitHub:
         )
         return self.request(path, mode="asset")
 
-    def download_asset(self, path: str, output: BinaryIO) -> None:
-        """Stream an allowlisted asset to disk without capturing installer bytes."""
+    def download_asset(self, path: str, output: _AssetWriter) -> None:
+        """Stream an allowlisted asset through an expected-size, budgeted sink."""
         require(
             re.fullmatch(r"releases/assets/[1-9]\d*", path, re.ASCII),
             "Unsupported binary download endpoint",
         )
+        require(isinstance(output, _AssetWriter), "Asset downloads require a bounded sink")
         endpoint = f"{self.base}/{path}"
         try:
             # Developer/CI toolchain selected by the invoking operator via PATH.
-            result = subprocess.run(  # nosec B603, B607
-                [
-                    "gh",
-                    "api",
-                    "--hostname",
-                    GITHUB_HOSTNAME,
-                    "--method",
-                    "GET",
-                    "-H",
-                    "Accept: application/octet-stream",
-                    "--",
-                    endpoint,
-                ],
-                stdout=output,
-                stderr=subprocess.PIPE,
-                check=False,
-                timeout=ASSET_DOWNLOAD_TIMEOUT,
-            )
+            result = _stream_asset([
+                "gh", "api", "--hostname", GITHUB_HOSTNAME, "--method", "GET",
+                "-H", "Accept: application/octet-stream", "--", endpoint,
+            ], output)
         except subprocess.TimeoutExpired as error:
             raise GitHubError(
                 f"GET {endpoint}: asset download exceeded {ASSET_DOWNLOAD_TIMEOUT} seconds"
             ) from error
         self.response(result, f"GET {endpoint}")
 
-    def upload(self, tag: str, path: Path) -> None:
-        """Upload a canonical tag's staged regular file, with no overwrite option."""
+    def upload(self, tag: str, path: Path, *, release_id: int) -> None:
+        """Upload once to the transaction's known draft, without tag lookup."""
         require(TAG_RE.fullmatch(tag), "Unsupported release upload tag")
+        release_id = positive(release_id, "release ID")
         require(
             path.is_absolute() and NAME_RE.fullmatch(path.name), "Unsafe upload path"
         )
@@ -565,23 +716,60 @@ class GitHub:
             and "#" not in str(path),
             "Upload must come from the private release staging directory",
         )
-        self.response(
+        # A draft is not returned by the published-release-by-tag endpoint.
+        # Reusing its creation ID avoids a separate GraphQL draft lookup for
+        # every file. Never accept an arbitrary upload host from response data.
+        endpoint = (
+            f"https://uploads.github.com/{self.base}/releases/{release_id}/assets"
+            f"?name={quote(path.name, safe='')}"
+        )
+        context = f"upload {tag} {path.name}"
+        try:
             # Developer/CI toolchain selected by the invoking operator via PATH.
-            subprocess.run(  # nosec B603, B607
+            result = subprocess.run(  # nosec B603, B607
                 [
                     "gh",
-                    "release",
-                    "upload",
-                    "--repo",
-                    f"github.com/{self.repo}",
-                    "--",
-                    tag,
+                    "api",
+                    "--hostname",
+                    GITHUB_HOSTNAME,
+                    "--include",
+                    "--method",
+                    "POST",
+                    "-H",
+                    "Content-Type: application/octet-stream",
+                    "--input",
                     str(parent / path.name),
+                    "--",
+                    endpoint,
                 ],
                 capture_output=True,
                 check=False,
-            ),
-            f"upload {tag} {path.name}",
+                timeout=ASSET_UPLOAD_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired as error:
+            # The server may have received the bytes. Leave the draft intact;
+            # replaying this write could replace or duplicate an existing asset.
+            raise GitHubError(
+                f"{context}: asset upload exceeded {ASSET_UPLOAD_TIMEOUT} seconds"
+            ) from error
+        try:
+            http = github_http_response(result.stdout or b"")
+        except GitHubError as error:
+            # A transport/CLI failure may precede any HTTP response. Preserve
+            # its error context, but never retry a possibly committed write.
+            self.response(result, context)
+            raise GitHubError(f"{context}: {error}") from error
+        response = self.response(result, context, http)
+        require(http[0] == 201, f"{context}: upload was not confirmed as created")
+        asset = parse_json(response, context)
+        require(isinstance(asset, dict), f"{context}: invalid asset response")
+        positive(asset.get("id"), "uploaded asset ID")
+        require(
+            asset.get("name") == path.name
+            and asset.get("state") == "uploaded"
+            and type(asset.get("size")) is int
+            and asset.get("size") == path.stat().st_size,
+            f"{context}: upload response did not confirm the staged asset",
         )
 
 
@@ -1064,6 +1252,34 @@ def validate_run_provenance(
     )
 
 
+def release_gate_ready(
+    gh: GitHub, run_id: int, sha: str, attempt: int, *, allow_pending: bool = False
+) -> bool:
+    """Require exact gate success; optionally report unfinished API metadata."""
+    jobs = gh.pages(f"actions/runs/{run_id}/attempts/{attempt}/jobs", "jobs")
+    gates = [job for job in jobs if job.get("name") == "Release gate"]
+    failure = "Exactly one successful, completed Release gate is required; skipped is not a pass"
+    if not gates and allow_pending:
+        return False
+    require(len(gates) == 1, failure)
+    gate = gates[0]
+    require(gate.get("head_sha") == sha, "Release gate SHA mismatch")
+    if allow_pending and gate.get("status") in {
+        "queued",
+        "requested",
+        "pending",
+        "waiting",
+        "in_progress",
+    }:
+        require(gate.get("conclusion") is None, failure)
+        return False
+    require(
+        gate.get("status") == "completed" and gate.get("conclusion") == "success",
+        failure,
+    )
+    return True
+
+
 # Keep the independently verified provenance fields explicit at each call site.
 # pylint: disable-next=too-many-arguments
 def validate_run(
@@ -1087,18 +1303,7 @@ def validate_run(
             run.get("status") == "in_progress", "Publication run is not in progress"
         )
     if gate:
-        jobs = gh.pages(
-            f"actions/runs/{positive(run.get('id'), 'run ID')}/attempts/{attempt}/jobs",
-            "jobs",
-        )
-        gates = [job for job in jobs if job.get("name") == "Release gate"]
-        require(
-            len(gates) == 1
-            and gates[0].get("status") == "completed"
-            and gates[0].get("conclusion") == "success",
-            "Exactly one successful, completed Release gate is required; skipped is not a pass",
-        )
-        require(gates[0].get("head_sha") == sha, "Release gate SHA mismatch")
+        release_gate_ready(gh, positive(run.get("id"), "run ID"), sha, attempt)
 
 
 # Execution identity is deliberately checked again on every fresh response.
@@ -1112,11 +1317,14 @@ def wait_for_executing_run(
     attempt: int,
     gate: bool = True,
 ) -> JSONObject:
-    """Allow five minutes for Actions' aggregate status to catch up.
+    """Allow five shared minutes for Actions' run and gate metadata to catch up.
 
     A running job may still be reported as queued or waiting after environment
     approval. Those states never authorize publication: only a fresh, fully
-    bound in_progress run can pass. Completed RC validation does not wait.
+    bound in_progress run and successful prerequisite gate can pass. Missing or
+    unfinished gate metadata shares the same deadline; terminal non-success,
+    conflicting identity and duplicate gates fail immediately. Completed RC
+    validation does not wait.
     """
     deadline = time.monotonic() + EXECUTING_RUN_WAIT_SECONDS
     reported_status = None
@@ -1129,26 +1337,42 @@ def wait_for_executing_run(
         require(
             run.get("conclusion") is None, "Publication run already has a conclusion"
         )
-        if status == "in_progress":
-            validate_run(gh, run, info, sha, attempt, completed=False, gate=gate)
+        if status == "in_progress" and (
+            not gate or release_gate_ready(gh, run_id, sha, attempt, allow_pending=True)
+        ):
+            require(
+                time.monotonic() < deadline,
+                f"Publication metadata was not ready within {EXECUTING_RUN_WAIT_SECONDS} seconds; "
+                f"run: {run_id}, attempt: {attempt}",
+            )
             return run
         require(
-            status in {"queued", "requested", "pending", "waiting"},
+            status in {"queued", "requested", "pending", "waiting", "in_progress"},
             f"Publication run is not active: {status!r}",
+        )
+        waiting_for = (
+            "Release gate metadata"
+            if status == "in_progress"
+            else f"aggregate status {status!r}"
+        )
+        timeout_target = (
+            "Release gate did not become successful"
+            if status == "in_progress"
+            else "Publication run did not become in_progress"
         )
         remaining = deadline - time.monotonic()
         require(
             remaining > 0,
-            f"Publication run did not become in_progress within {EXECUTING_RUN_WAIT_SECONDS} seconds; "
+            f"{timeout_target} within {EXECUTING_RUN_WAIT_SECONDS} seconds; "
             f"last status: {status!r}, run: {run_id}, attempt: {attempt}",
         )
-        if status != reported_status:
+        if waiting_for != reported_status:
             print(
                 f"Waiting for Actions run {run_id}, attempt {attempt}: "
-                f"aggregate status {status!r}; at most {remaining:.0f}s remaining",
+                f"{waiting_for}; at most {remaining:.0f}s remaining",
                 file=sys.stderr,
             )
-            reported_status = status
+            reported_status = waiting_for
         time.sleep(min(2, remaining))
 
 
@@ -1288,7 +1512,8 @@ def stage_assets(source: Path, destination: Path) -> list[JSONObject]:
     return assets
 
 
-def verify_uploaded_asset(gh: GitHub, item: JSONObject, path: Path) -> None:
+def verify_uploaded_asset(gh: GitHub, item: JSONObject, path: Path, *,
+                          budget: DownloadBudget) -> None:
     """Re-download every uploaded byte before making the draft public."""
     with path.open("rb") as source:
         local = stream_identity(source)
@@ -1296,12 +1521,11 @@ def verify_uploaded_asset(gh: GitHub, item: JSONObject, path: Path) -> None:
         item.get("state") == "uploaded" and item.get("size") == local["size"],
         "Incomplete asset upload; draft left unpublished",
     )
-    with tempfile.TemporaryFile() as downloaded:
-        gh.download_asset(
-            f"releases/assets/{positive(item.get('id'), 'asset ID')}", downloaded
+    with tempfile.TemporaryDirectory(prefix="release-readback-") as temporary:
+        remote = download_asset(
+            gh, item.get("id"), Path(temporary) / "payload", expected=local,
+            budget=budget,
         )
-        downloaded.seek(0)
-        remote = stream_identity(downloaded)
     require(remote == local, "Uploaded bytes differ; draft left unpublished")
 
 
@@ -1603,7 +1827,7 @@ def _publish_prepared(
     )
     release_id = positive(release.get("id"), "release ID")
     for path in sorted(directory.iterdir()):
-        gh.upload(tag, path)
+        gh.upload(tag, path, release_id=release_id)
     uploaded = gh.pages(f"releases/{release_id}/assets")
     expected = {path.name: path for path in directory.iterdir()}
     require(
@@ -1611,8 +1835,9 @@ def _publish_prepared(
         and {item.get("name") for item in uploaded} == set(expected),
         "Uploaded asset inventory mismatch; draft left unpublished",
     )
+    budget = DownloadBudget(sum(path.stat().st_size for path in expected.values()))
     for item in uploaded:
-        verify_uploaded_asset(gh, item, expected[cast(str, item["name"])])
+        verify_uploaded_asset(gh, item, expected[cast(str, item["name"])], budget=budget)
     result = cast(
         JSONObject,
         gh.api(
@@ -2118,13 +2343,18 @@ def promote(args: argparse.Namespace) -> JSONObject:
     check_workflow_publication(gh, cast(str, manifest["source_sha"]))
     with tempfile.TemporaryDirectory(prefix="release-promote-") as temp:
         stage = Path(temp)
+        budget = DownloadBudget(sum(cast(int, item["size"]) for item in expected.values()))
         for asset in release_assets:
             name = cast(str, asset["name"])
             if name == MANIFEST:
                 (stage / name).write_bytes(raw)
                 identity: AssetIdentity = {"size": len(raw), "sha256": digest(raw)}
             else:
-                identity = download_asset(gh, asset.get("id"), stage / name)
+                identity = download_asset(
+                    gh, asset.get("id"), stage / name,
+                    expected=cast(AssetIdentity, {key: expected[name][key] for key in ("size", "sha256")}),
+                    budget=budget,
+                )
             require(
                 asset.get("size") == identity["size"],
                 f"Release asset size mismatch: {name}",

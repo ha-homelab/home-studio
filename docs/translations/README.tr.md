@@ -24,7 +24,7 @@ HA’yı hazırlarken ayrı tarayıcı düzenleyicisini kullanabilirsiniz. Bu d�
 
 Evinizi tarayıcıda çizin. Hesap gerekmez. Dili düzenleyicinin üst kısmından seçin.
 
-1. Odalar, duvarlar, kapılar ve pencereler ekleyin. Kütüphanede 206 model bulunur. Bir renk paleti ve desteklenen nesneler için yüzey deseni seçin.
+1. Odalar, duvarlar, kapılar ve pencereler ekleyin. Kütüphanede 211 model bulunur. Bir renk paleti ve desteklenen nesneler için yüzey deseni seçin.
 2. Düzenlenebilir bir kopya saklamak için JSON dışa aktarın. Taslaklar yalnızca bu tarayıcıda kalır. Dil değiştirmek planınızı değiştirmez.
 
 ### İsteğe bağlı: Taşınabilir araçlar ve Python derleyicisi

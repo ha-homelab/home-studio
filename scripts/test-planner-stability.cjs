@@ -54,7 +54,35 @@ function fixture() {
 }
 
 function instrument() {
-  const stats=window.__plannerStats={planDraws:0,canvasResizes:0,contexts:0,contextLosses:0,retiredContextLosses:0,linkedPrograms:0,shaderErrors:[],errors:[],contextEvents:[],contextLossRequests:[],restoredBuffers:[],linkFailures:[],recoveryOperations:[]};
+  const stats=window.__plannerStats={planDraws:0,planPaints:0,planResizeSequence:0,lastPlanPaint:null,canvasResizes:0,contexts:0,contextLosses:0,retiredContextLosses:0,linkedPrograms:0,shaderErrors:[],errors:[],errorCount:0,errorDetails:[],canvasReadErrors:[],canvasReadErrorCount:0,contextEvents:[],contextLossRequests:[],restoredBuffers:[],linkFailures:[],recoveryOperations:[]};
+  let planContext=null;
+  const bounded=(value,limit)=>String(value??'').slice(0,limit);
+  const canvasState=canvas=>({id:bounded(canvas?.id,128),width:canvas?.width??null,height:canvas?.height??null,attached:canvas?.isConnected===true});
+  const errorDetails=(error,details={})=>({kind:bounded(details.kind||'error',64),message:bounded(details.message??error?.message??error,2048),
+    name:bounded(error?.name,128),stack:bounded(error?.stack,4096),file:bounded(details.file,1024),
+    line:Number.isInteger(details.line)?details.line:null,column:Number.isInteger(details.column)?details.column:null,
+    time:performance.now(),...(details.canvas?{canvas:canvasState(details.canvas)}:{})});
+  window.__plannerRecordError=(error,details={})=>{
+    stats.errorCount++;
+    if(stats.errorDetails.length<32) {
+      const record=errorDetails(error,details);stats.errors.push(record.message);stats.errorDetails.push(record);
+    }
+  };
+  window.__plannerPlanState=()=>{
+    const canvas=document.getElementById('plan-canvas');
+    return {...canvasState(canvas),contextAvailable:planContext!==null,
+      contextLost:typeof planContext?.isContextLost==='function'?planContext.isContextLost():null,
+      resizeSequence:stats.planResizeSequence,paintCount:stats.planPaints,lastPaint:stats.lastPlanPaint};
+  };
+  window.__plannerRecordPaint=()=>{
+    const state=window.__plannerPlanState();
+    // The fixture calls this only after the real renderPlan body returns.
+    // An attempted clear, skipped render, or zero-sized bitmap is not a paint.
+    if(state.attached&&state.width>0&&state.height>0&&state.contextAvailable&&state.contextLost!==true) {
+      stats.planPaints++;
+      stats.lastPlanPaint={time:performance.now(),resizeSequence:state.resizeSequence,width:state.width,height:state.height};
+    }
+  };
   const contexts=[];
   window.__plannerContextStates=()=>contexts.map(({id,canvas,gl,restores})=>({id,attached:canvas.isConnected,lost:gl.isContextLost(),restores}));
   window.__plannerTraceRenderer=(renderer,readLayout)=>{
@@ -82,20 +110,34 @@ function instrument() {
       };
     }
   };
-  window.addEventListener('error', event=>stats.errors.push(event.message || String(event.error)));
-  window.addEventListener('unhandledrejection', event=>stats.errors.push(String(event.reason)));
+  window.addEventListener('error', event=>window.__plannerRecordError(event.error,{kind:'uncaught',message:event.message,file:event.filename,line:event.lineno,column:event.colno}));
+  window.addEventListener('unhandledrejection', event=>window.__plannerRecordError(event.reason,{kind:'unhandledrejection'}));
   const originalError=console.error.bind(console);
-  console.error=(...args)=>{stats.errors.push(args.map(value=>value?.message || String(value)).join(' '));originalError(...args);};
+  console.error=(...args)=>{window.__plannerRecordError(args[0],{kind:'console',message:args.slice(0,8).map(value=>bounded(value?.message??value,256)).join(' ')});originalError(...args);};
   for(const property of ['width','height']) {
     const descriptor=Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype,property);
-    Object.defineProperty(HTMLCanvasElement.prototype,property,{...descriptor,set(value){if(this.id==='preview-canvas')stats.canvasResizes++;descriptor.set.call(this,value);}});
+    Object.defineProperty(HTMLCanvasElement.prototype,property,{...descriptor,set(value){if(this.id==='preview-canvas')stats.canvasResizes++;descriptor.set.call(this,value);if(this.id==='plan-canvas')stats.planResizeSequence++;}});
   }
   const original=HTMLCanvasElement.prototype.getContext;
   HTMLCanvasElement.prototype.getContext=function(...args) {
     const context=original.apply(this,args);
     if(!context || context.__plannerInstrumented)return context;
     context.__plannerInstrumented=true;
+    if(args[0]==='2d'&&typeof context.getImageData==='function') {
+      const read=context.getImageData;
+      context.getImageData=function(...values) {
+        try { return read.apply(this,values); }
+        catch(error) {
+          // Keep handled optional-thumbnail failures visible without changing
+          // their semantics. Only an uncaught failure enters stats.errors.
+          stats.canvasReadErrorCount++;
+          if(stats.canvasReadErrors.length<32)stats.canvasReadErrors.push(errorDetails(error,{kind:'2d-getImageData',canvas:this.canvas}));
+          throw error;
+        }
+      };
+    }
     if(args[0]==='2d' && this.id==='plan-canvas') {
+      planContext=context;
       const clear=context.clearRect.bind(context);context.clearRect=(...values)=>{stats.planDraws++;return clear(...values);};
     }
     if(String(args[0]).startsWith('webgl')) {
@@ -143,6 +185,20 @@ function instrument() {
     }
     return context;
   };
+}
+
+function instrumentPlanRenderer(source) {
+  const declaration='function renderPlan() {';
+  assert.equal(source.split(declaration).length,2,'Exactly one real plan renderer must be instrumented');
+  return source.replace(declaration,`function renderPlan() {
+  const before=window.__plannerStats.planDraws;
+  try {
+    const result=__plannerRenderPlanBody();
+    if(window.__plannerStats.planDraws>before)window.__plannerRecordPaint();
+    return result;
+  } catch(error) { window.__plannerRecordError(error,{kind:'plan-render'});throw error; }
+}
+function __plannerRenderPlanBody() {`);
 }
 
 const server=http.createServer((request,response)=>{
@@ -456,6 +512,7 @@ async function run(engine,origin) {
   catalog=JSON.parse(fs.readFileSync(path.join(root,'planner/catalog.json')));
   sourceFiles=Object.fromEntries(['planner/editor.js','planner/render-capacity.js'].filter(name=>fs.existsSync(path.join(root,name))).map(name=>[name,crypto.createHash('sha256').update(fs.readFileSync(path.join(root,name))).digest('hex')]));
   editor=fs.readFileSync(path.join(root,'planner/editor.js'),'utf8');
+  editor=instrumentPlanRenderer(editor);
   editor=editor.replace('const profile = previewRenderProfile(renderer.getContext());', '$& window.__plannerRasterProbe=profile.rasterProbe||null;');
   editor=startup.checkpointSource(editor,'const profile = previewRenderProfile(renderer.getContext());','profile');
   sourceHash=crypto.createHash('sha256').update(editor).digest('hex');

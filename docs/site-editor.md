@@ -44,6 +44,11 @@ no real home's location or private device data.
 
 ## Add the neighborhood
 
+Choose **Neighborhood** in the site toolbar to work on the surroundings while
+your own home, roof and shared ground elevation stay locked. **All site features**
+returns to editing the entire site. This is an editing scope, not another copy
+of your home or another floor.
+
 Select **Neighbor** for another building, **Street** for the paved road outline,
 or **Landscape** for a garden or green space. Name shapes so they are easy to
 find again. A street is a closed outline of the road surface, rather than a
@@ -54,25 +59,87 @@ usually provide enough context. You can select a shape from the list, adjust
 its color and height, or delete it without changing any indoor objects or
 Home Assistant entity bindings.
 
+New neighboring buildings use **Subdued outline**: upper and lower perimeters
+and vertical corners, with no solid walls hiding your home. Their contours remain
+visible around the detailed house when the map is enabled. Select a building and
+change **Neighbor appearance** to **Solid volume** if desired. Existing buildings
+keep their saved appearance. Drag the entire footprint to move it, drag a corner
+to reshape it, and hold **Alt** to bypass grid snapping for fine adjustments.
+
+### Draw over the saved map
+
+In the Home Assistant editor, select **Map background**. It uses the same saved
+alignment as **3D Home**. If no map has been aligned yet, open **3D Home → Align
+map**, align your home and save, then return to the editor and select **Reload
+map**. Changing the drawing does not change this geographic alignment.
+
+1. Select **Neighborhood**, enable **Map background**, and find your home.
+2. Choose **Neighbor** and **Draw polygon**. Click the corners of the next
+   building and press **Enter** to finish; **Escape** cancels.
+3. Set its approximate height and outline color in the inspector. Check a known
+   distance before drawing the rest of the block.
+4. Switch to **Preview 3D** to check the heights, then **Save draft** and
+   **Publish to 3D Home** when the placement looks right.
+
+The editor reads the saved map context once when it connects, so a map-aligned
+home does not receive a generated demo road or garden in Preview. Raster tiles
+remain optional. Tiles stop loading when you leave the site drawing or hide
+the page, and the editor uses its existing 2D canvas. The separate browser editor
+still works with the metric grid; it does not receive your Home Assistant map
+settings. The OpenStreetMap credit links to the data license above the native
+editor. Keep that attribution in screenshots containing map tiles.
+
+You can draw these outlines manually from known measurements and permitted
+references, without an AI account or key. Check their position on the shared
+grid before using the separate Home Assistant map alignment.
+
 The supported envelope is 64 shapes, 64 corners per shape and 1,024 corners in
 total. Coordinates extend 1,000 metres each side of the drawing origin. Keep
 individual polygons simple: their edges must not cross, fold back, or repeat
 the first point at the end. Separate polygons may overlap, for example a roof
 over a house or a garden beside a street.
 
+## Choose reference imagery
+
+Use your own photos or references licensed for your intended use, including
+submission to your selected AI provider. Keep required source attribution when
+showing or sharing imagery. A private project or personal API key does not grant
+additional rights to someone else's images.
+
+- **Google Maps screenshots:** Google's [image-use guidelines](https://about.google/brand-resource-center/products-and-services/geo-guidelines/)
+  permit adding labels and graphics to ordinary Maps screenshots with attribution.
+  That permission is not a general license for automated geometry extraction.
+- **Google Street View:** the same guidelines prohibit screenshotting Street View
+  and using applications to extract information from it. Use your own street-level
+  photographs for this workflow.
+- **Google Maps Platform imagery:** the [API terms](https://cloud.google.com/maps-platform/terms)
+  prohibit deriving building outlines from its satellite imagery. Home Studio does
+  not fetch Google imagery or provide a Google footprint-extraction service.
+
+[OpenStreetMap data](https://www.openstreetmap.org/copyright) can provide an open
+reference; retain its attribution and license notices and review the ODbL terms
+before redistributing derived data. Draw only the local context you need and
+check dimensions independently.
+
 ## Draft from photos with your own AI
 
-Open the optional AI panel and choose the site/roof mode. Select the photos you
-want to send and identify your home in words. Include a measured distance, the
-relationship to the existing drawing, and which nearby objects to include.
-For example:
+Open the optional AI panel in the relevant site scope; it selects **Site**
+automatically. **Neighborhood** limits
+proposals to neighbors, streets and landscape; **All site features** also allows
+your home's footprint and roof. Select the photos or
+permitted reference images you want to send and identify your home in words.
+Include a measured distance, the relationship to the existing drawing, and which
+nearby objects to include. For example:
 
 > My home is the white building in the center of photo 1. Its front wall is
 > 8 metres wide and runs along X from 0 to 8; the street is on the negative-Z
-> side. Draw my home's footprint and roof edge, the two buildings immediately
-> to its left and right, and the street in front. Do not include buildings in
-> the distance. The eaves are about 6 metres above ground. Mark uncertain
-> dimensions as estimates.
+> side. Keep my home unchanged. Draw the two buildings immediately to its left
+> and right, and the street in front. Do not include buildings in the distance.
+> The neighbors' eaves are about 6 metres above ground. Mark uncertain dimensions
+> as estimates.
+
+This example works in **Neighborhood** scope. Switch to **All site features**
+if you also want a proposal for your own building footprint or roof.
 
 A street-level photo does not reveal hidden roof edges, exact distances, or
 surveyed property boundaries. Review the proposed shapes and the AI's stated
@@ -84,11 +151,25 @@ existing interiors; it does not redraw your rooms or change entity bindings.
 AI uses the existing [provider connection](ai-planning.md) and photo preparation
 flow. A cloud provider receives your selected photos, instructions and the
 displayed planning context; a local model receives them through its configured
-endpoint. Credentials are session-only. Neither photos nor credentials are
-saved inside the drawing. No AI result sets GPS coordinates or silently changes
-the Home Assistant map alignment.
+endpoint. Neighborhood context contains existing exterior shapes or, if none
+exist, an explicitly approximate bounding rectangle. It excludes individual
+room outlines, room names and device bindings. **All site features** also sends
+the room outlines used to align your home's footprint. Credentials are
+session-only. Neither photos nor credentials are
+saved inside the drawing. Applied shapes are saved with the project and exported
+viewer, so keep real neighborhood projects and backups private. Ending the session
+clears Home Studio's selected photos and credentials; it cannot delete provider
+records. No AI result sets GPS coordinates or silently changes the Home Assistant
+map alignment.
 
 ## Show it on the Home Assistant map
+
+Neighborhood scope, outline appearance, the editor map background and explicit
+imported-frame calibration are available in the **1.3.0 preview releases,
+starting with beta.2**, including [1.3.0-beta.4](https://github.com/ha-homelab/home-studio/releases/tag/v1.3.0-beta.4).
+Older stable releases may not show these controls or load an exported drawing
+containing the new `render_style` field. The 1.3.0 previews are not a stable
+1.3.0 release.
 
 Drawings with a `site` property require **v1.2.0-beta.6 or newer** in both the
 toolkit and Home Studio integration, even when the site has no shapes. The
@@ -102,6 +183,20 @@ not yet available, keep your exported JSON; preview releases are optional.
 Save and publish the drawing as usual. In the native **3D Home** view, an
 administrator can use **Align map** to align a known drawing point with its
 geographic location. Follow the [map alignment guide](map-navigation.md).
+
+If imported floors disagree on site ground, use the explicit
+[site-frame calibration preview](imported-site-calibration.md) before publishing
+exterior shapes. It preserves the original local geometry and requires review.
+
+An imported home can retain an older viewer inside its saved baseline even after
+the integration is updated. For a supported previously published home, use
+**More options → Update imported viewer**, review the proposed map-renderer
+change and apply it. This prepares a new baseline while retaining the old one;
+it does not publish or alter the current family view. Then calibrate if needed,
+draw the neighbors, and publish. Unknown or modified renderer versions require
+a rebuild from the original source instead of an automatic update. Keep the
+private source and HA backup; a project JSON alone does not contain an imported
+home's custom geometry and assets.
 
 The exterior shapes appear as you move out from the indoor view into the map
 overview. Detailed indoor controls remain the focus at house scale. The site
@@ -138,4 +233,8 @@ feature contains `id`, `name`, `kind`, `polygon`, `height_m`, and `color`.
 `kind` is `home`, `roof`, `building`, `street`, or `landscape`; `polygon` is a
 list of `[x, z]` pairs. Heights are 0–100 m, ground elevation is −100–100 m, and
 colors use `#RRGGBB`. Unknown fields, invalid numbers, and malformed outlines
-are rejected by both the JavaScript editor and the Python compiler.
+are rejected by both the JavaScript editor and the Python compiler. In the
+neighborhood-capable format, buildings may also specify
+`render_style: "outline"` or `render_style: "solid"`. Omitting it preserves the
+legacy solid appearance; the editor explicitly sets `outline` for new neighbors.
+Other feature kinds cannot use this field.

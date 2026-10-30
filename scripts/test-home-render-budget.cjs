@@ -364,6 +364,7 @@ const root = path.resolve(__dirname, '..');
   const context = vm.createContext({
     THREE: {...THREE, Vector3: TrackedVector}, active: true, renderProfile: {pointShadows:8, pointShadowSize:512}, renderer: {}, camera: undefined, cameraFit: undefined, houseFitBounds: undefined, root: new THREE.Group(),
     projectedPosition: new THREE.Vector3(), projectedForward: new THREE.Vector3(),
+    markerMotion:{reset(){},target(){}},markerViewport:'',deviceEffects:{project(){}},
     selected: '', planRadius: 10, planBounds: true, zoom: 1, panX: 0, panY: 0, homeRotation: 0, homeTilt: 0,
     model: {ceiling_height_m: 3, rooms: [
       {id: 'A', polygon: [[0, 0], [4, 0], [4, 4], [0, 4]]},
@@ -371,7 +372,7 @@ const root = path.resolve(__dirname, '..');
     ]},
     xm: x => x, zm: z => z, $: id => id === 'homeStage' ? {getBoundingClientRect: () => rect} : {},
     roomLighting: null, lowerFloorContext: null, assumedZones: null, presenceView: null, vacuumView: null, signalZone: '', showLowerFloor: true,
-    labels: [label], points: [], roomCode: id => id, roomName: id => id,
+    labels: [label], points: [], motionTracks: new Map(), roomCode: id => id, roomName: id => id,
     refreshSignalStatus() {}, drawScene() {}, positionMediaPreviews() {}, renderCount: 0,
   });
   const home = fs.readFileSync(path.join(root, 'home-view.js'), 'utf8');

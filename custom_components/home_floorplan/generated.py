@@ -136,6 +136,13 @@ def _check_site_runtime(html, project):
                           "Rebuild its viewer with the current Home Studio toolkit through the "
                           "original home update process, then publish this saved draft again. "
                           "The current published home is unchanged.")
+    if (any("render_style" in feature for feature in project["site"]["features"]) and
+            "constHOME_SITE_RENDER_STYLE_VERSION=1;" not in code):
+        raise NativeError("unsupported_site_runtime",
+                          "This generated home's saved viewer does not support neighboring building styles. "
+                          "Rebuild its viewer with the current Home Studio toolkit through the "
+                          "original home update process, then publish this saved draft again. "
+                          "The current published home is unchanged.")
 
 
 def _check_source_site_frame(project, assets):
@@ -175,9 +182,9 @@ def _check_source_site_frame(project, assets):
             raise ValueError("The original floors disagree on site ground.")
     except ValueError as error:
         raise NativeError("inconsistent_site_frame",
-                          "Site changes need consistent floor reference levels. Rebuild the original home "
-                          "with matching floor elevations before publishing them. To continue without site changes, "
-                          "export the drawing, remove its top-level site field, and import it again. "
+                          "The imported home's floor reference levels need calibration before publishing site shapes. "
+                          "Use More options > Calibrate imported site frame to review the source levels, "
+                          "or rebuild the original home with consistent elevations. "
                           "The saved draft and current published home are unchanged. " + str(error)) from error
 
 
@@ -302,6 +309,10 @@ def _merge_model(base, floor, original, additions, runtime=False):
     # Detailed custom meshes can be tens of megabytes. Share their immutable
     # objects; copy only the collections that this merge actually changes.
     model = dict(base)
+    # The protected source project may carry an explicitly confirmed floor-frame
+    # calibration. Preserve it in published metadata without moving local meshes.
+    if base.get("elevation_m", 0) != floor["elevation_m"]:
+        model["elevation_m"] = floor["elevation_m"]
     model["rooms"] = copy.deepcopy(base["rooms"])
     model["inventory"] = copy.deepcopy(floor["items"])
     old_items = {item["id"]: item for item in original["items"]}
@@ -435,7 +446,22 @@ class GeneratedProject(NativeProject):
         self.installed_inventory = copy.deepcopy(inventory)
         self.document.update(inventory=copy.deepcopy(inventory), baseline=None)
         self.baseline_project = None
+        self._baseline_recovery_required = False
         self.source = {"kind": "generated", "protected_floors": [], "protected_rooms": {}, "custom_items": {}}
+
+    def check_recovery(self):
+        if self._baseline_recovery_required:
+            raise NativeError("baseline_recovery_required",
+                              "The previous baseline write has an uncertain outcome. Restart Home Assistant "
+                              "before loading or editing this draft. Both baselines are retained.")
+
+    def check_revision(self, revision):
+        self.check_recovery()
+        super().check_revision(revision)
+
+    async def save_inventory(self, inventory):
+        self.check_recovery()
+        await super().save_inventory(inventory)
 
     def _metadata(self, project, models):
         self.baseline_project = project

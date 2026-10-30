@@ -65,8 +65,29 @@ def validate_catalog(catalog):
         if 'tags' in model:
             require(isinstance(model['tags'], list) and all(text(tag) for tag in model['tags']), identifier + ': invalid tags')
         require(isinstance(model.get('parts'), list) and 1 <= len(model['parts']) <= 32, identifier + ': requires 1–32 parts')
+        animation = model.get('device_animation')
+        if 'device_animation' in model:
+            require(isinstance(animation, dict) and set(animation) <= {'kind', 'rotor', 'airflow'}, identifier + ': invalid device animation')
+            require(animation.get('kind') in ('fan', 'air_conditioner', 'heater'), identifier + ': invalid animation kind')
+            airflow = animation.get('airflow')
+            require(isinstance(airflow, dict) and set(airflow) == {'origin', 'direction', 'width', 'length'}, identifier + ': invalid airflow')
+            for key in ('origin', 'direction'):
+                require(isinstance(airflow[key], list) and len(airflow[key]) == 3
+                        and all(finite_number(value, -2, 2) for value in airflow[key]), identifier + ': invalid airflow ' + key)
+            require(any(airflow['direction']), identifier + ': airflow direction must be nonzero')
+            require(finite_number(airflow['width'], .05, 2) and finite_number(airflow['length'], .05, 3), identifier + ': invalid airflow size')
+            if 'rotor' in animation:
+                rotor = animation['rotor']
+                require(animation['kind'] == 'fan' and isinstance(rotor, dict)
+                        and set(rotor) == {'axis', 'pivot'} and rotor['axis'] in ('x', 'y', 'z'), identifier + ': invalid rotor')
+                require(isinstance(rotor['pivot'], list) and len(rotor['pivot']) == 3
+                        and all(finite_number(value, -.5 if axis != 1 else 0, .5 if axis != 1 else 1)
+                                for axis, value in enumerate(rotor['pivot'])), identifier + ': invalid rotor pivot')
+                require(any(part.get('fan_rotor') is True for part in model['parts']), identifier + ': rotor has no parts')
         for index, part in enumerate(model['parts']):
             prefix = f'{identifier} part {index}'
+            if 'fan_rotor' in part:
+                require(part['fan_rotor'] is True and animation and animation.get('rotor'), prefix + ': invalid rotor part')
             try:
                 mesh = primitive(part)
             except (ValueError, OverflowError) as error:

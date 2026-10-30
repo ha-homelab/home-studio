@@ -23,6 +23,8 @@ class SourceReplayTests(unittest.TestCase):
             source = work / 'extracted/home-studio'
             self.assertFalse((source / '.git').exists())
             self.assertFalse((source / 'node_modules').exists())
+            self.assertTrue((source / 'scripts/test-viewer-runtime-upgrade.cjs').is_file(),
+                            'The distributed source must include its runtime-upgrade browser acceptance test')
             # Load the tour browser helper from the distributed entry point,
             # without starting Playwright or relying on checkout-only files.
             result = subprocess.run([node, '-e', """
@@ -35,12 +37,12 @@ class SourceReplayTests(unittest.TestCase):
             replay = sorted(path.relative_to(source).as_posix()
                             for path in (source / 'fuzz').glob('*.test.mjs'))
             self.assertEqual(replay, ['fuzz/project-validation.test.mjs', 'fuzz/wall-geometry.test.mjs'])
-            commands = [['scripts/test-planner-navigation.cjs'], ['scripts/test-draft-storage.mjs'], ['scripts/test-onboarding.mjs'], ['scripts/test-ai-draft.mjs'], replay, ['scripts/test-browser-stability-diagnostics.cjs'], ['scripts/test-unlit-architectural-walls.cjs'], ['scripts/test-flat-editor-floors.cjs'], ['scripts/test-wall-outline-materials.cjs'], ['scripts/test-light-state.cjs'],
-                        ['scripts/test-tv-screen.cjs'], ['scripts/test-media-preview.cjs'], ['scripts/test-media-artwork-host.cjs'], ['scripts/test-render-lifecycle.cjs'], ['scripts/test-planner-render-budget.cjs'],
+            commands = [['scripts/test-climate-state.cjs', 'scripts/test-marker-motion.cjs', 'scripts/test-device-effects.cjs', 'scripts/test-fixture-animation.cjs'], ['scripts/test-planner-navigation.cjs'], ['scripts/test-draft-storage.mjs'], ['scripts/test-onboarding.mjs'], ['scripts/test-ai-draft.mjs'], replay, ['scripts/test-browser-stability-diagnostics.cjs'], ['scripts/test-unlit-architectural-walls.cjs'], ['scripts/test-flat-editor-floors.cjs'], ['scripts/test-wall-outline-materials.cjs'], ['scripts/test-light-state.cjs'],
+                        ['scripts/test-tv-screen.cjs'], ['scripts/test-media-preview.cjs'], ['scripts/test-media-artwork-host.cjs'], ['scripts/test-wall-motion.cjs'], ['scripts/test-home-render-budget.cjs'], ['scripts/test-render-lifecycle.cjs'], ['scripts/test-pointer-ownership.cjs'], ['scripts/test-planner-render-budget.cjs'],
                         ['scripts/test-viewer-geometry-context.cjs'], ['scripts/test-viewer-texture-context.cjs'], ['scripts/test-native-draw-diagnostic.cjs'], ['scripts/test-native-viewer-programs.cjs'], ['scripts/test-glass-wall-program.cjs'],
                         ['scripts/test-zero-point-block.cjs'], ['scripts/test-point-decay-two.cjs'], ['scripts/test-cached-shadow-transmission.cjs'], ['scripts/test-literal-lambert-directional.cjs'], ['scripts/test-fallback-shared-program.cjs'],
                         ['scripts/test-point-texture-current.cjs'], ['scripts/test-point-run-texture.cjs'], ['scripts/test-static-geometry-atlas.cjs'], ['scripts/test-point-signal-texture.cjs'], ['scripts/test-signal-texture-decay-two.cjs'], ['scripts/test-literal-lambert-point-body.cjs'], ['scripts/test-scalar-shadow-point.cjs'], ['scripts/test-scalar-indirect-lambert.cjs'], ['scripts/test-direct-shadow-uniforms.cjs'], ['scripts/test-scalar-lambert-accumulators.cjs']]
-            commands.extend([['scripts/test-site-model.mjs'], ['scripts/test-ai-site.mjs'],
+            commands.extend([['scripts/test-site-model.mjs'], ['scripts/test-ai-site.mjs'], ['scripts/test-site-map-underlay.mjs'],
                              ['scripts/test-camera-tour.mjs', 'scripts/test-camera-tour-recording.mjs',
                               'scripts/test-camera-tour-session-contract.mjs', 'scripts/test-camera-tour-hosts.cjs']])
             for paths in commands:
@@ -51,7 +53,7 @@ class SourceReplayTests(unittest.TestCase):
             result = subprocess.run([node, '--test', 'scripts/test-device-onboarding.mjs'], cwd=source,
                                     capture_output=True, text=True, timeout=60)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            for script in ('scripts/test-ai-companion.py', 'scripts/test-native-draw-diagnostic.py', 'scripts/test-intel-macos-ci.py', 'scripts/test-ubuntu-apt.py', 'scripts/test-waterfox-tooling.py'):
+            for script in ('scripts/test-ai-companion.py', 'scripts/test-native-draw-diagnostic.py', 'scripts/test-intel-macos-ci.py', 'scripts/test-ubuntu-apt.py', 'scripts/test-waterfox-tooling.py', 'scripts/test-site-calibration.py', 'scripts/test-runtime-upgrade.py', 'scripts/test-viewer-locales.py'):
                 result = subprocess.run([sys.executable, script], cwd=source,
                                         capture_output=True, text=True, timeout=60)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

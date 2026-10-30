@@ -58,21 +58,43 @@ function rectangle(measurements, origin) {
   return [[origin.x, origin.z], [origin.x + measurements.width, origin.z], [origin.x + measurements.width, origin.z + measurements.depth], [origin.x, origin.z + measurements.depth]];
 }
 
+export function neighborhoodReference(project) {
+  if (project.site?.features.some(feature => ['home', 'roof'].includes(feature.kind))) {
+    return { kind: 'site_home_and_roof', description: 'Use the existing home and roof polygons in site.features for alignment.' };
+  }
+  // Share one coarse extent, never the individual room/wall polygons or their
+  // identifiers. This rectangle is an alignment hint, not an inferred footprint.
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  const include = ([x, z]) => { minX = Math.min(minX, x); minZ = Math.min(minZ, z); maxX = Math.max(maxX, x); maxZ = Math.max(maxZ, z); };
+  for (const floor of project.floors) {
+    for (const room of floor.rooms) room.polygon.forEach(include);
+    for (const wall of floor.walls) { include(wall.start); include(wall.end); }
+  }
+  if (minX < maxX && minZ < maxZ) return {
+    kind: 'approximate_building_extent', polygon: [[minX, minZ], [maxX, minZ], [maxX, maxZ], [minX, maxZ]],
+    description: 'Approximate overall bounding rectangle for alignment only. It is not the actual exterior footprint or a measured property boundary; do not trace it as a new building.',
+  };
+  return { kind: 'unavailable', description: 'No exterior alignment geometry is available. Ask for measured dimensions and orientation before placing uncertain features.' };
+}
+
 /** Capture a sanitized provider context and privately bind it to this exact project. */
-export function createDraftContext(project, { floorId, roomId, mode = 'furnish_room', measurements, origin, siteNotes } = {}) {
+export function createDraftContext(project, { floorId, roomId, mode = 'furnish_room', measurements, origin, siteNotes, siteScope = 'all' } = {}) {
   validateProject(project);
   const baseline = serializeProject(project);
   if (!MODES.includes(mode)) throw new Error('Unknown AI draft mode.');
   const requestId = `request_${globalThis.crypto?.randomUUID?.().replaceAll('-', '') || Date.now().toString(36) + Math.random().toString(36).slice(2)}`;
   if (mode === 'site') {
+    if (!['all', 'neighborhood'].includes(siteScope)) throw new Error('Unknown site planning scope.');
     fields(siteNotes, ['own_home', 'include', 'reference'], 'Site description');
     for (const [field, label] of [['own_home', 'Identify your own home in the photos'], ['include', 'Requested surroundings'], ['reference', 'Known dimension and orientation']]) {
       text(typeof siteNotes[field] === 'string' ? siteNotes[field].replace(/[\r\n\t]/g, ' ') : siteNotes[field], 1000, label, field !== 'own_home');
     }
     const context = freeze({ draft_version: 1, request_id: requestId, mode,
       site: clone(project.site || createSite()), site_notes: clone(siteNotes),
-      floor_footprints: project.floors.map(floor => ({ elevation_m: floor.elevation_m, polygons: floor.rooms.map(room => clone(room.polygon)) })) });
-    trustedContexts.set(context, { baseline, mode });
+      ...(siteScope === 'neighborhood' ? { exterior_reference: neighborhoodReference(project) } : {
+        floor_footprints: project.floors.map(floor => ({ elevation_m: floor.elevation_m, polygons: floor.rooms.map(room => clone(room.polygon)) })),
+      }) });
+    trustedContexts.set(context, { baseline, mode, siteScope });
     return context;
   }
   const floor = project.floors.find(value => value.id === floorId);
@@ -117,13 +139,13 @@ const objectSchema = properties => ({ type: 'object', properties, required: Obje
 const stringSchema = maxLength => ({ type: 'string', maxLength });
 const numberSchema = (minimum, maximum) => ({ type: 'number', minimum, maximum });
 /** All provider object properties are required; nullable appearance means catalog default. */
-export function draftSchema(mode = 'furnish_room') {
+export function draftSchema(mode = 'furnish_room', context) {
   if (!MODES.includes(mode)) throw new Error('Unknown AI draft mode.');
   const candidateKey = { type: 'string', pattern: KEY.source, maxLength: 64 };
   if (mode === 'site') return objectSchema({
     draft_version: { type: 'integer', enum: [1] }, request_id: stringSchema(100), kind: { type: 'string', enum: [mode] },
     features: { type: 'array', maxItems: SITE_LIMITS.features, items: objectSchema({ candidate_key: candidateKey, name: stringSchema(100),
-      kind: { type: 'string', enum: SITE_KINDS }, polygon: { type: 'array', minItems: 3, maxItems: SITE_LIMITS.points,
+      kind: { type: 'string', enum: trustedContexts.get(context)?.siteScope === 'neighborhood' ? ['building', 'street', 'landscape'] : SITE_KINDS }, polygon: { type: 'array', minItems: 3, maxItems: SITE_LIMITS.points,
         items: { type: 'array', minItems: 2, maxItems: 2, items: numberSchema(-SITE_LIMITS.coordinate, SITE_LIMITS.coordinate) } },
       height_m: numberSchema(0, SITE_LIMITS.height), color: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' }, evidence: stringSchema(300) }) },
     assumptions: { type: 'array', maxItems: 16, items: stringSchema(300) }, needs_measurements: { type: 'array', maxItems: 16, items: stringSchema(300) },
@@ -297,11 +319,13 @@ function prepareSiteDraft(project, context, draft, selectedCandidateKeys) {
   const keys = new Set(), candidates = [], proposed = createSite();
   for (const source of array(draft.features, SITE_LIMITS.features, 'Site features')) {
     fields(source, ['candidate_key', 'name', 'kind', 'polygon', 'height_m', 'color', 'evidence'], 'Draft site feature');
+    if (trustedContexts.get(context)?.siteScope === 'neighborhood' && !['building', 'street', 'landscape'].includes(source.kind)) throw new Error('Neighborhood drafts may add only neighboring buildings, streets and landscape. Your home and roof stay fixed.');
     key(source.candidate_key);
     if (keys.has(source.candidate_key)) throw new Error('Candidate keys must be unique across site features.');
     keys.add(source.candidate_key);
     text(source.name, 100, 'Site feature name'); text(source.evidence, 300, 'Site feature evidence', true);
-    proposed.features.push({ id: source.candidate_key, name: source.name, kind: source.kind, polygon: clone(source.polygon), height_m: source.height_m, color: source.color });
+    proposed.features.push({ id: source.candidate_key, name: source.name, kind: source.kind, polygon: clone(source.polygon), height_m: source.height_m, color: source.color,
+      ...(source.kind === 'building' ? { render_style: 'outline' } : {}) });
     candidates.push({ candidate_key: source.candidate_key, kind: 'site', name: source.name, evidence: source.evidence, feature: clone(source) });
   }
   // Validate every candidate, including unchecked ones; selection cannot hide bad data.

@@ -72,6 +72,13 @@ class PublicPackageTests(unittest.TestCase):
             archive = packaging.package(packaging.ROOT, work / "dist", "a" * 40)
             with zipfile.ZipFile(archive) as contents:
                 self.assertIn("home-studio/planner/interaction-render.js", contents.namelist())
+                feedback_files = {"home-studio/" + name for name in (
+                    "climate-state.js", "marker-motion.js", "device-effects.js",
+                    "scripts/test-climate-state.cjs", "scripts/test-marker-motion.cjs",
+                    "scripts/test-device-effects.cjs", "scripts/test-device-feedback.cjs",
+                    "scripts/test-fixture-animation.cjs", "scripts/test-fixture-animation.py")}
+                self.assertEqual(feedback_files - set(contents.namelist()), set(),
+                                 "The public source archive retains device feedback and its CI checks")
                 action = ".github/actions/upload-acceptance-artifact/action.yml"
                 self.assertEqual(contents.read("home-studio/" + action),
                                  (packaging.ROOT / action).read_bytes())
