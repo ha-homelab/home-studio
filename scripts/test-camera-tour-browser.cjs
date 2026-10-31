@@ -9,6 +9,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const playwright = require('playwright');
+const { decodeVideo } = require('./camera-tour-video-check.cjs');
 
 const root = path.resolve(process.env.CAMERA_TOUR_ROOT || path.join(__dirname, '..'));
 const engine = process.env.CAMERA_TOUR_ENGINE || 'chromium';
@@ -92,62 +93,6 @@ async function saveRecordingDiagnostics(page, name, detail) {
   });
   fs.writeFileSync(path.join(artifacts, `${name}-recording-diagnostics.json`),
     JSON.stringify({ engine, name, ...detail, observed }, null, 2) + '\n');
-}
-
-async function decodeVideo(page, bytes, mimeType) {
-  // Decode the downloaded bytes independently of the inline player so the
-  // saved file's content and motion are verified as well as on-page playback.
-  const decoder = await page.context().newPage();
-  try { return await decoder.evaluate(async ({ base64, type }) => {
-    const data = Uint8Array.from(atob(base64), value => value.charCodeAt(0));
-    const url = URL.createObjectURL(new Blob([data], { type }));
-    const video = document.createElement('video'); video.muted = true; video.playsInline = true; video.preload = 'auto';
-    // WebKit can report loadeddata before a detached video's frame is ready
-    // for canvas sampling. Keep it paused but attached, and await presentation.
-    document.body.append(video);
-    const timeout = setTimeout(() => video.dispatchEvent(new Event('testtimeout')), 15000);
-    let frameCallback = null, animationFrame = null;
-    try {
-      const failure = new Promise((_, reject) => {
-        video.addEventListener('error', () => reject(new Error(`Video decode error ${video.error?.code}: ${video.error?.message}`)), { once: true });
-        video.addEventListener('testtimeout', () => reject(new Error('Timed out decoding recorded video')), { once: true });
-      });
-      const waitForFrame = async (event, change) => {
-        const ready = new Promise(resolve => video.addEventListener(event, resolve, { once: true }));
-        const presented = typeof video.requestVideoFrameCallback === 'function'
-          ? new Promise(resolve => { frameCallback = video.requestVideoFrameCallback((_, metadata) => {
-            frameCallback = null; resolve(metadata.mediaTime);
-          }); })
-          : ready.then(() => new Promise(resolve => { animationFrame = requestAnimationFrame(() => {
-            animationFrame = requestAnimationFrame(() => { animationFrame = null; resolve(video.currentTime); });
-          }); }));
-        change();
-        return (await Promise.race([Promise.all([ready, presented]), failure]))[1];
-      };
-      const firstFrameTime = await waitForFrame('loadeddata', () => { video.src = url; video.load(); });
-      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 32;
-      const context = canvas.getContext('2d'); context.drawImage(video, 0, 0, 32, 32);
-      const pixels = context.getImageData(0, 0, 32, 32).data, colors = new Set();
-      for (let i = 0; i < pixels.length; i += 4) colors.add(`${pixels[i]},${pixels[i + 1]},${pixels[i + 2]}`);
-      // A nonempty file alone does not prove that the camera moved.
-      const laterFrameTime = await waitForFrame('seeked', () => { video.currentTime = 1.1; });
-      context.drawImage(video, 0, 0, 32, 32);
-      const later = context.getImageData(0, 0, 32, 32).data;
-      let changedPixels = 0;
-      for (let i = 0; i < pixels.length; i += 4) {
-        if (Math.abs(pixels[i] - later[i]) + Math.abs(pixels[i+1] - later[i+1]) + Math.abs(pixels[i+2] - later[i+2]) > 45) changedPixels++;
-      }
-      return { width: video.videoWidth, height: video.videoHeight, readyState: video.readyState,
-        duration: Number.isFinite(video.duration) ? video.duration : null, colors: colors.size, changedPixels,
-        firstFrameTime, laterFrameTime };
-    } finally {
-      clearTimeout(timeout);
-      if (frameCallback !== null) video.cancelVideoFrameCallback(frameCallback);
-      if (animationFrame !== null) cancelAnimationFrame(animationFrame);
-      video.pause(); video.removeAttribute('src'); video.load(); video.remove(); URL.revokeObjectURL(url);
-    }
-  }, { base64: bytes.toString('base64'), type: mimeType });
-  } finally { await decoder.close(); }
 }
 
 async function exercise(context, origin, name) {
@@ -330,6 +275,7 @@ async function exercise(context, origin, name) {
   browser = await playwright[engine].launch(browserLaunchOptions(engine, true));
   report.browserVersion = browser.version();
   await require('./test-camera-tour-native-downloads.cjs').checkNativeTourDownloads(browser, root);
+  await require('./test-camera-tour-video-check.cjs').checkVideoDecoder(browser);
   for (const name of ['planner', 'editor', 'home']) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, locale: 'en-US', acceptDownloads: true });
     try { await exercise(context, origin, name); }
