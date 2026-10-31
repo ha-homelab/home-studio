@@ -42,7 +42,7 @@ jobs:
         run: python3 scripts/stage_release_assets.py --target public-source --pattern 'release-dist/*' --pattern 'native-release-dist/home_floorplan.zip' --pattern 'native-release-dist/home_floorplan.zip.sha256'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: release-assets-public-source
+          name: release-assets-public-source-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: release-assets/public-source/*
           if-no-files-found: error
           retention-days: 30

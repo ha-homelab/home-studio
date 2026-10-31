@@ -125,3 +125,49 @@ Then run the project commands above. Keep the source, plan and channel together;
 do not invent a release sequence or edit version fields by hand. Local packaging
 does not create a qualified release: the hosted pipeline still verifies the full
 build inventory, provenance and, for an RC, its own isolated fuzz report.
+
+## Public release artifacts and retries
+
+Fresh public package uploads and RC fuzz evidence use
+`-run-<run_id>-attempt-<run_attempt>` artifact names. The candidate and final
+collectors select that same run and attempt.
+
+Before publication starts, use **Re-run all jobs** only if the allocator and
+release policy permit reuse of that run's reservation. Recreate every required
+input in the same attempt; failed-only or individual retries can leave inputs
+missing, and older artifacts must not fill those gaps.
+
+For a fresh candidate or final build, once publication has started
+(`begin_publication`), or its external publication result is partial or uncertain,
+inspect the existing release, tags and assets before retrying. A consumed build
+number requires a new workflow run and reservation authorized by the release
+policy; an existing immutable tag may also require a new base version. Never
+reset the release ledger, overwrite assets or retag to force a retry. Historical
+byte promotion of an accepted RC keeps its reserved number and follows the
+existing promotion policy.
+
+Mutation remains limited to an explicit RC dispatch on the public default
+branch. Its report describes one source revision and run; it does not establish
+complete platform coverage or device acceptance. See the shared
+[evidence contract](rc-fuzzing.md).
+
+The fresh closed-build importer consumes the same public package and fuzz
+artifact names, so its selectors must migrate with the public workflows.
+Published-release validation and rebuild use their existing verified context
+artifacts and exact artifact IDs. Their environment gates, lineage checks and
+historical receipt rules remain separate from fresh collection.
+
+### Package receipt identity
+
+Fresh publication verifies each staged package receipt against the independently
+supplied repository, source commit, workflow run and attempt. Receipts created
+before this migration, or offline without an Actions identity, cannot qualify a
+fresh publication. Run all required producers in one complete workflow attempt
+after migration; an earlier attempt cannot fill missing inputs.
+
+Historical promotion and retained-evidence validation keep their existing checks.
+Receipt coverage validates the staged files; the expected packages and platforms
+still require a separate completeness check. Existing release approval and device
+acceptance policies continue to apply.
+
+See the shared [receipt migration guide](https://github.com/victron-venus/venus-os-ci-toolkit/blob/main/docs/release-workflow.md#migrate-package-receipt-identity-without-replacing-the-release-engine).

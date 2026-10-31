@@ -246,17 +246,17 @@ class BoundaryTests(unittest.TestCase):
             (published / "context.json").write_bytes(envelope.canonical(context))
             shutil.copyfile(root / "version-plan.json", published / "version-plan.json")
             class GitHub:
-                artifact_names = ["release-assets-public-source", "release-assets-fuzz"]
+                artifact_names = ["release-assets-public-source-run-10-attempt-1", "release-assets-fuzz-run-10-attempt-1"]
                 def pages(self, path, field):
                     if field == "jobs":
                         return [{"name": "Release gate", "conclusion": "success"}]
                     return [{"name": name, "expired": False} for name in self.artifact_names]
             gh = GitHub()
             def download(unused, name, destination, *, producer):
-                folders = {"plan": root, "release-assets-public-source": source,
-                           "release-assets-fuzz": fuzz, "resolved": published}
-                producers = {"plan": "prepare", "release-assets-public-source": "build / package",
-                             "release-assets-fuzz": "fuzz / RC fuzzing", "resolved": "closed_existing_resolve"}
+                folders = {"plan": root, "release-assets-public-source-run-10-attempt-1": source,
+                           "release-assets-fuzz-run-10-attempt-1": fuzz, "resolved": published}
+                producers = {"plan": "prepare", "release-assets-public-source-run-10-attempt-1": "build / package",
+                             "release-assets-fuzz-run-10-attempt-1": "fuzz / RC fuzzing", "resolved": "closed_existing_resolve"}
                 self.assertTrue(producer(producers[name]))
                 self.assertFalse(producer("untrusted producer"))
                 if name == "plan":
@@ -281,7 +281,7 @@ class BoundaryTests(unittest.TestCase):
                 with self.assertRaises(build.Rejected):
                     build.public_inputs(args, root / "collision")
                 (source / "fuzz-report.json").unlink()
-                for number, names in enumerate((["release-assets-public-source"], gh.artifact_names + ["release-assets-other"])):
+                for number, names in enumerate((["release-assets-public-source-run-10-attempt-1"], gh.artifact_names + ["release-assets-other-run-10-attempt-1"])):
                     gh.artifact_names = names
                     with self.assertRaises(build.Rejected):
                         build.public_inputs(args, root / f"invalid-{number}")
@@ -936,6 +936,132 @@ pathlib.Path(a.output).with_name('acceptance.json').write_text(json.dumps({'sche
             with self.assertRaises(build.Rejected):
                 build.run_worker(build.policy()["worker_image"], source, public, root / "timeout-output", context, root / "timeout.log", timeout=1)
             self.assertFalse((root / "timeout-output/home-package.tar.gz").exists())
+
+
+
+class ScopedPublicArtifactTests(unittest.TestCase):
+    def test_current_inventory_is_complete_without_old_attempt_fallback(self):
+        import release_fuzz
+        source = "release-assets-public-source-run-10-attempt-2"
+        fuzz = "release-assets-fuzz-run-10-attempt-2"
+        previous = ["release-assets-public-source-run-10-attempt-1",
+                    "release-assets-fuzz-run-10-attempt-1",
+                    "release-assets-public-source-run-9-attempt-2",
+                    "release-assets-fuzz-run-9-attempt-2",
+                    "release-assets-public-source", "release-assets-fuzz"]
+        cases = [
+            ("current", [source, fuzz], True),
+            ("retained", [source, fuzz, *previous], True),
+            ("missing_source", [fuzz, *previous], False),
+            ("missing_fuzz", [source, *previous], False),
+            ("only_old", previous, False),
+            ("duplicate_source", [source, source, fuzz], False),
+            ("duplicate_fuzz", [source, fuzz, fuzz], False),
+            ("unknown_current", [source, fuzz, "release-assets-extra-run-10-attempt-2"], False),
+        ]
+        for label, names, accepted in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                assets = root / "assets"
+                assets.mkdir()
+                retained = root / "retained-old-attempt"
+                retained.write_bytes(b"retained")
+                class GitHub:
+                    def pages(self, path, field):
+                        self.path = path
+                        return [{"name": name, "expired": False} for name in names]
+                gh = GitHub()
+                def download(client, name, destination, *, producer):
+                    self.assertIs(client, gh)
+                    self.assertEqual(name, fuzz)
+                    self.assertTrue(producer(release_fuzz.JOB))
+                    destination.mkdir()
+                    for filename in ("fuzz-report.json", "release-inputs-fuzz.json"):
+                        (destination / filename).write_text("synthetic")
+                with patch.dict(os.environ, {"GITHUB_RUN_ID": "10", "GITHUB_RUN_ATTEMPT": "2"}), \
+                        patch.object(release_fuzz, "configuration", return_value={"enabled": True}), \
+                        patch.object(build, "download_artifact", side_effect=download) as transfer:
+                    if accepted:
+                        build.complete_staged_inventory(gh, assets, root, {"channel": "rc"}, {})
+                        self.assertEqual({p.name for p in assets.iterdir()}, {"fuzz-report.json", "release-inputs-fuzz.json"})
+                        self.assertEqual(transfer.call_count, 1)
+                    else:
+                        with self.assertRaises(build.Rejected):
+                            build.complete_staged_inventory(gh, assets, root, {"channel": "rc"}, {})
+                        transfer.assert_not_called()
+                        self.assertEqual(list(assets.iterdir()), [])
+                self.assertEqual(gh.path, "actions/runs/10/artifacts")
+                self.assertEqual(retained.read_bytes(), b"retained")
+
+    def test_beta_requires_only_current_source_and_rejects_invalid_identity(self):
+        class GitHub:
+            def pages(self, path, field):
+                return [{"name": "release-assets-public-source-run-10-attempt-2", "expired": False},
+                        {"name": "release-assets-fuzz-run-10-attempt-1", "expired": False}]
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.dict(os.environ, {"GITHUB_RUN_ID": "10", "GITHUB_RUN_ATTEMPT": "2"}), \
+                patch.object(build, "download_artifact") as transfer:
+            build.complete_staged_inventory(GitHub(), Path(directory), Path(directory), {"channel": "beta"}, {})
+            transfer.assert_not_called()
+        for field in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT"):
+            for invalid in ("", "0", "-1", "01", "1.0", "1\n", "invalid"):
+                with self.subTest(field=field, value=invalid), \
+                        patch.dict(os.environ, {"GITHUB_RUN_ID": "10", "GITHUB_RUN_ATTEMPT": "2", field: invalid}):
+                    with self.assertRaises(build.Rejected):
+                        build.release_artifact_suffix()
+
+    def test_scoped_download_still_checks_exact_metadata_and_never_falls_back(self):
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w") as archive:
+            archive.writestr("public.txt", b"public bytes")
+        raw = stream.getvalue()
+        selected = "release-assets-public-source-run-10-attempt-2"
+        run = {"run_attempt": 2, "head_sha": "a" * 40, "path": build.WORKFLOW, "head_branch": "main"}
+        job = {"name": "build / package", "conclusion": "success",
+               "started_at": "2026-10-31T01:00:00Z", "completed_at": "2026-10-31T01:00:30Z"}
+        artifact = {"id": 3, "name": selected, "expired": False,
+                    "workflow_run": {"id": 10, "head_sha": "a" * 40},
+                    "created_at": "2026-10-31T01:00:10Z", "size_in_bytes": len(raw),
+                    "digest": "sha256:" + envelope.digest(raw)}
+        for change in (None, "missing", "duplicate", "expired", "attempt", "source", "producer", "time", "digest"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
+                class GitHub:
+                    def api(self, path):
+                        return self.run
+                    def pages(self, path, field):
+                        if field == "jobs":
+                            self.jobs_path = path
+                            return [self.job]
+                        return self.artifacts
+                    def binary(self, path):
+                        self.downloaded.append(path)
+                        return raw
+                gh = GitHub()
+                gh.run, gh.job, current = copy.deepcopy((run, job, artifact))
+                old = {**copy.deepcopy(artifact), "id": 2, "name": "release-assets-public-source-run-10-attempt-1"}
+                gh.artifacts, gh.downloaded = [old, current], []
+                if change == "missing": gh.artifacts = [old]
+                if change == "duplicate": gh.artifacts.append(copy.deepcopy(current))
+                if change == "expired": current["expired"] = True
+                if change == "attempt": gh.run["run_attempt"] = 1
+                if change == "source": current["workflow_run"]["head_sha"] = "b" * 40
+                if change == "producer": gh.job["name"] = "wrong"
+                if change == "time": current["created_at"] = "2026-10-31T00:59:59Z"
+                if change == "digest": current["digest"] = "sha256:" + "0" * 64
+                with patch.dict(os.environ, {"GITHUB_RUN_ID": "10", "GITHUB_RUN_ATTEMPT": "2", "GITHUB_SHA": "a" * 40}):
+                    if change:
+                        with self.assertRaises(build.Rejected):
+                            build.download_artifact(gh, selected, Path(directory), producer=lambda name: name == "build / package")
+                        self.assertEqual(list(Path(directory).iterdir()), [])
+                    else:
+                        build.download_artifact(gh, selected, Path(directory), producer=lambda name: name == "build / package")
+                        self.assertEqual((Path(directory) / "public.txt").read_bytes(), b"public bytes")
+                        self.assertEqual(gh.jobs_path, "actions/runs/10/attempts/2/jobs")
+                self.assertNotIn("actions/artifacts/2/zip", gh.downloaded)
+                if change is None or change == "digest":
+                    self.assertEqual(gh.downloaded, ["actions/artifacts/3/zip"])
+                else:
+                    self.assertEqual(gh.downloaded, [])
 
 
 if __name__ == "__main__":

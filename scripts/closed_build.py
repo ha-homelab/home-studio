@@ -241,20 +241,29 @@ def download_artifact(gh, name, destination, *, producer):
     extract_zip(archive, destination)
 
 
+def release_artifact_suffix():
+    """Select only outputs from this exact workflow execution."""
+    values = [os.environ.get(name, "") for name in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT")]
+    require(all(re.fullmatch(r"[1-9][0-9]*", value) is not None for value in values))
+    return f"-run-{values[0]}-attempt-{values[1]}"
+
+
 def complete_staged_inventory(gh, assets, temporary, plan, source_policy):
     """Match the publisher's complete release-assets* inventory, fail on additions."""
     import release_fuzz
-    required = {"release-assets-public-source"}
+    suffix = release_artifact_suffix()
+    required = {"release-assets-public-source" + suffix}
     if plan["channel"] == "rc" and release_fuzz.configuration(source_policy):
-        required.add("release-assets-fuzz")
+        required.add("release-assets-fuzz" + suffix)
     artifacts = gh.pages(f"actions/runs/{os.environ['GITHUB_RUN_ID']}/artifacts", "artifacts")
     staged = [item["name"] for item in artifacts
-              if item["name"].startswith("release-assets") and not item["expired"]]
+              if item["name"].startswith("release-assets") and item["name"].endswith(suffix)
+              and not item["expired"]]
     require(len(staged) == len(required) and set(staged) == required)
     require(source_policy.get("artifact_pattern", "release-assets*") == "release-assets*")
-    if "release-assets-fuzz" in required:
+    if "release-assets-fuzz" + suffix in required:
         fuzz = temporary / "fuzz"
-        download_artifact(gh, "release-assets-fuzz", fuzz,
+        download_artifact(gh, "release-assets-fuzz" + suffix, fuzz,
                           producer=lambda name: name == release_fuzz.JOB)
         require({path.name for path in fuzz.iterdir()} == {"fuzz-report.json", "release-inputs-fuzz.json"})
         for path in fuzz.iterdir():
@@ -289,7 +298,7 @@ def public_inputs(args, temporary):
         plan_files = list((public / "plan").rglob("*.json"))
         require(len(plan_files) == 1)
         plan_path, assets = plan_files[0], public / "payloads"
-        download_artifact(gh, "release-assets-public-source", assets,
+        download_artifact(gh, "release-assets-public-source" + release_artifact_suffix(), assets,
                           producer=lambda name: name == "build / package")
         context = {"schema": 1, "repository": REPOSITORY, "workflow": WORKFLOW,
                    "run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
