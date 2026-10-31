@@ -25,13 +25,15 @@ class SourceReplayTests(unittest.TestCase):
             self.assertFalse((source / 'node_modules').exists())
             self.assertTrue((source / 'scripts/test-viewer-runtime-upgrade.cjs').is_file(),
                             'The distributed source must include its runtime-upgrade browser acceptance test')
-            # Load the tour browser helper from the distributed entry point,
+            # Load the tour browser helpers from the distributed entry point,
             # without starting Playwright or relying on checkout-only files.
             result = subprocess.run([node, '-e', """
                 const assert = require('node:assert/strict');
                 const {createRequire} = require('node:module');
                 const fromTour = createRequire(require('node:path').resolve('scripts/test-camera-tour-browser.cjs'));
                 assert.equal(typeof fromTour('./test-camera-tour-native-downloads.cjs').checkNativeTourDownloads, 'function');
+                assert.equal(typeof fromTour('./camera-tour-video-check.cjs').decodeVideo, 'function');
+                assert.equal(typeof fromTour('./test-camera-tour-video-check.cjs').checkVideoDecoder, 'function');
             """], cwd=source, capture_output=True, text=True, timeout=60)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             replay = sorted(path.relative_to(source).as_posix()
