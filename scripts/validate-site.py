@@ -73,6 +73,7 @@ SITE_FILES = (
 EDITOR_FILES = tuple(name for name in SITE_FILES if name not in ('index.html', *WEBSITE_MEDIA_FILES))
 REPO_FILES = (
     'docs/site-experience.md', 'scripts/test-site-experience.mjs', 'scripts/test-site-experience.cjs',
+    'scripts/camera-tour-video-check.cjs', 'scripts/test-camera-tour-video-check.cjs',
     'camera-tour-viewer.js', 'docs/camera-tours.md', 'docs/images/camera-tour-workflow.svg', 'scripts/test-camera-tour.mjs', 'scripts/test-camera-tour-recording.mjs', 'scripts/test-camera-tour-session-contract.mjs', 'scripts/test-camera-tour-browser.cjs', 'scripts/test-camera-tour-native-downloads.cjs', 'scripts/test-camera-tour-hosts.cjs','scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'THIRD_PARTY_NOTICES.md',
               'docs/closed-build.md', '.closed-build-policy.json', 'requirements-closed-build.txt',
               '.github/workflows/closed-build.yml', 'docker/closed-worker.Dockerfile',
