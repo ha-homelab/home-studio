@@ -24,7 +24,7 @@
   "release_notes": "CHANGELOG.md",
   "single_entry_ci": true,
   "fuzzing": {
-    "toolkit_ref": "6b2d99519d513d2b871d2a845ddd6134dea4af2c"
+    "toolkit_ref": "6f0bf114a398f9c2b7e5407042c3828a8cc28b40"
   },
   "versioning": {
     "schema": 1,
@@ -59,7 +59,10 @@
         "value": "package"
       }
     ],
-    "toolkit_revision": "45d7fb35910d49a29dc643c373ab5ecaae9c0b17"
+    "toolkit_revision": "45d7fb35910d49a29dc643c373ab5ecaae9c0b17",
+    "required_build_receipts": [
+      "release-inputs-public-source.json"
+    ]
   },
   "toolkit_revision": "45d7fb35910d49a29dc643c373ab5ecaae9c0b17",
   "closed_build": {
