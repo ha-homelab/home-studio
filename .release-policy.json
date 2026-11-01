@@ -59,7 +59,10 @@
         "value": "package"
       }
     ],
-    "toolkit_revision": "45d7fb35910d49a29dc643c373ab5ecaae9c0b17"
+    "toolkit_revision": "45d7fb35910d49a29dc643c373ab5ecaae9c0b17",
+    "required_build_receipts": [
+      "release-inputs-public-source.json"
+    ]
   },
   "toolkit_revision": "45d7fb35910d49a29dc643c373ab5ecaae9c0b17",
   "closed_build": {
