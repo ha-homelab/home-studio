@@ -22,6 +22,7 @@ jobs:
     # Positive evaluation keeps its existing author/repository/default-base route.
     # Withdrawals have a separate bounded, cancellation-only PR-target job.
     if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
       !((github.event.action == 'unlabeled' && github.event.label.name == 'automerge') || github.event.action == 'converted_to_draft' || (github.event.action == 'edited' && github.event.changes.base && github.event.pull_request.base.ref != github.event.repository.default_branch)) &&
       (github.event.action != 'edited' || github.event.changes.base) &&
       ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
@@ -32,6 +33,9 @@ jobs:
          github.event.pull_request.user.login == 'dependabot[bot]'))) &&
       contains(fromJSON('["4alvit","californiantiramisu","dependabot[bot]","renovate[bot]"]'), github.event.pull_request.user.login)
     uses: victron-venus/venus-os-ci-toolkit/.github/workflows/auto-merge.yml@559a10117d8831ee03ec0fcd195d6bf3716a7c11
+    with:
+      reviewed-merge: true
+      required-status-checks: CI gate
     secrets:
       BOT_PAT: ${{ secrets.BOT_PAT }}
 
