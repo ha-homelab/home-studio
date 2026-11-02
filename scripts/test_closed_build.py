@@ -436,7 +436,7 @@ class BoundaryTests(unittest.TestCase):
         worker_sign, worker_verify, deploy_decrypt, deploy_encrypt = keys()
         context = {"repository": build.REPOSITORY, "workflow": build.WORKFLOW,
                    "source_sha": "b" * 40, "plan_sha256": "c" * 64, "payloads": {},
-                   "run_id": "10", "run_attempt": "1", "mode": "prospective",
+                   "run_id": "10", "run_attempt": "1", "mode": "published",
                    "release_tag": "v1.2.3-rc.1"}
         lock = {"repository": "https://github.com/ha-homelab/home-studio.git", "commit": "a" * 40}
         files = {"scripts/closed-build-entry.py": MARKER.encode(), "public-core.lock.json": envelope.canonical(lock)}
@@ -457,6 +457,7 @@ class BoundaryTests(unittest.TestCase):
                        "CLOSED_INPUT_DECRYPT_KEY": ci_decrypt, "CLOSED_INPUT_VERIFY_KEY": operator_verify,
                        "CLOSED_OUTPUT_ENCRYPT_KEY": deploy_encrypt, "CLOSED_OUTPUT_SIGN_KEY": worker_sign}
         def public_inputs(args, temporary):
+            self.assertEqual(args.action, "rebuild")
             public = temporary / "public"
             (public / "component").mkdir(parents=True)
             (public / "component/core.py").write_bytes(b"public immutable")
@@ -471,9 +472,9 @@ class BoundaryTests(unittest.TestCase):
             log.write_text(MARKER)
         cases = [(failure, "fictional") for failure in
                  (None, "worker", "input-signature", "input-archive", "input-intent",
-                  "package-tamper", "acceptance-failure", "candidate-upload", "diagnostic-upload")]
+                  "package-tamper", "acceptance-failure", "candidate-upload")]
         for failure, request in [*cases, (None, "")]:
-            stored = {}
+            stored, attempted = {}, []
             selected_input = sealed_input
             if failure == "input-signature":
                 selected_input = envelope.seal(archive(files), ci_encrypt, keys()[0], purpose="input")
@@ -498,10 +499,13 @@ class BoundaryTests(unittest.TestCase):
                     permit = build.upload_control.make_permit(intent, wire, capacity, build.policy()["upload_admission"])
                     return envelope.seal(envelope.canonical(permit), ci_encrypt, operator_sign, purpose="upload-permit")
                 self.assertNotIn(MARKER.encode(), data)
+                self.assertTrue(create_only)
+                self.assertIn(suffix, {"fictional/10-1.upload-intent.json", "fictional/10-1.candidate.json"})
+                attempted.append(suffix)
                 if failure == "candidate-upload" and suffix.endswith(".candidate.json"):
                     raise RuntimeError(MARKER)
-                if failure == "diagnostic-upload" and suffix.endswith(".diagnostic.json"):
-                    raise RuntimeError(MARKER)
+                if suffix.endswith(".candidate.json"):
+                    self.assertIsNotNone(not_after)
                 stored[suffix] = data
                 return b""
             def selected_worker(*args, **kwargs):
@@ -519,21 +523,17 @@ class BoundaryTests(unittest.TestCase):
                 prepared = Path(directory)
                 (prepared / "prepared.json").write_bytes(envelope.canonical(build.policy()))
                 with patch.dict(os.environ, environment), patch.object(build, "public_inputs", side_effect=public_inputs), patch.object(build, "transport", side_effect=transport), patch.object(build, "run_worker", side_effect=selected_worker), contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
-                    result = build.main(["--action", "build", "--closed-request", request, "--prepared-root", str(prepared)])
+                    result = build.main(["--action", "rebuild", "--closed-request", request, "--prepared-root", str(prepared)])
             self.assertNotIn(MARKER, out.getvalue() + err.getvalue(), failure)
             self.assertEqual(result, int(failure is not None), failure)
-            expected_status = ("CLOSED_CANDIDATE_STORED" if failure is None else
-                               "CLOSED_DIAGNOSTIC_UPLOAD_FAILED" if failure == "diagnostic-upload" else
-                               "CLOSED_BUILD_REJECTED")
+            expected_status = "CLOSED_CANDIDATE_STORED" if failure is None else "CLOSED_BUILD_REJECTED"
             self.assertEqual(out.getvalue(), expected_status + "\n", failure)
             self.assertEqual(err.getvalue(), "", failure)
             candidates = [wire for name, wire in stored.items() if name.endswith(".candidate.json")]
-            self.assertEqual(len(candidates), int(failure in {None, "diagnostic-upload"}), failure)
-            if failure != "diagnostic-upload":
-                diagnostic = next(wire for name, wire in stored.items() if name.endswith(".diagnostic.json"))
-                plain_diagnostic = envelope.open_envelope(diagnostic, deploy_decrypt, worker_verify, purpose="diagnostic")
-                if failure not in {"input-signature", "input-archive", "input-intent"}:
-                    self.assertIn(MARKER.encode(), plain_diagnostic, failure)
+            self.assertEqual(len(candidates), int(failure is None), failure)
+            self.assertEqual(attempted, ["fictional/10-1.upload-intent.json", "fictional/10-1.candidate.json"]
+                             if failure in {None, "candidate-upload"} else [], failure)
+            self.assertFalse(any(name.endswith(".diagnostic.json") for name in stored))
             if candidates:
                 candidate_tar = envelope.open_envelope(candidates[0], deploy_decrypt, worker_verify, purpose="candidate")
                 with tarfile.open(fileobj=io.BytesIO(candidate_tar), mode="r:gz") as content:
@@ -567,7 +567,8 @@ class BoundaryTests(unittest.TestCase):
                 with self.assertRaises(build.Rejected):
                     build.validate_input(root, {**context, field: value}, "test", "image")
 
-    def test_acceptance_keeps_source_and_closed_runs_distinct(self):
+    @staticmethod
+    def accepted_fixture():
         public = {"repository": build.REPOSITORY, "workflow": build.WORKFLOW, "source_sha": "a" * 40,
                   "plan_sha256": "b" * 64, "payloads": {}, "run_id": "10", "run_attempt": "1", "release_tag": "v1.0.0-rc.1"}
         accepted = {"schema": 1, "state": "accepted", "request_id": "test", "acceptance_policy": "ha-home-python-v1",
@@ -580,6 +581,10 @@ class BoundaryTests(unittest.TestCase):
                     "qualification": {"status": "published", "conclusion": "success", "release_tag": public["release_tag"], "public": public,
                                       "source_run": {"id": "10", "attempt": "1", "latest_attempt": "1", "conclusion": "success"},
                                       "closed_build_run": {"id": "20", "attempt": "2", "latest_attempt": "2", "conclusion": "success"}}}
+        return public, accepted
+
+    def test_acceptance_keeps_source_and_closed_runs_distinct(self):
+        public, accepted = self.accepted_fixture()
         build.validate_acceptance(accepted, public, "test")
         for size in (build.MAX_FILE + 1, build.MAX_PACKAGE):
             with self.subTest(payload_size=size):
@@ -598,6 +603,91 @@ class BoundaryTests(unittest.TestCase):
         accepted["qualification"]["source_run"]["latest_attempt"] = "2"
         with self.assertRaises(build.Rejected):
             build.validate_acceptance(accepted, public, "test")
+
+    def test_stable_validation_reads_signed_accepted_bytes_without_uploads(self):
+        operator_sign, operator_verify, ci_decrypt, ci_encrypt = keys()
+        worker_sign, _, _, deploy_encrypt = keys()
+        public, accepted = self.accepted_fixture()
+        public = copy.deepcopy(public)
+        payload, installer = b"accepted package fixture", b"trusted installer fixture"
+        accepted.update(payload_sha256=envelope.digest(payload), payload_size=len(payload),
+                        installer_sha256=envelope.digest(installer), installer_size=len(installer))
+        accepted["site_acceptance"]["payload_sha256"] = accepted["payload_sha256"]
+        candidate_plain = build.pack_candidate(payload, {
+            "schema": 1, "state": "candidate", "request_id": accepted["request_id"],
+            "public": public, "build_run_id": accepted["build_run_id"],
+            "build_run_attempt": accepted["build_run_attempt"], "build_source_sha": accepted["build_source_sha"],
+            "payload_sha256": accepted["payload_sha256"], "payload_size": accepted["payload_size"],
+            "installer_sha256": accepted["installer_sha256"], "installer_size": accepted["installer_size"],
+        }, installer)
+        candidate_wire = envelope.seal(candidate_plain, deploy_encrypt, worker_sign, purpose="candidate")
+        accepted["candidate_sha256"] = envelope.digest(candidate_wire)
+        repository = {"full_name": build.REPOSITORY, "id": int(build.REPOSITORY_ID),
+                      "owner": {"id": int(build.OWNER_ID)}}
+        run = {"id": 20, "run_attempt": 2, "repository": repository, "head_repository": repository,
+               "head_sha": accepted["build_source_sha"], "path": build.WORKFLOW, "head_branch": "main",
+               "event": "workflow_dispatch", "status": "completed", "conclusion": "success"}
+        environment = {"GITHUB_REPOSITORY": build.REPOSITORY, "GITHUB_REPOSITORY_ID": build.REPOSITORY_ID,
+                       "GITHUB_REPOSITORY_OWNER_ID": build.OWNER_ID, "GITHUB_REF": "refs/heads/main",
+                       "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_WORKFLOW_REF": build.REPOSITORY + "/" + build.WORKFLOW + "@refs/heads/main",
+                       "RUNNER_ENVIRONMENT": "github-hosted", "GITHUB_RUN_ID": "30", "GITHUB_RUN_ATTEMPT": "1",
+                       "GITHUB_SHA": "9" * 40, "CLOSED_ACCEPTANCE_READ_URL": "https://storage.invalid/acceptance",
+                       "CLOSED_OUTPUT_READ_URL": "https://storage.invalid/output/",
+                       "CLOSED_INPUT_READ_URL": "https://storage.invalid/must-not-read-input",
+                       "CLOSED_OUTPUT_WRITE_URL": "https://storage.invalid/must-not-write/",
+                       "CLOSED_INPUT_DECRYPT_KEY": ci_decrypt, "CLOSED_INPUT_VERIFY_KEY": operator_verify,
+                       "CLOSED_OUTPUT_SIGN_KEY": worker_sign, "CLOSED_OUTPUT_ENCRYPT_KEY": deploy_encrypt}
+        for failure in (None, "candidate-digest", "candidate-signer", "acceptance-signer", "public-source", "run-attempt", "run-source"):
+            selected_accepted, selected_run = copy.deepcopy(accepted), copy.deepcopy(run)
+            selected_candidate, signer = candidate_wire, operator_sign
+            if failure == "candidate-digest":
+                selected_candidate = envelope.seal(candidate_plain, deploy_encrypt, worker_sign, purpose="candidate")
+            elif failure == "candidate-signer":
+                selected_candidate = envelope.seal(candidate_plain, deploy_encrypt, keys()[0], purpose="candidate")
+                selected_accepted["candidate_sha256"] = envelope.digest(selected_candidate)
+            elif failure == "acceptance-signer":
+                signer = keys()[0]
+            elif failure == "public-source":
+                selected_accepted["public"]["source_sha"] = "0" * 40
+            elif failure == "run-attempt":
+                selected_run["run_attempt"] = 3
+            elif failure == "run-source":
+                selected_run["head_sha"] = environment["GITHUB_SHA"]
+            acceptance_wire = envelope.seal(envelope.canonical(selected_accepted), ci_encrypt, signer, purpose="acceptance")
+            reads = []
+            def transport(url, **kwargs):
+                reads.append((url, kwargs))
+                if url == environment["CLOSED_ACCEPTANCE_READ_URL"] and not kwargs:
+                    return acceptance_wire
+                if url == environment["CLOSED_OUTPUT_READ_URL"] and kwargs == {"suffix": accepted["candidate_object"]}:
+                    return selected_candidate
+                raise AssertionError("Unexpected stable validation transport")
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "prepared.json").write_bytes(envelope.canonical(build.policy()))
+                with patch.dict(os.environ, environment, clear=True), \
+                     patch.object(build, "public_inputs", return_value=(public, root)), \
+                     patch.object(build, "transport", side_effect=transport), \
+                     patch.object(release_control.GitHub, "api", return_value=selected_run) as api, \
+                     patch.object(build, "run_worker") as worker, \
+                     patch.object(build, "validate_input") as input_check, \
+                     patch.object(build, "upload_candidate") as upload, \
+                     patch.object(build, "seal") as seal, \
+                     contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                    result = build.main(["--action", "validate", "--closed-request", "test", "--prepared-root", str(root)])
+                self.assertEqual(result, int(failure is not None))
+                self.assertEqual(out.getvalue(), ("CLOSED_BUILD_REJECTED" if failure else "CLOSED_ACCEPTED_BYTES_VALIDATED") + "\n")
+                self.assertEqual(err.getvalue(), "")
+                expected_reads = [(environment["CLOSED_ACCEPTANCE_READ_URL"], {})]
+                if failure in (None, "candidate-digest", "candidate-signer"):
+                    expected_reads.append((environment["CLOSED_OUTPUT_READ_URL"], {"suffix": accepted["candidate_object"]}))
+                self.assertEqual(reads, expected_reads)
+                if failure in ("acceptance-signer", "public-source"):
+                    api.assert_not_called()
+                else:
+                    api.assert_called_once_with("actions/runs/20")
+                for operation in (worker, input_check, upload, seal):
+                    operation.assert_not_called()
 
     def test_stable_rechecks_latest_closed_build_attempt(self):
         accepted = {"build_run_id": "20", "build_run_attempt": "2", "build_source_sha": "f" * 40}
@@ -701,6 +791,37 @@ class BoundaryTests(unittest.TestCase):
                          {f"{name}: ${{{{ secrets.{name} }}}}" for name in names})
         self.assertNotIn("secrets: inherit", workflow)
 
+    def test_normal_releases_stop_before_environment_policy_or_transport(self):
+        environment = {name: MARKER for name in (
+            "CLOSED_INPUT_READ_URL", "CLOSED_OUTPUT_READ_URL", "CLOSED_OUTPUT_WRITE_URL",
+            "CLOSED_INPUT_DECRYPT_KEY", "CLOSED_INPUT_VERIFY_KEY",
+            "CLOSED_OUTPUT_ENCRYPT_KEY", "CLOSED_OUTPUT_SIGN_KEY")}
+        environment.update(GITHUB_RUN_ID="1", GITHUB_RUN_ATTEMPT="1")
+        for event in ("workflow_dispatch", "push", "schedule"):
+            for request in ("", "fixture"):
+                with self.subTest(event=event, request=request), \
+                     patch.dict(os.environ, {**environment, "GITHUB_EVENT_NAME": event}, clear=True), \
+                     patch.object(build, "gate_environment") as gate, \
+                     patch.object(build, "policy") as policy, \
+                     patch.object(build, "public_inputs") as public_inputs, \
+                     patch.object(build, "run_worker") as worker, \
+                     patch.object(build, "seal") as seal, \
+                     patch.object(build, "transport") as transport, \
+                     patch.object(build.traceback, "format_exc") as traceback, \
+                     patch.object(Path, "open") as open_file, \
+                     contextlib.redirect_stdout(io.StringIO()) as out, \
+                     contextlib.redirect_stderr(io.StringIO()) as err:
+                    # Deliberately omit every other field: the hold must be first.
+                    with self.assertRaises(build.UploadAdmissionUnavailable):
+                        build.execute(SimpleNamespace(action="build"), Path("/unused"))
+                    result = build.main(["--action", "build", "--closed-request", request,
+                                         "--prepared-root", "/unused"])
+                self.assertEqual(result, 1)
+                self.assertEqual(out.getvalue(), "CLOSED_UPLOAD_ADMISSION_UNAVAILABLE\n")
+                self.assertEqual(err.getvalue(), "")
+                for operation in (gate, policy, public_inputs, worker, seal, transport, traceback, open_file):
+                    operation.assert_not_called()
+
     def test_cli_error_canary_is_never_printed(self):
         for exception in (RuntimeError, KeyboardInterrupt, SystemExit):
             with self.subTest(exception=exception), patch.object(build, "execute", side_effect=exception(MARKER)), contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
@@ -746,44 +867,68 @@ class BoundaryTests(unittest.TestCase):
 
     def test_temporary_directory_entry_and_cleanup_failures_are_private(self):
         class InterruptedDirectory:
-            def __init__(self, stage, exception):
-                self.stage, self.exception = stage, exception
+            def __init__(self, stage, exception, path):
+                self.stage, self.exception, self.path = stage, exception, path
 
             def __enter__(self):
                 if self.stage == "entry":
                     raise self.exception(MARKER)
-                return "/unused"
+                return self.path
 
             def __exit__(self, *_):
                 raise self.exception(MARKER)
 
         for stage in ("entry", "cleanup"):
             for exception in (OSError, KeyboardInterrupt, SystemExit):
-                with self.subTest(stage=stage, exception=exception), patch.dict(os.environ, {}, clear=True), \
-                     patch.object(build.tempfile, "TemporaryDirectory", return_value=InterruptedDirectory(stage, exception)), \
-                     patch.object(build, "execute", return_value="CLOSED_CANDIDATE_STORED") as execute, \
-                     patch.object(Path, "exists", return_value=False), \
-                     contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
-                    result = build.main(["--action", "build", "--prepared-root", "/unused"])
+                with tempfile.TemporaryDirectory() as directory:
+                    (Path(directory) / "private.log").write_text(MARKER)
+                    environment = {name: "fictional" for name in (
+                        "CLOSED_OUTPUT_ENCRYPT_KEY", "CLOSED_OUTPUT_SIGN_KEY", "CLOSED_OUTPUT_WRITE_URL")}
+                    environment.update(GITHUB_RUN_ID="1", GITHUB_RUN_ATTEMPT="1")
+                    with self.subTest(stage=stage, exception=exception), patch.dict(os.environ, environment, clear=True), \
+                         patch.object(build.tempfile, "TemporaryDirectory", return_value=InterruptedDirectory(stage, exception, directory)), \
+                         patch.object(build, "execute", return_value="CLOSED_CANDIDATE_STORED") as execute, \
+                         patch.object(build, "seal") as seal, patch.object(build, "transport") as transport, \
+                         contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                        result = build.main(["--action", "rebuild", "--prepared-root", "/unused", "--closed-request", "fixture"])
                 self.assertEqual(result, 1)
                 self.assertEqual(out.getvalue(), "CLOSED_BUILD_REJECTED\n")
                 self.assertEqual(err.getvalue(), "")
                 self.assertEqual(execute.call_count, int(stage == "cleanup"))
+                seal.assert_not_called()
+                transport.assert_not_called()
 
-    def test_diagnostic_upload_interruptions_remain_fixed_status(self):
+    def test_seeded_private_logs_never_trigger_remote_diagnostics(self):
         environment = {name: "fictional" for name in (
             "CLOSED_OUTPUT_ENCRYPT_KEY", "CLOSED_OUTPUT_SIGN_KEY", "CLOSED_OUTPUT_WRITE_URL")}
         environment.update(GITHUB_RUN_ID="1", GITHUB_RUN_ATTEMPT="1")
-        for exception in (RuntimeError, KeyboardInterrupt, SystemExit):
-            with self.subTest(exception=exception), patch.dict(os.environ, environment, clear=True), \
-                 patch.object(build, "execute", side_effect=RuntimeError(MARKER)), \
-                 patch.object(build, "seal", return_value=b"fictional encrypted diagnostic"), \
-                 patch.object(build, "transport", side_effect=exception(MARKER)), \
-                 contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
-                result = build.main(["--action", "build", "--prepared-root", "/unused", "--closed-request", "fixture"])
-            self.assertEqual(result, 1)
-            self.assertEqual(out.getvalue(), "CLOSED_DIAGNOSTIC_UPLOAD_FAILED\n")
-            self.assertEqual(err.getvalue(), "")
+        for action, success in (("prepare", "CLOSED_PUBLIC_TOOLS_READY"),
+                                ("build", "CLOSED_CANDIDATE_STORED"),
+                                ("rebuild", "CLOSED_CANDIDATE_STORED"),
+                                ("validate", "CLOSED_ACCEPTED_BYTES_VALIDATED")):
+            for exception in (None, RuntimeError, KeyboardInterrupt, SystemExit):
+                directories = []
+                def operation(args, temporary):
+                    directories.append(temporary)
+                    (temporary / "private.log").write_text(MARKER)
+                    if exception is not None:
+                        raise exception(MARKER)
+                    return success
+                with self.subTest(action=action, exception=exception), \
+                     patch.dict(os.environ, environment, clear=True), \
+                     patch.object(build, "prepare", side_effect=operation), \
+                     patch.object(build, "execute", side_effect=operation), \
+                     patch.object(build, "seal") as seal, \
+                     patch.object(build, "transport") as transport, \
+                     contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                    result = build.main(["--action", action, "--prepared-root", "/unused", "--closed-request", "fixture"])
+                self.assertEqual(result, int(exception is not None))
+                self.assertEqual(out.getvalue(), (success if exception is None else "CLOSED_BUILD_REJECTED") + "\n")
+                self.assertEqual(err.getvalue(), "")
+                seal.assert_not_called()
+                transport.assert_not_called()
+                self.assertEqual(len(directories), 1)
+                self.assertFalse(directories[0].exists(), "The private log must still be cleaned up")
 
     def test_transport_rejects_insecure_or_redirected_capabilities(self):
         for url in ("http://example.com/a", "https://name:secret@example.com/a", "https://example.com:80/a", "https://example.com/a#secret"):

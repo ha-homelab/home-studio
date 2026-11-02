@@ -33,7 +33,7 @@ class UploadAdmissionTests(unittest.TestCase):
           'limits_available_bytes':1024**3,'regional_limit_bytes':20*1024**3,
           'version_inclusive_bytes':19*1024**3,'safe_available_bytes':1024**3}
 
-    def exercise(self, mutation=None, action="rebuild"):
+    def exercise(self, mutation=None):
         writes=[]; intent_wire=None; clock=[0]
         def monotonic():
             clock[0]+=5
@@ -64,26 +64,28 @@ class UploadAdmissionTests(unittest.TestCase):
         failed=False
         with patch.dict(os.environ,self.environment),patch.object(build,'transport',side_effect=transport),\
              patch('time.time',return_value=NOW),patch('time.monotonic',side_effect=monotonic),patch('time.sleep'):
-            try:build.upload_candidate(b'ciphertext','fixture/12-1.candidate.json','a'*64,'fixture',self.limits,action=action)
+            try:build.upload_candidate(b'ciphertext','fixture/12-1.candidate.json','a'*64,'fixture',self.limits,action='rebuild')
             except Exception:failed=True
         candidates=[x for x in writes if x[0].endswith('.candidate.json')]
         self.assertEqual(len(candidates),0 if mutation else 1)
         self.assertEqual(failed,bool(mutation))
         if candidates:
             self.assertEqual(candidates[0][1],b'ciphertext')
-            if action=='rebuild':self.assertEqual(candidates[0][2]['not_after'],NOW+30)
-            else:self.assertNotIn('not_after',candidates[0][2])
+            self.assertEqual(candidates[0][2]['not_after'],NOW+30)
         return writes
 
     def test_exact_single_create_only_upload(self):
         writes=self.exercise()
         self.assertEqual(len(writes),2)
 
-    def test_normal_release_preserves_direct_transport_without_controls(self):
-        writes=self.exercise(action='build')
-        self.assertEqual(len(writes),1)
-        self.assertEqual(writes[0][0],'fixture/12-1.candidate.json')
-        self.assertEqual(writes[0][2],{})
+    def test_normal_release_cannot_bypass_upload_admission(self):
+        with patch.dict(os.environ,self.environment),patch.object(build,'transport') as transport,\
+             patch.object(build,'seal') as seal:
+            with self.assertRaises(build.UploadAdmissionUnavailable):
+                build.upload_candidate(b'ciphertext','fixture/12-1.candidate.json','a'*64,
+                                       'fixture',self.limits,action='build')
+        transport.assert_not_called()
+        seal.assert_not_called()
 
     def test_wrong_or_stale_permit_never_uploads_candidate(self):
         cases=['absent','expired','future','long_ttl','stale_capacity','low_capacity','unknown_field',

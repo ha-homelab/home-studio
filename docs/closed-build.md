@@ -2,8 +2,9 @@
 
 `closed-build.yml` is a reusable **job of the public release pipeline**. Its
 inputs contain public release references and an optional opaque request ID.
-Private source, archives, hashes, and detailed diagnostics stay in closed object
-storage. The first package contract is `ha-home-python-v1`; it covers Python
+Private source, archives, and hashes stay in closed object storage. Detailed
+diagnostics remain in bounded temporary files on the trusted runner and are
+not uploaded automatically. The first package contract is `ha-home-python-v1`; it covers Python
 geometry, exact component composition, and site contracts. It does not claim
 browser, device, or standalone gateway-image acceptance.
 
@@ -12,6 +13,14 @@ branch in that generator, then render it here. Do not hand-edit the generated
 pipeline. Its existing public gate stays unchanged; an enabled closed build must
 succeed before candidate/final publication. Stable promotion validates already
 accepted bytes without rebuilding them.
+
+Normal `action=build` is temporarily blocked before any closed transport or
+worker execution while its capacity coordinator is completed. This applies to
+manual releases, push-triggered beta builds, and scheduled nightlies. With closed
+builds enabled, their required failure blocks publication; passing public PR
+checks does not qualify a new closed release. Existing-release rebuilds still
+require their signed upload permit, and stable validation can read already
+accepted bytes. See [issue #97](https://github.com/ha-homelab/home-studio/issues/97).
 
 ## Trust and execution
 
@@ -155,9 +164,12 @@ trust updates; fingerprints supplied by an envelope never choose a trust root.
 
 No closed contents are uploaded as Actions artifacts, cache entries, SARIF,
 summaries, public release assets, packages, Pages, or public transparency-log
-attestations. Detailed failures are encrypted to closed diagnostics. Public
-stdout contains fixed status codes only. Interrupted runners may lose
-diagnostics; confidentiality does not depend on cleanup succeeding.
+attestations. Public stdout contains fixed status codes only. Detailed failures
+stay in bounded private temporary logs, removed at cleanup; they are not
+automatically uploaded, even after a successful candidate upload. A candidate
+permit does not authorize a diagnostic object's bytes, destination or lifetime.
+Remote diagnostic collection requires a separately reviewed admission path.
+Retained diagnostic envelopes from earlier runs remain untouched.
 
 ## Fresh admission before a closed rebuild upload
 
@@ -170,9 +182,12 @@ target object, ciphertext digest and size, exact rebuild operation and worker
 job, output capability digest and a fresh random nonce. No additional Actions
 secrets, list access or broad OCI credentials are given to the worker.
 
-The reviewed local operator authenticates the live run and collects a complete
-version-inclusive inventory and regional Limits response. Available space is
-the smaller measurement. The required headroom is the maximum candidate size
+The operator must independently authenticate the live run, prove its inventory
+visibility, and collect a fresh, complete version-inclusive regional inventory
+and Limits response. Caller-visible inventory flags alone do not establish
+coverage of the whole region or applicable quotas. The protocol helper does not
+discover credentials or establish that proof for its caller. Available space is
+the smaller verified measurement. The required headroom is the maximum candidate size
 plus 144 MiB of remaining reserve and 8 KiB for the not-yet-stored permit.
 Unknown, incomplete or insufficient capacity produces no permit. Earlier
 approval or a previous green snapshot is insufficient. The permit expires
@@ -193,12 +208,21 @@ helper hashes. Retain old request evidence and keys rather than rebinding an
 exported request. Start the coordinator immediately after approving the rebuild;
 browser-only approval without its permit loop makes the rebuild time out.
 
-Normal `action=build` releases retain their existing single create-only upload,
-without an intent or permit. Migrating their manual, push/beta and
-schedule/nightly coordinators is tracked in [issue #97](https://github.com/ha-homelab/home-studio/issues/97).
+Normal `action=build` releases return `CLOSED_UPLOAD_ADMISSION_UNAVAILABLE` before resolving
+inputs, reading closed storage, running the worker or uploading anything. The
+upload helper also rejects this action independently. There is no environment
+flag to bypass the stop. Migrating the manual, push/beta and schedule/nightly
+coordinators is tracked in [issue #97](https://github.com/ha-homelab/home-studio/issues/97).
+This status means the reviewed normal-release coordinator must be completed;
+retrying the run or approving its environment again cannot remove the stop.
 `action=validate` continues to verify and reuse accepted bytes without a new
-candidate upload. Retained accepted candidates remain installable under their
+candidate or diagnostic upload. Retained accepted candidates remain installable under their
 original protocol and acceptance proof.
+
+The rebuild protocol still writes its bounded encrypted intent before receiving
+a permit. A failed rebuild therefore does not imply zero storage writes. Do not
+approve a real rebuild solely on a previous storage allowance: first establish
+the coordinator, its verified capacity coverage, and the control-object budget.
 
 ## Validation and recovery
 
@@ -208,6 +232,10 @@ archive safety, exact component and failure-output tests. With a prepared
 public image and an available Docker daemon, set `CLOSED_DOCKER_TEST=1` for
 the real synthetic container success/failure and isolation checks. The public
 package workflow runs both; all fixtures are fictional and use temporary keys.
+Negative tests cover blocked normal builds for all three release events, with
+explicit and default request IDs, and assert that neither candidate nor
+diagnostic transport occurs. The encrypted roundtrip uses the admitted rebuild
+path; it does not bypass the normal-build stop for testing.
 
 For local Colima checks on macOS, select the intended daemon with an explicit
 `DOCKER_HOST` socket and set `TMPDIR` to a directory under its shared `/Users`
