@@ -508,8 +508,10 @@ mutation campaigns.
 
 An optional [closed package worker](docs/closed-build.md) can compose approved
 site inputs inside the public release orchestration while keeping its archives
-and diagnostics in closed storage. It verifies exact public release bytes and
-requires separate installation acceptance.
+in closed storage and private diagnostics out of public outputs. It verifies
+exact public release bytes and requires separate installation acceptance.
+Normal closed builds are temporarily blocked pending their capacity coordinator;
+existing-release rebuilds require fresh signed upload admission.
 
 
 ## Contributing and security

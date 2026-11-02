@@ -48,7 +48,11 @@ REQUIRED_CHECKS = {"package", "site-contracts"}
 
 
 class Rejected(Exception):
-    """Error details stay in closed diagnostics."""
+    """Error details stay in private temporary logs."""
+
+
+class UploadAdmissionUnavailable(Rejected):
+    """The requested build has no supported upload-admission coordinator."""
 
 
 def require(condition):
@@ -150,14 +154,10 @@ def transport(url, *, data=None, suffix=None, create_only=False, maximum=MAX_ENV
 
 
 def upload_candidate(envelope, object_name, input_sha256, request_id, limits, *, action):
-    """Preserve release uploads; require fresh admission for closed rebuilds."""
-    require(action in {"build", "rebuild"})
+    """Require signed rebuild admission; normal releases remain blocked."""
     if action == "build":
-        # The normal-release coordinator has a separate migration. Keep its
-        # existing transport exactly; no intent, permit or fallback is involved.
-        transport(os.environ["CLOSED_OUTPUT_WRITE_URL"], data=envelope,
-                  suffix=object_name, create_only=True)
-        return
+        raise UploadAdmissionUnavailable()
+    require(action == "rebuild")
     upload_control.policy(limits)
     operation = "closed-rebuild"
     worker_job = upload_control.worker_job(operation)
@@ -544,6 +544,10 @@ def prepare(args, temporary):
 
 
 def execute(args, temporary):
+    # Normal releases stay blocked before any private read until their manual,
+    # push and scheduled coordinators support fresh upload admission (#97).
+    if args.action == "build":
+        raise UploadAdmissionUnavailable()
     gate_environment(os.environ)
     require(not args.closed_request or REQUEST.fullmatch(args.closed_request) is not None)
     configured = policy()
@@ -681,9 +685,11 @@ def main(argv=None):
             try:
                 status = prepare(args, temporary) if args.action == "prepare" else execute(args, temporary)
                 code = 0
+            except UploadAdmissionUnavailable:
+                status = "CLOSED_UPLOAD_ADMISSION_UNAVAILABLE"
             except (Exception, KeyboardInterrupt, SystemExit):
                 # Interrupts and explicit exits also stay behind the fixed public status boundary.
-                # Exception details, including network/Docker failures, stay in the closed log.
+                # Exception details, including network/Docker failures, stay in the private temporary log.
                 try:
                     with (temporary / "private.log").open("ab") as log:
                         remaining = max(0, MAX_LOG - log.tell())
@@ -692,18 +698,9 @@ def main(argv=None):
                     # Formatting/writing diagnostics is inside the same private boundary.
                     # A second interruption must not expose the original exception chain.
                     pass
-            finally:
-                try:
-                    log = temporary / "private.log"
-                    if (log.exists() and REQUEST.fullmatch(args.closed_request)
-                            and all(os.environ.get(key) for key in ("CLOSED_OUTPUT_ENCRYPT_KEY", "CLOSED_OUTPUT_SIGN_KEY", "CLOSED_OUTPUT_WRITE_URL"))):
-                        encrypted = seal(regular(log, MAX_LOG), os.environ["CLOSED_OUTPUT_ENCRYPT_KEY"],
-                                         os.environ["CLOSED_OUTPUT_SIGN_KEY"], purpose="diagnostic")
-                        name = args.closed_request + "/" + os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"] + ".diagnostic.json"
-                        transport(os.environ["CLOSED_OUTPUT_WRITE_URL"], data=encrypted, suffix=name)
-                except (Exception, KeyboardInterrupt, SystemExit):
-                    # An interrupted diagnostic upload must not emit a private traceback.
-                    status, code = "CLOSED_DIAGNOSTIC_UPLOAD_FAILED", 1
+            # Diagnostics remain local to this private temporary directory.
+            # Candidate permits do not authorize a separate diagnostic upload,
+            # including after failures, interruptions or permit expiry.
     except (Exception, KeyboardInterrupt, SystemExit):
         # Temporary-directory entry/cleanup can also fail or be interrupted.
         # Never let that outer exception chain bypass fixed public statuses.

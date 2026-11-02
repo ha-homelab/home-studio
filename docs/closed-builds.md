@@ -1,5 +1,12 @@
 # Closed builds in the public release workflow
 
+The current Home Studio worker temporarily rejects normal `action=build` before
+closed I/O while its production capacity coordinator is completed. The workflow
+contract below is unchanged: when closed builds are enabled, that rejection
+blocks normal release publication. Existing-release rebuilds still require a
+fresh signed permit, and stable validation retains its accepted-byte reads.
+See the [worker's current admission limits](closed-build.md#fresh-admission-before-a-closed-rebuild-upload).
+
 An application can opt into a reviewed local worker with this release policy:
 
 ```json
