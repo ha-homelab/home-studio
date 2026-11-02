@@ -301,12 +301,19 @@ test('viewer scene diagnostics read live scheduler handles from the viewer closu
   const start=source.indexOf('window.__browserScene=()=>'),end=source.indexOf(';\\n</script></body>',start);
   assert(start>0&&end>start);
   const env={renderProfile:{},scene:{traverse(){}},__browserCamera:{world:[1]},__browserRenderPasses:{scene:1},
+    document:{visibilityState:'visible',hidden:false,getElementById:id=>({id,getBoundingClientRect:()=>({width:800,height:600})})},
+    homeView:{active:true},
     renderer:{shadowMap:{type:2},domElement:{width:800,height:600},getPixelRatio:()=>1,
       info:{programs:[],memory:{textures:0,geometries:0},render:{triangles:0,calls:0}}}};
   env.window=env;
-  vm.runInNewContext('let renderRequest=11,renderDelay=12,renderFallback=13;'+source.slice(start,end+1)+
+  vm.runInNewContext('let renderRequest=11,renderDelay=12,renderFallback=13,renderSuspended=false,renderLost=false,failed3D=false,initialViewReady=true;'+source.slice(start,end+1)+
     ';globalThis.setHandles=(request,delay,fallback)=>{renderRequest=request;renderDelay=delay;renderFallback=fallback;};',env);
   assert.deepEqual({...env.__browserScene().renderState},{request:11,delay:12,fallback:13});
+  const initial=env.__browserScene().lifecycle;
+  assert.equal(initial.visibility,'visible');assert.equal(initial.home,true);assert.equal(initial.suspended,false);
+  env.document.hidden=true;env.document.visibilityState='hidden';env.homeView.active=false;
+  const changed=env.__browserScene().lifecycle;
+  assert.equal(changed.hidden,true);assert.equal(changed.home,false);
   env.setHandles(0,0,0);
   assert.deepEqual({...env.__browserScene().renderState},{request:0,delay:0,fallback:0},'Reads are live, not values captured at installation');
 });
@@ -772,6 +779,8 @@ const read = (diagnostics, file = 'firefox.json') => JSON.parse(fs.readFileSync(
 test('failed-load capture preserves pending shader and map evidence without synchronization', async () => {
   const fake=fakeBrowser();let flushes=0;
   const env={location:{href:'about:srcdoc',pathname:''},navigator:{userAgent:'fixture'},devicePixelRatio:1,
+    document:{visibilityState:'hidden',hidden:true,hasFocus:()=>false,
+      getElementById:id=>id==='homeStage'?{getBoundingClientRect:()=>({width:800,height:600})}:null},
     innerWidth:800,innerHeight:600,scrollX:0,scrollY:0,__browserStability:{shaderChecks:{pending:1}},
     __viewerLoadDiagnostics:{snapshot:()=>({pending:[{requestId:'map-1'}]})},
     __flushBrowserShaders(){flushes++;throw Error('A failed-run observation must not wait for shaders');}};env.window=env;
@@ -780,6 +789,9 @@ test('failed-load capture preserves pending shader and map evidence without sync
   await assert.rejects(diagnostics.run('firefox',options,async()=>{throw Error('Synthetic cold-load failure');}),/Synthetic cold-load failure/);
   const record=read(diagnostics);
   assert.equal(flushes,0);assert.equal(record.snapshot[0].stats.shaderChecks.pending,1);
+  assert.equal(record.snapshot[0].visibility,'hidden');assert.equal(record.snapshot[0].hidden,true);
+  assert.equal(record.snapshot[0].focused,false);
+  assert.deepEqual(record.snapshot[0].stages,{homeStage:{width:800,height:600},view3d:null});
   assert.deepEqual(record.snapshot[0].viewerLoad.pending,[{requestId:'map-1'}]);
 });
 

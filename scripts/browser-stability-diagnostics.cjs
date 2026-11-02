@@ -583,9 +583,16 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
           let scene = null, sceneError = null;
           try { scene = window.__browserScene?.() || window.__plannerScene?.() || null; }
           catch (error) { sceneError = String(error); }
+          // Measure layout only after failure, never during a timed acceptance operation.
+          const stages = Object.fromEntries(['homeStage', 'view3d'].map(id => {
+            const bounds = document.getElementById(id)?.getBoundingClientRect();
+            return [id, bounds ? {width: bounds.width, height: bounds.height} : null];
+          }));
           return {
             url: location.href === 'about:srcdoc' ? 'about:srcdoc' : location.pathname,
             userAgent: navigator.userAgent, devicePixelRatio: window.devicePixelRatio,
+            visibility: document.visibilityState, hidden: document.hidden, focused: document.hasFocus(),
+            stages,
             viewport: {width:innerWidth,height:innerHeight,scrollX,scrollY,visual:window.visualViewport ?
               {width:visualViewport.width,height:visualViewport.height,scale:visualViewport.scale,x:visualViewport.offsetLeft,y:visualViewport.offsetTop} : null},
             input: window.__acceptanceInput || null,

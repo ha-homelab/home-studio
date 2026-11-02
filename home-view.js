@@ -486,8 +486,10 @@ homeView = (() => {
     if(!value)clearMotion();
     if (!value) showMode(false);
     refreshControls();
-    const before=window.floorplan?.renderCount;
-    requestAnimationFrame(()=>{window.resizeModel?.();if(window.floorplan?.renderCount===before)window.requestModelRender?.()});
+    // Commit the new stage size before scheduling its frame. A raw RAF here
+    // could strand both resize and redraw before the bounded scheduler runs.
+    window.resizeModel?.(false);
+    window.requestModelRender?.();
   }
 
   let nativePressTimer=null,nativePress=null;
