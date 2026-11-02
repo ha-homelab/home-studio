@@ -25,7 +25,7 @@ CATEGORY_FINISH = {
 WOOD_BODY = {'stool', 'rocking_chair', 'nursery_crib', 'coat_tree', 'clothes_valet',
              'rocking_horse', 'toy_chest', 'dollhouse', 'building_blocks', 'acoustic_guitar',
              'upright_piano', 'art_easel', 'hobby_workbench', 'garden_bench', 'wood_balustrade',
-             'plant_stand', 'tabletop_photo_frame'}
+             'plant_stand', 'tabletop_photo_frame', 'interior_straight_stairs', 'pergola_wood'}
 FABRIC_BODY = {'blanket_ladder', 'shoe_storage_bench', 'laundry_hamper', 'folded_towels', 'bath_mat',
                'towel_rail', 'ironing_board', 'patio_lounge_chair', 'patio_umbrella', 'golf_bag',
                'teddy_bear', 'plush_bunny'}
@@ -88,6 +88,7 @@ def finish_for(model, index, part):
         if category == 'vehicles': return 'glass' if part['shape'] == 'sphere' else 'plastic'
         return 'plastic'
     if name == 'solar_panel': return 'solar_cell'
+    if name == 'pergola_steel': return 'matte_metal'
     if role.startswith('#'):
         if category == 'technology': return 'light_diffuser'
         if category == 'vehicles': return 'light_diffuser'
@@ -192,7 +193,7 @@ def author(catalog):
                 part.pop('geometry_dimensions',None);part.pop('geometry_leaf_count',None)
         if model['id'] in VEHICLES: model['parts']=vehicle_parts(model)
         if model['id'] in BATH_MODELS:model['parts']=bath_parts(model)
-        if model['id']=='toilet':model['default_style']='gallery_white'
+        if model['id'] in ('toilet','bidet','shower_enclosure'):model['default_style']='gallery_white'
         if model['id'] in anatomy:
             # Continuous authored sections and anchored features override the
             # category-level primitive rules; never restyle individual parts.

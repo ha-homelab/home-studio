@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "Desk fan",
   "model.wall_air_conditioner": "Wall air conditioner",
   "model.panel_heater": "Panel heater",
+  "model.interior_straight_stairs": "Straight indoor staircase",
+  "model.pergola_wood": "Wood garden pergola",
+  "model.pergola_steel": "Steel garden pergola",
+  "model.bidet": "Floor-standing bidet",
+  "model.shower_enclosure": "Walk-in shower enclosure",
 };

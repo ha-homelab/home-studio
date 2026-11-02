@@ -230,6 +230,13 @@ approximate silhouette, not a manufacturer-supplied model or exact dimensions.
 Object libraries provide geometry; adding a server or car does not automatically
 connect its telemetry to Home Assistant.
 
+The library also includes a straight indoor staircase, wood and steel pergolas,
+a bidet and a walk-in shower. They can be moved, resized and recoloured like
+other objects. The staircase is decorative and does not create a floor opening;
+see [catalog geometry and placement limits](docs/catalog-material-authoring.md).
+
+![Straight stairs, wood and steel pergolas, a bidet and a walk-in shower from the object library](docs/images/library-extensions.png)
+
 Edit furniture designs, palettes, and patterns in **Home Studio**, then **Save
 draft** and **Publish to 3D Home**. The separate **3D Home** placement editor
 can move, resize, rename, and bind existing objects; its inventory import does

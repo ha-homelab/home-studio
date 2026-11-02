@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "Ventilateur de bureau",
   "model.wall_air_conditioner": "Climatiseur mural",
   "model.panel_heater": "Radiateur panneau",
+  "model.interior_straight_stairs": "Escalier intérieur droit",
+  "model.pergola_wood": "Pergola de jardin en bois",
+  "model.pergola_steel": "Pergola de jardin en acier",
+  "model.bidet": "Bidet sur pied",
+  "model.shower_enclosure": "Paroi de douche à l’italienne",
 };

@@ -1,9 +1,21 @@
 # Stock catalog geometry and physical surfaces
 
-The offline catalog contains 211 orbitable models composed of 2,287 named parts.
+The offline catalog contains 216 orbitable models composed of 2,341 named parts.
 These are authored approximations of furniture, appliances, plants, vehicles and
 decorative objects. They are not scans or photographs of a particular product.
 They remain ordinary meshes: no camera-facing photographic billboards are used.
+
+The library includes a straight indoor staircase, wood and steel garden
+pergolas, a floor-standing bidet and a walk-in shower enclosure. Place and resize
+them from the Item library, then choose a palette or custom colour as with other
+furniture. The bidet has a recessed basin; the shower has a recessed tray,
+transparent glazing and an open entrance. Pergolas retain gaps between their
+roof beams. These use the existing shared materials and geometry profiles.
+
+The staircase is a visual object: it does not cut an opening in the floor or
+create navigation between floors. Its full height must fit the assigned room.
+Assign a pergola to a garden or other outdoor room. Verify dimensions in the
+editor before publishing; these models are illustrations, not construction plans.
 
 ## Authoring contract
 

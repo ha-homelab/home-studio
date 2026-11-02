@@ -800,4 +800,9 @@ export default {
   "model.desk_fan": "מאוורר שולחני",
   "model.wall_air_conditioner": "מזגן קיר",
   "model.panel_heater": "תנור חימום פנל",
+  "model.interior_straight_stairs": "גרם מדרגות ישר לפנים הבית",
+  "model.pergola_wood": "פרגולת עץ לגינה",
+  "model.pergola_steel": "פרגולת פלדה לגינה",
+  "model.bidet": "בידה עומד",
+  "model.shower_enclosure": "מקלחון עם כניסה פתוחה",
 };

@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "Kipas meja",
   "model.wall_air_conditioner": "AC dinding",
   "model.panel_heater": "Pemanas panel",
+  "model.interior_straight_stairs": "Tangga lurus dalam ruangan",
+  "model.pergola_wood": "Pergola taman kayu",
+  "model.pergola_steel": "Pergola taman baja",
+  "model.bidet": "Bidet berdiri",
+  "model.shower_enclosure": "Bilik pancuran terbuka",
 };

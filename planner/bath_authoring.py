@@ -1,7 +1,7 @@
 """Generic sanitary fixtures with open cavities, no private floorplan data."""
 import math
 
-BATH_MODELS={'toilet','bathtub'}
+BATH_MODELS={'toilet','bathtub','bidet','shower_enclosure'}
 
 def shell(center,size,profile,material='white',finish='ceramic',power=2,sides=24):
     """A closed solid from outer bottom through the rim to the inner floor.
@@ -24,6 +24,36 @@ def solid(center,size,material='white',finish='ceramic',power=4):
     return shell(center,size,[(-1,.88),(-.85,.97),(-.6,1),(.6,1),(.85,.97),(1,.88)],material,finish,power)
 
 def bath_parts(model):
+    if model['id']=='bidet':
+        return [shell((0,.54,.10),(1,.70,.80),[
+                    (-1,.42),(-.80,.62),(-.25,.83),(.70,.98),(1,1),
+                    (1,.86),(.78,.82),(-.52,.55),(-.76,.30)],material='body'),
+                solid((0,.13,.05),(.62,.26,.65),'body','ceramic',3),
+                solid((0,.78,-.35),(.84,.16,.30),'body'),
+                {'shape':'cylinder','center':[0,.915,-.39],'size':[.09,.17,.06],
+                 'material':'metal','surface_finish':'brushed_metal','geometry_profile':'rod'},
+                {'shape':'box','center':[0,.95,-.30],'size':[.10,.06,.24],
+                 'material':'metal','surface_finish':'brushed_metal','geometry_profile':'edge'},
+                {'shape':'cylinder','center':[0,.278,.10],'size':[.10,.014,.065],
+                 'material':'metal','surface_finish':'brushed_metal','geometry_profile':'turned'}]
+    if model['id']=='shower_enclosure':
+        return [shell((0,.025,0),(1,.05,1),[
+                    (-1,.94),(-.80,1),(1,1),(1,.91),(.65,.89),(-.35,.88),(-.35,.10)],
+                    material='body',power=8),
+                {'shape':'box','center':[-.492,.525,0],'size':[.016,.95,1],
+                 'material':'glass','surface_finish':'glass','geometry_profile':'flat','opacity':.28},
+                {'shape':'box','center':[0,.525,-.492],'size':[1,.95,.016],
+                 'material':'glass','surface_finish':'glass','geometry_profile':'flat','opacity':.28},
+                {'shape':'cylinder','center':[.30,.505,-.45],'size':[.035,.90,.035],
+                 'material':'metal','surface_finish':'brushed_metal','geometry_profile':'rod'},
+                {'shape':'box','center':[.30,.95,-.28],'size':[.035,.025,.34],
+                 'material':'metal','surface_finish':'brushed_metal','geometry_profile':'edge'},
+                {'shape':'cylinder','center':[.30,.935,-.10],'size':[.20,.025,.20],
+                 'material':'metal','surface_finish':'brushed_metal','geometry_profile':'lathed'},
+                {'shape':'box','center':[.30,.50,-.442],'size':[.18,.05,.055],
+                 'material':'metal','surface_finish':'brushed_metal','geometry_profile':'edge'},
+                {'shape':'cylinder','center':[0,.019,0],'size':[.06,.007,.06],
+                 'material':'metal','surface_finish':'brushed_metal','geometry_profile':'turned'}]
     if model['id']=='bathtub':
         return [shell((0,.535,0),(1,.93,1),[
                     (-1,.58),(-.88,.70),(-.48,.85),(.55,.98),(.90,1),(1,.99),

@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "Tafelventilator",
   "model.wall_air_conditioner": "Wandairconditioner",
   "model.panel_heater": "Paneelverwarming",
+  "model.interior_straight_stairs": "Rechte binnentrap",
+  "model.pergola_wood": "Houten tuinpergola",
+  "model.pergola_steel": "Stalen tuinpergola",
+  "model.bidet": "Staand bidet",
+  "model.shower_enclosure": "Inloopdouche",
 };

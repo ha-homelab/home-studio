@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "Masa vantilatörü",
   "model.wall_air_conditioner": "Duvar tipi klima",
   "model.panel_heater": "Panel ısıtıcı",
+  "model.interior_straight_stairs": "Düz iç mekân merdiveni",
+  "model.pergola_wood": "Ahşap bahçe pergolası",
+  "model.pergola_steel": "Çelik bahçe pergolası",
+  "model.bidet": "Yere monte bide",
+  "model.shower_enclosure": "Açık girişli duş kabini",
 };

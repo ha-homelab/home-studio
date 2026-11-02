@@ -800,4 +800,9 @@ export default {
   "model.desk_fan": "Настольный вентилятор",
   "model.wall_air_conditioner": "Настенный кондиционер",
   "model.panel_heater": "Панельный обогреватель",
+  "model.interior_straight_stairs": "Прямая внутренняя лестница",
+  "model.pergola_wood": "Деревянная садовая пергола",
+  "model.pergola_steel": "Стальная садовая пергола",
+  "model.bidet": "Напольное биде",
+  "model.shower_enclosure": "Душевое ограждение с открытым входом",
 };

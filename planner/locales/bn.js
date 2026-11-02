@@ -800,4 +800,9 @@ export default {
   "model.desk_fan": "টেবিল ফ্যান",
   "model.wall_air_conditioner": "দেয়ালে লাগানো এয়ার কন্ডিশনার",
   "model.panel_heater": "প্যানেল হিটার",
+  "model.interior_straight_stairs": "ঘরের সোজা সিঁড়ি",
+  "model.pergola_wood": "বাগানের কাঠের পারগোলা",
+  "model.pergola_steel": "বাগানের স্টিলের পারগোলা",
+  "model.bidet": "মেঝেতে বসানো বিডে",
+  "model.shower_enclosure": "ওয়াক-ইন শাওয়ার ঘের",
 };

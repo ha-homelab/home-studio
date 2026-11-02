@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "Stolní ventilátor",
   "model.wall_air_conditioner": "Nástěnná klimatizace",
   "model.panel_heater": "Panelové topidlo",
+  "model.interior_straight_stairs": "Přímé interiérové schodiště",
+  "model.pergola_wood": "Dřevěná zahradní pergola",
+  "model.pergola_steel": "Ocelová zahradní pergola",
+  "model.bidet": "Stojací bidet",
+  "model.shower_enclosure": "Sprchový kout walk-in",
 };

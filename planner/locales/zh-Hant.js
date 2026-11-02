@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "桌扇",
   "model.wall_air_conditioner": "壁掛式冷氣",
   "model.panel_heater": "面板式暖氣機",
+  "model.interior_straight_stairs": "室內直樓梯",
+  "model.pergola_wood": "木製花園棚架",
+  "model.pergola_steel": "鋼製花園棚架",
+  "model.bidet": "落地式坐浴盆",
+  "model.shower_enclosure": "開放式淋浴間",
 };

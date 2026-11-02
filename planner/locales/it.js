@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "Ventilatore da tavolo",
   "model.wall_air_conditioner": "Condizionatore a parete",
   "model.panel_heater": "Radiatore a pannello",
+  "model.interior_straight_stairs": "Scala interna dritta",
+  "model.pergola_wood": "Pergola da giardino in legno",
+  "model.pergola_steel": "Pergola da giardino in acciaio",
+  "model.bidet": "Bidet a pavimento",
+  "model.shower_enclosure": "Box doccia walk-in",
 };

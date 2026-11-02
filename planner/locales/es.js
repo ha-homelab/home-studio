@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "Ventilador de mesa",
   "model.wall_air_conditioner": "Aire acondicionado de pared",
   "model.panel_heater": "Calefactor de panel",
+  "model.interior_straight_stairs": "Escalera interior recta",
+  "model.pergola_wood": "Pérgola de jardín de madera",
+  "model.pergola_steel": "Pérgola de jardín de acero",
+  "model.bidet": "Bidé de pie",
+  "model.shower_enclosure": "Mampara de ducha abierta",
 };
