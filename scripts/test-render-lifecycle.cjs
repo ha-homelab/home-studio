@@ -556,6 +556,52 @@ assert.equal(oldMode.modes.at(-1),'editor');
 const fastMode=modeScheduler();
 assert.equal(rapidModeReturn(fastMode),1,'Rapid Editor cutaway/full then Home paints Home exactly once');
 assert.equal(fastMode.modes.at(-1),'home');assert.equal(fastMode.raf.size,0);
+// Mode changes must enter the bounded scheduler before the browser delivers
+// another animation frame, including after context restoration.
+for(const restored of [false,true]) {
+  const q=modeScheduler();
+  if(restored){q.handlers.webglcontextlost({preventDefault(){}});q.handlers.webglcontextrestored();q.flush();}
+  q.c.setActive(false);q.cutaway(true);q.cutaway(false);
+  const before=q.c.renderCount;
+  q.c.setActive(true);
+  q.advance(99);
+  assert.equal(q.c.renderCount,before,'A mode switch defers its draw while waiting for the bounded frame');
+  q.advance(1);
+  assert.equal(q.c.renderCount,before+1,'A visible Home activation paints when RAF delivery is withheld');
+  assert.equal(q.modes.at(-1),'home');
+  q.flush();q.advance(1000);
+  assert.equal(q.c.renderCount,before+1,'A late RAF cannot duplicate the mode fallback or start an idle loop');
+  assert.equal(q.raf.size,0);assert.equal(q.allTimers.size,0);
+}
+// Rapid mode changes commit the latest stage dimensions without painting
+// intermediate modes or extending the first demand's deadline.
+for(const winner of ['timer','raf','explicit','observer']) {
+  const q=modeScheduler(), before=q.c.renderCount, painted=[];
+  let buffer=[800,600];
+  q.c.renderer.setDrawingBufferSize=(width,height,ratio)=>{buffer=[Math.floor(width*ratio),Math.floor(height*ratio)];};
+  const draw=q.c.drawScene;
+  q.c.drawScene=camera=>{painted.push({mode:q.c.active?'home':'editor',buffer:buffer.slice()});draw(camera);};
+  q.setWidth(640);q.c.setActive(false);
+  q.advance(50);
+  q.setWidth(960);q.c.setActive(true);
+  q.setWidth(900);q.c.setActive(false);
+  q.setWidth(720);q.c.setActive(true);q.c.setActive(true);
+  assert.equal(q.c.renderCount,before,'Mode activation commits layout without synchronous scene draws');
+  assert.equal(q.raf.size,1,'Rapid mode switches share one queued frame');
+  assert.equal(q.allTimers.size,1,'Rapid mode switches share one fixed fallback');
+  const staleFrame=[...q.raf.values()][0],staleTimer=[...q.allTimers.values()][0].fn;
+  q.advance(49);
+  assert.equal(q.c.renderCount,before,'Further mode changes do not paint before the original deadline');
+  if(winner==='timer')q.advance(1);
+  else if(winner==='raf')q.flush();
+  else if(winner==='explicit')q.c.window.renderModel();
+  else {q.setWidth(700);q.c.window.resizeModel();}
+  assert.deepEqual(painted,[{mode:'home',buffer:[winner==='observer'?700:720,600]}],
+    winner+' paints only the latest mode with its current drawing-buffer dimensions');
+  staleFrame();staleTimer();q.flush();q.advance(1000);
+  assert.equal(q.c.renderCount,before+1,winner+' satisfies and cancels the shared mode demand');
+  assert.equal(q.raf.size,0);assert.equal(q.allTimers.size,0);
+}
 // Family sessions cannot expose the placement editor, including direct handler calls.
 const familyMode=modeScheduler(false,false,false),familyBefore=familyMode.c.renderCount;
 familyMode.c.setActive(false);familyMode.flush();
@@ -582,23 +628,25 @@ for(const change of ['mode','size','observer','explicit','stable','repeated']) {
 for(const transition of ['visibility','context','bfcache','dispose']) {
   const q=modeScheduler(), before=q.c.renderCount;
   q.c.setActive(false);q.c.setActive(true);
+  const staleFrame=[...q.raf.values()][0],staleTimer=[...q.allTimers.values()][0].fn;
   if(transition==='visibility'){q.c.document.hidden=true;q.handlers.visibilitychange();}
   else if(transition==='context')q.handlers.webglcontextlost({preventDefault(){}});
   else q.handlers.pagehide({persisted:transition==='bfcache'});
-  q.flush();q.flush();
+  q.advance(1000);q.flush();
   assert.equal(q.c.renderCount,before,transition+' suppresses mode callbacks while inactive');
-  assert.equal(q.raf.size,0);
+  assert.equal(q.raf.size,0);assert.equal(q.allTimers.size,0);
   if(transition==='visibility'){q.c.document.hidden=false;q.handlers.visibilitychange();}
   else if(transition==='context')q.handlers.webglcontextrestored();
   else if(transition==='bfcache')q.handlers.pageshow({persisted:true});
-  q.flush();q.flush();
+  q.advance(100);q.flush();staleFrame();staleTimer();
   assert.equal(q.c.renderCount,before+(transition==='dispose'?0:1),transition+' preserves lifecycle recovery');
+  assert.equal(q.raf.size,0);assert.equal(q.allTimers.size,0);
 }
 const restoredMode=modeScheduler();
 restoredMode.handlers.webglcontextlost({preventDefault(){}});restoredMode.handlers.webglcontextrestored();
 restoredMode.flush();
 assert.equal(rapidModeReturn(restoredMode),1,'The same rapid transition repaints after real loss/restore handlers');
-console.log('PASS: actual Home mode/resize race, old-code negative control, coalesced repaint and lifecycle guards');
+console.log('PASS: actual Home mode/resize race, withheld RAF, bounded latest-size repaint and lifecycle guards');
 
 // Both raw Apple and measured masked-Apple select this existing diffuse flag;
 // other reduced and hardware profiles retain the ordinary Editor backdrop.

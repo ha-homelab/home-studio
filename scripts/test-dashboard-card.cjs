@@ -27,6 +27,8 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><but
       calls.push(message);
       if (message.type !== 'home_floorplan/viewer') throw Error('Unexpected request');
       if (message.floor === 'missing') throw Error('Unknown floor');
+      if (message.floor === 'repair') return {html:null,items:[],can_edit:admin,mode:'native',has_editor:true,
+        recovery:{issues:['Synthetic repair required'],backup:{rooms:{main:['study']}}}};
       if (message.floor === 'empty') return {html:null,items:[],can_edit:admin,mode:'native',has_editor:true,floors:[]};
       return {mode:message.floor==='legacy'?'legacy':'native',has_editor:message.floor!=='legacy',html:${JSON.stringify(viewer).replaceAll('<','\\u003c')},floor:message.floor || 'main',floors:['main','upper'],
         site_features:false,can_edit:admin,readable_entities:['switch.lamp'],controllable_entities:['switch.lamp'],revision:0,items:[{id:'lamp',entity_id:'switch.lamp'}]};
@@ -44,7 +46,7 @@ async function testVisualEditor(page) {
     if (Card.getStubConfig().edit_locked !== true) throw Error('New cards must lock layout editing');
     window.editor = Card.getConfigElement();
     window.originalConfig = Object.freeze({type:'custom:home-floorplan-card',floor:'upper',height:600,
-      sidebar_collapsed:true,room_labels:false,dry_run:false,edit_locked:true,device_filter:'all',
+      sidebar_collapsed:true,toolbar_hidden:false,room_labels:false,dry_run:false,edit_locked:true,device_filter:'all',
       visibility:[{condition:'user',users:['family']}],custom_option:{keep:'unchanged'}});
     window.configChanges = []; window.statusRequests = [];
     document.body.addEventListener('config-changed',event => configChanges.push(structuredClone(event.detail.config)));
@@ -79,12 +81,13 @@ async function testVisualEditor(page) {
   await height.fill(''); await height.press('Tab');
   assert.equal(await page.evaluate(() => Object.hasOwn(configChanges.at(-1),'height')),false);
   await editor.locator('#sidebar_collapsed').uncheck();
+  await editor.getByLabel('Hide menus initially').check();
   await editor.locator('#room_labels').check();
   await editor.getByLabel('Devices to show').selectOption('controls');
   await editor.locator('#dry_run').check();
   await editor.locator('#edit_locked').uncheck();
   const changed = await page.evaluate(() => configChanges.at(-1));
-  assert.deepEqual(changed,{type:'custom:home-floorplan-card',floor:'main',sidebar_collapsed:false,
+  assert.deepEqual(changed,{type:'custom:home-floorplan-card',floor:'main',sidebar_collapsed:false,toolbar_hidden:true,
     room_labels:true,dry_run:true,edit_locked:false,device_filter:'controls',
     visibility:[{condition:'user',users:['family']}],custom_option:{keep:'unchanged'}});
   assert.deepEqual(await page.evaluate(() => [originalConfig.floor,originalConfig.height,originalConfig.edit_locked]),['upper',600,true]);
@@ -132,6 +135,115 @@ async function testVisualEditor(page) {
   await page.evaluate(() => editor.remove());
 }
 
+async function testHiddenToolbar(page) {
+  await page.evaluate(() => {
+    window.kiosk=makeCard({toolbar_hidden:true,sidebar_collapsed:true,edit_locked:true});kiosk.id='kiosk';
+    window.other=makeCard({});other.id='other';
+  });
+  await page.waitForFunction(() => kiosk._panel?.modelConfigured && other._panel?.modelConfigured);
+  const host=page.locator('#kiosk'), peer=page.locator('#other');
+  let frame=await (await host.locator('iframe').elementHandle()).contentFrame();
+  assert.deepEqual(await frame.evaluate(() => [initial.preferences.toolbarHidden,initial.preferences.sidebarCollapsed,initial.can_edit]),[true,true,false]);
+  assert.equal(await host.locator('header').isVisible(),true,'loading or a retained viewer without toolbar support keeps recovery controls');
+  await page.evaluate(() => {
+    window.postMessage({type:'view_preferences',toolbarHidden:true},'*');
+    kiosk._panel.handleViewerMessage({type:'view_preferences',toolbarHidden:true},kiosk._panel.generation-1);
+  });
+  await frame.evaluate(() => port.postMessage({type:'view_preferences',toolbarHidden:'true'}));
+  assert.equal(await host.locator('header').isVisible(),true,'window messages, stale generations and non-booleans cannot acknowledge the toolbar');
+  await frame.evaluate(() => port.postMessage({type:'view_preferences',toolbarHidden:true}));
+  await page.waitForFunction(() => kiosk._panel.$('header',false).hidden);
+  assert.equal(await peer.locator('header').isVisible(),true,'one card cannot hide another card’s menus');
+  assert.equal(await page.evaluate(() => other._panel.viewPreferences.toolbarHidden),false);
+  assert.equal(await page.evaluate(() => localStorage.getItem('home-floorplan:toolbar-hidden')),null);
+  assert.equal(await host.locator('iframe').getAttribute('sandbox'),'allow-scripts','menu visibility does not change editing permissions');
+  await frame.evaluate(() => port.postMessage({type:'view_preferences',toolbarHidden:false,can_edit:true,editLocked:false}));
+  await page.waitForFunction(() => !kiosk._panel.$('header',false).hidden);
+  assert.equal(await page.evaluate(() => kiosk._panel.canEdit),false);
+  await frame.evaluate(() => port.postMessage({type:'view_preferences',toolbarHidden:true}));
+  await page.waitForFunction(() => kiosk._panel.$('header',false).hidden);
+  await page.evaluate(() => kiosk._panel.showMapAttribution(true));
+  assert.equal(await host.locator('#map-attribution').isVisible(),true,'attribution survives hidden host menus');
+  await frame.evaluate(() => port.postMessage({type:'view_preferences',toolbarHidden:false}));
+  await page.waitForFunction(() => !kiosk._panel.$('header',false).hidden);
+  assert.equal(await page.evaluate(() => kiosk._panel.mapAttributionLink.parentElement.tagName),'HEADER');
+  await frame.evaluate(() => port.postMessage({type:'view_preferences',toolbarHidden:true}));
+  await page.waitForFunction(() => kiosk._panel.$('header',false).hidden);
+  await page.evaluate(() => kiosk._panel.applyDryRun(true));
+  assert.equal(await host.locator('#dry-run').isVisible(),true,'Dry run stays visible');
+  await page.evaluate(() => kiosk._panel.applyDryRun(false));
+  assert.equal(await host.locator('header').isVisible(),false);
+  assert.equal(await frame.evaluate(() => received.filter(message=>message.focusMenus===true).length),0,
+    'a background state update never requests keyboard focus');
+  await page.evaluate(() => kiosk._panel.applyDryRun(true));
+  await host.locator('#dry-run').focus();
+  await page.keyboard.press('Enter');
+  await frame.waitForFunction(() => received.some(message=>message.focusMenus===true));
+  assert.equal(await host.locator('header').isVisible(),false);
+  assert.deepEqual(await frame.evaluate(() => received.filter(message=>message.focusMenus===true)),
+    [{type:'view_preferences',toolbarHidden:true,focusMenus:true}],
+    'hiding the focused Dry run control transfers focus to the viewer restore button');
+  await page.evaluate(() => {
+    kiosk._panel.updateToolbarVisibility();
+    kiosk._panel.updateToolbarVisibility();
+  });
+  await frame.evaluate(() => port.postMessage({type:'view_preferences',toolbarHidden:true}));
+  assert.equal(await frame.evaluate(() => received.filter(message=>message.focusMenus===true).length),1,
+    'repeated state updates and viewer acknowledgments do not repeat the focus request');
+  await page.evaluate(() => kiosk._panel.notice('Synthetic command error',true));
+  assert.equal(await host.locator('#notice').isVisible(),true,'errors stay visible');
+  await page.evaluate(() => kiosk._panel.notice('Connected'));
+  assert.equal(await host.locator('header').isVisible(),false);
+  await page.evaluate(() => {
+    window.kioskPanel=kiosk._panel;
+    kiosk.setConfig({toolbar_hidden:true,sidebar_collapsed:true,edit_locked:true,height:720});
+  });
+  assert.equal(await page.evaluate(() => kiosk._panel===kioskPanel),true,'size-only edits retain the viewer and preference');
+  await page.evaluate(() => kiosk.setConfig({toolbar_hidden:false,sidebar_collapsed:true,edit_locked:true}));
+  await page.waitForFunction(() => kiosk._panel!==kioskPanel && kiosk._panel.modelConfigured);
+  assert.equal(await host.locator('header').isVisible(),true,'an explicit config edit restores menus');
+  assert.equal(await page.evaluate(() => kioskPanel.port),null);
+  await page.evaluate(() => kiosk.setConfig({toolbar_hidden:true}));
+  await page.waitForFunction(() => kiosk._panel?.modelConfigured);
+  frame=await (await host.locator('iframe').elementHandle()).contentFrame();
+  await frame.evaluate(() => port.postMessage({type:'view_preferences',toolbarHidden:true}));
+  await page.waitForFunction(() => kiosk._panel.$('header',false).hidden);
+  await page.evaluate(() => kiosk._panel.connectionReadiness(kiosk._panel.connectionState,false));
+  assert.equal(await host.locator('header').isVisible(),true,'disconnect restores recovery controls immediately');
+  await page.evaluate(() => kiosk._panel.connectionReadiness(kiosk._panel.connectionState,true));
+  await page.waitForFunction(() => kiosk._panel?.modelConfigured);
+  assert.equal(await host.locator('header').isVisible(),true,'reloaded viewers must acknowledge their own usable toolbar');
+  frame=await (await host.locator('iframe').elementHandle()).contentFrame();
+  await frame.evaluate(() => port.postMessage({type:'view_preferences',toolbarHidden:true}));
+  await page.waitForFunction(() => kiosk._panel.$('header',false).hidden);
+  await page.evaluate(() => {
+    const original=kiosk._panel._hass.callWS;
+    kiosk._panel._hass.callWS=message=>message.type==='home_floorplan/save' ?
+      new Promise((resolve,reject)=>window.failKioskSave=reject) : original(message);
+    kiosk._panel.handleViewerMessage({type:'save',items:[{id:'draft',entity_id:'switch.lamp'}]},kiosk._panel.generation);
+  });
+  await page.waitForFunction(() => window.failKioskSave);
+  assert.equal(await host.locator('#notice').isVisible(),true,'pending placements remain visible');
+  assert.equal(await page.evaluate(() => {
+    try {kiosk.setConfig({toolbar_hidden:false});return false;} catch {return true;}
+  }),true,'menu config changes cannot discard an unsaved layout');
+  await page.evaluate(() => failKioskSave(Error('Synthetic save failure')));
+  await page.waitForFunction(() => kiosk._panel.failed && !kiosk._panel.pending);
+  assert.equal(await host.locator('#notice').isVisible(),true,'failed saves remain visible');
+  await page.evaluate(() => {kiosk.remove();document.body.append(kiosk);});
+  assert.equal(await host.locator('#local-recovery').isVisible(),true);
+  assert.equal(await host.locator('header').isVisible(),true,'local recovery retains its reload action');
+  await page.evaluate(() => {kiosk.remove();other.remove();window.kiosk=makeCard({toolbar_hidden:true,floor:'repair'});kiosk.id='kiosk';});
+  await page.waitForFunction(() => kiosk._panel?.recovery);
+  assert.equal(await host.locator('#recovery').isVisible(),true);
+  assert.equal(await host.locator('header').isVisible(),true,'server recovery cannot be hidden');
+  await page.evaluate(() => {kiosk.remove();window.kiosk=makeCard({toolbar_hidden:true,floor:'missing'});kiosk.id='kiosk';});
+  await page.waitForFunction(() => kiosk._panel?.$('notice').textContent.includes('Cannot load plan'));
+  assert.equal(await host.locator('#notice').isVisible(),true,'initial load errors cannot be hidden');
+  await page.evaluate(() => kiosk.remove());
+  assert.equal(await page.evaluate(() => subscriptions),0);
+}
+
 (async () => {
   const server = http.createServer((request,response) => {
     const filename = new URL(request.url,'http://localhost').pathname;
@@ -163,7 +275,8 @@ async function testVisualEditor(page) {
     }),[12,{columns:12,rows:'auto',min_columns:6},1]);
     await page.evaluate(() => {
       const invalid = [null,[],{floor:'../main'},{floor:'A'},{floor:'a'.repeat(49)},{height:'600px'},
-        {height:239},{height:1601},{height:NaN},{sidebar_collapsed:'true'},{dry_run:1},{edit_locked:'yes'},{room_labels:1},{device_filter:'invalid'}];
+        {height:239},{height:1601},{height:NaN},{sidebar_collapsed:'true'},{toolbar_hidden:'true'},{toolbar_hidden:1},
+        {dry_run:1},{edit_locked:'yes'},{room_labels:1},{device_filter:'invalid'}];
       for (const config of invalid) {
         const card = document.createElement('home-floorplan-card');
         let rejected = false;
@@ -176,6 +289,7 @@ async function testVisualEditor(page) {
     let frame = page.frames().find(frame => frame.parentFrame());
     await frame.waitForFunction(() => window.initial);
     assert.equal(await frame.evaluate(() => initial.preferences.sidebarCollapsed),true);
+    assert.equal(await frame.evaluate(() => initial.preferences.toolbarHidden),false);
     assert.equal(await frame.evaluate(() => window.origin),'null','viewer retains its opaque sandbox');
     assert.deepEqual(await page.evaluate(() => calls),[{type:'home_floorplan/viewer',floor:'upper'}]);
     assert.equal(await page.locator('iframe').getAttribute('sandbox'),'allow-scripts allow-downloads allow-forms');
@@ -462,7 +576,8 @@ async function testVisualEditor(page) {
     assert.equal(await page.evaluate(()=>legacy._panel.canEdit),true);
     assert.equal(await page.locator('#studio').isVisible(),false,'portable builds do not link to an unavailable native editor');
     await page.evaluate(()=>legacy.remove());
+    await testHiddenToolbar(page);
     assert.deepEqual(errors,[]);
-    console.log('PASS: visual card editor, permitted floor catalog, account-race isolation, dashboard module, validation, sizing, floor selection, opaque sandbox, pinned dry run, live controls, admin gating, reconnect/remount edit recovery and stale-save rejection.');
+    console.log('PASS: visual card editor, permitted floor catalog, account-race isolation, dashboard module, validation, sizing, floor selection, opaque sandbox, pinned dry run, live controls, admin gating, reconnect/remount edit recovery, hidden-menu safety and stale-save rejection.');
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

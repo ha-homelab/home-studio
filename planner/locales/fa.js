@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "پنکه رومیزی",
   "model.wall_air_conditioner": "کولر گازی دیواری",
   "model.panel_heater": "بخاری پنلی",
+  "model.interior_straight_stairs": "راه‌پله مستقیم داخلی",
+  "model.pergola_wood": "پرگولای چوبی باغ",
+  "model.pergola_steel": "پرگولای فولادی باغ",
+  "model.bidet": "بیده پایه‌دار",
+  "model.shower_enclosure": "محفظه دوش با ورودی باز",
 };

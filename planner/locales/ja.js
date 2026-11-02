@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "卓上扇風機",
   "model.wall_air_conditioner": "壁掛けエアコン",
   "model.panel_heater": "パネルヒーター",
+  "model.interior_straight_stairs": "屋内直線階段",
+  "model.pergola_wood": "木製ガーデンパーゴラ",
+  "model.pergola_steel": "スチール製ガーデンパーゴラ",
+  "model.bidet": "床置きビデ",
+  "model.shower_enclosure": "ウォークインシャワーブース",
 };

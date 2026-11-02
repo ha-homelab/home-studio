@@ -38,7 +38,7 @@ homeView = (() => {
   const errorText=value=>value && typeof value==='object' ? vt(value.key,value.params) : value || '';
   const commandError=message=>typeof message.error_key==='string' ? {key:message.error_key,params:message.error_params || {}} : message.error || {key:'The command could not be sent.'};
   let countdownTimer, moduleItem;
-  let sequence = 0, zoom = 1, panX = 0, panY = 0, controlsCollapsed = false;
+  let sequence = 0, zoom = 1, panX = 0, panY = 0, controlsCollapsed = false, toolbarHidden = false;
   let navigationMode='rotate', homeRotation=0, homeTilt=0, mapLayer=null, mapConfig=null, mapDraft=null, mapReference=null, mapRevision=0, mapLoaded=false, mapLoading=false, mapSaving=false, mapBeforeEdit=null, pendingMapNavigation=null, mapFraming=null, mapBeforeRoom='', mapCoarseState=false;
   let mapSettingsError=false, mapTileStatus='', mapTileRetry=false;
   const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6m-5 3h4M8.5 14.5a6 6 0 1 1 7 0L15 16H9z"/></svg>';
@@ -412,6 +412,17 @@ homeView = (() => {
   $('homeZoomReset').onclick=resetHomeView;
   function applyViewPreferences(value){
     viewerI18n.applyPreferences(value);
+    if(typeof value.toolbarHidden==='boolean'){
+      const restoreFocus=value.toolbarHidden ? value.focusMenus===true||document.activeElement?.closest('#homeToolbar,#homeActivity,#homeSignals,#homeMapEditor') : document.activeElement===$('homeShowMenus');
+      toolbarHidden=value.toolbarHidden;
+      $('homeView').classList.toggle('menus-hidden',toolbarHidden);
+      $('homeShowMenus').hidden=!toolbarHidden;
+      if(restoreFocus)(toolbarHidden?$('homeShowMenus'):$('homeHideMenus')).focus({preventScroll:true});
+      // Acknowledge only after the restore button exists. Older viewers must
+      // not cause their host to hide its only available navigation controls.
+      bridge?.postMessage({type:'view_preferences',toolbarHidden});
+      requestAnimationFrame(()=>window.resizeModel?.());
+    }
     if(typeof value.roomLabels==='boolean')roomLabels=value.roomLabels;
     if(['all','controls'].includes(value.deviceFilter))deviceFilter=value.deviceFilter;
     $('homeRoomLabels').setAttribute('aria-pressed',String(roomLabels));
@@ -437,6 +448,8 @@ homeView = (() => {
     applyViewPreferences({sidebarCollapsed:!controlsCollapsed});
     bridge?.postMessage({type:'view_preferences',sidebarCollapsed:controlsCollapsed});
   };
+  $('homeHideMenus').onclick=()=>applyViewPreferences({toolbarHidden:true});
+  $('homeShowMenus').onclick=()=>applyViewPreferences({toolbarHidden:false});
 
   function attachRoomLighting() {
     const attach=()=>{roomLighting?.attach(root,active,{staticGeometry:true});roomLighting?.attach(objectGroup,active)};
@@ -473,8 +486,10 @@ homeView = (() => {
     if(!value)clearMotion();
     if (!value) showMode(false);
     refreshControls();
-    const before=window.floorplan?.renderCount;
-    requestAnimationFrame(()=>{window.resizeModel?.();if(window.floorplan?.renderCount===before)window.requestModelRender?.()});
+    // Commit the new stage size before scheduling its frame. A raw RAF here
+    // could strand both resize and redraw before the bounded scheduler runs.
+    window.resizeModel?.(false);
+    window.requestModelRender?.();
   }
 
   let nativePressTimer=null,nativePress=null;

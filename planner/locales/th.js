@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "พัดลมตั้งโต๊ะ",
   "model.wall_air_conditioner": "เครื่องปรับอากาศติดผนัง",
   "model.panel_heater": "เครื่องทำความร้อนแบบแผง",
+  "model.interior_straight_stairs": "บันไดตรงภายในอาคาร",
+  "model.pergola_wood": "ซุ้มไม้ระแนงในสวน",
+  "model.pergola_steel": "ซุ้มเหล็กในสวน",
+  "model.bidet": "โถบิเดต์แบบตั้งพื้น",
+  "model.shower_enclosure": "ฉากกั้นอาบน้ำแบบเดินเข้า",
 };

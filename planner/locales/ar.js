@@ -800,4 +800,9 @@ export default {
   "model.desk_fan": "مروحة مكتب",
   "model.wall_air_conditioner": "مكيف هواء جداري",
   "model.panel_heater": "مدفأة لوحية",
+  "model.interior_straight_stairs": "درج داخلي مستقيم",
+  "model.pergola_wood": "عريشة حديقة خشبية",
+  "model.pergola_steel": "عريشة حديقة فولاذية",
+  "model.bidet": "بيديه أرضي",
+  "model.shower_enclosure": "كابينة دش بمدخل مفتوح",
 };

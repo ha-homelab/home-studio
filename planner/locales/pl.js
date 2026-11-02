@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "Wentylator biurkowy",
   "model.wall_air_conditioner": "Klimatyzator ścienny",
   "model.panel_heater": "Grzejnik panelowy",
+  "model.interior_straight_stairs": "Proste schody wewnętrzne",
+  "model.pergola_wood": "Drewniana pergola ogrodowa",
+  "model.pergola_steel": "Stalowa pergola ogrodowa",
+  "model.bidet": "Bidet stojący",
+  "model.shower_enclosure": "Kabina prysznicowa walk-in",
 };

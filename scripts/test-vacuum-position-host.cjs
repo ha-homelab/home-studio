@@ -16,7 +16,7 @@ function fixture(){
     savedItems:[],vacuumSources:[binding],displayEntities:new Set(['sensor.unrelated']),scopedStates:true,tvFrameCache:{},
     curtains:{profiles:{},power:{},memory:{}},port:{postMessage(message){messages.push(plain(message));}},
     dispatchEvent(event){events.push(plain(event));},noticeKey(){},t:key=>key,
-    refreshTVFrame(){},refreshCameraFrames(){},refreshMediaArtwork(){},
+    refreshTVFrame(){},refreshCameraFrames(){},refreshMediaArtwork(){},updateToolbarVisibility(){},
     _hass:{connected:true,user:{id:'fixture_reader',is_admin:false},states:{
       'vacuum.fixture':{state:'cleaning',attributes:{battery_level:43,token:'SECRET'}},
       'sensor.fixture_position':{state:'available',last_updated:'2026-10-22T10:00:20Z',attributes:{...sample,token:'SECRET',raw_map:{credential:'SECRET'}}},

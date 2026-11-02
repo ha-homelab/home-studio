@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "탁상용 선풍기",
   "model.wall_air_conditioner": "벽걸이 에어컨",
   "model.panel_heater": "패널 히터",
+  "model.interior_straight_stairs": "실내 일자형 계단",
+  "model.pergola_wood": "목재 정원 퍼골라",
+  "model.pergola_steel": "강철 정원 퍼골라",
+  "model.bidet": "바닥 설치형 비데",
+  "model.shower_enclosure": "개방형 샤워 부스",
 };

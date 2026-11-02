@@ -107,6 +107,9 @@ if (process.argv.includes('--primitive-fixtures')) {
     'saguaro_cactus', 'prickly_pear_cactus', 'standing_brown_bear', 'brown_bear_all_fours',
     'polar_bear'];
   for (const id of decorIds) assert.ok(getCatalogModel(id), `decor catalog includes ${id}`);
+  for (const id of ['interior_straight_stairs', 'pergola_wood', 'pergola_steel', 'bidet', 'shower_enclosure']) {
+    assert.ok(getCatalogModel(id), `home fixtures catalog includes ${id}`);
+  }
   assert.equal(new Set(CATALOG.models.map(model => model.id)).size, CATALOG.models.length);
   for (const { part, mesh } of primitiveFixtures) {
     verifyPrimitive(part, mesh);

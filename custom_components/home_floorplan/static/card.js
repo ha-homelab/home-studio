@@ -36,6 +36,7 @@ class HomeFloorplanCardEditor extends HTMLElement {
         <small id="height-help">240–1600 pixels. Leave empty to use 600.</small>
       </div>
       <label class="check" for="sidebar_collapsed"><input id="sidebar_collapsed" data-key="sidebar_collapsed" type="checkbox"><span>Hide the sidebar initially<small>Leave more space for your home. The sidebar can be opened inside the card.</small></span></label>
+      <label class="check" for="toolbar_hidden"><input id="toolbar_hidden" data-key="toolbar_hidden" type="checkbox"><span>Hide menus initially<small>Show your home with fewer controls. Use Show menus inside the card to bring them back.</small></span></label>
       <label class="check" for="room_labels"><input id="room_labels" data-key="room_labels" type="checkbox"><span>Show room names<small>Display room labels when opening the card.</small></span></label>
       <div class="field"><label for="device_filter">Devices to show</label><select id="device_filter" data-key="device_filter"><option value="all">All devices and sensors</option><option value="controls">Controls only</option></select><small>Controls only hides passive sensor markers.</small></div>
       <label class="check" for="dry_run"><input id="dry_run" data-key="dry_run" type="checkbox"><span>Preview only (Dry run)<small>Block real device commands from this card. Your remembered Dry run preference may also block commands when this is off.</small></span></label>
@@ -135,7 +136,7 @@ class HomeFloorplanCardEditor extends HTMLElement {
   _render() {
     if (!this._config) return;
     this._renderFloors();
-    for (const key of ['sidebar_collapsed','room_labels','dry_run','edit_locked'])
+    for (const key of ['sidebar_collapsed','toolbar_hidden','room_labels','dry_run','edit_locked'])
       this.shadowRoot.getElementById(key).checked = this._config[key] ?? (key === 'sidebar_collapsed');
     this.shadowRoot.querySelector('#height').value = this._config.height ?? '';
     this.shadowRoot.querySelector('#device_filter').value = this._config.device_filter ?? 'all';
@@ -190,14 +191,14 @@ class HomeFloorplanCard extends HTMLElement {
       throw Error('floor must be a floor ID from your project.');
     if (config.height !== undefined && (!Number.isInteger(config.height) || config.height < 240 || config.height > 1600))
       throw Error('height must be a number between 240 and 1600 pixels.');
-    for (const key of ['sidebar_collapsed','dry_run','edit_locked','room_labels']) {
+    for (const key of ['sidebar_collapsed','toolbar_hidden','dry_run','edit_locked','room_labels']) {
       if (config[key] !== undefined && typeof config[key] !== 'boolean') throw Error(`${key} must be true or false.`);
     }
     if (config.device_filter !== undefined && !['all','controls'].includes(config.device_filter)) throw Error('device_filter must be all or controls.');
     const next = {floor:config.floor,height:config.height ?? 600,
-      sidebarCollapsed:config.sidebar_collapsed ?? true,dryRun:config.dry_run ?? false,
+      sidebarCollapsed:config.sidebar_collapsed ?? true,toolbarHidden:config.toolbar_hidden ?? false,dryRun:config.dry_run ?? false,
       editLocked:config.edit_locked ?? false,deviceFilter:config.device_filter ?? 'all',roomLabels:config.room_labels ?? false};
-    const changed = this._config && ['floor','sidebarCollapsed','dryRun','editLocked','deviceFilter','roomLabels'].some(key => next[key] !== this._config[key]);
+    const changed = this._config && ['floor','sidebarCollapsed','toolbarHidden','dryRun','editLocked','deviceFilter','roomLabels'].some(key => next[key] !== this._config[key]);
     if (changed && (this._panel?.pending || this._panel?.failed))
       throw Error('Save or recover your floorplan placements before changing the card settings.');
     this._config = next;

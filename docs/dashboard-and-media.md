@@ -39,7 +39,7 @@ The ordinary **3D Home** sidebar panel remains available after this upgrade.
    module automatically. Existing resources are preserved.
 3. Edit a dashboard, choose **Add card**, and select **Home Studio**. Its visual
    editor lets you choose a published floor by name, set the height, show room
-   names, filter devices, hide the sidebar initially, and control Dry run and
+   names, filter devices, hide the sidebar or menus initially, and control Dry run and
    layout editing. New cards have **Lock layout editing** on.
 4. Enable **Preview only (Dry run)** while checking your home and device bindings.
    Turn it off when you intend to use live controls. A remembered Dry run
@@ -74,6 +74,25 @@ example `floor: main`. Omitting it uses the project default. You can still
 switch floors inside the card.
 `height` is a number of pixels from 240 to 1600; the default is 600.
 `sidebar_collapsed` defaults to `true` to leave more room for the map.
+`toolbar_hidden` defaults to `false`. Turn on **Hide menus initially** for a
+wall-tablet or kiosk view, or add it in YAML:
+
+```yaml
+type: custom:home-floorplan-card
+height: 800
+toolbar_hidden: true
+sidebar_collapsed: true
+edit_locked: true
+```
+
+Use **Show menus** inside the view to restore its menus, then **Hide menus**
+to hide them again. The sidebar keeps its separate setting. Device actions
+remain available according to the account's permissions. Dry run, loading
+status, errors, unsaved edits, recovery controls and map attribution stay visible.
+The host header hides only after the viewer confirms that its menus can be
+restored; an older published viewer keeps the header. Publish the saved drawing
+again after updating to use the new viewer controls.
+
 Existing cards keep their saved choices and existing defaults; only newly
 added visual cards start with layout editing locked.
 

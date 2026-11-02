@@ -83,7 +83,7 @@ REPO_FILES = (
               'requirements-strict-tls.txt', 'docs/transport-security.md',
               'docs/vacuum-position.md', 'scripts/test-vacuum-state.cjs', 'scripts/test-vacuum-view.cjs', 'scripts/test-vacuum-position-host.cjs', 'scripts/test-vacuum-browser.cjs',
               'docs/indicators.md', 'scripts/test-appliance-state.cjs', 'scripts/test-presence-view.cjs',
-              'docs/environment.md', 'docs/images/garden-surroundings.png',
+              'docs/environment.md', 'docs/images/garden-surroundings.png', 'docs/images/library-extensions.png',
               'scripts/test-environment.mjs', 'scripts/test-environment-browser.cjs',
               'scripts/test-environment-surfaces.mjs', 'scripts/author-environment-animal.py',
               'docs/i18n.md', 'docs/translations/README.md',
@@ -259,7 +259,7 @@ def validate(root):
             validate_website_media(path)
             if path.suffix != '.vtt':
                 continue
-        if path.suffix == '.jpg' or relative in ('docs/images/dashboard-media-example.png', 'docs/images/native-editor.png', 'docs/images/garden-surroundings.png', 'docs/images/device-feedback.png'):
+        if path.suffix == '.jpg' or relative in ('docs/images/dashboard-media-example.png', 'docs/images/native-editor.png', 'docs/images/garden-surroundings.png', 'docs/images/device-feedback.png', 'docs/images/library-extensions.png'):
             continue
         text = path.read_text(encoding='utf-8')
         # The validator intentionally contains its own private-pattern tripwires.

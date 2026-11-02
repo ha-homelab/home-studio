@@ -30,9 +30,24 @@ def area(mesh):
     return total
 
 
+def vertical_hits(meshes, x, z):
+    """Intersect a vertical ray with rendered triangles, in normalized coordinates."""
+    hits=[]
+    for mesh in meshes:
+        for i in range(0,len(mesh['indices']),3):
+            a,b,c=[mesh['vertices'][j] for j in mesh['indices'][i:i+3]]
+            det=(b[2]-c[2])*(a[0]-c[0])+(c[0]-b[0])*(a[2]-c[2])
+            if abs(det)<1e-14:continue
+            u=((b[2]-c[2])*(x-c[0])+(c[0]-b[0])*(z-c[2]))/det
+            v=((c[2]-a[2])*(x-c[0])+(a[0]-c[0])*(z-c[2]))/det
+            w=1-u-v
+            if min(u,v,w)>=-1e-10:hits.append(u*a[1]+v*b[1]+w*c[1])
+    return hits
+
+
 class AuthoredProfiles(unittest.TestCase):
     def test_every_stock_part_has_closed_oriented_refined_geometry(self):
-        self.assertEqual(len(CATALOG['models']),211)
+        self.assertEqual(len(CATALOG['models']),216)
         for model in CATALOG['models']:
             for index,part in enumerate(model['parts']):
                 with self.subTest(model=model['id'],part=index):
@@ -150,21 +165,56 @@ class AuthoredProfiles(unittest.TestCase):
                 with self.assertRaises(ValueError):primitive({**source,**bad})
 
     def test_bath_openings_are_recessed_geometry_not_dark_discs(self):
-        for model_id,z,limit in [('bathtub',0,.30),('toilet',.17,.45)]:
+        for model_id,z,limit in [('bathtub',0,.30),('toilet',.17,.45),
+                                 ('bidet',.10,.40),('shower_enclosure',.20,.04)]:
             asset=build_furniture_asset({'model_id':model_id,'type':'furniture'})
-            hits=[]
-            for mesh in asset['meshes']:
-                for i in range(0,len(mesh['indices']),3):
-                    a,b,c=[mesh['vertices'][j] for j in mesh['indices'][i:i+3]]
-                    det=(b[2]-c[2])*(a[0]-c[0])+(c[0]-b[0])*(a[2]-c[2])
-                    if abs(det)<1e-14:continue
-                    u=((b[2]-c[2])*(-c[0])+(c[0]-b[0])*(z-c[2]))/det
-                    v=((c[2]-a[2])*(-c[0])+(a[0]-c[0])*(z-c[2]))/det
-                    w=1-u-v
-                    if min(u,v,w)>=-1e-10:hits.append(u*a[1]+v*b[1]+w*c[1])
+            hits=vertical_hits(asset['meshes'],0,z)
             self.assertTrue(hits,model_id)
             self.assertLess(max(hits),limit,model_id+' opening must reach a recessed cavity')
             self.assertTrue(any(p['geometry_profile']=='molded_shell' for p in MODELS[model_id]['parts']))
+
+    def test_stair_has_level_treads_with_increasing_rise(self):
+        asset=build_furniture_asset({'model_id':'interior_straight_stairs','type':'furniture'})
+        heights=[]
+        for step in range(14):
+            z=.5-(step+.5)/14
+            height=max(vertical_hits(asset['meshes'],0,z))
+            for x in (-.4,.4):
+                for offset in (-.01,.01):
+                    self.assertAlmostEqual(max(vertical_hits(asset['meshes'],x,z+offset)),height)
+            heights.append(height)
+        self.assertLess(heights[0],.1)
+        self.assertAlmostEqual(heights[-1],1)
+        self.assertTrue(all(a<b for a,b in zip(heights,heights[1:])))
+        self.assertTrue(all(p['surface_finish']=='wood' for p in asset['meshes']))
+
+    def test_pergolas_have_grounded_posts_open_roofs_and_distinct_materials(self):
+        for model_id,finish in [('pergola_wood','wood'),('pergola_steel','matte_metal')]:
+            asset=build_furniture_asset({'model_id':model_id,'type':'furniture'})
+            self.assertTrue(all(p['surface_finish']==finish for p in asset['meshes']))
+            for x in (-.455,.455):
+                for z in (-.455,.455):
+                    hits=vertical_hits(asset['meshes'],x,z)
+                    self.assertAlmostEqual(min(hits),0)
+                    self.assertAlmostEqual(max(hits),1)
+            self.assertGreater(max(vertical_hits(asset['meshes'],0,0)),.9)
+            self.assertEqual(vertical_hits(asset['meshes'],0,.075),[], 'Rafters leave open sky between them')
+
+    def test_shower_has_transparent_sides_and_an_open_entrance(self):
+        asset=build_furniture_asset({'model_id':'shower_enclosure','type':'furniture'})
+        glazing=[m for m in asset['meshes'] if m['surface_finish']=='glass']
+        self.assertEqual(len(glazing),2)
+        for mesh in glazing:
+            alpha=asset['materials'][mesh['material']][3]
+            self.assertGreater(alpha,0)
+            self.assertLess(alpha,.5)
+        self.assertLess(max(vertical_hits(asset['meshes'],0,.45)),.06)
+        self.assertTrue(all(asset['materials'][m['material']][3]==1 for m in asset['meshes'] if m not in glazing))
+
+    def test_new_home_fixtures_keep_compact_geometry(self):
+        for model_id in ('interior_straight_stairs','pergola_wood','pergola_steel','bidet','shower_enclosure'):
+            asset=build_furniture_asset({'model_id':model_id,'type':'furniture'})
+            self.assertLessEqual(sum(len(m['indices'])//3 for m in asset['meshes']),1500,model_id)
 
     def test_wood_grain_follows_tabletop_and_leg_axes(self):
         model=MODELS['dining_table'];asset=build_furniture_asset({'type':model['type'],'model_id':model['id']})

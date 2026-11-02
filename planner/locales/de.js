@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "Tischventilator",
   "model.wall_air_conditioner": "Wandklimaanlage",
   "model.panel_heater": "Flächenheizgerät",
+  "model.interior_straight_stairs": "Gerade Innentreppe",
+  "model.pergola_wood": "Gartenpergola aus Holz",
+  "model.pergola_steel": "Gartenpergola aus Stahl",
+  "model.bidet": "Standbidet",
+  "model.shower_enclosure": "Begehbare Duschkabine",
 };

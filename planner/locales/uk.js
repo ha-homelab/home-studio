@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "Настільний вентилятор",
   "model.wall_air_conditioner": "Настінний кондиціонер",
   "model.panel_heater": "Панельний обігрівач",
+  "model.interior_straight_stairs": "Прямі внутрішні сходи",
+  "model.pergola_wood": "Дерев’яна садова пергола",
+  "model.pergola_steel": "Сталева садова пергола",
+  "model.bidet": "Підлогове біде",
+  "model.shower_enclosure": "Душова кабіна з відкритим входом",
 };

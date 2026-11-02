@@ -802,4 +802,9 @@ export default {
   "model.desk_fan": "Quạt để bàn",
   "model.wall_air_conditioner": "Máy điều hòa treo tường",
   "model.panel_heater": "Máy sưởi dạng tấm",
+  "model.interior_straight_stairs": "Cầu thang thẳng trong nhà",
+  "model.pergola_wood": "Giàn pergola gỗ sân vườn",
+  "model.pergola_steel": "Giàn pergola thép sân vườn",
+  "model.bidet": "Chậu rửa vệ sinh đặt sàn",
+  "model.shower_enclosure": "Buồng tắm đứng lối vào mở",
 };

@@ -20,6 +20,8 @@ function fixture({storage=new Map(),search='',storageFails=false}={}){
     CustomEvent:class{constructor(type,options){this.type=type;Object.assign(this,options);}},
     customElements:{get:name=>types.get(name),define:(name,type)=>types.set(name,type)}};
   vm.runInNewContext(source,context);
+  // Browser visibility and focus are exercised by test-dashboard-card.cjs.
+  types.get('home-floorplan-panel').prototype.updateToolbarVisibility=()=>{};
   const panel=new(types.get('home-floorplan-panel'))();
   panel.generation=1;panel.port={postMessage:message=>sent.push(plain(message))};
   const ids=['light.lamp','switch.relay','input_boolean.helper','fan.room','cover.curtain','media_player.tv','lock.door'];

@@ -37,7 +37,7 @@ function fixture({fetch,decode=false,output='data:image/jpeg;base64,AQID',imageW
   vm.runInContext(source,context);
   const iframe={src:'blob:viewer',srcdoc:'viewer',removeAttribute(name){delete this[name];}};
   const panel=Object.assign(Object.create(Panel.prototype),{generation:1,isConnected:true,modelConfigured:true,serverCanEdit:true,readableEntities:new Set(['media_player.study']),controllableEntities:new Set(['media_player.study']),siteFeatures:false,tvFrames:{},savedItems:[{id:'speaker',entity_id:'media_player.study'}],
-    shadowRoot:{querySelector(){return iframe;}},
+    shadowRoot:{querySelector(){return iframe;}},updateToolbarVisibility(){},
     port:{postMessage(message){messages.push(plain(message));},close(){}},
     _hass:{user:{id:'fixture-admin',is_admin:true},connected:true,states:{'media_player.study':{state:'playing',attributes:{entity_picture:'https://untrusted.invalid/image?token=PRIVATE',media_title:'First track',media_artist:'Artist'}}},
       fetchWithAuth(url,options){calls.push({url,options});return fetch?fetch(url,options):Promise.resolve(response());}}});

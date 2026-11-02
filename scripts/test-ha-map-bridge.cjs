@@ -25,7 +25,7 @@ function fixture({callWS,admin=true,dryRun=false}={}) {
     editLocked:false,recovery:null,dryRun,dryRunEpoch:0,mapView:null,viewPreferences:{language:'en'},savedItems:[],
     floor:'fictional_ground',requestedFloor:'fictional_ground',queue:Promise.resolve(),pending:0,tvFrames:{},
     port:makePort(),mapAttributionLink:{hidden:true},ownerDocument:document,notice(){},noticeKey(){},updateAccessUI(){},publishEntityStates(){},
-    clearMediaArtwork(){},notifySaveStatus(){},checkDryRunStorage(){},
+    clearMediaArtwork(){},notifySaveStatus(){},checkDryRunStorage(){},updateToolbarVisibility(){},
     $(key){if(!nodes.has(key))nodes.set(key,{hidden:false,classList:{toggle(){}},removeAttribute(name){delete this[name];},
       contentWindow:{postMessage(value,target,transfer){initializations.push({value:plain(value),target,transfer});}}});return nodes.get(key);},
     _hass:{user:{id:'fictional-user',is_admin:admin},connected:true,connection:{connected:true},

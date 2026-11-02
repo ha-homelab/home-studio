@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "टेबल पंखा",
   "model.wall_air_conditioner": "दीवार पर लगा एयर कंडीशनर",
   "model.panel_heater": "पैनल हीटर",
+  "model.interior_straight_stairs": "घर के अंदर की सीधी सीढ़ी",
+  "model.pergola_wood": "बगीचे का लकड़ी का पेर्गोला",
+  "model.pergola_steel": "बगीचे का स्टील का पेर्गोला",
+  "model.bidet": "फ़र्श पर लगा बिडे",
+  "model.shower_enclosure": "खुले प्रवेश वाला शावर एनक्लोज़र",
 };

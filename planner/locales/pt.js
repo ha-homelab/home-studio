@@ -801,4 +801,9 @@ export default {
   "model.desk_fan": "Ventilador de mesa",
   "model.wall_air_conditioner": "Ar-condicionado de parede",
   "model.panel_heater": "Aquecedor de painel",
+  "model.interior_straight_stairs": "Escada interior reta",
+  "model.pergola_wood": "Pérgola de jardim em madeira",
+  "model.pergola_steel": "Pérgola de jardim em aço",
+  "model.bidet": "Bidé de chão",
+  "model.shower_enclosure": "Cabine de duche aberta",
 };
