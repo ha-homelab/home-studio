@@ -322,11 +322,16 @@ private ledger durability, current state, inventory coverage, concurrent-writer
 growth or the approved batch reserve from these hashes. Structural validation
 does not establish those facts either.
 
-The capacity `policy_sha256` binds the exact four caller-reviewed admission
-limits: `candidate_max_bytes`, `permit_ttl_seconds`,
+The capacity `policy_sha256` binds the exact four caller-reviewed worker limits:
+`candidate_max_bytes`, `permit_ttl_seconds`,
 `capacity_max_age_seconds` and `wait_seconds`. Both permit and result validation
 require those limits explicitly. The private capacity budget and its evidence
 remain separate coordinator checks, bound through the assessment.
+
+Records passed to `validate_*` must be the exact plaintext returned by
+`open_control` for their corresponding envelope bytes, using the pinned key and
+expected purpose. The pure validators compare structure and supplied bindings;
+they do not establish that a supplied plaintext record came from those bytes.
 
 Before issuing a real permit, a future coordinator must authenticate the live
 run and exact worker, validate the public context and input, establish fresh
