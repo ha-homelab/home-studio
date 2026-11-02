@@ -95,7 +95,11 @@ from that signature alone. Production integration should use the higher-level
 path.
 
 `authenticate_input(...)` authenticates the actual encrypted input tar and its
-bootstrap. `validate_bootstrap(..., now=...)` validates bindings and current
+bootstrap. This path accepts regular USTAR members in exactly one gzip stream;
+it rejects PAX/GNU extensions and other member types before reading their
+payloads. Streaming decompression bounds the full tar, including headers and
+padding, independently of the member-size checks.
+`validate_bootstrap(..., now=...)` validates bindings and current
 validity without authenticating an envelope. The pure
 `validate_bootstrap_bindings(bootstrap, expected, capabilities, limits)` omits
 freshness solely for delayed proof reconciliation; it grants no write authority.
@@ -104,6 +108,13 @@ The transfer performs one intent PUT, bounded polling of the fixed permit object
 (only HTTP 404 permits another read), one candidate PUT, and one result PUT.
 Input, permit, and acceptance publication belong to the authority. There are no
 diagnostic PUTs, upload retries, automatic renewals, or finalizer uploads.
+Each PUT timeout is additionally capped by the admission time remaining after
+its attempt journal is synced; the deadline is checked again after the call.
+The release transport supervises each request in a separate process, with a
+deadline that includes validation, hashing, preparation, and child startup.
+Timeout terminates the owned process group and reaps the direct child, using a
+separately bounded cleanup grace. It cannot guarantee cancellation of a remote write. Uninterruptible
+local OS/filesystem calls can delay return, but late results are rejected.
 
 An append-only owner-private journal is synced before every PUT. Its directory
 must be a trusted POSIX directory with mode 0700; the journal is created

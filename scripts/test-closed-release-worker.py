@@ -2,6 +2,7 @@
 """Offline signed-bootstrap, bounded exchange and existing-builder regressions."""
 import contextlib
 import copy
+import gzip
 import hashlib
 import io
 import json
@@ -13,7 +14,6 @@ import traceback
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
-import urllib.error
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
@@ -166,8 +166,8 @@ class Fixture:
         with patch.object(worker.time, "time", side_effect=lambda: self.now), \
              patch.object(worker.time, "monotonic", side_effect=lambda: self.now - NOW), \
              patch.object(worker.time, "sleep", side_effect=lambda seconds: setattr(self, "now", self.now + seconds)), \
-             patch.object(build, "transport_put_result", side_effect=self.put), \
-             patch.object(build, "transport", side_effect=self.get):
+             patch.object(worker.release_transport, "put", side_effect=self.put), \
+             patch.object(worker.release_transport, "get", side_effect=self.get):
             yield
 
 
@@ -225,7 +225,7 @@ class WorkerTests(unittest.TestCase):
                     self.f.put(url, **kwargs)
                     if role == failure:
                         raise RuntimeError(CANARY)
-                with patch.object(build, "transport_put_result", side_effect=fail):
+                with patch.object(worker.release_transport, "put", side_effect=fail):
                     self.rejected(self.f.run)
                 before = list(self.f.calls), self.f.gets
                 self.rejected(self.f.run)
@@ -298,6 +298,82 @@ class WorkerTests(unittest.TestCase):
             self.rejected(self.f.run)
         self.f.input_wire = original
         self.assertFalse(self.f.journal.exists())
+
+    def test_pax_and_gnu_extensions_reject_before_any_extension_payload_read(self):
+        original_read = worker._GzipInput.read
+        for kind in (b"x", b"g", b"L", b"K", b"S"):
+            with self.subTest(kind=kind):
+                header = tarfile.TarInfo("extension")
+                header.type, header.size = kind, 1_000_000_000
+                raw = header.tobuf(format=tarfile.USTAR_FORMAT)
+                self.f.input_wire = crypto.seal(gzip.compress(raw), self.f.ci_encrypt,
+                                                self.f.operator_sign, purpose="input")
+                requested = []
+                def tracked(stream, size):
+                    requested.append(size)
+                    return original_read(stream, size)
+                with patch.object(worker._GzipInput, "read", new=tracked):
+                    self.rejected(self.f.run)
+                self.assertEqual(requested, [512])
+        self.assertFalse(self.f.journal.exists())
+
+    def test_gzip_expansion_is_bounded_before_tar_extensions_or_padding(self):
+        # A small injected cap exercises the production streaming bound.
+        bomb = gzip.compress(bytes(8192))
+        self.assertLess(len(bomb), 100)
+        self.f.input_wire = crypto.seal(bomb, self.f.ci_encrypt, self.f.operator_sign, purpose="input")
+        with patch.object(worker, "INPUT_TAR_MAX", 2048):
+            self.rejected(self.f.run)
+        self.assertFalse(self.f.journal.exists())
+
+    def test_gzip_truncation_concatenation_trailing_bytes_and_non_gzip_reject(self):
+        raw = archive({**self.f.files, "closed-build.json": crypto.canonical(self.f.manifest)})
+        for malformed in (raw[:-1], raw + gzip.compress(b"hidden"), raw + b"hidden", gzip.decompress(raw)):
+            self.f.input_wire = crypto.seal(malformed, self.f.ci_encrypt, self.f.operator_sign, purpose="input")
+            self.rejected(self.f.run)
+        self.assertFalse(self.f.journal.exists())
+
+    def test_ustar_checksum_negative_size_duplicate_and_missing_end_blocks_reject(self):
+        valid = gzip.decompress(archive({"closed-build.json": crypto.canonical(self.f.manifest)}))
+        damaged = bytearray(valid)
+        damaged[0] ^= 1
+        negative = bytearray(valid[:512])
+        negative[124:136] = b"-0000000001\0"
+        negative[148:156] = b"        "
+        negative[148:156] = ("%06o\0 " % sum(negative)).encode()
+        one_length = 512 + ((len(crypto.canonical(self.f.manifest)) + 511) // 512) * 512
+        duplicate = valid[:one_length] * 2 + bytes(1024)
+        for malformed in (bytes(damaged), bytes(negative), duplicate, valid[:one_length]):
+            self.f.input_wire = crypto.seal(gzip.compress(malformed), self.f.ci_encrypt,
+                                           self.f.operator_sign, purpose="input")
+            self.rejected(self.f.run)
+        self.assertFalse(self.f.journal.exists())
+
+    def test_ustar_prefix_names_and_streaming_multiple_chunks_are_supported(self):
+        name = "long/" + "a" * 90 + "/" + "b" * 80
+        self.f.files[name] = b"payload" * 20000
+        self.f.manifest["files"][name] = crypto.digest(self.f.files[name])
+        self.f.reseal()
+        result = self.f.run()
+        self.assertEqual(result["state"], "result-stored")
+
+    def test_put_timeout_is_remaining_admission_after_attempt_journal_sync(self):
+        append = worker._append
+        timeouts = {}
+        def delayed(descriptor, path, value):
+            append(descriptor, path, value)
+            if value["stage"] == "candidate-attempted":
+                self.f.now += 28.5
+        def measured(url, **kwargs):
+            timeouts[kwargs["attempt_id"]] = kwargs["timeout"]
+            return self.f.put(url, **kwargs)
+        with patch.object(worker, "_append", side_effect=delayed), \
+             patch.object(worker.release_transport, "put", side_effect=measured):
+            self.f.run()
+        self.assertEqual(timeouts["attempt-intent"], 60)
+        self.assertGreater(timeouts["attempt-candidate"], 0)
+        self.assertLessEqual(timeouts["attempt-candidate"], 0.5)
+        self.assertLessEqual(timeouts["attempt-result"], 0.5)
 
     def test_candidate_must_be_immutable_valid_signed_candidate(self):
         for candidate in (bytearray(self.f.candidate), b"bad", crypto.seal(b"x", self.f.operator_encrypt,
@@ -376,15 +452,15 @@ class WorkerTests(unittest.TestCase):
     def test_only_404_waits_and_wait_is_bounded(self):
         def unavailable(url, **kwargs):
             self.f.gets += 1
-            raise urllib.error.HTTPError(url, 404, CANARY, {}, io.BytesIO())
-        with patch.object(build, "transport", side_effect=unavailable):
+            raise worker.release_transport.ReleaseTransportNotFound()
+        with patch.object(worker.release_transport, "get", side_effect=unavailable):
             self.rejected(self.f.run)
         self.assertLessEqual(self.f.gets, self.f.limits["wait_seconds"] + 1)
         self.assertEqual(self.f.calls, ["intent"])
         self.f.journal = self.root / "forbidden.jsonl"
         self.f.calls.clear()
         self.f.stored.clear()
-        with patch.object(build, "transport", side_effect=urllib.error.HTTPError("https://invalid", 403, CANARY, {}, io.BytesIO())):
+        with patch.object(worker.release_transport, "get", side_effect=worker.release_transport.ReleaseTransportError()):
             self.rejected(self.f.run)
         self.assertEqual(self.f.calls, ["intent"])
 
@@ -393,7 +469,7 @@ class WorkerTests(unittest.TestCase):
             permit = self.f.permit()
             permit["ledger"]["candidate_claim_id"] = "another-claim"
             return control.seal_control(permit, self.f.ci_encrypt, self.f.operator_sign, purpose="upload-permit-v2")
-        with patch.object(build, "transport", side_effect=wrong):
+        with patch.object(worker.release_transport, "get", side_effect=wrong):
             self.rejected(self.f.run)
         self.assertEqual(self.f.calls, ["intent"])
 
@@ -403,7 +479,7 @@ class WorkerTests(unittest.TestCase):
             if kwargs["attempt_id"] == "attempt-candidate":
                 self.f.now += 30
             return receipt
-        with patch.object(build, "transport_put_result", side_effect=delayed):
+        with patch.object(worker.release_transport, "put", side_effect=delayed):
             self.rejected(self.f.run)
         self.assertEqual(self.f.calls, ["intent", "candidate"])
         self.rejected(self.f.run)
@@ -413,7 +489,7 @@ class WorkerTests(unittest.TestCase):
             result = self.f.put(url, **kwargs)
             result["version_id"] = None
             return result
-        with patch.object(build, "transport_put_result", side_effect=missing):
+        with patch.object(worker.release_transport, "put", side_effect=missing):
             result = self.f.run()
         record = control.open_control(result["result_wire"], self.f.operator_decrypt,
                                       self.f.worker_verify, purpose="upload-result-v2")

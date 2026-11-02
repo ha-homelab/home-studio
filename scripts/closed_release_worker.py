@@ -10,21 +10,20 @@ There is no automatic retry, renewal, release, or recovery upload.
 from __future__ import annotations
 
 from functools import wraps
-import io
 import math
 import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
-import tarfile
 import time
-import urllib.error
 import urllib.parse
+import zlib
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import closed_build as transport
 import closed_envelope as crypto
+import closed_release_transport as release_transport
 import closed_upload_control_v2 as control
 
 ROLES = ("input", "intent", "permit", "candidate", "result", "acceptance")
@@ -32,6 +31,8 @@ CAPABILITIES = ("input_read", "output_read", "output_write", "acceptance_read")
 SUFFIXES = dict(zip(ROLES, ("input", "upload-intent", "upload-permit", "candidate",
                             "upload-result", "acceptance")))
 BOOTSTRAP_MAX = 32768
+INPUT_CHUNK_BYTES = 65536
+INPUT_TAR_MAX = transport.MAX_TOTAL + transport.MAX_FILES * 1024 + 10240
 
 
 class WorkerError(ValueError):
@@ -263,6 +264,109 @@ def validate_bootstrap(bootstrap, *, expected, capabilities, limits, now):
     return value
 
 
+class _GzipInput:
+    """Bound every decompressor output, including tar extensions and padding."""
+
+    def __init__(self, wire):
+        self.wire, self.offset, self.pending, self.total = wire, 0, b"", 0
+        self.decoder = zlib.decompressobj(31)
+
+    def read(self, size):
+        _require(type(size) is int and 0 < size <= INPUT_CHUNK_BYTES)
+        chunks, count = [], 0
+        while count < size and not self.decoder.eof:
+            if self.pending:
+                chunk = self.pending
+            else:
+                chunk = self.wire[self.offset:self.offset + INPUT_CHUNK_BYTES]
+                self.offset += len(chunk)
+            _require(bool(chunk))
+            limit = min(size - count, INPUT_TAR_MAX - self.total + 1)
+            _require(limit > 0)
+            output = self.decoder.decompress(chunk, limit)
+            self.pending = self.decoder.unconsumed_tail
+            self.total += len(output)
+            _require(self.total <= INPUT_TAR_MAX)
+            _require(output or len(self.pending) < len(chunk) or self.decoder.eof)
+            chunks.append(output)
+            count += len(output)
+        if self.decoder.eof:
+            # One gzip member only; no hidden second archive or trailing bytes.
+            _require(not self.decoder.unused_data and self.offset == len(self.wire))
+        return b"".join(chunks)
+
+
+def _exact(stream, size):
+    data = stream.read(size)
+    _require(len(data) == size)
+    return data
+
+
+def _octal(field):
+    value = field.strip(b" \0")
+    _require(not value or re.fullmatch(rb"[0-7]+", value))
+    return int(value, 8) if value else 0
+
+
+def _tar_text(field):
+    value, separator, padding = field.partition(b"\0")
+    _require(not separator or not padding.strip(b"\0"))
+    text = value.decode("utf-8")
+    _require(all(ord(char) >= 32 and ord(char) != 127 for char in text))
+    return text
+
+
+def _input_manifest(wire):
+    """Read only regular USTAR members, rejecting extension headers up front."""
+    stream = _GzipInput(wire)
+    manifest, total, names = None, 0, set()
+    while True:
+        header = _exact(stream, 512)
+        if header == bytes(512):
+            _require(_exact(stream, 512) == bytes(512))
+            while True:
+                padding = stream.read(INPUT_CHUNK_BYTES)
+                _require(not padding.strip(b"\0"))
+                if not padding:
+                    break
+            _require(stream.total % 512 == 0)
+            break
+        # No tarfile parser is invoked: PAX/GNU payload lengths cannot trigger
+        # a read/allocation before this fixed-header type check.
+        _require(header[156:157] in (b"0", b"\0")
+                 and header[257:265] == b"ustar\x0000"
+                 and not header[157:257].strip(b"\0")
+                 and not header[500:512].strip(b"\0"))
+        _require(_octal(header[148:156]) == sum(header[:148]) + 8 * 32 + sum(header[156:]))
+        for start, end in ((100, 108), (108, 116), (116, 124), (136, 148), (329, 337), (337, 345)):
+            _octal(header[start:end])
+        size = _octal(header[124:136])
+        name, prefix = _tar_text(header[:100]), _tar_text(header[345:500])
+        name = prefix + "/" + name if prefix else name
+        transport.safe_name(name)
+        _require(str(PurePosixPath(name)) == name and name.casefold() not in names
+                 and len(names) < transport.MAX_FILES and size <= transport.MAX_FILE)
+        names.add(name.casefold())
+        total += size
+        _require(total <= transport.MAX_TOTAL)
+        retain = name == "closed-build.json"
+        _require(not retain or size <= 2_000_000)
+        parts, remaining = [], size
+        while remaining:
+            count = min(INPUT_CHUNK_BYTES, remaining)
+            part = _exact(stream, count)
+            if retain:
+                parts.append(part)
+            remaining -= count
+        padding_size = (-size) % 512
+        if padding_size:
+            _require(not _exact(stream, padding_size).strip(b"\0"))
+        if retain:
+            manifest = crypto.decode_json(b"".join(parts))
+    _require(type(manifest) is dict)
+    return manifest
+
+
 @_boundary
 def authenticate_input(input_wire, *, input_keys, limits, expected, capabilities):
     """Authenticate the real input tar and return its detached, bound bootstrap.
@@ -277,24 +381,7 @@ def authenticate_input(input_wire, *, input_keys, limits, expected, capabilities
         _key(value)
     plain = crypto.open_envelope(input_wire, input_keys["recipient_key"], input_keys["verify_key"], purpose="input")
     _require(type(plain) is bytes and len(plain) <= crypto.MAX_ENVELOPE)
-    manifest, total, names = None, 0, set()
-    with tarfile.open(fileobj=io.BytesIO(plain), mode="r|*") as archive:
-        for count, member in enumerate(archive, 1):
-            _require(count <= 12000 and member.isfile() and 0 <= member.size <= 64 * 1024**2)
-            name = member.name
-            _require(name and not name.startswith("/") and "\\" not in name
-                     and all(part not in ("", ".", "..") for part in name.split("/")))
-            _require(str(PurePosixPath(name)) == name and name not in names)
-            names.add(name)
-            total += member.size
-            _require(total <= 512 * 1024**2)
-            if name == "closed-build.json":
-                _require(member.size <= 2_000_000)
-                stream = archive.extractfile(member)
-                _require(stream is not None)
-                with stream:
-                    manifest = crypto.decode_json(stream.read(2_000_001))
-    _require(type(manifest) is dict)
+    manifest = _input_manifest(plain)
     value = _bootstrap(manifest["upload_bootstrap"], limits, expected, capabilities)
     _require(manifest["request_id"] == value["request_id"]
              and len(input_wire) <= value["objects"]["input"]["maximum_bytes"])
@@ -404,10 +491,10 @@ def _upload_release(input_wire, candidate, *, input_keys, output_keys, limits, e
             _require(type(wire) is bytes and 0 < len(wire) <= entry["maximum_bytes"])
             _append(descriptor, path, {"stage": role + "-attempted", "attempt_id": entry["attempt_id"],
                 "ciphertext_sha256": crypto.digest(wire), "bytes": len(wire)})
-            fresh(deadline)
-            result = transport.transport_put_result(capabilities["output_write"], data=wire,
+            result = release_transport.put(capabilities["output_write"], data=wire,
                 attempt_id=entry["attempt_id"], expected_sha256=crypto.digest(wire), expected_bytes=len(wire),
-                suffix=entry["object"], maximum=8192, timeout=timeout, not_after=deadline)
+                suffix=entry["object"], maximum=8192,
+                timeout=min(timeout, deadline - fresh(deadline)), not_after=deadline)
             fresh(deadline)
             _append(descriptor, path, {"stage": role + "-returned", "transport": result})
             return result
@@ -418,14 +505,12 @@ def _upload_release(input_wire, candidate, *, input_keys, output_keys, limits, e
         for _ in range(limits["wait_seconds"] + 1):
             remaining = wait_until - fresh(wait_until)
             try:
-                permit_wire = transport.transport(capabilities["output_read"],
+                permit_wire = release_transport.get(capabilities["output_read"],
                     suffix=value["objects"]["permit"]["object"], maximum=8192,
                     timeout=min(timeout, 5, remaining), not_after=math.ceil(wait_until))
                 break
-            except urllib.error.HTTPError as error:
-                status = error.code
-                error.close()
-                _require(status == 404)
+            except release_transport.ReleaseTransportNotFound:
+                pass
             time.sleep(min(1, wait_until - fresh(wait_until)))
         _require(permit_wire is not None)
         permit = control.open_control(permit_wire, input_keys["recipient_key"], input_keys["verify_key"],
