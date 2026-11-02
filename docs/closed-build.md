@@ -275,11 +275,86 @@ reconciliation. It must also preserve fresh upload admission. This helper adds
 no receipt object or other remote write beyond its single requested PUT, and its
 offline tests do not establish production storage behavior.
 
+## Inactive v2 admission bindings
+
+`scripts/closed_upload_control_v2.py` provides separate, source-only entrypoints
+for bounded intent, permit and result records. No production caller invokes
+them. The active policy and upload call sites are unchanged; normal
+`action=build` still stops before input resolution or closed transport. Existing
+v1 rebuild admission and read-only accepted-candidate validation keep their
+original contracts.
+
+V2 records require schema 2 and their exact v2 record kind. Their envelope
+purposes are `upload-intent-v2`, `upload-permit-v2` and `upload-result-v2`.
+The encrypted envelope format itself is unchanged. Opening requires an explicit
+expected purpose and a caller-pinned verification key; there is no v1 fallback,
+schema coercion or trust-root selection from envelope metadata. Canonical
+plaintext is limited to 5,600 bytes and the complete encrypted control, including
+its metadata and signature, to 8,192 bytes. Oversized records are rejected,
+never truncated. Nested transport results and ledger checkpoints retain their
+own schema-1 record types; they are not v1 admission records.
+
+This contract covers normal prospective releases only: a push binds to `beta`,
+a schedule to `nightly`, and a manual dispatch to `beta`, `rc` or `nightly`.
+The operation is `release` and the worker is `closed_build / package`. Stable
+promotion, existing-release rebuilds and other workers are outside this v2
+contract. Run and attempt identifiers are bounded exact values; authenticating
+the latest attempt remains a coordinator responsibility.
+
+The intent binds the execution identity, release channel and plan, encrypted
+input, and exact encrypted candidate. Its public-context digest covers the
+fully enriched prospective context returned by `public_inputs`, including the
+verified payload inventory and dependencies, rather than an earlier context
+file. That context's source SHA, run and attempt must equal the execution being
+admitted. Candidate identity includes its exact ciphertext SHA-256 and byte
+count, object name and attempt ID. The capability digest covers the configured
+output capability; the target digest covers the exact resolved request URL,
+including the object suffix. Neither URL is included in the control record.
+
+A permit binds both the exact intent envelope bytes and the canonical intent
+record. It carries destination fingerprints, capacity-evidence and assessment
+digests, bounded issuance/expiry times, and the candidate's committed
+`begin_write` checkpoint. The checkpoint identifies its ledger, scope,
+generation, state digest, operation and core-receipt digest. The worker can
+authenticate the coordinator signature and compare the intent, candidate,
+destination and time bindings to its retained values. It cannot establish
+private ledger durability, current state, inventory coverage, concurrent-writer
+growth or the approved batch reserve from these hashes. Structural validation
+does not establish those facts either.
+
+The capacity `policy_sha256` binds the exact four caller-reviewed admission
+limits: `candidate_max_bytes`, `permit_ttl_seconds`,
+`capacity_max_age_seconds` and `wait_seconds`. Both permit and result validation
+require those limits explicitly. The private capacity budget and its evidence
+remain separate coordinator checks, bound through the assessment.
+
+Before issuing a real permit, a future coordinator must authenticate the live
+run and exact worker, validate the public context and input, establish fresh
+capacity and all outstanding claims, reserve the complete request, and commit
+the candidate attempt as ambiguous. The permit contains that candidate
+checkpoint. Only after sealing the permit can the coordinator record the
+permit's own exact write attempt; that later checkpoint stays in its local
+journal. Embedding the permit's own write checkpoint in the permit would create
+a circular dependency on its ciphertext hash. Preserve independent checkpoint
+anchors: historical state hashes cannot be recomputed from the ledger's current
+tables, and structural or receipt-binding checks are not historical proof.
+
+A v2 result binds the exact intent and permit envelopes, and the canonical
+permit record through `permit_record_sha256`, to the bounded transport result.
+This also rejects accidental pairing of a permit record with another envelope.
+Result validation is timeless so that delayed reconciliation remains possible;
+it does not extend a permit's upload deadline. It does not turn a missing
+version ID or ambiguous PUT into a confirmed
+write. This slice creates or budgets no result channel and performs no remote
+write. An authenticated result channel, exact-version reconciliation and the
+remaining coordinator checks are still required before production activation.
+
 ## Validation and recovery
 
 Run `python3 scripts/test_closed_build.py`,
-`python3 scripts/test_closed_transport.py` and
-`python3 scripts/test_closed_upload_control.py` for transport, upload admission, source policy,
+`python3 scripts/test_closed_transport.py`,
+`python3 scripts/test_closed_upload_control.py` and
+`python3 scripts/test_closed_upload_control_v2.py` for transport, upload admission, source policy,
 archive safety, exact component and failure-output tests. With a prepared
 public image and an available Docker daemon, set `CLOSED_DOCKER_TEST=1` for
 the real synthetic container success/failure and isolation checks. The public

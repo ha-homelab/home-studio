@@ -20,7 +20,8 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 SCHEMA = "home-studio-closed-envelope-v1"
 MAX_ENVELOPE = 256 * 1024 * 1024
-PURPOSES = {"input", "candidate", "diagnostic", "acceptance", "upload-intent", "upload-permit"}
+PURPOSES = {"input", "candidate", "diagnostic", "acceptance", "upload-intent", "upload-permit",
+            "upload-intent-v2", "upload-permit-v2", "upload-result-v2"}
 
 
 def canonical(value):
