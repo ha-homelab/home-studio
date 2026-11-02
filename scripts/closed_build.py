@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import io
 import os
 from pathlib import Path, PurePosixPath
@@ -121,11 +122,39 @@ def extract_zip(data, destination):
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # urllib closes this response only after redirect_request returns.
+        # Reject without consuming an untrusted body, but release the socket.
+        if fp is not None:
+            try:
+                fp.close()
+            except Exception:
+                pass
         raise Rejected()
 
 
-def transport(url, *, data=None, suffix=None, create_only=False, maximum=MAX_ENVELOPE, timeout=60, not_after=None):
-    """Capabilities never cross redirects or enter subprocess argv/logs."""
+def _put_response_metadata(response, data):
+    """Keep only bounded, unambiguous OCI single-object PUT metadata."""
+    selected = {"version-id": None, "etag": None, "opc-content-md5": None}
+    size = 0
+    for count, (name, value) in enumerate(response.headers.raw_items(), 1):
+        require(type(name) is str and type(value) is str and count <= 100)
+        size += len(name) + len(value) + 4
+        require(size <= 16384)
+        key = name.lower()
+        if key in selected:
+            require(selected[key] is None and 0 < len(value) <= 1024)
+            require(value == value.strip() and all(32 <= ord(char) <= 126 for char in value))
+            selected[key] = value
+    md5 = selected["opc-content-md5"]
+    if md5 is not None:
+        # MD5 is an optional transport checksum, never the content identity.
+        require(md5 == b64(hashlib.md5(data, usedforsecurity=False).digest()))
+    return {"version_id": selected["version-id"], "etag": selected["etag"], "md5": md5}
+
+
+def _transport_exchange(url, *, data=None, suffix=None, create_only=False,
+                        maximum=MAX_ENVELOPE, timeout=60, not_after=None, capture_attempt=None):
+    """One HTTP request engine; legacy callers do not inspect response metadata."""
     require(type(maximum) is int and 0 < maximum <= MAX_ENVELOPE and 0 < timeout <= 60)
     parsed = urllib.parse.urlsplit(url)
     require(parsed.scheme == "https" and parsed.hostname and not parsed.username
@@ -149,7 +178,60 @@ def transport(url, *, data=None, suffix=None, create_only=False, maximum=MAX_ENV
         result = response.read(maximum + 1)
         require(len(result) <= maximum)
         require(not_after is None or time.time() < not_after)
-        return result
+        if capture_attempt is not None:
+            result = {"schema": 1, "kind": "closed-put-result", "attempt_id": capture_attempt,
+                      "request_target_sha256": digest(request.full_url.encode("ascii")),
+                      "status": response.status, "bytes": len(data),
+                      "ciphertext_sha256": digest(data),
+                      **_put_response_metadata(response, data), "authorizes_upload": False}
+            require(len(canonical(result)) <= 8192)
+    if capture_attempt is not None:
+        # Closing the response can fail or consume the remaining admission time.
+        require(not_after is None or time.time() < not_after)
+    return result
+
+
+def transport(url, *, data=None, suffix=None, create_only=False, maximum=MAX_ENVELOPE, timeout=60, not_after=None):
+    """Capabilities never cross redirects or enter subprocess argv/logs."""
+    return _transport_exchange(url, data=data, suffix=suffix, create_only=create_only,
+                               maximum=maximum, timeout=timeout, not_after=not_after)
+
+
+def transport_put_result(url, *, data, attempt_id, expected_sha256, expected_bytes,
+                         suffix=None, maximum=8192, timeout=60, not_after=None):
+    """Observe one create-only PUT; this does not grant admission or confirm a claim.
+
+    Not yet used by upload_candidate. Before using this helper, a coordinator
+    must durably mark the exact attempt ambiguous. Every exception, or a result
+    without a version ID, leaves it unresolved. Never retry automatically.
+    """
+    try:
+        require(type(url) is str and 0 < len(url) <= 8192
+                and all(33 <= ord(char) <= 126 for char in url))
+        require(suffix is None or (type(suffix) is str and len(url) + len(suffix) <= 8192))
+        require(type(data) is bytes and 0 < len(data) <= MAX_ENVELOPE)
+        require(type(expected_bytes) is int and expected_bytes == len(data))
+        require(type(expected_sha256) is str and SHA.fullmatch(expected_sha256)
+                and expected_sha256 == digest(data))
+        require(type(attempt_id) is str and REQUEST.fullmatch(attempt_id))
+        require(type(maximum) is int and 0 < maximum <= 8192)
+        require(type(timeout) in {int, float} and 0 < timeout <= 60)
+        return _transport_exchange(url, data=data, suffix=suffix, create_only=True,
+                                   maximum=maximum, timeout=timeout, not_after=not_after,
+                                   capture_attempt=attempt_id)
+    except Exception as error:
+        if isinstance(error, urllib.error.HTTPError):
+            try:
+                error.close()
+            except Exception:
+                pass
+    # Also clear a caller's active exception, not just this helper's handler.
+    # A bare re-raise preserves the sanitized exception without reattaching it.
+    try:
+        raise Rejected() from None
+    except Rejected as error:
+        error.__context__ = None
+        raise
 
 
 

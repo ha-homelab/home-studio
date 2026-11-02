@@ -224,9 +224,61 @@ a permit. A failed rebuild therefore does not imply zero storage writes. Do not
 approve a real rebuild solely on a previous storage allowance: first establish
 the coordinator, its verified capacity coverage, and the control-object budget.
 
+## Bounded transport-result capture
+
+`scripts/closed_build.py` provides a separate helper for capturing the result of
+one create-only PUT:
+
+```python
+transport_put_result(
+    url, *, data, attempt_id, expected_sha256, expected_bytes,
+    suffix=None, maximum=8192, timeout=60, not_after=None,
+)
+```
+
+The helper and `transport(...)` share the HTTP engine. The existing transport
+API still returns bytes, and existing upload call sites are unchanged. This
+capture path is not wired into release orchestration or activated by a workflow;
+normal `action=build` remains blocked.
+
+Before any request, the helper bounds the resolved request URL to 8,192 ASCII
+characters, requires immutable payload bytes and checks their
+exact length and SHA-256 against the supplied attempt information. The result
+contains exactly `schema: 1`, `kind: "closed-put-result"`, `attempt_id`,
+`request_target_sha256`, `status`, `bytes`, `ciphertext_sha256`, `version_id`,
+`etag`, `md5`, and `authorizes_upload: false`. The target digest covers the
+resolved request URL, including any suffix. Neither that URL nor the payload,
+response body or arbitrary response headers enter the record.
+
+Oracle's [PutObject response contract](https://github.com/oracle/oci-go-sdk/blob/master/objectstorage/put_object_request_response.go)
+names the version header `version-id`, the entity tag `etag`, and the
+single-part payload checksum `opc-content-md5`. The helper preserves ETag as an
+opaque value and verifies an optional returned MD5 against the submitted bytes.
+Its ciphertext SHA-256 is computed locally, never inferred from MD5 or ETag.
+Missing version metadata remains null and unresolved; a successful HTTP status
+alone cannot identify the stored version. Oracle's
+[PAR documentation](https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/usingpreauthenticatedrequests_topic-Working_with_PreAuthenticated_Requests.htm)
+shows version metadata on a HEAD response, but a separate HEAD is not proof of
+the payload written by this attempt.
+
+Capture is bounded to 100 response headers, 16 KiB of header metadata, 1,024 bytes
+per selected value, and an 8 KiB serialized result record. The response-body
+limit defaults to 8 KiB and can only be lowered through `maximum`. Redirect rejection and timeout/deadline
+checks remain in force. Invalid input, malformed metadata and transport failures
+use fixed rejection errors; the helper never retries. A failure after the request
+starts may leave a stored object and must preserve the attempt for reconciliation.
+
+The record grants no upload or install permission. Future integration still
+needs a durable ledger attempt, an authenticated and protected result channel,
+an exact payload/version binding, and verified inventory before claim
+reconciliation. It must also preserve fresh upload admission. This helper adds
+no receipt object or other remote write beyond its single requested PUT, and its
+offline tests do not establish production storage behavior.
+
 ## Validation and recovery
 
-Run `python3 scripts/test_closed_build.py` and
+Run `python3 scripts/test_closed_build.py`,
+`python3 scripts/test_closed_transport.py` and
 `python3 scripts/test_closed_upload_control.py` for transport, upload admission, source policy,
 archive safety, exact component and failure-output tests. With a prepared
 public image and an available Docker daemon, set `CLOSED_DOCKER_TEST=1` for
