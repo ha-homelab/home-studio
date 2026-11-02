@@ -45,6 +45,7 @@ def _boundary(function):
         try:
             return function(*args, **kwargs)
         except Exception:
+            # Do not retain private input or capability details in the outward exception.
             pass
         try:
             raise WorkerError("ClosedReleaseWorkerRejected") from None
@@ -510,6 +511,7 @@ def _upload_release(input_wire, candidate, *, input_keys, output_keys, limits, e
                     timeout=min(timeout, 5, remaining), not_after=math.ceil(wait_until))
                 break
             except release_transport.ReleaseTransportNotFound:
+                # A missing fixed permit is the only outcome allowed to poll again.
                 pass
             time.sleep(min(1, wait_until - fresh(wait_until)))
         _require(permit_wire is not None)

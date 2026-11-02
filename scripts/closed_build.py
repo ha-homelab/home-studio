@@ -128,6 +128,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
             try:
                 fp.close()
             except Exception:
+                # Close failures must not replace the fixed rejection or expose a response.
                 pass
         raise Rejected()
 
@@ -224,6 +225,7 @@ def transport_put_result(url, *, data, attempt_id, expected_sha256, expected_byt
             try:
                 error.close()
             except Exception:
+                # Preserve the sanitized error even if closing the untrusted response fails.
                 pass
     # Also clear a caller's active exception, not just this helper's handler.
     # A bare re-raise preserves the sanitized exception without reattaching it.

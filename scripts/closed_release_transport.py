@@ -70,6 +70,7 @@ def _boundary(function):
         except ReleaseTransportNotFound:
             missing = True
         except Exception:
+            # Discard transport details before raising the fixed error outside this handler.
             pass
         try:
             raise (ReleaseTransportNotFound() if missing else ReleaseTransportError()) from None
@@ -185,6 +186,7 @@ def _run_child(payload, data_fd, result_fd, remaining):
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
+                # The owned group may have exited between the failed wait and kill.
                 pass
         finally:
             try:
@@ -324,4 +326,7 @@ if __name__ == "__main__":
         _require(len(sys.argv) == 4 and sys.argv[1] == "--child")
         _child_main(int(sys.argv[2]), int(sys.argv[3]))
     except BaseException:
+        # This child-only boundary must turn every exceptional exit, including
+        # SystemExit(0), into failure. Parent cancellation is re-raised after
+        # owned-process cleanup; this child never resumes or retries a request.
         sys.exit(1)

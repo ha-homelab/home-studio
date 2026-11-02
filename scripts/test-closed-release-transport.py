@@ -120,6 +120,7 @@ class Server:
             try:
                 self.active.shutdown(socket.SHUT_RDWR)
             except OSError:
+                # The peer may already have closed after deadline termination.
                 pass
         self.thread.join(3)
         if self.thread.is_alive() or self.errors:
@@ -184,7 +185,7 @@ class TransportTests(unittest.TestCase):
             self.assertIsNone(error.__context__)
             self.assertNotIn(MARKER, "".join(traceback.format_exception(error)))
             return error
-        self.fail("Expected fixed rejection")
+        return self.fail("Expected fixed rejection")
 
     @contextlib.contextmanager
     def child(self, server, mode="normal"):
