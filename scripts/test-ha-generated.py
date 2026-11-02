@@ -517,6 +517,82 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime["object_assets"]["custom_lamp"], self.models["upper"]["object_assets"]["custom_lamp"])
         self.assert_baseline_unchanged()
 
+    async def test_aggregate_overlay_budget_rejects_before_copy_or_compile(self):
+        assets, *_ = await self.publish_seed()
+        active_before = tree_hashes(assets)
+        draft = copy.deepcopy(self.project.document["project"])
+        for floor in draft["floors"]:
+            item = copy.deepcopy(floor["items"][0])
+            item.update(id="new_lamp", entity_id="")
+            floor["items"].append(item)
+        await self.project.save(1, draft)
+        before, stored = copy.deepcopy(self.project.document), copy.deepcopy(self.hass.saved)
+        files_before = tree_hashes(self.project.root)
+        # Each overlay is 16 room triangles + 12 for its new box, below 30.
+        # Both together must fail before either floor can be compiled.
+        with patch.object(native, "MAX_NATIVE_TRIANGLES", 30), \
+                patch.object(generated.shutil, "copytree") as copytree, \
+                patch.object(compiler, "make_floor") as make_floor:
+            with self.assertRaises(native.NativeError) as error:
+                await self.project.publish(2)
+            copytree.assert_not_called()
+            make_floor.assert_not_called()
+        self.assertEqual(error.exception.code, "invalid_project")
+        self.assertEqual(self.project.document, before)
+        self.assertEqual(self.hass.saved, stored)
+        self.assertEqual(tree_hashes(self.project.root), files_before)
+        self.assertEqual(tree_hashes(assets), active_before)
+        self.assert_baseline_unchanged()
+
+    def test_overlay_selection_preserves_custom_and_placement_only_items(self):
+        original = copy.deepcopy(self.project.document["project"]["floors"][0])
+        catalog = copy.deepcopy(original["items"][0])
+        catalog.update(id="catalog_rug", type="furniture", model_id="rug",
+                       dimensions_m=copy.deepcopy(compiler.MODELS["rug"]["dimensions_m"]))
+        original["items"].append(catalog)
+        floor = copy.deepcopy(original)
+        floor["items"][0]["position_m"]["x"] += 1
+        floor["items"][1]["rotation_deg"] += 90
+        floor["items"][1]["dimensions_m"]["width"] += .1
+        floor["items"][1]["name"] = "Placement-only edit"
+        self.assertIsNone(generated._addition_floor(floor, original))
+        floor["items"][1]["pattern_id"] = "dots"
+        added = copy.deepcopy(floor["items"][0])
+        added["id"] = "new_custom_box"
+        floor["items"].append(added)
+        before = copy.deepcopy(floor)
+        source = generated._addition_floor(floor, original)
+        self.assertEqual([item["id"] for item in source["items"]], ["catalog_rug", "new_custom_box"])
+        self.assertEqual(source["rooms"], original["rooms"])
+        self.assertEqual(floor, before)
+
+    async def test_unchanged_imported_assets_do_not_consume_overlay_budget(self):
+        draft = copy.deepcopy(self.project.document["project"])
+        for floor in draft["floors"]:
+            floor["items"][0]["position_m"]["x"] += .1
+        await self.project.save(0, draft)
+        with patch.object(native, "MAX_NATIVE_TRIANGLES", 1), \
+                patch.object(compiler, "build_furniture_asset") as asset, \
+                patch.object(compiler, "make_floor") as make_floor:
+            _, _, models, _, _ = await self.project.publish(1)
+            asset.assert_not_called()
+            make_floor.assert_not_called()
+        self.assertEqual(models["upper"]["object_assets"], self.models["upper"]["object_assets"])
+        self.assert_baseline_unchanged()
+
+    def test_generated_export_retains_architecture_only_overlay_guard(self):
+        draft = copy.deepcopy(self.project.document["project"])
+        draft["floors"][0]["rooms"].append({"id": "added_room", "name": "Added room",
+            "polygon": [[8, 0], [11, 0], [11, 3], [8, 3]], "material": "floor"})
+        before = copy.deepcopy(self.project.document)
+        with patch.object(native, "MAX_NATIVE_TRIANGLES", 31), patch.object(compiler, "make_floor") as make_floor:
+            with self.assertRaises(native.NativeError) as error:
+                self.project.export_model(draft, draft["floors"][0]["id"], "glb")
+            make_floor.assert_not_called()
+        self.assertEqual(error.exception.code, "invalid_project")
+        self.assertEqual(self.project.document, before)
+        self.assert_baseline_unchanged()
+
     async def test_overlay_geometry_is_additive_and_can_be_removed(self):
         original = copy.deepcopy(self.project.document["project"])
         draft = copy.deepcopy(original)

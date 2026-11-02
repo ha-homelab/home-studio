@@ -20,8 +20,8 @@ import shutil
 from types import MappingProxyType
 import uuid
 
-from .native import (GENERATION, MAX_NATIVE_TRIANGLES, MAX_GENERATED_BYTES, NativeError, NativeProject,
-                     compiler, load_models, validate_draft)
+from .native import (GENERATION, MAX_GENERATED_BYTES, NativeError, NativeProject,
+                     check_geometry_budget, compiler, load_models, validate_draft)
 from .site import validate_floor_inventory
 from .validation import validate_inventory
 from .permissions import model_references, referenced_entities
@@ -281,8 +281,8 @@ def _check_architecture(project, baseline):
                 raise NativeError("protected_architecture", "Keep the installed room outlines and materials. Room names and Home Assistant areas can be changed.")
 
 
-def _additions(runtime, project, floor, original):
-    """Compile only overlay objects; never compile the detailed original home."""
+def _addition_floor(floor, original):
+    """Select the unchanged overlay rules without constructing any geometry."""
     protected = {room["id"] for room in original["rooms"]}
     old_items = {item["id"]: item for item in original["items"]}
     changed_items = [item for item in floor["items"] if item["id"] not in old_items or
@@ -292,13 +292,18 @@ def _additions(runtime, project, floor, original):
         return None
     # Original room outlines supply compiler bounds and labels, but their
     # generated floor meshes are discarded before merging the overlay.
-    source = {**floor, "items": changed_items}
-    triangles = len(floor["walls"]) * 60 + len(floor["openings"]) * 48 + sum(len(r["polygon"]) * 4 for r in floor["rooms"])
-    for item in changed_items:
-        asset = runtime.build_furniture_asset(item)
-        triangles += sum(len(mesh["indices"]) // 3 for mesh in asset["meshes"]) if asset else 12
-        if triangles > MAX_NATIVE_TRIANGLES:
-            raise NativeError("invalid_project", "The added geometry exceeds the editing budget. Reduce detailed furniture before publishing.")
+    return {**floor, "items": changed_items}
+
+
+def _additions(runtime, project, floor, original):
+    """Compile only overlay objects; never compile the detailed original home."""
+    source = _addition_floor(floor, original)
+    if source is None:
+        return None
+    # Export also calls this helper without the publication-wide preflight.
+    check_geometry_budget(runtime, [source])
+    protected = {room["id"] for room in original["rooms"]}
+    new_rooms = {room["id"] for room in floor["rooms"]} - protected
     data, _ = runtime.make_floor(project, source, None)
     data["rooms"] = [room for room in data["rooms"] if room["id"] in new_rooms]
     data["meshes"] = [mesh for mesh in data["meshes"] if mesh["name"] not in {"room_" + room for room in protected}]
@@ -642,6 +647,9 @@ class GeneratedProject(NativeProject):
         self._validate(project)
         runtime = compiler()
         runtime.validate_project(project)
+        additions = [_addition_floor(floor, original)
+                     for floor, original in zip(project["floors"], self.baseline_project["floors"])]
+        check_geometry_budget(runtime, [floor for floor in additions if floor is not None])
         baseline = self.root / "baselines" / self.document["baseline"]
         metadata = json.loads((baseline / "source.json").read_text(encoding="utf-8"))
         if _hashes(baseline / "assets") != metadata["hashes"]:

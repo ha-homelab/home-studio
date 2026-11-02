@@ -108,24 +108,29 @@ def load_models(assets, floors):
     return models, references
 
 
-def build_generation(project, root, generation):
-    """Produce a complete immutable generation in private HA configuration storage."""
-    runtime = compiler()
-    runtime.validate_project(project)
+def check_geometry_budget(runtime, floors):
+    """Bound aggregate geometry before compiling validated floors or overlays."""
     triangles = 0
-    for floor in project["floors"]:
-        triangles += len(floor["walls"]) * 60 + len(floor["openings"]) * 48
+    for floor in floors:
+        # One final solid box per wall; each opening can add a preceding solid,
+        # sill, lintel, three frame parts, bottom frame and glass (eight boxes).
+        triangles += len(floor["walls"]) * 12 + len(floor["openings"]) * 96
         triangles += sum(len(room["polygon"]) * 4 for room in floor["rooms"])
         if triangles > MAX_NATIVE_TRIANGLES:
             raise NativeError("invalid_project", "This project exceeds the native geometry budget.")
         for item in floor["items"]:
-            if item.get("model_id"):
-                asset = runtime.build_furniture_asset(item)
-                triangles += sum(len(mesh["indices"]) // 3 for mesh in asset["meshes"])
-            else:
-                triangles += 12
+            asset = runtime.build_furniture_asset(item)
+            triangles += sum(len(mesh["indices"]) // 3 for mesh in asset["meshes"]) if asset else 12
             if triangles > MAX_NATIVE_TRIANGLES:
                 raise NativeError("invalid_project", "This project exceeds the native geometry budget. Reduce detailed furniture before publishing.")
+    return triangles
+
+
+def build_generation(project, root, generation):
+    """Produce a complete immutable generation in private HA configuration storage."""
+    runtime = compiler()
+    runtime.validate_project(project)
+    check_geometry_budget(runtime, project["floors"])
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     target = root / generation
     try:
