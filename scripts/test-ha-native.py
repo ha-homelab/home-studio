@@ -12,7 +12,7 @@ import sys
 import tempfile
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -154,6 +154,62 @@ class Connection:
 
 def sample():
     return json.loads((ROOT / "planner/example-home.json").read_text(encoding="utf-8"))
+
+
+def budget_floor(identifier="ground", items=()):
+    return {"id": identifier, "name": "Floor", "elevation_m": 0, "height_m": 2.7,
+            "rooms": [{"id": "room", "name": "Room", "polygon": [[0, 0], [20, 0], [20, 4], [0, 4]],
+                       "material": "floor"}], "walls": [], "openings": [], "items": list(items)}
+
+
+class GeometryBudgetTests(unittest.TestCase):
+    def test_architecture_only_aggregate_boundary_before_asset_generation(self):
+        runtime = types.SimpleNamespace(build_furniture_asset=Mock())
+        floors = [budget_floor(), budget_floor("upper")]
+        with patch.object(native, "MAX_NATIVE_TRIANGLES", 32):
+            self.assertEqual(native.check_geometry_budget(runtime, floors), 32)
+        with patch.object(native, "MAX_NATIVE_TRIANGLES", 31), self.assertRaises(native.NativeError) as error:
+            native.check_geometry_budget(runtime, floors)
+        self.assertEqual(error.exception.code, "invalid_project")
+        runtime.build_furniture_asset.assert_not_called()
+
+    def test_architecture_estimate_bounds_actual_window_door_and_passage_meshes(self):
+        for kind in ("window", "door", "passage"):
+            with self.subTest(kind=kind):
+                floor = budget_floor()
+                floor["walls"] = [{"id": "wall", "start": [0, 0], "end": [20, 0], "thickness_m": .2}]
+                floor["openings"] = [{"id": f"opening_{i}", "wall_id": "wall", "type": kind,
+                    "offset_m": .5 + 1.5 * i, "width_m": 1, "sill_m": .8 if kind == "window" else 0,
+                    "head_m": 2.1} for i in range(10)]
+                project = {"schema_version": 1, "title": "Small geometry probe", "floors": [floor]}
+                compiler.validate_project(project)
+                model, _ = compiler.make_floor(project, floor, None)
+                actual = sum(len(mesh["indices"]) // 3 for mesh in model["meshes"])
+                estimate = native.check_geometry_budget(compiler, [floor])
+                self.assertGreaterEqual(estimate, actual)
+                with patch.object(native, "MAX_NATIVE_TRIANGLES", estimate):
+                    native.check_geometry_budget(compiler, [floor])
+                with patch.object(native, "MAX_NATIVE_TRIANGLES", estimate - 1), self.assertRaises(native.NativeError):
+                    native.check_geometry_budget(compiler, [floor])
+
+    def test_actual_pattern_geometry_and_plain_box_are_counted(self):
+        item = {"id": "rug", "name": "Rug", "type": "furniture", "room": "room",
+                "position_m": {"x": 1, "y": 0, "z": 1}, "dimensions_m": compiler.MODELS["rug"]["dimensions_m"],
+                "rotation_deg": 0, "entity_id": "", "notes": "", "model_id": "rug"}
+        plain = budget_floor(items=[item])
+        patterned = copy.deepcopy(plain)
+        patterned["items"][0]["pattern_id"] = "dots"
+        ordinary = native.check_geometry_budget(compiler, [plain])
+        detailed = native.check_geometry_budget(compiler, [patterned])
+        self.assertGreater(detailed, ordinary)
+        with patch.object(native, "MAX_NATIVE_TRIANGLES", ordinary):
+            native.check_geometry_budget(compiler, [plain])
+            with self.assertRaises(native.NativeError):
+                native.check_geometry_budget(compiler, [patterned])
+        with patch.object(native, "MAX_NATIVE_TRIANGLES", detailed):
+            self.assertEqual(native.check_geometry_budget(compiler, [patterned]), detailed)
+        item.pop("model_id")
+        self.assertEqual(native.check_geometry_budget(compiler, [plain]), 16 + 12)
 
 
 class StorageTests(unittest.IsolatedAsyncioTestCase):
@@ -318,6 +374,26 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
             await self.project.publish(2)
         self.assertEqual(self.project.document["generation"], old_generation)
         self.assertEqual(len(list(self.project.root.iterdir())), 1)
+
+    async def test_aggregate_budget_rejects_before_compile_and_preserves_publication(self):
+        await self.project.save(0, sample())
+        assets, *_ = await self.project.publish(1)
+        original_page = (assets / "main/index.html").read_bytes()
+        draft = {"schema_version": 1, "title": "Two small floors",
+                 "floors": [budget_floor(), budget_floor("upper")]}
+        await self.project.save(1, draft)
+        before = copy.deepcopy(self.project.document)
+        stored = copy.deepcopy(self.hass.saved)
+        with patch.object(native, "MAX_NATIVE_TRIANGLES", 31), \
+                patch.object(compiler, "compile_project") as compile_project:
+            with self.assertRaises(native.NativeError) as error:
+                await self.project.publish(2)
+            compile_project.assert_not_called()
+        self.assertEqual(error.exception.code, "invalid_project")
+        self.assertEqual(self.project.document, before)
+        self.assertEqual(self.hass.saved, stored)
+        self.assertEqual((assets / "main/index.html").read_bytes(), original_page)
+        self.assertEqual(list(self.project.root.iterdir()), [assets])
 
     async def test_viewer_save_synchronizes_source_and_conflicts_with_draft(self):
         await self.project.save(0, sample())

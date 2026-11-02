@@ -14,6 +14,9 @@
 ### Fixed
 
 - Climate devices no longer show a stale heating/cooling action while off.
+- Check the combined geometry of all edited floors before publishing an imported
+  home. Oversized additions leave the saved draft and published home available;
+  unchanged imported geometry is not rebuilt or charged as new geometry.
 
 ## [1.3.1] - Bounded viewer loading
 
