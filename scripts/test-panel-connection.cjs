@@ -61,7 +61,7 @@ function fixture() {
   const panel=Object.assign(Object.create(Panel.prototype), {
     isConnected:true, generation:0, queue:Promise.resolve(), pending:0, failed:false,
     tvFrames:{}, viewPreferences:{language:'en'}, savedItems:[], ownerDocument:document,
-    clearMediaArtwork() {}, updateAccessUI() {}, publishEntityStates() {},
+    clearMediaArtwork() {}, updateAccessUI() {}, updateToolbarVisibility() {}, publishEntityStates() {},
     checkDryRunStorage() {}, notifySaveStatus() {},
     notice(message) {notices.push(message);},
     $(key) {

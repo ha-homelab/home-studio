@@ -126,7 +126,7 @@ function stateFixture(){
   const panel=Object.assign(Object.create(Panel.prototype),{generation:1,isConnected:true,started:true,dryRun:false,dryRunEpoch:0,
     pending:0,failed:false,serverCanEdit:true,readableEntities:new Set(['media_player.speaker','light.unbound','sensor.room_activity']),controllableEntities:new Set(['media_player.speaker','light.unbound']),queue:Promise.resolve(),commands:new Set(),floor:'main',revision:1,tvFrameCache:{},viewPreferences:{language:'en'},
     savedItems:[{id:'speaker',entity_id:'media_player.speaker'}],curtains:{profiles:{},power:{},memory:{}},
-    port:{postMessage(message){sent.push(plain(message));}},notice(){},noticeKey(){},notifySaveStatus(){},updateAccessUI(){},
+    port:{postMessage(message){sent.push(plain(message));}},notice(){},noticeKey(){},notifySaveStatus(){},updateAccessUI(){},updateToolbarVisibility(){},
     refreshTVFrame(){},refreshCameraFrames(){},refreshMediaArtwork(){},clearMediaArtwork(){},
     _hass:{user:{id:'fictional_admin',is_admin:true},connection:{},connected:true,states:{
       'media_player.speaker':{state:'playing',attributes:{friendly_name:'Fictional speaker',supported_features:16384}},

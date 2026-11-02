@@ -18,7 +18,7 @@ function fixture({ denied = false } = {}) {
   const panel = Object.assign(Object.create(Panel.prototype), {
     generation: 1, started: true, _hass:{user:{id:'fixture-admin',is_admin:true}}, updateAccessUI(){}, viewPreferences: { sidebarCollapsed: false },
     port: { postMessage(message) { sent.push(JSON.parse(JSON.stringify(message))); } },
-    publishEntityStates() {}, loadFloor() { calls.push('load'); },
+    publishEntityStates() {}, updateToolbarVisibility() {}, loadFloor() { calls.push('load'); },
   });
   return { panel, stored, sent, calls, resolve: value => context.resolveViewerLanguage(value),
     languages: vm.runInContext('JSON.stringify(viewerLanguages)', context) };

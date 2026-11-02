@@ -324,7 +324,7 @@ class HomeFloorplanPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({mode: 'open'});
-    this.shadowRoot.innerHTML = `<style>:host{display:flex;flex-direction:column;height:100dvh;min-height:0;background:#11191f}header{flex-shrink:0;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;font:14px system-ui;color:#b8c8d0}button{padding:8px 10px;cursor:pointer;background:#202d35;color:#e9eeef;border:1px solid #44515a;border-radius:7px;min-height:40px}#notice{flex:1;min-width:160px;overflow-wrap:anywhere}#dry-run[aria-pressed="true"]{border-color:#e8c56c;color:#ffe6a2}iframe{border:0;flex:1;width:100%;min-height:0}.error{color:#ffd19b}#recovery,#local-recovery{padding:20px;color:#e9eeef;font:14px/1.5 system-ui;overflow:auto}#recovery-details{white-space:pre-wrap;overflow-wrap:anywhere}button:disabled{opacity:.5}#studio{display:inline-flex;align-items:center;min-height:44px;box-sizing:border-box;color:#a9e0ee;padding:8px 12px;border:1px solid #44515a;border-radius:7px;text-decoration:none}#studio:focus-visible,#map-attribution:focus-visible{outline:3px solid #e8c56c;outline-offset:3px}#map-attribution{color:#a9e0ee;font-size:12px;padding:8px 0}[hidden]{display:none!important}</style><header><button id="menu" aria-label="Open sidebar">☰</button><span id="notice" role="status">Connecting to Home Assistant…</span><button id="dry-run" type="button" aria-pressed="false">Dry run: Off</button><button id="retry">Reload saved plan</button><a id="studio" href="/home-studio" lang="en" hidden>Edit home</a><a id="map-attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" hidden>© OpenStreetMap contributors</a></header><section id="local-recovery" hidden><h2>Unsaved layout edits</h2><p>The latest layout submitted by this card is retained in memory. Export it before reloading the saved plan. Keep this card open until you have saved the file.</p><button id="local-export">Export unsaved inventory JSON</button></section><section id="recovery" hidden><h2>Saved placements need repair</h2><p>Nothing has been overwritten. Export the original inventory, keep it as a backup, and edit a copy using the current floor and room IDs below. Importing the repaired copy replaces all saved floors only after validation.</p><pre id="recovery-details"></pre><button id="recovery-export">Export original inventory</button> <button id="recovery-import">Import repaired inventory</button><input id="recovery-file" type="file" accept="application/json,.json" hidden></section><iframe title="Private home floorplan" sandbox="allow-scripts allow-downloads allow-forms"></iframe>`;
+    this.shadowRoot.innerHTML = `<style>:host{display:flex;flex-direction:column;height:100dvh;min-height:0;background:#11191f}header{flex-shrink:0;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;font:14px system-ui;color:#b8c8d0}button{padding:8px 10px;cursor:pointer;background:#202d35;color:#e9eeef;border:1px solid #44515a;border-radius:7px;min-height:40px}#notice{flex:1;min-width:160px;overflow-wrap:anywhere}#dry-run[aria-pressed="true"]{border-color:#e8c56c;color:#ffe6a2}iframe{border:0;flex:1;width:100%;min-height:0}.error{color:#ffd19b}#recovery,#local-recovery{padding:20px;color:#e9eeef;font:14px/1.5 system-ui;overflow:auto}#recovery-details{white-space:pre-wrap;overflow-wrap:anywhere}button:disabled{opacity:.5}#studio{display:inline-flex;align-items:center;min-height:44px;box-sizing:border-box;color:#a9e0ee;padding:8px 12px;border:1px solid #44515a;border-radius:7px;text-decoration:none}#studio:focus-visible,#map-attribution:focus-visible{outline:3px solid #e8c56c;outline-offset:3px}#map-attribution{color:#a9e0ee;font-size:12px;padding:8px 0}:host > #map-attribution{flex-shrink:0;padding:4px 12px;font-family:system-ui}[hidden]{display:none!important}</style><header><button id="menu" aria-label="Open sidebar">☰</button><span id="notice" role="status">Connecting to Home Assistant…</span><button id="dry-run" type="button" aria-pressed="false">Dry run: Off</button><button id="retry">Reload saved plan</button><a id="studio" href="/home-studio" lang="en" hidden>Edit home</a><a id="map-attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" hidden>© OpenStreetMap contributors</a></header><section id="local-recovery" hidden><h2>Unsaved layout edits</h2><p>The latest layout submitted by this card is retained in memory. Export it before reloading the saved plan. Keep this card open until you have saved the file.</p><button id="local-export">Export unsaved inventory JSON</button></section><section id="recovery" hidden><h2>Saved placements need repair</h2><p>Nothing has been overwritten. Export the original inventory, keep it as a backup, and edit a copy using the current floor and room IDs below. Importing the repaired copy replaces all saved floors only after validation.</p><pre id="recovery-details"></pre><button id="recovery-export">Export original inventory</button> <button id="recovery-import">Import repaired inventory</button><input id="recovery-file" type="file" accept="application/json,.json" hidden></section><iframe title="Private home floorplan" sandbox="allow-scripts allow-downloads allow-forms"></iframe>`;
     this.serverCanEdit = false;
     this.editLocked = false;
     this.readableEntities = new Set();
@@ -366,7 +366,7 @@ class HomeFloorplanPanel extends HTMLElement {
       if (event.target !== iframe && !event.composedPath?.().includes(iframe)) this.dismissViewerOverlays();
     };
     this.$('dry-run').onclick = () => this.setDryRun(!this.dryRun);
-    this.viewPreferences = {sidebarCollapsed:false};
+    this.viewPreferences = {sidebarCollapsed:false,toolbarHidden:false};
     try { this.viewPreferences.sidebarCollapsed=localStorage.getItem('home-floorplan:sidebar-collapsed')==='true'; } catch {}
     try { this.explicitLanguage=resolveViewerLanguage(localStorage.getItem('home-studio.language.v1')); } catch {}
     const queryLanguage=resolveViewerLanguage(new URLSearchParams(globalThis.location?.search || '').get('lang'));
@@ -401,7 +401,7 @@ class HomeFloorplanPanel extends HTMLElement {
     };
   }
 
-  configureDashboard({floor, sidebarCollapsed = true, dryRun = false, editLocked = false, deviceFilter = 'all', roomLabels = false} = {}) {
+  configureDashboard({floor, sidebarCollapsed = true, toolbarHidden = false, dryRun = false, editLocked = false, deviceFilter = 'all', roomLabels = false} = {}) {
     if (this.started) throw Error('Configure the dashboard before connecting its floorplan.');
     this.initialFloor = floor;
     this.dashboard = true;
@@ -409,6 +409,7 @@ class HomeFloorplanPanel extends HTMLElement {
     this.viewPreferences.deviceFilter = deviceFilter;
     this.viewPreferences.roomLabels = roomLabels;
     this.viewPreferences.sidebarCollapsed = sidebarCollapsed;
+    this.viewPreferences.toolbarHidden = toolbarHidden;
     this.$('menu').hidden = true;
     this.dryRunPinned ||= dryRun;
     this.applyDryRun(this.dryRun || this.dryRunPinned);
@@ -421,6 +422,27 @@ class HomeFloorplanPanel extends HTMLElement {
   updateAccessUI() {
     this.$('studio').hidden = !this.canEdit || this.hasEditor !== true;
     this.$('iframe',false).setAttribute?.('sandbox',this.canEdit ? 'allow-scripts allow-downloads allow-forms' : 'allow-scripts');
+  }
+
+  updateToolbarVisibility() {
+    const header=this.$('header',false);
+    if (!header) return;
+    const wasHidden=header.hidden, restoreFocus=header.contains(this.shadowRoot.activeElement);
+    // Only a ready viewer that offers Show menus may hide its host controls.
+    // A retained older viewer never acknowledges this preference.
+    header.hidden=this.viewPreferences?.toolbarHidden===true && this.toolbarReady===true &&
+      !!this.port && this.modelConfigured===true && this.isConnected && !!this._hass?.user?.id &&
+      this.connectionState?.ready===true && this._hass.connected!==false &&
+      !this.noticeError && !this.dryRun && !this.pending && !this.failed &&
+      !this.localEdits && !this.suspendedEdits && !this.recovery;
+    // Attribution belongs to the map, so it stays visible when menus are hidden.
+    const attribution=this.mapAttributionLink;
+    if (attribution) {
+      if (header.hidden && attribution.parentElement===header) header.after(attribution);
+      else if (!header.hidden && attribution.parentElement!==header) header.append(attribution);
+    }
+    if (header.hidden && !wasHidden && restoreFocus)
+      this.port.postMessage({type:'view_preferences',toolbarHidden:true,focusMenus:true});
   }
 
   t(key, params = {}) {
@@ -457,6 +479,7 @@ class HomeFloorplanPanel extends HTMLElement {
     if (enabled && !this.dryRun) this.dryRunEpoch++;
     this.dryRun=enabled;
     this.updateDryRunButton();
+    this.updateToolbarVisibility();
   }
   setDryRun(enabled) {
     if (typeof enabled !== 'boolean' || this.dryRunPinned && !enabled) return;
@@ -516,6 +539,7 @@ class HomeFloorplanPanel extends HTMLElement {
     }
     this.syncConnection();
     this.publishEntityStates();
+    this.updateToolbarVisibility();
   }
   syncConnection() {
     if (!this.isConnected) return;
@@ -549,6 +573,7 @@ class HomeFloorplanPanel extends HTMLElement {
       this.started = true;
       this.loadFloor(this.requestedFloor ?? this.floor ?? this.initialFloor);
     }
+    this.updateToolbarVisibility();
   }
   stopTrackingConnection() {
     const state = this.connectionState;
@@ -575,6 +600,7 @@ class HomeFloorplanPanel extends HTMLElement {
     Promise.resolve().then(unsubscribe).catch(() => {});
   }
   invalidateViewerLoad() {
+    this.toolbarReady=false;
     this.generation = (this.generation || 0) + 1;
     this.clearMapRequests();
     this.showMapAttribution(false);
@@ -582,6 +608,7 @@ class HomeFloorplanPanel extends HTMLElement {
     this.clearMediaArtwork();
     this.clearViewerLoad();
     this.port?.close(); this.port = null;
+    this.updateToolbarVisibility();
   }
   connectedCallback() {
     globalThis.addEventListener?.('storage',this.onDryRunStorage);
@@ -617,15 +644,19 @@ class HomeFloorplanPanel extends HTMLElement {
   isCurrent(generation) { return generation === this.generation && this.isConnected; }
   notice(text, error = false) {
     this.noticeMessage=null;
+    this.noticeError=error;
     const el = this.$('notice');
     el.textContent = text; el.classList.toggle('error', error);
+    this.updateToolbarVisibility();
   }
   notifySaveStatus() {
+    this.updateToolbarVisibility();
     if (typeof CustomEvent==='function') this.dispatchEvent?.(new CustomEvent('home-floorplan-save-status'));
   }
   discardLocalEdits() {
     this.localEdits=null;this.suspendedEdits=false;
     if (this.shadowRoot) this.$('local-recovery').hidden=true;
+    this.updateToolbarVisibility();
   }
   exportLocalEdits() {
     if (!this.canEdit || !this.localEdits || this.localEdits.account !== this._hass?.user?.id) return;
@@ -1134,7 +1165,13 @@ class HomeFloorplanPanel extends HTMLElement {
       this.moduleEntities=new Set(Object.values(message.receiver_activity||{}).map(value=>value?.modules_sensor).filter(sensor));
       this.assumedActivity=sensor(message.assumed_activity?.sensor)?message.assumed_activity:null;
       this.publishEntityStates();
+      this.updateToolbarVisibility();
     } else if (message.type === 'view_preferences') {
+      if (typeof message.toolbarHidden==='boolean') {
+        this.viewPreferences.toolbarHidden=message.toolbarHidden;
+        this.toolbarReady=true;
+        this.updateToolbarVisibility();
+      }
       if(typeof message.sidebarCollapsed==='boolean') {
         this.viewPreferences.sidebarCollapsed=message.sidebarCollapsed;
         // A compact dashboard does not change the full panel's saved layout.

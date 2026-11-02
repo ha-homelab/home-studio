@@ -31,22 +31,22 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
    if(capture)HTMLCanvasElement.prototype.captureStream=function(...args){tourCaptureAttempts++;return capture.apply(this,args);};
   });
   await page.route('**/*',route=>route.request().url().startsWith(origin+'/')?route.continue():route.abort());
-  async function mount(canEdit){
+  async function mount(canEdit,preferences={toolbarHidden:false}){
    await page.goto(origin);
    await page.evaluate(({html,canEdit})=>{const frame=document.createElement('iframe');frame.sandbox=canEdit?'allow-scripts allow-downloads allow-forms':'allow-scripts';frame.srcdoc=html;document.body.append(frame);},{html:embedded,canEdit});
    const frame=page.frameLocator('iframe');await frame.locator('#homeRoom').waitFor();
-   await page.evaluate(({items,canEdit})=>{
+   await page.evaluate(({items,canEdit,preferences})=>{
     const channel=new MessageChannel();window.messages=[];window.channel=channel.port1;channel.port1.onmessage=event=>{
      if(event.data.type==='map_request'&&event.data.action==='get'){
       channel.port1.postMessage({type:'map_result',request_id:event.data.request_id,success:true,result:{revision:0,configured:false,config:null,reference:null}});return;
      }
      messages.push(event.data);
     };
-    document.querySelector('iframe').contentWindow.postMessage({type:'home-floorplan:init',can_edit:canEdit,items},'*',[channel.port2]);
-   },{items:project.floors[0].items,canEdit});
+    document.querySelector('iframe').contentWindow.postMessage({type:'home-floorplan:init',can_edit:canEdit,items,preferences},'*',[channel.port2]);
+   },{items:project.floors[0].items,canEdit,preferences});
    await page.waitForFunction(()=>messages.some(message=>message.type==='model_config'));
    await page.evaluate(()=>channel.postMessage({type:'states',connected:true,states:{'light.desk':{state:'off',can_control:true},'sensor.temperature':{state:'21',unit:'°C',can_control:false}}}));
-   await frame.locator('[data-home-device="lamp"]').waitFor();
+   await frame.locator('[data-home-device="lamp"]').waitFor({state:'attached'});
    return frame;
   }
   async function openTour(frame){
@@ -62,7 +62,38 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
    const duration=tour.locator('input[type="number"]');await duration.fill('0.25');await duration.press('Tab');
    return tour;
   }
-  let frame=await mount(false);
+  let frame=await mount(false,{toolbarHidden:true,sidebarCollapsed:true});
+  assert.equal(await frame.locator('#homeToolbar').isVisible(),false,'configured minimal view hides menus');
+  assert.equal(await frame.locator('#homeControls').isVisible(),false,'sidebar preference stays independent');
+  await frame.locator('#homeShowMenus').waitFor({state:'visible'});
+  await page.waitForFunction(()=>messages.some(message=>message.type==='view_preferences'&&message.toolbarHidden===true));
+  await frame.locator('canvas').first().focus();
+  await page.evaluate(()=>channel.postMessage({type:'view_preferences',toolbarHidden:true,focusMenus:true}));
+  await frame.locator('#homeShowMenus:focus').waitFor();
+  await frame.locator('[data-home-item="lamp"]').click();
+  await page.waitForFunction(()=>messages.some(message=>message.type==='toggle'&&message.entity_id==='light.desk'));
+  await page.evaluate(()=>channel.postMessage({type:'states',connected:true,states:{'light.desk':{state:'on',can_control:true},'sensor.temperature':{state:'21',unit:'°C',can_control:false}}}));
+  await frame.locator('[data-home-item="lamp"][data-state="on"]').waitFor();
+  await page.evaluate(()=>channel.postMessage({type:'states',connected:true,states:{'light.desk':{state:'off',can_control:true},'sensor.temperature':{state:'21',unit:'°C',can_control:false}}}));
+  await frame.locator('[data-home-item="lamp"][data-state="off"]').waitFor();
+  for(const viewport of [{width:1200,height:850},{width:390,height:460}]){
+   await page.setViewportSize(viewport);
+   const stage=await frame.locator('#homeStage').boundingBox();
+   assert.ok(stage.height>=viewport.height-3,'minimal view uses the available card height on desktop and phone');
+   const restore=await frame.locator('#homeShowMenus').boundingBox();
+   assert.ok(restore.height>=44&&restore.x>=0&&restore.x+restore.width<=viewport.width,'restore button stays touch-sized and inside the card');
+  }
+  await page.setViewportSize({width:1200,height:850});
+  await frame.locator('#homeShowMenus').click();
+  assert.equal(await frame.locator('#homeToolbar').isVisible(),true);
+  assert.equal(await frame.locator('#homeControls').isVisible(),false,'showing menus does not override a collapsed sidebar');
+  await frame.locator('#homeHideMenus').focus();await frame.locator('#homeHideMenus').press('Enter');
+  assert.equal(await frame.locator('#homeShowMenus').evaluate(node=>node===document.activeElement),true,'keyboard focus moves out of hidden menus');
+  await frame.locator('#homeShowMenus').press('Enter');
+  assert.equal(await frame.locator('#homeHideMenus').evaluate(node=>node===document.activeElement),true);
+  await page.evaluate(()=>channel.postMessage({type:'view_preferences',toolbarHidden:'true'}));
+  assert.equal(await frame.locator('#homeToolbar').isVisible(),true,'nonboolean preference cannot hide controls');
+  await frame.locator('#homeToggleControls').click();
   assert.equal(await frame.locator('#editLayout').isVisible(),false);
   assert.equal(await frame.locator('aside').isVisible(),false);
   assert.equal(await frame.locator('aside').evaluate(node=>node.inert),true);
@@ -119,6 +150,6 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
   await tour.getByRole('button',{name:'Close camera tour',exact:true}).click();await page.locator('#editLayout').click();
   assert.equal(await page.locator('aside').isVisible(),true,'offline editor remains editable');
   assert.deepEqual(errors,[]);
-  console.log('PASS: family playback without download/capture attempts, owner/standalone tour exports, immutable host edit grant, allowed controls, read-only devices, label/device filters, admin editing, offline editing.');
+  console.log('PASS: minimal desktop/phone view, restored keyboard focus, live controls with hidden menus, family playback without downloads, immutable host edit grant, label/device filters, admin and offline editing.');
  }finally{await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));fs.rmSync(temporary,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});
