@@ -1,16 +1,37 @@
 """Public source release inventory and reproducibility checks."""
 
 import hashlib
+import importlib.metadata
 import json
-from pathlib import Path
-import tempfile
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
-from unittest.mock import patch
 import zipfile
+from pathlib import Path
+from unittest.mock import patch
 
 import package_release as packaging
+
+RELEASE_REPLAY_FILES = (
+    'scripts/closed_upload_control_v2.py', 'scripts/closed_release_worker.py', 'scripts/closed_release_transport.py',
+    'scripts/test_closed_upload_control_v2.py', 'scripts/test_closed_transport.py',
+    'scripts/test-closed-release-worker.py', 'scripts/test-closed-release-transport.py',
+    'scripts/fixtures/release_transport_tls_child.py', 'docs/closed-release-bootstrap.md',
+    'scripts/release_control.py', 'scripts/release_fuzz.py', 'scripts/version_plan.py', 'scripts/version_receipt.py',
+)
+
+
+def has_release_runtime():
+    # Cross-platform source packaging needs no optional transport installation.
+    # Exercise the executable replay when its declared POSIX runtime is present.
+    if os.name != 'posix':
+        return False
+    try:
+        return importlib.metadata.version('cryptography') == '50.0.1'
+    except importlib.metadata.PackageNotFoundError:
+        return False
 
 
 class PublicPackageTests(unittest.TestCase):
@@ -82,10 +103,45 @@ class PublicPackageTests(unittest.TestCase):
                 action = ".github/actions/upload-acceptance-artifact/action.yml"
                 self.assertEqual(contents.read("home-studio/" + action),
                                  (packaging.ROOT / action).read_bytes())
+                for name in RELEASE_REPLAY_FILES:
+                    self.assertEqual(contents.read("home-studio/" + name),
+                                     (packaging.ROOT / name).read_bytes(), name)
                 contents.extractall(work / "extracted")
             source = work / "extracted/home-studio"
+            # -I excludes the checkout and PYTHONPATH. Import the lazy public
+            # input helpers from the extracted package, with no network calls.
+            probe = '''import importlib,pathlib,sys
+root=pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0,str(root/'scripts'))
+for name in ('release_control','release_fuzz','version_plan','version_receipt'):
+ module=importlib.import_module(name)
+ assert pathlib.Path(module.__file__).resolve().parent == root/'scripts'
+'''
+            result = subprocess.run([sys.executable, '-I', '-c', probe, str(source)],
+                                    cwd=work, capture_output=True, text=True, timeout=30, check=False)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             result = subprocess.run([sys.executable, "scripts/test-public-package.py"],
                                     cwd=source, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipUnless(has_release_runtime(), 'requires the locked POSIX closed-release runtime')
+    def test_closed_release_replays_from_extracted_source_without_checkout(self):
+        with tempfile.TemporaryDirectory(prefix='home-studio-release-replay-') as temporary:
+            root = Path(temporary).resolve()
+            archive = packaging.package(packaging.ROOT, root / 'dist', 'a' * 40)
+            with zipfile.ZipFile(archive) as contents:
+                contents.extractall(root / 'extracted')
+            source = root / 'extracted/home-studio'
+            # The suite exercises real crypto, all sibling imports, the USTAR
+            # bootstrap, and builder/output checks. Its transport is synthetic.
+            probe = '''import pathlib,runpy,sys
+root=pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0,str(root/'scripts'))
+sys.argv=[str(root/'scripts/test-closed-release-worker.py')]
+runpy.run_path(sys.argv[0],run_name='__main__')
+'''
+            result = subprocess.run([sys.executable, '-I', '-c', probe, str(source)],
+                                    cwd=root, capture_output=True, text=True, timeout=60, check=False)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_invalid_source_is_rejected_before_output(self):

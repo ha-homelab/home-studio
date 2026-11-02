@@ -21,7 +21,11 @@ jobs:
       - name: Verify synthetic transport, upload admission and failure confidentiality
         run: |
           python3 scripts/test_closed_build.py
+          python3 scripts/test_closed_transport.py
           python3 scripts/test_closed_upload_control.py
+          python3 scripts/test_closed_upload_control_v2.py
+          python3 scripts/test-closed-release-worker.py
+          python3 scripts/test-closed-release-transport.py
       - name: Preload public toolchain
         run: python3 scripts/closed_build.py --action prepare --prepared-root "$RUNNER_TEMP/closed-synthetic-public"
       - name: Verify real unprivileged network-disabled container with fictional input

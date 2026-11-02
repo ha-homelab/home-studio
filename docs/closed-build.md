@@ -224,10 +224,142 @@ a permit. A failed rebuild therefore does not imply zero storage writes. Do not
 approve a real rebuild solely on a previous storage allowance: first establish
 the coordinator, its verified capacity coverage, and the control-object budget.
 
+## Bounded transport-result capture
+
+`scripts/closed_build.py` provides a separate helper for capturing the result of
+one create-only PUT:
+
+```python
+transport_put_result(
+    url, *, data, attempt_id, expected_sha256, expected_bytes,
+    suffix=None, maximum=8192, timeout=60, not_after=None,
+)
+```
+
+The helper and `transport(...)` share the HTTP engine. The existing transport
+API still returns bytes, and existing upload call sites are unchanged. This
+capture path is not wired into release orchestration or activated by a workflow;
+normal `action=build` remains blocked.
+
+Before any request, the helper bounds the resolved request URL to 8,192 ASCII
+characters, requires immutable payload bytes and checks their
+exact length and SHA-256 against the supplied attempt information. The result
+contains exactly `schema: 1`, `kind: "closed-put-result"`, `attempt_id`,
+`request_target_sha256`, `status`, `bytes`, `ciphertext_sha256`, `version_id`,
+`etag`, `md5`, and `authorizes_upload: false`. The target digest covers the
+resolved request URL, including any suffix. Neither that URL nor the payload,
+response body or arbitrary response headers enter the record.
+
+Oracle's [PutObject response contract](https://github.com/oracle/oci-go-sdk/blob/master/objectstorage/put_object_request_response.go)
+names the version header `version-id`, the entity tag `etag`, and the
+single-part payload checksum `opc-content-md5`. The helper preserves ETag as an
+opaque value and verifies an optional returned MD5 against the submitted bytes.
+Its ciphertext SHA-256 is computed locally, never inferred from MD5 or ETag.
+Missing version metadata remains null and unresolved; a successful HTTP status
+alone cannot identify the stored version. Oracle's
+[PAR documentation](https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/usingpreauthenticatedrequests_topic-Working_with_PreAuthenticated_Requests.htm)
+shows version metadata on a HEAD response, but a separate HEAD is not proof of
+the payload written by this attempt.
+
+Capture is bounded to 100 response headers, 16 KiB of header metadata, 1,024 bytes
+per selected value, and an 8 KiB serialized result record. The response-body
+limit defaults to 8 KiB and can only be lowered through `maximum`. Redirect rejection and timeout/deadline
+checks remain in force. Invalid input, malformed metadata and transport failures
+use fixed rejection errors; the helper never retries. A failure after the request
+starts may leave a stored object and must preserve the attempt for reconciliation.
+
+The record grants no upload or install permission. Future integration still
+needs a durable ledger attempt, an authenticated and protected result channel,
+an exact payload/version binding, and verified inventory before claim
+reconciliation. It must also preserve fresh upload admission. This helper adds
+no receipt object or other remote write beyond its single requested PUT, and its
+offline tests do not establish production storage behavior.
+
+## Inactive v2 admission bindings
+
+`scripts/closed_upload_control_v2.py` provides separate, source-only entrypoints
+for bounded intent, permit and result records. No production caller invokes
+them. The active policy and upload call sites are unchanged; normal
+`action=build` still stops before input resolution or closed transport. Existing
+v1 rebuild admission and read-only accepted-candidate validation keep their
+original contracts.
+
+V2 records require schema 2 and their exact v2 record kind. Their envelope
+purposes are `upload-intent-v2`, `upload-permit-v2` and `upload-result-v2`.
+The encrypted envelope format itself is unchanged. Opening requires an explicit
+expected purpose and a caller-pinned verification key; there is no v1 fallback,
+schema coercion or trust-root selection from envelope metadata. Canonical
+plaintext is limited to 5,600 bytes and the complete encrypted control, including
+its metadata and signature, to 8,192 bytes. Oversized records are rejected,
+never truncated. Nested transport results and ledger checkpoints retain their
+own schema-1 record types; they are not v1 admission records.
+
+This contract covers normal prospective releases only: a push binds to `beta`,
+a schedule to `nightly`, and a manual dispatch to `beta`, `rc` or `nightly`.
+The operation is `release` and the worker is `closed_build / package`. Stable
+promotion, existing-release rebuilds and other workers are outside this v2
+contract. Run and attempt identifiers are bounded exact values; authenticating
+the latest attempt remains a coordinator responsibility.
+
+The intent binds the execution identity, release channel and plan, encrypted
+input, and exact encrypted candidate. Its public-context digest covers the
+fully enriched prospective context returned by `public_inputs`, including the
+verified payload inventory and dependencies, rather than an earlier context
+file. That context's source SHA, run and attempt must equal the execution being
+admitted. Candidate identity includes its exact ciphertext SHA-256 and byte
+count, object name and attempt ID. The capability digest covers the configured
+output capability; the target digest covers the exact resolved request URL,
+including the object suffix. Neither URL is included in the control record.
+
+A permit binds both the exact intent envelope bytes and the canonical intent
+record. It carries destination fingerprints, capacity-evidence and assessment
+digests, bounded issuance/expiry times, and the candidate's committed
+`begin_write` checkpoint. The checkpoint identifies its ledger, scope,
+generation, state digest, operation and core-receipt digest. The worker can
+authenticate the coordinator signature and compare the intent, candidate,
+destination and time bindings to its retained values. It cannot establish
+private ledger durability, current state, inventory coverage, concurrent-writer
+growth or the approved batch reserve from these hashes. Structural validation
+does not establish those facts either.
+
+The capacity `policy_sha256` binds the exact four caller-reviewed worker limits:
+`candidate_max_bytes`, `permit_ttl_seconds`,
+`capacity_max_age_seconds` and `wait_seconds`. Both permit and result validation
+require those limits explicitly. The private capacity budget and its evidence
+remain separate coordinator checks, bound through the assessment.
+
+Records passed to `validate_*` must be the exact plaintext returned by
+`open_control` for their corresponding envelope bytes, using the pinned key and
+expected purpose. The pure validators compare structure and supplied bindings;
+they do not establish that a supplied plaintext record came from those bytes.
+
+Before issuing a real permit, a future coordinator must authenticate the live
+run and exact worker, validate the public context and input, establish fresh
+capacity and all outstanding claims, reserve the complete request, and commit
+the candidate attempt as ambiguous. The permit contains that candidate
+checkpoint. Only after sealing the permit can the coordinator record the
+permit's own exact write attempt; that later checkpoint stays in its local
+journal. Embedding the permit's own write checkpoint in the permit would create
+a circular dependency on its ciphertext hash. Preserve independent checkpoint
+anchors: historical state hashes cannot be recomputed from the ledger's current
+tables, and structural or receipt-binding checks are not historical proof.
+
+A v2 result binds the exact intent and permit envelopes, and the canonical
+permit record through `permit_record_sha256`, to the bounded transport result.
+This also rejects accidental pairing of a permit record with another envelope.
+Result validation is timeless so that delayed reconciliation remains possible;
+it does not extend a permit's upload deadline. It does not turn a missing
+version ID or ambiguous PUT into a confirmed
+write. This slice creates or budgets no result channel and performs no remote
+write. An authenticated result channel, exact-version reconciliation and the
+remaining coordinator checks are still required before production activation.
+
 ## Validation and recovery
 
-Run `python3 scripts/test_closed_build.py` and
-`python3 scripts/test_closed_upload_control.py` for transport, upload admission, source policy,
+Run `python3 scripts/test_closed_build.py`,
+`python3 scripts/test_closed_transport.py`,
+`python3 scripts/test_closed_upload_control.py` and
+`python3 scripts/test_closed_upload_control_v2.py` for transport, upload admission, source policy,
 archive safety, exact component and failure-output tests. With a prepared
 public image and an available Docker daemon, set `CLOSED_DOCKER_TEST=1` for
 the real synthetic container success/failure and isolation checks. The public
