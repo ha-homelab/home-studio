@@ -625,32 +625,19 @@ def prepare(args, temporary):
     return "CLOSED_PUBLIC_TOOLS_READY"
 
 
-def execute(args, temporary):
-    # Normal releases stay blocked before any private read until their manual,
-    # push and scheduled coordinators support fresh upload admission (#97).
-    if args.action == "build":
-        raise UploadAdmissionUnavailable()
-    gate_environment(os.environ)
-    require(not args.closed_request or REQUEST.fullmatch(args.closed_request) is not None)
-    configured = policy()
+def build_release_candidate(args, temporary, *, configured, context, public, input_wire,
+                            input_keys=None, output_keys=None):
+    """Build/sign with the existing contained path; does not upload or admit bytes."""
     image = configured["worker_image"]
-    require(decode_json(regular(args.prepared_root / "prepared.json")) == configured)
-    context, public = public_inputs(args, temporary)
-    if args.action == "validate":
-        # Accepted records are issued by the deployment client after actual publication.
-        accepted = decode_json(open_envelope(transport(os.environ["CLOSED_ACCEPTANCE_READ_URL"]),
-            os.environ["CLOSED_INPUT_DECRYPT_KEY"], os.environ["CLOSED_INPUT_VERIFY_KEY"], purpose="acceptance"))
-        validate_acceptance(accepted, context, args.closed_request)
-        validate_accepted_build(accepted)
-        encrypted = transport(os.environ["CLOSED_OUTPUT_READ_URL"], suffix=accepted["candidate_object"])
-        require(digest(encrypted) == accepted["candidate_sha256"])
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-        public_signer = Ed25519PrivateKey.from_private_bytes(unb64(os.environ["CLOSED_OUTPUT_SIGN_KEY"], 32)).public_key()
-        verify_envelope(encrypted, b64(public_signer.public_bytes_raw()), purpose="candidate")
-        return "CLOSED_ACCEPTED_BYTES_VALIDATED"
-    encrypted = transport(os.environ["CLOSED_INPUT_READ_URL"])
-    plain = open_envelope(encrypted, os.environ["CLOSED_INPUT_DECRYPT_KEY"],
-                          os.environ["CLOSED_INPUT_VERIFY_KEY"], purpose="input")
+    encrypted = input_wire
+    if input_keys is None:
+        input_keys = {"recipient_key": os.environ["CLOSED_INPUT_DECRYPT_KEY"],
+                      "verify_key": os.environ["CLOSED_INPUT_VERIFY_KEY"]}
+    if output_keys is None:
+        output_keys = {"recipient_key": os.environ["CLOSED_OUTPUT_ENCRYPT_KEY"],
+                       "signing_key": os.environ["CLOSED_OUTPUT_SIGN_KEY"]}
+    plain = open_envelope(encrypted, input_keys["recipient_key"],
+                          input_keys["verify_key"], purpose="input")
     source = temporary / "input"
     source.mkdir()
     extract_tar(plain, source)
@@ -685,8 +672,36 @@ def execute(args, temporary):
                  "build_source_sha": os.environ["GITHUB_SHA"],
                  "private_source": intent.get("private_source"),
                  "payload_sha256": digest(payload), "payload_size": len(payload)}
-    envelope = seal(pack_candidate(payload, candidate, installer), os.environ["CLOSED_OUTPUT_ENCRYPT_KEY"],
-                    os.environ["CLOSED_OUTPUT_SIGN_KEY"], purpose="candidate")
+    envelope = seal(pack_candidate(payload, candidate, installer), output_keys["recipient_key"],
+                    output_keys["signing_key"], purpose="candidate")
+    return envelope
+
+
+def execute(args, temporary):
+    # Normal releases stay blocked before any private read until their manual,
+    # push and scheduled coordinators support fresh upload admission (#97).
+    if args.action == "build":
+        raise UploadAdmissionUnavailable()
+    gate_environment(os.environ)
+    require(not args.closed_request or REQUEST.fullmatch(args.closed_request) is not None)
+    configured = policy()
+    require(decode_json(regular(args.prepared_root / "prepared.json")) == configured)
+    context, public = public_inputs(args, temporary)
+    if args.action == "validate":
+        # Accepted records are issued by the deployment client after actual publication.
+        accepted = decode_json(open_envelope(transport(os.environ["CLOSED_ACCEPTANCE_READ_URL"]),
+            os.environ["CLOSED_INPUT_DECRYPT_KEY"], os.environ["CLOSED_INPUT_VERIFY_KEY"], purpose="acceptance"))
+        validate_acceptance(accepted, context, args.closed_request)
+        validate_accepted_build(accepted)
+        encrypted = transport(os.environ["CLOSED_OUTPUT_READ_URL"], suffix=accepted["candidate_object"])
+        require(digest(encrypted) == accepted["candidate_sha256"])
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        public_signer = Ed25519PrivateKey.from_private_bytes(unb64(os.environ["CLOSED_OUTPUT_SIGN_KEY"], 32)).public_key()
+        verify_envelope(encrypted, b64(public_signer.public_bytes_raw()), purpose="candidate")
+        return "CLOSED_ACCEPTED_BYTES_VALIDATED"
+    encrypted = transport(os.environ["CLOSED_INPUT_READ_URL"])
+    envelope = build_release_candidate(args, temporary, configured=configured, context=context,
+                                       public=public, input_wire=encrypted)
     # Run/attempt object identity prevents an interrupted attempt overwriting another.
     object_name = args.closed_request + "/" + os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"] + ".candidate.json"
     upload_candidate(envelope, object_name, digest(encrypted), args.closed_request,
