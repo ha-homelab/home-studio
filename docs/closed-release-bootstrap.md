@@ -8,6 +8,14 @@ the legacy upload entry point still rejects normal builds. Local test success
 does not configure the environment, establish live storage capacity, authorize
 a deployment, or satisfy actual home acceptance.
 
+The protected workflow executes `closed_release_worker.py`. Its CLI delegates
+to the existing bounded `closed_build.main` with an explicit release executor;
+the transport module does not import the worker. Calling `closed_build.py`
+directly for a normal build or stable validation remains fail-closed, even with
+an anchor. Explicit Python callers pass `release_executor=worker.execute_release`
+to `closed_build.execute`. Public preparation and existing-release rebuilds
+retain the same implementation and checks.
+
 The existing [closed-build contract](closed-build.md) still governs containment,
 public artifact provenance, encrypted envelopes, and final site acceptance.
 The bootstrap adds accounting for the first control write and the final result.

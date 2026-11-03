@@ -688,7 +688,7 @@ class BoundaryTests(unittest.TestCase):
                      patch.object(build, "upload_candidate") as upload, \
                      patch.object(build, "seal") as seal, \
                      contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
-                    result = build.main(["--action", "validate", "--closed-request", request,
+                    result = release_worker.main(["--action", "validate", "--closed-request", request,
                                          "--release-tag", public["release_tag"], "--prepared-root", str(root)])
                 self.assertEqual(result, int(failure is not None))
                 self.assertEqual(out.getvalue(), ("CLOSED_BUILD_REJECTED" if failure else "CLOSED_ACCEPTED_BYTES_VALIDATED") + "\n")
@@ -924,7 +924,8 @@ class BoundaryTests(unittest.TestCase):
                                 ("validate", "CLOSED_ACCEPTED_BYTES_VALIDATED")):
             for exception in (None, RuntimeError, KeyboardInterrupt, SystemExit):
                 directories = []
-                def operation(args, temporary):
+                def operation(args, temporary, *, release_executor=None):
+                    self.assertIsNone(release_executor)
                     directories.append(temporary)
                     (temporary / "private.log").write_text(MARKER)
                     if exception is not None:

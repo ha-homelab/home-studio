@@ -735,3 +735,12 @@ def _finish_release(args, temporary, *, configured, context, public, input_wire,
     return _upload_release(input_wire, candidate, input_keys=input_keys, output_keys=output_keys,
         limits=limits, expected=expected, capabilities=capabilities, journal_path=journal_path,
         timeout=timeout, now=now, before_write=recheck)
+
+
+def main(argv=None):
+    """Use the shared bounded CLI with this explicit normal-release executor."""
+    return transport.main(argv, release_executor=execute_release)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

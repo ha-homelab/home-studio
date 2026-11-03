@@ -679,14 +679,13 @@ def build_release_candidate(args, temporary, *, configured, context, public, inp
     return envelope
 
 
-def execute(args, temporary):
+def execute(args, temporary, *, release_executor=None):
     if args.action in {"build", "validate"}:
         # No default ledger or input-derived authority. An unconfigured worker
         # still refuses before environment validation, public or private I/O.
-        if not os.environ.get("CLOSED_RELEASE_LEDGER_ANCHOR"):
+        if not callable(release_executor) or not os.environ.get("CLOSED_RELEASE_LEDGER_ANCHOR"):
             raise UploadAdmissionUnavailable()
-        import closed_release_worker
-        return closed_release_worker.execute_release(args, temporary)
+        return release_executor(args, temporary)
     gate_environment(os.environ)
     require(not args.closed_request or REQUEST.fullmatch(args.closed_request) is not None)
     configured = policy()
@@ -751,7 +750,7 @@ def validate_accepted_build(accepted):
         accepted["build_source_sha"], int(accepted["build_run_attempt"]), completed=True, gate=False)
 
 
-def main(argv=None):
+def main(argv=None, *, release_executor=None):
     class QuietParser(argparse.ArgumentParser):
         def error(self, message):
             raise Rejected()
@@ -773,7 +772,8 @@ def main(argv=None):
         with tempfile.TemporaryDirectory(prefix="closed-build-", ignore_cleanup_errors=True) as directory:
             temporary = Path(directory)
             try:
-                status = prepare(args, temporary) if args.action == "prepare" else execute(args, temporary)
+                status = prepare(args, temporary) if args.action == "prepare" else execute(
+                    args, temporary, release_executor=release_executor)
                 code = 0
             except UploadAdmissionUnavailable:
                 status = "CLOSED_UPLOAD_ADMISSION_UNAVAILABLE"
