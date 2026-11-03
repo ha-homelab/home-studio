@@ -8,6 +8,8 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tarfile
 import tempfile
 import traceback
@@ -595,6 +597,364 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(manifest["public"], self.f.context)
         self.assertEqual(manifest["build_run_attempt"], "2")
         self.assertFalse(result["authorizes_upload"])
+
+
+class ProductionRouteTests(unittest.TestCase):
+    setUp = WorkerTests.setUp
+    rejected = WorkerTests.rejected
+
+    def test_legacy_entry_requires_callable_executor_even_with_anchor(self):
+        with patch.dict(os.environ, {"CLOSED_RELEASE_LEDGER_ANCHOR": "fixture"}), \
+             patch.object(build, "public_inputs") as public, patch.object(build, "transport") as read:
+            for action in ("build", "validate"):
+                for executor in (None, False, object()):
+                    with self.subTest(action=action, executor=type(executor).__name__), \
+                         self.assertRaises(build.UploadAdmissionUnavailable):
+                        build.execute(SimpleNamespace(action=action), self.root,
+                                      release_executor=executor)
+            public.assert_not_called()
+            read.assert_not_called()
+
+    def test_worker_cli_delegates_to_shared_boundary(self):
+        args = ["--action", "build", "--prepared-root", str(self.root)]
+        with patch.object(build, "main", return_value=17) as entry:
+            self.assertEqual(worker.main(args), 17)
+        entry.assert_called_once_with(args, release_executor=worker.execute_release)
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/closed-build.yml").read_text()
+        self.assertIn('python3 scripts/closed_build.py --action prepare', workflow)
+        self.assertEqual(workflow.count('python3 scripts/closed_release_worker.py'), 1)
+
+    def test_worker_cli_preserves_fixed_success_and_failure_statuses(self):
+        with patch.dict(os.environ, {"CLOSED_RELEASE_LEDGER_ANCHOR": "fixture"}):
+            for action, status in (("build", "CLOSED_CANDIDATE_STORED"),
+                                   ("validate", "CLOSED_ACCEPTED_BYTES_VALIDATED")):
+                args = ["--action", action, "--prepared-root", str(self.root)]
+                with patch.object(worker, "execute_release", return_value=status) as execute, \
+                     contextlib.redirect_stdout(io.StringIO()) as output:
+                    self.assertEqual(worker.main(args), 0)
+                self.assertEqual(output.getvalue(), status + "\n")
+                execute.assert_called_once()
+                with patch.object(worker, "execute_release", side_effect=RuntimeError(CANARY)), \
+                     contextlib.redirect_stdout(io.StringIO()) as output, \
+                     contextlib.redirect_stderr(io.StringIO()) as errors:
+                    self.assertEqual(worker.main(args), 1)
+                self.assertEqual(output.getvalue(), "CLOSED_BUILD_REJECTED\n")
+                self.assertEqual(errors.getvalue(), "")
+
+    def test_actual_cli_uses_worker_executor_and_retains_legacy_refusal(self):
+        scripts = Path(__file__).resolve().parent
+        for script, environment, status in (
+                ("closed_release_worker.py", {}, "CLOSED_UPLOAD_ADMISSION_UNAVAILABLE"),
+                ("closed_build.py", {"CLOSED_RELEASE_LEDGER_ANCHOR": "{}"},
+                 "CLOSED_UPLOAD_ADMISSION_UNAVAILABLE"),
+                ("closed_release_worker.py", {"CLOSED_RELEASE_LEDGER_ANCHOR": "{}"},
+                 "CLOSED_BUILD_REJECTED")):
+            # No capability URLs: the selected worker fails before any I/O.
+            result = subprocess.run([sys.executable, "-B", str(scripts / script),
+                "--action", "build", "--prepared-root", str(self.root)],
+                env=environment, capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, status + "\n")
+            self.assertEqual(result.stderr, "")
+
+    def configure(self, action="build", channel="rc"):
+        import release_control
+        f = self.f
+        f.context["channel"] = channel
+        identifier = worker.release_request_id(build.REPOSITORY_ID, "73", "2", channel)
+        f.bootstrap["request_id"] = f.expected["request_id"] = f.manifest["request_id"] = identifier
+        f.bootstrap["public"] = {"channel": channel, "plan_sha256": f.context["plan_sha256"],
+                                  "context_sha256": digest(f.context)}
+        names = worker.object_names(identifier, f.execution)
+        for role, entry in f.bootstrap["objects"].items():
+            entry["object"] = names[role]
+            cap = f.capabilities[{"input": "input_read", "acceptance": "acceptance_read"}.get(role, "output_write")]
+            entry["request_target_sha256"] = crypto.digest((cap + names[role]).encode())
+        f.bootstrap["routing"]["input_suffix"] = names["input"]
+        f.expected["input_target_sha256"] = f.bootstrap["objects"]["input"]["request_target_sha256"]
+        f.expected["public_context"] = copy.deepcopy(f.context)
+        f.reseal()
+        f.journal = self.root / "release-attempt.jsonl"
+        self.args = SimpleNamespace(action=action, closed_request="", prepared_root=self.root,
+                                    public_context_artifact="" if action == "build" else "context", release_tag="v1.2.3-rc.1")
+        (self.root / "prepared.json").write_bytes(crypto.canonical(build.policy()))
+        self.anchor = {"schema": 1, "kind": "closed-release-ledger-anchor", "ledger": f.ledger,
+                       "capability_sha256": f.bootstrap["capability_sha256"]}
+        self.env = {"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": build.REPOSITORY,
+            "GITHUB_REPOSITORY_ID": build.REPOSITORY_ID, "GITHUB_REPOSITORY_OWNER_ID": build.OWNER_ID,
+            "GITHUB_REF": "refs/heads/main", "GITHUB_EVENT_NAME": "workflow_dispatch",
+            "GITHUB_WORKFLOW_REF": f.execution["workflow_ref"], "RUNNER_ENVIRONMENT": "github-hosted",
+            "GITHUB_RUN_ID": "73", "GITHUB_RUN_ATTEMPT": "2", "GITHUB_SHA": "a" * 40,
+            "CLOSED_RELEASE_LEDGER_ANCHOR": json.dumps(self.anchor),
+            "CLOSED_INPUT_DECRYPT_KEY": f.ci_decrypt, "CLOSED_INPUT_VERIFY_KEY": f.operator_verify,
+            "CLOSED_OUTPUT_ENCRYPT_KEY": f.operator_encrypt, "CLOSED_OUTPUT_SIGN_KEY": f.worker_sign}
+        self.env.update({"CLOSED_" + key.upper() + "_URL": value for key, value in f.capabilities.items()})
+        event = self.root / "event.json"
+        event.write_text(json.dumps({"inputs": {"channel": "stable" if action == "validate" else channel}}))
+        self.env["GITHUB_EVENT_PATH"] = str(event)
+        self.stack.enter_context(patch.dict(os.environ, self.env, clear=True))
+        info = {"full_name": build.REPOSITORY, "id": int(build.REPOSITORY_ID),
+                "owner": {"id": int(build.OWNER_ID)}, "default_branch": "main", "private": False}
+        self.run = {"id": 73, "run_attempt": 2, "head_sha": "a" * 40, "path": build.WORKFLOW,
+                    "head_branch": "main", "event": "workflow_dispatch", "status": "in_progress", "conclusion": None,
+                    "repository": copy.deepcopy(info), "head_repository": copy.deepcopy(info)}
+        self.jobs = [{"name": "Release gate", "status": "completed", "conclusion": "success", "head_sha": "a" * 40},
+                     {"name": "closed_build / package" if action == "build" else "closed_stable_validate / package",
+                      "status": "in_progress", "conclusion": None, "head_sha": "a" * 40}]
+        if action == "validate":
+            self.jobs[0]["conclusion"] = "skipped"
+            self.jobs.append({"name": "closed_stable_resolve", "status": "completed",
+                              "conclusion": "success", "head_sha": "a" * 40})
+        def api(path):
+            self.assertIn(path, ("", "actions/runs/73"))
+            return copy.deepcopy(info if path == "" else self.run)
+        def pages(path, key):
+            self.assertEqual((path, key), ("actions/runs/73/attempts/2/jobs", "jobs"))
+            return copy.deepcopy(self.jobs)
+        gh = SimpleNamespace(repo=build.REPOSITORY, api=api, pages=pages)
+        self.stack.enter_context(patch.object(release_control, "GitHub", return_value=gh))
+        self.stack.enter_context(patch.object(release_control, "checked_out_sha", return_value="a" * 40))
+        self.public = self.stack.enter_context(patch.object(build, "public_inputs", side_effect=lambda *a: (copy.deepcopy(f.context), self.root)))
+        self.read = self.stack.enter_context(patch.object(build, "transport", side_effect=lambda *a, **kw: f.input_wire))
+        self.builder = self.stack.enter_context(patch.object(build, "build_release_candidate", return_value=f.candidate))
+        return identifier, names
+
+    def test_configured_production_entry_reuses_signed_exchange(self):
+        identifier, names = self.configure()
+        self.assertEqual(build.execute(self.args, self.root, release_executor=worker.execute_release), "CLOSED_CANDIDATE_STORED")
+        self.assertEqual(self.args.closed_request, identifier)
+        self.read.assert_called_once_with(self.f.capabilities["input_read"], suffix=names["input"])
+        self.public.assert_called_once()
+        self.builder.assert_called_once()
+        self.assertEqual(self.f.calls, ["intent", "candidate", "result"])
+        self.assertEqual(set(self.f.stored), {names[role] for role in self.f.calls})
+
+    def check_event_route(self, channel, event):
+        self.configure(channel=channel)
+        self.run["event"] = event
+        os.environ["GITHUB_EVENT_NAME"] = event
+        self.f.execution["event"] = event
+        self.f.bootstrap["execution"]["event"] = event
+        self.f.reseal()
+        self.assertEqual(build.execute(self.args, self.root, release_executor=worker.execute_release), "CLOSED_CANDIDATE_STORED")
+        self.assertEqual(self.f.calls, ["intent", "candidate", "result"])
+
+    def test_push_beta_route(self):
+        self.check_event_route("beta", "push")
+
+    def test_scheduled_nightly_route(self):
+        self.check_event_route("nightly", "schedule")
+
+    def test_private_get_failure_is_not_retried(self):
+        self.configure()
+        self.read.side_effect = TimeoutError(CANARY)
+        self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        self.read.assert_called_once()
+        self.builder.assert_not_called()
+        self.assertEqual(self.f.calls, [])
+
+    def test_request_identity_is_deterministic_and_all_dimensions_matter(self):
+        values = [build.REPOSITORY_ID, "73", "2", "rc"]
+        original = worker.release_request_id(*values)
+        self.assertEqual(original, worker.release_request_id(*values))
+        self.assertEqual(len(original), 72)
+        for index, replacement in enumerate(("99", "74", "3", "beta")):
+            other = values.copy(); other[index] = replacement
+            self.assertNotEqual(original, worker.release_request_id(*other))
+        for invalid in ("0", "01", True, "1/2", "9" * 21):
+            self.rejected(lambda: worker.release_request_id(invalid, "73", "2", "rc"))
+        self.rejected(lambda: worker.release_request_id(*values[:3], "stable"))
+
+    def test_missing_or_malformed_anchor_cannot_reach_any_input(self):
+        self.configure()
+        invalid = ("", "{}", "[0]", "x" * 16385, json.dumps({**self.anchor, "extra": 1}),
+                   json.dumps({**self.anchor, "schema": True}),
+                   json.dumps({**self.anchor, "capability_sha256": {**self.anchor["capability_sha256"], "output_read": "0" * 64}}))
+        for raw in invalid:
+            with self.subTest(raw_length=len(raw)), patch.dict(os.environ, {"CLOSED_RELEASE_LEDGER_ANCHOR": raw}):
+                with self.assertRaises((worker.WorkerError, build.UploadAdmissionUnavailable)):
+                    build.execute(self.args, self.root, release_executor=worker.execute_release)
+        self.public.assert_not_called(); self.read.assert_not_called(); self.builder.assert_not_called()
+        self.assertEqual(self.f.calls, [])
+
+    def test_api_run_and_job_failures_precede_private_read(self):
+        self.configure()
+        original = copy.deepcopy(self.run)
+        for field, value in (("status", "completed"), ("run_attempt", 3), ("head_sha", "b" * 40),
+                             ("event", "push"), ("head_branch", "other")):
+            self.run = {**original, field: value}
+            self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        self.run = original
+        for mutate in (lambda: self.jobs.clear(), lambda: self.jobs.append(copy.deepcopy(self.jobs[-1])),
+                       lambda: self.jobs[-1].update(status="queued"), lambda: self.jobs[-1].update(head_sha="b" * 40),
+                       lambda: self.jobs[0].update(conclusion="skipped")):
+            saved = copy.deepcopy(self.jobs); mutate()
+            self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release)); self.jobs[:] = saved
+        self.read.assert_not_called(); self.builder.assert_not_called()
+
+    def test_wrong_explicit_request_and_dispatch_channel_refuse(self):
+        self.configure(); self.args.closed_request = "foreign"
+        self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        self.args.closed_request = ""
+        Path(self.env["GITHUB_EVENT_PATH"]).write_text('{"inputs":{"channel":"beta"}}')
+        self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        self.read.assert_not_called()
+
+    def test_changed_signed_anchor_or_signature_refuses_before_build(self):
+        self.configure()
+        self.f.bootstrap["ledger"]["batch_id"] = "other"; self.f.reseal()
+        self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        self.read.side_effect = lambda *a, **kw: b"invalid-envelope"
+        self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        self.builder.assert_not_called(); self.assertEqual(self.f.calls, [])
+
+    def test_slow_get_exhausts_original_grant_before_build(self):
+        self.configure()
+        def slow(*a, **kw):
+            self.f.now += 1001
+            return self.f.input_wire
+        self.read.side_effect = slow
+        self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        self.builder.assert_not_called(); self.assertEqual(self.f.calls, [])
+
+    def test_frozen_wall_get_elapsed_is_not_renewed(self):
+        self.configure(); tick = [0]
+        def slow(*a, **kw):
+            tick[0] = 1001
+            return self.f.input_wire
+        self.read.side_effect = slow
+        with patch.object(worker.time, "monotonic", side_effect=lambda: tick[0]):
+            self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        self.builder.assert_not_called(); self.assertEqual(self.f.calls, [])
+
+    def test_fresh_run_guard_after_get_and_after_build(self):
+        self.configure()
+        def changed_get(*a, **kw):
+            self.run["run_attempt"] = 3
+            return self.f.input_wire
+        self.read.side_effect = changed_get
+        self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        self.builder.assert_not_called(); self.assertEqual(self.f.calls, [])
+        self.run["run_attempt"] = 2; self.read.side_effect = lambda *a, **kw: self.f.input_wire
+        def changed_build(*a, **kw):
+            self.jobs[-1]["status"] = "completed"
+            return self.f.candidate
+        self.builder.side_effect = changed_build
+        self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        self.assertEqual(self.f.calls, []); self.assertFalse(self.f.journal.exists())
+
+    def test_expired_build_cannot_start_any_put(self):
+        self.configure()
+        def slow(*a, **kw):
+            self.f.now += 1001
+            return self.f.candidate
+        self.builder.side_effect = slow
+        self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        self.assertEqual(self.f.calls, []); self.assertFalse(self.f.journal.exists())
+
+    def test_run_change_while_waiting_for_permit_blocks_candidate_put(self):
+        self.configure()
+        def changed(*args, **kwargs):
+            permit = self.f.get(*args, **kwargs)
+            self.run["run_attempt"] = 3
+            return permit
+        with patch.object(worker.release_transport, "get", side_effect=changed):
+            self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        # The earlier intent remains charged; no retry or cleanup write follows.
+        self.assertEqual(self.f.calls, ["intent"])
+        self.assertEqual(self.f.gets, 1)
+
+    def test_identity_read_consumes_remaining_permit_time(self):
+        self.configure()
+        original = worker._current_execution
+        def delayed(*args, **kwargs):
+            if self.f.gets:
+                self.f.now += 30
+            return original(*args, **kwargs)
+        with patch.object(worker, "_current_execution", side_effect=delayed):
+            self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        self.assertEqual(self.f.calls, ["intent"])
+
+    def accepted(self, names):
+        context = self.f.context
+        context.update(mode="published", release_tag="v1.2.3-rc.1")
+        accepted = {"schema": 1, "state": "accepted", "request_id": self.args.closed_request,
+            "acceptance_policy": "ha-home-python-v1", "public": copy.deepcopy(context),
+            "candidate_sha256": crypto.digest(self.f.candidate), "payload_sha256": "1" * 64,
+            "installer_sha256": "2" * 64, "payload_size": 10, "installer_size": 10,
+            "build_source_sha": context["source_sha"], "build_run_id": context["run_id"],
+            "build_run_attempt": context["run_attempt"], "candidate_object": names["candidate"],
+            "site_acceptance": {"schema": 1, "state": "site-canary-passed", "payload_sha256": "1" * 64,
+                "checks": {"actual_ha": True, "browser": True}, "evidence_sha256": "3" * 64, "receipt_sha256": "4" * 64},
+            "qualification": {"status": "published", "conclusion": "success", "public": copy.deepcopy(context),
+                "release_tag": context["release_tag"],
+                "source_run": {"conclusion": "success", "id": "73", "attempt": "2", "latest_attempt": "2"},
+                "closed_build_run": {"conclusion": "success", "id": "73", "attempt": "2", "latest_attempt": "2"}}}
+        return accepted
+
+    def test_stable_uses_exact_original_rc_locator_and_retained_checks(self):
+        identifier, names = self.configure(action="validate")
+        self.args.closed_request = identifier
+        accepted = self.accepted(names)
+        # The current promotion run differs from the original RC run in context.
+        self.run["id"] = 91; self.run["run_attempt"] = 4
+        os.environ.update(GITHUB_RUN_ID="91", GITHUB_RUN_ATTEMPT="4")
+        import release_control
+        gh = release_control.GitHub(build.REPOSITORY)
+        prior_api, prior_pages = gh.api, gh.pages
+        gh.api = lambda path: copy.deepcopy(self.run) if path == "actions/runs/91" else prior_api(path)
+        gh.pages = lambda path, key: copy.deepcopy(self.jobs) if path == "actions/runs/91/attempts/4/jobs" else prior_pages(path, key)
+        wire = crypto.seal(crypto.canonical(accepted), self.f.ci_encrypt, self.f.operator_sign, purpose="acceptance")
+        self.read.side_effect = [wire, self.f.candidate]
+        with patch.object(build, "validate_accepted_build") as retained:
+            self.assertEqual(build.execute(self.args, self.root, release_executor=worker.execute_release), "CLOSED_ACCEPTED_BYTES_VALIDATED")
+        self.assertEqual(retained.call_count, 2)
+        self.assertEqual(self.read.call_args_list[0].kwargs, {"suffix": names["acceptance"], "maximum": 8 * 1024**2})
+        self.assertEqual(self.read.call_args_list[1].kwargs, {"suffix": names["candidate"]})
+        self.builder.assert_not_called(); self.assertEqual(self.f.calls, [])
+
+    def test_stable_rejects_foreign_record_and_candidate_bytes(self):
+        identifier, names = self.configure(action="validate")
+        self.args.closed_request = identifier
+        accepted = self.accepted(names)
+        for field, value in (("request_id", "foreign"), ("build_run_attempt", "3"),
+                             ("build_source_sha", "b" * 40), ("candidate_object", "foreign/73-2.candidate.json")):
+            other = {**accepted, field: value}
+            self.read.side_effect = [crypto.seal(crypto.canonical(other), self.f.ci_encrypt, self.f.operator_sign, purpose="acceptance")]
+            self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        self.read.side_effect = [crypto.seal(crypto.canonical(accepted), self.f.ci_encrypt, self.f.operator_sign, purpose="acceptance"), b"different"]
+        with patch.object(build, "validate_accepted_build"):
+            self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        self.assertEqual(self.f.calls, [])
+
+    def test_stable_requires_exact_successful_resolver_before_private_read(self):
+        self.configure(action="validate")
+        original = copy.deepcopy(self.jobs)
+        for field, value in (("conclusion", "skipped"), ("status", "in_progress"), ("head_sha", "b" * 40)):
+            self.jobs[-1][field] = value
+            self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+            self.jobs[:] = copy.deepcopy(original)
+        self.jobs.append(copy.deepcopy(self.jobs[-1]))
+        self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        self.read.assert_not_called()
+
+    def test_stable_rechecks_retained_run_after_candidate_read(self):
+        identifier, names = self.configure(action="validate")
+        self.args.closed_request = identifier
+        accepted = self.accepted(names)
+        self.read.side_effect = [crypto.seal(crypto.canonical(accepted), self.f.ci_encrypt,
+                                            self.f.operator_sign, purpose="acceptance"), self.f.candidate]
+        with patch.object(build, "validate_accepted_build", side_effect=[None, build.Rejected()]):
+            self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
+        self.assertEqual(self.read.call_count, 2)
+        self.assertEqual(self.f.calls, [])
+
+    def test_workflow_anchor_and_existing_envelope_limits(self):
+        source = (Path(__file__).parents[1] / ".github/workflows/closed-build.yml").read_text()
+        self.assertIn("CLOSED_RELEASE_LEDGER_ANCHOR: ${{ vars.CLOSED_RELEASE_LEDGER_ANCHOR }}", source)
+        self.assertIn("timeout-minutes: 25", source)
+        self.assertEqual(worker.release_transport.MAX_CONTROL_BYTES, 8192)
+        self.assertEqual(worker.release_transport.MAX_INPUT_BYTES, 16384)
 
 
 if __name__ == "__main__":

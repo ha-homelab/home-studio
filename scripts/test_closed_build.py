@@ -26,6 +26,7 @@ import closed_build as build
 import closed_envelope as envelope
 import release_control
 import closed_synthetic
+import closed_release_worker as release_worker
 
 MARKER = "FICTIONAL_CLOSED_CANARY_NEVER_PUBLIC_93f8"
 
@@ -609,6 +610,13 @@ class BoundaryTests(unittest.TestCase):
         worker_sign, _, _, deploy_encrypt = keys()
         public, accepted = self.accepted_fixture()
         public = copy.deepcopy(public)
+        public.update(repository_id=build.REPOSITORY_ID, channel="rc", mode="published")
+        request = release_worker.release_request_id(build.REPOSITORY_ID, "10", "1", "rc")
+        names = release_worker.object_names(request, public)
+        accepted.update(public=public, request_id=request, build_run_id="10", build_run_attempt="1",
+                        build_source_sha=public["source_sha"], candidate_object=names["candidate"])
+        accepted["qualification"]["public"] = public
+        accepted["qualification"]["closed_build_run"].update(id="10", attempt="1", latest_attempt="1")
         payload, installer = b"accepted package fixture", b"trusted installer fixture"
         accepted.update(payload_sha256=envelope.digest(payload), payload_size=len(payload),
                         installer_sha256=envelope.digest(installer), installer_size=len(installer))
@@ -624,19 +632,24 @@ class BoundaryTests(unittest.TestCase):
         accepted["candidate_sha256"] = envelope.digest(candidate_wire)
         repository = {"full_name": build.REPOSITORY, "id": int(build.REPOSITORY_ID),
                       "owner": {"id": int(build.OWNER_ID)}}
-        run = {"id": 20, "run_attempt": 2, "repository": repository, "head_repository": repository,
+        run = {"id": 10, "run_attempt": 1, "repository": repository, "head_repository": repository,
                "head_sha": accepted["build_source_sha"], "path": build.WORKFLOW, "head_branch": "main",
                "event": "workflow_dispatch", "status": "completed", "conclusion": "success"}
         environment = {"GITHUB_REPOSITORY": build.REPOSITORY, "GITHUB_REPOSITORY_ID": build.REPOSITORY_ID,
                        "GITHUB_REPOSITORY_OWNER_ID": build.OWNER_ID, "GITHUB_REF": "refs/heads/main",
                        "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_WORKFLOW_REF": build.REPOSITORY + "/" + build.WORKFLOW + "@refs/heads/main",
                        "RUNNER_ENVIRONMENT": "github-hosted", "GITHUB_RUN_ID": "30", "GITHUB_RUN_ATTEMPT": "1",
-                       "GITHUB_SHA": "9" * 40, "CLOSED_ACCEPTANCE_READ_URL": "https://storage.invalid/acceptance",
+                       "GITHUB_SHA": "9" * 40, "CLOSED_ACCEPTANCE_READ_URL": "https://storage.invalid/acceptance/",
                        "CLOSED_OUTPUT_READ_URL": "https://storage.invalid/output/",
-                       "CLOSED_INPUT_READ_URL": "https://storage.invalid/must-not-read-input",
+                       "CLOSED_INPUT_READ_URL": "https://storage.invalid/must-not-read-input/",
                        "CLOSED_OUTPUT_WRITE_URL": "https://storage.invalid/must-not-write/",
                        "CLOSED_INPUT_DECRYPT_KEY": ci_decrypt, "CLOSED_INPUT_VERIFY_KEY": operator_verify,
                        "CLOSED_OUTPUT_SIGN_KEY": worker_sign, "CLOSED_OUTPUT_ENCRYPT_KEY": deploy_encrypt}
+        environment["CLOSED_RELEASE_LEDGER_ANCHOR"] = json.dumps({"schema": 1,
+            "kind": "closed-release-ledger-anchor", "ledger": {"ledger_id": "fixture", "batch_id": "batch",
+                "scope_fingerprint": "a" * 64, "bucket_fingerprint": "b" * 64},
+            "capability_sha256": {name: envelope.digest(environment["CLOSED_" + name.upper() + "_URL"].encode())
+                                  for name in release_worker.CAPABILITIES}})
         for failure in (None, "candidate-digest", "candidate-signer", "acceptance-signer", "public-source", "run-attempt", "run-source"):
             selected_accepted, selected_run = copy.deepcopy(accepted), copy.deepcopy(run)
             selected_candidate, signer = candidate_wire, operator_sign
@@ -657,7 +670,7 @@ class BoundaryTests(unittest.TestCase):
             reads = []
             def transport(url, **kwargs):
                 reads.append((url, kwargs))
-                if url == environment["CLOSED_ACCEPTANCE_READ_URL"] and not kwargs:
+                if url == environment["CLOSED_ACCEPTANCE_READ_URL"] and kwargs == {"suffix": names["acceptance"], "maximum": 8 * 1024**2}:
                     return acceptance_wire
                 if url == environment["CLOSED_OUTPUT_READ_URL"] and kwargs == {"suffix": accepted["candidate_object"]}:
                     return selected_candidate
@@ -666,6 +679,7 @@ class BoundaryTests(unittest.TestCase):
                 root = Path(directory)
                 (root / "prepared.json").write_bytes(envelope.canonical(build.policy()))
                 with patch.dict(os.environ, environment, clear=True), \
+                     patch.object(release_worker, "_current_execution", return_value={"run_id": "30"}), \
                      patch.object(build, "public_inputs", return_value=(public, root)), \
                      patch.object(build, "transport", side_effect=transport), \
                      patch.object(release_control.GitHub, "api", return_value=selected_run) as api, \
@@ -674,18 +688,20 @@ class BoundaryTests(unittest.TestCase):
                      patch.object(build, "upload_candidate") as upload, \
                      patch.object(build, "seal") as seal, \
                      contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
-                    result = build.main(["--action", "validate", "--closed-request", "test", "--prepared-root", str(root)])
+                    result = release_worker.main(["--action", "validate", "--closed-request", request,
+                                         "--release-tag", public["release_tag"], "--prepared-root", str(root)])
                 self.assertEqual(result, int(failure is not None))
                 self.assertEqual(out.getvalue(), ("CLOSED_BUILD_REJECTED" if failure else "CLOSED_ACCEPTED_BYTES_VALIDATED") + "\n")
                 self.assertEqual(err.getvalue(), "")
-                expected_reads = [(environment["CLOSED_ACCEPTANCE_READ_URL"], {})]
+                expected_reads = [(environment["CLOSED_ACCEPTANCE_READ_URL"], {"suffix": names["acceptance"], "maximum": 8 * 1024**2})]
                 if failure in (None, "candidate-digest", "candidate-signer"):
                     expected_reads.append((environment["CLOSED_OUTPUT_READ_URL"], {"suffix": accepted["candidate_object"]}))
                 self.assertEqual(reads, expected_reads)
                 if failure in ("acceptance-signer", "public-source"):
                     api.assert_not_called()
                 else:
-                    api.assert_called_once_with("actions/runs/20")
+                    self.assertEqual(api.call_count, 2 if failure is None else 1)
+                    api.assert_called_with("actions/runs/10")
                 for operation in (worker, input_check, upload, seal):
                     operation.assert_not_called()
 
@@ -908,7 +924,8 @@ class BoundaryTests(unittest.TestCase):
                                 ("validate", "CLOSED_ACCEPTED_BYTES_VALIDATED")):
             for exception in (None, RuntimeError, KeyboardInterrupt, SystemExit):
                 directories = []
-                def operation(args, temporary):
+                def operation(args, temporary, *, release_executor=None):
+                    self.assertIsNone(release_executor)
                     directories.append(temporary)
                     (temporary / "private.log").write_text(MARKER)
                     if exception is not None:

@@ -29,7 +29,7 @@ import urllib.request
 import uuid
 import zipfile
 
-from closed_envelope import canonical, decode_json, digest, open_envelope, seal, verify_envelope, b64, unb64, MAX_ENVELOPE
+from closed_envelope import canonical, decode_json, digest, open_envelope, seal, b64, MAX_ENVELOPE
 import closed_upload_control as upload_control
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -679,28 +679,18 @@ def build_release_candidate(args, temporary, *, configured, context, public, inp
     return envelope
 
 
-def execute(args, temporary):
-    # Normal releases stay blocked before any private read until their manual,
-    # push and scheduled coordinators support fresh upload admission (#97).
-    if args.action == "build":
-        raise UploadAdmissionUnavailable()
+def execute(args, temporary, *, release_executor=None):
+    if args.action in {"build", "validate"}:
+        # No default ledger or input-derived authority. An unconfigured worker
+        # still refuses before environment validation, public or private I/O.
+        if not callable(release_executor) or not os.environ.get("CLOSED_RELEASE_LEDGER_ANCHOR"):
+            raise UploadAdmissionUnavailable()
+        return release_executor(args, temporary)
     gate_environment(os.environ)
     require(not args.closed_request or REQUEST.fullmatch(args.closed_request) is not None)
     configured = policy()
     require(decode_json(regular(args.prepared_root / "prepared.json")) == configured)
     context, public = public_inputs(args, temporary)
-    if args.action == "validate":
-        # Accepted records are issued by the deployment client after actual publication.
-        accepted = decode_json(open_envelope(transport(os.environ["CLOSED_ACCEPTANCE_READ_URL"]),
-            os.environ["CLOSED_INPUT_DECRYPT_KEY"], os.environ["CLOSED_INPUT_VERIFY_KEY"], purpose="acceptance"))
-        validate_acceptance(accepted, context, args.closed_request)
-        validate_accepted_build(accepted)
-        encrypted = transport(os.environ["CLOSED_OUTPUT_READ_URL"], suffix=accepted["candidate_object"])
-        require(digest(encrypted) == accepted["candidate_sha256"])
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-        public_signer = Ed25519PrivateKey.from_private_bytes(unb64(os.environ["CLOSED_OUTPUT_SIGN_KEY"], 32)).public_key()
-        verify_envelope(encrypted, b64(public_signer.public_bytes_raw()), purpose="candidate")
-        return "CLOSED_ACCEPTED_BYTES_VALIDATED"
     encrypted = transport(os.environ["CLOSED_INPUT_READ_URL"])
     envelope = build_release_candidate(args, temporary, configured=configured, context=context,
                                        public=public, input_wire=encrypted)
@@ -760,7 +750,7 @@ def validate_accepted_build(accepted):
         accepted["build_source_sha"], int(accepted["build_run_attempt"]), completed=True, gate=False)
 
 
-def main(argv=None):
+def main(argv=None, *, release_executor=None):
     class QuietParser(argparse.ArgumentParser):
         def error(self, message):
             raise Rejected()
@@ -782,7 +772,8 @@ def main(argv=None):
         with tempfile.TemporaryDirectory(prefix="closed-build-", ignore_cleanup_errors=True) as directory:
             temporary = Path(directory)
             try:
-                status = prepare(args, temporary) if args.action == "prepare" else execute(args, temporary)
+                status = prepare(args, temporary) if args.action == "prepare" else execute(
+                    args, temporary, release_executor=release_executor)
                 code = 0
             except UploadAdmissionUnavailable:
                 status = "CLOSED_UPLOAD_ADMISSION_UNAVAILABLE"

@@ -61,6 +61,7 @@ jobs:
       - name: Process closed package
         env:
           GH_TOKEN: ${{ github.token }}
+          CLOSED_RELEASE_LEDGER_ANCHOR: ${{ vars.CLOSED_RELEASE_LEDGER_ANCHOR }}
           CLOSED_ACTION: ${{ inputs.action }}
           CLOSED_REQUEST: ${{ inputs.closed_request }}
           PUBLIC_PLAN: ${{ inputs.release_plan_artifact }}
@@ -75,7 +76,7 @@ jobs:
           CLOSED_OUTPUT_ENCRYPT_KEY: ${{ secrets.CLOSED_OUTPUT_ENCRYPT_KEY }}
           CLOSED_OUTPUT_SIGN_KEY: ${{ secrets.CLOSED_OUTPUT_SIGN_KEY }}
         run: >-
-          python3 scripts/closed_build.py
+          python3 scripts/closed_release_worker.py
           --action "$CLOSED_ACTION"
           --closed-request "$CLOSED_REQUEST"
           --release-plan-artifact "$PUBLIC_PLAN"
