@@ -1,11 +1,11 @@
 # Closed builds in the public release workflow
 
-The current Home Studio worker temporarily rejects normal `action=build` before
-closed I/O while its production capacity coordinator is completed. The workflow
-contract below is unchanged: when closed builds are enabled, that rejection
-blocks normal release publication. Existing-release rebuilds still require a
-fresh signed permit, and stable validation retains its accepted-byte reads.
-See the [worker's current admission limits](closed-build.md#fresh-admission-before-a-closed-rebuild-upload).
+The current Home Studio worker uses the [configured finite v2 route](closed-release-bootstrap.md#configured-production-route-and-stable-lookup)
+for normal `action=build`, and exact original-RC acceptance lookup for stable
+validation. Both refuse before private I/O when the protected ledger anchor is
+absent. Required closed-job failure still blocks publication. Existing-release
+rebuilds retain their separate fresh signed permit. Source support does not
+establish live capacity, install authorization or actual home acceptance.
 
 An application can opt into a reviewed local worker with this release policy:
 
@@ -69,7 +69,9 @@ this extension does not rewrite or retrofit their tags or manifests.
 
 `closed_request` is an optional opaque identifier of at most 80 ASCII letters,
 digits, underscores or hyphens, starting with a letter or digit. Empty stays empty
-in the public graph; the protected worker selects the approved default envelope.
+in the public graph; the normal worker derives the exact authenticated run/attempt/channel
+locator. A supplied normal request must match it. The legacy rebuild route retains
+its existing explicit/default input behavior.
 It is not a URL, path, command, credential or authorization. The worker must verify
 the signed request and exact input/upgrade intent independently.
 
@@ -99,7 +101,8 @@ CLI file selections are limited to regular YAML files in the current repository'
 
 The concrete `action=rebuild` worker also requires a [fresh signed upload permit](closed-build.md#fresh-admission-before-a-closed-rebuild-upload)
 from its local operator before storing a new candidate. Normal `action=build`
-uploads keep their existing behavior pending a separate coordinator migration.
+uploads use the separately configured six-role v2 route; the legacy upload function
+continues to reject them.
 The permit uses the existing eight secrets and closed object prefix; no encrypted
 private bytes are allowed in Actions artifacts.
 

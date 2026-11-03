@@ -61,6 +61,7 @@ jobs:
       - name: Process closed package
         env:
           GH_TOKEN: ${{ github.token }}
+          CLOSED_RELEASE_LEDGER_ANCHOR: ${{ vars.CLOSED_RELEASE_LEDGER_ANCHOR }}
           CLOSED_ACTION: ${{ inputs.action }}
           CLOSED_REQUEST: ${{ inputs.closed_request }}
           PUBLIC_PLAN: ${{ inputs.release_plan_artifact }}

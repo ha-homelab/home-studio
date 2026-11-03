@@ -1,11 +1,12 @@
 # Closed release bootstrap contract
 
-`scripts/closed_release_worker.py` provides an explicit, finite v2 worker path.
-It is **not enabled in release orchestration**. Normal `action=build` remains
-blocked before private input access and independently at the legacy candidate
-upload boundary. Existing rebuild and accepted-byte validation behavior is
-unchanged. Passing its local tests does not authorize a deployment, remove an
-environment protection, or establish live storage capacity.
+`scripts/closed_release_worker.py` provides the finite v2 exchange used by the
+configured `action=build` route. Without the protected ledger anchor described
+below, normal builds and stable validation still refuse before private input
+access. Existing-release rebuilds retain their separate v1 permit route, and
+the legacy upload entry point still rejects normal builds. Local test success
+does not configure the environment, establish live storage capacity, authorize
+a deployment, or satisfy actual home acceptance.
 
 The existing [closed-build contract](closed-build.md) still governs containment,
 public artifact provenance, encrypted envelopes, and final site acceptance.
@@ -62,8 +63,8 @@ verifying those scopes are separate operational work; a URL hash proves neither
 the granted scope nor access rights.
 
 Push binds to `beta`, schedule to `nightly`, and workflow dispatch to `beta`, `rc`,
-or `nightly`. Stable promotion and existing-release rebuilds are outside this v2
-exchange. Execution and full public-context fields must match independently
+or `nightly`. Stable promotion reads the original RC acceptance without a new v2 exchange.
+Existing-release rebuilds retain the separate v1 exchange. Execution and full public-context fields must match independently
 trusted caller expectations, not merely the bootstrap's own assertions.
 
 The bootstrap covers a bounded interval of at least 900 and at most 3600 seconds,
@@ -91,8 +92,8 @@ signing path. It takes no caller-supplied candidate.
 expected, capabilities, journal_path, timeout=60)` is the lower-level transfer
 phase. Its caller must already have established the candidate's provenance. It
 checks the candidate signature/purpose, but cannot infer its decrypted manifest
-from that signature alone. Production integration should use the higher-level
-path.
+from that signature alone. The configured production route shares the contained
+builder with the higher-level path before entering this transfer phase.
 
 `authenticate_input(...)` authenticates the actual encrypted input tar and its
 bootstrap. This path accepts regular USTAR members in exactly one gzip stream;
@@ -136,3 +137,81 @@ transport and container execution are substituted. Live capability scope,
 growth coverage, Docker integration, and complete trigger-by-trigger deployment
 qualification remain operational prerequisites. This module installs no service,
 changes no credentials, and dispatches no workflow.
+
+
+## Configured production route and stable lookup
+
+The existing `closed-build` protected environment must supply
+`CLOSED_RELEASE_LEDGER_ANCHOR` through its environment variables, alongside the
+existing eight secrets. This change does not set that variable or grant access.
+The variable is at most 16 KiB of JSON with this exact schema (placeholders are
+not usable configuration):
+
+```json
+{
+  "schema": 1,
+  "kind": "closed-release-ledger-anchor",
+  "ledger": {
+    "ledger_id": "REVIEWED_OPAQUE_ID",
+    "batch_id": "REVIEWED_OPAQUE_ID",
+    "scope_fingerprint": "SHA256",
+    "bucket_fingerprint": "SHA256"
+  },
+  "capability_sha256": {
+    "input_read": "SHA256",
+    "output_read": "SHA256",
+    "output_write": "SHA256",
+    "acceptance_read": "SHA256"
+  }
+}
+```
+
+The four hashes must match the exact corresponding secret prefix URLs. Missing,
+malformed or mismatched configuration refuses before private I/O. This anchor
+must come from an independently reviewed ledger and capability configuration;
+neither its presence nor a signed bootstrap establishes actual IAM scope,
+capacity, future growth, an inventory watermark, or authorization to install.
+Those remain the private operator's independently verified prerequisites.
+
+The worker verifies the current repository and owner numeric IDs, public
+repository, main ref, source checkout, trusted event and workflow, latest run
+attempt, successful Release gate for a new build, and the one currently executing closed job
+using GitHub API results. It also uses the existing complete public plan,
+artifact, receipt and source-policy checks. Dispatch channel is checked against
+the actual event payload. It then derives a request ID using
+`release_request_id(repository_id, run_id, run_attempt, channel)`: `release-`
+followed by SHA-256 of canonical JSON
+`["closed-release-request-v2", repository_id, run_id, run_attempt, channel]`.
+All three numeric identifiers are decimal strings. The private operator must use
+this same public function with independently authenticated run data before it
+prepares the six-role bootstrap. A supplied `closed_request` must equal this ID;
+an empty input selects this ID, never a mutable default object.
+
+Only the derived input suffix is read. The signed bootstrap must equal the
+independent public execution/context, protected ledger and capability hashes,
+worker image and policy. The original grant and fresh GitHub identity are checked
+after this GET immediately before the contained build, again before entering
+the existing intent/permit/candidate/result exchange, and before each PUT.
+Identity-read time also consumes the remaining original permit time. Build and GET time consume
+the same original grant; expiry does not cause a new read, reseal, retry or write.
+The existing input transport has a 256 MiB body cap and a 60-second **socket**
+timeout, not a whole-download timer. The unchanged 25-minute Actions job bounds
+the complete operation. The control transport remains 8 KiB with 16 KiB IPC;
+large input bytes are never sent through its control IPC.
+
+For stable promotion, the existing resolver first verifies the selected exact RC
+release, retained successful/latest source attempt and complete immutable public
+assets. The current stable run intentionally skips its build/Release gate; the
+worker instead requires its exact successful `closed_stable_resolve` job and
+verified resolver artifact. The worker derives the locator from that **original RC** run, attempt
+and `rc` channel, not the current stable promotion run. It reads only that
+acceptance suffix (8 MiB cap), verifies its signature, source, request, candidate
+object, site acceptance and publication proof, then checks the exact candidate
+hash and signature. The original successful build/latest attempt and current
+promotion identity are checked again after transfer. A missing historical
+acceptance or a non-deterministic legacy request has no fallback scan or mutable
+pointer; it remains unavailable for this route.
+
+These are executable configured caller paths, not evidence of a live grant or
+home acceptance. No environment value, credential, retention rule or household
+state is changed by this source update.

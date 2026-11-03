@@ -1,7 +1,8 @@
-"""Finite v2 worker exchange; deliberately not wired to production build actions.
+"""Finite v2 worker exchange and configured normal-release entry point.
 
-The caller supplies independently trusted execution/context/routing anchors and
-an already encrypted candidate. Bootstrap signatures bind assertions, not proof
+Explicit transfer callers supply trusted anchors and an encrypted candidate;
+the configured production route obtains those anchors and builds the candidate.
+Bootstrap signatures bind assertions, not proof
 of OCI capacity or capability scope: the private coordinator must establish both.
 The POSIX attempt journal requires an owner-private, trusted local directory.
 Every existing journal rejects re-entry, including a crash before the first PUT.
@@ -153,6 +154,141 @@ def object_names(request_id, execution):
                  and int(value) <= 2**63 - 1)
     prefix = request_id + "/" + execution["run_id"] + "-" + execution["run_attempt"]
     return {role: prefix + "." + SUFFIXES[role] + ".json" for role in ROLES}
+
+
+@_boundary
+def release_request_id(repository_id, run_id, run_attempt, channel):
+    """Shared locator derived only from independently authenticated public identity."""
+    for value in (repository_id, run_id, run_attempt):
+        _require(type(value) is str and re.fullmatch(r"[1-9][0-9]{0,19}", value)
+                 and int(value) <= 2**63 - 1)
+    _require(channel in {"beta", "rc", "nightly"})
+    return "release-" + _digest(["closed-release-request-v2", repository_id,
+                                  run_id, run_attempt, channel])
+
+
+def _configured_anchor(environment, capabilities):
+    raw = environment.get("CLOSED_RELEASE_LEDGER_ANCHOR")
+    _require(type(raw) is str and 0 < len(raw.encode("utf-8")) <= 16384)
+    value = _freeze(crypto.decode_json(raw.encode("utf-8")))
+    _fields(value, ("schema", "kind", "ledger", "capability_sha256"))
+    _require(type(value["schema"]) is int and value["schema"] == 1
+             and value["kind"] == "closed-release-ledger-anchor")
+    _fields(value["ledger"], ("ledger_id", "batch_id", "scope_fingerprint", "bucket_fingerprint"))
+    for name in ("ledger_id", "batch_id"):
+        _id(value["ledger"][name])
+    for name in ("scope_fingerprint", "bucket_fingerprint"):
+        _sha(value["ledger"][name])
+    _fields(value["capability_sha256"], CAPABILITIES)
+    for name in CAPABILITIES:
+        _prefix(capabilities[name])
+        _require(value["capability_sha256"][name] == crypto.digest(capabilities[name].encode("ascii")))
+    return value
+
+
+def _current_execution(action, channel=None):
+    """Fresh API run/job identity; environment values alone are not authority."""
+    import release_control
+    transport.gate_environment(os.environ)
+    gh = release_control.GitHub(transport.REPOSITORY)
+    info = release_control.repository_info(gh)
+    _require(str(info["id"]) == transport.REPOSITORY_ID
+             and str(info["owner"]["id"]) == transport.OWNER_ID
+             and info["default_branch"] == "main" and info["private"] is False)
+    run_id, attempt = os.environ["GITHUB_RUN_ID"], os.environ["GITHUB_RUN_ATTEMPT"]
+    run = gh.api("actions/runs/" + run_id)
+    _require(str(run["id"]) == run_id and run.get("conclusion") is None)
+    for repository in (run["repository"], run["head_repository"]):
+        _require(str(repository["id"]) == transport.REPOSITORY_ID
+                 and str(repository["owner"]["id"]) == transport.OWNER_ID)
+    # Stable reuses an RC and intentionally skips this run's build/Release gate.
+    # Its completed resolver supplies independently verified retained RC proof.
+    release_control.validate_run(gh, run, info, os.environ["GITHUB_SHA"], int(attempt),
+                                 completed=False, gate=action == "build")
+    _require(run["event"] == os.environ["GITHUB_EVENT_NAME"])
+    job_name = {"build": "closed_build / package", "validate": "closed_stable_validate / package"}[action]
+    jobs = gh.pages(f"actions/runs/{run_id}/attempts/{attempt}/jobs", "jobs")
+    selected = [job for job in jobs if job.get("name") == job_name]
+    _require(len(selected) == 1 and selected[0].get("status") == "in_progress"
+             and selected[0].get("conclusion") is None
+             and selected[0].get("head_sha") == os.environ["GITHUB_SHA"])
+    if action == "validate":
+        resolvers = [job for job in jobs if job.get("name") == "closed_stable_resolve"]
+        _require(len(resolvers) == 1 and resolvers[0].get("status") == "completed"
+                 and resolvers[0].get("conclusion") == "success"
+                 and resolvers[0].get("head_sha") == os.environ["GITHUB_SHA"])
+    if channel is not None:
+        release_control.check_execution(gh, int(run_id), channel, info, run)
+    return {"repository": transport.REPOSITORY, "repository_id": transport.REPOSITORY_ID,
+        "repository_owner_id": transport.OWNER_ID, "workflow_ref": os.environ["GITHUB_WORKFLOW_REF"],
+        "run_id": run_id, "run_attempt": attempt, "source_sha": os.environ["GITHUB_SHA"],
+        "event": run["event"], "operation": "release", "worker_job": job_name}
+
+
+@_boundary
+def execute_release(args, temporary):
+    """Production route: public authority first, one exact private input, no retries.
+
+    Input GET retains the existing 60s socket limit and bounded body. The fixed
+    25-minute Actions job is the whole-operation bound, not a 60s transfer timer.
+    Fresh identity and signed grant checks after GET precede build and writes.
+    """
+    _require(args.action in {"build", "validate"})
+    now = _elapsed_clock()
+    capabilities = {name: os.environ["CLOSED_" + name.upper() + "_URL"] for name in CAPABILITIES}
+    anchor = _configured_anchor(os.environ, capabilities)
+    execution = _current_execution(args.action)
+    configured = transport.policy()
+    _require(crypto.decode_json(transport.regular(args.prepared_root / "prepared.json")) == configured)
+    context, public = transport.public_inputs(args, temporary)
+    channel = "stable" if args.action == "validate" else context["channel"]
+    _require(_current_execution(args.action, channel) == execution)
+    input_keys = {"recipient_key": os.environ["CLOSED_INPUT_DECRYPT_KEY"],
+                  "verify_key": os.environ["CLOSED_INPUT_VERIFY_KEY"]}
+    output_keys = {"recipient_key": os.environ["CLOSED_OUTPUT_ENCRYPT_KEY"],
+                   "signing_key": os.environ["CLOSED_OUTPUT_SIGN_KEY"]}
+    identifier = release_request_id(context["repository_id"], context["run_id"],
+                                    context["run_attempt"], context["channel"])
+    _require(args.closed_request in ("", identifier))
+    args.closed_request = identifier
+    names = object_names(identifier, context)
+
+    def recheck():
+        _require(_current_execution(args.action, channel) == execution)
+
+    if args.action == "validate":
+        _require(context["mode"] == "published" and context["channel"] == "rc"
+                 and re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*", context["release_tag"])
+                 and context["release_tag"] == args.release_tag)
+        accepted = crypto.decode_json(crypto.open_envelope(transport.transport(
+            capabilities["acceptance_read"], suffix=names["acceptance"], maximum=8 * 1024**2),
+            input_keys["recipient_key"], input_keys["verify_key"], purpose="acceptance"))
+        recheck()
+        transport.validate_acceptance(accepted, context, identifier)
+        _require(accepted["build_run_id"] == context["run_id"]
+                 and accepted["build_run_attempt"] == context["run_attempt"]
+                 and accepted["build_source_sha"] == context["source_sha"]
+                 and accepted["candidate_object"] == names["candidate"])
+        transport.validate_accepted_build(accepted)
+        encrypted = transport.transport(capabilities["output_read"], suffix=names["candidate"])
+        _require(crypto.digest(encrypted) == accepted["candidate_sha256"])
+        public_signer = Ed25519PrivateKey.from_private_bytes(_key(output_keys["signing_key"])).public_key()
+        crypto.verify_envelope(encrypted, crypto.b64(public_signer.public_bytes_raw()), purpose="candidate")
+        recheck()
+        transport.validate_accepted_build(accepted)
+        return "CLOSED_ACCEPTED_BYTES_VALIDATED"
+
+    limits = {name: configured["upload_admission"][name] for name in control.MAX_LIMITS}
+    expected = {"request_id": identifier, "execution": execution, "public_context": context,
+        "ledger": anchor["ledger"], "capability_sha256": anchor["capability_sha256"],
+        "input_target_sha256": _target(capabilities["input_read"], names["input"]),
+        "worker": {"image": configured["worker_image"], "policy_sha256": _digest(configured)}}
+    input_wire = transport.transport(capabilities["input_read"], suffix=names["input"])
+    _finish_release(args, temporary, configured=configured, context=context, public=public,
+        input_wire=input_wire, input_keys=input_keys, output_keys=output_keys, limits=limits,
+        expected=expected, capabilities=capabilities, journal_path=temporary / "release-attempt.jsonl",
+        timeout=60, now=now, recheck=recheck)
+    return "CLOSED_CANDIDATE_STORED"
 
 
 def _clock():
@@ -449,7 +585,7 @@ def upload_release(input_wire, candidate, *, input_keys, output_keys, limits, ex
 
 
 def _upload_release(input_wire, candidate, *, input_keys, output_keys, limits, expected,
-                    capabilities, journal_path, timeout, now):
+                    capabilities, journal_path, timeout, now, before_write=None):
 
     _require(type(timeout) in (int, float) and math.isfinite(timeout) and 0 < timeout <= 60)
     limits, expected, capabilities, input_keys, output_keys = map(
@@ -490,6 +626,9 @@ def _upload_release(input_wire, candidate, *, input_keys, output_keys, limits, e
         def put(role, wire, deadline):
             entry = value["objects"][role]
             _require(type(wire) is bytes and 0 < len(wire) <= entry["maximum_bytes"])
+            if before_write is not None:
+                before_write()
+            fresh(deadline)
             _append(descriptor, path, {"stage": role + "-attempted", "attempt_id": entry["attempt_id"],
                 "ciphertext_sha256": crypto.digest(wire), "bytes": len(wire)})
             result = release_transport.put(capabilities["output_write"], data=wire,
@@ -550,9 +689,8 @@ def build_and_run_release(args, temporary, *, input_wire, input_keys, output_key
                           limits, expected, capabilities, journal_path, timeout=60):
     """Authenticate, build with the existing contained builder, then exchange.
 
-    This explicit callable remains disconnected from production execute(). The
-    real public artifact checks and contained builder are reused, with explicit
-    keys for this exact input/output pair. No caller-supplied candidate enters.
+    This explicit callable and the configured production route share the real
+    contained builder. No caller-supplied candidate enters either path.
     """
     now = _elapsed_clock()
     input_keys, output_keys, limits, expected, capabilities = map(
@@ -575,9 +713,25 @@ def build_and_run_release(args, temporary, *, input_wire, input_keys, output_key
              and crypto.decode_json(transport.regular(args.prepared_root / "prepared.json")) == configured)
     context, public = transport.public_inputs(args, temporary)
     _require(context == expected["public_context"])
+    return _finish_release(args, temporary, configured=configured, context=context, public=public,
+        input_wire=input_wire, input_keys=input_keys, output_keys=output_keys, limits=limits,
+        expected=expected, capabilities=capabilities, journal_path=journal_path,
+        timeout=timeout, now=now, recheck=lambda: None)
+
+
+def _finish_release(args, temporary, *, configured, context, public, input_wire, input_keys,
+                    output_keys, limits, expected, capabilities, journal_path, timeout, now, recheck):
+    bootstrap = authenticate_input(input_wire, input_keys=input_keys, limits=limits,
+                                    expected=expected, capabilities=capabilities)
+    recheck()
+    # API reads and the private GET can consume or exhaust the original grant.
+    # No new timestamp, bootstrap, or attempt is minted after either operation.
+    validate_bootstrap(bootstrap, expected=expected, capabilities=capabilities, limits=limits, now=now())
     args.closed_request = bootstrap["request_id"]
     candidate = transport.build_release_candidate(args, temporary, configured=configured, context=context,
         public=public, input_wire=input_wire, input_keys=input_keys, output_keys=output_keys)
+    recheck()
+    validate_bootstrap(bootstrap, expected=expected, capabilities=capabilities, limits=limits, now=now())
     return _upload_release(input_wire, candidate, input_keys=input_keys, output_keys=output_keys,
         limits=limits, expected=expected, capabilities=capabilities, journal_path=journal_path,
-        timeout=timeout, now=now)
+        timeout=timeout, now=now, before_write=recheck)

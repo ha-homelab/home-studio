@@ -14,13 +14,14 @@ pipeline. Its existing public gate stays unchanged; an enabled closed build must
 succeed before candidate/final publication. Stable promotion validates already
 accepted bytes without rebuilding them.
 
-Normal `action=build` is temporarily blocked before any closed transport or
-worker execution while its capacity coordinator is completed. This applies to
-manual releases, push-triggered beta builds, and scheduled nightlies. With closed
-builds enabled, their required failure blocks publication; passing public PR
-checks does not qualify a new closed release. Existing-release rebuilds still
-require their signed upload permit, and stable validation can read already
-accepted bytes. See [issue #97](https://github.com/ha-homelab/home-studio/issues/97).
+Normal `action=build` uses the [configured six-role route](closed-release-bootstrap.md#configured-production-route-and-stable-lookup).
+Without its protected ledger anchor it refuses before private I/O. Manual,
+push-triggered beta and scheduled nightly releases all keep the same public and
+closed-job gates; passing PR checks does not qualify a closed release. Stable
+validation uses the original RC's exact deterministic acceptance object.
+Existing-release rebuilds retain their separate v1 admission route. Live capacity,
+growth coverage and home acceptance still need independent evidence under
+[issue #97](https://github.com/ha-homelab/home-studio/issues/97).
 
 ## Trust and execution
 
@@ -208,13 +209,14 @@ helper hashes. Retain old request evidence and keys rather than rebinding an
 exported request. Start the coordinator immediately after approving the rebuild;
 browser-only approval without its permit loop makes the rebuild time out.
 
-Normal `action=build` releases return `CLOSED_UPLOAD_ADMISSION_UNAVAILABLE` before resolving
-inputs, reading closed storage, running the worker or uploading anything. The
-upload helper also rejects this action independently. There is no environment
-flag to bypass the stop. Migrating the manual, push/beta and schedule/nightly
-coordinators is tracked in [issue #97](https://github.com/ha-homelab/home-studio/issues/97).
-This status means the reviewed normal-release coordinator must be completed;
-retrying the run or approving its environment again cannot remove the stop.
+Unconfigured normal `action=build` releases return
+`CLOSED_UPLOAD_ADMISSION_UNAVAILABLE` before resolving inputs, reading closed
+storage, running the worker or uploading anything. The legacy upload helper
+also rejects this action independently. Configured normal builds use the
+separate six-role route, never a bypass of that helper. Completing live admission
+and acceptance is tracked in [issue #97](https://github.com/ha-homelab/home-studio/issues/97).
+This status now means the protected normal-route ledger anchor is absent;
+retrying the run or approving its environment again cannot configure that authority.
 `action=validate` continues to verify and reuse accepted bytes without a new
 candidate or diagnostic upload. Retained accepted candidates remain installable under their
 original protocol and acceptance proof.
@@ -238,8 +240,8 @@ transport_put_result(
 
 The helper and `transport(...)` share the HTTP engine. The existing transport
 API still returns bytes, and existing upload call sites are unchanged. This
-capture path is not wired into release orchestration or activated by a workflow;
-normal `action=build` remains blocked.
+capture helper remains separate from the supervised v2 transport used by configured
+normal builds. An absent normal-route anchor still blocks private I/O.
 
 Before any request, the helper bounds the resolved request URL to 8,192 ASCII
 characters, requires immutable payload bytes and checks their
@@ -275,14 +277,14 @@ reconciliation. It must also preserve fresh upload admission. This helper adds
 no receipt object or other remote write beyond its single requested PUT, and its
 offline tests do not establish production storage behavior.
 
-## Inactive v2 admission bindings
+## V2 admission bindings
 
 `scripts/closed_upload_control_v2.py` provides separate, source-only entrypoints
-for bounded intent, permit and result records. No production caller invokes
-them. The active policy and upload call sites are unchanged; normal
-`action=build` still stops before input resolution or closed transport. Existing
-v1 rebuild admission and read-only accepted-candidate validation keep their
-original contracts.
+for bounded intent, permit and result records. The configured production route
+uses these records through the finite worker described in [the bootstrap contract](closed-release-bootstrap.md).
+Normal `action=build` still stops before private I/O when its anchor is missing.
+Existing v1 rebuild admission keeps its original contract; stable validation now
+uses the exact original-RC acceptance locator.
 
 V2 records require schema 2 and their exact v2 record kind. Their envelope
 purposes are `upload-intent-v2`, `upload-permit-v2` and `upload-result-v2`.
@@ -364,10 +366,11 @@ archive safety, exact component and failure-output tests. With a prepared
 public image and an available Docker daemon, set `CLOSED_DOCKER_TEST=1` for
 the real synthetic container success/failure and isolation checks. The public
 package workflow runs both; all fixtures are fictional and use temporary keys.
-Negative tests cover blocked normal builds for all three release events, with
-explicit and default request IDs, and assert that neither candidate nor
-diagnostic transport occurs. The encrypted roundtrip uses the admitted rebuild
-path; it does not bypass the normal-build stop for testing.
+Negative tests cover unconfigured normal builds for all three release events, with
+explicit and empty request IDs, and assert that no private transport occurs.
+Configured-route tests use real signed bootstrap/control envelopes and verify
+exact lookup, current GitHub identity, expiry before build/write, and stable RC reuse.
+The existing encrypted rebuild roundtrip continues to test the separate v1 path.
 
 For local Colima checks on macOS, select the intended daemon with an explicit
 `DOCKER_HOST` socket and set `TMPDIR` to a directory under its shared `/Users`

@@ -680,27 +680,18 @@ def build_release_candidate(args, temporary, *, configured, context, public, inp
 
 
 def execute(args, temporary):
-    # Normal releases stay blocked before any private read until their manual,
-    # push and scheduled coordinators support fresh upload admission (#97).
-    if args.action == "build":
-        raise UploadAdmissionUnavailable()
+    if args.action in {"build", "validate"}:
+        # No default ledger or input-derived authority. An unconfigured worker
+        # still refuses before environment validation, public or private I/O.
+        if not os.environ.get("CLOSED_RELEASE_LEDGER_ANCHOR"):
+            raise UploadAdmissionUnavailable()
+        import closed_release_worker
+        return closed_release_worker.execute_release(args, temporary)
     gate_environment(os.environ)
     require(not args.closed_request or REQUEST.fullmatch(args.closed_request) is not None)
     configured = policy()
     require(decode_json(regular(args.prepared_root / "prepared.json")) == configured)
     context, public = public_inputs(args, temporary)
-    if args.action == "validate":
-        # Accepted records are issued by the deployment client after actual publication.
-        accepted = decode_json(open_envelope(transport(os.environ["CLOSED_ACCEPTANCE_READ_URL"]),
-            os.environ["CLOSED_INPUT_DECRYPT_KEY"], os.environ["CLOSED_INPUT_VERIFY_KEY"], purpose="acceptance"))
-        validate_acceptance(accepted, context, args.closed_request)
-        validate_accepted_build(accepted)
-        encrypted = transport(os.environ["CLOSED_OUTPUT_READ_URL"], suffix=accepted["candidate_object"])
-        require(digest(encrypted) == accepted["candidate_sha256"])
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-        public_signer = Ed25519PrivateKey.from_private_bytes(unb64(os.environ["CLOSED_OUTPUT_SIGN_KEY"], 32)).public_key()
-        verify_envelope(encrypted, b64(public_signer.public_bytes_raw()), purpose="candidate")
-        return "CLOSED_ACCEPTED_BYTES_VALIDATED"
     encrypted = transport(os.environ["CLOSED_INPUT_READ_URL"])
     envelope = build_release_candidate(args, temporary, configured=configured, context=context,
                                        public=public, input_wire=encrypted)
