@@ -29,7 +29,7 @@ import urllib.request
 import uuid
 import zipfile
 
-from closed_envelope import canonical, decode_json, digest, open_envelope, seal, verify_envelope, b64, unb64, MAX_ENVELOPE
+from closed_envelope import canonical, decode_json, digest, open_envelope, seal, b64, MAX_ENVELOPE
 import closed_upload_control as upload_control
 
 ROOT = Path(__file__).resolve().parents[1]
