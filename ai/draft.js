@@ -3,6 +3,7 @@ import { CATALOG, PATTERNS, getCatalogModel, getCatalogStyle, supportsFurnitureP
 import { LIMITS, clone, distance, nextId, outlineRoom, pointInPolygon, validateProject } from '../planner/model.js';
 import { createSite, nextSiteId, SITE_KINDS, SITE_LIMITS, validateSite } from '../planner/site-model.js';
 import { parseDraftJSON } from './json.js';
+import { createDocumentation, measurementGeometry } from '../planner/documentation-model.js';
 
 export { parseDraftJSON } from './json.js';
 const EPS = 1e-8;
@@ -283,6 +284,10 @@ export function prepareDraft(project, context, rawDraft, { selectedCandidateKeys
   }
   for (const { key: candidateKey, item } of mappedItems) if (selected.has(candidateKey)) {
     const added = { id: nextId(floor, 'item'), ...item }; floor.items.push(added); additions.push(added);
+    const documentation = merged.documentation ??= createDocumentation();
+    const ref = { floor_id: floor.id, target_type: 'item', target_id: added.id };
+    // Provider explanations stay in transient review candidates, not saved notes.
+    documentation.measurements.push({ ...ref, status: 'estimated', note: '', geometry: measurementGeometry(merged, ref) });
   }
   validateProject(merged); serializeProject(merged);
   for (const item of additions) {

@@ -35,6 +35,7 @@ else:
     from material_textures import validate_material_textures, material_uv
 from .furniture import build_furniture_asset, validate_furniture_appearance, supports_curtain, MODELS
 from .site_model import validate_site
+from .documentation_model import validate_documentation
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "dist" / "planner-project"
@@ -187,7 +188,7 @@ def rooms_overlap(a, b):
 
 def validate_project(project, *, complete=True):
     """Validate completely and return a detached copy; never write partial output."""
-    fields(project, {"schema_version", "title", "floors"}, "project", {"id", "site"})
+    fields(project, {"schema_version", "title", "floors"}, "project", {"id", "site", "documentation"})
     if "site" in project:
         try:
             validate_site(project["site"])
@@ -321,6 +322,11 @@ def validate_project(project, *, complete=True):
                     fail(ip + ".curtain.opening_id", "choose an existing window on this floor")
                 if entity and not entity.startswith("cover."):
                     fail(ip + ".entity_id", "a bound curtain requires a cover entity or an empty entity ID")
+    if "documentation" in project:
+        try:
+            validate_documentation(project["documentation"], project)
+        except ValueError as error:
+            fail("project.documentation", str(error))
     return copy.deepcopy(project)
 
 

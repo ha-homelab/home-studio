@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { CATALOG } from '../planner/furniture.js';
 import { blankProject, clone, demoProject, newFloor, validateProject } from '../planner/model.js';
 import { createDraftContext, draftSchema, footprintInsideRoom, itemFootprint, parseDraftJSON, prepareDraft, serializeProject } from '../ai/draft.js';
+import { createDocumentation, measurementState } from '../planner/documentation-model.js';
 
 let checks = 0;
 function test(name, run) {
@@ -39,6 +40,71 @@ test('furnishing is additive, detached, and preserves bindings', () => {
   const detached = prepareDraft(base, context, valid);
   detached.project.floors[0].items.at(-1).position_m.x = 0;
   assert.equal(valid.items[0].position_m.x, 4.8);
+});
+test('provider review text stays ephemeral for furnishing and new-room acceptance', () => {
+  for (const mode of ['furnish_room', 'new_room']) {
+    const project = mode === 'new_room' ? blankProject() : demoProject();
+    const captured = mode === 'new_room'
+      ? createDraftContext(project, { floorId: 'ground', mode, measurements: { width: 4, depth: 4, height: 3 }, origin: { x: 0, z: 0 } })
+      : contextFor(project);
+    const draft = response(captured, {
+      items: [item({ position_m: { x: 2, y: 0, z: 2 }, evidence: 'SYNTHETIC_REVIEW_EVIDENCE' })],
+      assumptions: ['SYNTHETIC_PRIVATE_ASSUMPTION'], needs_measurements: ['SYNTHETIC_PRIVATE_QUESTION'],
+    });
+    const before = serializeProject(project), prepared = prepareDraft(project, captured, draft);
+    const persisted = serializeProject(prepared.project);
+    for (const marker of [draft.items[0].evidence, ...draft.assumptions, ...draft.needs_measurements]) {
+      assert(!persisted.includes(marker), `${mode}: persisted project must exclude provider review text`);
+    }
+    assert.equal(prepared.candidates[0].evidence, draft.items[0].evidence);
+    assert.equal(prepared.candidates[0].item.evidence, draft.items[0].evidence);
+    assert.deepEqual(prepared.assumptions, draft.assumptions);
+    assert.deepEqual(prepared.needsMeasurements, draft.needs_measurements);
+    assert.equal(serializeProject(project), before);
+    const row = prepared.project.documentation.measurements[0];
+    assert.equal(row.note, ''); assert.equal(measurementState(prepared.project, row), 'estimated');
+  }
+});
+test('accepted item dimensions are persisted as estimated authoring metadata only', () => {
+  const added = result.project.floors[0].items.at(-1);
+  const row = result.project.documentation.measurements[0];
+  assert.equal(row.target_id, added.id); assert.equal(row.floor_id, 'ground'); assert.equal(row.target_type, 'item');
+  assert.equal(row.note, ''); assert.equal(measurementState(result.project, row), 'estimated');
+  assert.equal(Object.hasOwn(base, 'documentation'), false);
+  const changed = clone(result.project); changed.floors[0].items.at(-1).dimensions_m.width += .01;
+  assert.equal(measurementState(changed, changed.documentation.measurements[0]), 'stale');
+});
+test('metadata preserves user documentation and only records selected accepted items', () => {
+  const project = demoProject(); project.documentation = createDocumentation(); project.documentation.brief = 'Keep the existing brief.';
+  project.documentation.measurements.push({ floor_id: 'ground', target_type: 'room', target_id: 'living', status: 'unknown', note: 'Keep this user-authored note.', geometry: null });
+  const context = contextFor(project), draft = response(context, { items: [item(), item({ candidate_key: 'candidate_2', name: 'Second chair', position_m: { x: 4.8, y: 0, z: 2.2 }, evidence: 'Second evidence.' })] });
+  const prepared = prepareDraft(project, context, draft, { selectedCandidateKeys: ['candidate_2'] });
+  assert.equal(prepared.project.documentation.brief, project.documentation.brief);
+  assert.equal(prepared.project.documentation.measurements.length, 2);
+  assert.deepEqual(prepared.project.documentation.measurements[0], project.documentation.measurements[0]);
+  assert.equal(prepared.project.documentation.measurements[1].note, '');
+  assert.equal(project.documentation.measurements.length, 1);
+  const none = prepareDraft(project, context, draft, { selectedCandidateKeys: [] });
+  assert.deepEqual(none.project.documentation, project.documentation);
+  assert.equal(JSON.stringify(context).includes(project.documentation.brief), false);
+  const legacyContext = contextFor(base);
+  const empty = prepareDraft(base, legacyContext, response(legacyContext), { selectedCandidateKeys: [] });
+  assert.equal(Object.hasOwn(empty.project, 'documentation'), false);
+});
+test('a full evidence collection rejects acceptance atomically instead of dropping provenance', () => {
+  const project = demoProject(), template = clone(project.floors[0]);
+  project.floors = Array.from({ length: 5 }, (_, floorIndex) => {
+    const floor = clone(template); floor.id = floorIndex ? `floor_${floorIndex}` : 'ground';
+    floor.elevation_m = floorIndex * 3;
+    floor.items = Array.from({ length: floorIndex === 4 ? 204 : 205 }, (_, itemIndex) => ({ ...clone(template.items[0]), id: `item_${itemIndex}` }));
+    return floor;
+  });
+  project.documentation = createDocumentation();
+  for (const floor of project.floors) for (const value of floor.items) project.documentation.measurements.push({ floor_id: floor.id, target_type: 'item', target_id: value.id, status: 'unknown', note: '', geometry: null });
+  validateProject(project);
+  const context = contextFor(project), before = serializeProject(project);
+  assert.throws(() => prepareDraft(project, context, response(context)), /Documentation/);
+  assert.equal(serializeProject(project), before);
 });
 test('context sends only selected geometry and descriptors', () => {
   const serialized = JSON.stringify(context);

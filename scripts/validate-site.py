@@ -55,6 +55,7 @@ SITE_FILES = (
     'planner/ha-bridge.js', 'planner/draft-storage.js', 'planner/inspector-dom.js', 'planner/onboarding.js', 'planner/device-onboarding.js', 'planner/room-transform.js', 'planner/device-onboarding-ui.js', *(f'planner/examples/{name}.js' for name in ('practice', 'decor', 'patterns', 'garage')),
     'planner/help.js', 'planner/help.css', 'planner/help-locales.js', 'planner/language-links.js',
     *(f'planner/locales/{code}.js' for code in LOCALE_CODES),
+    'planner/documentation-model.js', 'planner/drawing-package.js', 'planner/drawing-panel.js', 'planner/drawing-panel.css',
     'planner/model.js', 'planner/site-model.js', 'planner/site-editor.js', 'planner/site-editor.css', 'planner/site-map-underlay.js', 'planner/catalog.js', 'planner/furniture.js', 'planner/guide.html', 'planner/guide.css',
     'planner/publishing.html', 'planner/guide-assets/practice-home.json',
     'planner/guide-assets/01-room.jpg', 'planner/guide-assets/02-rooms.jpg',
@@ -72,6 +73,7 @@ SITE_FILES = (
 # the website landing page and its promotional media out of both editor bundles.
 EDITOR_FILES = tuple(name for name in SITE_FILES if name not in ('index.html', *WEBSITE_MEDIA_FILES))
 REPO_FILES = (
+    'planner/documentation_model.py', 'docs/drawing-package.md', 'scripts/test-drawing-package.mjs', 'scripts/test-documentation-model.mjs', 'scripts/test-drawing-browser.cjs',
     'docs/site-experience.md', 'scripts/test-site-experience.mjs', 'scripts/test-site-experience.cjs',
     'scripts/camera-tour-video-check.cjs', 'scripts/test-camera-tour-video-check.cjs',
     'camera-tour-viewer.js', 'docs/camera-tours.md', 'docs/images/camera-tour-workflow.svg', 'scripts/test-camera-tour.mjs', 'scripts/test-camera-tour-recording.mjs', 'scripts/test-camera-tour-session-contract.mjs', 'scripts/test-camera-tour-browser.cjs', 'scripts/test-camera-tour-native-downloads.cjs', 'scripts/test-camera-tour-hosts.cjs','scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'THIRD_PARTY_NOTICES.md',

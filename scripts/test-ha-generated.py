@@ -135,6 +135,14 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
         await self.project.save(0, copy.deepcopy(self.project.document["project"]))
         return await self.project.publish(1)
 
+    async def test_documented_viewer_inventory_edits_preserve_evidence_and_prune_deleted_items(self):
+        # Both floors deliberately reuse the same item ID: pruning is floor-scoped.
+        await support.check_documented_inventory_edits(self, self.project, self.project.document["project"])
+        reopened = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
+        await reopened.load()
+        self.assertEqual(reopened.document, self.project.document)
+        self.assert_baseline_unchanged()
+
     async def source_site_frame(self, elevations=(None, None), grounds=(-3, 0), embedded_grounds=None):
         """Create a synthetic imported home with independent local floor frames."""
         embedded_grounds = grounds if embedded_grounds is None else embedded_grounds
@@ -497,6 +505,43 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restarted.document["project"], draft)
         self.assertEqual(restarted.document["inventory"], inventory)
         self.assertEqual(restarted.document["published_revision"], 1)
+        self.assert_baseline_unchanged()
+
+    async def test_documentation_roundtrips_store_without_changing_preserved_runtime(self):
+        document = support.with_documentation(self.project.document["project"])
+        await self.project.save(0, document)
+        reopened = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
+        await reopened.load()
+        self.assertEqual(reopened.document["project"], document)
+        saved, files = copy.deepcopy(self.hass.saved), tree_hashes(reopened.root)
+        for mutation in ("reference", "bound"):
+            invalid = copy.deepcopy(document)
+            if mutation == "reference":
+                invalid["documentation"]["ceiling_fixture_ids"][0]["item_id"] = "missing_item"
+            else:
+                invalid["documentation"]["measurements"][0]["note"] = "x" * 1001
+            with self.subTest(mutation=mutation), self.assertRaises(native.NativeError) as error:
+                await reopened.save(1, invalid)
+            self.assertEqual(error.exception.code, "invalid_project")
+            self.assertEqual(self.hass.saved, saved)
+            self.assertEqual(tree_hashes(reopened.root), files)
+            self.assertEqual(reopened.document["revision"], 1)
+            self.assertEqual(reopened.document["project"], document)
+        assets, _, models, _, _ = await reopened.publish(1)
+        self.assertEqual(models, self.models)
+        for floor_id in self.models:
+            for filename in ("index.html", "model-data.json"):
+                content = (assets / floor_id / filename).read_text()
+                for private_text in ("PRIVATE_DOCUMENTATION_", "sensor.private_documentation_reference"):
+                    self.assertNotIn(private_text, content)
+            self.assertEqual(embedded_model(assets / floor_id / "index.html"),
+                             embedded_model(self.component / "assets" / floor_id / "index.html"))
+            self.assertEqual((assets / floor_id / "model-data.json").read_bytes(),
+                             (self.component / "assets" / floor_id / "model-data.json").read_bytes())
+        published = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
+        await published.load()
+        self.assertEqual(published.document["project"], document)
+        self.assertEqual(published.document["published_revision"], 1)
         self.assert_baseline_unchanged()
 
     async def test_new_item_is_added_without_rewriting_existing_runtime_origins(self):

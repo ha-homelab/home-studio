@@ -15,6 +15,7 @@ import { createFloorNavigator } from './floor-navigator.js';
 import { createSiteEditor, buildSitePreview } from './site-editor.js';
 import { getRenderCapacity } from './render-capacity.js';
 import { formatValidationError } from './validation.js';
+import { pruneDocumentation } from './documentation-model.js';
 import { roomBounds, roomMoveGroup, moveRoom, resizeRoom } from './room-transform.js';
 import { t, LOCALES, initI18n, setLocale, getLocale, onLocaleChange, translateStatic } from './i18n.js';
 
@@ -429,7 +430,9 @@ function transact(change, message = () => t('Project updated.'), { fit = false }
   if (previewEdit) finishPreviewEdit(null, true);
   const draft = clone(project), priorSelection = selection && { ...selection };
   try {
-    change(draft, draft.floors.find(f => f.id === activeFloorId) || draft.floors[0]); validateProject(draft); validateSourcePolicy(draft); serializeProject(draft);
+    change(draft, draft.floors.find(f => f.id === activeFloorId) || draft.floors[0]);
+    if (draft.documentation) draft.documentation = pruneDocumentation(draft);
+    validateProject(draft); validateSourcePolicy(draft); serializeProject(draft);
     if (committingField) { committingField.inspectorDraft = false; committingField.removeAttribute('aria-invalid'); }
     historyPush(project); project = draft; previewDirty = true;
     if (!project.floors.some(f => f.id === activeFloorId)) activeFloorId = project.floors[0].id;
@@ -1930,6 +1933,13 @@ export const editorBridge = Object.freeze({
     if (!candidatePreview) return;
     candidatePreview = null; previewDirty = true; setView(view); requestCanvasRender();
   },
+  applyDocumentation(documentation, baseRevision) {
+    if (baseRevision !== editorRevision || drag || previewEdit || siteEditor.busy) throw new Error('The drawing changed. Reopen the documentation before saving.');
+    const candidate = clone(project);
+    candidate.documentation = clone(documentation);
+    validateProject(candidate); serializeProject(candidate);
+    return transact(draft => { draft.documentation = candidate.documentation; }, 'Drawing documentation saved. Undo restores the previous version.');
+  },
   applyProject(candidate, baseRevision) {
     if (baseRevision !== editorRevision || drag || siteEditor.busy) throw new Error('The plan or selection changed. Generate a fresh draft.');
     validateProject(candidate); serializeProject(candidate);
@@ -1937,6 +1947,27 @@ export const editorBridge = Object.freeze({
     const next = clone(candidate);
     return transact(draft => { for (const key of Object.keys(draft)) delete draft[key]; Object.assign(draft, next); }, 'AI draft applied. Undo restores your previous plan.', { fit: true });
   },
+});
+
+
+// Documentation is authoring-only. Do not load its renderer or styles until
+// requested, and never export a half-entered inspector value.
+let drawingPanelPromise = null;
+$('drawing-package').addEventListener('click', async () => {
+  if (drag) finishPointer(null, true);
+  if (previewEdit) finishPreviewEdit(null, true);
+  for (const field of document.querySelectorAll('[data-project-field]')) {
+    if (field.inspectorDraft) field.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  if (focusUnfinishedGuideField('Finish the highlighted field before preparing drawings.')) return;
+  const opener = $('drawing-package'); opener.disabled = true;
+  try {
+    drawingPanelPromise ||= import('./drawing-panel.js').then(({ createDrawingPanel }) => createDrawingPanel({ bridge: editorBridge, translate: t }));
+    (await drawingPanelPromise).open();
+  } catch (error) {
+    drawingPanelPromise = null;
+    status(() => t('Could not prepare drawings: {error}', { error: String(error.message || error) }), true);
+  } finally { opener.disabled = false; }
 });
 
 
