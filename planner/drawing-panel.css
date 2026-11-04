@@ -1,5 +1,5 @@
 .drawing-panel{width:min(920px,calc(100% - 32px));max-width:920px;max-height:92vh;max-height:92dvh;padding:24px;color:var(--studio-text,#263737);background:var(--studio-surface,#fff);border:1px solid var(--studio-border,#d9dfda);border-radius:14px;overflow:auto;text-align:start}
-.drawing-panel::backdrop{background:#142a2a88}
+.drawing-panel::backdrop{background:#142a2a88;backdrop-filter:none}
 .drawing-panel[open]{display:flex;flex-direction:column;gap:16px}
 .drawing-panel [hidden]{display:none!important}
 .drawing-header{display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:0;z-index:2;background:var(--studio-surface,#fff);padding-block:8px;border-bottom:1px solid var(--studio-border,#d9dfda)}

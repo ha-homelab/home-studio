@@ -63,9 +63,14 @@ function documentDiagnostics() {
 }
 async function failureDiagnostics(browser, context) {
   const targets = [...new Set([activePage, activeFrame])].filter(Boolean);
+  // Keep this free of layout/style reads: a blocked rendering query is not
+  // sufficient evidence that the document's JavaScript also stopped running.
+  const heartbeats = await Promise.all(targets.map(target => bounded(() => target.evaluate(() => ({
+    at: performance.now(), readyState: document.readyState, visibility: document.visibilityState,
+  })), 500)));
   const documents = await Promise.all(targets.map(target => bounded(() => target.evaluate(documentDiagnostics))));
   const report = { engine, browser: browser?.version(), node: process.version, platform: process.platform,
-    ...diagnostic, pageCount: context?.pages().length, documents };
+    ...diagnostic, pageCount: context?.pages().length, heartbeats, documents };
   console.error('Drawing failure diagnostics:', JSON.stringify(report));
   if (!artifactDir) return;
   fs.mkdirSync(artifactDir, { recursive: true });
@@ -157,6 +162,8 @@ async function exercise(page,frame,native){
   assert.equal(await dialog.locator('tbody tr').count(),3);
   const csv=await readDownload(page,()=>action(dialog,'download-csv').click());
   assert.match(csv,/F-01/);assert.match(csv,/13\.2/);
+  assert.equal(await dialog.evaluate(element=>getComputedStyle(element,'::backdrop').backdropFilter),'none',
+    'The drawing dialog dims the editor without a full-viewport backdrop filter.');
   if(native){
     assert.equal(await frame.evaluate(()=>getComputedStyle(document.querySelector('.drawing-panel')).backgroundColor),'rgb(32, 45, 64)','Native theme applies to the document panel.');
     const dir=process.env.DRAWING_ARTIFACTS;
