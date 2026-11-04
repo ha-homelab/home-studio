@@ -377,8 +377,10 @@ async function run(engine,origin) {
       sample.allFloorsMs=allFloorsMs;save();
       await page.locator('#preview-canvas').scrollIntoViewIfNeeded();
       const preOrbit=await snapshot(),box=await page.locator('#preview-canvas').boundingBox(),orbitStart=Date.now();
-      await input.drag({x:box.x+box.width*.45,y:box.y+box.height*.45},
-        {x:box.x+box.width*.6,y:box.y+box.height*.55});await frames();
+      sample.orbitPhases={...await input.drag({x:box.x+box.width*.45,y:box.y+box.height*.45},
+        {x:box.x+box.width*.6,y:box.y+box.height*.55}),framesMs:null};
+      const orbitFramesStart=Date.now();await frames();
+      sample.orbitPhases.framesMs=Date.now()-orbitFramesStart;
       const orbitMs=Date.now()-orbitStart,afterOrbit=await snapshot();
       sample.orbitMs=orbitMs;save();
       assert.notDeepEqual(afterOrbit.scene.orbit,preOrbit.scene.orbit,'Actual pointer input changes the preview camera');
@@ -477,8 +479,10 @@ async function run(engine,origin) {
       assert.deepEqual(await getProject(),exported,'Graphics restoration preserves the exported project');
       await page.locator('#preview-canvas').scrollIntoViewIfNeeded();
       const recoveredBox=await page.locator('#preview-canvas').boundingBox(),recoveredOrbitStart=Date.now();
-      await input.drag({x:recoveredBox.x+recoveredBox.width*.4,y:recoveredBox.y+recoveredBox.height*.4},
-        {x:recoveredBox.x+recoveredBox.width*.55,y:recoveredBox.y+recoveredBox.height*.5});await frames();
+      recovery.orbitPhases={...await input.drag({x:recoveredBox.x+recoveredBox.width*.4,y:recoveredBox.y+recoveredBox.height*.4},
+        {x:recoveredBox.x+recoveredBox.width*.55,y:recoveredBox.y+recoveredBox.height*.5}),framesMs:null};
+      const recoveredFramesStart=Date.now();await frames();
+      recovery.orbitPhases.framesMs=Date.now()-recoveredFramesStart;
       recovery.orbitMs=Date.now()-recoveredOrbitStart;recovery.afterOrbit=await snapshot();
       recovery.afterOrbit.contexts=await page.evaluate(()=>window.__plannerContextStates());save();
       assert.deepEqual(recovery.afterOrbit.contexts,recovery.contexts,'Orbiting preserves exactly one live replacement context');
