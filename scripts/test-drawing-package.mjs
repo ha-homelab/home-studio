@@ -5,7 +5,6 @@ import { createDocumentation, measurementGeometry } from '../planner/documentati
 
 let passed = 0;
 function test(name, fn) { try { fn(); passed++; } catch (error) { error.message = `${name}: ${error.message}`; throw error; } }
-const copy = value => JSON.parse(JSON.stringify(value));
 function home() {
   return { schema_version: 1, id: 'drawing_fixture', title: 'Measured room', floors: [{ id: 'ground', name: 'Ground', elevation_m: 0, height_m: 2.7,
     rooms: [{ id: 'room', name: 'Room', polygon: [[0, 0], [4, 0], [4, 3], [0, 3]], material: 'floor' }],
