@@ -41,23 +41,49 @@ test('furnishing is additive, detached, and preserves bindings', () => {
   detached.project.floors[0].items.at(-1).position_m.x = 0;
   assert.equal(valid.items[0].position_m.x, 4.8);
 });
-test('accepted item evidence is persisted as estimated authoring metadata only', () => {
+test('provider review text stays ephemeral for furnishing and new-room acceptance', () => {
+  for (const mode of ['furnish_room', 'new_room']) {
+    const project = mode === 'new_room' ? blankProject() : demoProject();
+    const captured = mode === 'new_room'
+      ? createDraftContext(project, { floorId: 'ground', mode, measurements: { width: 4, depth: 4, height: 3 }, origin: { x: 0, z: 0 } })
+      : contextFor(project);
+    const draft = response(captured, {
+      items: [item({ position_m: { x: 2, y: 0, z: 2 }, evidence: 'SYNTHETIC_REVIEW_EVIDENCE' })],
+      assumptions: ['SYNTHETIC_PRIVATE_ASSUMPTION'], needs_measurements: ['SYNTHETIC_PRIVATE_QUESTION'],
+    });
+    const before = serializeProject(project), prepared = prepareDraft(project, captured, draft);
+    const persisted = serializeProject(prepared.project);
+    for (const marker of [draft.items[0].evidence, ...draft.assumptions, ...draft.needs_measurements]) {
+      assert(!persisted.includes(marker), `${mode}: persisted project must exclude provider review text`);
+    }
+    assert.equal(prepared.candidates[0].evidence, draft.items[0].evidence);
+    assert.equal(prepared.candidates[0].item.evidence, draft.items[0].evidence);
+    assert.deepEqual(prepared.assumptions, draft.assumptions);
+    assert.deepEqual(prepared.needsMeasurements, draft.needs_measurements);
+    assert.equal(serializeProject(project), before);
+    const row = prepared.project.documentation.measurements[0];
+    assert.equal(row.note, ''); assert.equal(measurementState(prepared.project, row), 'estimated');
+  }
+});
+test('accepted item dimensions are persisted as estimated authoring metadata only', () => {
   const added = result.project.floors[0].items.at(-1);
   const row = result.project.documentation.measurements[0];
   assert.equal(row.target_id, added.id); assert.equal(row.floor_id, 'ground'); assert.equal(row.target_type, 'item');
-  assert.equal(row.note, valid.items[0].evidence); assert.equal(measurementState(result.project, row), 'estimated');
+  assert.equal(row.note, ''); assert.equal(measurementState(result.project, row), 'estimated');
   assert.equal(Object.hasOwn(base, 'documentation'), false);
   const changed = clone(result.project); changed.floors[0].items.at(-1).dimensions_m.width += .01;
   assert.equal(measurementState(changed, changed.documentation.measurements[0]), 'stale');
 });
 test('metadata preserves user documentation and only records selected accepted items', () => {
   const project = demoProject(); project.documentation = createDocumentation(); project.documentation.brief = 'Keep the existing brief.';
+  project.documentation.measurements.push({ floor_id: 'ground', target_type: 'room', target_id: 'living', status: 'unknown', note: 'Keep this user-authored note.', geometry: null });
   const context = contextFor(project), draft = response(context, { items: [item(), item({ candidate_key: 'candidate_2', name: 'Second chair', position_m: { x: 4.8, y: 0, z: 2.2 }, evidence: 'Second evidence.' })] });
   const prepared = prepareDraft(project, context, draft, { selectedCandidateKeys: ['candidate_2'] });
   assert.equal(prepared.project.documentation.brief, project.documentation.brief);
-  assert.equal(prepared.project.documentation.measurements.length, 1);
-  assert.equal(prepared.project.documentation.measurements[0].note, 'Second evidence.');
-  assert.equal(project.documentation.measurements.length, 0);
+  assert.equal(prepared.project.documentation.measurements.length, 2);
+  assert.deepEqual(prepared.project.documentation.measurements[0], project.documentation.measurements[0]);
+  assert.equal(prepared.project.documentation.measurements[1].note, '');
+  assert.equal(project.documentation.measurements.length, 1);
   const none = prepareDraft(project, context, draft, { selectedCandidateKeys: [] });
   assert.deepEqual(none.project.documentation, project.documentation);
   assert.equal(JSON.stringify(context).includes(project.documentation.brief), false);

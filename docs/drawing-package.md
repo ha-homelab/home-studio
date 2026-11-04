@@ -17,6 +17,10 @@ later changes, the record becomes **Out of date** until you check and explicitly
 record it again. This never resizes the drawing. Photos and estimates are not a
 survey, and importing dimensions does not establish their accuracy.
 
+Accepted suggestions record item dimensions as **Estimated**, with an empty
+measurement note. Provider explanations remain in the temporary review and do
+not become saved project notes. Notes you enter yourself are preserved.
+
 ## 2. Finishes and ceiling fixtures
 
 Choose a room and enter finish codes, specifications, and optional waste

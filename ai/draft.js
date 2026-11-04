@@ -256,7 +256,7 @@ export function prepareDraft(project, context, rawDraft, { selectedCandidateKeys
     if (item.position_m.y + item.dimensions_m.height > floor.height_m + EPS) throw new Error(`${item.name}: top of item is above the ceiling.`);
     if (!footprintInsideRoom(item, room.polygon)) throw new Error(`${item.name}: the complete rotated footprint must be inside the selected room.`);
     candidates.push({ candidate_key: source.candidate_key, kind: 'item', name: source.name, evidence: source.evidence, item: { ...source, rotation_deg: rotation } });
-    return { key: source.candidate_key, item, evidence: source.evidence };
+    return { key: source.candidate_key, item };
   });
   const mappedOpenings = (creating ? draft.openings : []).map(source => {
     fields(source, OPENING_FIELDS, 'Draft opening'); registerKey(source.candidate_key);
@@ -282,11 +282,12 @@ export function prepareDraft(project, context, rawDraft, { selectedCandidateKeys
     if (project.floors.find(value => value.id === floor.id).walls.some(wall => wall.id === opening.wall_id)) warn('A proposed opening uses an existing shared wall; review its effect on the adjacent room.');
     const added = { id: nextId(floor, 'opening'), ...opening }; floor.openings.push(added); addedOpenings.push(added);
   }
-  for (const { key: candidateKey, item, evidence } of mappedItems) if (selected.has(candidateKey)) {
+  for (const { key: candidateKey, item } of mappedItems) if (selected.has(candidateKey)) {
     const added = { id: nextId(floor, 'item'), ...item }; floor.items.push(added); additions.push(added);
     const documentation = merged.documentation ??= createDocumentation();
     const ref = { floor_id: floor.id, target_type: 'item', target_id: added.id };
-    documentation.measurements.push({ ...ref, status: 'estimated', note: evidence, geometry: measurementGeometry(merged, ref) });
+    // Provider explanations stay in transient review candidates, not saved notes.
+    documentation.measurements.push({ ...ref, status: 'estimated', note: '', geometry: measurementGeometry(merged, ref) });
   }
   validateProject(merged); serializeProject(merged);
   for (const item of additions) {
