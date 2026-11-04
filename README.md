@@ -59,6 +59,20 @@ separate from the view your household uses.
 
 The walkthrough was recorded on [v0.10.1-beta.6](https://github.com/ha-homelab/home-studio/releases/tag/v0.10.1-beta.6). This native workflow is included in the 1.0 release line. Install the [latest stable release](https://github.com/ha-homelab/home-studio/releases/latest) through HACS; pre-release versions are optional.
 
+## Prepare drawings and material schedules
+
+Inside **Home Assistant → Home Studio**, choose **Drawings & materials** to
+record your measurements, describe finishes, and select ceiling fixtures. Build a
+coordinated package containing dimensioned floor plans, ceiling plans, wall
+elevations, and room/material schedules from the same saved drawing.
+
+Download vector sheets, CSV schedules, or a printable document. Areas and counts
+come from the drawing geometry; estimates and measurements that need another
+check remain visible. This is optional authoring work: the household 3D view does
+not load the drawing-package interface or export renderer.
+
+[Create your drawing package](docs/drawing-package.md)
+
 ## Make it your home
 
 Draw measured rooms, add doors and windows, furnish them from **206 designs**,

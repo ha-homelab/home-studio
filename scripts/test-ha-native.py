@@ -115,6 +115,7 @@ native = sys.modules["ha_native_test.native"]
 packaging = load_file("ha_native_packaging", ROOT / "scripts/build-home-studio.py")
 sys.path.insert(0, str(ROOT))
 from planner import project as compiler
+from planner.documentation_model import create_documentation, measurement_geometry
 
 
 class Hass:
@@ -154,6 +155,26 @@ class Connection:
 
 def sample():
     return json.loads((ROOT / "planner/example-home.json").read_text(encoding="utf-8"))
+
+
+def with_documentation(project):
+    """Add synthetic private authoring text without changing geometry or bindings."""
+    project = copy.deepcopy(project)
+    floor = project["floors"][0]
+    room, item = floor["rooms"][0], floor["items"][0]
+    documentation = create_documentation()
+    documentation["brief"] = "PRIVATE_DOCUMENTATION_BRIEF sensor.private_documentation_reference"
+    for target_type, target in (("room", room), ("item", item)):
+        ref = dict(floor_id=floor["id"], target_type=target_type, target_id=target["id"])
+        documentation["measurements"].append(dict(
+            **ref, status="estimated", note="PRIVATE_DOCUMENTATION_EVIDENCE",
+            geometry=measurement_geometry(project, ref)))
+    documentation["finishes"].append(dict(floor_id=floor["id"], room_id=room["id"],
+                                          surface="floor", code="F-01",
+                                          specification="PRIVATE_DOCUMENTATION_FINISH", waste_percent=10))
+    documentation["ceiling_fixture_ids"].append(dict(floor_id=floor["id"], item_id=item["id"]))
+    project["documentation"] = documentation
+    return project
 
 
 def budget_floor(identifier="ground", items=()):
@@ -295,6 +316,41 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((loaded_assets, loaded_site, loaded_models, loaded_references), (assets, site, models, references))
         self.assertEqual(restarted.document["inventory"], inventory)
         self.assertTrue(self.hass.executor_calls)
+
+    async def test_documentation_roundtrips_store_without_runtime_leakage(self):
+        original = sample()
+        original["floors"] = [original["floors"][0]]
+        expected_model, expected_svg = compiler.make_floor(original, original["floors"][0], None)
+        document = with_documentation(original)
+        await self.project.save(0, document)
+        reopened = native.NativeProject(self.hass, self.project.root)
+        await reopened.load()
+        self.assertEqual(reopened.document["project"], document)
+        saved = copy.deepcopy(self.hass.saved)
+        for mutation in ("reference", "bound"):
+            invalid = copy.deepcopy(document)
+            if mutation == "reference":
+                invalid["documentation"]["measurements"][0]["target_id"] = "missing_room"
+            else:
+                invalid["documentation"]["brief"] = "x" * 4001
+            with self.subTest(mutation=mutation), self.assertRaises(native.NativeError) as error:
+                await reopened.save(1, invalid)
+            self.assertEqual(error.exception.code, "invalid_project")
+            self.assertEqual(self.hass.saved, saved)
+            self.assertEqual(reopened.document["revision"], 1)
+            self.assertEqual(reopened.document["project"], document)
+        assets, _, models, _, _ = await reopened.publish(1)
+        floor_id = original["floors"][0]["id"]
+        self.assertEqual((assets / floor_id / "plan.svg").read_text(), expected_svg)
+        self.assertEqual(models[floor_id]["meshes"], compiler.runtime_model_data(expected_model)["meshes"])
+        for filename in ("index.html", "model-data.json", "plan.svg", "inventory.json"):
+            content = (assets / floor_id / filename).read_text()
+            for private_text in ("PRIVATE_DOCUMENTATION_", "sensor.private_documentation_reference"):
+                self.assertNotIn(private_text, content)
+        published = native.NativeProject(self.hass, self.project.root)
+        await published.load()
+        self.assertEqual(published.document["project"], document)
+        self.assertEqual(published.document["published_revision"], 1)
 
     async def test_conflicts_and_failed_save_preserve_source(self):
         await self.project.save(0, sample())
@@ -896,6 +952,7 @@ class PackagingTests(unittest.TestCase):
                 names = set(zipped.namelist())
                 self.assertIn("config_flow.py", names)
                 self.assertIn("runtime/planner/project.py", names)
+                self.assertIn("runtime/planner/documentation_model.py", names)
                 self.assertIn("runtime/viewer_locales.py", names)
                 for name in ("climate-state.js", "marker-motion.js", "device-effects.js"):
                     self.assertEqual(zipped.read("runtime/" + name), (ROOT / name).read_bytes())
@@ -925,7 +982,7 @@ class PackagingTests(unittest.TestCase):
             package.__path__ = [str(component)]
             bundled = __import__("isolated_bundle.runtime.planner.project", fromlist=["compile_project"])
             old_paths = list(sys.path)
-            project = sample()
+            project = with_documentation(sample())
             floor = project["floors"][0]
             catalog = json.loads((component / "runtime/planner/catalog.json").read_text())
             fixtures = [model for model in catalog["models"] if model.get("device_animation")]
@@ -939,7 +996,10 @@ class PackagingTests(unittest.TestCase):
             generated = Path(temporary) / "generated"
             result = bundled.compile_project(project, generated)
             self.assertEqual(result["floors"], [floor["id"] for floor in sample()["floors"]])
+            self.assertEqual(json.loads((generated / "project.json").read_text())["documentation"], project["documentation"])
             viewer = (generated / floor["id"] / "index.html").read_text()
+            self.assertNotIn("PRIVATE_DOCUMENTATION_", viewer)
+            self.assertNotIn("sensor.private_documentation_reference", viewer)
             for name in ("climate-state.js", "marker-motion.js", "device-effects.js"):
                 self.assertIn((ROOT / name).read_text(), viewer, "The isolated compiler inlines the full feedback runtime")
             data = json.loads((generated / floor["id"] / "model-data.json").read_text())

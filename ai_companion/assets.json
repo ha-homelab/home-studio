@@ -101,5 +101,9 @@
   "camera-tour-recording.js",
   "camera-tour-session.js",
   "camera-tour.css",
-  "planner/camera-tour-adapter.js"
+  "planner/camera-tour-adapter.js",
+  "planner/documentation-model.js",
+  "planner/drawing-package.js",
+  "planner/drawing-panel.js",
+  "planner/drawing-panel.css"
 ]
