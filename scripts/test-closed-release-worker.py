@@ -697,6 +697,7 @@ class ProductionRouteTests(unittest.TestCase):
                 "owner": {"id": int(build.OWNER_ID)}, "default_branch": "main", "private": False}
         self.run = {"id": 73, "run_attempt": 2, "head_sha": "a" * 40, "path": build.WORKFLOW,
                     "head_branch": "main", "event": "workflow_dispatch", "status": "in_progress", "conclusion": None,
+                    "run_started_at": "2026-11-03T12:00:00Z",
                     "repository": copy.deepcopy(info), "head_repository": copy.deepcopy(info)}
         self.jobs = [{"name": "Release gate", "status": "completed", "conclusion": "success", "head_sha": "a" * 40},
                      {"name": "closed_build / package" if action == "build" else "closed_stable_validate / package",
@@ -705,8 +706,15 @@ class ProductionRouteTests(unittest.TestCase):
             self.jobs[0]["conclusion"] = "skipped"
             self.jobs.append({"name": "closed_stable_resolve", "status": "completed",
                               "conclusion": "success", "head_sha": "a" * 40})
+        # Successful rerun jobs must reflect actual execution in this attempt.
+        for job in self.jobs:
+            job.update(run_attempt=2, started_at="2026-11-03T12:00:01Z",
+                       completed_at="2026-11-03T12:00:03Z" if job["status"] == "completed" else None,
+                       steps=[{"status": "completed", "conclusion": "success",
+                               "started_at": "2026-11-03T12:00:01Z",
+                               "completed_at": "2026-11-03T12:00:02Z"}])
         def api(path):
-            self.assertIn(path, ("", "actions/runs/73"))
+            self.assertIn(path, ("", "actions/runs/73", "actions/runs/73/attempts/2"))
             return copy.deepcopy(info if path == "" else self.run)
         def pages(path, key):
             self.assertEqual((path, key), ("actions/runs/73/attempts/2/jobs", "jobs"))
@@ -791,6 +799,26 @@ class ProductionRouteTests(unittest.TestCase):
             saved = copy.deepcopy(self.jobs); mutate()
             self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release)); self.jobs[:] = saved
         self.read.assert_not_called(); self.builder.assert_not_called()
+
+    def test_rerun_gate_metadata_rejects_cloned_success_before_private_read(self):
+        self.configure()
+        original = copy.deepcopy(self.jobs[0])
+        for changes in ({"run_attempt": 1},
+                        {"started_at": "2026-11-03T11:59:59Z"},
+                        {"completed_at": "2026-11-03T11:59:59Z"},
+                        {"steps": [{"status": "completed", "conclusion": "success",
+                                    "started_at": "2026-11-03T11:59:58Z",
+                                    "completed_at": "2026-11-03T11:59:59Z"}]}):
+            with self.subTest(changes=changes):
+                self.jobs[0] = {**original, **changes}
+                self.rejected(lambda: build.execute(
+                    self.args, self.root, release_executor=worker.execute_release))
+        self.jobs[0] = original
+        self.run["run_started_at"] = None
+        self.rejected(lambda: build.execute(
+            self.args, self.root, release_executor=worker.execute_release))
+        self.read.assert_not_called(); self.builder.assert_not_called()
+        self.assertEqual(self.f.calls, [])
 
     def test_wrong_explicit_request_and_dispatch_channel_refuse(self):
         self.configure(); self.args.closed_request = "foreign"
