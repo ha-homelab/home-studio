@@ -135,6 +135,14 @@ class GeneratedProjectTests(unittest.IsolatedAsyncioTestCase):
         await self.project.save(0, copy.deepcopy(self.project.document["project"]))
         return await self.project.publish(1)
 
+    async def test_documented_viewer_inventory_edits_preserve_evidence_and_prune_deleted_items(self):
+        # Both floors deliberately reuse the same item ID: pruning is floor-scoped.
+        await support.check_documented_inventory_edits(self, self.project, self.project.document["project"])
+        reopened = generated.GeneratedProject(self.hass, self.component, self.site, self.models, self.inventory)
+        await reopened.load()
+        self.assertEqual(reopened.document, self.project.document)
+        self.assert_baseline_unchanged()
+
     async def source_site_frame(self, elevations=(None, None), grounds=(-3, 0), embedded_grounds=None):
         """Create a synthetic imported home with independent local floor frames."""
         embedded_grounds = grounds if embedded_grounds is None else embedded_grounds

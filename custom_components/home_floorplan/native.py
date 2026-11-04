@@ -217,13 +217,25 @@ class NativeProject:
         if self.document["revision"] != self.document["published_revision"]:
             raise NativeError("conflict", "This project has unpublished edits. Finish them in Home Studio before editing placements here.")
         project = copy.deepcopy(self.document["project"])
+        deleted_items = set()
         for floor in project["floors"]:
             # Runtime placements do not edit source-only window bindings.
             curtains = {item["id"]: item["curtain"] for item in floor["items"] if "curtain" in item}
+            previous_ids = {item["id"] for item in floor["items"]}
             floor["items"] = copy.deepcopy(inventory[floor["id"]]["items"])
+            deleted_items.update((floor["id"], identifier) for identifier in
+                                 previous_ids - {item["id"] for item in floor["items"]})
             for item in floor["items"]:
                 if item["id"] in curtains:
                     item["curtain"] = copy.deepcopy(curtains[item["id"]])
+        if deleted_items and "documentation" in project:
+            # Prune only deleted placements. Surviving evidence keeps its original
+            # geometry, so moving or resizing an item makes its measurement stale.
+            documentation = project["documentation"]
+            documentation["measurements"] = [row for row in documentation["measurements"]
+                if row["target_type"] != "item" or (row["floor_id"], row["target_id"]) not in deleted_items]
+            documentation["ceiling_fixture_ids"] = [row for row in documentation["ceiling_fixture_ids"]
+                if (row["floor_id"], row["item_id"]) not in deleted_items]
         await self.hass.async_add_executor_job(validate_draft, project)
         revision = self.document["revision"] + 1
         updated = {**self.document, "inventory": inventory, "project": project,

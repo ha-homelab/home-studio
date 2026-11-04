@@ -115,7 +115,7 @@ native = sys.modules["ha_native_test.native"]
 packaging = load_file("ha_native_packaging", ROOT / "scripts/build-home-studio.py")
 sys.path.insert(0, str(ROOT))
 from planner import project as compiler
-from planner.documentation_model import create_documentation, measurement_geometry
+from planner.documentation_model import create_documentation, measurement_geometry, measurement_state
 
 
 class Hass:
@@ -175,6 +175,69 @@ def with_documentation(project):
     documentation["ceiling_fixture_ids"].append(dict(floor_id=floor["id"], item_id=item["id"]))
     project["documentation"] = documentation
     return project
+
+
+async def check_documented_inventory_edits(case, adapter, document):
+    """Exercise published-view edits through the real storage/compiler boundary."""
+    document = with_documentation(document)
+    documentation = document["documentation"]
+    for floor in document["floors"][1:]:
+        item = floor["items"][0]
+        ref = dict(floor_id=floor["id"], target_type="item", target_id=item["id"])
+        documentation["measurements"].append(dict(
+            **ref, status="measured", note="Keep this other floor's evidence",
+            geometry=measurement_geometry(document, ref)))
+        documentation["ceiling_fixture_ids"].append(dict(floor_id=floor["id"], item_id=item["id"]))
+    floor_id = document["floors"][0]["id"]
+    item_id = document["floors"][0]["items"][0]["id"]
+    item_record = documentation["measurements"][1]
+    item_record["status"] = "measured"
+    original = copy.deepcopy(document)
+    await adapter.save(0, document)
+    _, _, _, inventory, _ = await adapter.publish(1)
+
+    moved = copy.deepcopy(inventory)
+    item = next(item for item in moved[floor_id]["items"] if item["id"] == item_id)
+    item["position_m"]["x"] += .1
+    item["dimensions_m"]["width"] *= .9
+    item["rotation_deg"] += 10
+    moved_input = copy.deepcopy(moved)
+    await adapter.save_inventory(moved)
+    case.assertEqual(moved, moved_input)
+    case.assertEqual(document, original)
+    case.assertEqual(adapter.document["project"]["documentation"], documentation)
+    case.assertEqual(measurement_state(adapter.document["project"], item_record), "stale")
+
+    deleted = copy.deepcopy(moved)
+    deleted[floor_id]["items"] = [item for item in deleted[floor_id]["items"] if item["id"] != item_id]
+    deleted_input = copy.deepcopy(deleted)
+    before, stored = copy.deepcopy(adapter.document), copy.deepcopy(adapter.hass.saved)
+    # Ordinary imports remain strict; only the accepted inventory-edit route prunes.
+    invalid_import = copy.deepcopy(before["project"])
+    invalid_import["floors"][0]["items"] = copy.deepcopy(deleted[floor_id]["items"])
+    with case.assertRaises(native.NativeError) as rejected:
+        await adapter.save(before["revision"], invalid_import)
+    case.assertEqual(rejected.exception.code, "invalid_project")
+    case.assertEqual((adapter.document, adapter.hass.saved), (before, stored))
+
+    adapter.hass.fail_save = True
+    try:
+        with case.assertRaises(OSError):
+            await adapter.save_inventory(deleted)
+    finally:
+        adapter.hass.fail_save = False
+    case.assertEqual((adapter.document, adapter.hass.saved), (before, stored))
+    case.assertEqual(deleted, deleted_input)
+
+    await adapter.save_inventory(deleted)
+    expected = copy.deepcopy(documentation)
+    expected["measurements"].remove(item_record)
+    expected["ceiling_fixture_ids"].remove(dict(floor_id=floor_id, item_id=item_id))
+    case.assertEqual(adapter.document["project"]["documentation"], expected)
+    case.assertEqual(adapter.document["revision"], before["revision"] + 1)
+    case.assertEqual(adapter.document["published_revision"], adapter.document["revision"])
+    case.assertEqual(deleted, deleted_input)
+    case.assertEqual(document, original)
 
 
 def budget_floor(identifier="ground", items=()):
@@ -463,6 +526,12 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(native.NativeError) as error:
             await self.project.save_inventory(inventory)
         self.assertEqual(error.exception.code, "conflict")
+
+    async def test_documented_viewer_inventory_edits_preserve_evidence_and_prune_deleted_items(self):
+        await check_documented_inventory_edits(self, self.project, sample())
+        reopened = native.NativeProject(self.hass, self.project.root)
+        await reopened.load()
+        self.assertEqual(reopened.document, self.project.document)
 
     async def test_recreated_floor_rejects_stale_viewers_after_republication_and_restart(self):
         original = sample()
