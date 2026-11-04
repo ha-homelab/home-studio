@@ -67,13 +67,32 @@ def wall_shape(value):
     number(value["thickness_m"], 0.04, 2)
 
 
+def wall_openings(value):
+    array(value, 256)
+    previous = None
+    for opening in value:
+        fields(opening, ("id", "type", "offset_m", "width_m", "sill_m", "head_m"))
+        identifier(opening["id"])
+        if previous is not None and previous >= opening["id"]:
+            fail("wall openings must have unique, sorted identifiers.")
+        previous = opening["id"]
+        choice(opening["type"], ("door", "window", "passage"))
+        number(opening["offset_m"], 0, 300)
+        number(opening["width_m"], 0.05, 300)
+        number(opening["sill_m"], 0, 20)
+        number(opening["head_m"], 0.05, 20)
+
+
 def geometry(value, target_type):
     if value is None:
         return
     extra = dict(room=("polygon",), wall=("start", "end", "thickness_m"),
                  opening=("wall_id", "wall", "type", "offset_m", "width_m", "sill_m", "head_m"),
                  item=("type", "model_id", "room", "position_m", "dimensions_m", "rotation_deg"))
-    fields(value, ("target_type", "elevation_m", "height_m", *extra[target_type]))
+    # Legacy wall snapshots load unchanged, but cannot establish fresh evidence.
+    has_openings = target_type == "wall" and isinstance(value, dict) and "openings" in value
+    fields(value, ("target_type", "elevation_m", "height_m", *extra[target_type],
+                   *(("openings",) if has_openings else ())))
     if value["target_type"] != target_type:
         fail("geometry belongs to another target type.")
     number(value["elevation_m"], -100, 100)
@@ -86,6 +105,8 @@ def geometry(value, target_type):
             point(p)
     elif target_type == "wall":
         wall_shape({key: value[key] for key in ("start", "end", "thickness_m")})
+        if has_openings:
+            wall_openings(value["openings"])
     elif target_type == "opening":
         identifier(value["wall_id"])
         wall_shape(value["wall"])
@@ -195,6 +216,10 @@ def measurement_geometry(project, ref):
         result["polygon"] = copy.deepcopy(target["polygon"])
     elif ref["target_type"] == "wall":
         result.update({key: copy.deepcopy(target[key]) for key in ("start", "end", "thickness_m")})
+        result["openings"] = sorted(
+            ({key: opening[key] for key in ("id", "type", "offset_m", "width_m", "sill_m", "head_m")}
+             for opening in floor["openings"] if opening["wall_id"] == target["id"]),
+            key=lambda opening: opening["id"])
     elif ref["target_type"] == "opening":
         wall = next((value for value in floor["walls"] if value["id"] == target["wall_id"]), None)
         if not wall:
@@ -211,6 +236,8 @@ def measurement_state(project, row):
     if row is None or row["status"] == "unknown" or row["geometry"] is None:
         return "unknown"
     if not resolve(project, row):
+        return "stale"
+    if row["target_type"] == "wall" and "openings" not in row["geometry"]:
         return "stale"
     return row["status"] if row["geometry"] == measurement_geometry(project, row) else "stale"
 

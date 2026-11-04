@@ -27,17 +27,31 @@ function point(value) { if (!Array.isArray(value) || value.length !== 2) fail('i
 function wallShape(value) {
   fields(value, ['start', 'end', 'thickness_m']); point(value.start); point(value.end); number(value.thickness_m, 0.04, 2);
 }
+function wallOpenings(value) {
+  array(value, 256);
+  let previous = null;
+  for (const opening of value) {
+    fields(opening, ['id', 'type', 'offset_m', 'width_m', 'sill_m', 'head_m']); identifier(opening.id);
+    if (previous !== null && previous >= opening.id) fail('wall openings must have unique, sorted identifiers.');
+    previous = opening.id;
+    choice(opening.type, ['door', 'window', 'passage']); number(opening.offset_m, 0, 300); number(opening.width_m, 0.05, 300);
+    number(opening.sill_m, 0, 20); number(opening.head_m, 0.05, 20);
+  }
+}
 function geometry(value, type) {
   if (value === null) return;
   const common = ['target_type', 'elevation_m', 'height_m'];
   const extra = { room: ['polygon'], wall: ['start', 'end', 'thickness_m'], opening: ['wall_id', 'wall', 'type', 'offset_m', 'width_m', 'sill_m', 'head_m'], item: ['type', 'model_id', 'room', 'position_m', 'dimensions_m', 'rotation_deg'] };
-  fields(value, [...common, ...extra[type]]);
+  // Legacy wall snapshots load unchanged, but cannot establish fresh evidence.
+  const hasOpenings = type === 'wall' && value && Object.hasOwn(value, 'openings');
+  fields(value, [...common, ...extra[type], ...(hasOpenings ? ['openings'] : [])]);
   if (value.target_type !== type) fail('geometry belongs to another target type.');
   number(value.elevation_m, -100, 100); number(value.height_m, 0.5, 20);
   if (type === 'room') {
     array(value.polygon, 64); if (value.polygon.length < 3) fail('invalid polygon.'); value.polygon.forEach(point);
   } else if (type === 'wall') {
     wallShape({ start: value.start, end: value.end, thickness_m: value.thickness_m });
+    if (hasOpenings) wallOpenings(value.openings);
   } else if (type === 'opening') {
     identifier(value.wall_id); wallShape(value.wall); choice(value.type, ['door', 'window', 'passage']);
     number(value.offset_m, 0, 300); number(value.width_m, 0.05, 300); number(value.sill_m, 0, 20); number(value.head_m, 0.05, 20);
@@ -106,7 +120,10 @@ export function measurementGeometry(project, ref) {
   const { floor, target } = found;
   const result = { target_type: ref.target_type, elevation_m: floor.elevation_m, height_m: floor.height_m };
   if (ref.target_type === 'room') result.polygon = copy(target.polygon);
-  else if (ref.target_type === 'wall') Object.assign(result, { start: [...target.start], end: [...target.end], thickness_m: target.thickness_m });
+  else if (ref.target_type === 'wall') Object.assign(result, { start: [...target.start], end: [...target.end], thickness_m: target.thickness_m,
+    openings: floor.openings.filter(opening => opening.wall_id === target.id).map(opening => ({ id: opening.id, type: opening.type,
+      offset_m: opening.offset_m, width_m: opening.width_m, sill_m: opening.sill_m, head_m: opening.head_m }))
+      .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0) });
   else if (ref.target_type === 'opening') {
     const wall = floor.walls.find(value => value.id === target.wall_id); if (!wall) fail('opening wall does not exist.');
     Object.assign(result, { wall_id: target.wall_id, wall: { start: [...wall.start], end: [...wall.end], thickness_m: wall.thickness_m }, type: target.type, offset_m: target.offset_m, width_m: target.width_m, sill_m: target.sill_m, head_m: target.head_m });
@@ -117,6 +134,7 @@ export function measurementGeometry(project, ref) {
 export function measurementState(project, row) {
   if (!row || row.status === 'unknown' || row.geometry === null) return 'unknown';
   if (!resolve(project, row)) return 'stale';
+  if (row.target_type === 'wall' && !Object.hasOwn(row.geometry, 'openings')) return 'stale';
   return same(row.geometry, measurementGeometry(project, row)) ? row.status : 'stale';
 }
 

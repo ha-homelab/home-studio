@@ -31,6 +31,32 @@ export function memoryDraftOptions() {
     locks: { request: async (_name, operation) => operation() },
   };
 }
+
+// A sandboxed iframe can be taller than the visible HA panel. Only the host
+// knows that visible rectangle; exchange bounded pixels, never parent DOM access.
+export function fitHostDialog(dialog, win = window) {
+  const context = embeddedContext(win);
+  if (!context) return () => {};
+  const send = open => win.parent.postMessage({ protocol: PROTOCOL, channel: context.channel,
+    type: 'dialog-state', open }, context.origin);
+  const receive = event => {
+    const data = event.data;
+    if (event.source !== win.parent || event.origin !== context.origin || data?.protocol !== PROTOCOL
+        || data.channel !== context.channel || data.type !== 'dialog-viewport' || !dialog.open) return;
+    if (![data.top, data.height].every(value => Number.isFinite(value) && value >= 0 && value <= 10000)
+        || data.height < 48 || data.top + data.height > 10000) return;
+    dialog.style.top = `${data.top + 12}px`;
+    dialog.style.bottom = 'auto';
+    dialog.style.marginBlock = '0';
+    dialog.style.maxHeight = `${data.height - 24}px`;
+  };
+  win.addEventListener('message', receive); send(true);
+  let disposed = false;
+  return () => {
+    if (disposed) return;
+    disposed = true; win.removeEventListener('message', receive); send(false);
+  };
+}
 export function connectHost(context, { initialize, snapshot, currentFloor, editState, subscribe, flush, failed, guideAction, theme }, win = window) {
   const ai = createNativeAiTransport(context, win);
   const map = createNativeMapTransport(context, win);

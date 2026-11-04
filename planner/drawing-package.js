@@ -91,6 +91,60 @@ function rectangleArea(rectangles) {
   return result;
 }
 
+// Midpoints of interior scanline spans stay inside concave rooms as well. Sorting
+// vertices and crossings makes the anchor independent of winding/start vertex.
+function roomLabelPoint(polygon) {
+  const levels = [...new Set(polygon.map(p => p[1]))].sort((a, b) => a - b);
+  let best, widest = -1, fallback, fallbackWidth = -1;
+  for (let i = 1; i < levels.length; i++) {
+    const z = (levels[i - 1] + levels[i]) / 2, crossings = [];
+    for (let j = 0; j < polygon.length; j++) {
+      const p = polygon[j], q = polygon[(j + 1) % polygon.length];
+      const [a, b] = p[1] < q[1] ? [p, q] : [q, p];
+      if (a[1] < z && b[1] > z) crossings.push(a[0] + (z - a[1]) * (b[0] - a[0]) / (b[1] - a[1]));
+    }
+    crossings.sort((a, b) => a - b);
+    for (let j = 1; j < crossings.length; j += 2) {
+      const width = crossings[j] - crossings[j - 1];
+      const point = [n((crossings[j] + crossings[j - 1]) / 2), n(z)];
+      if (width > fallbackWidth + EPS) { fallbackWidth = width; fallback = point; }
+      if (width > widest + EPS && pointInPolygon(point, polygon, false)) { widest = width; best = point; }
+    }
+  }
+  // Prefer an interior point after SVG rounding; retain the previous placement
+  // fallback if every sampled span is too fine for that coordinate precision.
+  return best || fallback;
+}
+
+// Split a segment at polygon crossings, then test each positive-length span.
+// A bounding-box test alone includes unrelated geometry in concave-room gaps.
+function segmentInRooms(start, end, rooms) {
+  const dx = end[0] - start[0], dz = end[1] - start[1], length = distance(start, end);
+  return rooms.some(room => {
+    const cuts = [0, 1];
+    for (let i = 0; i < room.polygon.length; i++) {
+      const a = room.polygon[i], b = room.polygon[(i + 1) % room.polygon.length];
+      const ex = b[0] - a[0], ez = b[1] - a[1], denominator = dx * ez - dz * ex;
+      if (Math.abs(denominator) <= EPS) continue;
+      const ax = a[0] - start[0], az = a[1] - start[1];
+      const t = (ax * ez - az * ex) / denominator, u = (ax * dz - az * dx) / denominator;
+      if (t > 0 && t < 1 && u >= 0 && u <= 1) cuts.push(t);
+    }
+    cuts.sort((a, b) => a - b);
+    return cuts.some((t, i) => {
+      if (!i || (t - cuts[i - 1]) * length <= EPS) return false;
+      const middle = (t + cuts[i - 1]) / 2;
+      return pointInPolygon([start[0] + middle * dx, start[1] + middle * dz], room.polygon);
+    });
+  });
+}
+
+function openingSegment(opening, wall) {
+  const length = distance(wall.start, wall.end);
+  return [opening.offset_m, opening.offset_m + opening.width_m].map(offset =>
+    wall.start.map((v, i) => v + (wall.end[i] - v) * offset / length));
+}
+
 function roomEdges(floor, room) {
   return room.polygon.map((a, index) => {
     const b = room.polygon[(index + 1) % room.polygon.length], length = distance(a, b);
@@ -204,8 +258,8 @@ function planSheet(floor, rooms, edgesByRoom, ceiling, options, identity, fixtur
     for (const room of rooms) {
       const poly = room.polygon.map(local);
       out.push(`<polygon points="${poly.map(p => p.map(fmt).join(',')).join(' ')}" fill="#f3f5f5"/>`);
-      // Label at a boundary vertex; a concave polygon's centroid can lie outside it.
-      out.push(text(poly[0][0] + .1, poly[0][1] + .2, label(room.name), 3 / k, 'fill="#182327" stroke="none"'));
+      const anchor = roomLabelPoint(poly);
+      out.push(text(...anchor, label(room.name), 3 / k, 'text-anchor="middle" dominant-baseline="middle" fill="#182327" stroke="none"'));
       for (const edge of edgesByRoom.get(room.id)) {
         const a = local(edge.a), b = local(edge.b), mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
         if (!ceiling) {
@@ -243,23 +297,27 @@ function planSheet(floor, rooms, edgesByRoom, ceiling, options, identity, fixtur
 
 function elevationSheet(floor, room, edge, options, identity, measurementStatus) {
   const id = `${floor.id}-${room.id}-elevation-${edge.index + 1}`;
+  const side = Math.sign(signedArea(room.polygon));
+  // Horizontal positions describe the view from inside the room, not the
+  // arbitrary direction in which its polygon vertices were entered.
+  const left = (x0, x1) => side < 0 ? edge.length - x1 : x0;
   return sheet({ id, kind: 'elevation', floorId: floor.id, roomId: room.id, edgeIndex: edge.index, measurementStatus,
     title: `${floor.name} / ${room.name} — wall face ${edge.index + 1}` }, edge.length, floor.height_m, k => {
     const out = [`<rect x="0" y="0" width="${fmt(edge.length)}" height="${fmt(floor.height_m)}"/>`,
       text(edge.length / 2, -3 / k, `${fmt(edge.length)} m wide × ${fmt(floor.height_m)} m high`, 3 / k, 'text-anchor="middle" fill="#182327" stroke="none"')];
     for (const o of edge.openings) {
-      out.push(`<rect x="${fmt(o.x0)}" y="${fmt(floor.height_m - o.y1)}" width="${fmt(o.x1 - o.x0)}" height="${fmt(o.y1 - o.y0)}" fill="#e8f1f5"/>`,
-        text((o.x0 + o.x1) / 2, floor.height_m - (o.y0 + o.y1) / 2, `${o.type} ${fmt(o.x1 - o.x0)} × ${fmt(o.y1 - o.y0)} m; sill ${fmt(o.y0)} m`, 2.4 / k, 'text-anchor="middle" fill="#182327" stroke="none"'));
+      out.push(`<rect x="${fmt(left(o.x0, o.x1))}" y="${fmt(floor.height_m - o.y1)}" width="${fmt(o.x1 - o.x0)}" height="${fmt(o.y1 - o.y0)}" fill="#e8f1f5"/>`,
+        text(left(o.x0, o.x1) + (o.x1 - o.x0) / 2, floor.height_m - (o.y0 + o.y1) / 2, `${o.type} ${fmt(o.x1 - o.x0)} × ${fmt(o.y1 - o.y0)} m; sill ${fmt(o.y0)} m`, 2.4 / k, 'text-anchor="middle" fill="#182327" stroke="none"'));
     }
     if (options.includeFurniture) for (const item of floor.items.filter(i => i.room === room.id)) {
-      const corners = footprint(item), side = Math.sign(signedArea(room.polygon)), offsets = corners.map(p => side * edge.away(p));
+      const corners = footprint(item), offsets = corners.map(p => side * edge.away(p));
       if (Math.min(...offsets) > options.wallProjectionDepthM || Math.max(...offsets) < -EPS) continue;
       const xs = corners.map(edge.at), x0 = Math.max(0, Math.min(...xs)), x1 = Math.min(edge.length, Math.max(...xs));
       if (x1 <= x0 + EPS) continue;
-      out.push(`<rect x="${fmt(x0)}" y="${fmt(floor.height_m - item.position_m.y - item.dimensions_m.height)}" width="${fmt(x1 - x0)}" height="${fmt(item.dimensions_m.height)}" stroke="#68747a" stroke-dasharray="${fmt(1 / k)} ${fmt(1 / k)}"/>`);
+      out.push(`<rect x="${fmt(left(x0, x1))}" y="${fmt(floor.height_m - item.position_m.y - item.dimensions_m.height)}" width="${fmt(x1 - x0)}" height="${fmt(item.dimensions_m.height)}" stroke="#68747a" stroke-dasharray="${fmt(1 / k)} ${fmt(1 / k)}"/>`);
     }
     return out.join('');
-  }, options, identity, `Interior face along polygon edge ${edge.index + 1}; opening rectangles clipped to this face. Dashed furniture is an envelope, not joinery.`);
+  }, options, identity, `Viewed from inside along polygon edge ${edge.index + 1}; openings clipped to this face. Dashed furniture is an envelope, not joinery.`);
 }
 
 function csv(rows) {
@@ -331,12 +389,16 @@ export function buildDrawingPackage(project, rawOptions) {
           waste_percent: waste, waste_m2: n(quantity * waste / 100), quantity_with_waste_m2: n(quantity * (1 + waste / 100)) });
       }
     }
-    for (const o of floor.openings.filter(v => rooms.length === floor.rooms.length || usedOpenings.has(v.id))) schedules.openings.push({ floor_id: floor.id,
+    const completeFloor = rooms.length === floor.rooms.length;
+    const scopedWalls = floor.walls.filter(w => completeFloor || usedWalls.has(w.id) || segmentInRooms(w.start, w.end, rooms));
+    const scopedOpenings = floor.openings.filter(o => completeFloor || usedOpenings.has(o.id)
+      || segmentInRooms(...openingSegment(o, floor.walls.find(w => w.id === o.wall_id)), rooms));
+    for (const o of scopedOpenings) schedules.openings.push({ floor_id: floor.id,
       opening_id: o.id, wall_id: o.wall_id, type: o.type, width_m: o.width_m, height_m: n(o.head_m - o.sill_m),
       sill_m: o.sill_m, head_m: o.head_m, area_m2: n(o.width_m * (o.head_m - o.sill_m)), measurement_status: statusFor(accepted, floor, 'opening', o.id) });
-    if (rooms.length === floor.rooms.length) for (const o of floor.openings.filter(v => !usedOpenings.has(v.id)))
+    for (const o of scopedOpenings.filter(v => !usedOpenings.has(v.id)))
       warnings.add(`${floor.name}: opening ${o.id} is not on a room-boundary wall; it is not deducted from room finishes.`);
-    if (rooms.length === floor.rooms.length) for (const wall of floor.walls.filter(v => !usedWalls.has(v.id)))
+    for (const wall of scopedWalls.filter(v => !usedWalls.has(v.id)))
       warnings.add(`${floor.name}: wall ${wall.id} is not matched to a room boundary; additional finish faces are not included.`);
     for (const item of floor.items.filter(i => selectedRooms.has(i.room))) {
       const designated = fixtures.has(floor.id + '/' + item.id);

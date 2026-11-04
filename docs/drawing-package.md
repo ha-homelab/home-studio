@@ -10,12 +10,24 @@ Write a short design brief, choose a floor and an element, and record the source
 of its dimensions: **Measured**, **Estimated**, **Imported**, or **Unknown**.
 Add a note describing the source or what still needs checking.
 
+The **Current drawing dimensions** summary shows the selected element's actual
+values from this drawing, with units: room area/perimeter and ceiling height,
+wall dimensions and opening count, door/window dimensions, or item size and
+base height. Compare these with your measurements before recording a source.
+The summary does not measure the real room for you.
+
 **Record current dimensions** associates that source with the element's current
 geometry. Selecting or changing a source alone does not verify the dimensions;
 record the current dimensions explicitly after checking them. If the geometry
 later changes, the record becomes **Out of date** until you check and explicitly
 record it again. This never resizes the drawing. Photos and estimates are not a
 survey, and importing dimensions does not establish their accuracy.
+
+Wall records also capture their doors and windows. Adding, deleting, moving or
+resizing an opening makes the wall record out of date, because its net finish
+area may have changed. Older wall records without an opening list still load,
+but require one explicit recheck and **Record current dimensions**. Your notes
+remain available; they are not silently replaced or marked verified.
 
 Accepted suggestions record item dimensions as **Estimated**, with an empty
 measurement note. Provider explanations remain in the temporary review and do
@@ -52,6 +64,13 @@ schedule preview before downloading:
 - **Selected CSV** contains the complete room, opening, item, or material schedule.
   The readable in-panel table shows the first 50 rows. An optional raw CSV preview
   is also available; neither preview limit truncates the download.
+
+Item previews include floor, room and item identity. Opening previews identify
+their floor, opening and wall, so identical names or sizes on different floors
+remain distinguishable. The rules summary shows the number of warnings; expand
+it before using the quantities. Walls inside selected rooms that do not match a
+room boundary are flagged as excluded finish surfaces, even for a partial-room
+package. Their in-scope openings remain visible in the opening schedule.
 
 Quantities are derived from authored geometry under the package's stated
 measurement rules. Unknown or stale measurements remain qualified. Check the
@@ -94,9 +113,27 @@ the editor revision handles freshness separately. Review room names, item names,
 dimensions, and finish specifications before sharing.
 
 If the drawing changes while the panel is open, saving and downloads are blocked.
+Text fields become read-only but remain selectable, so you can copy unsaved
+notes or specifications before reloading. Floor, element and room selectors
+still let you find pending text in the retained snapshot. Duplicate floor names
+include their IDs to distinguish them. Those edits are not automatically
+merged into the changed drawing.
 **Reload drawing and discard documentation edits** loads the latest snapshot;
 generate the package again explicitly. Previously downloaded files remain
 snapshots and do not update themselves.
+
+## Keyboard and smaller screens
+
+Changing an element, floor, room or scope keeps keyboard focus on that selector.
+Use the numbered steps or **Next**/**Back** to move through the workflow. Escape
+closes a saved panel; with unsaved edits it first offers a choice to keep editing
+or discard. Closing returns focus to the editor's **Drawings & materials** button.
+
+Inside Home Assistant, the dialog fits the visible host viewport, including a
+short landscape screen or a resized on-screen keyboard. Its body scrolls while
+Close and the footer actions remain accessible. This uses only bounded viewport
+coordinates through the existing authenticated iframe channel; it does not give
+the editor access to Home Assistant credentials or the parent page's DOM.
 
 ## Editable metadata and compatibility
 

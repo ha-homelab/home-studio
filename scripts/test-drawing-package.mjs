@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import { buildDrawingPackage } from '../planner/drawing-package.js';
-import { createDocumentation, measurementGeometry } from '../planner/documentation-model.js';
+import { createDocumentation, measurementGeometry, pruneDocumentation } from '../planner/documentation-model.js';
+import { pointInPolygon } from '../planner/model.js';
 
 let passed = 0;
 function test(name, fn) { try { fn(); passed++; } catch (error) { error.message = `${name}: ${error.message}`; throw error; } }
@@ -140,6 +141,19 @@ test('unknown, estimated, imported and stale geometry remain explicit', () => {
   assert(r.warnings.some(v => v.includes('stale')));
 });
 
+test('deleting a recorded doorway changes net area and leaves wall measurements stale', () => {
+  const p = home(), f = p.floors[0];
+  f.openings = [{ ...f.openings[0], width_m: 1 }]; measured(p);
+  assert.equal(build(p).schedules.rooms[0].net_wall_area_m2, 35.8);
+  f.openings = []; p.documentation = pruneDocumentation(p);
+  const result = build(p), room = result.schedules.rooms[0];
+  assert.equal(room.net_wall_area_m2, 37.8);
+  assert.equal(room.floor_area_status, 'measured');
+  assert.equal(room.wall_area_status, 'stale');
+  assert.equal(result.schedules.materials.find(row => row.surface === 'walls').measurement_status, 'stale');
+  assert(result.warnings.some(warning => warning.includes('stale')));
+});
+
 test('concave outline uses polygon area and actual edge perimeter', () => {
   const p = home(), f = p.floors[0];
   f.rooms[0].polygon = [[0, 0], [4, 0], [4, 1], [1, 1], [1, 3], [0, 3]];
@@ -219,6 +233,76 @@ test('optional furniture envelopes use rotated metric placement', () => {
   assert(!stale.html.includes('No unresolved measurement flags were found.'));
 });
 
+test('interior elevations keep opening and furniture positions for either polygon winding', () => {
+  for (const angle of [0, Math.PI / 6]) {
+    const p = home(), f = p.floors[0], rotate = ([x, z]) => [x * Math.cos(angle) - z * Math.sin(angle), x * Math.sin(angle) + z * Math.cos(angle)];
+    f.items.push({ id: 'cabinet', name: 'Cabinet', type: 'furniture', room: 'room', position_m: { x: .9, y: .2, z: .3 },
+      dimensions_m: { width: .4, depth: .3, height: .8 }, rotation_deg: 0, entity_id: '', notes: '' });
+    f.rooms[0].polygon = f.rooms[0].polygon.map(rotate);
+    f.walls.forEach(w => { w.start = rotate(w.start); w.end = rotate(w.end); });
+    const item = f.items[0], [x, z] = rotate([item.position_m.x, item.position_m.z]);
+    Object.assign(item.position_m, { x, z }); item.rotation_deg = -angle * 180 / Math.PI;
+    const original = f.rooms[0].polygon, baseline = build(p, { includeFurniture: true });
+    const key = (a, b) => [JSON.stringify(a), JSON.stringify(b)].sort().join('|');
+    const faceContents = sheet => sheet.svg.match(/<g transform="translate\(22 39\) scale\([^)]+\)"[^>]*>([^]*?)<\/g>/)[1];
+    assert(baseline.sheets.find(s => s.edgeIndex === 0).svg.includes('<rect x="0.5" y="0.7" width="0.9" height="2"'));
+    assert(baseline.sheets.find(s => s.edgeIndex === 0).svg.includes('<rect x="0.7" y="1.7" width="0.4" height="0.8"'));
+    for (const points of [original, [...original].reverse()]) for (let offset = 0; offset < points.length; offset++) {
+      f.rooms[0].polygon = [...points.slice(offset), ...points.slice(0, offset)];
+      const result = build(p, { includeFurniture: true });
+      for (let i = 0; i < original.length; i++) {
+        const face = key(original[i], original[(i + 1) % original.length]);
+        const index = f.rooms[0].polygon.findIndex((a, j, poly) => key(a, poly[(j + 1) % poly.length]) === face);
+        assert.equal(faceContents(result.sheets.find(s => s.edgeIndex === index)), faceContents(baseline.sheets.find(s => s.edgeIndex === i)));
+      }
+      assert.equal(result.schedules.rooms[0].net_wall_area_m2, 34.2);
+    }
+  }
+});
+
+test('room label anchors stay inside convex and concave rooms regardless of vertex order', () => {
+  for (const polygon of [
+    [[-4, -3], [0, -3], [0, 0], [-4, 0]],
+    [[0, 0], [4, 0], [4, 1], [1, 1], [1, 3], [0, 3]],
+    [[0, 0], [4, 0], [4, 4], [3, 4], [3, 1], [1, 1], [1, 4], [0, 4]],
+  ]) {
+    const p = home(), f = p.floors[0]; f.walls = []; f.openings = [];
+    let expected;
+    for (const points of [polygon, [...polygon].reverse()]) for (let offset = 0; offset < points.length; offset++) {
+      f.rooms[0].polygon = [...points.slice(offset), ...points.slice(0, offset)];
+      const result = build(p);
+      for (const sheet of result.sheets.filter(s => ['floor-plan', 'ceiling'].includes(s.kind))) {
+        const match = sheet.svg.match(/<text x="([^"]+)" y="([^"]+)"[^>]*text-anchor="middle"[^>]*>Room<\/text>/);
+        assert(match, 'Room labels use a centered anchor.');
+        const point = [Number(match[1]) + Math.min(...polygon.map(v => v[0])), Number(match[2]) + Math.min(...polygon.map(v => v[1]))];
+        assert(pointInPolygon(point, polygon, false), 'The anchor must lie strictly inside its room.');
+        if (expected) assert.deepEqual(point, expected); else expected = point;
+      }
+    }
+  }
+  const p = home(), f = p.floors[0];
+  f.rooms[0].polygon = [[4, 0], [4, 3], [0, 3], [0, 0]];
+  f.rooms.push({ id: 'other', name: 'Other', polygon: [[4, 0], [8, 0], [8, 3], [4, 3]], material: 'floor' });
+  const svg = build(p).sheets[0].svg, match = svg.match(/<text x="([^"]+)" y="([^"]+)"[^>]*>Room<\/text>/);
+  const point = [Number(match[1]), Number(match[2])];
+  assert(pointInPolygon(point, f.rooms[0].polygon, false));
+  assert(!pointInPolygon(point, f.rooms[1].polygon));
+});
+
+test('room labels skip thin scanlines that round outside at SVG precision', () => {
+  const p = home(), f = p.floors[0]; f.walls = []; f.openings = [];
+  const polygon = [[0, 0], [1, 0], [2, 2e-7], [4, 2e-7], [3, 3e-7], [1, 3e-7], [1, 1], [0, 1]];
+  for (const points of [polygon, [...polygon].reverse()]) {
+    f.rooms[0].polygon = points;
+    for (const sheet of build(p).sheets.filter(s => ['floor-plan', 'ceiling'].includes(s.kind))) {
+      const match = sheet.svg.match(/<text x="([^"]+)" y="([^"]+)"[^>]*>Room<\/text>/);
+      const point = [Number(match[1]), Number(match[2])];
+      assert(pointInPolygon(point, polygon, false), 'Use the broad interior instead of an unrepresentable sliver.');
+      assert.deepEqual(point, [.5, .5]);
+    }
+  }
+});
+
 test('markup is escaped and spreadsheet formula strings are neutralized', () => {
   const p = measured(home()); p.title = '<script>alert(1)</script>'; p.floors[0].rooms[0].name = '=SUM(1,2)';
   p.documentation.finishes.push({ floor_id: 'ground', room_id: 'room', surface: 'walls', code: '@danger', specification: '<img src=x onerror=alert(1)>', waste_percent: 0 });
@@ -285,6 +369,40 @@ test('unmatched interior walls remain visible and explicitly excluded from quant
   assert.equal(r.schedules.rooms[0].net_wall_area_m2, 34.2);
   assert(r.warnings.some(w => w.includes('partition') && w.includes('additional finish faces')));
   assert(r.sheets[0].svg.includes('x1="1" y1="1" x2="3" y2="1"'));
+});
+
+test('partial room scope reports interior partitions and openings without unrelated warnings', () => {
+  const p = home(), f = p.floors[0];
+  f.rooms.push({ id: 'other', name: 'Other', polygon: [[5, 0], [9, 0], [9, 3], [5, 3]], material: 'floor' });
+  f.walls.push({ id: 'partition', start: [1, 1], end: [3, 1], thickness_m: .2 },
+    { id: 'remote', start: [6, 1], end: [8, 1], thickness_m: .2 });
+  f.openings.push({ id: 'partition_door', wall_id: 'partition', type: 'door', offset_m: .3, width_m: .9, sill_m: 0, head_m: 2 },
+    { id: 'remote_door', wall_id: 'remote', type: 'door', offset_m: .3, width_m: .9, sill_m: 0, head_m: 2 });
+  p.floors.push({ ...structuredClone(f), id: 'upper', name: 'Unselected floor', elevation_m: 3 });
+  measured(p);
+  const r = build(p, { floorIds: ['ground'], roomIds: ['ground/room'] });
+  assert.equal(r.schedules.rooms[0].net_wall_area_m2, 34.2);
+  assert.deepEqual(r.schedules.openings.map(o => o.opening_id), ['door', 'window', 'partition_door']);
+  assert(r.warnings.some(w => w.includes('partition_door') && w.includes('not deducted')));
+  assert(r.warnings.some(w => w.includes('wall partition ') && w.includes('additional finish faces')));
+  assert(!r.warnings.some(w => /remote|Unselected floor|Other/.test(w)));
+  assert(!r.html.includes('No unresolved measurement flags were found.'));
+});
+
+test('partial scope checks polygon intersections, including concave gaps and crossing segments', () => {
+  const p = home(), f = p.floors[0];
+  f.rooms[0].polygon = [[0, 0], [4, 0], [4, 1], [1, 1], [1, 3], [0, 3]];
+  f.rooms.push({ id: 'other', name: 'Other', polygon: [[5, 0], [6, 0], [6, 1], [5, 1]], material: 'floor' });
+  f.walls = [{ id: 'crossing', start: [-1, .5], end: [6, .5], thickness_m: .15 },
+    { id: 'gap', start: [2, 2], end: [3, 2], thickness_m: .15 },
+    { id: 'touch_only', start: [-1, 3], end: [0, 3], thickness_m: .15 }];
+  f.openings = [{ id: 'inside', wall_id: 'crossing', type: 'door', offset_m: 2, width_m: .9, sill_m: 0, head_m: 2 },
+    { id: 'outside', wall_id: 'crossing', type: 'door', offset_m: 6, width_m: .9, sill_m: 0, head_m: 2 }];
+  const r = build(p, { roomIds: ['ground/room'] });
+  assert.deepEqual(r.schedules.openings.map(o => o.opening_id), ['inside']);
+  assert(r.warnings.some(w => w.includes('wall crossing ')));
+  assert(r.warnings.some(w => w.includes('opening inside ')));
+  assert(!r.warnings.some(w => /gap|touch_only|outside/.test(w)));
 });
 
 console.log(`PASS: ${passed} drawing package checks`);
