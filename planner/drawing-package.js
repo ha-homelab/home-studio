@@ -124,6 +124,34 @@ function combined(states) {
   return ['stale', 'unknown', 'estimated', 'imported', 'measured'].find(state => states.includes(state)) || 'unknown';
 }
 
+// Only drawing inputs enter the exported label. In particular, measurement
+// snapshots contribute their resolved state, never their private source record.
+function exportProjection(project, selected, options, fixtures, measurementRules) {
+  return { schema: 1, title: project.title, options, measurementRules, floors: selected.map(({ floor, rooms }) => ({
+    id: floor.id, name: floor.name, height_m: floor.height_m, complete_floor: rooms.length === floor.rooms.length,
+    rooms: rooms.map(room => ({
+      id: room.id, name: room.name, polygon: room.polygon, measurement_status: statusFor(project, floor, 'room', room.id),
+      finishes: ['floor', 'walls', 'ceiling'].map(surface => {
+        const finish = project.documentation?.finishes.find(v => v.floor_id === floor.id && v.room_id === room.id && v.surface === surface);
+        return { surface, code: finish?.code || '', specification: finish?.specification || '', waste_percent: finish?.waste_percent ?? options.wastePercent };
+      }),
+    })),
+    // The plan clips every wall/opening on this floor, even for a room selection.
+    walls: floor.walls.map(wall => ({ id: wall.id, start: wall.start, end: wall.end, thickness_m: wall.thickness_m,
+      measurement_status: statusFor(project, floor, 'wall', wall.id) })),
+    openings: floor.openings.map(opening => ({ id: opening.id, wall_id: opening.wall_id, type: opening.type,
+      offset_m: opening.offset_m, width_m: opening.width_m, sill_m: opening.sill_m, head_m: opening.head_m,
+      measurement_status: statusFor(project, floor, 'opening', opening.id) })),
+    items: floor.items.filter(item => rooms.some(room => room.id === item.room)).map(item => ({
+      id: item.id, name: item.name, type: item.type, model_id: item.model_id || '', room: item.room,
+      position_m: { x: item.position_m.x, y: item.position_m.y, z: item.position_m.z },
+      dimensions_m: { width: item.dimensions_m.width, depth: item.dimensions_m.depth, height: item.dimensions_m.height },
+      rotation_deg: item.rotation_deg, ceiling_designated: fixtures.has(floor.id + '/' + item.id),
+      measurement_status: statusFor(project, floor, 'item', item.id),
+    })),
+  })) };
+}
+
 function footprint(item) {
   const angle = item.rotation_deg * Math.PI / 180, c = Math.cos(angle), s = Math.sin(angle);
   return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, z]) => {
@@ -263,7 +291,6 @@ export function buildDrawingPackage(project, rawOptions) {
   check(selected.length > 0, 'Select at least one room.');
   check(selected.reduce((sum, v) => sum + 2 + v.rooms.reduce((count, r) => count + r.polygon.length, 0), 0) <= MAX_SHEETS,
     'The drawing package exceeds 256 sheets. Select fewer floors or rooms.');
-  const identity = fingerprint(snapshot + '\n' + canonical(options));
   const warnings = new Set(), schedules = { rooms: [], openings: [], items: [], materials: [] }, sheets = [];
   const fixtures = new Set((accepted.documentation?.ceiling_fixture_ids || []).map(v => v.floor_id + '/' + v.item_id));
   const measurementRules = [
@@ -275,6 +302,7 @@ export function buildDrawingPackage(project, rawOptions) {
     'Unmatched boundary lengths remain assumed wall faces and are marked unknown. No reveals, soffits, skirting or service quantities are inferred.',
     'Waste is a separate allowance; quantities do not include it. The fingerprint is a non-security reproducibility label.'
   ];
+  const identity = fingerprint(canonical(exportProjection(accepted, selected, options, fixtures, measurementRules)));
   for (const { floor, rooms } of selected) {
     const edgesByRoom = new Map(), usedOpenings = new Set(), usedWalls = new Set(), selectedRooms = new Set(rooms.map(r => r.id));
     for (const room of rooms) {

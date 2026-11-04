@@ -84,8 +84,10 @@ silent print scaling. If a drawing cannot fit, select fewer rooms, larger paper,
 or a supported smaller drawing scale, then generate again.
 
 Briefs and measurement notes stay in the editable project and are omitted from
-the generated package, along with Home Assistant entity identifiers. Review
-room names, item names, dimensions, and finish specifications before sharing.
+the generated package, along with Home Assistant entity identifiers. These
+private fields are also excluded from the package's reproducibility fingerprint;
+the editor revision handles freshness separately. Review room names, item names,
+dimensions, and finish specifications before sharing.
 
 If the drawing changes while the panel is open, saving and downloads are blocked.
 **Reload drawing and discard documentation edits** loads the latest snapshot;

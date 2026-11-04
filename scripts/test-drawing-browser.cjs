@@ -8,6 +8,70 @@ const root = path.resolve(__dirname, '..');
 const engine = process.env.BROWSER || 'chromium';
 const browserType = { chromium, firefox, webkit }[engine];
 assert(browserType, 'Choose chromium, firefox, or webkit.');
+const artifactDir = process.env.DRAWING_ARTIFACTS;
+const diagnostic = { phase: 'startup', lifecycle: [], errors: [], requests: [] };
+let activePage, activeFrame;
+const bounded = async (read, milliseconds = 2000) => {
+  let timer;
+  try {
+    return await Promise.race([Promise.resolve().then(read), new Promise(resolve => {
+      timer = setTimeout(() => resolve({ unavailable: 'diagnostic deadline' }), milliseconds);
+    })]);
+  } catch (error) { return { unavailable: String(error.message).slice(0, 240) }; }
+  finally { clearTimeout(timer); }
+};
+// Passive, bounded evidence survives an input-command timeout. No form values,
+// project contents, request bodies, focus changes or replacement clicks.
+function installInputDiagnostics() {
+  const describe = element => element?.tagName ? {
+    tag: element.tagName, id: element.id, action: element.dataset?.drawingAction,
+  } : null;
+  const rect = element => element?.getBoundingClientRect().toJSON() || null;
+  window.__drawingInputEvents = [];
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'focusin', 'scroll']) {
+    document.addEventListener(type, event => {
+      window.__drawingInputEvents.push({ type, at: performance.now(), target: describe(event.target),
+        point: typeof event.clientX === 'number' ? [event.clientX, event.clientY] : null,
+        record: rect(document.querySelector('[data-drawing-action="record-measurement"]')) });
+      if (window.__drawingInputEvents.length > 48) window.__drawingInputEvents.shift();
+    }, { capture: true, passive: true });
+  }
+}
+function documentDiagnostics() {
+  const describe = element => element?.tagName ? {
+    tag: element.tagName, id: element.id, action: element.dataset?.drawingAction,
+  } : null;
+  const geometry = element => {
+    if (!element) return null;
+    const rect = element.getBoundingClientRect(), style = getComputedStyle(element);
+    return { ...describe(element), rect: rect.toJSON(), scroll: [element.scrollLeft, element.scrollTop, element.scrollWidth, element.scrollHeight],
+      display: style.display, visibility: style.visibility, pointerEvents: style.pointerEvents,
+      centerTarget: describe(element.getRootNode().elementFromPoint?.(rect.x + rect.width / 2, rect.y + rect.height / 2)) };
+  };
+  const host = document.querySelector('home-floorplan-studio-panel');
+  return { readyState: document.readyState, visibility: document.visibilityState, focused: document.hasFocus(),
+    viewport: [innerWidth, innerHeight, devicePixelRatio], scroll: [scrollX, scrollY], active: describe(document.activeElement),
+    fonts: document.fonts.status, styles: Array.from(document.querySelectorAll('link[rel="stylesheet"]')).slice(0, 8).map(link => ({
+      path: new URL(link.href).pathname, loaded: !!link.sheet,
+    })),
+    dialog: geometry(document.querySelector('dialog[open]')),
+    record: geometry(document.querySelector('[data-drawing-action="record-measurement"]')),
+    header: geometry(document.querySelector('.drawing-header')), footer: geometry(document.querySelector('.drawing-panel>footer')),
+    host: geometry(host), iframe: geometry(host?.shadowRoot?.querySelector('iframe')),
+    native: host ? { ready: host._ready, busy: host._busy, generation: host._generation, sequence: host._sequence } : null,
+    events: window.__drawingInputEvents || [] };
+}
+async function failureDiagnostics(browser, context) {
+  const targets = [...new Set([activePage, activeFrame])].filter(Boolean);
+  const documents = await Promise.all(targets.map(target => bounded(() => target.evaluate(documentDiagnostics))));
+  const report = { engine, browser: browser?.version(), node: process.version, platform: process.platform,
+    ...diagnostic, pageCount: context?.pages().length, documents };
+  console.error('Drawing failure diagnostics:', JSON.stringify(report));
+  if (!artifactDir) return;
+  fs.mkdirSync(artifactDir, { recursive: true });
+  fs.writeFileSync(path.join(artifactDir, `drawing-${engine}-failure.json`), JSON.stringify(report, null, 2) + '\n');
+  if (activePage) await bounded(() => activePage.screenshot({ path: path.join(artifactDir, `drawing-${engine}-failure.png`), timeout: 2000 }));
+}
 const fixture = { schema_version: 1, id: 'drawing_check', title: 'Measured studio', floors: [{
   id: 'ground', name: 'Ground floor', elevation_m: 0, height_m: 2.7,
   rooms: [{ id: 'studio', name: 'Studio', material: 'floor', polygon: [[0,0],[4,0],[4,3],[0,3]] }],
@@ -51,11 +115,16 @@ async function openPanel(frame){await frame.locator('#drawing-package').click();
 async function step(dialog,n){await dialog.getByRole('button',{name:new RegExp(`^${n}\\.`)}).click();}
 async function readDownload(page,click){const pending=page.waitForEvent('download');await click();const download=await pending;return fs.promises.readFile(await download.path(),'utf8');}
 async function exercise(page,frame,native){
+  activePage = page; activeFrame = frame;
+  const stage = name => { diagnostic.phase = `${native ? 'native' : 'standalone'}: ${name}`; };
+  stage('open and edit measurements');
   let dialog=await openPanel(frame);
   await dialog.getByLabel('Design brief',{exact:true}).fill('Keep the doorway clear.');
   await dialog.getByLabel('Dimension source',{exact:true}).selectOption('measured');
   await dialog.getByLabel('Measurement note',{exact:true}).fill('Tape measure checked.');
+  stage('record first measurement');
   await action(dialog,'record-measurement').click();
+  stage('finishes and documentation save');
   await step(dialog,2);
   const finish=dialog.locator('[data-drawing-surface="floor"]');
   await finish.getByLabel('Finish code',{exact:true}).fill('F-01');
@@ -72,6 +141,7 @@ async function exercise(page,frame,native){
   assert.equal(documented.documentation.measurements[0].status,'measured');
   assert.equal(documented.documentation.ceiling_fixture_ids[0].item_id,'pendant');
   assert.equal(documented.documentation.brief,'Keep the doorway clear.');
+  stage('generate and download');
   await step(dialog,3);await action(dialog,'generate').click();
   await dialog.locator('img.drawing-sheet').waitFor();
   await dialog.locator('img.drawing-sheet').evaluate(image=>image.decode());
@@ -93,6 +163,7 @@ async function exercise(page,frame,native){
     if(dir){fs.mkdirSync(dir,{recursive:true});await page.screenshot({path:path.join(dir,`native-drawings-${engine}.png`),fullPage:true});}
   }
   // A changed accepted snapshot must revoke all old download controls.
+  stage('stale output invalidation');
   await frame.evaluate(async()=>{const {editorBridge}=await import('./editor.js');const next=editorBridge.snapshot();next.floors[0].rooms[0].name='Renamed studio';editorBridge.applyProject(next,editorBridge.revision());});
   assert.equal(await action(dialog,'download-html').count(),0);
   assert.ok(await action(dialog,'generate').isDisabled());await action(dialog,'reload').click();
@@ -100,6 +171,7 @@ async function exercise(page,frame,native){
   await action(dialog,'close').click();
   if(native){await page.locator('#save').click();await page.waitForFunction(()=>window.server.project?.documentation?.finishes.length===1);}
   // Geometry changes leave authored evidence intact but mark it out of date.
+  stage('measurement freshness and undo');
   await frame.evaluate(async()=>{const {editorBridge}=await import('./editor.js');const next=editorBridge.snapshot();next.floors[0].height_m=2.8;editorBridge.applyProject(next,editorBridge.revision());});
   dialog=await openPanel(frame);
   assert.match(await dialog.innerText(),/Current evidence: Out of date/);
@@ -107,12 +179,14 @@ async function exercise(page,frame,native){
   await frame.locator('#undo').click();
   dialog=await openPanel(frame);assert.match(await dialog.innerText(),/Current evidence: Measured/);await action(dialog,'close').click();
   // Removing a referenced item prunes only its metadata within the same undo step.
+  stage('deleted reference pruning and undo');
   await frame.locator('[data-object-kind="items"]').first().click();
   await frame.getByRole('button',{name:'Delete item',exact:true}).click();
   assert.equal(await frame.evaluate(()=>planner.getProject().floors[0].items.length),0);
   assert.equal(await frame.evaluate(()=>planner.getProject().documentation.ceiling_fixture_ids.length),0);
   await frame.locator('#undo').click();
   assert.equal(await frame.evaluate(()=>planner.getProject().documentation.ceiling_fixture_ids.length),1);
+  stage('source change and explicit re-record');
   dialog=await openPanel(frame);
   await dialog.getByLabel('Dimension source',{exact:true}).selectOption('imported');
   await action(dialog,'save').click();
@@ -127,23 +201,50 @@ async function exercise(page,frame,native){
   await action(dialog,'close').click();
 }
 (async()=>{
- let browser;
+ let browser, context, tracing = false, failed = false;
  try{
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const origin=`http://127.0.0.1:${server.address().port}`;
   browser=await browserType.launch(browserLaunchOptions(engine));
-  const context=await browser.newContext({viewport:{width:1440,height:1000},acceptDownloads:true});
-  const errors=[],outside=[];context.on('page',page=>{page.on('pageerror',e=>errors.push(String(e)));page.on('dialog',d=>d.accept());});
+  context=await browser.newContext({viewport:{width:1440,height:1000},acceptDownloads:true});
+  await context.addInitScript(installInputDiagnostics);
+  if (artifactDir) { fs.mkdirSync(artifactDir, { recursive: true }); await context.tracing.start({ screenshots: true, snapshots: true }); tracing = true; }
+  const errors=[],outside=[];context.on('page',page=>{
+    page.on('pageerror',e=>{errors.push(String(e));if(diagnostic.errors.length<8)diagnostic.errors.push(String(e).slice(0,240));});
+    page.on('dialog',d=>d.accept());
+  });
+  context.on('page', page => {
+    const record = (event, frame) => {
+      diagnostic.lifecycle.push({ event, path: frame ? new URL(frame.url() || 'about:blank').pathname : null, at: Date.now() });
+      if (diagnostic.lifecycle.length > 24) diagnostic.lifecycle.shift();
+    };
+    for (const event of ['frameattached', 'framenavigated', 'framedetached']) page.on(event, frame => record(event, frame));
+    for (const event of ['crash', 'close']) page.on(event, () => record(event));
+  });
   context.on('request',request=>{if(!request.url().startsWith(origin+'/')&&!/^(data:|blob:)/.test(request.url()))outside.push(request.url());});
+  context.on('requestfailed',request=>{
+    if(diagnostic.requests.length<8)diagnostic.requests.push({path:new URL(request.url()).pathname,error:request.failure()?.errorText?.slice(0,160)});
+  });
   const page=await context.newPage();page.setDefaultTimeout(20000);
+  activePage = page; activeFrame = page; diagnostic.phase = 'standalone: startup';
   await page.goto(origin+'/planner/index.html');await page.waitForFunction(()=>window.planner);
   await page.locator('#file-input').setInputFiles({name:'measured.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(fixture))});
   await page.waitForFunction(()=>planner.getProject().id==='drawing_check');await exercise(page,page,false);console.log(`${engine}: standalone drawing workflow PASS`);
-  const native=await context.newPage();native.setDefaultTimeout(20000);await native.goto(origin+'/native');await native.waitForFunction(()=>window.host?._ready).catch(async error=>{console.error('Native fixture:',await native.locator('body').innerText(),errors);throw error;});
+  const native=await context.newPage();native.setDefaultTimeout(20000);
+  activePage = native; activeFrame = native; diagnostic.phase = 'native: startup';
+  await native.goto(origin+'/native');await native.waitForFunction(()=>window.host?._ready);
   const frame=native.frames().find(f=>f.url().includes('embed='));assert(frame,'Native editor frame initialized.');
   await exercise(native,frame,true);
   assert.deepEqual(errors,[]);assert.deepEqual(outside,[]);
+  diagnostic.phase = 'native: narrow viewport';
   await native.setViewportSize({width:430,height:880});const modal=await openPanel(frame);
   const bounds=await modal.boundingBox();assert(bounds.width<=430,'Dialog fits a narrow viewport.');await action(modal,'close').click();
   console.log(`${engine}: drawing workflow, native theme/save, private-field exclusion, downloads, stale invalidation, undo and narrow dialog PASS`);
- }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
+ }catch(error){
+  failed = true;
+  await bounded(() => failureDiagnostics(browser, context), 5000);
+  throw error;
+ }finally{
+  if (tracing) await bounded(() => context.tracing.stop(failed ? { path: path.join(artifactDir, `drawing-${engine}-trace.zip`) } : {}), 5000);
+  await browser?.close();await new Promise(resolve=>server.close(resolve));
+ }
 })().catch(error=>{console.error(error);process.exitCode=1;});

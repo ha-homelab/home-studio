@@ -60,6 +60,73 @@ test('detached, deterministic output independent of clocks and object key orderi
   } finally { Date.now = originalNow; Math.random = originalRandom; }
 });
 
+test('private authoring fields cannot change any exported output at a fixed revision', () => {
+  const p = home(), floor = p.floors[0];
+  floor.items.push({ id: 'fixture', name: 'Ceiling Fixture', type: 'lamp', room: 'room', position_m: { x: 2, y: 2.5, z: 1 },
+    dimensions_m: { width: .2, depth: .2, height: .2 }, rotation_deg: 0, entity_id: 'light.private_before', notes: 'Private item note' });
+  measured(p);
+  const expected = build(p);
+  for (const change of [
+    () => { p.documentation.brief = 'Private design brief'; },
+    () => { p.documentation.measurements.forEach(row => { row.note = 'Private measurement note'; }); },
+    () => { floor.items[0].notes = 'Revised private item note'; },
+    () => { floor.items[0].entity_id = 'light.private_after'; },
+    () => { floor.ha_floor_id = 'private_floor'; },
+    () => { floor.rooms[0].ha_area_id = 'private_area'; },
+  ]) {
+    change(); assert.deepEqual(build(p), expected);
+  }
+});
+
+test('fingerprints use resolved measurement state rather than historical snapshots', () => {
+  const p = measured(home()), row = p.documentation.measurements[0];
+  const current = build(p);
+  row.geometry.polygon[0][0] = .1;
+  const stale = build(p);
+  assert.notEqual(stale.fingerprint, current.fingerprint);
+  assert.equal(stale.schedules.rooms[0].floor_area_status, 'stale');
+  row.geometry.polygon[0][0] = .2;
+  assert.deepEqual(build(p), stale);
+});
+
+test('drawing geometry, labels, finishes, evidence and options affect the fingerprint', () => {
+  const original = measured(home());
+  original.documentation.finishes.push({ floor_id: 'ground', room_id: 'room', surface: 'floor', code: 'F1', specification: 'Oak', waste_percent: 5 });
+  const expected = build(original).fingerprint;
+  for (const change of [
+    p => { p.title = 'Renamed drawing'; },
+    p => { p.floors[0].name = 'Renamed floor'; },
+    p => { p.floors[0].rooms[0].name = 'Renamed room'; },
+    p => { p.floors[0].height_m = 2.8; },
+    p => { p.floors[0].walls[0].thickness_m = .2; },
+    p => { p.floors[0].openings[0].width_m = 1; },
+    p => { p.documentation.finishes[0].code = 'F2'; },
+    p => { p.documentation.finishes[0].specification = 'Tile'; },
+    p => { p.documentation.finishes[0].waste_percent = 10; },
+    p => { p.documentation.measurements[0].status = 'estimated'; },
+  ]) {
+    const p = structuredClone(original); change(p);
+    assert.notEqual(build(p).fingerprint, expected);
+  }
+  assert.notEqual(build(original, { scale: 100 }).fingerprint, expected);
+  assert.notEqual(build(original, { revision: 8 }).fingerprint, expected);
+  const unmeasured = home(), beforeGeometry = build(unmeasured).fingerprint;
+  unmeasured.floors[0].rooms[0].polygon[1][0] = 4.25;
+  assert.notEqual(build(unmeasured).fingerprint, beforeGeometry, 'Geometry changes matter even when evidence remains unknown.');
+});
+
+test('excluded fingerprint fields still pass full input validation and bounds', () => {
+  for (const change of [
+    p => { p.documentation.brief = 'x'.repeat(4001); },
+    p => { p.documentation.measurements[0].note = 'x'.repeat(1001); },
+    p => { p.floors[0].ha_floor_id = 'x'.repeat(129); },
+    p => { p.provider_metadata = { private: 'unsupported' }; },
+    p => { p.documentation.brief = 'x'.repeat(2_000_001); },
+  ]) {
+    const p = measured(home()); change(p); assert.throws(() => build(p));
+  }
+});
+
 test('unknown, estimated, imported and stale geometry remain explicit', () => {
   assert.equal(build().schedules.rooms[0].wall_area_status, 'unknown');
   for (const status of ['estimated', 'imported']) {
