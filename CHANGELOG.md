@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.0] - In preparation
+
+This release is not published yet. The latest stable release remains 1.3.1.
 
 ### Added
 
@@ -29,6 +31,33 @@
 - Check the combined geometry of all edited floors before publishing an imported
   home. Oversized additions leave the saved draft and published home available;
   unchanged imported geometry is not rebuilt or charged as new geometry.
+
+### Upgrade
+
+- Back up Home Assistant and export your original project JSON before updating.
+  Once 1.4.0 is published, update through HACS or install its `home_floorplan.zip`,
+  restart Home Assistant, and reload the browser. Existing drawings without
+  documentation metadata remain valid.
+- The hosted editor and installed HA integration update separately and keep
+  separate drafts. Opening the hosted editor does not upgrade HA or transfer a
+  project. Use JSON export/import to move drawings between compatible versions.
+- For the portable workflow, use the matching `home-studio-VERSION.zip` release
+  asset. Existing generated homes need a matching rebuild to receive updated
+  embedded viewer features; updating the hosted editor alone is insufficient.
+
+### Compatibility
+
+- Drawings can include optional `documentation` metadata for measurement sources,
+  notes, finishes, and selected ceiling fixtures. Older strict editors or compilers
+  may reject this field. Keep your original JSON backup as well as the documented
+  project, and use compatible tools rather than removing metadata to force an import.
+- Older wall measurement records remain readable but require an explicit recheck
+  because they do not include the wall's opening set. Review the current dimensions
+  and choose **Record current dimensions** again. A geometry change never silently
+  verifies a measurement.
+- **Save documentation** updates the editor's undoable project state. Use the
+  normal editor save controls to persist it in HA. Downloaded sheets and schedules
+  are snapshots and must be regenerated after changes.
 
 ## [1.3.1] - Bounded viewer loading
 

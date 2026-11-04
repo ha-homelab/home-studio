@@ -61,9 +61,9 @@ The walkthrough was recorded on [v0.10.1-beta.6](https://github.com/ha-homelab/h
 
 ## Prepare drawings and material schedules
 
-Available in current development builds; this section describes functionality
-that is not included in the 1.3.1 stable release. Updating the hosted editor does
-not update an installed Home Assistant integration.
+Planned for 1.4.0 and currently available in development builds. These features
+are not included in the 1.3.1 stable release. Updating the hosted editor does not
+update an installed Home Assistant integration.
 
 Inside **Home Assistant → Home Studio**, choose **Drawings & materials** to
 record your measurements, describe finishes, and select ceiling fixtures. Build a
