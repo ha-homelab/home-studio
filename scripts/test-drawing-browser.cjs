@@ -131,7 +131,9 @@ async function exerciseKeyboardAndReview(page, frame, native) {
   activePage = page; activeFrame = frame;
   diagnostic.phase = `${native ? 'native' : 'standalone'}: keyboard and geometry review`;
   const project = structuredClone(fixture);
-  const upper = structuredClone(project.floors[0]); upper.id = 'upper'; upper.name = 'Upper floor'; upper.elevation_m = 3;
+  // Floor keeps its select node across rerenders. A shared initial exercises
+  // native first-character cycling without assuming blur clears typeahead.
+  const upper = structuredClone(project.floors[0]); upper.id = 'upper'; upper.name = 'Gallery floor'; upper.elevation_m = 3;
   project.floors.push(upper);
   project.floors[0].rooms.push({ id: 'annex', name: 'Annex', material: 'floor', polygon: [[6,0],[8,0],[8,2],[6,2]] });
   await frame.evaluate(async value => {
@@ -142,8 +144,8 @@ async function exerciseKeyboardAndReview(page, frame, native) {
   const focused = async control => assert.ok(await control.evaluate(element => element === document.activeElement), 'The changed selector retains keyboard focus.');
   const keyboardChoice = async (name, key, expected) => {
     const control = field(name);
-    // Start a new focus gesture instead of appending to an earlier typeahead
-    // search. Closed-select typeahead works without a native popup in headless macOS.
+    // Use closed-select typeahead: native popups are unavailable in headless
+    // macOS. The persistent Floor selector uses the same cycling key each time.
     if (await control.evaluate(element => element === document.activeElement)) await page.keyboard.press('Tab');
     await control.focus();
     const fieldKey = await control.getAttribute('data-drawing-field');
@@ -164,7 +166,7 @@ async function exerciseKeyboardAndReview(page, frame, native) {
   const value = async (label, expected) => {
     assert.equal(await geometry.getByText(label, { exact: true }).locator('..').locator('dd').innerText(), expected);
   };
-  assert.deepEqual(await field('Floor').locator('option').allTextContents(), ['Ground floor', 'Upper floor']);
+  assert.deepEqual(await field('Floor').locator('option').allTextContents(), ['Ground floor', 'Gallery floor']);
   await value('Floor area', '12 m²'); await value('Perimeter', '14 m'); await value('Ceiling height', '2.7 m');
   await keyboardChoice('Element type', 'w', 'wall');
   await value('Length', '4 m'); await value('Height', '2.7 m'); await value('Thickness', '0.15 m'); await value('Openings included', '1');
@@ -177,14 +179,14 @@ async function exerciseKeyboardAndReview(page, frame, native) {
   await keyboardChoice('Element type', 'i', 'item');
   await value('Width × depth × height', '0.3 × 0.3 × 0.3 m'); await value('Base height above floor', '2.4 m');
   await keyboardChoice('Element type', 'r', 'room');
-  await keyboardChoice('Floor', 'u', 'upper'); await keyboardChoice('Floor', 'g', 'ground');
+  await keyboardChoice('Floor', 'g', 'upper'); await keyboardChoice('Floor', 'g', 'ground');
   await step(dialog, 2);
   await keyboardChoice('Room', 'a', 'annex'); await keyboardChoice('Room', 's', 'studio');
   await step(dialog, 3);
   await keyboardChoice('Floors', 's', 'current');
   await roomScope('ground/annex'); await roomScope('all');
   await keyboardChoice('Floors', 'a', 'all');
-  assert.equal(await field('Rooms').locator('option[value="upper/studio"]').innerText(), 'Upper floor · Studio');
+  assert.equal(await field('Rooms').locator('option[value="upper/studio"]').innerText(), 'Gallery floor · Studio');
   assert.equal(await frame.evaluate(() => planner.getProject().documentation), undefined, 'Reviewing geometry and scope does not record measurements or save documentation.');
   await action(dialog, 'generate').click();
   const warnings = dialog.locator('summary').filter({ hasText: /^Measurement rules and limitations/ });
@@ -193,10 +195,10 @@ async function exerciseKeyboardAndReview(page, frame, native) {
   await field('Schedule').selectOption('items');
   const rows = dialog.locator('tbody tr'); assert.equal(await rows.count(), 2);
   assert.match(await rows.nth(0).innerText(), /Ground floor \/ Studio/);
-  assert.match(await rows.nth(1).innerText(), /Upper floor \/ Studio/);
+  assert.match(await rows.nth(1).innerText(), /Gallery floor \/ Studio/);
   for (let i = 0; i < 2; i++) assert.match(await rows.nth(i).innerText(), /Studio pendant \(pendant\)/);
   await field('Schedule').selectOption('openings'); assert.equal(await rows.count(), 4);
-  for (const [index, floor] of [[0, 'Ground floor'], [2, 'Upper floor']]) {
+  for (const [index, floor] of [[0, 'Ground floor'], [2, 'Gallery floor']]) {
     const cells = rows.nth(index).locator('td');
     assert.equal(await cells.nth(0).innerText(), floor);
     assert.equal(await cells.nth(1).innerText(), 'door'); assert.equal(await cells.nth(2).innerText(), 'south');
@@ -206,7 +208,7 @@ async function exerciseKeyboardAndReview(page, frame, native) {
   await field('Design brief').fill('Unsaved brief to copy before reloading.');
   const note = field('Measurement note'), pending = 'Unsaved source note to copy.', upperPending = 'Unsaved upper-floor item note.';
   await note.fill(pending);
-  await keyboardChoice('Floor', 'u', 'upper'); await keyboardChoice('Element type', 'i', 'item');
+  await keyboardChoice('Floor', 'g', 'upper'); await keyboardChoice('Element type', 'i', 'item');
   await note.fill(upperPending);
   await keyboardChoice('Floor', 'g', 'ground'); await keyboardChoice('Element type', 'r', 'room');
   assert.equal(await note.inputValue(), pending); await note.focus(); await note.press('ControlOrMeta+A');
@@ -219,10 +221,10 @@ async function exerciseKeyboardAndReview(page, frame, native) {
   await note.press('x'); assert.equal(await note.inputValue(), pending, 'Stale text can be selected but cannot be edited.');
   assert.ok(await action(dialog, 'save').isDisabled()); assert.ok(await action(dialog, 'record-measurement').isDisabled());
   assert.ok(await field('Dimension source').isDisabled());
-  await keyboardChoice('Floor', 'u', 'upper'); await keyboardChoice('Element type', 'i', 'item');
+  await keyboardChoice('Floor', 'g', 'upper'); await keyboardChoice('Element type', 'i', 'item');
   assert.equal(await note.inputValue(), upperPending, 'Stale navigation retains pending notes on another floor and element.');
   assert.equal(await note.getAttribute('readonly'), ''); assert.equal(await note.isDisabled(), false);
-  assert.deepEqual(await field('Floor').locator('option').allTextContents(), ['Ground floor', 'Upper floor'], 'Stale navigation stays within the retained snapshot.');
+  assert.deepEqual(await field('Floor').locator('option').allTextContents(), ['Ground floor', 'Gallery floor'], 'Stale navigation stays within the retained snapshot.');
   await note.press('ControlOrMeta+A');
   assert.deepEqual(await note.evaluate(element => [element.selectionStart, element.selectionEnd]), [0, upperPending.length]);
   await keyboardChoice('Floor', 'g', 'ground'); await keyboardChoice('Element type', 'r', 'room');
