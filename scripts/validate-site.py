@@ -111,7 +111,7 @@ REPO_FILES = (
               'README.md', 'LICENSE', 'CONTRIBUTING.md', 'SECURITY.md',
               'GOVERNANCE.md', 'CODE_OF_CONDUCT.md', 'ROADMAP.md', 'docs/quality.md',
               'RELEASING.md', 'CHANGELOG.md', 'docs/fuzzing.md',
-              'docs/rc-fuzzing.md', 'docs/release-workflow.md', '.gitignore', '.gitattributes', 'scripts/validate-site.py', '.github/workflows/pages.yml',
+              'docs/rc-fuzzing.md', 'docs/release-workflow.md', 'docs/release-read-safety.md', '.gitignore', '.gitattributes', 'scripts/validate-site.py', '.github/workflows/pages.yml',
               '.github/workflows/package.yml', '.github/workflows/platform-acceptance.yml',
               '.github/actions/upload-acceptance-artifact/action.yml',
               'docs/architecture.md', 'docs/first-session.md', 'docs/home-assistant-editor.md', 'docs/blender-export.md', 'docs/dashboard-and-media.md', 'docs/curtain-authoring.md', 'scripts/test-curtain-authoring.mjs', 'scripts/test-curtain-authoring.py', 'scripts/test-curtain-browser.cjs', 'docs/platform-acceptance.md',
