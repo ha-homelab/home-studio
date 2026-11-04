@@ -1,8 +1,6 @@
 # Changelog
 
-## [1.4.0] - In preparation
-
-This release is not published yet. The latest stable release remains 1.3.1.
+## [1.4.0] - Drawings, materials and device feedback
 
 ### Added
 
@@ -34,10 +32,10 @@ This release is not published yet. The latest stable release remains 1.3.1.
 
 ### Upgrade
 
-- Back up Home Assistant and export your original project JSON before updating.
-  Once 1.4.0 is published, update through HACS or install its `home_floorplan.zip`,
-  restart Home Assistant, and reload the browser. Existing drawings without
-  documentation metadata remain valid.
+- To update to 1.4.0, back up Home Assistant and export your original project JSON.
+  Update through HACS or install `home_floorplan.zip` from the matching
+  [release](https://github.com/ha-homelab/home-studio/releases), restart Home Assistant,
+  and reload the browser. Existing drawings without documentation metadata remain valid.
 - The hosted editor and installed HA integration update separately and keep
   separate drafts. Opening the hosted editor does not upgrade HA or transfer a
   project. Use JSON export/import to move drawings between compatible versions.
