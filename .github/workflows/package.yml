@@ -75,6 +75,7 @@ jobs:
           python3 scripts/test-ha-project-metadata.py
           node scripts/test-drawing-package.mjs
           node scripts/test-documentation-model.mjs
+          node scripts/test-dialog-viewport.mjs
           python3 scripts/test-ha-native.py
           python3 scripts/test-ha-generated.py
           python3 scripts/test-site-calibration.py

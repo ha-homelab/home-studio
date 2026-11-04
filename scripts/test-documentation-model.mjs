@@ -51,6 +51,23 @@ invalid(project => project.documentation.measurements[0].geometry.provider = 'un
 invalid(project => project.documentation.measurements[0].geometry.polygon[0][0] = true);
 invalid(project => project.documentation.measurements[0].geometry.polygon = [[0, 0]]);
 invalid(project => project.documentation.measurements[1].geometry.thickness_m = 0);
+const wallOpening = clone(base.documentation.measurements[1].geometry.openings[0]);
+assert.deepEqual(wallOpening, { id: 'view', type: 'window', offset_m: 1.1, width_m: 3.4, sill_m: .75, head_m: 2.2 });
+valid(project => { delete project.documentation.measurements[1].geometry.openings; }); // Legacy evidence needs rechecking, not repair on import.
+valid(project => { project.documentation.measurements[1].geometry.openings = []; });
+valid(project => { project.documentation.measurements[1].geometry.openings[0].id = 'historical_window'; });
+valid(project => { project.documentation.measurements[1].geometry.openings = Array.from({ length: 256 }, (_, i) => ({ ...wallOpening, id: `historical_${String(i).padStart(3, '0')}` })); });
+for (const value of [null, {}, 'openings', true]) invalid(project => project.documentation.measurements[1].geometry.openings = value);
+invalid(project => project.documentation.measurements[1].geometry.openings = Array.from({ length: 257 }, (_, i) => ({ ...wallOpening, id: `historical_${String(i).padStart(3, '0')}` })));
+invalid(project => project.documentation.measurements[1].geometry.openings.push(clone(wallOpening)));
+invalid(project => project.documentation.measurements[1].geometry.openings = [{ ...wallOpening, id: 'z' }, { ...wallOpening, id: 'a' }]);
+for (const field of Object.keys(wallOpening)) invalid(project => delete project.documentation.measurements[1].geometry.openings[0][field]);
+invalid(project => project.documentation.measurements[1].geometry.openings[0].wall_id = 'wall_1');
+for (const value of ['__proto__', 'invalid id', 1, null]) invalid(project => project.documentation.measurements[1].geometry.openings[0].id = value);
+for (const value of ['skylight', {}, null]) invalid(project => project.documentation.measurements[1].geometry.openings[0].type = value);
+for (const [field, values] of [['offset_m', [-1, 301]], ['width_m', [0, 301]], ['sill_m', [-1, 21]], ['head_m', [0, 21]]]) {
+  for (const value of [...values, null, true, '1']) invalid(project => project.documentation.measurements[1].geometry.openings[0][field] = value);
+}
 invalid(project => project.documentation.measurements[2].geometry.wall_id = '__proto__');
 invalid(project => project.documentation.measurements[2].geometry.type = 'skylight');
 invalid(project => project.documentation.measurements[3].geometry.model_id = '__proto__');
@@ -99,6 +116,64 @@ const changedRoom = clone(measured); changedRoom.floors[0].rooms[0].polygon[1][0
 assert.equal(measurementState(changedRoom, changedRoom.documentation.measurements[0]), 'stale'); stateCases.push(changedRoom);
 const changedOpening = clone(measured); changedOpening.floors[0].openings[0].width_m -= .1;
 assert.equal(measurementState(changedOpening, changedOpening.documentation.measurements[2]), 'stale'); stateCases.push(changedOpening);
+// Wall-finish evidence must cover the opening set, including a deleted opening
+// whose own measurement is pruned. An undo restores the original snapshot.
+const wallState = project => measurementState(project, project.documentation.measurements[1]);
+const openingChanges = [
+  p => p.floors[0].openings.push({ id: 'new_window', wall_id: 'wall_1', type: 'window', offset_m: 5, width_m: .5, sill_m: .8, head_m: 2 }),
+  p => { p.floors[0].openings = p.floors[0].openings.filter(o => o.id !== 'view'); },
+  p => { p.floors[0].openings.find(o => o.id === 'view').offset_m -= .1; },
+  p => { p.floors[0].openings.find(o => o.id === 'view').width_m -= .1; },
+  p => { p.floors[0].openings.find(o => o.id === 'view').sill_m += .1; },
+  p => { p.floors[0].openings.find(o => o.id === 'view').head_m -= .1; },
+  p => { const o = p.floors[0].openings.find(o => o.id === 'view'); o.type = 'passage'; o.sill_m = 0; },
+  p => { p.floors[0].openings.find(o => o.id === 'view').id = 'replacement_window'; },
+  p => { p.floors[0].openings.find(o => o.id === 'view').wall_id = 'wall_6'; },
+];
+for (const change of openingChanges) {
+  const project = clone(measured), previous = clone(project);
+  change(project); project.documentation = pruneDocumentation(project); validateProject(project);
+  assert.equal(wallState(project), 'stale');
+  assert.deepEqual(project.documentation.measurements[1], previous.documentation.measurements[1]);
+  assert.equal(wallState(previous), 'measured'); stateCases.push(project, previous);
+}
+const deletedDocumentedOpening = clone(measured), deletedRef = ref('opening', 'view');
+deletedDocumentedOpening.documentation.measurements.push({ ...deletedRef, status: 'measured', note: 'Opening checked', geometry: measurementGeometry(deletedDocumentedOpening, deletedRef) });
+const deletionUndo = clone(deletedDocumentedOpening);
+deletedDocumentedOpening.floors[0].openings = deletedDocumentedOpening.floors[0].openings.filter(o => o.id !== 'view');
+deletedDocumentedOpening.documentation = pruneDocumentation(deletedDocumentedOpening);
+validateProject(deletedDocumentedOpening);
+assert.equal(deletedDocumentedOpening.documentation.measurements.some(row => row.target_id === 'view'), false);
+assert.equal(wallState(deletedDocumentedOpening), 'stale');
+assert.equal(wallState(deletionUndo), 'measured');
+stateCases.push(deletedDocumentedOpening, deletionUndo);
+const unrelatedOpening = clone(measured); unrelatedOpening.floors[0].openings.find(o => o.id === 'entry').width_m -= .1;
+assert.equal(wallState(unrelatedOpening), 'measured'); stateCases.push(unrelatedOpening);
+const orderedOpenings = clone(measured);
+orderedOpenings.floors[0].openings.push({ id: 'a_window', wall_id: 'wall_1', type: 'window', offset_m: 5, width_m: .5, sill_m: .8, head_m: 2 });
+orderedOpenings.documentation.measurements[1].geometry = measurementGeometry(orderedOpenings, references[1]);
+assert.deepEqual(orderedOpenings.documentation.measurements[1].geometry.openings.map(o => o.id), ['a_window', 'view']);
+const beforeReorder = clone(orderedOpenings.documentation.measurements[1]);
+orderedOpenings.floors[0].openings.reverse();
+assert.equal(wallState(orderedOpenings), 'measured');
+assert.deepEqual(orderedOpenings.documentation.measurements[1], beforeReorder); stateCases.push(orderedOpenings);
+const legacyWall = clone(measured); delete legacyWall.documentation.measurements[1].geometry.openings;
+const legacyWallBefore = clone(legacyWall); validateProject(legacyWall);
+assert.deepEqual(legacyWall, legacyWallBefore); assert.equal(wallState(legacyWall), 'stale'); stateCases.push(clone(legacyWall));
+for (const status of ['estimated', 'imported', 'unknown']) {
+  const old = clone(legacyWall); old.documentation.measurements[1].status = status;
+  assert.equal(wallState(old), status === 'unknown' ? 'unknown' : 'stale'); stateCases.push(old);
+}
+legacyWall.documentation.measurements[1].geometry = measurementGeometry(legacyWall, references[1]);
+assert.equal(wallState(legacyWall), 'measured');
+assert.equal(legacyWall.documentation.measurements[1].note, legacyWallBefore.documentation.measurements[1].note); stateCases.push(legacyWall);
+const noOpenings = clone(measured); noOpenings.floors[0].openings = [];
+noOpenings.documentation = pruneDocumentation(noOpenings);
+noOpenings.documentation.measurements[1].geometry = measurementGeometry(noOpenings, references[1]);
+assert.deepEqual(noOpenings.documentation.measurements[1].geometry.openings, []);
+assert.equal(wallState(noOpenings), 'measured'); stateCases.push(noOpenings);
+const detachedWall = measurementGeometry(measured, references[1]); detachedWall.openings[0].width_m = .1;
+assert.notEqual(measured.floors[0].openings.find(o => o.id === 'view').width_m, .1);
 const renamed = clone(measured); renamed.title = 'Renamed'; renamed.floors[0].items[0].name = 'Renamed sofa'; renamed.floors[0].items[0].notes = 'Private runtime note';
 assert.deepEqual(states(renamed), states(measured)); stateCases.push(renamed);
 const snapshot = measurementGeometry(base, references[3]); snapshot.position_m.x = -50; assert.notEqual(base.floors[0].items[0].position_m.x, -50);

@@ -147,6 +147,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     this._pending = new Map(); this._sequence = 0; this._request = 0; this._generation = 0;
     this._aiPending = new Map(); this._aiEpoch = 0; this._aiSequence = 0; this._aiSession = null; this._aiSessionPromise = null;
     this._pagehide = () => {
+      this._stopDialogViewport();
       this._disposeAi();
       this._resetMapTransport();
       this._cancelViewerRuntime();
@@ -313,6 +314,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     if (!this._online() || epoch !== this._connectionEpoch) throw new Error('The Home Assistant connection changed. Keep this tab open and try again after reconnecting.');
   }
   _reset() {
+    this._stopDialogViewport();
     this._resetMapTransport();
     this._cancelViewerRuntime();
     this._viewerRuntimeUnconfirmed = false;
@@ -340,6 +342,44 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     window.removeEventListener('pagehide', this._pagehide);
     this._persist(); window.removeEventListener('message', this._receive); window.removeEventListener('beforeunload', this._beforeUnload);
     this._reset();
+  }
+  _stopDialogViewport() {
+    this._dialogViewportCleanup?.(); this._dialogViewportCleanup = null;
+  }
+  _startDialogViewport() {
+    if (this._dialogViewportCleanup || !this._ready || !this._frame) return;
+    const frame = this._frame, viewport = window.visualViewport;
+    let scheduled = null, previous = '';
+    const publish = () => {
+      scheduled = null;
+      if (frame !== this._frame || !frame.isConnected) return;
+      const rect = frame.getBoundingClientRect(), host = this.getBoundingClientRect();
+      const visibleTop = Math.max(viewport?.offsetTop || 0, rect.top, host.top);
+      const visibleBottom = Math.min((viewport?.offsetTop || 0) + (viewport?.height || window.innerHeight), rect.bottom, host.bottom);
+      const top = Math.max(0, Math.ceil(visibleTop - rect.top));
+      const height = Math.max(0, Math.floor(visibleBottom - visibleTop));
+      if (height < 48 || top + height > 10000) return;
+      const key = `${top}/${height}`;
+      if (key === previous) return;
+      previous = key; this._send('dialog-viewport', { top, height });
+    };
+    const schedule = () => { if (scheduled === null) scheduled = requestAnimationFrame(publish); };
+    // This navigation is caused by the user opening a dialog in the editor.
+    frame.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'instant' });
+    window.addEventListener('resize', schedule);
+    window.addEventListener('scroll', schedule, true);
+    this.addEventListener('scroll', schedule);
+    viewport?.addEventListener('resize', schedule);
+    viewport?.addEventListener('scroll', schedule);
+    this._dialogViewportCleanup = () => {
+      if (scheduled !== null) cancelAnimationFrame(scheduled);
+      window.removeEventListener('resize', schedule);
+      window.removeEventListener('scroll', schedule, true);
+      this.removeEventListener('scroll', schedule);
+      viewport?.removeEventListener('resize', schedule);
+      viewport?.removeEventListener('scroll', schedule);
+    };
+    schedule();
   }
   _scheduleTheme() {
     if (!this.isConnected || this._themeFrame != null) return;
@@ -591,6 +631,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     }, STARTUP_TIMEOUT_MS);
   }
   _failStartup(message, allowRetry = true, error = true) {
+    this._stopDialogViewport();
     this._disposeAi();
     this._clearStartup(); this._clearEditorNavigation(); this._generation++; this._startupFailed = allowRetry; this._ready = false; this._busy = false;
     this._frame?.remove(); this._frame = null; this._channel = null;
@@ -664,6 +705,7 @@ class HomeFloorplanStudioPanel extends HTMLElement {
     else { try { sessionStorage.removeItem(this._key()); } catch {} this._openEditor(this._saved.project); }
   }
   _openEditor(project) {
+    this._stopDialogViewport();
     this._cancelViewerRuntime();
     this._viewerRuntimeUnconfirmed = false;
     this._resetMapTransport();
@@ -693,6 +735,10 @@ class HomeFloorplanStudioPanel extends HTMLElement {
   _onMessage(event) {
     const data = event.data;
     if (event.source !== this._frame?.contentWindow || event.origin !== 'null' || data?.protocol !== STUDIO_PROTOCOL || data.channel !== this._channel) return;
+    if (data.type === 'dialog-state' && typeof data.open === 'boolean') {
+      if (data.open) this._startDialogViewport(); else this._stopDialogViewport();
+      return;
+    }
     if (this._mapTransport.handle(data)) {
       if (data.type === 'map-close') this.$('studio-map-credit').hidden = true;
       return;

@@ -28,6 +28,14 @@ function installInputDiagnostics() {
   } : null;
   const rect = element => element?.getBoundingClientRect().toJSON() || null;
   window.__drawingInputEvents = [];
+  window.__drawingSelectEvents = [];
+  for (const type of ['input', 'change']) {
+    document.addEventListener(type, event => {
+      if (event.target.tagName !== 'SELECT' || !event.target.dataset.drawingField) return;
+      window.__drawingSelectEvents.push({ type, trusted: event.isTrusted, field: event.target.dataset.drawingField });
+      if (window.__drawingSelectEvents.length > 16) window.__drawingSelectEvents.shift();
+    }, { capture: true, passive: true });
+  }
   for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'focusin', 'scroll']) {
     document.addEventListener(type, event => {
       window.__drawingInputEvents.push({ type, at: performance.now(), target: describe(event.target),
@@ -59,7 +67,7 @@ function documentDiagnostics() {
     header: geometry(document.querySelector('.drawing-header')), footer: geometry(document.querySelector('.drawing-panel>footer')),
     host: geometry(host), iframe: geometry(host?.shadowRoot?.querySelector('iframe')),
     native: host ? { ready: host._ready, busy: host._busy, generation: host._generation, sequence: host._sequence } : null,
-    events: window.__drawingInputEvents || [] };
+    events: window.__drawingInputEvents || [], selectEvents: window.__drawingSelectEvents || [] };
 }
 async function failureDiagnostics(browser, context) {
   const targets = [...new Set([activePage, activeFrame])].filter(Boolean);
@@ -119,6 +127,162 @@ const action=(scope,name)=>scope.locator(`[data-drawing-action="${name}"]`);
 async function openPanel(frame){await frame.locator('#drawing-package').click();const dialog=frame.getByRole('dialog',{name:'Drawings & materials',exact:true});await dialog.waitFor();return dialog;}
 async function step(dialog,n){await dialog.getByRole('button',{name:new RegExp(`^${n}\\.`)}).click();}
 async function readDownload(page,click){const pending=page.waitForEvent('download');await click();const download=await pending;return fs.promises.readFile(await download.path(),'utf8');}
+async function exerciseKeyboardAndReview(page, frame, native) {
+  activePage = page; activeFrame = frame;
+  diagnostic.phase = `${native ? 'native' : 'standalone'}: keyboard and geometry review`;
+  const project = structuredClone(fixture);
+  const upper = structuredClone(project.floors[0]); upper.id = 'upper'; upper.name = 'Upper floor'; upper.elevation_m = 3;
+  project.floors.push(upper);
+  project.floors[0].rooms.push({ id: 'annex', name: 'Annex', material: 'floor', polygon: [[6,0],[8,0],[8,2],[6,2]] });
+  await frame.evaluate(async value => {
+    const { editorBridge } = await import('./editor.js'); editorBridge.applyProject(value, editorBridge.revision());
+  }, project);
+  let dialog = await openPanel(frame);
+  const field = name => dialog.getByLabel(name, { exact: true });
+  const focused = async control => assert.ok(await control.evaluate(element => element === document.activeElement), 'The changed selector retains keyboard focus.');
+  const keyboardChoice = async (name, key, expected) => {
+    const control = field(name);
+    // Start a new focus gesture instead of appending to an earlier typeahead
+    // search. Closed-select typeahead works without a native popup in headless macOS.
+    if (await control.evaluate(element => element === document.activeElement)) await page.keyboard.press('Tab');
+    await control.focus();
+    const fieldKey = await control.getAttribute('data-drawing-field');
+    await frame.evaluate(() => { window.__drawingSelectEvents = []; });
+    await page.keyboard.press(key);
+    await control.locator(`option[value="${expected}"]:checked`).waitFor({ state: 'attached' });
+    assert.equal(await control.inputValue(), expected); await focused(control);
+    const events = await frame.evaluate(() => window.__drawingSelectEvents);
+    for (const type of ['input', 'change']) assert.ok(events.some(event => event.field === fieldKey && event.type === type && event.trusted),
+      `Keyboard ${name} selection emits trusted ${type}: ${JSON.stringify(events)}`);
+  };
+  const roomScope = async value => {
+    // Room labels share the floor-name prefix, so cover this ambiguous selector's
+    // focus separately; the rebuilt type/element/floor/room controls use real keys.
+    const control = field('Rooms'); await control.focus(); await control.selectOption(value); await focused(control);
+  };
+  const geometry = dialog.getByRole('region', { name: 'Current drawing dimensions', exact: true });
+  const value = async (label, expected) => {
+    assert.equal(await geometry.getByText(label, { exact: true }).locator('..').locator('dd').innerText(), expected);
+  };
+  assert.deepEqual(await field('Floor').locator('option').allTextContents(), ['Ground floor', 'Upper floor']);
+  await value('Floor area', '12 m²'); await value('Perimeter', '14 m'); await value('Ceiling height', '2.7 m');
+  await keyboardChoice('Element type', 'w', 'wall');
+  await value('Length', '4 m'); await value('Height', '2.7 m'); await value('Thickness', '0.15 m'); await value('Openings included', '1');
+  await page.keyboard.press('Tab'); await focused(field('Element'));
+  await keyboardChoice('Element', 'w', 'west'); await value('Length', '3 m'); await value('Openings included', '0');
+  await keyboardChoice('Element type', 'd', 'opening');
+  await value('Width', '0.9 m'); await value('Height', '2 m');
+  await keyboardChoice('Element', 'w', 'window');
+  await value('Width', '1.2 m'); await value('Height', '1.5 m'); await value('Sill height above floor', '0.6 m');
+  await keyboardChoice('Element type', 'i', 'item');
+  await value('Width × depth × height', '0.3 × 0.3 × 0.3 m'); await value('Base height above floor', '2.4 m');
+  await keyboardChoice('Element type', 'r', 'room');
+  await keyboardChoice('Floor', 'u', 'upper'); await keyboardChoice('Floor', 'g', 'ground');
+  await step(dialog, 2);
+  await keyboardChoice('Room', 'a', 'annex'); await keyboardChoice('Room', 's', 'studio');
+  await step(dialog, 3);
+  await keyboardChoice('Floors', 's', 'current');
+  await roomScope('ground/annex'); await roomScope('all');
+  await keyboardChoice('Floors', 'a', 'all');
+  assert.equal(await field('Rooms').locator('option[value="upper/studio"]').innerText(), 'Upper floor · Studio');
+  assert.equal(await frame.evaluate(() => planner.getProject().documentation), undefined, 'Reviewing geometry and scope does not record measurements or save documentation.');
+  await action(dialog, 'generate').click();
+  const warnings = dialog.locator('summary').filter({ hasText: /^Measurement rules and limitations/ });
+  assert.match(await warnings.innerText(), /[1-9][0-9]* warnings/);
+  assert.equal(await warnings.evaluate(element => element.parentElement.open), false, 'Warning count is visible without expanding the rules.');
+  await field('Schedule').selectOption('items');
+  const rows = dialog.locator('tbody tr'); assert.equal(await rows.count(), 2);
+  assert.match(await rows.nth(0).innerText(), /Ground floor \/ Studio/);
+  assert.match(await rows.nth(1).innerText(), /Upper floor \/ Studio/);
+  for (let i = 0; i < 2; i++) assert.match(await rows.nth(i).innerText(), /Studio pendant \(pendant\)/);
+  await field('Schedule').selectOption('openings'); assert.equal(await rows.count(), 4);
+  for (const [index, floor] of [[0, 'Ground floor'], [2, 'Upper floor']]) {
+    const cells = rows.nth(index).locator('td');
+    assert.equal(await cells.nth(0).innerText(), floor);
+    assert.equal(await cells.nth(1).innerText(), 'door'); assert.equal(await cells.nth(2).innerText(), 'south');
+  }
+  diagnostic.phase = `${native ? 'native' : 'standalone'}: stale text remains copyable`;
+  await step(dialog, 1);
+  await field('Design brief').fill('Unsaved brief to copy before reloading.');
+  const note = field('Measurement note'), pending = 'Unsaved source note to copy.', upperPending = 'Unsaved upper-floor item note.';
+  await note.fill(pending);
+  await keyboardChoice('Floor', 'u', 'upper'); await keyboardChoice('Element type', 'i', 'item');
+  await note.fill(upperPending);
+  await keyboardChoice('Floor', 'g', 'ground'); await keyboardChoice('Element type', 'r', 'room');
+  assert.equal(await note.inputValue(), pending); await note.focus(); await note.press('ControlOrMeta+A');
+  await frame.evaluate(async () => {
+    const { editorBridge } = await import('./editor.js'); const next = editorBridge.snapshot();
+    next.floors[1].name = 'Updated upper floor'; editorBridge.applyProject(next, editorBridge.revision());
+  });
+  assert.equal(await note.isDisabled(), false); assert.equal(await note.getAttribute('readonly'), ''); await focused(note);
+  assert.deepEqual(await note.evaluate(element => [element.selectionStart, element.selectionEnd]), [0, pending.length]);
+  await note.press('x'); assert.equal(await note.inputValue(), pending, 'Stale text can be selected but cannot be edited.');
+  assert.ok(await action(dialog, 'save').isDisabled()); assert.ok(await action(dialog, 'record-measurement').isDisabled());
+  assert.ok(await field('Dimension source').isDisabled());
+  await keyboardChoice('Floor', 'u', 'upper'); await keyboardChoice('Element type', 'i', 'item');
+  assert.equal(await note.inputValue(), upperPending, 'Stale navigation retains pending notes on another floor and element.');
+  assert.equal(await note.getAttribute('readonly'), ''); assert.equal(await note.isDisabled(), false);
+  assert.deepEqual(await field('Floor').locator('option').allTextContents(), ['Ground floor', 'Upper floor'], 'Stale navigation stays within the retained snapshot.');
+  await note.press('ControlOrMeta+A');
+  assert.deepEqual(await note.evaluate(element => [element.selectionStart, element.selectionEnd]), [0, upperPending.length]);
+  await keyboardChoice('Floor', 'g', 'ground'); await keyboardChoice('Element type', 'r', 'room');
+  assert.equal(await note.inputValue(), pending);
+  await step(dialog, 2); await keyboardChoice('Room', 'a', 'annex'); await keyboardChoice('Room', 's', 'studio');
+  await step(dialog, 1);
+  assert.ok(await action(dialog, 'save').isDisabled()); assert.ok(await action(dialog, 'record-measurement').isDisabled());
+  await note.press('Escape');
+  const keep = dialog.getByRole('button', { name: 'Keep editing', exact: true });
+  await focused(keep); await keep.press('Enter');
+  await step(dialog, 3); assert.ok(await action(dialog, 'generate').isDisabled());
+  await step(dialog, 1); await action(dialog, 'reload').click();
+  assert.equal(await note.getAttribute('readonly'), null); assert.equal(await note.inputValue(), '');
+  assert.equal(await field('Design brief').inputValue(), '');
+  assert.equal(await frame.evaluate(() => planner.getProject().documentation), undefined, 'Reload explicitly discards pending documentation without saving it.');
+  await action(dialog, 'close').click();
+  // Duplicate display names are a separate identity case, not an ambiguous
+  // typeahead target. Per-floor element IDs are deliberately identical too.
+  await frame.evaluate(async () => {
+    const { editorBridge } = await import('./editor.js'); const next = editorBridge.snapshot();
+    next.floors[1].name = next.floors[0].name; editorBridge.applyProject(next, editorBridge.revision());
+  });
+  dialog = await openPanel(frame);
+  assert.deepEqual(await field('Floor').locator('option').allTextContents(), ['Ground floor (ground)', 'Ground floor (upper)']);
+  await step(dialog, 3);
+  assert.equal(await field('Rooms').locator('option[value="upper/studio"]').innerText(), 'Ground floor (upper) · Studio');
+  await action(dialog, 'generate').click(); await field('Schedule').selectOption('items');
+  assert.match(await rows.nth(0).innerText(), /Ground floor \(ground\) \/ Studio/);
+  assert.match(await rows.nth(1).innerText(), /Ground floor \(upper\) \/ Studio/);
+  await field('Schedule').selectOption('openings');
+  for (const [index, floor] of [[0, 'Ground floor (ground)'], [2, 'Ground floor (upper)']]) {
+    assert.equal(await rows.nth(index).locator('td').first().innerText(), floor);
+  }
+  await action(dialog, 'close').click();
+}
+async function exerciseNativeViewport(page, frame, viewport) {
+  diagnostic.phase = `native: dialog viewport ${viewport.width}x${viewport.height}`;
+  await page.setViewportSize(viewport);
+  const dialog = await openPanel(frame);
+  await frame.waitForFunction(() => Boolean(document.querySelector('.drawing-panel')?.style.maxHeight));
+  await dialog.getByLabel('Design brief', { exact: true }).fill(`Viewport ${viewport.width}x${viewport.height} check.`);
+  const insideViewport = async (control, label) => {
+    const box = await control.boundingBox();
+    assert.ok(box && box.width > 0 && box.height > 0, `${label} has visible bounds.`);
+    assert.ok(box.x >= -1 && box.y >= -1 && box.x + box.width <= viewport.width + 1 && box.y + box.height <= viewport.height + 1,
+      `${label} remains inside the host viewport: ${JSON.stringify(box)}`);
+  };
+  for (const index of [1, 2, 3]) {
+    await step(dialog, index);
+    await action(dialog, 'close').click({ trial: true });
+    await action(dialog, 'save').click({ trial: true });
+    await frame.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    // boundingBox uses main-frame coordinates, including the opaque iframe offset.
+    await insideViewport(dialog, 'Dialog');
+    await insideViewport(action(dialog, 'close'), 'Close');
+    await insideViewport(action(dialog, 'save'), 'Save documentation');
+  }
+  await action(dialog, 'save').click(); await action(dialog, 'close').click();
+  await page.waitForFunction(() => window.host._dialogViewportCleanup === null);
+}
 async function exercise(page,frame,native){
   activePage = page; activeFrame = frame;
   const stage = name => { diagnostic.phase = `${native ? 'native' : 'standalone'}: ${name}`; };
@@ -235,16 +399,15 @@ async function exercise(page,frame,native){
   activePage = page; activeFrame = page; diagnostic.phase = 'standalone: startup';
   await page.goto(origin+'/planner/index.html');await page.waitForFunction(()=>window.planner);
   await page.locator('#file-input').setInputFiles({name:'measured.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(fixture))});
-  await page.waitForFunction(()=>planner.getProject().id==='drawing_check');await exercise(page,page,false);console.log(`${engine}: standalone drawing workflow PASS`);
+  await page.waitForFunction(()=>planner.getProject().id==='drawing_check');await exercise(page,page,false);await exerciseKeyboardAndReview(page,page,false);console.log(`${engine}: standalone drawing workflow PASS`);
   const native=await context.newPage();native.setDefaultTimeout(20000);
   activePage = native; activeFrame = native; diagnostic.phase = 'native: startup';
   await native.goto(origin+'/native');await native.waitForFunction(()=>window.host?._ready);
   const frame=native.frames().find(f=>f.url().includes('embed='));assert(frame,'Native editor frame initialized.');
-  await exercise(native,frame,true);
+  await exercise(native,frame,true);await exerciseKeyboardAndReview(native,frame,true);
+  await exerciseNativeViewport(native, frame, {width:430,height:600});
+  await exerciseNativeViewport(native, frame, {width:850,height:450});
   assert.deepEqual(errors,[]);assert.deepEqual(outside,[]);
-  diagnostic.phase = 'native: narrow viewport';
-  await native.setViewportSize({width:430,height:880});const modal=await openPanel(frame);
-  const bounds=await modal.boundingBox();assert(bounds.width<=430,'Dialog fits a narrow viewport.');await action(modal,'close').click();
   console.log(`${engine}: drawing workflow, native theme/save, private-field exclusion, downloads, stale invalidation, undo and narrow dialog PASS`);
  }catch(error){
   failed = true;

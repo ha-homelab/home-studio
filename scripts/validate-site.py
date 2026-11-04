@@ -73,7 +73,7 @@ SITE_FILES = (
 # the website landing page and its promotional media out of both editor bundles.
 EDITOR_FILES = tuple(name for name in SITE_FILES if name not in ('index.html', *WEBSITE_MEDIA_FILES))
 REPO_FILES = (
-    'planner/documentation_model.py', 'docs/drawing-package.md', 'scripts/test-drawing-package.mjs', 'scripts/test-documentation-model.mjs', 'scripts/test-drawing-browser.cjs',
+    'planner/documentation_model.py', 'docs/drawing-package.md', 'scripts/test-drawing-package.mjs', 'scripts/test-documentation-model.mjs', 'scripts/test-drawing-browser.cjs', 'scripts/test-dialog-viewport.mjs',
     'docs/site-experience.md', 'scripts/test-site-experience.mjs', 'scripts/test-site-experience.cjs',
     'scripts/camera-tour-video-check.cjs', 'scripts/test-camera-tour-video-check.cjs',
     'camera-tour-viewer.js', 'docs/camera-tours.md', 'docs/images/camera-tour-workflow.svg', 'scripts/test-camera-tour.mjs', 'scripts/test-camera-tour-recording.mjs', 'scripts/test-camera-tour-session-contract.mjs', 'scripts/test-camera-tour-browser.cjs', 'scripts/test-camera-tour-native-downloads.cjs', 'scripts/test-camera-tour-hosts.cjs','scripts/tls_key_policy.py', 'scripts/_darwin_certificate.py', 'THIRD_PARTY_NOTICES.md',

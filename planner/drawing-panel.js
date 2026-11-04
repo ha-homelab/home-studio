@@ -1,5 +1,7 @@
 import { createDocumentation, validateDocumentation, measurementGeometry, measurementState } from './documentation-model.js';
 import { buildDrawingPackage } from './drawing-package.js';
+import { signedArea } from './model.js';
+import { fitHostDialog } from './ha-bridge.js';
 
 let panelSequence = 0;
 const copy = value => JSON.parse(JSON.stringify(value));
@@ -15,7 +17,7 @@ export function createDrawingPanel({ bridge, translate = text => text } = {}) {
   }
   const t = translate, prefix = `drawing-package-${++panelSequence}`;
   let fieldSequence = 0;
-  let modal = null, unsubscribe = null, opener = null, project, documentation, baseRevision;
+  let modal = null, unsubscribe = null, stopFitting = null, opener = null, project, documentation, baseRevision;
   let dirty = false, stale = false, applying = false, step = 0, floorId, roomId, targetType = 'room', targetId;
   let result = null, previewUrl = null, downloadUrl = null, disposed = false;
   let pages, stepButtons, message, freshness, saveButton, nextButton, backButton, reloadButton;
@@ -56,6 +58,9 @@ export function createDrawingPanel({ bridge, translate = text => text } = {}) {
   function changed() { dirty = true; invalidate(); updateControls(); }
   function currentFloor() { return project.floors.find(floor => floor.id === floorId) || project.floors[0]; }
   function currentRoom() { return currentFloor().rooms.find(room => room.id === roomId) || currentFloor().rooms[0]; }
+  function floorName(floor) {
+    return project.floors.filter(value => value.name === floor.name).length > 1 ? `${floor.name} (${floor.id})` : floor.name;
+  }
   function selectDefaults() {
     const floor = currentFloor(); floorId = floor.id; roomId = currentRoom()?.id;
     if (!floor[TARGETS[targetType]].some(target => target.id === targetId)) targetId = floor[TARGETS[targetType]][0]?.id;
@@ -70,10 +75,14 @@ export function createDrawingPanel({ bridge, translate = text => text } = {}) {
     saveButton.disabled = stale || !dirty;
     backButton.disabled = step === 0; nextButton.hidden = step === STEPS.length - 1;
     reloadButton.hidden = !stale;
-    freshness.textContent = stale ? t('The drawing changed. Reload it before saving or downloading. Reload discards unsaved documentation edits.')
+    freshness.textContent = stale ? t('The drawing changed. Text remains selectable for copying. Reload before saving or downloading; reloading discards unsaved documentation edits.')
       : dirty ? t('Documentation has unsaved changes. Save it before generating a package.') : t('Documentation matches the saved editor snapshot.');
     freshness.classList.toggle('drawing-error', stale);
-    for (const control of modal.querySelectorAll('[data-drawing-edit]')) control.disabled = stale;
+    for (const control of modal.querySelectorAll('[data-drawing-edit]')) {
+      const textField = control.matches('textarea, input:not([type=checkbox])');
+      control.disabled = stale && !textField && !control.hasAttribute('data-drawing-navigate');
+      if (textField) control.readOnly = stale;
+    }
     const generate = modal.querySelector('[data-drawing-generate]'); if (generate) generate.disabled = stale || dirty;
     for (const control of modal.querySelectorAll('[data-drawing-download]')) control.disabled = stale || dirty || !result;
   }
@@ -81,6 +90,7 @@ export function createDrawingPanel({ bridge, translate = text => text } = {}) {
     if (stale || bridge.revision() !== baseRevision) { stale = true; invalidate(); updateControls(); throw new Error(t('The drawing changed. Reload the latest drawing to continue.')); }
   }
   function editable(control) { control.dataset.drawingEdit = ''; return control; }
+  function navigable(control) { control.dataset.drawingNavigate = ''; return editable(control); }
   function guard(action) {
     return () => { try { checkFresh(); action(); } catch (error) { notice(error.message || t('The drawing package could not be prepared.'), true); } };
   }
@@ -96,16 +106,43 @@ export function createDrawingPanel({ bridge, translate = text => text } = {}) {
   function measurementRow() {
     return documentation.measurements.find(row => row.floor_id === floorId && row.target_type === targetType && row.target_id === targetId);
   }
+  function renderGeometry(page) {
+    const geometry = measurementGeometry(project, { floor_id: floorId, target_type: targetType, target_id: targetId });
+    const metric = value => String(Math.round(value * 1e6) / 1e6);
+    const metres = value => `${metric(value)} m`;
+    let values;
+    if (targetType === 'room') {
+      const perimeter = geometry.polygon.reduce((total, point, index, points) => {
+        const next = points[(index + 1) % points.length]; return total + Math.hypot(next[0] - point[0], next[1] - point[1]);
+      }, 0);
+      values = [['Floor area', `${metric(Math.abs(signedArea(geometry.polygon)))} m²`], ['Perimeter', metres(perimeter)], ['Ceiling height', metres(geometry.height_m)]];
+    } else if (targetType === 'wall') {
+      values = [['Length', metres(Math.hypot(geometry.end[0] - geometry.start[0], geometry.end[1] - geometry.start[1]))], ['Height', metres(geometry.height_m)], ['Thickness', metres(geometry.thickness_m)], ['Openings included', String(geometry.openings.length)]];
+    } else if (targetType === 'opening') {
+      values = [['Width', metres(geometry.width_m)], ['Height', metres(geometry.head_m - geometry.sill_m)], ['Sill height above floor', metres(geometry.sill_m)]];
+    } else {
+      values = [['Width × depth × height', `${metric(geometry.dimensions_m.width)} × ${metric(geometry.dimensions_m.depth)} × ${metric(geometry.dimensions_m.height)} m`], ['Base height above floor', metres(geometry.position_m.y)]];
+    }
+    const group = node('section', '', 'drawing-geometry'), title = node('h4', t('Current drawing dimensions'));
+    title.id = `${prefix}-geometry-title`; group.setAttribute('aria-labelledby', title.id);
+    group.dataset.drawingGeometry = targetType;
+    const element = currentFloor()[TARGETS[targetType]].find(value => value.id === targetId);
+    const list = node('dl');
+    for (const [label, value] of values) { const row = node('div'); row.append(node('dt', t(label)), node('dd', value)); list.append(row); }
+    group.append(title, node('p', `${floorName(currentFloor())} / ${element.name || element.id}`, 'drawing-note'), list,
+      node('p', t('These values come from the drawing, not a new measurement. Check them before recording their source.'), 'drawing-note'));
+    page.append(group);
+  }
   function renderMeasurements(page) {
     const heading = node('h3', t(STEPS[0])); heading.tabIndex = -1; page.append(heading);
     const brief = editable(field(page, 'Design brief', 'textarea')); brief.maxLength = 4000; brief.value = documentation.brief;
-    brief.addEventListener('input', () => { documentation.brief = brief.value; changed(); });
+    brief.addEventListener('input', guard(() => { documentation.brief = brief.value; changed(); }));
     page.append(node('p', t('Record where dimensions came from. This does not change geometry. Photos and estimates are not a survey.'), 'drawing-note'));
     const selectors = node('div', '', 'drawing-grid'); page.append(selectors);
-    const type = editable(field(selectors, 'Element type', 'select'));
+    const type = navigable(field(selectors, 'Element type', 'select'));
     choices(type, [['room', t('Room')], ['wall', t('Wall')], ['opening', t('Door or window')], ['item', t('Item')]], targetType);
     type.addEventListener('change', () => { targetType = type.value; targetId = null; selectDefaults(); renderPages(); });
-    const target = editable(field(selectors, 'Element', 'select'));
+    const target = navigable(field(selectors, 'Element', 'select'));
     choices(target, currentFloor()[TARGETS[targetType]].map(value => [value.id, value.name || value.id]), targetId);
     target.addEventListener('change', () => { targetId = target.value; renderPages(); });
     if (!targetId) { page.append(node('p', t('There are no elements of this type on this floor.'), 'drawing-note')); return; }
@@ -128,17 +165,18 @@ export function createDrawingPanel({ bridge, translate = text => text } = {}) {
       changed(); updateState();
     };
     status.addEventListener('change', guard(() => storeRow())); note.addEventListener('input', guard(() => storeRow()));
+    renderGeometry(page);
     const actions = node('div', '', 'drawing-actions');
     const record = editable(button('Record current dimensions', guard(() => { storeRow(true); notice(t('Dimension source recorded locally. Save documentation to keep it.')); }), 'quiet'));
     record.dataset.drawingAction = 'record-measurement'; actions.append(record);
-    actions.append(editable(button('Clear measurement record', guard(() => {
+    const clear = editable(button('Clear measurement record', guard(() => {
       documentation.measurements = documentation.measurements.filter(value => value !== measurementRow()); changed(); renderPages();
-    })))); page.append(actions); updateState();
+    }))); clear.dataset.drawingAction = 'clear-measurement'; actions.append(clear); page.append(actions); updateState();
   }
   function renderFinishes(page) {
     const heading = node('h3', t(STEPS[1])); heading.tabIndex = -1; page.append(heading);
     page.append(node('p', t('Finish codes and specifications describe your intent. Quantities are derived from drawing geometry; waste is an explicit allowance.'), 'drawing-note'));
-    const room = editable(field(page, 'Room', 'select'));
+    const room = navigable(field(page, 'Room', 'select'));
     choices(room, currentFloor().rooms.map(value => [value.id, value.name]), roomId);
     room.addEventListener('change', () => { roomId = room.value; renderPages(); });
     if (!currentRoom()) { page.append(node('p', t('Add a room before describing finishes or ceiling fixtures.'), 'drawing-note')); return; }
@@ -189,7 +227,8 @@ export function createDrawingPanel({ bridge, translate = text => text } = {}) {
     previewContent.replaceChildren(); revokePreview(); if (!result) return;
     const packageResult = result;
     previewContent.append(node('p', `${packageResult.sheets.length} ${t('sheets generated from this saved snapshot.')}`, 'drawing-note'));
-    const rules = node('details'), list = node('ul'); rules.append(node('summary', t('Measurement rules and limitations')));
+    const rules = node('details'), list = node('ul');
+    rules.append(node('summary', `${t('Measurement rules and limitations')} · ${(packageResult.warnings || []).length} ${t('warnings')}`));
     for (const text of [...(packageResult.measurementRules || []), ...(packageResult.warnings || [])]) list.append(node('li', text));
     rules.append(list); previewContent.append(rules);
     const sheet = field(previewContent, 'Preview sheet', 'select');
@@ -214,7 +253,10 @@ export function createDrawingPanel({ bridge, translate = text => text } = {}) {
     const text = field(raw, 'CSV preview', 'textarea'); text.readOnly = true; text.className = 'drawing-csv';
     raw.append(node('p', t('Raw preview is limited to 12,000 characters. The CSV download contains the complete schedule.'), 'drawing-note'));
     const sourceLabel = value => t(STATUS_LABELS[value] || value || 'Unknown');
-    const roomLabel = row => `${project.floors.find(floor => floor.id === row.floor_id)?.name || row.floor_id} / ${row.room}`;
+    const floorLabel = row => {
+      const floor = project.floors.find(value => value.id === row.floor_id); return floor ? floorName(floor) : row.floor_id;
+    };
+    const roomLabel = row => `${floorLabel(row)} / ${row.room || project.floors.find(floor => floor.id === row.floor_id)?.rooms.find(room => room.id === row.room_id)?.name || row.room_id}`;
     const columns = {
       rooms: [
         ['Room', roomLabel], ['Floor m²', row => row.floor_area_m2], ['Walls m²', row => row.net_wall_area_m2],
@@ -226,9 +268,10 @@ export function createDrawingPanel({ bridge, translate = text => text } = {}) {
         ['Net m²', row => row.quantity_m2], ['Waste m²', row => row.waste_m2], ['Total m²', row => row.quantity_with_waste_m2], ['Source', row => sourceLabel(row.measurement_status)],
       ],
       items: [
-        ['Name', row => row.name], ['Quantity', row => row.quantity], ['Dimensions (m)', row => `${row.width_m} × ${row.depth_m} × ${row.height_m}`], ['Source', row => sourceLabel(row.measurement_status)],
+        ['Room', roomLabel], ['Item', row => `${row.name} (${row.item_id})`], ['Quantity', row => row.quantity], ['Dimensions (m)', row => `${row.width_m} × ${row.depth_m} × ${row.height_m}`], ['Source', row => sourceLabel(row.measurement_status)],
       ],
       openings: [
+        ['Floor', floorLabel], ['Opening', row => row.opening_id], ['Wall', row => row.wall_id],
         ['Type', row => t({ door: 'Door', window: 'Window', passage: 'Passage' }[row.type] || row.type)],
         ['Width (m)', row => row.width_m], ['Height (m)', row => row.height_m], ['Source', row => sourceLabel(row.measurement_status)],
       ],
@@ -262,7 +305,7 @@ export function createDrawingPanel({ bridge, translate = text => text } = {}) {
     const paper = editable(field(controls, 'Paper', 'select')); choices(paper, [['A3', 'A3'], ['A4', 'A4']], options.paper);
     const scale = editable(field(controls, 'Scale', 'select')); choices(scale, [['auto', t('Fit to sheet')], ['50', '1:50'], ['100', '1:100'], ['200', '1:200']], String(options.scale));
     const scope = editable(field(controls, 'Floors', 'select')); choices(scope, [['all', t('All floors')], ['current', t('Selected floor')]], options.scope || 'all');
-    const roomChoices = (options.scope === 'current' ? [currentFloor()] : project.floors).flatMap(floor => floor.rooms.map(room => [`${floor.id}/${room.id}`, `${floor.name} · ${room.name}`]));
+    const roomChoices = (options.scope === 'current' ? [currentFloor()] : project.floors).flatMap(floor => floor.rooms.map(room => [`${floor.id}/${room.id}`, `${floorName(floor)} · ${room.name}`]));
     if (!roomChoices.some(([id]) => id === options.room)) options.room = 'all';
     const room = editable(field(controls, 'Rooms', 'select')); choices(room, [['all', t('All rooms')], ...roomChoices], options.room);
     for (const control of [paper, scale]) control.addEventListener('change', () => {
@@ -287,12 +330,28 @@ export function createDrawingPanel({ bridge, translate = text => text } = {}) {
   }
   function renderPages() {
     if (!modal) return;
+    const active = document.activeElement;
+    const focus = modal.contains(active) && (active.dataset.drawingField || active.dataset.drawingAction) ? {
+      field: active.dataset.drawingField, action: active.dataset.drawingAction,
+      surface: active.closest('[data-drawing-surface]')?.dataset.drawingSurface,
+      start: active.selectionStart, end: active.selectionEnd, direction: active.selectionDirection,
+    } : null;
     previewContent = null; pages.forEach(page => page.replaceChildren());
-    choices(floorSelect, project.floors.map(floor => [floor.id, floor.name]), floorId);
+    choices(floorSelect, project.floors.map(floor => [floor.id, floorName(floor)]), floorId);
     renderMeasurements(pages[0]); renderFinishes(pages[1]); renderPreview(pages[2]); showStep(step, false);
+    if (focus) {
+      const target = [...modal.querySelectorAll('[data-drawing-field], [data-drawing-action]')].find(control =>
+        control.dataset.drawingField === focus.field && control.dataset.drawingAction === focus.action
+        && control.closest('[data-drawing-surface]')?.dataset.drawingSurface === focus.surface);
+      if (target && !target.disabled) {
+        target.focus({ preventScroll: true });
+        if (typeof focus.start === 'number') target.setSelectionRange(focus.start, focus.end, focus.direction);
+      }
+    }
   }
   function cleanup() {
     if (!modal) return;
+    stopFitting?.(); stopFitting = null;
     unsubscribe?.(); unsubscribe = null; revokePreview(); if (downloadUrl) URL.revokeObjectURL(downloadUrl); downloadUrl = null;
     const old = modal, returnFocus = opener;
     modal = null; opener = null; result = null; project = undefined; documentation = undefined; baseRevision = undefined;
@@ -333,7 +392,7 @@ export function createDrawingPanel({ bridge, translate = text => text } = {}) {
       try { syncFromEditor(); renderPages(); notice(t('Latest drawing loaded. Unsaved documentation edits were discarded.')); } catch (error) { notice(error.message, true); }
     }, 'quiet'); reloadButton.dataset.drawingAction = 'reload'; reloadButton.hidden = true; modal.append(reloadButton);
     const body = node('div', '', 'drawing-body'); modal.append(body);
-    floorSelect = editable(field(body, 'Floor', 'select'));
+    floorSelect = navigable(field(body, 'Floor', 'select'));
     floorSelect.addEventListener('change', () => { floorId = floorSelect.value; roomId = null; targetId = null; selectDefaults(); invalidate(); renderPages(); });
     pages = STEPS.map((_, index) => { const page = node('section', '', 'drawing-step'); page.dataset.drawingStep = String(index + 1); body.append(page); return page; });
     message = node('p', '', 'drawing-message'); message.setAttribute('role', 'status'); message.setAttribute('aria-live', 'polite'); modal.append(message);
@@ -346,7 +405,7 @@ export function createDrawingPanel({ bridge, translate = text => text } = {}) {
     modal.addEventListener('cancel', event => { if (dirty) { event.preventDefault(); close(); } });
     renderPages(); document.body.append(modal);
     unsubscribe = bridge.subscribe(() => { if (!applying && bridge.revision() !== baseRevision) { stale = true; invalidate(); updateControls(); } });
-    modal.showModal(); pages[0].querySelector('h3').focus();
+    modal.showModal(); stopFitting = fitHostDialog(modal); pages[0].querySelector('h3').focus();
   }
   return Object.freeze({ open, close, dispose() { finishClose(); disposed = true; } });
 }

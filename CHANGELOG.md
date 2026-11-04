@@ -4,6 +4,11 @@
 
 ### Added
 
+- Drawings and materials: dimensioned floor plans, ceiling-fixture sheets,
+  interior wall elevations, material schedules, and SVG/CSV/printable HTML
+  export. Measurement records preserve source notes and flag changed geometry.
+- Current dimension summaries, identifiable multi-floor schedule rows, visible
+  warning counts, keyboard continuity and viewport-aware drawing dialogs in HA.
 - Five library fixtures: ceiling, standing and desk fans, a wall air conditioner,
   and a panel heater. Published fans rotate when running; active cooling and
   heating show blue or warm airflow with a current-temperature badge.
@@ -13,6 +18,13 @@
 
 ### Fixed
 
+- Interior elevations and room-label placement no longer depend on polygon
+  winding or the chosen first vertex. Partial-room exports report excluded
+  interior partition surfaces and retain their in-scope opening schedules.
+- Wall measurement records now include their opening set. Existing records
+  without that information remain readable and require an explicit recheck.
+- Unsaved documentation remains selectable for copying after the drawing changes;
+  stale records still cannot overwrite the new drawing or produce downloads.
 - Climate devices no longer show a stale heating/cooling action while off.
 - Check the combined geometry of all edited floors before publishing an imported
   home. Oversized additions leave the saved draft and published home available;

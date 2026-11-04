@@ -61,10 +61,18 @@ The walkthrough was recorded on [v0.10.1-beta.6](https://github.com/ha-homelab/h
 
 ## Prepare drawings and material schedules
 
+Available in current development builds; this section describes functionality
+that is not included in the 1.3.1 stable release. Updating the hosted editor does
+not update an installed Home Assistant integration.
+
 Inside **Home Assistant → Home Studio**, choose **Drawings & materials** to
 record your measurements, describe finishes, and select ceiling fixtures. Build a
 coordinated package containing dimensioned floor plans, ceiling plans, wall
 elevations, and room/material schedules from the same saved drawing.
+
+Review the displayed dimensions before recording a measurement. Changes to a
+wall's doors or windows mark its previous evidence out of date. Keyboard focus
+stays with your selections, and the dialog adapts to the visible HA screen.
 
 Download vector sheets, CSV schedules, or a printable document. Areas and counts
 come from the drawing geometry; estimates and measurements that need another
