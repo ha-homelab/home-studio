@@ -57,6 +57,15 @@
   normal editor save controls to persist it in HA. Downloaded sheets and schedules
   are snapshots and must be regenerated after changes.
 
+### Security
+
+- Exported drawings and schedules can disclose room names, dimensions and material
+  descriptions. Review them before sharing publicly; they are generated from the
+  current project and are not anonymized automatically.
+- The embedded editor retains its sandbox and validates message origin, source,
+  protocol and channel. The drawing-dialog viewport bridge carries bounded layout
+  coordinates, without sharing HA credentials or granting access to the parent page.
+
 ## [1.3.1] - Bounded viewer loading
 
 ### Fixed
