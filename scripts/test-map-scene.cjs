@@ -208,7 +208,7 @@ async function mapSnapshot(page){
   for(const scenario of ['disabled','healthy','partial']){
     const nodes=new Map(),held=[],tileAttempts=new Map();let failFirst=scenario==='partial',firstKey;
     const node=id=>{if(!nodes.has(id))nodes.set(id,{hidden:true,textContent:'',setAttribute(){}});return nodes.get(id);};
-    const c=vm.createContext({THREE,Promise,Map,Set,Math,Number,Error,$:node,scene:new THREE.Scene(),renderer:{},canEdit:true,zoom:1,panX:0,panY:0,
+    const c=vm.createContext({THREE,Promise,Map,Set,Math,Number,Error,$:node,scene:new THREE.Scene(),renderer:{},canEdit:true,active:true,zoom:1,panX:0,panY:0,
       model:{rooms:[]},environmentLayer:{contexts:[],setSiteContext(value){this.contexts.push(value);}},xm:x=>x,zm:z=>z,updateZoom(){},applyNavigationState(){},window:{}});
     vm.runInContext(fs.readFileSync(path.join(root,'map-layer.js'),'utf8'),c);
     const factory=c.createHomeMapLayer;
@@ -227,12 +227,25 @@ async function mapSnapshot(page){
     c.configureMap({revision:1,configured:true,config});assert.equal(c.environmentLayer.contexts.at(-1),true);c.layer().render(camera,{width:1200,height:1200});await tick();
     assert(held.length>0,'The failure overlaps real pending tile decodes');
     if(scenario==='disabled')c.configureMap({revision:2,configured:false,config:null});
+    const layoutCalls=[],presentation=()=>({loading:vm.runInContext('mapLoading',c),status:node('homeMapStatus').textContent,
+      captionHidden:node('homeMapCaption').hidden,retryHidden:node('homeMapRetry').hidden});
+    c.window.resizeModel=paint=>layoutCalls.push({operation:'resize',paint,...presentation()});
+    c.window.requestModelRender=()=>layoutCalls.push({operation:'request',...presentation()});
+    const assertSettledLayout=()=>{
+      const finalPresentation=presentation();assert.equal(finalPresentation.loading,false);
+      assert.deepEqual(layoutCalls,[{operation:'resize',paint:false,...finalPresentation},{operation:'request',...finalPresentation}],
+        'Settled active settings commit their final presentation before one resize and scheduled draw');
+    };
     await c.loadMap();
+    assertSettledLayout();
     const assertSettingsFailure=()=>{
       c.refreshMapControls();assert.match(node('homeMapStatus').textContent,/settings unavailable/);
       assert.equal(node('homeMapRetry').hidden,false);assert.equal(node('homeMapCaption').hidden,false);
     };
     assertSettingsFailure();
+    c.active=false;layoutCalls.length=0;await c.loadMap();
+    assert.deepEqual(layoutCalls,[],'Inactive settings failures do not resize or request a draw');
+    c.active=true;
     const drain=async()=>{for(let i=0;i<100&&c.layer().stats.inflight;i++){held.splice(0).forEach(resolve=>resolve(new THREE.Texture()));await tick();}assert.equal(c.layer().stats.inflight,0);};
     await drain();assertSettingsFailure();
     const priorContext=c.environmentLayer.contexts.length;
@@ -241,7 +254,7 @@ async function mapSnapshot(page){
       if(action!=='tile')return {revision:3,configured:scenario!=='disabled',config:scenario==='disabled'?null:config};
       const key=`${tile.z}/${tile.x}/${tile.y}`;tileAttempts.set(key,(tileAttempts.get(key)||0)+1);return {data_url:png};
     };
-    await c.loadMap();
+    layoutCalls.length=0;await c.loadMap();assertSettledLayout();
     if(scenario==='partial'){
       assert.match(node('homeMapStatus').textContent,/Some map tiles/);assert.equal(node('homeMapRetry').hidden,false);
       c.layer().render(camera,{width:1200,height:1200});c.layer().clearFailures();await drain();
@@ -249,6 +262,9 @@ async function mapSnapshot(page){
     }
     assert.equal(node('homeMapStatus').textContent,'','Accepted success clears the settings error even if the tile status is unchanged');
     assert.equal(node('homeMapRetry').hidden,true);assert.equal(node('homeMapCaption').hidden,scenario==='disabled');
+    c.active=false;layoutCalls.length=0;await c.loadMap();
+    assert.deepEqual(layoutCalls,[],'Inactive settings success does not resize or request a draw');
+    c.active=true;
     c.configureMap({revision:4,configured:true,config:{...config,enabled:false}});
     assert.equal(c.environmentLayer.contexts.at(-1),true,'A saved disabled map still suppresses generated scenery');
     c.model.site_context={features:[neighbor]};

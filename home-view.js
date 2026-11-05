@@ -315,7 +315,13 @@ homeView = (() => {
     mapLoading=true;
     try{configureMap(await window.homeMapRequest('get',{}));}
     catch(error){mapSettingsError=true;refreshMapControls();refreshMapStatus();}
-    finally{mapLoading=false;}
+    finally{
+      mapLoading=false;
+      // A settings reply can add or remove the in-flow status caption. Commit
+      // its final layout before requesting a bounded frame; ResizeObserver
+      // delivery may be delayed after the WebGL context has been restored.
+      if(active){window.resizeModel?.(false);window.requestModelRender?.();}
+    }
   }
   const mapFields={latitude:'homeMapLatitude',longitude:'homeMapLongitude',model_x:'homeMapX',model_z:'homeMapZ',north_deg:'homeMapNorth'};
   function fillMapForm(){
