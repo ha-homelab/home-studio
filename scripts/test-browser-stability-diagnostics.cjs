@@ -9,6 +9,27 @@ const {test, after} = require('node:test');
 const {sceneScreenshotRegion,analyzeScenePixels,inspectSceneScreenshot} = require('./browser-pixel-evidence.cjs');
 const {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, installContextEventDiagnostics, attributeContextEvents, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerLightState, waitForViewerDraw, assertViewerInteraction, bounded} = require('./browser-stability-diagnostics.cjs');
 
+// Explicit delivery keeps native observer ownership and subscription behavior
+// testable without starting a browser or inventing layout notifications.
+class ResizeObserverFixture {
+  constructor(callback) {this.callback=callback;this.targets=new Set();}
+  observe(target) {this.targets.add(target);}
+  unobserve(target) {this.targets.delete(target);}
+  disconnect() {this.targets.clear();}
+  emit(entries) {
+    const observed=entries.filter(entry=>this.targets.has(entry.target));
+    if(observed.length)this.callback.call(this,observed,this);
+  }
+}
+
+function installActualViewerInstrumentation(env) {
+  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
+  const start=source.indexOf('function instrumentation('),end=source.indexOf('// Serialized into the viewer frame.',start);
+  assert(start>0&&end>start);
+  vm.runInNewContext('globalThis.installShaderChecks='+deferViewerShaderChecks.toString()+';globalThis.installContextEvents='+installContextEventDiagnostics.toString(),env);
+  vm.runInNewContext(source.slice(start,end)+'\ninstrumentation(installShaderChecks,installContextEvents);',env);
+}
+
 test('context event diagnostics retain bounded raw timestamps without graphics queries or event changes', () => {
   let now=0;
   const listeners={}, canvas={isConnected:true,addEventListener(type,listener,options){
@@ -145,11 +166,12 @@ test('exact transport instrumentation distinguishes timely replies from timeout 
   const response=source.slice(source.indexOf("  if(message?.type==='map_result'){"),source.indexOf("  if(message?.type==='dismiss_overlays')"));
   const load=source.slice(source.indexOf('  async function loadMap(){'),source.indexOf('  const mapFields='));
   for(const outcome of ['reply','timeout','configure-error']) {
-    const timers=new Map(),sent=[];let now=0;
-    const env={performance:{now:()=>now,timeOrigin:1000},document:{querySelector:()=>null},embedded:true,
+    const timers=new Map(),sent=[],layoutCalls=[];let now=0;
+    const env={performance:{now:()=>now,timeOrigin:1000},document:{querySelector:()=>null},embedded:true,active:true,
       bridge:{postMessage:message=>sent.push(message)},setTimeout:(callback,delay)=>{assert.equal(delay,30000);timers.set(1,callback);return 1;},
       clearTimeout:id=>timers.delete(id),configureMap:()=>{if(outcome==='configure-error')throw new TypeError('Synthetic configure failure');},
-      refreshMapControls(){},refreshMapStatus(){}};env.window=env;
+      refreshMapControls(){},refreshMapStatus(){},resizeModel:paint=>layoutCalls.push(['resize',paint]),
+      requestModelRender:()=>layoutCalls.push(['request'])};env.window=env;
     vm.runInNewContext(`(${installViewerLoadDiagnostics.toString()})({role:'frame',expectedLights:72});
       const mapRequests=new Map();let mapSequence=0,mapLoading=false,mapSettingsError=false;
       ${request}\n${load}\nglobalThis.load=loadMap;globalThis.receive=message=>{${response}};`,env);
@@ -157,6 +179,7 @@ test('exact transport instrumentation distinguishes timely replies from timeout 
     if(outcome==='timeout') {now=31000;timers.get(1)();}
     env.receive({type:'map_result',request_id:sent[0].request_id,success:true,result:{revision:0,config:null}});
     await loading;
+    assert.deepEqual(layoutCalls,[['resize',false],['request']],'Each settled active request retains the product layout invalidation');
     const events=JSON.parse(JSON.stringify(env.__viewerLoadDiagnostics.snapshot().events));
     assert.equal(events.find(event=>event.event==='map-result').matched,outcome!=='timeout');
     const error=events.find(event=>event.event==='load-map-error');
@@ -167,16 +190,12 @@ test('exact transport instrumentation distinguishes timely replies from timeout 
 });
 
 test('shader status queries wait for the explicit readiness flush and retain timing', () => {
-  const source=fs.readFileSync(path.join(__dirname,'test-browser-stability.cjs'),'utf8');
-  const start=source.indexOf('function instrumentation('),end=source.indexOf('// Serialized into the viewer frame.',start);
-  assert(start>0&&end>start);
   let now=0,links=0,statusQueries=0;
   const gl={getExtension:()=>null,getParameter:()=>16,LINK_STATUS:1,
     linkProgram(){links++;now+=11;},deleteProgram(){},isContextLost:()=>false,getProgramParameter(){statusQueries++;now+=23;return true;}};
   function Canvas(){};Canvas.prototype.getContext=()=>gl;Canvas.prototype.addEventListener=()=>{};
-  const env={HTMLCanvasElement:Canvas,performance:{now:()=>now},addEventListener:()=>{},console:{error(){},info(){}}};env.window=env;
-  vm.runInNewContext('globalThis.installShaderChecks='+deferViewerShaderChecks.toString()+';globalThis.installContextEvents='+installContextEventDiagnostics.toString(),env);
-  vm.runInNewContext(source.slice(start,end)+'\ninstrumentation(installShaderChecks,installContextEvents);',env);
+  const env={HTMLCanvasElement:Canvas,ResizeObserver:ResizeObserverFixture,performance:{now:()=>now},addEventListener:()=>{},console:{error(){},info(){}}};env.window=env;
+  installActualViewerInstrumentation(env);
   const context=new env.HTMLCanvasElement().getContext('webgl2');context.linkProgram({});context.linkProgram({});
   assert.equal(statusQueries,0,'linkProgram does not add an eager synchronization barrier');
   assert.equal(env.__browserStability.shaderChecks.pending,2);
@@ -186,6 +205,44 @@ test('shader status queries wait for the explicit readiness flush and retain tim
   assert.equal(links,2);assert.equal(statusQueries,2,'Every linked program is checked once by the diagnostic');
   assert.equal(stats.linkedPrograms,2);assert.equal(stats.shaderTiming.linkMs,22);assert.equal(stats.shaderTiming.statusMs,46);
   assert.deepEqual(stats.shaderTiming.longestStatus,{startedMs:22,durationMs:23});
+});
+
+test('viewer resize hold preserves native entries, callback ownership and subscriptions', () => {
+  class Canvas {getContext() {return null;}}
+  const env={HTMLCanvasElement:Canvas,ResizeObserver:ResizeObserverFixture,performance:{now:()=>0},
+    addEventListener(){},console:{error(){},info(){}}};env.window=env;
+  installActualViewerInstrumentation(env);
+  const stage={id:'homeStage'},editor={id:'view3d'},other={id:'unrelated'},seen=[];
+  const observer=new env.ResizeObserver(function(entries,owner) {
+    assert.equal(this,observer);assert.equal(owner,observer);seen.push(entries);
+  });
+  assert(observer instanceof ResizeObserverFixture,'Instrumentation retains the native observer instance');
+  for(const target of [stage,editor,other])observer.observe(target);
+  const initial={target:stage},latest={target:stage},editorEntry={target:editor},unrelated={target:other};
+  observer.emit([initial]);
+  assert.equal(seen.length,1);assert.equal(seen[0][0],initial,'Normal delivery retains the original native entry');
+  const delivery=env.__resizeObserverDelivery;
+  delivery.hold();observer.emit([initial,editorEntry]);observer.emit([latest]);
+  assert.equal(seen.length,1,'Held viewer callbacks cannot reach the product');
+  assert.deepEqual({...delivery.snapshot()},{holding:true,deferred:2,delivered:0,pending:1});
+  observer.emit([unrelated]);
+  assert.equal(seen.length,2);assert.equal(seen[1][0],unrelated,'Unrelated native delivery is not held');
+  delivery.release();
+  assert.equal(seen.length,3);assert.deepEqual(Array.from(seen[2]),[latest,editorEntry]);
+  assert.equal(seen[2][0],latest);assert.equal(seen[2][1],editorEntry,'Release preserves actual entry identities');
+  assert.deepEqual({...delivery.snapshot()},{holding:false,deferred:2,delivered:1,pending:0});
+  delivery.release();assert.equal(seen.length,3,'Release cannot replay a completed delivery');
+  observer.emit([latest]);assert.equal(seen.length,4,'Normal native delivery resumes after release');
+
+  delivery.hold();observer.emit([latest,editorEntry]);observer.unobserve(stage);delivery.release();
+  assert.equal(seen.length,5);assert.deepEqual(Array.from(seen[4]),[editorEntry]);
+  assert(!observer.targets.has(stage),'Unobserve reaches the native subscription');
+  observer.emit([latest]);assert.equal(seen.length,5,'Unobserved targets remain unsubscribed');
+
+  delivery.hold();observer.emit([editorEntry]);observer.disconnect();delivery.release();
+  assert.equal(observer.targets.size,0);assert.equal(seen.length,5,'Disconnect cancels pending and future native deliveries');
+  observer.emit([editorEntry]);assert.equal(seen.length,5);
+  assert.equal(delivery.snapshot().pending,0);
 });
 
 test('deferred checks preserve failed links, deletion, relinking and context generations', () => {
