@@ -3,7 +3,8 @@
 `scripts/closed_release_worker.py` provides the finite v2 exchange used by the
 configured `action=build` route. Without the protected ledger anchor described
 below, normal builds and stable validation still refuse before private input
-access. Existing-release rebuilds retain their separate v1 permit route, and
+access. Existing-release rebuilds can explicitly select the v2 route described
+below or retain their separate v1 permit route, and
 the legacy upload entry point still rejects normal builds. Local test success
 does not configure the environment, establish live storage capacity, authorize
 a deployment, or satisfy actual home acceptance.
@@ -13,8 +14,8 @@ to the existing bounded `closed_build.main` with an explicit release executor;
 the transport module does not import the worker. Calling `closed_build.py`
 directly for a normal build or stable validation remains fail-closed, even with
 an anchor. Explicit Python callers pass `release_executor=worker.execute_release`
-to `closed_build.execute`. Public preparation and existing-release rebuilds
-retain the same implementation and checks.
+to `closed_build.execute`. Public preparation retains its implementation and
+checks. A selected v2 rebuild also requires this explicit executor and anchor.
 
 The existing [closed-build contract](closed-build.md) still governs containment,
 public artifact provenance, encrypted envelopes, and final site acceptance.
@@ -72,7 +73,7 @@ the granted scope nor access rights.
 
 Push binds to `beta`, schedule to `nightly`, and workflow dispatch to `beta`, `rc`,
 or `nightly`. Stable promotion reads the original RC acceptance without a new v2 exchange.
-Existing-release rebuilds retain the separate v1 exchange. Execution and full public-context fields must match independently
+Existing-release rebuilds use their explicitly selected exchange. Execution and full public-context fields must match independently
 trusted caller expectations, not merely the bootstrap's own assertions.
 
 The bootstrap covers a bounded interval of at least 900 and at most 3600 seconds,
@@ -148,6 +149,54 @@ changes no credentials, and dispatches no workflow.
 
 
 ## Configured production route and stable lookup
+
+### Rebuilding against an existing publication
+
+A private change can be qualified against an existing public release with
+`operation=closed-rebuild` and `existing_release=<exact tag>`. This operation
+does not allocate a version or promote a release. Keep `version` and `rc_tag`
+empty. The published release and its original source qualification must still
+pass the existing resolver's complete checks.
+
+Set `CLOSED_REBUILD_PROTOCOL=v2` in the protected `closed-build` environment to
+select the ledger-backed exchange. The existing `CLOSED_RELEASE_LEDGER_ANCHOR`,
+prefix capability checks and all six reserved roles remain required. An unset
+value or `v1` retains the separate legacy contract; any other value rejects the
+rebuild. Once v2 is selected, a missing executor, missing anchor or failed
+exchange never falls back to v1. This selector does not change normal-release
+or stable-validation routing.
+
+There are two independent identities:
+
+- The published context retains the original public source, run, attempt,
+  payload hashes and version plan. A promoted stable tag can retain its original
+  RC plan and channel.
+- The new rebuild execution uses its current source, run and attempt. It must
+  be an authenticated workflow dispatch with the exact successful
+  `closed_existing_resolve` job and active `closed_rebuild / package` job. A
+  current new-version Release gate is not substituted for the publication's
+  original qualification.
+
+The request ID is `rebuild_request_id(repository_id, current_run_id,
+current_run_attempt, original_plan_channel)`. It uses the `rebuild-` namespace
+and a distinct canonical hash domain. All six object suffixes use the current
+rebuild run and attempt. Rebuilding the same publication again therefore cannot
+reuse a previous exchange's objects or grants. Leave `closed_request` empty at
+dispatch to derive the ID from the new authenticated run; an explicit ID must
+match it exactly. The private operator uses the same public helper after
+authenticating that new run, then prepares its revision-bound input under the
+unchanged admission and expiry rules.
+
+Published context and current execution are checked separately before the
+input GET, before the contained build, and through the existing write
+checkpoints. The normal-release prospective-context equality checks remain in
+place. Package-only inputs are supported by the existing builder; that mode
+still requires package, site-contract and runtime-size checks, followed by
+actual package acceptance. No prior private status is transferred to a new
+revision. Capacity, growth, task budget, outstanding claims and canary evidence
+remain the operator's independent responsibilities.
+
+### Normal release anchor
 
 The existing `closed-build` protected environment must supply
 `CLOSED_RELEASE_LEDGER_ANCHOR` through its environment variables, alongside the

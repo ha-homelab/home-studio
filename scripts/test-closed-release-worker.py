@@ -661,7 +661,15 @@ class ProductionRouteTests(unittest.TestCase):
         import release_control
         f = self.f
         f.context["channel"] = channel
-        identifier = worker.release_request_id(build.REPOSITORY_ID, "73", "2", channel)
+        if action == "rebuild":
+            f.context.update(mode="published", run_id="17", run_attempt="1", source_sha="b" * 40,
+                             release_tag="v1.2.3", version="1.2.3-rc.1")
+            f.execution.update(operation="closed-rebuild", worker_job="closed_rebuild / package")
+            f.bootstrap["execution"] = f.execution.copy()
+            f.expected["execution"] = f.execution.copy()
+            f.manifest["target"] = {key: f.context[key] for key in ("source_sha", "plan_sha256", "payloads")}
+        locator = worker.rebuild_request_id if action == "rebuild" else worker.release_request_id
+        identifier = locator(build.REPOSITORY_ID, "73", "2", channel)
         f.bootstrap["request_id"] = f.expected["request_id"] = f.manifest["request_id"] = identifier
         f.bootstrap["public"] = {"channel": channel, "plan_sha256": f.context["plan_sha256"],
                                   "context_sha256": digest(f.context)}
@@ -676,7 +684,8 @@ class ProductionRouteTests(unittest.TestCase):
         f.reseal()
         f.journal = self.root / "release-attempt.jsonl"
         self.args = SimpleNamespace(action=action, closed_request="", prepared_root=self.root,
-                                    public_context_artifact="" if action == "build" else "context", release_tag="v1.2.3-rc.1")
+                                    public_context_artifact="" if action == "build" else "context",
+                                    release_tag="v1.2.3" if action == "rebuild" else "v1.2.3-rc.1")
         (self.root / "prepared.json").write_bytes(crypto.canonical(build.policy()))
         self.anchor = {"schema": 1, "kind": "closed-release-ledger-anchor", "ledger": f.ledger,
                        "capability_sha256": f.bootstrap["capability_sha256"]}
@@ -690,7 +699,12 @@ class ProductionRouteTests(unittest.TestCase):
             "CLOSED_OUTPUT_ENCRYPT_KEY": f.operator_encrypt, "CLOSED_OUTPUT_SIGN_KEY": f.worker_sign}
         self.env.update({"CLOSED_" + key.upper() + "_URL": value for key, value in f.capabilities.items()})
         event = self.root / "event.json"
-        event.write_text(json.dumps({"inputs": {"channel": "stable" if action == "validate" else channel}}))
+        dispatch = {"channel": "stable" if action == "validate" else channel}
+        if action == "rebuild":
+            self.env["CLOSED_REBUILD_PROTOCOL"] = "v2"
+            dispatch.update(operation="closed-rebuild", existing_release=self.args.release_tag,
+                            version="", rc_tag="", closed_request="", expected_sha="a" * 40)
+        event.write_text(json.dumps({"inputs": dispatch}))
         self.env["GITHUB_EVENT_PATH"] = str(event)
         self.stack.enter_context(patch.dict(os.environ, self.env, clear=True))
         info = {"full_name": build.REPOSITORY, "id": int(build.REPOSITORY_ID),
@@ -700,11 +714,12 @@ class ProductionRouteTests(unittest.TestCase):
                     "run_started_at": "2026-11-03T12:00:00Z",
                     "repository": copy.deepcopy(info), "head_repository": copy.deepcopy(info)}
         self.jobs = [{"name": "Release gate", "status": "completed", "conclusion": "success", "head_sha": "a" * 40},
-                     {"name": "closed_build / package" if action == "build" else "closed_stable_validate / package",
+                     {"name": {"build": "closed_build / package", "validate": "closed_stable_validate / package",
+                               "rebuild": "closed_rebuild / package"}[action],
                       "status": "in_progress", "conclusion": None, "head_sha": "a" * 40}]
-        if action == "validate":
+        if action in {"validate", "rebuild"}:
             self.jobs[0]["conclusion"] = "skipped"
-            self.jobs.append({"name": "closed_stable_resolve", "status": "completed",
+            self.jobs.append({"name": "closed_existing_resolve" if action == "rebuild" else "closed_stable_resolve", "status": "completed",
                               "conclusion": "success", "head_sha": "a" * 40})
         # Successful rerun jobs must reflect actual execution in this attempt.
         for job in self.jobs:
@@ -976,6 +991,181 @@ class ProductionRouteTests(unittest.TestCase):
             self.rejected(lambda: build.execute(self.args, self.root, release_executor=worker.execute_release))
         self.assertEqual(self.read.call_count, 2)
         self.assertEqual(self.f.calls, [])
+
+    def test_published_rebuild_preserves_original_context_and_uses_current_objects(self):
+        identifier, names = self.configure(action="rebuild")
+        # Selection of a stable publication does not turn its original RC plan
+        # into a new stable plan or bind its identity to this rebuild execution.
+        before = copy.deepcopy(self.f.context)
+        self.assertEqual(build.execute(self.args, self.root, release_executor=worker.execute_release), "CLOSED_CANDIDATE_STORED")
+        self.assertEqual(self.args.closed_request, identifier)
+        self.assertTrue(identifier.startswith("rebuild-"))
+        self.assertEqual(self.f.context, before)
+        self.assertEqual(self.builder.call_args.kwargs["context"], before)
+        self.assertEqual(before["release_tag"], "v1.2.3")
+        self.assertEqual(before["channel"], "rc")
+        self.assertEqual(before["run_id"], "17")
+        self.read.assert_called_once_with(self.f.capabilities["input_read"], suffix=names["input"])
+        self.assertEqual(self.f.calls, ["intent", "candidate", "result"])
+        intent = control.open_control(self.f.stored[names["intent"]], self.f.operator_decrypt,
+                                      self.f.worker_verify, purpose="upload-intent-v2")
+        self.assertEqual(intent["execution"], self.f.execution)
+        self.assertEqual(intent["public"]["context_sha256"], digest(before))
+        self.assertIn("/73-2.", intent["candidate"]["object"])
+
+    def test_rebuild_real_candidate_keeps_published_source_and_current_build_identity(self):
+        real_builder = build.build_release_candidate
+        self.configure(action="rebuild")
+        self.f.manifest["build_mode"] = "package-only"
+        self.f.reseal()
+        self.builder.side_effect = real_builder
+        def published_inputs(args, temporary):
+            public = temporary / "public"
+            (public / "component").mkdir(parents=True)
+            (public / "component/core.py").write_bytes(b"public immutable")
+            (public / "source/scripts").mkdir(parents=True)
+            (public / "source/scripts/install-home-assistant.py").write_bytes(b"trusted public installer")
+            return copy.deepcopy(self.f.context), public
+        def container(image, source, public, output, context, log, *, timeout):
+            self.assertEqual(crypto.decode_json((context / "build.json").read_bytes())["public"], self.f.context)
+            output.mkdir()
+            (output / "home-package.tar.gz").write_bytes(archive({
+                "custom_components/home_floorplan/core.py": b"public immutable",
+                "custom_components/home_floorplan/site.json": b"{}"}))
+            (output / "acceptance.json").write_bytes(crypto.canonical({"schema": 1, "passed": True,
+                "checks": ["package", "site-contracts", "geometry"]}))
+        self.public.side_effect = published_inputs
+        with patch.object(build, "run_worker", side_effect=container):
+            self.assertEqual(build.execute(self.args, self.root, release_executor=worker.execute_release), "CLOSED_CANDIDATE_STORED")
+        wire = self.f.stored[self.f.bootstrap["objects"]["candidate"]["object"]]
+        plain = crypto.open_envelope(wire, self.f.operator_decrypt, self.f.worker_verify, purpose="candidate")
+        with tarfile.open(fileobj=io.BytesIO(plain), mode="r:gz") as packed:
+            candidate = json.load(packed.extractfile("candidate.json"))
+        self.assertEqual(candidate["public"], self.f.context)
+        self.assertEqual(candidate["public"]["source_sha"], "b" * 40)
+        self.assertEqual(candidate["public"]["run_id"], "17")
+        self.assertEqual(candidate["build_source_sha"], "a" * 40)
+        self.assertEqual((candidate["build_run_id"], candidate["build_run_attempt"]), ("73", "2"))
+        self.assertEqual(candidate["build_mode"], "package-only")
+        self.assertEqual(self.f.calls, ["intent", "candidate", "result"])
+
+    def test_rebuild_namespaces_separate_repeated_runs_attempts_and_normal_release(self):
+        values = [build.REPOSITORY_ID, "73", "2", "rc"]
+        rebuilt = worker.rebuild_request_id(*values)
+        self.assertEqual(rebuilt, worker.rebuild_request_id(*values))
+        self.assertNotEqual(rebuilt, worker.release_request_id(*values))
+        for index, value in enumerate(("99", "74", "3", "beta")):
+            other = values.copy(); other[index] = value
+            self.assertNotEqual(rebuilt, worker.rebuild_request_id(*other))
+        for invalid in ("0", "01", True, "1/2", "9" * 21):
+            self.rejected(lambda: worker.rebuild_request_id(invalid, "73", "2", "rc"))
+        self.rejected(lambda: worker.rebuild_request_id(*values[:3], "stable"))
+        first = worker.object_names(rebuilt, self.f.execution)
+        second_run = {**self.f.execution, "run_id": "74"}
+        second = worker.object_names(worker.rebuild_request_id(build.REPOSITORY_ID, "74", "2", "rc"), second_run)
+        self.assertTrue(set(first.values()).isdisjoint(second.values()))
+
+    def test_rebuild_requires_current_successful_resolver_and_active_worker(self):
+        self.configure(action="rebuild")
+        original = copy.deepcopy(self.jobs)
+        mutations = [
+            lambda: self.jobs.pop(),
+            lambda: self.jobs.append(copy.deepcopy(self.jobs[-1])),
+            lambda: self.jobs[-1].update(conclusion="skipped"),
+            lambda: self.jobs[-1].update(status="in_progress"),
+            lambda: self.jobs[-1].update(head_sha="b" * 40),
+            lambda: self.jobs[-1].update(run_attempt=1),
+            lambda: self.jobs[-1].update(started_at="2026-11-03T11:59:59Z"),
+            lambda: self.jobs[1].update(status="completed"),
+            lambda: self.jobs[1].update(run_attempt=1),
+            lambda: self.jobs[1].update(name="closed_build / package"),
+        ]
+        for mutate in mutations:
+            self.jobs[:] = copy.deepcopy(original); mutate()
+            self.rejected(lambda: worker.execute_release(self.args, self.root))
+        self.public.assert_not_called(); self.read.assert_not_called(); self.builder.assert_not_called()
+        self.assertEqual(self.f.calls, [])
+
+    def test_rebuild_dispatch_cannot_allocate_change_target_or_substitute_request(self):
+        self.configure(action="rebuild")
+        event = Path(self.env["GITHUB_EVENT_PATH"])
+        original = json.loads(event.read_text())
+        for key, value in (("operation", "release"), ("existing_release", "v1.2.4"),
+                           ("version", "1.2.4"), ("rc_tag", "v1.2.3-rc.1"),
+                           ("expected_sha", "c" * 40), ("closed_request", "foreign")):
+            changed = copy.deepcopy(original); changed["inputs"][key] = value
+            event.write_text(json.dumps(changed))
+            self.rejected(lambda: worker.execute_release(self.args, self.root))
+        self.read.assert_not_called(); self.builder.assert_not_called()
+        self.assertFalse(self.f.journal.exists())
+
+    def test_rebuild_does_not_require_dispatch_channel_to_replace_original_plan_channel(self):
+        self.configure(action="rebuild")
+        event = Path(self.env["GITHUB_EVENT_PATH"])
+        payload = json.loads(event.read_text()); payload["inputs"]["channel"] = "beta"
+        event.write_text(json.dumps(payload))
+        self.assertEqual(worker.execute_release(self.args, self.root), "CLOSED_CANDIDATE_STORED")
+        self.assertEqual(self.f.context["channel"], "rc")
+
+    def test_rebuild_signed_context_and_current_object_substitutions_reject(self):
+        self.configure(action="rebuild")
+        original_bootstrap = copy.deepcopy(self.f.bootstrap)
+        for mutate in (
+            lambda b: b["public"].update(context_sha256=digest({**self.f.context, "run_id": "73"})),
+            lambda b: b["execution"].update(source_sha="b" * 40),
+            lambda b: b["execution"].update(operation="release", worker_job="closed_build / package"),
+            lambda b: b["objects"]["candidate"].update(object="foreign/17-1.candidate.json"),
+            lambda b: b["reservation_checkpoint"].update(scope_fingerprint="0" * 64),
+        ):
+            self.f.bootstrap = copy.deepcopy(original_bootstrap); mutate(self.f.bootstrap); self.f.reseal()
+            self.rejected(lambda: worker.execute_release(self.args, self.root))
+        self.builder.assert_not_called(); self.assertEqual(self.f.calls, [])
+        self.assertFalse(self.f.journal.exists())
+
+    def test_rebuild_never_accepts_prospective_context_even_when_signed(self):
+        self.configure(action="rebuild")
+        self.f.context["mode"] = "prospective"
+        self.f.bootstrap["public"]["context_sha256"] = digest(self.f.context)
+        self.f.reseal()
+        self.rejected(lambda: worker.execute_release(self.args, self.root))
+        self.read.assert_not_called(); self.builder.assert_not_called()
+
+    def test_rebuild_cannot_claim_current_run_as_original_published_run(self):
+        self.configure(action="rebuild")
+        self.f.expected["public_context"]["run_id"] = self.f.execution["run_id"]
+        self.f.bootstrap["public"]["context_sha256"] = digest(self.f.expected["public_context"])
+        self.rejected(lambda: worker.validate_bootstrap(self.f.bootstrap, expected=self.f.expected,
+            capabilities=self.f.capabilities, limits=self.f.limits, now=NOW))
+        self.assertEqual(self.f.calls, [])
+
+    def test_rebuild_read_elapsed_and_resolver_change_do_not_renew_or_upload(self):
+        self.configure(action="rebuild")
+        def slow_read(*args, **kwargs):
+            self.f.now += 1001
+            return self.f.input_wire
+        self.read.side_effect = slow_read
+        self.rejected(lambda: worker.execute_release(self.args, self.root))
+        self.builder.assert_not_called(); self.assertEqual(self.f.calls, [])
+        self.f.now = float(NOW)
+        def changed_read(*args, **kwargs):
+            self.jobs[-1]["conclusion"] = "failure"
+            return self.f.input_wire
+        self.read.side_effect = changed_read
+        self.rejected(lambda: worker.execute_release(self.args, self.root))
+        self.assertEqual(self.f.calls, [])
+        self.assertFalse(self.f.journal.exists())
+
+    def test_explicit_rebuild_builder_rechecks_current_execution_at_write_boundary(self):
+        self.configure(action="rebuild")
+        def changed_build(*args, **kwargs):
+            self.jobs[1]["status"] = "completed"
+            return self.f.candidate
+        self.builder.side_effect = changed_build
+        self.rejected(lambda: worker.build_and_run_release(self.args, self.root,
+            input_wire=self.f.input_wire, **self.f.kwargs()))
+        self.builder.assert_called_once()
+        self.assertEqual(self.f.calls, [])
+        self.assertFalse(self.f.journal.exists())
 
     def test_workflow_anchor_and_existing_envelope_limits(self):
         source = (Path(__file__).parents[1] / ".github/workflows/closed-build.yml").read_text()

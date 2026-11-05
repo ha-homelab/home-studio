@@ -182,6 +182,92 @@ class UploadControlV2Tests(unittest.TestCase):
         for object_name in ("fixture/12-1.candidate.json", "other/12-2.candidate.json", "../candidate", MARKER):
             self.rejected(lambda: control.validate_intent(changed(self.intent, ("candidate", "object"), object_name), self.limits))
 
+    def rebuild_records(self):
+        intent = copy.deepcopy(self.intent)
+        intent["execution"].update(operation="closed-rebuild", worker_job="closed_rebuild / package")
+        # The published source/run are deliberately distinct from current execution.
+        intent["public"]["context_sha256"] = sha({"mode": "published", "release_tag": "v1.3.1",
+            "source_sha": "a" * 40, "run_id": "7", "run_attempt": "1"})
+        wire, permit = self.rebind_intent(intent)
+        permit_wire = self.raw_seal(permit, PURPOSES[1])
+        result = copy.deepcopy(self.result)
+        result.update(intent_envelope_sha256=crypto.digest(wire),
+                      permit_envelope_sha256=crypto.digest(permit_wire), permit_record_sha256=sha(permit))
+        return intent, wire, permit, permit_wire, result
+
+    def test_rebuild_variant_requires_exact_dispatch_job_and_original_plan_channel(self):
+        intent, _, _, _, _ = self.rebuild_records()
+        for event in ("push", "schedule", "workflow_dispatch", "pull_request", "dispatch"):
+            for channel in ("beta", "rc", "nightly", "stable"):
+                value = changed(changed(intent, ("execution", "event"), event), ("public", "channel"), channel)
+                with self.subTest(event=event, channel=channel):
+                    if event == "workflow_dispatch" and channel in {"beta", "rc", "nightly"}:
+                        self.assertEqual(control.validate_intent(value, self.limits), value)
+                    else:
+                        self.rejected(lambda: control.validate_intent(value, self.limits))
+        for operation, job in (("release", "closed_rebuild / package"),
+                               ("closed-rebuild", "closed_build / package"),
+                               ("rebuild", "closed_rebuild / package"),
+                               ("closed-rebuild", "closed_existing_resolve")):
+            value = copy.deepcopy(intent)
+            value["execution"].update(operation=operation, worker_job=job)
+            self.rejected(lambda: control.validate_intent(value, self.limits))
+
+    def test_rebuild_roundtrips_and_cannot_substitute_for_release_or_published_context(self):
+        intent, wire, permit, permit_wire, result = self.rebuild_records()
+        self.assertEqual(self.validate_permit(permit, intent=intent, wire=wire), permit)
+        self.assertEqual(self.validate_result(result, intent=intent, intent_wire=wire,
+                         permit=permit, permit_wire=permit_wire), result)
+        for value, purpose in zip((intent, permit, result), PURPOSES):
+            sealed = control.seal_control(value, self.encrypt, self.sign, purpose=purpose)
+            self.assertEqual(self.open(sealed, purpose), value)
+        # Valid record shapes do not allow one operation's authority to cross over.
+        self.rejected(lambda: self.validate_permit(intent=intent, wire=wire))
+        self.rejected(lambda: self.validate_permit(permit))
+        self.rejected(lambda: self.validate_result(result))
+        self.rejected(lambda: self.validate_result(intent=intent, intent_wire=wire,
+                                                   permit=permit, permit_wire=permit_wire))
+        for field in ("plan_sha256", "context_sha256"):
+            substituted = changed(intent, ("public", field), sha("other published context"))
+            self.assertEqual(control.validate_intent(substituted, self.limits), substituted)
+            self.rejected(lambda: self.validate_permit(permit, intent=substituted, wire=wire))
+
+    def test_rebuild_preserves_current_execution_and_candidate_bindings(self):
+        intent, wire, permit, _, _ = self.rebuild_records()
+        for path, value in ((("execution", "repository_id"), "1414876450"),
+                            (("execution", "repository_owner_id"), "307715256"),
+                            (("execution", "workflow_ref"), MARKER),
+                            (("execution", "run_id"), "7"),
+                            (("execution", "run_attempt"), "1"),
+                            (("candidate", "object"), "fixture/7-1.candidate.json"),
+                            (("public", "context_sha256"), "")):
+            with self.subTest(path=path):
+                self.rejected(lambda: control.validate_intent(changed(intent, path, value), self.limits))
+        for path, value in ((("execution", "source_sha"), "a" * 40),
+                            (("candidate", "attempt_id"), "another-attempt"),
+                            (("candidate", "output_capability_sha256"), sha("other capability")),
+                            (("candidate", "request_target_sha256"), sha("other target")),
+                            (("input_sha256",), sha("other input"))):
+            with self.subTest(path=path):
+                self.rejected(lambda: self.validate_permit(permit, intent=changed(intent, path, value), wire=wire))
+
+    def test_rebuild_preserves_expiry_capacity_destination_and_ledger_checks(self):
+        intent, wire, permit, permit_wire, result = self.rebuild_records()
+        self.rejected(lambda: self.validate_permit(permit, intent=intent, wire=wire,
+                                                  now=permit["expires_at"]))
+        for path, value in ((("capacity", "policy_sha256"), sha("other policy")),
+                            (("capacity", "observed_at"), NOW - 31),
+                            (("destination", "bucket_fingerprint"), sha("other bucket")),
+                            (("ledger", "candidate_attempt_id"), "other-attempt"),
+                            (("ledger", "checkpoint", "generation"), 4097),
+                            (("ledger", "checkpoint", "scope_fingerprint"), sha("other scope"))):
+            with self.subTest(path=path):
+                self.rejected(lambda: self.validate_permit(changed(permit, path, value), intent=intent, wire=wire))
+        with patch.object(time, "time", side_effect=AssertionError("Implicit clock forbidden")):
+            self.assertEqual(self.validate_result(result, intent=intent, intent_wire=wire,
+                             permit=permit, permit_wire=permit_wire), result)
+        self.assertIs(result["transport"]["authorizes_upload"], False)
+
     def test_permit_binds_record_fields_even_when_replacements_are_well_formed(self):
         cases = (("execution", "source_sha", "c" * 40), ("public", "plan_sha256", sha("different plan")),
                  ("public", "context_sha256", sha("different context")), ("public", "channel", "beta"),
