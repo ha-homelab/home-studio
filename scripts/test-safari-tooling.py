@@ -290,6 +290,8 @@ class SessionStartupTests(unittest.TestCase):
                         if route == '/session/owned/window' and method == 'GET':
                             return 'owned-window'
                         if route.endswith('/execute/sync'):
+                            if data['script'] == safari.GRAPHICS_PREPARATION:
+                                return {'status':'pixels-read', 'readbackBytes':16384, 'matchedPixels':4096}
                             return {'documentFocused': True, 'visibilityState': 'visible'}
                         return None
                     driver = Mock(); driver.poll.return_value = None
@@ -340,6 +342,8 @@ class SessionStartupTests(unittest.TestCase):
                         if route == '/session/owned/window' and method == 'GET':
                             return 'owned-window'
                         if route.endswith('/execute/sync'):
+                            if data['script'] == safari.GRAPHICS_PREPARATION:
+                                return {'status':'pixels-read', 'readbackBytes':16384, 'matchedPixels':4096}
                             return {'documentFocused': False, 'visibilityState': 'visible'}
                         return None
                     def application(selected_client, origin, _project, _record, _save):
@@ -364,7 +368,7 @@ class SessionStartupTests(unittest.TestCase):
                     self.assertEqual(viewer.call_count, int(name.startswith('viewer')))
                     self.assertEqual(planner.call_count, int(name == 'planner-256'))
                     self.assertEqual(calls.count(('POST', '/session')), 1)
-                    self.assertEqual(calls.count(('POST', '/session/owned/url')), 1)
+                    self.assertEqual(calls.count(('POST', '/session/owned/url')), 2)
                     self.assertFalse(record['windowFocus']['documentFocused'])
                     self.assertNotIn('focusCompleted', record['windowFocus'])
                     self.assertEqual(record['status'], 'failed' if application_failure else 'passed')
@@ -582,6 +586,70 @@ class HostedPreparationTests(unittest.TestCase):
                     self.assertEqual(summary['cases'], [])
                 else:
                     self.assertEqual(summary['cases'][0]['status'], 'failed')
+
+
+class GraphicsPreparationTests(unittest.TestCase):
+    def test_exact_native_readback_once_and_original_exception(self):
+        javascript = r"""
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const script=fs.readFileSync(0,'utf8');
+for(const mode of ['good','wrong-pixel','short-read','native-error']) {
+  let reads=0;const fills=[],data=new Uint8ClampedArray(64*64*4),canvas={};
+  const context={fillStyle:'',fillRect(x,y,w,h){
+    fills.push([x,y,w,h]);const rgb=this.fillStyle.match(/\d+/g).map(Number);
+    for(let row=y;row<y+h;row++)for(let col=x;col<x+w;col++)data.set([...rgb,255],(row*64+col)*4);
+  }};
+  canvas.getContext=(kind,options)=>{assert.equal(kind,'2d');assert.equal(options.alpha,false);return context;};
+  const failure=Object.assign(new Error('native backing-store failure'),{name:'InvalidStateError'});
+  const prototype={getImageData(...args){
+    reads++;assert.equal(this,context);assert.deepEqual(args,[0,0,64,64]);
+    if(mode==='native-error')throw failure;
+    if(mode==='wrong-pixel')data[0]=0;
+    return {data:mode==='short-read'?data.slice(0,-1):data};
+  }};
+  const environment={CanvasRenderingContext2D:{prototype},document:{
+    createElement(name){assert.equal(name,'canvas');return canvas;},body:{appendChild(value){assert.equal(value,canvas);}}
+  }};
+  const result=vm.runInNewContext('(function(){'+script+'})()',environment);
+  assert.equal(reads,1);assert.deepEqual(fills,[[0,0,32,32],[32,0,32,32],[0,32,32,32],[32,32,32,32]]);
+  if(mode==='native-error'){
+    assert.equal(result.status,'readback-failed');assert.equal(result.name,failure.name);
+    assert.equal(result.message,failure.message);assert.equal(result.stack,failure.stack);
+  } else if(mode==='good'){
+    assert.equal(result.readbackBytes,16384);assert.equal(result.matchedPixels,4096);
+  } else assert.ok(result.readbackBytes!==16384||result.matchedPixels!==4096);
+}
+"""
+        result = subprocess.run(['node', '-e', javascript], input=safari.GRAPHICS_PREPARATION,
+                                text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_failed_preparation_never_enters_application_or_passes(self):
+        failure = {'status':'readback-failed', 'name':'InvalidStateError',
+                   'message':'native backing-store failure', 'stack':'native stack'}
+        client = Mock(); client.session_id = 'owned'
+        client.start.return_value = {'sessionId':'owned', 'capabilities':{'browserName':'Safari'}}
+        client.select_current_window.return_value = {'handle':'owned-window', 'documentFocused':True, 'visibilityState':'visible'}
+        client.execute.side_effect = lambda script: failure if script == safari.GRAPHICS_PREPARATION else {}
+        driver = Mock(); driver.poll.return_value = None
+        with tempfile.TemporaryDirectory() as temp, contextlib.ExitStack() as stack:
+            for target, name, value in ((safari.sys, 'platform', 'darwin'),
+                    (safari.subprocess, 'check_output', Mock(return_value='Safari test')),
+                    (safari.subprocess, 'Popen', Mock(return_value=driver)),
+                    (safari, 'fixture_server', Mock(return_value=(Mock(), {'origin':'http://fixture','sourceHash':'fixed'}, {}))),
+                    (safari, 'SafariWebDriver', Mock(return_value=client)),
+                    (safari.native, 'stop', Mock()), (safari.threading, 'Timer', Mock())):
+                stack.enter_context(patch.object(target, name, value))
+            viewer = stack.enter_context(patch.object(safari.native, 'viewer'))
+            planner = stack.enter_context(patch.object(safari.native, 'planner'))
+            record = safari.run_case(Path(temp), 'planner-256', '/test/safaridriver')
+            self.assertEqual(record['status'], 'failed'); self.assertEqual(record['phase'], 'preparation')
+            self.assertEqual(record['graphicsPreparation'], failure)
+            self.assertIn('native backing-store failure', record['error'])
+            self.assertEqual(record['samples'], [])
+            viewer.assert_not_called(); planner.assert_not_called()
+            client.execute.assert_any_call(safari.GRAPHICS_PREPARATION)
+            self.assertEqual(sum(call.args[0] == safari.GRAPHICS_PREPARATION for call in client.execute.call_args_list), 1)
 
 
 class PlannerDiagnosticTests(unittest.TestCase):
