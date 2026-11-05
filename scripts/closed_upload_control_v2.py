@@ -159,15 +159,24 @@ def _intent(value, limits):
     _fields(execution, {"repository", "repository_id", "repository_owner_id", "workflow_ref", "run_id",
                         "run_attempt", "source_sha", "event", "operation", "worker_job"})
     _require(execution["repository"] == _REPOSITORY and execution["repository_id"] == "1414876449"
-             and execution["repository_owner_id"] == "307715255" and execution["workflow_ref"] == _WORKFLOW
-             and execution["operation"] == "release" and execution["worker_job"] == "closed_build / package")
+             and execution["repository_owner_id"] == "307715255" and execution["workflow_ref"] == _WORKFLOW)
     _decimal(execution["run_id"])
     _decimal(execution["run_attempt"])
     _hex(execution["source_sha"], 40)
     public = value["public"]
     _fields(public, {"channel", "plan_sha256", "context_sha256"})
-    _require(type(execution["event"]) is str and execution["event"] in _CHANNELS
-             and type(public["channel"]) is str and public["channel"] in _CHANNELS[execution["event"]])
+    _require(type(execution["event"]) is str and type(public["channel"]) is str)
+    if execution["operation"] == "release":
+        _require(execution["worker_job"] == "closed_build / package"
+                 and execution["event"] in _CHANNELS
+                 and public["channel"] in _CHANNELS[execution["event"]])
+    else:
+        # Published-context qualification belongs to the authenticated caller.
+        # A promoted stable publication still carries its original RC plan.
+        _require(execution["operation"] == "closed-rebuild"
+                 and execution["worker_job"] == "closed_rebuild / package"
+                 and execution["event"] == "workflow_dispatch"
+                 and public["channel"] in _CHANNELS["workflow_dispatch"])
     _hex(public["plan_sha256"])
     _hex(public["context_sha256"])
     candidate = value["candidate"]

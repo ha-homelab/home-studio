@@ -1,4 +1,4 @@
-"""Finite v2 worker exchange and configured normal-release entry point.
+"""Finite v2 worker exchange and configured release/rebuild entry point.
 
 Explicit transfer callers supply trusted anchors and an encrypted candidate;
 the configured production route obtains those anchors and builds the candidate.
@@ -167,6 +167,15 @@ def release_request_id(repository_id, run_id, run_attempt, channel):
                                   run_id, run_attempt, channel])
 
 
+@_boundary
+def rebuild_request_id(repository_id, run_id, run_attempt, channel):
+    """A fresh published-rebuild locator, separate from normal release objects."""
+    # Share the exact numeric/channel validation without reusing its namespace.
+    release_request_id(repository_id, run_id, run_attempt, channel)
+    return "rebuild-" + _digest(["closed-rebuild-request-v2", repository_id,
+                                  run_id, run_attempt, channel])
+
+
 def _configured_anchor(environment, capabilities):
     raw = environment.get("CLOSED_RELEASE_LEDGER_ANCHOR")
     _require(type(raw) is str and 0 < len(raw.encode("utf-8")) <= 16384)
@@ -186,9 +195,10 @@ def _configured_anchor(environment, capabilities):
     return value
 
 
-def _current_execution(action, channel=None):
+def _current_execution(action, channel=None, *, release_tag=None):
     """Fresh API run/job identity; environment values alone are not authority."""
     import release_control
+    _require(action in {"build", "validate", "rebuild"})
     transport.gate_environment(os.environ)
     gh = release_control.GitHub(transport.REPOSITORY)
     info = release_control.repository_info(gh)
@@ -201,28 +211,50 @@ def _current_execution(action, channel=None):
     for repository in (run["repository"], run["head_repository"]):
         _require(str(repository["id"]) == transport.REPOSITORY_ID
                  and str(repository["owner"]["id"]) == transport.OWNER_ID)
-    # Stable reuses an RC and intentionally skips this run's build/Release gate.
-    # Its completed resolver supplies independently verified retained RC proof.
+    # Stable validation and published rebuilds use a completed resolver instead
+    # of a new-version Release gate. Normal builds retain their existing gate.
     release_control.validate_run(gh, run, info, os.environ["GITHUB_SHA"], int(attempt),
                                  completed=False, gate=action == "build")
     _require(run["event"] == os.environ["GITHUB_EVENT_NAME"])
-    job_name = {"build": "closed_build / package", "validate": "closed_stable_validate / package"}[action]
+    if action == "rebuild":
+        _require(run["event"] == "workflow_dispatch"
+                 and os.environ.get("GITHUB_ACTIONS") == "true"
+                 and release_control.checked_out_sha() == run["head_sha"])
+        _require(type(release_tag) is str and release_control.TAG_RE.fullmatch(release_tag))
+        event = crypto.decode_json(transport.regular(Path(os.environ["GITHUB_EVENT_PATH"]), 2_000_000))
+        _require(type(event) is dict and type(event.get("inputs")) is dict)
+        inputs = event["inputs"]
+        _require(inputs.get("operation") == "closed-rebuild"
+                 and inputs.get("existing_release") == release_tag
+                 and not inputs.get("version") and not inputs.get("rc_tag")
+                 and inputs.get("expected_sha", "") in ("", run["head_sha"]))
+        if channel is not None:
+            _require(inputs.get("closed_request", "") in ("", rebuild_request_id(
+                transport.REPOSITORY_ID, run_id, attempt, channel)))
+    job_name = {"build": "closed_build / package", "validate": "closed_stable_validate / package",
+                "rebuild": "closed_rebuild / package"}[action]
     jobs = gh.pages(f"actions/runs/{run_id}/attempts/{attempt}/jobs", "jobs")
     selected = [job for job in jobs if job.get("name") == job_name]
     _require(len(selected) == 1 and selected[0].get("status") == "in_progress"
              and selected[0].get("conclusion") is None
              and selected[0].get("head_sha") == os.environ["GITHUB_SHA"])
-    if action == "validate":
-        resolvers = [job for job in jobs if job.get("name") == "closed_stable_resolve"]
+    if action in {"validate", "rebuild"}:
+        resolver = "closed_existing_resolve" if action == "rebuild" else "closed_stable_resolve"
+        resolvers = [job for job in jobs if job.get("name") == resolver]
         _require(len(resolvers) == 1 and resolvers[0].get("status") == "completed"
                  and resolvers[0].get("conclusion") == "success"
                  and resolvers[0].get("head_sha") == os.environ["GITHUB_SHA"])
-    if channel is not None:
+        if action == "rebuild":
+            _require(selected[0].get("run_attempt") == int(attempt))
+            release_control.require_current_attempt_jobs(
+                gh, int(run_id), os.environ["GITHUB_SHA"], int(attempt), resolvers)
+    if channel is not None and action != "rebuild":
         release_control.check_execution(gh, int(run_id), channel, info, run)
     return {"repository": transport.REPOSITORY, "repository_id": transport.REPOSITORY_ID,
         "repository_owner_id": transport.OWNER_ID, "workflow_ref": os.environ["GITHUB_WORKFLOW_REF"],
         "run_id": run_id, "run_attempt": attempt, "source_sha": os.environ["GITHUB_SHA"],
-        "event": run["event"], "operation": "release", "worker_job": job_name}
+        "event": run["event"], "operation": "closed-rebuild" if action == "rebuild" else "release",
+        "worker_job": job_name}
 
 
 @_boundary
@@ -233,28 +265,38 @@ def execute_release(args, temporary):
     25-minute Actions job is the whole-operation bound, not a 60s transfer timer.
     Fresh identity and signed grant checks after GET precede build and writes.
     """
-    _require(args.action in {"build", "validate"})
+    _require(args.action in {"build", "validate", "rebuild"})
     now = _elapsed_clock()
     capabilities = {name: os.environ["CLOSED_" + name.upper() + "_URL"] for name in CAPABILITIES}
     anchor = _configured_anchor(os.environ, capabilities)
-    execution = _current_execution(args.action)
+    def current_execution(channel=None):
+        if args.action == "rebuild":
+            return _current_execution(args.action, channel, release_tag=args.release_tag)
+        return _current_execution(args.action, channel)
+
+    execution = current_execution()
     configured = transport.policy()
     _require(crypto.decode_json(transport.regular(args.prepared_root / "prepared.json")) == configured)
     context, public = transport.public_inputs(args, temporary)
     channel = "stable" if args.action == "validate" else context["channel"]
-    _require(_current_execution(args.action, channel) == execution)
+    _require(current_execution(channel) == execution)
     input_keys = {"recipient_key": os.environ["CLOSED_INPUT_DECRYPT_KEY"],
                   "verify_key": os.environ["CLOSED_INPUT_VERIFY_KEY"]}
     output_keys = {"recipient_key": os.environ["CLOSED_OUTPUT_ENCRYPT_KEY"],
                    "signing_key": os.environ["CLOSED_OUTPUT_SIGN_KEY"]}
-    identifier = release_request_id(context["repository_id"], context["run_id"],
-                                    context["run_attempt"], context["channel"])
+    if args.action == "rebuild":
+        _require(context["mode"] == "published" and context["release_tag"] == args.release_tag)
+        identifier = rebuild_request_id(execution["repository_id"], execution["run_id"],
+                                        execution["run_attempt"], context["channel"])
+    else:
+        identifier = release_request_id(context["repository_id"], context["run_id"],
+                                        context["run_attempt"], context["channel"])
     _require(args.closed_request in ("", identifier))
     args.closed_request = identifier
-    names = object_names(identifier, context)
+    names = object_names(identifier, execution if args.action == "rebuild" else context)
 
     def recheck():
-        _require(_current_execution(args.action, channel) == execution)
+        _require(current_execution(channel) == execution)
 
     if args.action == "validate":
         _require(context["mode"] == "published" and context["channel"] == "rc"
@@ -318,9 +360,27 @@ def _bootstrap(value, limits, expected, capabilities):
     _sha(value["worker"]["policy_sha256"])
     context = expected["public_context"]
     _require(type(context) is dict)
-    for field in ("repository", "repository_id", "repository_owner_id", "source_sha", "run_id", "run_attempt"):
-        _require(context[field] == value["execution"][field])
-    _require(context["mode"] == "prospective" and context["workflow"] == transport.WORKFLOW)
+    execution = value["execution"]
+    for field in ("repository", "repository_id", "repository_owner_id"):
+        _require(context[field] == execution[field])
+    _require(context["workflow"] == transport.WORKFLOW)
+    if execution["operation"] == "closed-rebuild":
+        # The trusted caller obtains this published context from the completed
+        # resolver. Its original run/source remain distinct from this execution.
+        import release_control
+        _require(context["mode"] == "published"
+                 and type(context["release_tag"]) is str
+                 and release_control.TAG_RE.fullmatch(context["release_tag"])
+                 and type(context["source_sha"]) is str
+                 and re.fullmatch(r"[0-9a-f]{40}", context["source_sha"]))
+        object_names(value["request_id"], context)  # Validate retained run identifiers.
+        _require(context["run_id"] != execution["run_id"])
+        _require(value["request_id"] == rebuild_request_id(execution["repository_id"],
+            execution["run_id"], execution["run_attempt"], context["channel"]))
+    else:
+        _require(context["mode"] == "prospective")
+        for field in ("source_sha", "run_id", "run_attempt"):
+            _require(context[field] == execution[field])
     _require(value["public"] == {"channel": context["channel"], "plan_sha256": context["plan_sha256"],
                                  "context_sha256": _digest(context)})
     ledger = value["ledger"]
@@ -699,7 +759,10 @@ def build_and_run_release(args, temporary, *, input_wire, input_keys, output_key
                                     expected=expected, capabilities=capabilities)
     validate_bootstrap(bootstrap, expected=expected, capabilities=capabilities,
                        limits=limits, now=now())
-    _require(args.action == "build" and args.closed_request in ("", bootstrap["request_id"]))
+    _require(args.action in {"build", "rebuild"}
+             and args.closed_request in ("", bootstrap["request_id"]))
+    _require(expected["execution"]["operation"] == (
+        "closed-rebuild" if args.action == "rebuild" else "release"))
     transport.gate_environment(os.environ)
     execution = expected["execution"]
     for field, name in (("repository", "GITHUB_REPOSITORY"), ("repository_id", "GITHUB_REPOSITORY_ID"),
@@ -711,12 +774,18 @@ def build_and_run_release(args, temporary, *, input_wire, input_keys, output_key
     _require(bootstrap["worker"] == {"image": configured["worker_image"], "policy_sha256": _digest(configured)}
              and {name: configured["upload_admission"][name] for name in control.MAX_LIMITS} == limits
              and crypto.decode_json(transport.regular(args.prepared_root / "prepared.json")) == configured)
+    def recheck():
+        if args.action == "rebuild":
+            _require(_current_execution("rebuild", expected["public_context"]["channel"],
+                release_tag=args.release_tag) == execution)
+
+    recheck()
     context, public = transport.public_inputs(args, temporary)
     _require(context == expected["public_context"])
     return _finish_release(args, temporary, configured=configured, context=context, public=public,
         input_wire=input_wire, input_keys=input_keys, output_keys=output_keys, limits=limits,
         expected=expected, capabilities=capabilities, journal_path=journal_path,
-        timeout=timeout, now=now, recheck=lambda: None)
+        timeout=timeout, now=now, recheck=recheck)
 
 
 def _finish_release(args, temporary, *, configured, context, public, input_wire, input_keys,
@@ -738,7 +807,7 @@ def _finish_release(args, temporary, *, configured, context, public, input_wire,
 
 
 def main(argv=None):
-    """Use the shared bounded CLI with this explicit normal-release executor."""
+    """Use the shared bounded CLI with this explicit v2 executor."""
     return transport.main(argv, release_executor=execute_release)
 
 

@@ -680,9 +680,13 @@ def build_release_candidate(args, temporary, *, configured, context, public, inp
 
 
 def execute(args, temporary, *, release_executor=None):
-    if args.action in {"build", "validate"}:
+    rebuild_protocol = os.environ.get("CLOSED_REBUILD_PROTOCOL", "") if args.action == "rebuild" else ""
+    if rebuild_protocol not in {"", "v1", "v2"}:
+        raise UploadAdmissionUnavailable()
+    if args.action in {"build", "validate"} or rebuild_protocol == "v2":
         # No default ledger or input-derived authority. An unconfigured worker
         # still refuses before environment validation, public or private I/O.
+        # A selected v2 rebuild must never fall back to the legacy exchange.
         if not callable(release_executor) or not os.environ.get("CLOSED_RELEASE_LEDGER_ANCHOR"):
             raise UploadAdmissionUnavailable()
         return release_executor(args, temporary)
