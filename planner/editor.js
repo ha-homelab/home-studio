@@ -118,7 +118,7 @@ function applyHostTheme(theme) {
   if (renderer) renderer.setClearColor(planColors.background);
   requestCanvasRender();
 }
-const planCanvas = $('plan-canvas'), ctx = planCanvas.getContext('2d', { alpha: false });
+const planCanvas = $('plan-canvas'), ctx = planCanvas.getContext('2d', { alpha: false, willReadFrequently: true });
 let project = blankProject(), activeFloorId, selection = null, tool = 'select', view = 'plan', history = [], future = [], drag = null, previewEdit = null;
 let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, spaceHeld = false, saveFailed = false, previewDirty = true;
 let canvasFrame = 0, canvasSuspended = false, planFrameRequested = false;
