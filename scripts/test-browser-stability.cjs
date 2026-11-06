@@ -537,12 +537,13 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
         for (const mode of ['editor-cutaway', 'editor-full', 'home']) {
           phases.start('post-restore-' + mode, {cycle});
           const beforeCount = (await snapshot()).renderCount;
-          const transition = {mode, startedMs:Date.now()-started, durationMs:null, completed:false};
+          const transition = {mode, beforeCount, startedMs:Date.now()-started, durationMs:null, completed:false};
           sample.postRestoreViews.push(transition);save();
           try {
             await child.evaluate(changeRestoredViewerMode, mode);
+            // Observe independently of RAF: the production scheduler also uses a timer fallback.
             await child.waitForFunction(({beforeCount, home}) => window.floorplan.renderCount > beforeCount && window.floorplan.homeMode === home,
-              {beforeCount, home:mode === 'home'});
+              {beforeCount, home:mode === 'home'}, {polling:100});
             transition.snapshot = attributeContextEvents(await child.evaluate(captureRestoredViewerMode), record);
             save();
             assertRestoredViewerMode(beforeCount, transition.snapshot, mode, lights);

@@ -2244,19 +2244,31 @@ test('post-restoration cases keep deadlines and preserve pending transition rece
   assert(start>0&&end>start);
   const code=source.slice(start,end);
   assert(!/waitForTimeout|screenshot|timeout\s*:|renderModel|requestAnimationFrame/.test(code));
-  let fail=false,calls=[],count=3,now=100;
+  let fail=false,calls=[],waits=[],count=3,now=100;
   const sample={}, env={sample,cycle:1,started:50,lights:18,Date:{now:()=>++now},
     phases:{start:name=>calls.push(name)},snapshot:async()=>({renderCount:count}),save:()=>{},
     changeRestoredViewerMode:()=>{},captureRestoredViewerMode:()=>{},attributeContextEvents,record:{},
     child:{evaluate:async(fn,mode)=>{if(mode){count++;return;}return {renderCount:count};},
-      waitForFunction:async()=>{if(fail)throw Error('primary transition failure');}},
+      waitForFunction:async(predicate,args,options)=>{
+        assert.deepEqual(JSON.parse(JSON.stringify(options)),{polling:100},'Timer polling retains the default operation timeout');
+        waits.push({beforeCount:args.beforeCount,home:args.home});
+        const observed=(renderCount,homeMode)=>vm.runInNewContext('('+predicate.toString()+')(args)',{
+          args,window:{floorplan:{renderCount,homeMode}}});
+        assert.equal(observed(args.beforeCount,args.home),false,'A stale frame cannot satisfy the wait');
+        assert.equal(observed(args.beforeCount+1,!args.home),false,'A new frame in the wrong mode cannot satisfy the wait');
+        assert.equal(observed(args.beforeCount+1,args.home),true,'A completed requested frame needs no RAF callback');
+        if(fail)throw Error('primary transition failure');
+      }},
     assertRestoredViewerMode:()=>{}};
   await vm.runInNewContext('(async()=>{'+code+'})()',env);
   assert.deepEqual(Array.from(sample.postRestoreViews,row=>row.mode),['editor-cutaway','editor-full','home']);
+  assert.deepEqual(Array.from(sample.postRestoreViews,row=>row.beforeCount),[3,4,5]);
+  assert.deepEqual(waits,[{beforeCount:3,home:false},{beforeCount:4,home:false},{beforeCount:5,home:true}]);
   assert(sample.postRestoreViews.every(row=>row.durationMs>=0&&row.snapshot&&row.completed===true));
   fail=true;await assert.rejects(vm.runInNewContext('(async()=>{'+code+'})()',env),/primary transition failure/);
   assert.equal(sample.postRestoreViews.length,1);assert(sample.postRestoreViews[0].durationMs>=0);
   assert.equal(sample.postRestoreViews[0].snapshot,undefined);
+  assert.equal(sample.postRestoreViews[0].beforeCount,6,'A failed wait retains its actual starting render count');
   assert.equal(sample.postRestoreViews[0].completed,false);
   fail=false;env.assertRestoredViewerMode=()=>{throw Error('restored graphics failure');};
   await assert.rejects(vm.runInNewContext('(async()=>{'+code+'})()',env),/restored graphics failure/);
