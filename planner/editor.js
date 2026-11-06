@@ -1306,7 +1306,7 @@ function zoomPreview(factor) {
   if (!canNavigatePreview() || !Number.isFinite(factor) || factor <= 0) return;
   const radius = previewRadius(orbit.radius / factor);
   if (radius === orbit.radius) return;
-  orbit.radius = radius; rebasePreviewGesture(); requestPreviewRender();
+  orbit.radius = radius; rebasePreviewGesture(); previewEnvironment?.noteNavigation(); requestPreviewRender();
 }
 let previewCanvas = $('preview-canvas'), previewEvents;
 function canNavigatePreview() { return view !== 'plan' && !drag && !siteEditor?.busy && !previewLost && !previewUnavailable && !canvasSuspended && !document.hidden; }
@@ -1347,15 +1347,15 @@ function setPreviewMode(mode) {
 }
 function resetPreview() {
   if (!canNavigatePreview()) return;
-  releasePreviewPointer(); orbit.yaw = -Math.PI / 3; orbit.pitch = .8; fitPreview(); requestPreviewRender();
+  releasePreviewPointer(); orbit.yaw = -Math.PI / 3; orbit.pitch = .8; fitPreview(); previewEnvironment?.noteNavigation(); requestPreviewRender();
 }
 function topPreview() {
   if (!canNavigatePreview()) return;
-  releasePreviewPointer(); orbit.yaw = -Math.PI / 2; orbit.pitch = previewPitch(Math.PI / 2); requestPreviewRender();
+  releasePreviewPointer(); orbit.yaw = -Math.PI / 2; orbit.pitch = previewPitch(Math.PI / 2); previewEnvironment?.noteNavigation(); requestPreviewRender();
 }
 function rotatePreview(angle) {
   if (!canNavigatePreview()) return;
-  releasePreviewPointer(); orbit.yaw = previewYaw(orbit.yaw + angle); requestPreviewRender();
+  releasePreviewPointer(); orbit.yaw = previewYaw(orbit.yaw + angle); previewEnvironment?.noteNavigation(); requestPreviewRender();
 }
 function previewPointerCenter() {
   const points = [...orbit.pointers.values()], first = points[0], second = points[1];
@@ -1510,7 +1510,7 @@ function bindPreviewCanvas() {
     if (start.mode === 'pan') panPreview(dx, dy, start);
     else { orbit.yaw = previewYaw(start.yaw - dx * .007); orbit.pitch = previewPitch(start.pitch + dy * .007); }
     if (orbit.pointers.size === 2 && start.distance > 0 && center.distance > 0) orbit.radius = previewRadius(start.radius * start.distance / center.distance);
-    requestPreviewRender();
+    previewEnvironment?.noteNavigation(); requestPreviewRender();
   }, options);
   canvas.addEventListener('pointerup', e => { if (previewEdit?.pointerId === e.pointerId) finishPreviewEdit(e); else releasePreviewPointer(e); }, options);
   canvas.addEventListener('lostpointercapture', releasePreviewPointer, options);
@@ -1538,7 +1538,7 @@ function bindPreviewCanvas() {
       if (key === 'arrowleft') orbit.yaw = previewYaw(orbit.yaw - .12); if (key === 'arrowright') orbit.yaw = previewYaw(orbit.yaw + .12);
       if (key === 'arrowup') orbit.pitch = previewPitch(orbit.pitch + .1); if (key === 'arrowdown') orbit.pitch = previewPitch(orbit.pitch - .1);
     }
-    requestPreviewRender();
+    previewEnvironment?.noteNavigation(); requestPreviewRender();
   }, options);
   canvas.addEventListener('webglcontextlost', e => {
     e.preventDefault(); previewLost = true; previewEnvironment?.setActive(false); cancelCanvasRender(); releasePreviewPointer();

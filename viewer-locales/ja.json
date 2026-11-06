@@ -136,6 +136,7 @@
   "3D view could not start. Plan editing and JSON export are still available.": "3D表示を開始できませんでした。間取りの編集とJSONのエクスポートは引き続き利用できます。",
   "Surroundings": "Surroundings",
   "Show garden surroundings": "Show garden surroundings",
+  "Show presentation base": "展示用の台座を表示",
   "Decorative motion": "Decorative motion",
   "Garden palette": "Garden palette",
   "Sage garden": "Sage garden",

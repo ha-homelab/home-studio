@@ -1,6 +1,7 @@
 // Optional decorative surroundings. No entities, model edits or network access.
-// Demo scenery stays outside the supplied bounds. Authored site/map context
-// suppresses it: uncharted space is not evidence of an empty lawn or a road.
+// Garden objects stay outside the supplied bounds; an opt-in base sits below
+// ground. Authored site/map context suppresses both: uncharted space is not
+// evidence of an empty lawn or a road.
 export const ENVIRONMENT_PALETTES = {
   sage: { label: 'Sage garden', lawn: '#6f8f7a', hedge: '#557463', leaf: '#7f9b78', leafLight: '#a2b595', path: '#afb5a5', road: '#697d75', trunk: '#8e8270', car: '#d6ba92' },
   meadow: { label: 'Summer meadow', lawn: '#c9d3a7', hedge: '#819168', leaf: '#91a477', leafLight: '#b2be87', path: '#e6ddc5', road: '#a9aaa0', trunk: '#97806b', car: '#b4cbd0' },
@@ -17,7 +18,7 @@ const ENVIRONMENT_RABBIT = {"vertices":1407,"indices":4464,"bytes":70836,"data":
 // deliberately independent of the traffic RNG, so visual work cannot change a
 // saved scene's arrival times, speeds, colours or animation counters.
 function environmentGeometry(THREE, shape) {
-  if (shape === 'box') return new THREE.BoxGeometry(1, 1, 1);
+  if (shape === 'box' || shape === 'presentation-base') return new THREE.BoxGeometry(1, 1, 1);
   if (shape === 'sphere') return new THREE.SphereGeometry(.5, 16, 8);
   if (shape === 'rabbit') {
     const packed = ENVIRONMENT_RABBIT, source = atob(packed.data), bytes = new Uint8Array(packed.bytes);
@@ -191,10 +192,32 @@ function environmentGeometry(THREE, shape) {
   return result;
 }
 
+// Both detail levels occupy the same buffer and batch. Navigation changes only
+// draw ranges; the canopy proxy keeps the original sampled outer envelope.
+function prepareNavigationGeometry(THREE, geometry, shape) {
+  const fullCount = geometry.getAttribute('position').count;
+  let start = 0, count;
+  if (shape === 'tree-branches') count = (10 + 8) * 4 * 3; // The two complete trunk tubes.
+  else if (shape === 'tree-crown') {
+    const indexed = new THREE.SphereGeometry(.5, 7, 4), proxy = indexed.toNonIndexed();
+    indexed.dispose();
+    start = fullCount; count = proxy.getAttribute('position').count;
+    for (const name of ['position', 'normal']) {
+      const original = geometry.getAttribute(name).array, extra = proxy.getAttribute(name).array;
+      const combined = new Float32Array(original.length + extra.length);
+      combined.set(original); combined.set(extra, original.length);
+      geometry.setAttribute(name, new THREE.BufferAttribute(combined, 3));
+    }
+    proxy.dispose();
+  } else return;
+  geometry.userData.navigationRange = { fullCount, start, count };
+  geometry.setDrawRange(0, fullCount);
+}
+
 export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, siteContext = false, requestRender = () => {}, decorateMaterial = () => {}, frameInterval = 180, active = true, settings = {}, seed = settings.seed, roadSide = settings.road_side, visibilityElement = null, document: doc = globalThis.document, window: win = globalThis.window } = {}) {
   const group = new THREE.Group(); group.name = 'decorative-surroundings'; group.visible = false; scene.add(group);
   const media = win?.matchMedia?.('(prefers-reduced-motion: reduce)');
-  const state = { enabled: false, motion: false, palette: 'sage' };
+  const state = { enabled: false, motion: false, presentation_base: false, palette: 'sage' };
   const geometry = new Map(), materials = new Map(), batches = [], actors = [];
   const dummy = new THREE.Object3D(), local = new THREE.Matrix4(), actorMatrix = new THREE.Matrix4();
   const trafficSeed = Number.isFinite(seed) ? seed >>> 0 : Math.floor(Math.random() * 0x100000000);
@@ -202,7 +225,7 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, si
   const roadDirection = roadSide === 'maxZ' ? 1 : -1;
   let randomState = trafficSeed, trafficColors = [];
   let contextual = siteContext === true;
-  let area, base = elevation, timer = 0, elapsed = 0, disposed = false, suspended = false, inViewport = true, dirty = true;
+  let area, base = elevation, timer = 0, detailTimer = 0, navigationDetail = false, detailRestorePending = false, elapsed = 0, disposed = false, suspended = false, inViewport = true, dirty = true;
   const tickMs = Math.max(180, Math.min(2000, Number.isFinite(frameInterval) ? frameInterval : 180)); // Never a permanent RAF loop.
   function random() {
     // Seed once per layer; rebuilding a palette replays the same bounded traffic.
@@ -218,8 +241,37 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, si
     return { minX: value.minX - (value.minX === value.maxX ? .25 : 0), maxX: value.maxX + (value.minX === value.maxX ? .25 : 0), minZ: value.minZ - (value.minZ === value.maxZ ? .25 : 0), maxZ: value.maxZ + (value.minZ === value.maxZ ? .25 : 0) };
   }
   function stop() { if (timer) win.clearTimeout(timer); timer = 0; }
-  function running() { return !disposed && !contextual && !suspended && inViewport && active && state.enabled && state.motion && !doc?.hidden && !media?.matches; }
+  function visible() { return !disposed && !contextual && !suspended && inViewport && active && state.enabled && !doc?.hidden; }
+  function setNavigationDetail(value) {
+    if (navigationDetail === value) return false;
+    navigationDetail = value; detailRestorePending = false;
+    for (const shape of geometry.values()) {
+      const range = shape.userData.navigationRange;
+      if (range) shape.setDrawRange(value ? range.start : 0, value ? range.count : range.fullCount);
+    }
+    return true;
+  }
+  function resetNavigation() {
+    if (detailTimer) win.clearTimeout(detailTimer);
+    detailTimer = 0;
+    if (setNavigationDetail(false)) detailRestorePending = true;
+  }
+  function noteNavigation() {
+    if (!visible() || !win?.setTimeout || !win?.clearTimeout) return;
+    if (detailTimer) win.clearTimeout(detailTimer);
+    const changed = setNavigationDetail(true);
+    detailTimer = win.setTimeout(() => {
+      detailTimer = 0;
+      if (setNavigationDetail(false)) {
+        if (visible()) requestRender(); else detailRestorePending = true;
+      }
+    }, 300);
+    if (changed) requestRender(true);
+  }
+  function running() { return visible() && state.motion && !media?.matches; }
   function schedule() {
+    if (!visible()) resetNavigation();
+    else if (detailRestorePending) { detailRestorePending = false; requestRender(); }
     stop();
     if (running()) timer = win.setTimeout(() => {
       timer = 0;
@@ -228,6 +280,7 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, si
     }, tickMs);
   }
   function clear() {
+    resetNavigation(); detailRestorePending = false;
     for (const batch of batches) { group.remove(batch.mesh); batch.mesh.dispose(); }
     batches.length = 0; actors.length = 0;
     for (const resource of geometry.values()) resource.dispose();
@@ -245,7 +298,7 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, si
       if (!entries.has(key)) {
         const family = shape === 'car-body' ? 'car_paint' : shape === 'car-glass' ? 'glass' : shape === 'car-wheel' ? 'rubber' : shape === 'car-rim' ? 'brushed_metal'
           : shape === 'tree-branches' ? 'rough_wood' : shape === 'tree-crown' ? 'foliage' : shape === 'rabbit' ? 'fur'
-          : color === p.lawn || color === p.hedge ? 'foliage' : color === p.path || color === p.road ? 'stone' : 'painted';
+          : color === p.lawn || color === p.hedge ? 'foliage' : shape === 'presentation-base' || color === p.path || color === p.road ? 'stone' : 'painted';
         entries.set(key, { shape, color, family, parts: [] });
       }
       dummy.position.set(...position); dummy.scale.set(...scale); dummy.rotation.set(0, rotation, 0); dummy.updateMatrix();
@@ -262,6 +315,12 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, si
     part('box', p.lawn, [center, -.07, roadEdge + roadDirection * 2], [width + 1, .1, 3]);
     part('box', p.path, [center, -.005, roadEdge + roadDirection * 4.1], [width + 9, .06, .7]);
     part('box', p.road, [center, -.025, roadEdge + roadDirection * 6], [width + 9, .06, 2.8]);
+    // An explicitly requested presentation plinth is below both the site's
+    // ground and all decorative surfaces. It never enters the source model.
+    if (state.presentation_base) {
+      const lowZ = minZ - (roadDirection < 0 ? 7.5 : 2.5), highZ = maxZ + (roadDirection > 0 ? 7.5 : 2.5);
+      part('presentation-base', p.path, [center, -.245, (lowZ + highZ) / 2], [width + 9, .24, highZ - lowZ]);
+    }
     const dashCount = Math.min(16, Math.max(3, Math.floor((width + 8) / 2)));
     for (let i = 0; i < dashCount; i++) part('box', '#d8ddd5', [minX - 3 + i * (width + 6) / Math.max(1, dashCount - 1), .015, roadEdge + roadDirection * 6], [.7, .015, .045]);
     for (const x of [minX - 3.2, maxX + 3.2]) {
@@ -302,6 +361,7 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, si
           // material decoration may use the per-instance scale for metric detail.
           const original = shape;
           shape = shape.toNonIndexed(); original.dispose();
+          prepareNavigationGeometry(THREE, shape, entry.shape);
           const positions = shape.getAttribute('position'), uv = [];
           for (let i = 0; i < positions.count; i += 3) {
             const points = [i,i+1,i+2].map(k => [positions.getX(k),positions.getY(k),positions.getZ(k)]);
@@ -321,7 +381,7 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, si
         }
         const scale = entry.parts.flatMap(part => entry.shape === 'tree-branches' || entry.shape === 'rabbit' ? [1, 1] : entry.shape === 'sphere'
           ? [Math.PI * part.scale[0], Math.PI * part.scale[1] / 2]
-          : [part.scale[0], part.scale[entry.shape === 'box' ? 2 : 1]]);
+          : [part.scale[0], part.scale[entry.shape === 'box' || entry.shape === 'presentation-base' ? 2 : 1]]);
         shape.setAttribute('materialUVScale',new THREE.InstancedBufferAttribute(new Float32Array(scale),2));
         geometry.set(geometryKey,shape);
       }
@@ -339,6 +399,13 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, si
       mesh.name = 'surroundings-' + entry.shape; mesh.frustumCulled = false;
       mesh.castShadow = entry.shape.startsWith('tree-') || entry.shape.startsWith('car-') || entry.shape === 'rabbit';
       mesh.receiveShadow = true;
+      const range = mesh.geometry.userData.navigationRange;
+      if (range) {
+        // A normal shadow refresh during navigation must not cache proxy
+        // shadows. Three reads the selected range after onBeforeShadow.
+        mesh.onBeforeShadow = () => mesh.geometry.setDrawRange(0, range.fullCount);
+        mesh.onAfterShadow = () => mesh.geometry.setDrawRange(navigationDetail ? range.start : 0, navigationDetail ? range.count : range.fullCount);
+      }
       entry.parts.forEach((part, index) => {
         mesh.setMatrixAt(index, part.matrix);
         // Allocate the shared instance-color buffer at build time, never during motion.
@@ -383,12 +450,14 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, si
     if (disposed) return;
     if ('enabled' in next) state.enabled = next.enabled === true;
     if ('motion' in next) state.motion = next.motion === true;
+    if ('presentation_base' in next && state.presentation_base !== (next.presentation_base === true)) { state.presentation_base = next.presentation_base === true; dirty = true; }
     if (Object.hasOwn(ENVIRONMENT_PALETTES, next.palette) && next.palette !== state.palette) { state.palette = next.palette; dirty = true; }
     if (state.enabled && !contextual && dirty) build();
     group.visible = state.enabled && !contextual;
     schedule(); requestRender();
   }
   function setBounds(next, nextElevation = base) {
+    if (disposed) return;
     const candidate = validBounds(next);
     if (!Number.isFinite(nextElevation)) throw new Error('Surroundings require finite ground elevation.');
     if (JSON.stringify(candidate) === JSON.stringify(area) && nextElevation === base) return;
@@ -402,7 +471,7 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, si
     if (contextual) clear();
     setSettings();
   }
-  const visibility = () => schedule(), hide = () => { suspended = true; stop(); }, show = () => { suspended = false; schedule(); };
+  const visibility = () => schedule(), hide = () => { suspended = true; stop(); resetNavigation(); }, show = () => { suspended = false; schedule(); };
   const observer = visibilityElement && win?.IntersectionObserver ? new win.IntersectionObserver(entries => {
     inViewport = entries.some(entry => entry.isIntersecting); schedule();
   }) : null;
@@ -411,10 +480,10 @@ export function createEnvironmentLayer(THREE, { scene, bounds, elevation = 0, si
   win?.addEventListener('pagehide', hide); win?.addEventListener('pageshow', show);
   setBounds(bounds, elevation); setSettings(settings);
   return {
-    setSettings, setBounds, setSiteContext,
+    setSettings, setBounds, setSiteContext, noteNavigation,
     setActive(value) { active = value === true; schedule(); },
     get settings() { return { ...state }; },
-    get stats() { return { enabled: state.enabled, siteContext: contextual, moving: running(), drawCalls: group.visible ? batches.length : 0, actors: actors.length, timerPending: !!timer, frameInterval: tickMs, elapsed, elevation: base, bounds: { ...area }, roadSide: roadDirection === 1 ? 'maxZ' : 'minZ', trafficSeed, traffic: actors.filter(actor => actor.kind === 'car').map(({ speed, entryDelay, color, cycle, visible }) => ({ speed, entryDelay, color, cycle, visible })) }; },
+    get stats() { return { enabled: state.enabled, siteContext: contextual, moving: running(), detail: navigationDetail ? 'navigation' : 'full', detailTimerPending: !!detailTimer, triangles: group.visible ? batches.reduce((sum, { mesh }) => sum + Math.min((mesh.geometry.index?.count ?? mesh.geometry.getAttribute('position').count) - mesh.geometry.drawRange.start, mesh.geometry.drawRange.count) / 3 * mesh.count, 0) : 0, drawCalls: group.visible ? batches.length : 0, actors: actors.length, timerPending: !!timer, frameInterval: tickMs, elapsed, elevation: base, bounds: { ...area }, roadSide: roadDirection === 1 ? 'maxZ' : 'minZ', trafficSeed, traffic: actors.filter(actor => actor.kind === 'car').map(({ speed, entryDelay, color, cycle, visible }) => ({ speed, entryDelay, color, cycle, visible })) }; },
     dispose() { if (disposed) return; disposed = true; stop(); observer?.disconnect(); clear(); scene.remove(group); doc?.removeEventListener('visibilitychange', visibility); media?.removeEventListener('change', visibility); win?.removeEventListener('pagehide', hide); win?.removeEventListener('pageshow', show); },
   };
 }
@@ -425,7 +494,7 @@ export function createEnvironmentControls(container, { getLayer, t = value => va
   const summary = label(doc.createElement('summary'), 'Surroundings'); panel.append(summary);
   const body = doc.createElement('div'); body.className = 'environment-options'; panel.append(body);
   const inputs = {};
-  for (const [key, text] of [['enabled', 'Show garden surroundings'], ['motion', 'Decorative motion']]) {
+  for (const [key, text] of [['enabled', 'Show garden surroundings'], ['presentation_base', 'Show presentation base'], ['motion', 'Decorative motion']]) {
     const row = doc.createElement('label'), input = doc.createElement('input'); input.type = 'checkbox'; input.dataset.environment = key; inputs[key] = input;
     row.append(input, label(doc.createElement('span'), text)); body.append(row);
   }
@@ -433,7 +502,7 @@ export function createEnvironmentControls(container, { getLayer, t = value => va
   for (const [value, entry] of Object.entries(ENVIRONMENT_PALETTES)) { const option = label(doc.createElement('option'), entry.label); option.value = value; palette.append(option); }
   row.append(palette); body.append(row);
   body.append(label(doc.createElement('small'), 'Decorative only. Motion pauses when hidden or reduced motion is preferred.'));
-  function refresh() { for (const [element, key] of labels) element.textContent = t(key); const settings = getLayer()?.settings || { enabled: false, motion: false, palette: 'sage' }; inputs.enabled.checked = settings.enabled; inputs.motion.checked = settings.motion; inputs.palette.value = settings.palette; inputs.motion.disabled = inputs.palette.disabled = !settings.enabled; }
+  function refresh() { for (const [element, key] of labels) element.textContent = t(key); const settings = getLayer()?.settings || { enabled: false, motion: false, presentation_base: false, palette: 'sage' }; inputs.enabled.checked = settings.enabled; inputs.motion.checked = settings.motion; inputs.presentation_base.checked = settings.presentation_base; inputs.palette.value = settings.palette; inputs.motion.disabled = inputs.presentation_base.disabled = inputs.palette.disabled = !settings.enabled; }
   function position() {
     if (!panel.open) return;
     // Escape scrolling toolbar clipping, including the narrow Home layout.
@@ -443,7 +512,7 @@ export function createEnvironmentControls(container, { getLayer, t = value => va
     body.style.left = Math.max(12, Math.min(win.innerWidth - width - 12, anchor.right - width)) + 'px';
     body.style.top = Math.max(12, Math.min(win.innerHeight - body.offsetHeight - 12, anchor.bottom + 5)) + 'px';
   }
-  panel.addEventListener('change', () => { const settings = { enabled: inputs.enabled.checked, motion: inputs.motion.checked, palette: inputs.palette.value }; getLayer()?.setSettings(settings); onChange(settings); refresh(); });
+  panel.addEventListener('change', () => { const settings = { enabled: inputs.enabled.checked, motion: inputs.motion.checked, presentation_base: inputs.presentation_base.checked, palette: inputs.palette.value }; getLayer()?.setSettings(settings); onChange(settings); refresh(); });
   panel.addEventListener('toggle', () => { refresh(); position(); });
   doc.defaultView.addEventListener('resize', position); doc.addEventListener('scroll', position, true);
   container.append(panel); refresh();

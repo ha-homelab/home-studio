@@ -702,6 +702,7 @@ export default {
   "model.garden_bird": "Small garden bird",
   "Surroundings": "Surroundings",
   "Show garden surroundings": "Show garden surroundings",
+  "Show presentation base": "展示用の台座を表示",
   "Decorative motion": "Decorative motion",
   "Garden palette": "Garden palette",
   "Sage garden": "Sage garden",

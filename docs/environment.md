@@ -1,8 +1,12 @@
 # Garden surroundings
 
-The planner and compiled Home view have a **Surroundings** dropdown. For a project without authored site features or a known map alignment, **Show garden surroundings** adds a small, geometric landscape around the complete site's bounding rectangle. **Sage garden**, **Summer meadow**, and **Blue dusk** change its palette. Scenery never changes the camera fit, room selection, exported architecture, inventory, or Home Assistant entities. Controls are view preferences for the current page; they are not saved into the project.
+In Home Assistant, open **Surroundings** in **3D Home** or **Home Studio → Preview 3D**. The separate planner and compiled Home view have the same controls. For a project without authored site features or a known map alignment, **Show garden surroundings** adds a small, geometric landscape around the complete site's bounding rectangle. **Sage garden**, **Summer meadow**, and **Blue dusk** change its palette. Scenery never changes the camera fit, room selection, exported architecture, inventory, or Home Assistant entities. Controls are view preferences for the current page; they are not saved into the project.
 
-Authored site features and a known geographic alignment take precedence over this demo scenery. In that context the generated road, path, lawns, trees and moving actors are omitted, including when map display is turned off. Manually placed garden objects and authored site polygons are preserved. The calibrated map supplies street context until a real street polygon is traced; the renderer never infers street width, setback or empty planting land from the house bounds.
+With garden surroundings enabled, **Show presentation base** adds a shallow, static base below the garden. It is off by default. The base is decorative: it does not represent soil layers or measured terrain, move the home's ground level, or change saved dimensions and exports.
+
+While you pan, rotate, or zoom, the surrounding trees temporarily use simpler shapes. Their full detail returns shortly after you stop. This applies only to the generated scenery; your home, placed objects, and device controls keep their detail. It also works with decorative motion off and with reduced motion enabled.
+
+Authored site features and a known geographic alignment take precedence over this demo scenery. In that context the generated road, path, lawns, trees, moving actors, and presentation base are omitted, including when map display is turned off. Manually placed garden objects and authored site polygons are preserved. The calibrated map supplies street context until a real street polygon is traced; the renderer never infers street width, setback or empty planting land from the house bounds.
 
 **Decorative motion** is off by default. It animates two small cars on fixed lanes beyond the site and three rabbits in the side lawn. Passing cars vary their speeds, arrival gaps, and muted body colors. Each car travels at 0.22–0.46 m/s, with a 2–9 second gap before its next pass. The routes are decorative and bounded; they do not represent occupancy, tracked vehicles, or device state. Ordinary placed catalog objects remain static. Motion runs at most once per 180 milliseconds (500 ms on reduced render profiles; 750 ms on diffuse software profiles) and pauses in Plan mode, on a hidden page, outside the viewport, during graphics-context loss, and when the system requests reduced motion. Time pauses too, so returning to a view does not catch up missed animation.
 
@@ -30,9 +34,10 @@ const layer = createEnvironmentLayer(THREE, {
   frameInterval: 1000, // Optional slower pacing for a large scene.
   seed: 42, // Optional repeatable traffic; otherwise chosen once for this layer.
   roadSide: 'maxZ', // Optional entry side: 'minZ' (default) or 'maxZ'.
-  settings: { enabled: true, motion: false, palette: 'sage' },
+  settings: { enabled: true, motion: false, presentation_base: false, palette: 'sage' },
 });
 layer.setSettings({ motion: true });
+layer.noteNavigation(); // Real pan, rotate, or zoom input; briefly simplifies trees.
 layer.setActive(false); // Switching to an inactive view or losing the GL context.
 layer.setBounds(nextSiteBounds, nextGroundY);
 layer.setSiteContext(true); // A late map response releases all generated scenery.
@@ -55,6 +60,7 @@ For the compiled viewer, set optional model metadata:
 model.environment = {
   enabled: true,
   motion: false,
+  presentation_base: false,
   palette: 'sage',
   frame_interval_ms: 1000, // Optional; clamped to 180–2000 ms.
   seed: 42, // Optional unsigned 32-bit traffic seed.
@@ -64,22 +70,33 @@ model.environment = {
 };
 ```
 
-Without `enabled: true`, the layer allocates no geometry or materials and has no animation timer. Public compilation emits settings with both toggles off, bounds for all floors, and the lowest floor elevation relative to the current floor. This keeps the same landscape on the ground when switching upstairs. `window.floorplan.surroundings` and `window.planner.getPreviewMetadata().surroundings` expose diagnostic counts, paused/running status, and the traffic seed and current pass settings. A seed supplied to the layer, or through `settings.seed` in the compiled viewer, produces repeatable traffic. Palette or bounds rebuilds restart that sequence; pausing motion preserves its current position and arrival gaps.
+Without `enabled: true`, the layer allocates no geometry or materials and has no animation timer, even if `presentation_base` is true. Public compilation leaves all three toggles off and supplies bounds for all floors and the lowest floor elevation relative to the current floor. This keeps the same landscape on the ground when switching upstairs. `window.floorplan.surroundings` and `window.planner.getPreviewMetadata().surroundings` expose diagnostic counts, the current detail level and restoration-timer status, paused/running status, and the traffic seed and current pass settings. A seed supplied to the layer, or through `settings.seed` in the compiled viewer, produces repeatable traffic. Palette, bounds, or presentation-base rebuilds restart that sequence; pausing motion preserves its current position and arrival gaps.
 
-`siteContext` is separate from the user's enabled/motion/palette preferences. Setting it to true disposes generated geometry and materials and stops the animation timer; changing bounds or palette does not allocate scenery while it remains true. An accepted transition back to no site/map context restores the saved preferences. Hidden maps and failed or stale map requests do not clear known map authority. When a map transport attaches, the planner reads its saved context once without fetching tiles, and retains it when switching to Preview. Diagnostics expose `siteContext` without geographic coordinates.
+`siteContext` is separate from the user's enabled/motion/presentation-base/palette preferences. Setting it to true disposes generated geometry and materials and stops the animation timer; changing bounds or palette does not allocate scenery while it remains true. An accepted transition back to no site/map context restores the saved preferences. Hidden maps and failed or stale map requests do not clear known map authority. When a map transport attaches, the planner reads its saved context once without fetching tiles, and retains it when switching to Preview. Diagnostics expose `siteContext` without geographic coordinates.
+
+Call `noteNavigation()` from actual camera input, not from each rendered frame.
+It selects prebuilt simpler tree geometry, then restores full detail after
+300 ms without further navigation. A single renewable timeout handles restoration;
+navigation does not rebuild the scenery or start an animation loop. Hiding the
+page or viewport, leaving the active view, disabling the layer, accepting site/map
+context, or disposing the layer cancels this timeout. Reduced-motion preferences
+still allow this static change in detail.
 
 In demo mode the layer uses fourteen shared `InstancedMesh` batches and nine physical material
 families. Trees have attached leaves and branches, cars have a continuous painted
 shell and distinct glazing, rubber tyres and metal hubs, and rabbits use the
-catalog's authored anatomy. The standard scene has 64,860 placed triangles.
+catalog's authored anatomy. The standard 8 m × 6 m test scene submits 64,860 triangles
+at rest and 13,272 during navigation, with the same fourteen batches. The optional
+presentation base adds one batch and twelve triangles.
 Materials receive the host's existing lights and optional shared physical detail
 through `decorateMaterial(material, family)`. Geometry casts and receives shadows
 when the host render profile enables them. The layer creates no lights, shadow
 maps, reflection probes or texture loaders of its own.
 
-All five actors are allocated once on first enable. Palette changes replace and
-dispose that resource set; animation reuses their instance transforms and color
-buffers. Cars briefly hide between passes instead of creating more actors. Each
+All five actors are allocated once on first enable. Palette, bounds, and
+presentation-base changes replace and dispose that resource set; animation reuses
+their instance transforms and color buffers. Cars briefly hide between passes
+instead of creating more actors. Each
 tick requests a motion frame through the existing renderer, preserving adaptive
 gesture throttling. The enclosing scene still incurs its normal rendering cost
 while motion is enabled, so static is the default.
@@ -91,8 +108,8 @@ its package job, after the existing browser-tool installation. The surrounding
 platform matrix continues to cover general rendering and navigation without
 repeating this dedicated Chromium scenario in every lane.
 
-- `node scripts/test-environment.mjs`: no allocation with real site/map context, disposal on late context, preservation of manual assets and saved preferences, no allocation while off, bounded shared draw batches, full scenery envelopes outside both site edges, repeatable traffic across four seeds and repeated 30-minute simulations, varied speeds/gaps/rendered colors, unchanged actor and GPU buffer counts, preserved road side through settings and bounds rebuilds, visibility/reduced-motion/lifecycle pause, palette replacement and disposal.
+- `node scripts/test-environment.mjs`: no allocation with real site/map context, disposal on late context, preservation of manual assets and saved preferences, no allocation while off, bounded shared draw batches, full scenery envelopes outside both site edges, presentation-base placement below ground, navigation-detail restoration and lifecycle cancellation, repeatable traffic across four seeds and repeated 30-minute simulations, varied speeds/gaps/rendered colors, unchanged actor and GPU buffer counts, preserved road side through settings and bounds rebuilds, visibility/reduced-motion/lifecycle pause, palette replacement and disposal.
 - `node scripts/test-environment-browser.cjs`: real garden placement, indoor/outdoor catalog items, unchanged camera fit, static idle rendering, reduced-motion pause, compiler metadata and Home controls. Set `ENVIRONMENT_SCREENSHOT_DIR` to save fictional-example screenshots.
-- `node scripts/test-environment-surfaces.mjs`: material families, draw/triangle bounds, metre UV scales, exact decoded rabbit GPU bytes and material disposal.
+- `node scripts/test-environment-surfaces.mjs`: material families, resting and navigation draw/triangle bounds, matching tree-canopy envelopes, metre UV scales, exact decoded rabbit GPU bytes and material disposal.
 - `python3 scripts/author-environment-animal.py --check`: reproducible catalog-to-scenery geometry; rerun without `--check` after changing the authored rabbit.
 - Existing furniture JS/Python, planner rendering budget and viewer lifecycle checks cover compatibility with catalog generation and on-demand rendering.

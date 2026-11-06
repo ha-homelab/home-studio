@@ -35,11 +35,12 @@ const elements = new Map(), get = id => {
   return elements.get(id);
 };
 const frames = new Map(), documentEvents = {}, windowEvents = {};
-let serial = 0, draws = 0, planDraws = 0;
+let serial = 0, draws = 0, planDraws = 0, sceneryNavigation = 0;
 const project = Object.freeze({title: 'Accepted plan', floors: Object.freeze([])});
 const context = vm.createContext({AbortController, THREE: {Vector3: Vector}, $: get,
   view: 'preview', previewLost: false, previewUnavailable: false, previewMetadata: {},
   previewEdit: null, camera: null, candidatePreview: null, selected() { return null; },
+  previewEnvironment: {noteNavigation() { sceneryNavigation++; }},
   project, history: Object.freeze([]), future: Object.freeze([]), selection: Object.freeze({kind: 'items', id: 'chair'}),
   size: {width: 800, height: 600}, spaceHeld: false, renderer: {}, devicePixelRatio: 1,
   planCanvas: surface(), map: {x: 0, y: 0}, ctx: {setTransform() {}}, fitPlan() {},
@@ -70,9 +71,11 @@ down(); const original = snapshot();
 for (let i = 1; i <= 100; i++) move({clientX: 100 + i, clientY: 100 + i / 4});
 assert.equal(frames.size, 1, 'A burst of pointer updates coalesces into one draw');
 assert.equal(draws, 0); assert.equal(orbit.yaw, -Math.PI / 3 - .7);
+assert.equal(sceneryNavigation, 100, 'Actual camera moves notify decorative detail without rendering each event');
 assert.notEqual(snapshot(), original); up(); stable();
 assert.equal(canvas.captures.size, 0); assert.equal(canvas.dataset.navigating, 'false');
 const afterOrbit = draws; move({clientX: 500}); stable(); assert.equal(draws, afterOrbit, 'Released pointers cannot keep moving the camera');
+assert.equal(sceneryNavigation, 100, 'Pointer hover cannot keep decorative detail work alive');
 down(); const beforeHover = snapshot(); move({clientX: 500, buttons: 0});
 assert.equal(snapshot(), beforeHover, 'Mouse hover after a missed release cannot orbit');
 assert.equal(canvas.captures.size, 0); assert.equal(orbit.pointers.size, 0);

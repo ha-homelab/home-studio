@@ -395,7 +395,7 @@ normal.flush();assert.equal(normal.painted.length,2);
 assert.equal(normal.read('interactionPointer'),null,'Hardware keeps its original pointer path');
 assert.deepEqual(normal.paths,['direct','direct']);
 assert.equal(normal.c.renderProfile.pixels,2000000);
-assert(source.includes('drag.y=e.clientY;requestRender(true)'), 'Editor pointer movement opts into motion scheduling');
+assert(lines.find(line => line.startsWith("renderer.domElement.addEventListener('pointermove',e=>"))?.includes('requestRender(true)'), 'Editor pointer movement opts into motion scheduling');
 const homeSource=fs.readFileSync(path.join(__dirname,'../home-view.js'),'utf8');
 const navigateStart=homeSource.indexOf('  function navigateHome('),navigateEnd=homeSource.indexOf("  for(const mode of ['rotate','move'])",navigateStart);
 assert(navigateStart>=0&&navigateEnd>navigateStart,'Production Home navigation helper is present');
