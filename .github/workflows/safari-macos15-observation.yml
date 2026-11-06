@@ -14,12 +14,17 @@ on:
         description: Collect native canvas diagnostics without claiming application acceptance
         type: boolean
         default: false
+      linux_i18n:
+        description: Run only the isolated Linux language browser diagnostic
+        type: boolean
+        default: false
   schedule:
     - cron: '37 4 * * 2'
 permissions:
   contents: read
 jobs:
   safari:
+    if: ${{ inputs.linux_i18n != true }}
     name: Safari (${{ inputs.runner || 'macos-15' }}, installed stable observation)
     runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 25
@@ -57,3 +62,37 @@ jobs:
           path: acceptance-artifacts/safari/
           if-no-files-found: error
           retention-days: 14
+  linux-i18n:
+    if: ${{ inputs.linux_i18n == true }}
+    name: Isolated Linux language browser diagnostic
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Record bounded environment before setup
+        timeout-minutes: 1
+        run: |
+          timeout 10s free -m
+          timeout 10s ps -eo comm= | sort -u | sed -n '1,80p'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+      - name: Install isolated Chromium test tools
+        timeout-minutes: 8
+        run: |
+          python3 scripts/prepare-ubuntu-apt.py
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Diagnose language browser lifecycle in isolation
+        timeout-minutes: 6
+        env:
+          DEBUG: pw:browser
+        run: node scripts/test-i18n-browser.cjs
+      - name: Record bounded environment after diagnostic
+        if: ${{ always() }}
+        timeout-minutes: 1
+        run: |
+          timeout 10s free -m
+          timeout 10s ps -eo comm= | sort -u | sed -n '1,80p'
