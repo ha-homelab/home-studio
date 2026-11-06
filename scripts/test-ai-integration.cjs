@@ -77,6 +77,57 @@ function startCompanion() {
     });
   });
 }
+async function checkPhotoEncoding(page, photo) {
+  const results = await page.evaluate(async encoded => {
+    const { processPhotoFile } = await import('/ai/photo-processing.js');
+    const file = new Blob([Uint8Array.from(atob(encoded), value => value.charCodeAt(0))], { type: 'image/png' });
+    const prototype = OffscreenCanvas.prototype, getContext = prototype.getContext, convertToBlob = prototype.convertToBlob;
+    const results = [], contexts = [];
+    let mode, controller;
+    try {
+      prototype.getContext = function(kind, options) {
+        contexts.push({ canvas: this, kind, options: { ...options } });
+        return getContext.call(this, kind, options);
+      };
+      prototype.convertToBlob = async function(options) {
+        contexts.at(-1).encoding = { ...options };
+        if (mode === 'failure') throw new DOMException('Synthetic encoder failure', 'InvalidStateError');
+        const blob = await convertToBlob.call(this, options);
+        if (mode === 'cancelled') controller.abort();
+        return blob;
+      };
+      for (mode of ['success', 'failure', 'cancelled']) {
+        controller = new AbortController();
+        let result;
+        try {
+          const { blob, width, height } = await processPhotoFile(file, controller.signal);
+          const decoded = await createImageBitmap(blob);
+          try {
+            result = { width, height, type: blob.type, bytes: blob.size, decoded: [decoded.width, decoded.height] };
+          } finally { decoded.close(); }
+        } catch (error) { result = { error: error.name, message: error.message }; }
+        const { canvas, ...context } = contexts.at(-1);
+        results.push({ mode, ...result, ...context, released: [canvas.width, canvas.height] });
+      }
+      return { results, contexts: contexts.length };
+    } finally {
+      prototype.getContext = getContext;
+      prototype.convertToBlob = convertToBlob;
+    }
+  }, photo);
+  assert.equal(results.contexts, 3);
+  for (const result of results.results) {
+    assert.equal(result.kind, '2d');
+    assert.deepEqual(result.options, { alpha: false, willReadFrequently: true });
+    assert.deepEqual(result.encoding, { type: 'image/jpeg', quality: .85 });
+    assert.deepEqual(result.released, [0, 0], 'Photo storage is released after encoding, failure and cancellation');
+  }
+  const [success, failure, cancelled] = results.results;
+  assert.equal(success.type, 'image/jpeg');assert(success.bytes > 0 && success.bytes <= 4 * 1024 * 1024);
+  assert.deepEqual([success.width, success.height], [64, 64]);assert.deepEqual(success.decoded, [64, 64]);
+  assert.equal(failure.error, 'InvalidStateError');assert.equal(failure.message, 'Synthetic encoder failure');
+  assert.equal(cancelled.error, 'AbortError');
+}
 (async () => {
   await new Promise(resolve => runtime.listen(0, '127.0.0.1', resolve));
   let companion;
@@ -100,7 +151,8 @@ function startCompanion() {
         await page.waitForFunction(() => document.getElementById('ai-status').textContent.includes('Session connected'));
         await page.locator('#ai-mode').selectOption('new_room');
         await page.locator('#ai-instructions').fill('Sketch the synthetic measured room.');
-        const photo = await page.evaluate(() => { const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64; const c = canvas.getContext('2d'); c.fillStyle = '#368d9e'; c.fillRect(0,0,64,64); return canvas.toDataURL('image/png').split(',')[1]; });
+        const photo = await page.evaluate(() => { const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64; const c = canvas.getContext('2d', { willReadFrequently: true }); c.fillStyle = '#368d9e'; c.fillRect(0,0,64,64); return canvas.toDataURL('image/png').split(',')[1]; });
+        await checkPhotoEncoding(page, photo);
         await page.locator('#ai-photos-input').setInputFiles({ name: 'fictional.png', mimeType: 'image/png', buffer: Buffer.from(photo, 'base64') });
         await page.waitForFunction(() => document.getElementById('ai-photo-progress').textContent.includes('1 photos ready'));
         const before = await page.evaluate(() => window.planner.getProject());

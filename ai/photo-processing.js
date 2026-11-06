@@ -31,7 +31,7 @@ function dimensions(bytes) {
 // The native editor has an opaque origin, so it calls this decoder directly.
 // Both entry points enforce identical limits before decoding any selected image.
 export async function processPhotoFile(file, signal) {
-  let bitmap;
+  let bitmap, canvas;
   const check = () => { if (signal?.aborted) throw new DOMException('Photo processing cancelled.', 'AbortError'); };
   try {
     check();
@@ -46,12 +46,16 @@ export async function processPhotoFile(file, signal) {
     if (bitmap.width * bitmap.height > MAX_PIXELS) throw new Error('The decoded photo exceeds 24 megapixels. Resize it first.');
     const ratio = Math.min(1, EDGE / Math.max(bitmap.width, bitmap.height));
     const width = Math.max(1, Math.round(bitmap.width * ratio)), height = Math.max(1, Math.round(bitmap.height * ratio));
-    const canvas = new OffscreenCanvas(width, height), context = canvas.getContext('2d', { alpha: false });
+    canvas = new OffscreenCanvas(width, height);
+    const context = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
     context.fillStyle = '#fff'; context.fillRect(0, 0, width, height); context.drawImage(bitmap, 0, 0, width, height);
     bitmap.close(); bitmap = null;
     const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: .85 });
     check();
     if (blob.size > 4 * 1024 * 1024) throw new Error('The processed photo is too large. Choose a smaller photo.');
     return { blob, width, height };
-  } finally { bitmap?.close(); }
+  } finally {
+    bitmap?.close();
+    if (canvas) canvas.width = canvas.height = 0;
+  }
 }
