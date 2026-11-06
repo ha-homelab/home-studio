@@ -35,12 +35,63 @@ const served = new Map([
     const url = origin + '/home-studio/planner/';
     browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
       args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+    const browserVersion = browser.version(), traces = new WeakMap();
+    function watchPage(target, name) {
+      const trace = { page: name, startedAt: new Date().toISOString(), startedMs: Date.now(), events: [], requests: [] };
+      traces.set(target, trace);
+      const localPath = value => { try { const parsed = new URL(value); return parsed.origin === origin ? served.has(parsed.pathname) ? parsed.pathname : '[unlisted]' : '[external]'; } catch { return '[unavailable]'; } };
+      const add = (ledger, event) => {
+        ledger.push({ ms: Date.now() - trace.startedMs, ...event });
+        if (ledger.length > 48) ledger.shift();
+      };
+      for (const event of ['request', 'requestfinished', 'requestfailed']) target.on(event, request => {
+        const pathname = localPath(request.url());
+        if (pathname === '[external]' || pathname === '[unavailable]') return;
+        add(trace.requests, { event, path: pathname, type: request.resourceType() });
+      });
+      target.on('pageerror', error => add(trace.events, { event: 'pageerror', name: /^[A-Za-z]+Error$/.test(error.name) ? error.name : 'Error' }));
+      for (const event of ['crash', 'close', 'domcontentloaded', 'load']) target.on(event, () => add(trace.events, { event }));
+      target.on('framenavigated', frame => add(trace.events, { event: 'framenavigated', main: frame === target.mainFrame(), path: localPath(frame.url()) }));
+      target.on('dialog', dialog => add(trace.events, { event: 'dialog', type: dialog.type() }));
+    }
+    async function observed(target, operation, action) {
+      const operationStartedMs = Date.now();
+      try { return await action(); }
+      catch (error) {
+        // Diagnostics must not replace the original failure or wait on a hung renderer.
+        try {
+          const trace = traces.get(target);
+          let timer;
+          let state;
+          try {
+            state = await Promise.race([
+              target.evaluate(() => {
+                const safeLocale = value => typeof value === 'string' && /^[A-Za-z-]{1,16}$/.test(value) ? value : null;
+                let savedLanguage = null;
+                try { savedLanguage = safeLocale(localStorage.getItem('home-studio.language.v1')); } catch { /* Storage can be denied. */ }
+                const view = window.planner?.getView();
+                return { readyState: document.readyState, lang: safeLocale(document.documentElement.lang),
+                  plannerReady: !!window.planner, savedLanguage, view: ['plan', 'preview', 'split'].includes(view) ? view : null };
+              }).catch(() => ({ probe: 'unavailable' })),
+              new Promise(resolve => { timer = setTimeout(() => resolve({ probe: 'timeout' }), 1000); }),
+            ]);
+          } finally { clearTimeout(timer); }
+          console.error('I18N_NAVIGATION_DIAGNOSTIC ' + JSON.stringify({ operation, browserVersion,
+            at: new Date().toISOString(), page: trace.page, startedAt: trace.startedAt,
+            elapsedMs: Date.now() - trace.startedMs, operationElapsedMs: Date.now() - operationStartedMs,
+            closed: target.isClosed(), state,
+            events: trace.events, requests: trace.requests }));
+        } catch { /* Preserve the original navigation or language assertion failure. */ }
+        throw error;
+      }
+    }
     const context = await browser.newContext({ locale: 'en-US', viewport: { width: 1440, height: 1000 } });
     const page = await context.newPage(), errors = [], requests = [];
+    watchPage(page, 'main');
     page.on('pageerror', error => errors.push(String(error)));
     page.on('request', request => requests.push(request.url()));
     page.on('dialog', dialog => dialog.accept());
-    await page.goto(url);
+    await observed(page, 'initial-goto', () => page.goto(url));
     await page.waitForFunction(count => document.querySelectorAll('#language-select option').length === count, LOCALES.length);
     assert.equal(await page.locator('html').getAttribute('lang'), 'en');
     assert.deepEqual(requests.filter(request => /\/locales\//.test(request)).map(request => request.split('/').at(-1)).sort(), ['en.js', 'index.js']);
@@ -48,7 +99,7 @@ const served = new Map([
 
     const change = async code => {
       await page.locator('#language-select').selectOption(code);
-      await page.waitForFunction(expected => document.documentElement.lang === expected && new URL(location.href).searchParams.get('lang') === expected, code);
+      await observed(page, 'language-change', () => page.waitForFunction(expected => document.documentElement.lang === expected && new URL(location.href).searchParams.get('lang') === expected, code));
     };
     await page.locator('#inspector-body').getByLabel('Width (m)', { exact: true }).fill('8.75');
     await change('ru');
@@ -120,22 +171,18 @@ const served = new Map([
     if (process.env.PLANNER_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.PLANNER_SCREENSHOT_DIR, 'i18n-japanese.png') });
     await change('ru');
     if (process.env.PLANNER_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.PLANNER_SCREENSHOT_DIR, 'i18n-russian.png') });
-    await page.reload();
-    try { await page.waitForFunction(() => document.documentElement.lang === 'ru'); }
-    catch (error) {
-      error.message += '\nReload diagnostics: ' + JSON.stringify({ errors, state: await page.evaluate(() => ({ lang: document.documentElement.lang, url: location.href, ready: !!window.planner, savedLanguage: localStorage.getItem('home-studio.language.v1') })) });
-      throw error;
-    }
+    await observed(page, 'preview-reload', () => page.reload());
+    await observed(page, 'reloaded-language', () => page.waitForFunction(() => document.documentElement.lang === 'ru'));
     assert.equal(await page.evaluate(() => JSON.stringify(window.planner.getProject())), before);
-    await page.goto(url + '?lang=ja&from=guide#language');
-    await page.waitForFunction(() => document.documentElement.lang === 'ja');
+    await observed(page, 'deep-link-goto', () => page.goto(url + '?lang=ja&from=guide#language'));
+    await observed(page, 'deep-link-language', () => page.waitForFunction(() => document.documentElement.lang === 'ja'));
     assert.equal(await page.evaluate(key => localStorage.getItem(key), LANGUAGE_STORAGE_KEY), 'ru', 'deep links do not overwrite explicit saved preferences');
     await change('fr');
     assert.equal(new URL(page.url()).searchParams.get('from'), 'guide');
     assert.equal(new URL(page.url()).hash, '#language');
     assert.equal(await page.evaluate(() => JSON.stringify(window.planner.getProject())), before, 'manual language choice does not change the project');
-    await page.reload();
-    await page.waitForFunction(() => window.planner && document.documentElement.lang === 'fr');
+    await observed(page, 'deep-link-reload', () => page.reload());
+    await observed(page, 'manual-language-after-reload', () => page.waitForFunction(() => window.planner && document.documentElement.lang === 'fr'));
     assert.equal(await page.locator('#language-select').inputValue(), 'fr', 'manual choice replaces the previous deep-link language on reload');
     assert.equal(await page.evaluate(() => JSON.stringify(window.planner.getProject())), before, 'reloading the new language preserves the project');
 
@@ -154,9 +201,10 @@ const served = new Map([
 
     const failureContext = await browser.newContext({ locale: 'en-US' });
     const failurePage = await failureContext.newPage();
+    watchPage(failurePage, 'failed-locale-download');
     await failurePage.route('**/locales/ar.js', route => route.abort());
-    await failurePage.goto(url + '?lang=ar');
-    await failurePage.waitForFunction(() => window.planner && document.querySelector('#language-select').value === 'en');
+    await observed(failurePage, 'failed-download-goto', () => failurePage.goto(url + '?lang=ar'));
+    await observed(failurePage, 'failed-download-language', () => failurePage.waitForFunction(() => window.planner && document.querySelector('#language-select').value === 'en'));
     assert.match(await failurePage.locator('#status').innerText(), /Language could not be loaded/);
     assert(await failurePage.getByRole('button', { name: 'Add room', exact: true }).isEnabled());
     await failureContext.close();
@@ -164,13 +212,14 @@ const served = new Map([
     const privateContext = await browser.newContext({ locale: 'ru-RU' });
     await privateContext.addInitScript(() => Object.defineProperty(window, 'localStorage', { get() { throw new Error('storage denied'); } }));
     const privatePage = await privateContext.newPage();
+    watchPage(privatePage, 'denied-storage');
     const privateErrors = [];
     privatePage.on('pageerror', error => privateErrors.push(String(error)));
-    await privatePage.goto(url);
-    await privatePage.waitForFunction(() => window.planner && document.documentElement.lang === 'ru');
+    await observed(privatePage, 'denied-storage-goto', () => privatePage.goto(url));
+    await observed(privatePage, 'denied-storage-language', () => privatePage.waitForFunction(() => window.planner && document.documentElement.lang === 'ru'));
     await privatePage.evaluate(() => { history.replaceState = () => { throw new DOMException('history denied', 'SecurityError'); }; });
     await privatePage.locator('#language-select').selectOption('fr');
-    await privatePage.waitForFunction(() => document.documentElement.lang === 'fr');
+    await observed(privatePage, 'denied-history-language', () => privatePage.waitForFunction(() => document.documentElement.lang === 'fr'));
     assert.deepEqual(privateErrors, [], 'denied history does not block a manual language choice');
     await privateContext.close();
     console.log(`Browser i18n checks passed: ${matrices.join(', ')}; lazy local packs, translated search, preserved drafts/forms, RTL, mobile, reload, deep links, failed downloads and denied storage.`);
