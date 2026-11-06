@@ -323,7 +323,7 @@ def run(output, driver_path='/usr/bin/safaridriver', native_display_capture=Fals
             observe(client, info, project, output, record, save, work_deadline, native_display_capture)
             record['status'] = 'observed'
         except Exception as error:
-            record.update(status='incomplete', error=canvas_diagnostic.error_record(error))
+            record.update(status='incomplete', failurePhase=record['phase'], error=canvas_diagnostic.error_record(error))
         finally:
             record['phase'] = 'cleanup'
             try:
