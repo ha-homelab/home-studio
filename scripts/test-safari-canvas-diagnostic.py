@@ -2,10 +2,13 @@
 """Check the diagnostic matrix and lifecycle without launching Safari."""
 import importlib.util
 import json
+import re
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
+import urllib.request
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -15,6 +18,230 @@ spec.loader.exec_module(diagnostic)
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_parser_control_is_served_without_script_or_external_resource(self):
+        server = diagnostic.ThreadingHTTPServer(('127.0.0.1', 0), diagnostic.BlankPage)
+        thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .01})
+        thread.start()
+        try:
+            with urllib.request.urlopen(f'http://127.0.0.1:{server.server_port}/task-boundary', timeout=2) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.headers['Cache-Control'], 'no-store')
+                body = response.read()
+            self.assertEqual(body, diagnostic.TASK_BOUNDARY_HTML)
+            self.assertNotRegex(body.lower(), rb'<script|<canvas|\bsrc=|\bhref=|url\(')
+            self.assertEqual(body.count(b'>DOM '), 4)
+            for color in (b'255,0,0', b'0,255,0', b'0,0,255', b'255,255,255'):
+                self.assertIn(b'background:rgb(' + color + b')', body)
+            with urllib.request.urlopen(f'http://127.0.0.1:{server.server_port}/', timeout=2) as response:
+                self.assertIn(b'<body></body>', response.read())
+        finally:
+            server.shutdown(); server.server_close(); thread.join(timeout=1)
+        self.assertFalse(thread.is_alive())
+
+    def test_task_boundary_capture_and_copy_order_retains_original_results(self):
+        client, record, events = Mock(), {}, []
+        deadline = time.monotonic() + 10
+        client.call.side_effect = lambda name, data: events.append(name) or {'value': {'frames': 2}}
+        def execute(script):
+            events.append(script)
+            return {'status': 'readback-failed'}  # Diagnostics must not certify bad pixels.
+        client.execute.side_effect = execute
+        client.screenshot.side_effect = lambda path: events.append(path.name)
+        def logs(actual_deadline):
+            self.assertEqual(actual_deadline, deadline)
+            events.append('gpu-log')
+            return {'status': 'unavailable'}
+        with tempfile.TemporaryDirectory() as temp, patch.object(diagnostic, 'gpu_fault_observation', side_effect=logs):
+            diagnostic.observe_task_boundary(client, 'http://127.0.0.1/task-boundary', Path(temp),
+                                             record, lambda: None, deadline)
+        self.assertEqual(events, ['WebDriver:Navigate', 'task-boundary-parser-dom.png',
+                                 diagnostic.TASK_BOUNDARY_SETUP, diagnostic.TASK_BOUNDARY_READ,
+                                 'WebDriver:ExecuteAsyncScript', 'task-boundary-after-frames.png',
+                                 diagnostic.TASK_BOUNDARY_READ, 'gpu-log', diagnostic.TASK_BOUNDARY_CLEANUP])
+        page = record['taskBoundaryComparison']
+        self.assertEqual(page['status'], 'observed')
+        self.assertEqual(page['setupAndSameCall']['status'], 'readback-failed')
+        self.assertLessEqual(page['controlStartedUTC'], page['controlEndedUTC'])
+        self.assertEqual(page['gpuFaults']['status'], 'unavailable')
+
+    def test_task_boundary_failures_preserve_evidence_and_always_clean_up(self):
+        for fail_at in ('first-screenshot', 'second-screenshot', 'next-command'):
+            with self.subTest(fail_at=fail_at):
+                client, record = Mock(), {}
+                captures = 0
+                def screenshot(_path):
+                    nonlocal captures
+                    captures += 1
+                    if captures == (1 if fail_at == 'first-screenshot' else 2) and fail_at.endswith('screenshot'):
+                        raise RuntimeError('original capture failure')
+                def execute(script):
+                    if fail_at == 'next-command' and script == diagnostic.TASK_BOUNDARY_READ:
+                        raise RuntimeError('original copy failure')
+                    return {'sameCall': {'matchedPixels': 4096}}
+                client.screenshot.side_effect = screenshot
+                client.execute.side_effect = execute
+                client.call.return_value = {'value': {'frames': 2}}
+                with tempfile.TemporaryDirectory() as temp, patch.object(diagnostic, 'gpu_fault_observation',
+                        side_effect=TimeoutError('log timeout with private path')):
+                    diagnostic.observe_task_boundary(client, 'http://127.0.0.1/task-boundary', Path(temp),
+                                                     record, lambda: None, time.monotonic() + 10)
+                page = record['taskBoundaryComparison']
+                self.assertEqual(page['status'], 'incomplete')
+                self.assertIn('original', page['error']['message'])
+                self.assertEqual(page['gpuFaults'], {'status': 'unavailable', 'errorType': 'TimeoutError'})
+                client.execute.assert_called_with(diagnostic.TASK_BOUNDARY_CLEANUP)
+                self.assertEqual('setupAndSameCall' in page, fail_at != 'first-screenshot')
+                self.assertNotIn('afterScreenshot', page)
+
+    def test_task_boundary_expired_budget_issues_no_browser_command(self):
+        client, record = Mock(), {}
+        with tempfile.TemporaryDirectory() as temp, patch.object(diagnostic, 'gpu_fault_observation', return_value={}):
+            diagnostic.observe_task_boundary(client, 'http://127.0.0.1/task-boundary', Path(temp),
+                                             record, lambda: None, time.monotonic() - 1)
+        self.assertEqual(client.mock_calls, [])
+        self.assertEqual(record['taskBoundaryComparison']['error']['name'], 'TimeoutError')
+
+    def test_gpu_log_summary_is_bounded_narrow_and_never_retains_arbitrary_text(self):
+        deadline = time.monotonic() + 60
+        secret = 'https://private.invalid/path?token=private-value'
+        output = '\n'.join([json.dumps({'eventMessage': 'GPUProcessProxy::didClose ' + secret}),
+                            json.dumps({'eventMessage': 'AppleParavirtGPU IOGPUScheduler ' + secret}),
+                            json.dumps({'eventMessage': 'unrelated ' + secret}), '{truncated'])
+        with patch.object(diagnostic, 'command_observation', return_value={
+                'returncode': 0, 'output': output, 'truncated': True}) as observe:
+            summary = diagnostic.gpu_fault_observation(deadline)
+        observe.assert_called_once_with(['/usr/bin/log', 'show', '--style', 'ndjson', '--last', '3m',
+                                         '--predicate', diagnostic.GPU_FAULT_PREDICATE], deadline)
+        self.assertEqual(summary['matchingEntries'], 2)
+        self.assertEqual(summary['signatureCounts']['GPUProcessProxy::didClose'], 1)
+        self.assertEqual(summary['signatureCounts']['IOGPUScheduler'], 1)
+        self.assertEqual(summary['unparsedLines'], 1)
+        self.assertTrue(summary['truncated'])
+        self.assertNotIn('private', json.dumps(summary))
+        for value in ({'name': 'TimeoutExpired', 'message': secret},
+                      {'returncode': 1, 'output': secret, 'truncated': False}):
+            with patch.object(diagnostic, 'command_observation', return_value=value):
+                summary = diagnostic.gpu_fault_observation(deadline)
+            self.assertEqual(summary['status'], 'unavailable')
+            self.assertNotIn('private', json.dumps(summary))
+        with patch.object(diagnostic, 'command_observation') as observe:
+            summary = diagnostic.gpu_fault_observation(time.monotonic() + 5)
+        observe.assert_not_called()
+        self.assertEqual(summary['errorType'], 'InsufficientRemainingBudget')
+
+    def test_task_boundary_workflow_stays_opt_in_and_cold_mode_skips_preflight(self):
+        source = (Path(__file__).resolve().parents[1] / '.github/workflows/safari-macos15-observation.yml').read_text()
+        inputs = re.findall(r'^      (\w+):$', source, re.MULTILINE)
+        self.assertLess(len(inputs), 10)
+        self.assertEqual(inputs.count('canvas_task_boundary'), 1)
+        self.assertRegex(source, r'canvas_task_boundary:\n        description:[^\n]+\n        type: boolean\n        default: false')
+        self.assertIn('if: ${{ inputs.canvas_diagnostic != true && inputs.canvas_task_boundary != true }}', source)
+        self.assertIn('if: ${{ inputs.canvas_diagnostic == true || inputs.canvas_task_boundary == true }}', source)
+        self.assertIn('if: ${{ inputs.canvas_diagnostic == true && inputs.canvas_task_boundary != true }}', source)
+        self.assertIn('if [[ "$COLD_CANVAS" != "true" ]]; then\n            preparation_args+=(--prepare-hosted-safari)', source)
+        self.assertIn('if [[ "$CANVAS_TASK_BOUNDARY" == "true" ]]; then\n            mode_args=(--task-boundary-comparison)', source)
+        self.assertIn('"${preparation_args[@]}" "${mode_args[@]}" --output', source)
+        self.assertNotIn('continue-on-error', source)
+
+    def test_task_boundary_mode_uses_one_owned_session_and_shared_deadline(self):
+        client, driver = Mock(), Mock()
+        client.session_id = 'owned'; driver.poll.return_value = None
+        client.start.return_value = {'sessionId': 'owned'}
+        client.select_current_window.return_value = {'focused': True}
+        client.call.return_value = {'value': {}}
+        client.execute.return_value = {'status': 'readback-failed'}
+        with tempfile.TemporaryDirectory() as temp, patch.object(diagnostic.sys, 'platform', 'darwin'), \
+                patch.object(diagnostic, 'command_observation', return_value={}), \
+                patch.object(diagnostic.subprocess, 'Popen', return_value=driver), \
+                patch.object(diagnostic.safari, 'SafariWebDriver', return_value=client), \
+                patch.object(diagnostic, 'observe_page') as original, \
+                patch.object(diagnostic, 'observe_presentation') as presentation, \
+                patch.object(diagnostic, 'observe_window_geometry') as geometry, \
+                patch.object(diagnostic, 'observe_extended_page') as extended, \
+                patch.object(diagnostic.safari, 'prepare_hosted_safari') as prepare:
+            result = diagnostic.run(Path(temp), '/mock/driver', task_boundary_comparison=True)
+        for unused in (original, extended, presentation, geometry, prepare):
+            unused.assert_not_called()
+        self.assertEqual(result['status'], 'observed')
+        self.assertFalse(result['acceptanceEvidence'])
+        self.assertTrue(result['taskBoundaryComparisonRequested'])
+        self.assertEqual(result['budgetMs'], 180000)
+        self.assertEqual(client._browser_deadline, client._preparation_deadline)
+        self.assertEqual(client.execute.call_args.args, (diagnostic.WEBGL,))
+        self.assertEqual(client.screenshot.call_count, 2)
+        client.start.assert_called_once(); client.close.assert_called_once()
+
+    def test_task_boundary_native_copy_detects_loss_without_repainting(self):
+        script = r"""
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const scripts=JSON.parse(fs.readFileSync(0,'utf8'));
+for(const mode of ['good','lost-between-commands','copy-error','no-context','no-frames']){
+  const canvases=[],frames=[],timers=new Map();let fills=0,copies=0;
+  class Element{
+    constructor(){this.children=[];this.style={};this.isConnected=true;}
+    appendChild(node){this.children.push(node);node.isConnected=true;}
+    getBoundingClientRect(){return {x:16,y:16,width:this.width||180,height:this.height||48};}
+  }
+  class Context{
+    constructor(canvas,options){this.canvas=canvas;this.options=options;this.data=new Uint8ClampedArray(16384);}
+    getContextAttributes(){return this.options;} isContextLost(){return false;}
+    fillRect(x,y,w,h){fills++;const rgb=this.fillStyle.match(/\d+/g).map(Number);
+      for(let row=y;row<y+h;row++)for(let col=x;col<x+w;col++)this.data.set([...rgb,255],(row*64+col)*4);}
+    clearRect(){this.data.fill(0);}
+    drawImage(source,x,y){assert.equal(x,0);assert.equal(y,0);copies++;
+      assert.deepEqual({...source.context.options},{alpha:false});
+      assert.deepEqual({...this.options},{alpha:true,willReadFrequently:true});
+      if(mode==='copy-error')throw Object.assign(Error('native copy failed'),{name:'InvalidStateError'});
+      this.data.set(source.context.data);}
+    getImageData(x,y,w,h){assert.deepEqual([x,y,w,h],[0,0,64,64]);return {data:this.data};}
+  }
+  class Canvas extends Element{
+    constructor(){super();this.isConnected=false;this.width=300;this.height=150;canvases.push(this);}
+    getContext(kind,options){assert.equal(kind,'2d');return mode==='no-context'?null:(this.context=new Context(this,options));}
+    remove(){this.isConnected=false;this.removed=true;}
+  }
+  const nodes=Object.fromEntries(['parser-canvas-slot','parser-heading','parser-swatches'].map(id=>[id,new Element()]));
+  nodes['parser-swatches'].children=Array.from({length:4},()=>new Element());
+  const environment={window:{},location:{href:'http://127.0.0.1/task-boundary'},innerWidth:1440,innerHeight:1000,
+    devicePixelRatio:2,performance:{now:()=>1},getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'}),
+    document:{getElementById:id=>nodes[id],readyState:'complete',hasFocus:()=>true,visibilityState:'visible',
+      createElement(name){assert.equal(name,'canvas');return new Canvas();}},CanvasRenderingContext2D:Context,
+    setTimeout(fn,ms){assert.equal(ms,1500);timers.set(1,fn);return 1;},clearTimeout(id){timers.delete(id);},
+    requestAnimationFrame(fn){frames.push(fn);return frames.length;},cancelAnimationFrame(){}};
+  const context=vm.createContext(environment),run=source=>vm.runInContext('(function(){'+source+'})()',context);
+  if(mode==='no-context'){assert.throws(()=>run(scripts.setup),/source context unavailable/);}
+  else{
+    const first=JSON.parse(JSON.stringify(run(scripts.setup)));
+    assert.equal(canvases.length,2);assert.equal(fills,4);assert.equal(copies,1);
+    assert.equal(nodes['parser-canvas-slot'].children.length,1);
+    assert.deepEqual(first.requestedAttributes,{alpha:false});
+    assert.deepEqual(first.requestedReadbackAttributes,{alpha:true,willReadFrequently:true});
+    if(mode==='lost-between-commands')canvases[0].context.data.fill(0);
+    const next=run(scripts.read);let settled;
+    environment.done=value=>{settled=value;};
+    vm.runInContext('(function(){'+scripts.settle+'})(done)',context);
+    if(mode==='no-frames')timers.get(1)();else while(frames.length)frames.shift()();
+    assert.equal(settled.settle.frames,mode==='no-frames'?0:2);
+    assert.equal(settled.settle.timedOut,mode==='no-frames');assert.equal(timers.size,0);
+    const last=run(scripts.read);
+    assert.equal(fills,4);assert.equal(copies,4); // No repaint or source reset across boundaries.
+    for(const read of [first.sameCall,next,settled.readback,last]){
+      if(mode==='copy-error'){assert.equal(read.status,'readback-failed');assert.equal(read.name,'InvalidStateError');}
+      else{assert.equal(read.readbackBytes,16384);assert.equal(read.pixelCount,4096);
+        const lost=mode==='lost-between-commands'&&read!==first.sameCall;
+        assert.equal(read.matchedPixels,lost?0:4096);assert.equal(read.visiblePixels,lost?0:4096);}
+    }
+  }
+  run(scripts.cleanup);assert.ok(canvases.every(c=>c.removed&&c.width===0&&c.height===0));
+  assert.equal(environment.window.__safariTaskBoundary,undefined);
+}
+"""
+        result = subprocess.run(['node', '-e', script], input=json.dumps({
+            'setup': diagnostic.TASK_BOUNDARY_SETUP, 'read': diagnostic.TASK_BOUNDARY_READ,
+            'settle': diagnostic.TASK_BOUNDARY_SETTLE, 'cleanup': diagnostic.TASK_BOUNDARY_CLEANUP}),
+            text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_native_matrix_preserves_first_failure_and_cleans_every_canvas(self):
         script = r"""
 const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');

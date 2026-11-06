@@ -18,6 +18,10 @@ on:
         description: Skip hosted preflight only for the independent canvas diagnostic
         type: boolean
         default: false
+      canvas_task_boundary:
+        description: Diagnose parser DOM and native canvas command boundaries without claiming acceptance
+        type: boolean
+        default: false
       linux_i18n:
         description: Run only the isolated Linux language browser diagnostic
         type: boolean
@@ -57,7 +61,7 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           python3 scripts/test-safari-tooling.py
       - name: Compile read-only GUI probe before starting Safari
-        if: ${{ inputs.canvas_diagnostic == true }}
+        if: ${{ inputs.canvas_diagnostic == true && inputs.canvas_task_boundary != true }}
         timeout-minutes: 1
         run: |
           python3 scripts/test-compile-macos-gui-health.py
@@ -66,24 +70,29 @@ jobs:
       - name: Enable WebDriver on this disposable hosted runner
         run: sudo /usr/bin/safaridriver --enable
       - name: Test installed Safari with both viewers and the 256-item planner
-        if: ${{ inputs.canvas_diagnostic != true }}
+        if: ${{ inputs.canvas_diagnostic != true && inputs.canvas_task_boundary != true }}
         run: python3 scripts/test-safari-acceptance.py --prepare-hosted-safari --output acceptance-artifacts/safari
       - name: Diagnose independent native canvas paths
-        if: ${{ inputs.canvas_diagnostic == true }}
+        if: ${{ inputs.canvas_diagnostic == true || inputs.canvas_task_boundary == true }}
         env:
           COLD_CANVAS: ${{ inputs.cold_canvas }}
+          CANVAS_TASK_BOUNDARY: ${{ inputs.canvas_task_boundary }}
         run: |
           python3 scripts/test-safari-canvas-diagnostic.py
           preparation_args=()
           if [[ "$COLD_CANVAS" != "true" ]]; then
             preparation_args+=(--prepare-hosted-safari)
           fi
-          python3 scripts/diagnose-safari-canvas.py "${preparation_args[@]}" --output acceptance-artifacts/safari --window-geometry-comparison --gui-health-executable "$RUNNER_TEMP/home-studio-gui-health"
+          mode_args=(--window-geometry-comparison --gui-health-executable "$RUNNER_TEMP/home-studio-gui-health")
+          if [[ "$CANVAS_TASK_BOUNDARY" == "true" ]]; then
+            mode_args=(--task-boundary-comparison)
+          fi
+          python3 scripts/diagnose-safari-canvas.py "${preparation_args[@]}" "${mode_args[@]}" --output acceptance-artifacts/safari
       - name: Preserve actual Safari identity and diagnostics
         if: ${{ always() }}
         uses: ./.github/actions/upload-acceptance-artifact
         with:
-          name: safari-${{ inputs.runner || 'macos-15' }}-${{ inputs.canvas_diagnostic && 'canvas-diagnostic' || 'observation' }}
+          name: safari-${{ inputs.runner || 'macos-15' }}-${{ (inputs.canvas_diagnostic || inputs.canvas_task_boundary) && 'canvas-diagnostic' || 'observation' }}
           path: acceptance-artifacts/safari/
           if-no-files-found: error
           retention-days: 14

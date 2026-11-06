@@ -5,6 +5,7 @@ No application code, browser preferences, or ordinary Safari windows are changed
 The optional hosted preparation and WebDriver transport are shared with acceptance.
 """
 import argparse
+from datetime import datetime, timezone
 import importlib.util
 import json
 import os
@@ -342,6 +343,92 @@ raf=requestAnimationFrame(()=>{frames++;raf=requestAnimationFrame(()=>{frames++;
 PRESENTATION_CLEAR = "if(window.__safariPresentation)window.__safariPresentation.clearCase();return true;"
 PRESENTATION_CLEANUP = "if(window.__safariPresentation){window.__safariPresentation.cleanup();delete window.__safariPresentation;}return true;"
 
+# Parser-created controls: no script, deferred image, stylesheet, or external resource.
+TASK_BOUNDARY_HTML = b'''<!doctype html><html><head><meta charset="utf-8">
+<title>Native parser DOM control</title><style>
+body{margin:8px;background:white;color:black;font:20px sans-serif}
+#parser-control{width:720px;padding:8px;background:white}
+#parser-heading{height:30px;background:black;color:white}
+#parser-swatches{display:flex;height:48px}
+#parser-swatches div{width:180px;height:48px}
+#parser-canvas-slot{margin-top:8px}
+</style></head><body><section id="parser-control">
+<div id="parser-heading">Parser-created DOM control</div><div id="parser-swatches">
+<div style="background:rgb(255,0,0)">DOM 1</div><div style="background:rgb(0,255,0)">DOM 2</div>
+<div style="background:rgb(0,0,255)">DOM 3</div><div style="background:rgb(255,255,255)">DOM 4</div>
+</div><div id="parser-canvas-slot"></div></section></body></html>'''
+
+TASK_BOUNDARY_SETUP = r"""
+const colors=[[255,0,0,255],[0,255,0,255],[0,0,255,255],[255,255,255,255]];
+const slot=document.getElementById('parser-canvas-slot');
+if(!slot)throw Error('Parser-created canvas slot missing');
+let canvas=null,scratch=null,context=null,readback=null;
+function cleanup(){
+  for(const target of [canvas,scratch])if(target){target.remove();target.width=0;target.height=0;}
+  canvas=scratch=context=readback=null;
+}
+function geometry(node){const r=node.getBoundingClientRect(),s=getComputedStyle(node);
+  return {rect:{x:r.x,y:r.y,width:r.width,height:r.height},display:s.display,visibility:s.visibility,
+    opacity:s.opacity,background:s.backgroundColor,connected:node.isConnected};}
+function facts(){return {url:location.href,readyState:document.readyState,focused:document.hasFocus(),
+  visibility:document.visibilityState,viewport:[innerWidth,innerHeight],devicePixelRatio,
+  heading:geometry(document.getElementById('parser-heading')),
+  swatches:Array.from(document.getElementById('parser-swatches').children,geometry),
+  canvas:canvas?geometry(canvas):null};}
+function read(){
+  const result={time:performance.now(),width:canvas.width,height:canvas.height,connected:canvas.isConnected};
+  try{
+    if(canvas.width!==64||canvas.height!==64)throw Error('Source dimensions changed');
+    result.contextLost=typeof context.isContextLost==='function'?context.isContextLost():null;
+    CanvasRenderingContext2D.prototype.clearRect.call(readback,0,0,64,64);
+    CanvasRenderingContext2D.prototype.drawImage.call(readback,canvas,0,0);
+    const pixels=CanvasRenderingContext2D.prototype.getImageData.call(readback,0,0,64,64).data;
+    if(pixels.length!==16384)throw Error('Incomplete native bitmap copy');
+    let matchedPixels=0,visiblePixels=0;
+    for(let y=0;y<64;y++)for(let x=0;x<64;x++){
+      const expected=colors[(y>=32?2:0)+(x>=32?1:0)],i=(y*64+x)*4;
+      if(pixels[i+3]>0)visiblePixels++;
+      if(expected.every((value,channel)=>pixels[i+channel]===value))matchedPixels++;
+    }
+    return {...result,status:'pixels-read',readbackBytes:pixels.length,pixelCount:4096,
+      matchedPixels,visiblePixels,rgbaSamples:[0,1,2,3].map(q=>{
+        const i=(((q<2?16:48)*64)+(q%2?48:16))*4;return Array.from(pixels.slice(i,i+4));})};
+  }catch(error){return {...result,status:'readback-failed',name:String(error?.name||'').slice(0,128),
+    message:String(error?.message||error).slice(0,2048)};}
+}
+window.__safariTaskBoundary={read,cleanup};
+// Exactly one source initialization and paint; subsequent commands only copy it.
+const parserDOM=facts();
+canvas=document.createElement('canvas');canvas.width=64;canvas.height=64;
+canvas.style.cssText='display:block;border:2px solid black;';slot.appendChild(canvas);
+context=canvas.getContext('2d',{alpha:false});
+if(!context)throw Error('Native source context unavailable');
+scratch=document.createElement('canvas');scratch.width=64;scratch.height=64;
+readback=scratch.getContext('2d',{alpha:true,willReadFrequently:true});
+if(!readback)throw Error('Native transparent readback context unavailable');
+for(let q=0;q<4;q++){
+  context.fillStyle='rgb('+colors[q].slice(0,3).join(',')+')';
+  CanvasRenderingContext2D.prototype.fillRect.call(context,(q%2)*32,Math.floor(q/2)*32,32,32);
+}
+const sameCall=read();
+return {parserDOM,sameCall,facts:facts(),requestedAttributes:{alpha:false},
+  requestedReadbackAttributes:{alpha:true,willReadFrequently:true},
+  contextAttributes:typeof context.getContextAttributes==='function'?context.getContextAttributes():null,
+  readbackAttributes:typeof readback.getContextAttributes==='function'?readback.getContextAttributes():null};
+"""
+TASK_BOUNDARY_READ = "return window.__safariTaskBoundary.read();"
+TASK_BOUNDARY_SETTLE = PRESENTATION_SETTLE.replace('window.__safariPresentation', 'window.__safariTaskBoundary')
+TASK_BOUNDARY_CLEANUP = "if(window.__safariTaskBoundary){window.__safariTaskBoundary.cleanup();delete window.__safariTaskBoundary;}return true;"
+
+GPU_FAULT_SIGNATURES = ('GPUProcessProxy::didClose', 'GPUProcessProxy::gpuProcessExited',
+                      'GPUProcessProxy::didBecomeUnresponsive', 'RemoteRenderingBackend', 'RemoteImageBuffer',
+                      'AppleParavirtGPU', 'IOGPUScheduler', 'GPURestartSignaled', 'SubmissionsIgnored', 'GPU hang')
+GPU_FAULT_PREDICATE = (
+    '((process == "Safari" OR process BEGINSWITH "com.apple.WebKit") AND (' +
+    ' OR '.join(f'eventMessage CONTAINS "{name}"' for name in GPU_FAULT_SIGNATURES[:5]) +
+    ')) OR ((process == "kernel" OR process == "WindowServer") AND (' +
+    ' OR '.join(f'eventMessage CONTAINS "{name}"' for name in GPU_FAULT_SIGNATURES[5:]) + '))')
+
 
 class BlankPage(BaseHTTPRequestHandler):
     def log_message(self, *_args):
@@ -349,7 +436,9 @@ class BlankPage(BaseHTTPRequestHandler):
 
     def do_GET(self):
         body = b'<!doctype html><html><head><meta charset="utf-8"><title>Native canvas diagnostic</title></head><body></body></html>'
-        self.send_response(200 if self.path == '/' else 404)
+        if self.path == '/task-boundary':
+            body = TASK_BOUNDARY_HTML
+        self.send_response(200 if self.path in ('/', '/task-boundary') else 404)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Cache-Control', 'no-store')
         self.send_header('Content-Length', str(len(body)))
@@ -380,6 +469,96 @@ def command_observation(command, deadline):
                 'truncated': len(data) > 65536}
     except Exception as error:
         return error_record(error)
+
+
+def gpu_fault_observation(deadline):
+    """One bounded query; retain signature counts, never arbitrary log text."""
+    summary = {'window': 'last 3m; may include events before the control',
+               'conclusion': 'diagnostic-only; absence of signatures is inconclusive',
+               'status': 'unavailable', 'signatureCounts': {key: 0 for key in GPU_FAULT_SIGNATURES}}
+    # Optional metadata must leave room for the existing bounded cleanup path.
+    if deadline - time.monotonic() <= 10:
+        summary['errorType'] = 'InsufficientRemainingBudget'
+        return summary
+    result = command_observation(['/usr/bin/log', 'show', '--style', 'ndjson', '--last', '3m',
+                                  '--predicate', GPU_FAULT_PREDICATE], deadline)
+    if 'returncode' not in result:
+        summary['errorType'] = result.get('name', 'UnknownError')
+        return summary
+    summary.update(returncode=result['returncode'], truncated=bool(result.get('truncated')),
+                   parsedEntries=0, unparsedLines=0, matchingEntries=0)
+    for line in result.get('output', '').splitlines():
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+            if not isinstance(entry, dict):
+                raise ValueError('Expected log object')
+        except (ValueError, TypeError):
+            summary['unparsedLines'] += 1
+            continue
+        summary['parsedEntries'] += 1
+        message = entry.get('eventMessage')
+        if not isinstance(message, str):
+            continue
+        matched = False
+        for signature in GPU_FAULT_SIGNATURES:
+            if signature in message:
+                summary['signatureCounts'][signature] += 1
+                matched = True
+        summary['matchingEntries'] += int(matched)
+    if result['returncode'] == 0:
+        summary['status'] = 'observed'
+    return summary
+
+
+def observe_task_boundary(client, url, output, record, save, deadline):
+    page = record['taskBoundaryComparison'] = {
+        'url': url, 'status': 'running',
+        'controlStartedUTC': datetime.now(timezone.utc).isoformat(),
+        'initialCaptureScope': 'parser-created DOM before any injected setup on this page; session focus already selected'}
+    save()
+    try:
+        remaining(deadline)
+        client.call('WebDriver:Navigate', {'url': url})
+        remaining(deadline)
+        # No execute/setup after navigation until the original parser DOM is captured.
+        client.screenshot(output / 'task-boundary-parser-dom.png')
+        page['initialDOMScreenshot'] = 'task-boundary-parser-dom.png'
+        save()
+        remaining(deadline)
+        page['setupAndSameCall'] = client.execute(TASK_BOUNDARY_SETUP)
+        save()
+        remaining(deadline)
+        page['nextCommand'] = client.execute(TASK_BOUNDARY_READ)
+        save()
+        remaining(deadline)
+        page['afterTwoFrames'] = client.call('WebDriver:ExecuteAsyncScript',
+                                            {'script': TASK_BOUNDARY_SETTLE, 'args': []})['value']
+        save()
+        remaining(deadline)
+        client.screenshot(output / 'task-boundary-after-frames.png')
+        page['afterFramesScreenshot'] = 'task-boundary-after-frames.png'
+        save()
+        remaining(deadline)
+        page['afterScreenshot'] = client.execute(TASK_BOUNDARY_READ)
+        page['status'] = 'observed'
+    except Exception as error:
+        page.update(status='incomplete', error=error_record(error))
+    finally:
+        page['controlEndedUTC'] = datetime.now(timezone.utc).isoformat()
+        save()
+        try:
+            page['gpuFaults'] = gpu_fault_observation(deadline)
+        except Exception as error:
+            # Metadata never replaces the original observation or transport failure.
+            page['gpuFaults'] = {'status': 'unavailable', 'errorType': type(error).__name__}
+        try:
+            remaining(deadline)
+            client.execute(TASK_BOUNDARY_CLEANUP)
+        except Exception as error:
+            page['cleanupError'] = error_record(error)
+        save()
 
 
 def observe_page(client, url, record, save, deadline):
@@ -543,7 +722,7 @@ def observe_window_geometry(client, url, output, record, save, deadline, *, gui_
 
 
 def run(output, driver_path, prepare=False, presentation_only=False, window_geometry_comparison=False,
-        gui_health_executable=None):
+        gui_health_executable=None, task_boundary_comparison=False):
     output.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     deadline = started + BUDGET_SECONDS
@@ -551,6 +730,7 @@ def run(output, driver_path, prepare=False, presentation_only=False, window_geom
               'status': 'running', 'budgetMs': BUDGET_SECONDS * 1000,
               'presentationOnly': presentation_only,
               'windowGeometryComparison': window_geometry_comparison,
+              'taskBoundaryComparisonRequested': task_boundary_comparison,
               'guiHealthRequested': gui_health_executable is not None,
               'preparation': {'requested': prepare, 'status': 'pending' if prepare else 'not-requested'},
               'sourceRevision': os.environ.get('GITHUB_SHA'), 'pages': [], 'extendedPages': [], 'cleanupErrors': [],
@@ -603,7 +783,10 @@ def run(output, driver_path, prepare=False, presentation_only=False, window_geom
             record['windowRect'] = client.call('WebDriver:SetWindowRect', {'width': 1440, 'height': 1000})
             record['windowFocus'] = client.select_current_window()
             urls = ('about:blank', f'http://127.0.0.1:{server.server_port}/')
-            if window_geometry_comparison:
+            if task_boundary_comparison:
+                observe_task_boundary(client, urls[1] + 'task-boundary', output, record, save, deadline)
+                observations = [record['taskBoundaryComparison']]
+            elif window_geometry_comparison:
                 observe_window_geometry(client, urls[1], output, record, save, deadline,
                                         gui_health_executable=gui_health_executable)
                 observations = [record['geometryComparison']]
@@ -664,9 +847,11 @@ def main():
                        help='Skip earlier small-canvas/encoding matrices; observe DOM and realistic surfaces before final WebGL identity')
     modes.add_argument('--window-geometry-comparison', action='store_true',
                        help='Compare DOM and 64x64 default/CPU canvases at large, inside-screen, and restored window sizes')
+    modes.add_argument('--task-boundary-comparison', action='store_true',
+                       help='Capture parser-created DOM, then compare one 64x64 source across command, frame and screenshot boundaries')
     args = parser.parse_args()
     result = run(args.output.resolve(), args.driver, args.prepare_hosted_safari, args.presentation_only,
-                 args.window_geometry_comparison, args.gui_health_executable)
+                 args.window_geometry_comparison, args.gui_health_executable, args.task_boundary_comparison)
     print(f'Native Safari diagnostic: {result["status"]}; never acceptance evidence', flush=True)
     return int(result['status'] != 'observed')
 
