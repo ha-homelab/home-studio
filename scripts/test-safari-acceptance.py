@@ -329,12 +329,13 @@ def fixture_server(name, log):
         raise
 
 
-# An independent native readback on a blank page, before application hooks.
+# An independent native bitmap copy/readback on a blank page, before application hooks.
 # This is preparation evidence, never a substitute for application pixel gates.
 GRAPHICS_PREPARATION = r"""
 const canvas=document.createElement('canvas');canvas.width=64;canvas.height=64;
 (document.body||document.documentElement).appendChild(canvas);
 const colors=[[255,0,0,255],[0,255,0,255],[0,0,255,255],[255,255,255,255]];
+let scratch;
 try {
   const context=canvas.getContext('2d',{alpha:false});
   if(!context)throw Error('Native 2D context unavailable');
@@ -342,16 +343,23 @@ try {
     context.fillStyle='rgb('+colors[q].slice(0,3).join(',')+')';
     context.fillRect((q%2)*32,Math.floor(q/2)*32,32,32);
   }
-  const data=CanvasRenderingContext2D.prototype.getImageData.call(context,0,0,64,64).data;
+  scratch=document.createElement('canvas');scratch.width=64;scratch.height=64;
+  const readback=scratch.getContext('2d',{willReadFrequently:true});
+  if(!readback)throw Error('Native readback context unavailable');
+  CanvasRenderingContext2D.prototype.drawImage.call(readback,canvas,0,0);
+  const data=CanvasRenderingContext2D.prototype.getImageData.call(readback,0,0,64,64).data;
   let matchedPixels=0;
   for(let y=0;y<64;y++)for(let x=0;x<64;x++) {
     const expected=colors[(y>=32?2:0)+(x>=32?1:0)],offset=(y*64+x)*4;
     if(expected.every((value,c)=>data[offset+c]===value))matchedPixels++;
   }
-  return {status:'pixels-read',width:64,height:64,readbackBytes:data.length,matchedPixels};
+  return {status:'pixels-read',readbackMethod:'native-canvas-copy',width:64,height:64,readbackBytes:data.length,matchedPixels};
 } catch(error) {
   return {status:'readback-failed',width:64,height:64,name:String(error?.name||'').slice(0,128),
     message:String(error?.message||error).slice(0,2048),stack:String(error?.stack||'').slice(0,4096)};
+} finally {
+  if(scratch){scratch.width=0;scratch.height=0;}
+  canvas.remove();canvas.width=0;canvas.height=0;
 }
 """
 
@@ -363,6 +371,7 @@ def prepare_graphics(client, record, save):
     result = record['graphicsPreparation'] = client.execute(GRAPHICS_PREPARATION)
     save()
     native.require(isinstance(result, dict) and result.get('status') == 'pixels-read'
+                   and result.get('readbackMethod') == 'native-canvas-copy'
                    and result.get('readbackBytes') == 64 * 64 * 4
                    and result.get('matchedPixels') == 64 * 64,
                    'Independent native canvas preparation failed: ' + json.dumps(result))
@@ -388,6 +397,9 @@ def run_case(output, name, driver_path):
             record['driverVersion'] = subprocess.check_output([driver_path, '--version'], text=True, timeout=10).strip()
             server, info, project = fixture_server(name, resources.enter_context((output / 'fixture.log').open('w', encoding='utf-8')))
             record['sourceHash'] = info['sourceHash']
+            if 'sourceFiles' in info:
+                record['sourceFiles'] = info['sourceFiles']
+                record['sourceHashScope'] = info['sourceHashScope']
             with socket.socket() as probe:
                 probe.bind(('127.0.0.1', 0))
                 port = probe.getsockname()[1]

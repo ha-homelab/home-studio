@@ -40,11 +40,20 @@ async function fixture(failure = null) {
       addEventListener(name, handler) { this.events[name] = handler; }, focus() {},
     };
     if (tag === 'canvas') {
+      let creationOptions;
       const context = {clearRect() {}, beginPath() {}, ellipse() {}, fill() {},
-        getImageData(_x, _y, width, height) { state.reads++; fail('read'); return {data: new Uint8ClampedArray(width * height * 4)}; },
+        getImageData(_x, _y, width, height) {
+          state.reads++; fail('read');
+          if (state.failure === 'accelerated-read' && !creationOptions?.willReadFrequently)
+            throw new DOMException('Synthetic unavailable accelerated readback', 'InvalidStateError');
+          return {data: new Uint8ClampedArray(width * height * 4)};
+        },
         putImageData(pixels) { state.writes++; fail('write'); state.lastPixels = Uint8ClampedArray.from(pixels.data); },
       };
-      element.getContext = () => state.failure === 'context' ? null : context;
+      element.getContext = (_kind, options) => {
+        creationOptions ??= options || {};
+        return state.failure === 'context' ? null : context;
+      };
       state.canvases.push(element);
     }
     return element;
@@ -119,10 +128,11 @@ test('Unexpected thumbnail errors remain visible', async () => {
   assert.throws(() => f.plan.events.pointerdown(f.pointer(1, 1)), /Synthetic programming error/);
 });
 
-test('A normal catalog thumbnail paints visible geometry and reuses identical cached pixels', async () => {
-  const f = await fixture();
+for (const failure of [null, 'accelerated-read']) test(`A catalog thumbnail paints visible geometry and reuses cached pixels (${failure || 'normal'})`, async () => {
+  const f = await fixture(failure);
   f.plan.events.pointerdown(f.pointer(1, 1));
   const pixels = f.state.lastPixels, colors = new Set(); let opaquePixels = 0;
+  assert(pixels, 'Selecting a catalog item paints its thumbnail');
   assert.equal(pixels.length, 280 * 170 * 4);
   for (let i = 0; i < pixels.length; i += 4) if (pixels[i + 3]) {
     opaquePixels++; colors.add(`${pixels[i]},${pixels[i + 1]},${pixels[i + 2]}`);

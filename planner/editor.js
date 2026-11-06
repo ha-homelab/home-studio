@@ -316,7 +316,7 @@ function drawItemThumbnail(canvas, model, appearance = { model_id: model.id, sty
   // This optional preview must not interrupt selection or its pointer gesture
   // when the browser cannot provide a usable 2D backing store.
   try {
-    const context = canvas.getContext('2d');
+    const context = canvas.getContext('2d', { willReadFrequently: true });
     if (!context) { canvas.hidden = true; return; }
     paintItemThumbnail(canvas, context, model, appearance);
     canvas.hidden = false;

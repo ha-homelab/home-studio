@@ -21,6 +21,8 @@
 
 ### Fixed
 
+- Keep furniture thumbnails visible in Safari when accelerated canvas pixel
+  readback is unavailable.
 - Reduce decorative tree detail during camera navigation using existing GPU
   buffers, then restore it after input settles. Static surroundings remain idle;
   hidden views cancel pending restoration and shadow detail remains stable.
