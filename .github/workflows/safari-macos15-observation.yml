@@ -9,6 +9,7 @@ on:
           - macos-15
           - macos-26
           - macos-26-intel
+          - xcode-27
         default: macos-15
       canvas_diagnostic:
         description: Collect native canvas diagnostics without claiming application acceptance
@@ -23,7 +24,11 @@ on:
         type: boolean
         default: false
       native_display_capture:
-        description: Optional OS display capture; requires canvas_task_boundary, grants no permissions
+        description: Optional OS display capture; requires canvas_task_boundary or viewer_presentation, grants no permissions
+        type: boolean
+        default: false
+      viewer_presentation:
+        description: Diagnose one actual viewer frame across presentation boundaries without claiming acceptance
         type: boolean
         default: false
       linux_i18n:
@@ -44,7 +49,7 @@ permissions:
   contents: read
 jobs:
   safari:
-    if: ${{ inputs.linux_i18n != true && inputs.i18n_lifecycle != true && inputs.i18n_channels != true }}
+    if: ${{ inputs.linux_i18n != true && inputs.i18n_lifecycle != true && inputs.i18n_channels != true && inputs.viewer_presentation != true }}
     name: Safari (${{ inputs.runner || 'macos-15' }}, installed stable observation)
     runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 25
@@ -106,6 +111,48 @@ jobs:
         uses: ./.github/actions/upload-acceptance-artifact
         with:
           name: safari-${{ inputs.runner || 'macos-15' }}-${{ (inputs.canvas_diagnostic || inputs.canvas_task_boundary) && 'canvas-diagnostic' || 'observation' }}
+          path: acceptance-artifacts/safari/
+          if-no-files-found: error
+          retention-days: 14
+  viewer-presentation:
+    if: ${{ inputs.viewer_presentation == true }}
+    name: Safari (${{ inputs.runner || 'macos-15' }}, viewer presentation diagnostic)
+    runs-on: ${{ inputs.runner || 'macos-15' }}
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+      - name: Install fixture tooling and check diagnostic contracts
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          python3 scripts/test-safari-tooling.py
+          python3 scripts/test-safari-viewer-presentation.py
+      - name: Enable WebDriver on this disposable hosted runner
+        run: sudo /usr/bin/safaridriver --enable
+      - name: Observe one actual viewer frame without acceptance claims
+        timeout-minutes: 4
+        env:
+          NATIVE_DISPLAY_CAPTURE: ${{ inputs.native_display_capture }}
+        run: |
+          capture_args=()
+          if [[ "$NATIVE_DISPLAY_CAPTURE" == "true" ]]; then
+            capture_args+=(--native-display-capture)
+          fi
+          python3 scripts/diagnose-safari-viewer-presentation.py --output acceptance-artifacts/safari "${capture_args[@]}"
+      - name: Preserve actual Safari identity and viewer presentation evidence
+        if: ${{ always() }}
+        uses: ./.github/actions/upload-acceptance-artifact
+        with:
+          name: safari-${{ inputs.runner || 'macos-15' }}-viewer-presentation
           path: acceptance-artifacts/safari/
           if-no-files-found: error
           retention-days: 14
