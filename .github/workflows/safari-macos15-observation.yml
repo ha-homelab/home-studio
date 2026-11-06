@@ -48,7 +48,7 @@ jobs:
         if: ${{ inputs.canvas_diagnostic == true }}
         run: |
           python3 scripts/test-safari-canvas-diagnostic.py
-          python3 scripts/diagnose-safari-canvas.py --prepare-hosted-safari --output acceptance-artifacts/safari --presentation-only
+          python3 scripts/diagnose-safari-canvas.py --prepare-hosted-safari --output acceptance-artifacts/safari --window-geometry-comparison
       - name: Preserve actual Safari identity and diagnostics
         if: ${{ always() }}
         uses: ./.github/actions/upload-acceptance-artifact

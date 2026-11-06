@@ -195,6 +195,130 @@ for(const mode of ['good','first-failure','no-frames','no-context']){
         self.assertEqual(len(record['presentation']['cases']), 8)
         client.execute.assert_any_call(diagnostic.PRESENTATION_CLEANUP)
 
+    def test_geometry_mode_uses_three_bounded_stages_in_one_session(self):
+        client, driver = Mock(), Mock()
+        driver.poll.return_value = None
+        client.session_id = 'owned'
+        client.start.return_value = {'sessionId': 'owned'}
+        client.select_current_window.return_value = {'handle': 'owned-window'}
+        client.execute.return_value = {'status': 'readback-failed'}
+        def call(name, data=None):
+            if name == 'WebDriver:SetWindowRect':
+                return {'x': 0, 'y': 31, **data}
+            return {'value': {}}
+        client.call.side_effect = call
+        with tempfile.TemporaryDirectory() as temp, patch.object(diagnostic.sys, 'platform', 'darwin'), \
+                patch.object(diagnostic, 'command_observation', return_value={}), \
+                patch.object(diagnostic.subprocess, 'Popen', return_value=driver), \
+                patch.object(diagnostic.safari, 'SafariWebDriver', return_value=client), \
+                patch.object(diagnostic, 'observe_page') as original, \
+                patch.object(diagnostic, 'observe_extended_page') as extended:
+            result = diagnostic.run(Path(temp), '/mock/driver', window_geometry_comparison=True)
+        original.assert_not_called(); extended.assert_not_called()
+        client.start.assert_called_once(); client.close.assert_called_once()
+        self.assertEqual(result['status'], 'observed')
+        self.assertFalse(result['acceptanceEvidence'])
+        self.assertEqual(result['budgetMs'], 180000)
+        self.assertTrue(result['windowGeometryComparison'])
+        self.assertNotIn('presentation', result)
+        comparison = result['geometryComparison']
+        self.assertTrue(comparison['restoreRequestCompleted'])
+        self.assertNotIn('restoration', comparison)
+        stages = comparison['stages']
+        self.assertEqual([stage['name'] for stage in stages], ['baseline', 'inside-screen', 'restored'])
+        self.assertEqual([(stage['actualWindowRect']['width'], stage['actualWindowRect']['height'])
+                          for stage in stages], [(1440, 1000), (960, 640), (1440, 1000)])
+        for stage in stages:
+            self.assertEqual(stage['actualWindowRect']['y'], 31)
+            self.assertEqual(len(stage['presentation']['cases']), 2)
+            self.assertEqual([case['name'] for case in stage['presentation']['cases']],
+                             ['64x64-fresh-default', '64x64-fresh-cpu'])
+            self.assertTrue(all([entry['palette'] for entry in case['palettes']] == ['primary']
+                                for case in stage['presentation']['cases']))
+        files = [call.args[0].name for call in client.screenshot.call_args_list]
+        self.assertEqual(len(files), 9)
+        self.assertEqual(len(set(files)), 9)
+        operations = [(call[0], call.args) for call in client.mock_calls]
+        for index, (name, args) in enumerate(operations):
+            if name == 'execute' and args[0] == diagnostic.PRESENTATION_SETUP:
+                self.assertEqual(operations[index + 1][0], 'screenshot')
+            if name == 'execute' and args[0] == diagnostic.PRESENTATION_PAINT:
+                self.assertEqual(args[1:], (0,))
+                self.assertEqual(operations[index + 1][0], 'screenshot')
+                self.assertEqual(operations[index + 2], ('execute', (diagnostic.PRESENTATION_READ,)))
+        starts = [call.args[1:] for call in client.execute.call_args_list
+                  if call.args[0] == diagnostic.PRESENTATION_START]
+        self.assertEqual(starts, [(64, 64, 'fresh', False), (64, 64, 'fresh', True)] * 3)
+        executes = [call.args[0] for call in client.execute.call_args_list]
+        self.assertEqual(executes.count(diagnostic.PRESENTATION_CLEAR), 6)
+        self.assertEqual(executes.count(diagnostic.PRESENTATION_CLEANUP), 3)
+        self.assertEqual(executes[-1], diagnostic.WEBGL)
+        self.assertEqual(len([call for call in client.call.call_args_list
+                              if call.args[0] == 'WebDriver:SetWindowRect']), 4)
+
+    def test_geometry_capture_failure_retains_evidence_and_restores(self):
+        client = Mock()
+        client.execute.return_value = {'paint': 'retained'}
+        client.call.return_value = {'value': {}}
+        captures = 0
+        def screenshot(_path):
+            nonlocal captures
+            captures += 1
+            if captures == 5:
+                raise RuntimeError('Middle-stage screenshot failed')
+        client.screenshot.side_effect = screenshot
+        record = {}
+        with tempfile.TemporaryDirectory() as temp:
+            diagnostic.observe_window_geometry(client, 'http://127.0.0.1/', Path(temp), record,
+                                               lambda: None, time.monotonic() + 10)
+        comparison = record['geometryComparison']
+        self.assertEqual(comparison['status'], 'incomplete')
+        self.assertTrue(comparison['restoreRequestCompleted'])
+        self.assertEqual([stage['status'] for stage in comparison['stages']],
+                         ['observed', 'incomplete', 'observed'])
+        failed = comparison['stages'][1]['presentation']['cases'][0]
+        self.assertEqual(failed['palettes'][0]['paint'], {'paint': 'retained'})
+        self.assertEqual(failed['error']['message'], 'Middle-stage screenshot failed')
+        executes = [call.args[0] for call in client.execute.call_args_list]
+        self.assertEqual(executes.count(diagnostic.PRESENTATION_CLEAR), 6)
+        self.assertEqual(executes.count(diagnostic.PRESENTATION_CLEANUP), 3)
+
+    def test_geometry_failed_final_resize_has_one_bounded_restoration_attempt(self):
+        for restore_fails in (False, True):
+            with self.subTest(restore_fails=restore_fails):
+                client, record = Mock(), {}
+                client.execute.return_value = {}
+                sizes = []
+                def call(name, data=None):
+                    if name == 'WebDriver:SetWindowRect':
+                        sizes.append(data)
+                        if len(sizes) == 3 or (restore_fails and len(sizes) == 4):
+                            raise RuntimeError('Resize unavailable')
+                        return {'x': 0, 'y': 31, **data}
+                    return {'value': {}}
+                client.call.side_effect = call
+                with tempfile.TemporaryDirectory() as temp:
+                    diagnostic.observe_window_geometry(client, 'http://127.0.0.1/', Path(temp), record,
+                                                       lambda: None, time.monotonic() + 10)
+                comparison = record['geometryComparison']
+                self.assertEqual(comparison['status'], 'incomplete')
+                self.assertEqual(len(sizes), 4)
+                self.assertEqual(sizes[-1], {'width': 1440, 'height': 1000})
+                self.assertEqual(comparison['restoreRequestCompleted'], not restore_fails)
+                self.assertEqual('error' in comparison['restoration'], restore_fails)
+                self.assertEqual(comparison['stages'][-1]['error']['message'], 'Resize unavailable')
+
+    def test_expired_geometry_budget_performs_no_browser_operations(self):
+        client, record = Mock(), {}
+        with tempfile.TemporaryDirectory() as temp:
+            diagnostic.observe_window_geometry(client, 'http://127.0.0.1/', Path(temp), record,
+                                               lambda: None, time.monotonic() - 1)
+        self.assertEqual(client.mock_calls, [])
+        comparison = record['geometryComparison']
+        self.assertEqual(comparison['status'], 'incomplete')
+        self.assertFalse(comparison['restoreRequestCompleted'])
+        self.assertEqual(comparison['restoration']['error']['name'], 'TimeoutError')
+
     def test_presentation_native_pixels_resize_and_cleanup(self):
         script = r"""
 const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');

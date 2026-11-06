@@ -430,7 +430,7 @@ def observe_extended_page(client, url, record, save, deadline):
         save()
 
 
-def observe_presentation(client, url, output, record, save, deadline):
+def observe_presentation(client, url, output, record, save, deadline, *, compact=False, prefix='presentation'):
     page = record['presentation'] = {'url': url, 'status': 'running', 'cases': []}
     save()
     try:
@@ -438,11 +438,11 @@ def observe_presentation(client, url, output, record, save, deadline):
         client.call('WebDriver:Navigate', {'url': url})
         page['initialDOM'] = client.execute(PRESENTATION_SETUP)
         remaining(deadline)
-        client.screenshot(output / 'presentation-dom-before-canvas.png')
-        page['initialDOMScreenshot'] = 'presentation-dom-before-canvas.png'
+        client.screenshot(output / f'{prefix}-dom-before-canvas.png')
+        page['initialDOMScreenshot'] = f'{prefix}-dom-before-canvas.png'
         save()
-        for width, height in ((64, 64), (934, 772)):
-            for resize in ('fresh', 'planner'):
+        for width, height in (((64, 64),) if compact else ((64, 64), (934, 772))):
+            for resize in (('fresh',) if compact else ('fresh', 'planner')):
                 for cpu in (False, True):
                     name = f'{width}x{height}-{resize}-{"cpu" if cpu else "default"}'
                     case = {'name': name, 'status': 'running', 'palettes': []}
@@ -450,14 +450,14 @@ def observe_presentation(client, url, output, record, save, deadline):
                     try:
                         remaining(deadline)
                         case['setup'] = client.execute(PRESENTATION_START, width, height, resize, cpu)
-                        for index, palette in enumerate(('primary', 'changed')):
+                        for index, palette in enumerate(('primary',) if compact else ('primary', 'changed')):
                             remaining(deadline)
                             observation = {'palette': palette, 'captureOrder': [
                                 'opaque-paint', 'native-screenshot', 'native-copy', 'two-rAF-native-copy']}
                             case['palettes'].append(observation)
                             observation['paint'] = client.execute(PRESENTATION_PAINT, index)
                             remaining(deadline)
-                            screenshot = f'presentation-{name}-{palette}.png'
+                            screenshot = f'{prefix}-{name}-{palette}.png'
                             client.screenshot(output / screenshot)
                             observation['screenshot'] = screenshot
                             remaining(deadline)
@@ -489,13 +489,55 @@ def observe_presentation(client, url, output, record, save, deadline):
         save()
 
 
-def run(output, driver_path, prepare=False, presentation_only=False):
+def observe_window_geometry(client, url, output, record, save, deadline):
+    """Compare three window sizes without changing canvas or renderer settings."""
+    comparison = record['geometryComparison'] = {'status': 'running', 'stages': []}
+    restore = {'width': 1440, 'height': 1000}
+    restored = False
+    try:
+        for name, width, height in (('baseline', 1440, 1000), ('inside-screen', 960, 640), ('restored', 1440, 1000)):
+            stage = {'name': name, 'status': 'running', 'requestedWindowRect': {'width': width, 'height': height}}
+            comparison['stages'].append(stage)
+            save()
+            try:
+                remaining(deadline)
+                # A failed mutation can have taken effect. Only a successful
+                # final request proves that no additional restoration is needed.
+                restored = False
+                stage['actualWindowRect'] = client.call('WebDriver:SetWindowRect', stage['requestedWindowRect'])
+                restored = name == 'restored'
+                save()
+                observe_presentation(client, url, output, stage, save, deadline,
+                                     compact=True, prefix=f'geometry-{name}')
+                page = stage['presentation']
+                stage['status'] = 'observed' if page['status'] == 'observed' and 'cleanupError' not in page else 'incomplete'
+            except Exception as error:
+                stage.update(status='incomplete', error=error_record(error))
+            finally:
+                save()
+        comparison['status'] = 'observed' if all(stage['status'] == 'observed' for stage in comparison['stages']) else 'incomplete'
+    finally:
+        if not restored:
+            comparison['restoration'] = {'requestedWindowRect': restore}
+            try:
+                remaining(deadline)
+                comparison['restoration']['actualWindowRect'] = client.call('WebDriver:SetWindowRect', restore)
+                restored = True
+            except Exception as error:
+                comparison['restoration']['error'] = error_record(error)
+                comparison['status'] = 'incomplete'
+        comparison['restoreRequestCompleted'] = restored
+        save()
+
+
+def run(output, driver_path, prepare=False, presentation_only=False, window_geometry_comparison=False):
     output.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     deadline = started + BUDGET_SECONDS
     record = {'schema': 1, 'purpose': 'diagnostic-only', 'acceptanceEvidence': False,
               'status': 'running', 'budgetMs': BUDGET_SECONDS * 1000,
               'presentationOnly': presentation_only,
+              'windowGeometryComparison': window_geometry_comparison,
               'sourceRevision': os.environ.get('GITHUB_SHA'), 'pages': [], 'extendedPages': [], 'cleanupErrors': [],
               'host': {'platform': sys.platform, 'release': platform.release(),
                        'machine': platform.machine(), 'cpuCount': os.cpu_count(),
@@ -545,17 +587,21 @@ def run(output, driver_path, prepare=False, presentation_only=False):
             record['windowRect'] = client.call('WebDriver:SetWindowRect', {'width': 1440, 'height': 1000})
             record['windowFocus'] = client.select_current_window()
             urls = ('about:blank', f'http://127.0.0.1:{server.server_port}/')
-            if not presentation_only:
-                for url in urls:
-                    observe_page(client, url, record, save, deadline)
-                for url in urls:
-                    observe_extended_page(client, url, record, save, deadline)
-            observe_presentation(client, urls[1], output, record, save, deadline)
+            if window_geometry_comparison:
+                observe_window_geometry(client, urls[1], output, record, save, deadline)
+                observations = [record['geometryComparison']]
+            else:
+                if not presentation_only:
+                    for url in urls:
+                        observe_page(client, url, record, save, deadline)
+                    for url in urls:
+                        observe_extended_page(client, url, record, save, deadline)
+                observe_presentation(client, urls[1], output, record, save, deadline)
+                observations = record['pages'] + record['extendedPages'] + [record['presentation']]
             remaining(deadline)
             record['webgl2'] = client.execute(WEBGL)
             save()
             remaining(deadline)
-            observations = record['pages'] + record['extendedPages'] + [record['presentation']]
             record['status'] = 'observed' if all(page['status'] == 'observed' and 'cleanupError' not in page for page in observations) else 'incomplete'
     except Exception as error:
         record.update(status='incomplete', error=error_record(error))
@@ -593,10 +639,14 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--driver', default='/usr/bin/safaridriver')
     parser.add_argument('--prepare-hosted-safari', action='store_true')
-    parser.add_argument('--presentation-only', action='store_true',
-                        help='Skip earlier small-canvas/encoding matrices; observe DOM and realistic surfaces before final WebGL identity')
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--presentation-only', action='store_true',
+                       help='Skip earlier small-canvas/encoding matrices; observe DOM and realistic surfaces before final WebGL identity')
+    modes.add_argument('--window-geometry-comparison', action='store_true',
+                       help='Compare DOM and 64x64 default/CPU canvases at large, inside-screen, and restored window sizes')
     args = parser.parse_args()
-    result = run(args.output.resolve(), args.driver, args.prepare_hosted_safari, args.presentation_only)
+    result = run(args.output.resolve(), args.driver, args.prepare_hosted_safari, args.presentation_only,
+                 args.window_geometry_comparison)
     print(f'Native Safari diagnostic: {result["status"]}; never acceptance evidence', flush=True)
     return int(result['status'] != 'observed')
 
