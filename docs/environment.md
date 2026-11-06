@@ -86,7 +86,8 @@ In demo mode the layer uses fourteen shared `InstancedMesh` batches and nine phy
 families. Trees have attached leaves and branches, cars have a continuous painted
 shell and distinct glazing, rubber tyres and metal hubs, and rabbits use the
 catalog's authored anatomy. The standard 8 m × 6 m test scene submits 64,860 triangles
-at rest and 13,272 during navigation, with the same fourteen batches. The optional
+at rest and 13,272 during navigation in the main render pass, with the same fourteen
+batches. Shadow passes retain full detail. The optional
 presentation base adds one batch and twelve triangles.
 Materials receive the host's existing lights and optional shared physical detail
 through `decorateMaterial(material, family)`. Geometry casts and receives shadows
