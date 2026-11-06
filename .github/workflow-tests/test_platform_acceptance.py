@@ -100,7 +100,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
         expected = {
             'browser': ('acceptance-${{ matrix.os }}-${{ matrix.id }}', 'acceptance-artifacts/'),
             'native-browser': ('acceptance-${{ matrix.os }}-${{ matrix.id }}', '${{ env.NATIVE_BROWSER_DIAGNOSTICS_DIR }}'),
-            'safari': ('acceptance-macos-26-safari', 'acceptance-artifacts/safari/'),
+            'safari': ('acceptance-macos-15-safari', 'acceptance-artifacts/safari/'),
         }
         for name, job in jobs.items():
             self.assertNotIn('continue-on-error', job)
@@ -117,7 +117,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
                                                      'if-no-files-found': 'error', 'retention-days': '14'})
         rows = inventory()
         names = [f"acceptance-{row['os']}-{row['id']}" for group in rows.values() for row in group['include']]
-        names.append('acceptance-macos-26-safari')
+        names.append('acceptance-macos-15-safari')
         self.assertEqual(len(names), 74)
         self.assertEqual(len(set(names)), len(names))
         spec = importlib.util.spec_from_file_location('upload_inventory', ROOT / 'scripts/validate-site.py')
@@ -127,7 +127,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
 
     def assert_package_setup_budget(self, package):
         jobs = package['jobs']
-        self.assertEqual(set(jobs), {'package', 'platforms', 'native-core', 'closed-contracts'})
+        self.assertEqual(set(jobs), {'package', 'platforms', 'native-core', 'closed-contracts', 'i18n'})
         self.assertEqual(jobs['platforms'], {'uses': './.github/workflows/platform-acceptance.yml'})
         job = jobs['package']
         self.assertEqual(job['timeout-minutes'], '45')
@@ -144,7 +144,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
             'npm ci --ignore-scripts --no-audit --no-fund',
             'npx playwright install --with-deps chromium firefox webkit',
         ])
-        for command in ('npm run test:planner', 'node scripts/test-i18n-browser.cjs',
+        for command in ('npm run test:planner',
                         'node scripts/test-help-i18n.cjs', 'node scripts/test-viewer-i18n.cjs',
                         'node scripts/test-lock-control.cjs'):
             matches = [step for step in steps if command in step.get('run', '').splitlines()]
@@ -155,6 +155,74 @@ class PlatformAcceptanceTests(unittest.TestCase):
 
     def test_package_browser_setup_has_separate_bounded_envelope(self):
         self.assert_package_setup_budget(workflow('package.yml'))
+
+    def assert_isolated_i18n(self, package):
+        self.assertEqual(set(package['on']), {'workflow_call'})
+        job = package['jobs']['i18n']
+        self.assertEqual(job['runs-on'], 'ubuntu-latest')
+        self.assertEqual(job['timeout-minutes'], '15')
+        for key in ('if', 'continue-on-error', 'needs', 'strategy', 'container'):
+            self.assertNotIn(key, job)
+        steps = job['steps']
+        self.assertEqual(len(steps), 4)
+        self.assertEqual(steps[0]['uses'], 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1')
+        self.assertEqual(steps[0]['with'], {'persist-credentials': 'false'})
+        self.assertEqual(steps[1]['uses'], 'actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1')
+        self.assertEqual(steps[1]['with'], {'node-version': '22'})
+        self.assertEqual(steps[2]['timeout-minutes'], '8')
+        self.assertEqual(steps[2]['run'].splitlines(), [
+            'python3 scripts/prepare-ubuntu-apt.py',
+            'npm ci --ignore-scripts --no-audit --no-fund',
+            'npx playwright install --with-deps chromium',
+        ])
+        self.assertEqual(steps[3]['timeout-minutes'], '6')
+        self.assertEqual(steps[3]['env'], {'DEBUG': 'pw:browser'})
+        self.assertEqual(steps[3]['run'], 'node scripts/test-i18n-browser.cjs')
+        for step in steps:
+            self.assertNotIn('if', step)
+            self.assertNotIn('continue-on-error', step)
+        calls = [(name, step['run']) for name, candidate in package['jobs'].items()
+                 for step in candidate.get('steps', [])
+                 if 'test-i18n-browser.cjs' in step.get('run', '')]
+        self.assertEqual(calls, [('i18n', 'node scripts/test-i18n-browser.cjs')])
+
+    def test_i18n_has_one_required_fresh_runner_and_unchanged_command(self):
+        self.assert_isolated_i18n(workflow('package.yml'))
+        quality = workflow('quality-gate.yml')['jobs']
+        self.assertEqual(quality['check-0']['uses'], './.github/workflows/package.yml')
+        self.assertNotIn('continue-on-error', quality['check-0'])
+        self.assertIn('check-0', quality['gate']['needs'])
+        gate = next(step['run'] for step in quality['gate']['steps']
+                    if step.get('name') == 'Require every validation workflow')
+        self.assertIn("'check-0'", gate)
+        self.assertIn("if value['result'] != wanted:", gate)
+        self.assertIn("raise SystemExit(f'Validation did not pass: {failed}')", gate)
+
+    def test_i18n_contract_rejects_skips_retries_weaker_commands_and_duplicate_execution(self):
+        original = workflow('package.yml')
+        mutations = (
+            ('job', 'if', 'false'), ('job', 'continue-on-error', 'true'),
+            ('job', 'needs', ['package']), ('job', 'timeout-minutes', '30'),
+            ('job', 'runs-on', 'self-hosted'),
+            ('setup', 'run', 'npx playwright install chromium'),
+            ('setup', 'timeout-minutes', '20'),
+            ('test', 'if', 'false'), ('test', 'continue-on-error', 'true'),
+            ('test', 'timeout-minutes', '20'),
+            ('test', 'run', 'node scripts/test-i18n-browser.cjs || true'),
+            ('test', 'run', 'node scripts/test-i18n-browser.cjs || node scripts/test-i18n-browser.cjs'),
+        )
+        for target, key, value in mutations:
+            with self.subTest(target=target, key=key, value=value):
+                changed = copy.deepcopy(original)
+                job = changed['jobs']['i18n']
+                selected = job if target == 'job' else job['steps'][2 if target == 'setup' else 3]
+                selected[key] = value
+                with self.assertRaises(AssertionError):
+                    self.assert_isolated_i18n(changed)
+        duplicate = copy.deepcopy(original)
+        duplicate['jobs']['package']['steps'].append({'run': 'node scripts/test-i18n-browser.cjs'})
+        with self.assertRaises(AssertionError):
+            self.assert_isolated_i18n(duplicate)
 
     def test_native_core_uses_pinned_runtime_and_required_bounded_job(self):
         job = workflow('package.yml')['jobs']['native-core']
@@ -653,7 +721,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
 
     def test_safari_uses_the_actual_macos_browser(self):
         job = workflow('platform-acceptance.yml')['jobs']['safari']
-        self.assertEqual(job['runs-on'], 'macos-26')
+        self.assertEqual(job['runs-on'], 'macos-15')
         runs = '\n'.join(step.get('run', '') for step in job['steps'])
         self.assertIn('sudo /usr/bin/safaridriver --enable', runs)
         self.assertIn('scripts/test-safari-tooling.py', runs)
@@ -663,9 +731,16 @@ class PlatformAcceptanceTests(unittest.TestCase):
         observation = workflow('safari-macos15-observation.yml')
         self.assertEqual(set(observation['on']), {'workflow_dispatch', 'schedule'})
         self.assertEqual(observation['on']['schedule'], [{'cron': '37 4 * * 2'}])
+        inputs = observation['on']['workflow_dispatch']['inputs']
+        self.assertEqual(set(inputs), {'runner', 'canvas_diagnostic'})
+        self.assertEqual(inputs['runner']['type'], 'choice')
+        self.assertEqual(inputs['runner']['options'], ['macos-15', 'macos-26'])
+        self.assertEqual(inputs['runner']['default'], 'macos-15')
+        self.assertEqual(inputs['canvas_diagnostic']['type'], 'boolean')
+        self.assertEqual(inputs['canvas_diagnostic']['default'], 'false')
         self.assertEqual(observation['permissions'], {'contents': 'read'})
         job = observation['jobs']['safari']
-        self.assertEqual(job['runs-on'], 'macos-15')
+        self.assertEqual(job['runs-on'], "${{ inputs.runner || 'macos-15' }}")
         self.assertNotIn('continue-on-error', job)
         self.assertNotIn('if', job)
         self.assertEqual(int(job['timeout-minutes']), 25)
@@ -675,10 +750,27 @@ class PlatformAcceptanceTests(unittest.TestCase):
         self.assertIn('sudo /usr/bin/safaridriver --enable', runs)
         self.assertIn('scripts/test-safari-tooling.py', runs)
         self.assertIn('scripts/test-safari-acceptance.py --prepare-hosted-safari --output acceptance-artifacts/safari', runs)
+        tooling = [step for step in job['steps'] if 'scripts/test-safari-tooling.py' in step.get('run', '')]
+        self.assertEqual(len(tooling), 1)
+        self.assertNotIn('if', tooling[0])
+        acceptance = [step for step in job['steps'] if 'scripts/test-safari-acceptance.py' in step.get('run', '')]
+        diagnostic = [step for step in job['steps'] if 'scripts/diagnose-safari-canvas.py' in step.get('run', '')]
+        self.assertEqual(len(acceptance), 1)
+        self.assertEqual(len(diagnostic), 1)
+        self.assertEqual(acceptance[0]['if'], '${{ inputs.canvas_diagnostic != true }}')
+        self.assertEqual(diagnostic[0]['if'], '${{ inputs.canvas_diagnostic == true }}')
+        self.assertEqual(acceptance[0]['run'], 'python3 scripts/test-safari-acceptance.py --prepare-hosted-safari --output acceptance-artifacts/safari')
+        self.assertEqual(diagnostic[0]['run'].strip().splitlines(), [
+            'python3 scripts/test-safari-canvas-diagnostic.py',
+            'python3 scripts/diagnose-safari-canvas.py --prepare-hosted-safari --output acceptance-artifacts/safari',
+        ])
         upload = job['steps'][-1]
         self.assertEqual(upload['if'], '${{ always() }}')
         self.assertEqual(upload['uses'], './.github/actions/upload-acceptance-artifact')
-        self.assertEqual(upload['with']['name'], 'acceptance-macos-15-safari-observation')
+        self.assertEqual(upload['with']['name'], "safari-${{ inputs.runner || 'macos-15' }}-${{ inputs.canvas_diagnostic && 'canvas-diagnostic' || 'observation' }}")
+        self.assertEqual(upload['with']['path'], 'acceptance-artifacts/safari/')
+        self.assertEqual(upload['with']['if-no-files-found'], 'error')
+        self.assertEqual(upload['with']['retention-days'], '14')
 
     def test_macos_gecko_backends_are_scoped_to_the_supported_versions(self):
         jobs = workflow('platform-acceptance.yml')['jobs']

@@ -701,6 +701,7 @@ export default {
   "model.garden_bird": "Small garden bird",
   "Surroundings": "Surroundings",
   "Show garden surroundings": "Show garden surroundings",
+  "Show presentation base": "প্রদর্শনের ভিত্তি দেখান",
   "Decorative motion": "Decorative motion",
   "Garden palette": "Garden palette",
   "Sage garden": "Sage garden",

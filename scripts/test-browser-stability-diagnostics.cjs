@@ -1575,7 +1575,7 @@ function freshPreviewHarness(view = 'preview') {
     applyMaterialPBR(){},installInstanceMaterialUV(){},
     planColors:{background:'#f2f4ed'},
     // This renderer-lifecycle fixture has no scenery; preserve its optional layer contract.
-    createEnvironmentControls:()=>({refresh(){}}),createEnvironmentLayer:()=>({setActive(){},dispose(){}}),
+    createEnvironmentControls:()=>({refresh(){}}),createEnvironmentLayer:()=>({setActive(){},noteNavigation(){},dispose(){}}),
     t:value=>value,floorBounds:()=>({minX:0,maxX:8,minZ:0,maxZ:10}),
     THREE:{WebGLRenderer:Renderer,Scene:Group,Group,Vector3:class {constructor(x,y,z){Object.assign(this,vector(),{x,y,z});}},HemisphereLight:Light,DirectionalLight:Light,
       PerspectiveCamera:class {constructor(){this.position=vector();}lookAt(){}updateProjectionMatrix(){} }},

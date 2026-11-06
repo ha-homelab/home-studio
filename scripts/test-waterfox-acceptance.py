@@ -666,9 +666,19 @@ PLANNER_2D_PIXELS = r"""
 const canvas=document.getElementById('plan-canvas'),width=canvas?.width,height=canvas?.height;
 if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||width*height>4000000)
   return {status:'outside-readback-bound',width:width??null,height:height??null};
+let scratch;
 try {
   const resizeSequence=window.__plannerPlanState().resizeSequence;
-  const pixels=canvas.getContext('2d').getImageData(0,0,width,height).data,colors=new Set();
+  // Read the actual application bitmap without changing its drawing context.
+  scratch=document.createElement('canvas');scratch.width=width;scratch.height=height;
+  const context=scratch.getContext('2d',{willReadFrequently:true});
+  if(!context)throw Error('Native readback context unavailable');
+  CanvasRenderingContext2D.prototype.drawImage.call(context,canvas,0,0);
+  const pixels=CanvasRenderingContext2D.prototype.getImageData.call(context,0,0,width,height).data,colors=new Set();
+  const current=window.__plannerPlanState();
+  if(document.getElementById('plan-canvas')!==canvas||!canvas.isConnected||
+     canvas.width!==width||canvas.height!==height||current.resizeSequence!==resizeSequence)
+    throw Error('Planner bitmap changed during native copy');
   if(pixels.length!==width*height*4)throw Error('Incomplete canvas readback');
   let scanned=0,visible=0;
   for(let i=0;i<pixels.length;i+=4) {
@@ -676,12 +686,14 @@ try {
     scanned++;
     if(colors.size>=257)break;
   }
-  return {status:'pixels-read',width,height,resizeSequence,time:performance.now(),
+  return {status:'pixels-read',readbackMethod:'native-canvas-copy',width,height,resizeSequence,time:performance.now(),
     readbackBytes:pixels.length,pixelCount:width*height,scannedPixels:scanned,visiblePixelsScanned:visible,
     distinctVisibleRGBColorsAtLeast:colors.size,complete:scanned===width*height,visibleRGBSample:[...colors].slice(0,8)};
 } catch(error) {
   return {status:'readback-failed',width,height,name:String(error?.name||'').slice(0,128),
     message:String(error?.message||error).slice(0,2048),stack:String(error?.stack||'').slice(0,4096)};
+} finally {
+  if(scratch){scratch.width=0;scratch.height=0;}
 }
 """
 
@@ -701,6 +713,7 @@ def assert_planner_painted(snapshot):
 
 def assert_planner_pixels(pixels, snapshot):
     require(pixels['status'] == 'pixels-read', 'Planner 2D readback failed: ' + json.dumps(pixels))
+    require(pixels.get('readbackMethod') == 'native-canvas-copy', 'Planner 2D requires native bitmap copy evidence')
     require(pixels['readbackBytes'] == pixels['width'] * pixels['height'] * 4 and
             pixels['distinctVisibleRGBColorsAtLeast'] > 1,
             'Planner 2D bitmap must contain more than one visible RGB color')

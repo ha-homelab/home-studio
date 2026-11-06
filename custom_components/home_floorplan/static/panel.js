@@ -263,7 +263,7 @@ async function normalizeMediaArtwork(source, signal) {
     const canvas=document.createElement('canvas'),scale=Math.min(1,mediaArtworkLimits.edge/width,mediaArtworkLimits.edge/height);
     canvas.width=Math.max(1,Math.round(width*scale));canvas.height=Math.max(1,Math.round(height*scale));
     try {
-      const context=canvas.getContext('2d');
+      const context=canvas.getContext('2d',{willReadFrequently:true});
       if (!context) throw Error('Artwork canvas unavailable');
       context.fillStyle='#11191f';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(image,0,0,canvas.width,canvas.height);
       const result=canvas.toDataURL('image/jpeg',.8);

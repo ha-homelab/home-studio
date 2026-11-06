@@ -61,9 +61,8 @@ The walkthrough was recorded on [v0.10.1-beta.6](https://github.com/ha-homelab/h
 
 ## Prepare drawings and material schedules
 
-Available in current development builds; this section describes functionality
-that is not included in the 1.3.1 stable release. Updating the hosted editor does
-not update an installed Home Assistant integration.
+This functionality requires version 1.4.0 or later; it is not included in 1.3.1.
+Updating the hosted editor does not update an installed Home Assistant integration.
 
 Inside **Home Assistant → Home Studio**, choose **Drawings & materials** to
 record your measurements, describe finishes, and select ceiling fixtures. Build a
@@ -281,6 +280,11 @@ It is off by default, pauses when hidden or offscreen and for reduced-motion
 preferences, and represents no Home Assistant device or occupancy state.
 These surroundings settings last for the current page; the editable garden and
 placed objects are saved in your project. See the [garden guide](docs/environment.md).
+
+**Show presentation base** adds a shallow static plinth beneath these optional
+surroundings. Trees simplify during navigation and regain their detail when you
+stop, without a continuous render loop. Authored site and map context take
+precedence over generated scenery, including the presentation base.
 
 ![Fictional Garden Studio showing editable planting, pets, and optional geometric surroundings](docs/images/garden-surroundings.png)
 

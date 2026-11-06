@@ -1,9 +1,12 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.0] - Drawings, materials and device feedback
 
 ### Added
 
+- Optional static presentation base for garden surroundings, with translated
+  controls in the planner and Home view. It leaves saved dimensions and exports
+  unchanged and stays disabled for authored site or map contexts.
 - Drawings and materials: dimensioned floor plans, ceiling-fixture sheets,
   interior wall elevations, material schedules, and SVG/CSV/printable HTML
   export. Measurement records preserve source notes and flag changed geometry.
@@ -18,6 +21,12 @@
 
 ### Fixed
 
+- Keep the 2D plan, furniture thumbnails, photo preparation and media artwork
+  working in Safari when accelerated canvas drawing, readback or image encoding
+  is unavailable.
+- Reduce decorative tree detail during camera navigation using existing GPU
+  buffers, then restore it after input settles. Static surroundings remain idle;
+  hidden views cancel pending restoration and shadow detail remains stable.
 - Interior elevations and room-label placement no longer depend on polygon
   winding or the chosen first vertex. Partial-room exports report excluded
   interior partition surfaces and retain their in-scope opening schedules.
@@ -29,6 +38,48 @@
 - Check the combined geometry of all edited floors before publishing an imported
   home. Oversized additions leave the saved draft and published home available;
   unchanged imported geometry is not rebuilt or charged as new geometry.
+
+### Upgrade
+
+- To update to 1.4.0, back up Home Assistant and export your original project JSON.
+  Update through HACS or install `home_floorplan.zip` from the matching
+  [release](https://github.com/ha-homelab/home-studio/releases), restart Home Assistant,
+  and reload the browser. Existing drawings without documentation metadata remain valid.
+- The hosted editor and installed HA integration update separately and keep
+  separate drafts. Opening the hosted editor does not upgrade HA or transfer a
+  project. Use JSON export/import to move drawings between compatible versions.
+- For the portable workflow, use the matching `home-studio-VERSION.zip` release
+  asset. Existing generated homes need a matching rebuild to receive updated
+  embedded viewer features; updating the hosted editor alone is insufficient.
+
+### Compatibility
+
+- Hosted Safari 27.2 3D presentation remains unqualified: internal checks passed
+  but captured viewer and preview geometry was blank. A bounded manual Safari
+  27.0/macOS 26.7.1 check displayed and rotated the practice home; it does not
+  replace automated or 256-item acceptance. The prospective beta host change
+  preserves every assertion and budget and does not authorize stable promotion.
+  See [platform acceptance](docs/platform-acceptance.md) for the exact scope.
+- Drawings can include optional `documentation` metadata for measurement sources,
+  notes, finishes, and selected ceiling fixtures. Older strict editors or compilers
+  may reject this field. Keep your original JSON backup as well as the documented
+  project, and use compatible tools rather than removing metadata to force an import.
+- Older wall measurement records remain readable but require an explicit recheck
+  because they do not include the wall's opening set. Review the current dimensions
+  and choose **Record current dimensions** again. A geometry change never silently
+  verifies a measurement.
+- **Save documentation** updates the editor's undoable project state. Use the
+  normal editor save controls to persist it in HA. Downloaded sheets and schedules
+  are snapshots and must be regenerated after changes.
+
+### Security
+
+- Exported drawings and schedules can disclose room names, dimensions and material
+  descriptions. Review them before sharing publicly; they are generated from the
+  current project and are not anonymized automatically.
+- The embedded editor retains its sandbox and validates message origin, source,
+  protocol and channel. The drawing-dialog viewport bridge carries bounded layout
+  coordinates, without sharing HA credentials or granting access to the parent page.
 
 ## [1.3.1] - Bounded viewer loading
 

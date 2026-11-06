@@ -701,6 +701,7 @@ export default {
   "model.garden_bird": "Маленькая садовая птица",
   "Surroundings": "Окружение",
   "Show garden surroundings": "Показать сад вокруг дома",
+  "Show presentation base": "Показать подставку макета",
   "Decorative motion": "Декоративное движение",
   "Garden palette": "Палитра сада",
   "Sage garden": "Шалфейный сад",

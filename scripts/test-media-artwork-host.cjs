@@ -21,7 +21,7 @@ function response(bytes=png(),mime='image/png',headers={}){
   return new Response(bytes,{status:200,headers:{'content-type':mime,...headers}});
 }
 function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
-function fixture({fetch,decode=false,output='data:image/jpeg;base64,AQID',imageWidth=1200,imageHeight=800}={}){
+function fixture({fetch,decode=false,output='data:image/jpeg;base64,AQID',imageWidth=1200,imageHeight=800,encodeError=null}={}){
   let Panel,nextTimer=0;const messages=[],calls=[],timers=new Map(),urls=[],images=[],canvases=[];
   class Image {
     constructor(){this.naturalWidth=imageWidth;this.naturalHeight=imageHeight;images.push(this);}
@@ -29,7 +29,15 @@ function fixture({fetch,decode=false,output='data:image/jpeg;base64,AQID',imageW
     removeAttribute(){this.url=null;}
   }
   const document={hidden:false,removeEventListener(){},createElement(type){assert.equal(type,'canvas');
-    const canvas={width:0,height:0,getContext(){return {fillRect(){},drawImage(image,x,y,width,height){canvas.drawn={width,height};}};},toDataURL(mime,quality){assert.equal(mime,'image/jpeg');assert.equal(quality,.8);return output;}};
+    const canvas={width:0,height:0,getContext(kind,options){
+      assert.equal(kind,'2d');canvas.contextOptions=plain(options);
+      return {fillRect(x,y,width,height){canvas.fill={color:this.fillStyle,x,y,width,height};},drawImage(image,x,y,width,height){canvas.drawn={width,height};}};
+    },toDataURL(mime,quality){
+      assert.equal(mime,'image/jpeg');assert.equal(quality,.8);
+      if(!canvas.contextOptions.willReadFrequently)throw new DOMException('Unreadable encoder surface','InvalidStateError');
+      if(encodeError)throw encodeError;
+      return output;
+    }};
     canvases.push(canvas);return canvas;}};
   const context=vm.createContext({HTMLElement:class{},customElements:{get(){},define(name,value){Panel=value;}},
     AbortController,Blob,Response,Uint8Array,DataView,URL:{createObjectURL(){const url='blob:private-'+urls.length;urls.push({url,revoked:false});return url;},revokeObjectURL(url){urls.find(row=>row.url===url).revoked=true;}},
@@ -55,6 +63,9 @@ test('fetch uses only canonical authenticated proxy and sends a bounded JPEG wit
   assert.deepEqual(entry,{entity_id:'media_player.study',identity:'artwork-1',image:'data:image/jpeg;base64,AQID'});
   assert.doesNotMatch(JSON.stringify(f.messages),/PRIVATE|untrusted|First track/);
   assert.deepEqual(f.canvases[0].drawn,{width:512,height:341});assert.equal(f.canvases[0].width,0);
+  assert.deepEqual(f.canvases[0].contextOptions,{willReadFrequently:true});
+  assert.deepEqual(f.canvases[0].fill,{color:'#11191f',x:0,y:0,width:512,height:341});
+  assert.equal(f.canvases[0].height,0);
   assert.ok(f.urls.every(url=>url.revoked));assert.equal(f.timers.size,0);assert.equal(f.panel.mediaArtworkRequests,0);
 });
 
@@ -262,9 +273,11 @@ test('raster headers reject huge dimensions, animated PNG/WebP, GIF, SVG and mal
     [Buffer.from('<svg/>'),'image/svg+xml'],[Buffer.from('GIF89a'),'image/gif'],[Buffer.from([255,216,255,192]),'image/jpeg'],[png().subarray(0,40),'image/png']])assert.throws(()=>f.dimensions(bytes,mime));
 });
 
-test('invalid decoder dimensions and oversized normalized output never reach the sandbox',async()=>{
-  for(const options of [{imageWidth:50000},{output:'data:image/jpeg;base64,'+'A'.repeat(250000)}]){
+test('invalid dimensions, oversized output and encoder failures never reach the sandbox',async()=>{
+  for(const options of [{imageWidth:50000},{output:'data:image/jpeg;base64,'+'A'.repeat(250000)},
+    {encodeError:new DOMException('Encoder failed','InvalidStateError')}]){
     const f=fixture(options);f.panel.refreshMediaArtwork();await flush();assert.deepEqual(f.messages.at(-1).artwork,{});assert.ok(f.urls.every(url=>url.revoked));
+    for(const canvas of f.canvases){assert.equal(canvas.width,0);assert.equal(canvas.height,0);}
   }
 });
 

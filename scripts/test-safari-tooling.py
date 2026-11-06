@@ -291,16 +291,19 @@ class SessionStartupTests(unittest.TestCase):
                             return 'owned-window'
                         if route.endswith('/execute/sync'):
                             if data['script'] == safari.GRAPHICS_PREPARATION:
-                                return {'status':'pixels-read', 'readbackBytes':16384, 'matchedPixels':4096}
+                                return {'status':'pixels-read', 'readbackMethod':'native-canvas-copy', 'readbackBytes':16384, 'matchedPixels':4096}
                             return {'documentFocused': True, 'visibilityState': 'visible'}
                         return None
                     driver = Mock(); driver.poll.return_value = None
+                    fixture_info = {'origin':'http://fixture', 'sourceHash':'fixed',
+                                    'sourceHashScope':'instrumented-planner-editor',
+                                    'sourceFiles':{'planner/editor.js':'a' * 64}}
                     with contextlib.ExitStack() as stack:
                         stack.enter_context(patch.object(safari.sys, 'platform', 'darwin'))
                         stack.enter_context(patch.object(safari.time, 'monotonic', side_effect=lambda: now[0]))
                         stack.enter_context(patch.object(safari.subprocess, 'check_output', return_value='Safari test'))
                         stack.enter_context(patch.object(safari.subprocess, 'Popen', return_value=driver))
-                        stack.enter_context(patch.object(safari, 'fixture_server', return_value=(Mock(), {'origin':'http://fixture', 'sourceHash':'fixed'}, {})))
+                        stack.enter_context(patch.object(safari, 'fixture_server', return_value=(Mock(), fixture_info, {})))
                         stack.enter_context(patch.object(safari, 'SafariWebDriver', return_value=client))
                         stack.enter_context(patch.object(client, 'request', side_effect=request))
                         stack.enter_context(patch.object(safari.native, 'stop'))
@@ -327,7 +330,11 @@ class SessionStartupTests(unittest.TestCase):
                     else:
                         self.assertEqual(record['samples'], [])
                     self.assertIn(('DELETE', '/session/owned', 30, None), calls)
-                    self.assertEqual(json.loads((Path(temp) / 'report.json').read_text())['status'], record['status'])
+                    persisted = json.loads((Path(temp) / 'report.json').read_text())
+                    self.assertEqual(persisted['status'], record['status'])
+                    for key in ('sourceHash', 'sourceHashScope', 'sourceFiles'):
+                        self.assertEqual(record[key], fixture_info[key])
+                        self.assertEqual(persisted[key], fixture_info[key])
 
     def test_unfocused_blank_page_reaches_application_and_keeps_application_failures(self):
         for name in ('viewer-6', 'planner-256'):
@@ -343,7 +350,7 @@ class SessionStartupTests(unittest.TestCase):
                             return 'owned-window'
                         if route.endswith('/execute/sync'):
                             if data['script'] == safari.GRAPHICS_PREPARATION:
-                                return {'status':'pixels-read', 'readbackBytes':16384, 'matchedPixels':4096}
+                                return {'status':'pixels-read', 'readbackMethod':'native-canvas-copy', 'readbackBytes':16384, 'matchedPixels':4096}
                             return {'documentFocused': False, 'visibilityState': 'visible'}
                         return None
                     def application(selected_client, origin, _project, _record, _save):
@@ -589,33 +596,64 @@ class HostedPreparationTests(unittest.TestCase):
 
 
 class GraphicsPreparationTests(unittest.TestCase):
+    def test_preparation_requires_complete_copy_evidence(self):
+        valid = {'status':'pixels-read', 'readbackMethod':'native-canvas-copy',
+                 'readbackBytes':16384, 'matchedPixels':4096}
+        for change in ({'readbackMethod':None}, {'readbackMethod':'direct'},
+                       {'readbackBytes':16383}, {'matchedPixels':4095},
+                       {'status':'readback-failed'}):
+            with self.subTest(change=change):
+                result = {**valid, **change}
+                client = Mock(); client.execute.return_value = result
+                record = {}
+                with self.assertRaisesRegex(AssertionError, 'native canvas preparation failed'):
+                    safari.prepare_graphics(client, record, lambda: None)
+                self.assertEqual(record['graphicsPreparation'], result)
+                client.execute.assert_called_once_with(safari.GRAPHICS_PREPARATION)
+
     def test_exact_native_readback_once_and_original_exception(self):
         javascript = r"""
 const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
 const script=fs.readFileSync(0,'utf8');
-for(const mode of ['good','wrong-pixel','short-read','native-error']) {
-  let reads=0;const fills=[],data=new Uint8ClampedArray(64*64*4),canvas={};
+for(const mode of ['good','wrong-pixel','short-read','native-error','copy-error','missing-context','no-copy']) {
+  let reads=0,copies=0,creates=0,removed=0;const fills=[],data=new Uint8ClampedArray(64*64*4),canvas={remove(){removed++;}},scratch={};
   const context={fillStyle:'',fillRect(x,y,w,h){
     fills.push([x,y,w,h]);const rgb=this.fillStyle.match(/\d+/g).map(Number);
     for(let row=y;row<y+h;row++)for(let col=x;col<x+w;col++)data.set([...rgb,255],(row*64+col)*4);
   }};
-  canvas.getContext=(kind,options)=>{assert.equal(kind,'2d');assert.equal(options.alpha,false);return context;};
+  const readback={data:new Uint8ClampedArray(64*64*4),
+    getImageData(){assert.fail('Use native readback');},drawImage(){assert.fail('Use native copy');}};
+  context.getImageData=()=>assert.fail('Never read the drawing context');
+  canvas.getContext=(kind,options)=>{assert.equal(kind,'2d');assert.equal(options.alpha,false);assert.equal(options.willReadFrequently,undefined);return context;};
+  scratch.getContext=(kind,options)=>{assert.equal(kind,'2d');assert.equal(options.willReadFrequently,true);assert.equal(options.alpha,undefined);return mode==='missing-context'?null:readback;};
   const failure=Object.assign(new Error('native backing-store failure'),{name:'InvalidStateError'});
-  const prototype={getImageData(...args){
-    reads++;assert.equal(this,context);assert.deepEqual(args,[0,0,64,64]);
+  const prototype={drawImage(...args){
+    copies++;assert.equal(this,readback);assert.equal(args[0],canvas);assert.deepEqual(args.slice(1),[0,0]);
+    assert.equal(scratch.width,64);assert.equal(scratch.height,64);
+    if(mode==='copy-error')throw failure;
+    if(mode!=='no-copy')this.data=Uint8ClampedArray.from(data);
+  },getImageData(...args){
+    reads++;assert.equal(this,readback);assert.deepEqual(args,[0,0,64,64]);
     if(mode==='native-error')throw failure;
-    if(mode==='wrong-pixel')data[0]=0;
-    return {data:mode==='short-read'?data.slice(0,-1):data};
+    if(mode==='wrong-pixel')this.data[0]=0;
+    return {data:mode==='short-read'?this.data.slice(0,-1):this.data};
   }};
   const environment={CanvasRenderingContext2D:{prototype},document:{
-    createElement(name){assert.equal(name,'canvas');return canvas;},body:{appendChild(value){assert.equal(value,canvas);}}
+    createElement(name){assert.equal(name,'canvas');assert.ok(creates<2);return creates++?scratch:canvas;},body:{appendChild(value){assert.equal(value,canvas);}}
   }};
   const result=vm.runInNewContext('(function(){'+script+'})()',environment);
-  assert.equal(reads,1);assert.deepEqual(fills,[[0,0,32,32],[32,0,32,32],[0,32,32,32],[32,32,32,32]]);
-  if(mode==='native-error'){
+  assert.equal(reads,['copy-error','missing-context'].includes(mode)?0:1);
+  assert.equal(copies,mode==='missing-context'?0:1);assert.equal(creates,2);
+  assert.equal(removed,1);assert.equal(canvas.width,0);assert.equal(canvas.height,0);
+  assert.equal(scratch.width,0);assert.equal(scratch.height,0);
+  assert.deepEqual(fills,[[0,0,32,32],[32,0,32,32],[0,32,32,32],[32,32,32,32]]);
+  if(mode==='native-error'||mode==='copy-error'){
     assert.equal(result.status,'readback-failed');assert.equal(result.name,failure.name);
     assert.equal(result.message,failure.message);assert.equal(result.stack,failure.stack);
+  } else if(mode==='missing-context'){
+    assert.equal(result.status,'readback-failed');assert.match(result.message,/context unavailable/);
   } else if(mode==='good'){
+    assert.equal(result.readbackMethod,'native-canvas-copy');
     assert.equal(result.readbackBytes,16384);assert.equal(result.matchedPixels,4096);
   } else assert.ok(result.readbackBytes!==16384||result.matchedPixels!==4096);
 }
@@ -719,24 +757,93 @@ assert.deepEqual(hits,[[20,30],[25,30]],'Hit tests use the rounded coordinates s
 assert.equal(snapshot.position.x,1);position.x=5;assert.equal(snapshot.position.x,1,'Before-drag evidence is a copy');
 assert.equal(snapshot.canvas.width,400);assert.equal(snapshot.endpointHits[0].canvas,true);
 assert.equal(snapshot.errorDetails.length,32);assert.equal(snapshot.documentFocused,true);
-const readPixels=()=>vm.runInContext('(function(){'+diagnostics.pixels+'})()',env);let reads=0;
-plan.width=2;plan.height=2;ctx.getImageData=()=>{reads++;return {data:new Uint8Array([1,2,3,255,1,2,3,255,4,5,6,255,4,5,6,255])};};
-const detail=readPixels();assert.equal(detail.distinctVisibleRGBColorsAtLeast,2);assert.equal(detail.complete,true);assert.equal(reads,1);
-assert.equal(detail.resizeSequence,env.__plannerPlanState().resizeSequence);assert.equal(detail.readbackBytes,16);
-ctx.getImageData=()=>({data:new Uint8Array([1,2,3,255,1,2,3,255,1,2,3,255,1,2,3,255])});
-assert.equal(readPixels().distinctVisibleRGBColorsAtLeast,1,'Uniform opaque pixels are blank');
-ctx.getImageData=()=>({data:new Uint8Array([1,2,3,0,4,5,6,0,7,8,9,0,10,11,12,0])});
-assert.equal(readPixels().distinctVisibleRGBColorsAtLeast,0,'Invisible RGB differences do not prove content');
-ctx.getImageData=()=>({data:new Uint8Array([1,2,3,1,1,2,3,80,1,2,3,160,1,2,3,255])});
-assert.equal(readPixels().distinctVisibleRGBColorsAtLeast,1,'Alpha changes alone do not prove RGB diversity');
-ctx.getImageData=()=>({data:new Uint8Array(15)});
-assert.equal(readPixels().status,'readback-failed','Incomplete readback is rejected');
-ctx.getImageData=()=>{throw readError;};assert.equal(readPixels().name,'InvalidStateError');
-plan.width=4000001;assert.equal(readPixels().status,'outside-readback-bound');
 """
         result = subprocess.run(['node', '-e', javascript, str(Path(__file__).with_name('test-planner-stability.cjs'))],
                                 input=json.dumps({'snapshot': safari.native.PLANNER_INPUT_SNAPSHOT,
                                                   'pixels': safari.native.PLANNER_2D_PIXELS}),
+                                text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_native_copy_reads_current_source_preserves_alpha_and_releases_scratch(self):
+        javascript = r"""
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const script=fs.readFileSync(0,'utf8');
+let width=2,height=2,generation=7,sourceWrites=0,reads=0,copies=0,time=0,mode='good';
+const allocations=[],pixelsA=new Uint8Array([1,2,3,255,1,2,3,255,4,5,6,255,4,5,6,255]);
+let sourcePixels=pixelsA;
+const source={isConnected:true,get width(){return width;},set width(v){sourceWrites++;width=v;},
+  get height(){return height;},set height(v){sourceWrites++;height=v;},
+  getContext(){assert.fail('Do not reconfigure or read the drawing context');}};
+let selected=source;
+const failure=Object.assign(new Error('native pixel failure'),{name:'InvalidStateError'});
+const prototype={drawImage(image,...coordinates){
+  copies++;assert.equal(image,source);assert.deepEqual(coordinates,[0,0]);
+  assert.ok(allocations.includes(this.canvas));assert.equal(this.canvas.width,width);assert.equal(this.canvas.height,height);
+  if(mode==='copy-error')throw failure;
+  if(mode!=='no-copy')this.pixels=Uint8Array.from(sourcePixels);
+  if(mode==='replace-source')selected={...source};
+  if(mode==='resize-source')width++;
+  if(mode==='new-generation')generation++;
+  if(mode==='detach-source')source.isConnected=false;
+},getImageData(...args){
+  reads++;assert.deepEqual(args,[0,0,this.canvas.width,this.canvas.height]);
+  if(mode==='read-error')throw failure;
+  return {data:this.pixels};
+}};
+const env={CanvasRenderingContext2D:{prototype},performance:{now:()=>++time},document:{
+  getElementById(id){assert.equal(id,'plan-canvas');return selected;},
+  createElement(tag){
+    assert.equal(tag,'canvas');
+    const scratch={width:0,height:0,isConnected:false};
+    const context={canvas:scratch,pixels:new Uint8Array(width*height*4),
+      getImageData(){assert.fail('Use native readback');},drawImage(){assert.fail('Use native copy');}};
+    scratch.getContext=(kind,options)=>{
+      assert.equal(kind,'2d');assert.equal(options.willReadFrequently,true);
+      assert.equal(options.alpha,undefined,'Preserve transparent and alpha-only source semantics');
+      return mode==='missing-context'?null:context;
+    };
+    allocations.push(scratch);return scratch;
+  },body:{appendChild(){assert.fail('Scratch must stay detached');}}},
+  window:{__plannerPlanState:()=>({width,height,resizeSequence:generation})}};
+const read=()=>vm.runInNewContext('(function(){'+script+'})()',env);
+const readClean=()=>{
+  const before=allocations.length,oldReads=reads,oldCopies=copies;
+  const result=read();assert.equal(allocations.length,before+1);
+  const scratch=allocations.at(-1);assert.equal(scratch.width,0);assert.equal(scratch.height,0);assert.equal(scratch.isConnected,false);
+  assert.equal(sourceWrites,0,'Never resize the application canvas');
+  assert.equal(copies-oldCopies,mode==='missing-context'?0:1);
+  assert.equal(reads-oldReads,['copy-error','missing-context'].includes(mode)?0:1);
+  return result;
+};
+const first=readClean();assert.equal(first.status,'pixels-read');assert.equal(first.readbackMethod,'native-canvas-copy');
+assert.equal(first.distinctVisibleRGBColorsAtLeast,2);assert.equal(first.complete,true);assert.equal(first.readbackBytes,16);
+assert.equal(first.resizeSequence,7);assert.equal(first.scannedPixels,4);
+sourcePixels=new Uint8Array([20,30,40,255,20,30,40,255,50,60,70,255,50,60,70,255]);
+const second=readClean();assert.notDeepEqual([...second.visibleRGBSample],[...first.visibleRGBSample],'A later copy must reflect changed source pixels');
+assert.deepEqual([...pixelsA],[1,2,3,255,1,2,3,255,4,5,6,255,4,5,6,255],'Never rewrite source pixels');
+for(const [pixels,colors] of [
+  [[1,2,3,255,1,2,3,255,1,2,3,255,1,2,3,255],1],
+  [[1,2,3,0,4,5,6,0,7,8,9,0,10,11,12,0],0],
+  [[1,2,3,1,1,2,3,80,1,2,3,160,1,2,3,255],1]
+]){sourcePixels=new Uint8Array(pixels);assert.equal(readClean().distinctVisibleRGBColorsAtLeast,colors);}
+sourcePixels=new Uint8Array(15);assert.equal(readClean().status,'readback-failed','Incomplete readback is rejected');
+sourcePixels=pixelsA;mode='no-copy';assert.equal(readClean().distinctVisibleRGBColorsAtLeast,0,'Fresh scratch cannot pass without source painting');
+for(mode of ['copy-error','read-error']){
+  const result=readClean();assert.equal(result.status,'readback-failed');
+  assert.equal(result.name,failure.name);assert.equal(result.message,failure.message);assert.equal(result.stack,failure.stack);
+}
+mode='missing-context';assert.equal(readClean().status,'readback-failed');
+for(mode of ['replace-source','resize-source','new-generation','detach-source']){
+  const result=readClean();assert.equal(result.status,'readback-failed');assert.match(result.message,/changed during native copy/);
+  selected=source;width=2;height=2;generation=7;source.isConnected=true;
+}
+mode='good';
+for(const dims of [[0,2],[2,0],[-1,2],[1.5,2],[4000001,1],[2001,2000]]){
+  [width,height]=dims;const count=allocations.length,oldReads=reads,oldCopies=copies;
+  assert.equal(read().status,'outside-readback-bound');assert.equal(allocations.length,count);assert.equal(reads,oldReads);assert.equal(copies,oldCopies);
+}
+"""
+        result = subprocess.run(['node', '-e', javascript], input=safari.native.PLANNER_2D_PIXELS,
                                 text=True, capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -749,7 +856,7 @@ plan.width=4000001;assert.equal(readPixels().status,'outside-readback-bound');
                 'position': {'x': x, 'y': 0, 'z': 1}, 'errorCount': 0, 'errors': [], 'errorDetails': []}
 
     def pixels(self):
-        return {'status': 'pixels-read', 'width': 400, 'height': 300, 'resizeSequence': 2,
+        return {'status': 'pixels-read', 'readbackMethod': 'native-canvas-copy', 'width': 400, 'height': 300, 'resizeSequence': 2,
                 'readbackBytes': 400 * 300 * 4, 'distinctVisibleRGBColorsAtLeast': 2}
 
     def run_planner_prefix(self, before, after, *, loaded=None, on_snapshot=None, on_pixels=None,
@@ -841,6 +948,7 @@ plan.width=4000001;assert.equal(readPixels().status,'outside-readback-bound');
 
     def test_nonblank_main_bitmap_and_initial_screenshot_are_required(self):
         for changed in ({'distinctVisibleRGBColorsAtLeast': 0}, {'distinctVisibleRGBColorsAtLeast': 1},
+                        {'readbackMethod': None}, {'readbackMethod': 'direct'},
                         {'readbackBytes': 0}, {'status': 'readback-failed', 'name': 'InvalidStateError'},
                         {'status': 'outside-readback-bound'}):
             pixels = self.pixels(); pixels.update(changed)

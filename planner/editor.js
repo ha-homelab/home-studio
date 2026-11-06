@@ -118,7 +118,7 @@ function applyHostTheme(theme) {
   if (renderer) renderer.setClearColor(planColors.background);
   requestCanvasRender();
 }
-const planCanvas = $('plan-canvas'), ctx = planCanvas.getContext('2d', { alpha: false });
+const planCanvas = $('plan-canvas'), ctx = planCanvas.getContext('2d', { alpha: false, willReadFrequently: true });
 let project = blankProject(), activeFloorId, selection = null, tool = 'select', view = 'plan', history = [], future = [], drag = null, previewEdit = null;
 let map = { scale: 55, x: 80, y: 80 }, size = { width: 800, height: 600 }, spaceHeld = false, saveFailed = false, previewDirty = true;
 let canvasFrame = 0, canvasSuspended = false, planFrameRequested = false;
@@ -316,7 +316,7 @@ function drawItemThumbnail(canvas, model, appearance = { model_id: model.id, sty
   // This optional preview must not interrupt selection or its pointer gesture
   // when the browser cannot provide a usable 2D backing store.
   try {
-    const context = canvas.getContext('2d');
+    const context = canvas.getContext('2d', { willReadFrequently: true });
     if (!context) { canvas.hidden = true; return; }
     paintItemThumbnail(canvas, context, model, appearance);
     canvas.hidden = false;
@@ -1306,7 +1306,7 @@ function zoomPreview(factor) {
   if (!canNavigatePreview() || !Number.isFinite(factor) || factor <= 0) return;
   const radius = previewRadius(orbit.radius / factor);
   if (radius === orbit.radius) return;
-  orbit.radius = radius; rebasePreviewGesture(); requestPreviewRender();
+  orbit.radius = radius; rebasePreviewGesture(); previewEnvironment?.noteNavigation(); requestPreviewRender();
 }
 let previewCanvas = $('preview-canvas'), previewEvents;
 function canNavigatePreview() { return view !== 'plan' && !drag && !siteEditor?.busy && !previewLost && !previewUnavailable && !canvasSuspended && !document.hidden; }
@@ -1347,15 +1347,15 @@ function setPreviewMode(mode) {
 }
 function resetPreview() {
   if (!canNavigatePreview()) return;
-  releasePreviewPointer(); orbit.yaw = -Math.PI / 3; orbit.pitch = .8; fitPreview(); requestPreviewRender();
+  releasePreviewPointer(); orbit.yaw = -Math.PI / 3; orbit.pitch = .8; fitPreview(); previewEnvironment?.noteNavigation(); requestPreviewRender();
 }
 function topPreview() {
   if (!canNavigatePreview()) return;
-  releasePreviewPointer(); orbit.yaw = -Math.PI / 2; orbit.pitch = previewPitch(Math.PI / 2); requestPreviewRender();
+  releasePreviewPointer(); orbit.yaw = -Math.PI / 2; orbit.pitch = previewPitch(Math.PI / 2); previewEnvironment?.noteNavigation(); requestPreviewRender();
 }
 function rotatePreview(angle) {
   if (!canNavigatePreview()) return;
-  releasePreviewPointer(); orbit.yaw = previewYaw(orbit.yaw + angle); requestPreviewRender();
+  releasePreviewPointer(); orbit.yaw = previewYaw(orbit.yaw + angle); previewEnvironment?.noteNavigation(); requestPreviewRender();
 }
 function previewPointerCenter() {
   const points = [...orbit.pointers.values()], first = points[0], second = points[1];
@@ -1510,7 +1510,7 @@ function bindPreviewCanvas() {
     if (start.mode === 'pan') panPreview(dx, dy, start);
     else { orbit.yaw = previewYaw(start.yaw - dx * .007); orbit.pitch = previewPitch(start.pitch + dy * .007); }
     if (orbit.pointers.size === 2 && start.distance > 0 && center.distance > 0) orbit.radius = previewRadius(start.radius * start.distance / center.distance);
-    requestPreviewRender();
+    previewEnvironment?.noteNavigation(); requestPreviewRender();
   }, options);
   canvas.addEventListener('pointerup', e => { if (previewEdit?.pointerId === e.pointerId) finishPreviewEdit(e); else releasePreviewPointer(e); }, options);
   canvas.addEventListener('lostpointercapture', releasePreviewPointer, options);
@@ -1538,7 +1538,7 @@ function bindPreviewCanvas() {
       if (key === 'arrowleft') orbit.yaw = previewYaw(orbit.yaw - .12); if (key === 'arrowright') orbit.yaw = previewYaw(orbit.yaw + .12);
       if (key === 'arrowup') orbit.pitch = previewPitch(orbit.pitch + .1); if (key === 'arrowdown') orbit.pitch = previewPitch(orbit.pitch - .1);
     }
-    requestPreviewRender();
+    previewEnvironment?.noteNavigation(); requestPreviewRender();
   }, options);
   canvas.addEventListener('webglcontextlost', e => {
     e.preventDefault(); previewLost = true; previewEnvironment?.setActive(false); cancelCanvasRender(); releasePreviewPointer();

@@ -1,14 +1,26 @@
-name: Safari macOS 15 compatibility observation
+name: Safari compatibility observation
 on:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: Disposable macOS runner for this observation
+        type: choice
+        options:
+          - macos-15
+          - macos-26
+        default: macos-15
+      canvas_diagnostic:
+        description: Collect native canvas diagnostics without claiming application acceptance
+        type: boolean
+        default: false
   schedule:
     - cron: '37 4 * * 2'
 permissions:
   contents: read
 jobs:
   safari:
-    name: Safari (macos-15, installed stable observation)
-    runs-on: macos-15
+    name: Safari (${{ inputs.runner || 'macos-15' }}, installed stable observation)
+    runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 25
     env:
       PYTHONUTF8: '1'
@@ -29,12 +41,18 @@ jobs:
       - name: Enable WebDriver on this disposable hosted runner
         run: sudo /usr/bin/safaridriver --enable
       - name: Test installed Safari with both viewers and the 256-item planner
+        if: ${{ inputs.canvas_diagnostic != true }}
         run: python3 scripts/test-safari-acceptance.py --prepare-hosted-safari --output acceptance-artifacts/safari
+      - name: Diagnose independent native canvas paths
+        if: ${{ inputs.canvas_diagnostic == true }}
+        run: |
+          python3 scripts/test-safari-canvas-diagnostic.py
+          python3 scripts/diagnose-safari-canvas.py --prepare-hosted-safari --output acceptance-artifacts/safari
       - name: Preserve actual Safari identity and diagnostics
         if: ${{ always() }}
         uses: ./.github/actions/upload-acceptance-artifact
         with:
-          name: acceptance-macos-15-safari-observation
+          name: safari-${{ inputs.runner || 'macos-15' }}-${{ inputs.canvas_diagnostic && 'canvas-diagnostic' || 'observation' }}
           path: acceptance-artifacts/safari/
           if-no-files-found: error
           retention-days: 14

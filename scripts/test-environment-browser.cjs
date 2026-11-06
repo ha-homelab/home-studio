@@ -35,6 +35,43 @@ const root = path.resolve(__dirname, '..');
     browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined, args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
     const page = await browser.newPage({ viewport: { width: 1520, height: 1000 } });
     const errors = []; page.on('pageerror', e => errors.push(String(e))); page.on('dialog', d => d.accept());
+    const surroundings = mode => mode === 'planner' ? window.planner.getPreviewMetadata().surroundings : window.floorplan.surroundings;
+    const renderCount = mode => mode === 'planner' ? window.planner.getPreviewMetadata().renderCount : window.floorplan.renderCount;
+    async function checkNavigation(mode, action) {
+      const before = await page.evaluate(surroundings, mode);
+      const canvas = page.locator(mode === 'planner' ? '#preview-canvas' : 'canvas').filter({visible:true}).first();
+      // Observe after the real input handler in the same dispatch. A slow CI
+      // roundtrip must not mistake an already restored 300 ms state for failure.
+      await canvas.evaluate((element, mode) => {
+        const types = ['pointermove', 'wheel', 'keydown'];
+        const capture = () => {
+          const state = mode === 'planner' ? window.planner.getPreviewMetadata().surroundings : window.floorplan.surroundings;
+          if (state.detail === 'navigation') element.navigationSample = state;
+        };
+        element.navigationCleanup = () => types.forEach(type => element.removeEventListener(type, capture));
+        types.forEach(type => element.addEventListener(type, capture));
+      }, mode);
+      let moving;
+      try {
+        await action();
+        moving = await canvas.evaluate(element => element.navigationSample);
+      } finally {
+        await canvas.evaluate(element => { element.navigationCleanup(); delete element.navigationCleanup; delete element.navigationSample; });
+      }
+      assert(moving, 'Real camera input was observed');
+      assert.equal(moving.detail, 'navigation', 'Real camera input enables temporary scenery detail');
+      assert.equal(moving.detailTimerPending, true);
+      assert.equal(moving.drawCalls, before.drawCalls, 'Navigation adds no draw batches');
+      assert(moving.triangles < before.triangles / 2, 'Navigation submits substantially fewer scenery triangles');
+      await page.waitForFunction(mode => (mode === 'planner' ? window.planner.getPreviewMetadata().surroundings : window.floorplan.surroundings).detail === 'full', mode);
+      const restored = await page.evaluate(surroundings, mode);
+      assert.equal(restored.triangles, before.triangles);
+      assert.equal(restored.detailTimerPending, false);
+      await page.waitForTimeout(200);
+      const idle = await page.evaluate(renderCount, mode);
+      await page.waitForTimeout(400);
+      assert.equal(await page.evaluate(renderCount, mode), idle, 'Restored detail leaves no idle render loop');
+    }
     await page.goto(origin + '/planner/'); await page.waitForFunction(() => window.planner);
     const fixture = JSON.parse(fs.readFileSync(path.join(root, 'planner/example-home.json'))); fixture.title = 'Garden Studio · fictional example'; fixture.id = 'garden_studio';
     const wallOnly=structuredClone(fixture);wallOnly.id='wall_only';wallOnly.floors[0].rooms=[];wallOnly.floors[0].items=[];wallOnly.floors[0].openings=[];wallOnly.floors[0].walls=[{id:'wall',start:[0,0],end:[5,0],thickness_m:2}];
@@ -68,6 +105,24 @@ const root = path.resolve(__dirname, '..');
     await page.waitForTimeout(500); const enabled = await page.evaluate(() => window.planner.getPreviewMetadata());
     assert.deepEqual(enabled.camera, before.camera, 'Scenery must not change camera fit');
     await page.waitForTimeout(600); assert.equal((await page.evaluate(() => window.planner.getPreviewMetadata())).renderCount, enabled.renderCount, 'Static scenery stays idle');
+    const baseControl = controls.getByLabel('Show presentation base', {exact:true});
+    assert.equal(await baseControl.isChecked(), false, 'The presentation base starts off');
+    await baseControl.focus(); await page.keyboard.press('Space');
+    const withBase = await page.evaluate(surroundings, 'planner');
+    assert.equal(withBase.triangles, enabled.surroundings.triangles + 12);
+    assert.equal(withBase.drawCalls, enabled.surroundings.drawCalls + 1);
+    assert.deepEqual(await page.evaluate(() => window.planner.getProject()), project, 'View decoration never enters the saved project');
+    assert.deepEqual((await page.evaluate(() => window.planner.getPreviewMetadata())).camera, enabled.camera);
+    await controls.locator('summary').click();
+    const previewCanvas = page.locator('#preview-canvas'), previewBox = await previewCanvas.boundingBox();
+    await checkNavigation('planner', async () => {
+      await page.mouse.move(previewBox.x + previewBox.width / 2, previewBox.y + previewBox.height / 2);
+      await page.mouse.down(); await page.mouse.move(previewBox.x + previewBox.width / 2 + 60, previewBox.y + previewBox.height / 2 + 20, {steps:3}); await page.mouse.up();
+    });
+    await page.emulateMedia({reducedMotion:'reduce'});
+    await checkNavigation('planner', async () => { await previewCanvas.focus(); await page.keyboard.press('ArrowLeft'); });
+    await page.emulateMedia({reducedMotion:'no-preference'});
+    await controls.locator('summary').click();
     await controls.getByLabel('Decorative motion',{exact:true}).check();
     await page.waitForFunction(count => window.planner.getPreviewMetadata().renderCount>count+1,enabled.renderCount);
     await page.emulateMedia({reducedMotion:'reduce'}); await page.waitForTimeout(400);
@@ -90,8 +145,14 @@ const root = path.resolve(__dirname, '..');
     await page.locator('#modePlan').click();assert.equal(await page.evaluate(()=>window.floorplan.surroundings.timerPending),false);
     await page.locator('#openHome').click();await page.waitForFunction(()=>window.floorplan.homeMode && window.floorplan.surroundings.moving);
     const homeControls=page.locator('.home-map-tools .environment-controls');await homeControls.locator('summary').click();await homeControls.getByLabel('Decorative motion',{exact:true}).uncheck();
+    await homeControls.getByLabel('Show presentation base',{exact:true}).check();
+    await homeControls.locator('summary').click();
+    const homeCanvas = page.locator('canvas').filter({visible:true}).first();
+    await checkNavigation('home', async () => { await homeCanvas.focus(); await page.keyboard.press('ArrowRight'); });
+    await checkNavigation('home', async () => { await homeCanvas.hover(); await page.mouse.wheel(0, -80); });
+    await homeControls.locator('summary').click();
     if(shots){await page.locator('#homeZoomOut').click();await page.locator('#homeZoomOut').click();await page.waitForTimeout(400);await page.screenshot({path:path.join(shots,'garden-home-view.png')});}
-    await page.setViewportSize({width:480,height:800});await page.waitForTimeout(200);const menuBox=await homeControls.locator('.environment-options').boundingBox();assert(menuBox.x>=0 && menuBox.x+menuBox.width<=480,'Home surroundings menu stays reachable on narrow screens');
+    await page.setViewportSize({width:480,height:600});await page.waitForTimeout(200);const menuBox=await homeControls.locator('.environment-options').boundingBox();assert(menuBox.x>=0 && menuBox.x+menuBox.width<=480 && menuBox.y>=0 && menuBox.y+menuBox.height<=600,'Home surroundings menu stays reachable on narrow, short screens');
     // Legacy builders provide model metadata directly. Exercise that same entry
     // point without changing the public compiler's default scenery configuration.
     const compiledPath=path.join(temp,'build/main/index.html');

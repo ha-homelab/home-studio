@@ -9,13 +9,13 @@ class Events {
   removeEventListener(name, fn) { this.listeners.get(name)?.delete(fn); }
   emit(name) { for (const fn of this.listeners.get(name) || []) fn(); }
 }
-const doc = new Events(), win = new Events(), media = new Events(), timers = new Map();
+const doc = new Events(), win = new Events(), media = new Events(), timers = new Map(), timerDelays = new Map();
 let sequence = 0, renders = 0, intersection; const renderRequests = [];
 win.IntersectionObserver = class { constructor(callback) { intersection = callback; } observe() {} disconnect() { intersection = null; } };
 win.matchMedia = () => media;
-win.setTimeout = fn => { const id = ++sequence; timers.set(id, fn); return id; };
-win.clearTimeout = id => timers.delete(id);
-const advance = () => { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach(fn => fn()); };
+win.setTimeout = (fn, delay) => { const id = ++sequence; timers.set(id, fn); timerDelays.set(id, delay); return id; };
+win.clearTimeout = id => { timerDelays.delete(id); return timers.delete(id); };
+const advance = () => { const callbacks = [...timers.values()]; timers.clear(); timerDelays.clear(); callbacks.forEach(fn => fn()); };
 const scene = new THREE.Scene(), bounds = { minX: 0, maxX: 10, minZ: 0, maxZ: 8 };
 const layer = createEnvironmentLayer(THREE, { scene, bounds, elevation: -3, visibilityElement: {}, document: doc, window: win, requestRender: motion => { renders++; renderRequests.push(motion); } });
 assert.equal(layer.stats.drawCalls, 0); assert.equal(layer.stats.actors, 0); assert.equal(timers.size, 0);
@@ -38,6 +38,43 @@ function checkSiteClear(target = scene, site = bounds) {
   }
 }
 checkSiteClear();
+// Navigation changes submitted geometry, without rebuilding any shared batch,
+// material or GPU buffer. A single quiet-period timer restores exact detail.
+const detailMeshes = [...scene.children[0].children];
+const detailResources = detailMeshes.map(mesh => [mesh.geometry, mesh.material, mesh.instanceMatrix, mesh.instanceMatrix.array,
+  ...Object.values(mesh.geometry.attributes).flatMap(attribute => [attribute, attribute.array])]);
+const fullTriangles = layer.stats.triangles;
+assert.equal(fullTriangles, 64872, 'The resting ten-metre-wide scene retains its original triangle count');
+layer.noteNavigation();
+assert.equal(layer.stats.detail, 'navigation'); assert.equal(layer.stats.detailTimerPending, true);
+assert(layer.stats.triangles < fullTriangles / 2, 'Navigation removes substantial fine foliage detail');
+assert.equal(layer.stats.drawCalls, 14, 'Lower detail uses the same fourteen batches');
+assert.equal(timers.size, 1); assert.deepEqual([...timerDelays.values()], [300]);
+for (let i = 0; i < 100; i++) layer.noteNavigation();
+assert.equal(timers.size, 1, 'Repeated navigation renews only one restoration timer');
+advance();
+assert.equal(layer.stats.detail, 'full'); assert.equal(layer.stats.triangles, fullTriangles); assert.equal(timers.size, 0);
+assert.deepEqual(scene.children[0].children, detailMeshes);
+detailMeshes.forEach((mesh, index) => [mesh.geometry, mesh.material, mesh.instanceMatrix, mesh.instanceMatrix.array,
+  ...Object.values(mesh.geometry.attributes).flatMap(attribute => [attribute, attribute.array])].forEach((resource, slot) =>
+  assert.equal(resource, detailResources[index][slot], 'Detail changes reuse the exact mesh resources')));
+for (const [hide, show] of [
+  [() => { doc.hidden = true; doc.emit('visibilitychange'); }, () => { doc.hidden = false; doc.emit('visibilitychange'); }],
+  [() => layer.setActive(false), () => layer.setActive(true)],
+  [() => intersection([{ isIntersecting: false }]), () => intersection([{ isIntersecting: true }])],
+  [() => win.emit('pagehide'), () => win.emit('pageshow')],
+  [() => layer.setSettings({ enabled: false }), () => layer.setSettings({ enabled: true })],
+]) {
+  layer.noteNavigation(); hide();
+  assert.equal(timers.size, 0); assert.equal(layer.stats.detail, 'full');
+  const pausedRenders = renders;
+  layer.noteNavigation(); advance(); assert.equal(timers.size, 0); assert.equal(renders, pausedRenders);
+  show(); assert.equal(layer.stats.triangles, fullTriangles); assert.equal(timers.size, 0);
+  assert(renders > pausedRenders, 'Returning to visibility paints the restored detail even with motion off');
+}
+media.matches = true; media.emit('change'); layer.noteNavigation();
+assert.equal(layer.stats.detail, 'navigation', 'Reduced motion does not disable static navigation detail reduction');
+advance(); media.matches = false; media.emit('change');
 layer.setSettings({ motion: true });
 assert.equal(timers.size, 1);
 renderRequests.length = 0;
@@ -190,6 +227,36 @@ const expandedSite = { ...configuredSite, maxX: 14, maxZ: 24 };
 configured.setBounds(expandedSite); checkApproach(expandedSite, 'dusk');
 configured.dispose(); assert.equal(configuredScene.children.length, 0);
 assert([...doc.listeners.values(), ...win.listeners.values(), ...media.listeners.values()].every(set => set.size === 0));
+// The opt-in plinth is an isolated display mesh, below ground and all garden
+// surfaces. Preferences do not allocate geometry until the garden is enabled.
+const baseScene = new THREE.Scene(), baseBounds = { minX: -4, maxX: 9, minZ: -7, maxZ: 17 };
+const originalBounds = JSON.stringify(baseBounds);
+const baseLayer = createEnvironmentLayer(THREE, { scene: baseScene, bounds: baseBounds, elevation: -2,
+  settings: { presentation_base: true }, document: doc, window: win });
+assert.equal(baseLayer.stats.triangles, 0); assert.equal(baseScene.children[0].children.length, 0);
+baseLayer.noteNavigation(); assert.equal(timers.size, 0);
+baseLayer.setSettings({ enabled: true, presentation_base: false });
+const baseFullTriangles = baseLayer.stats.triangles;
+baseLayer.setSettings({ presentation_base: true }); baseScene.updateMatrixWorld(true);
+const plinth = baseScene.getObjectByName('surroundings-presentation-base');
+assert(plinth); assert.equal(plinth.count, 1); assert.equal(plinth.castShadow, false);
+const baseMatrix = new THREE.Matrix4(); plinth.getMatrixAt(0, baseMatrix); baseMatrix.premultiply(plinth.matrixWorld);
+plinth.geometry.computeBoundingBox(); const baseBox = plinth.geometry.boundingBox.clone().applyMatrix4(baseMatrix);
+assert(Math.abs(baseBox.max.y - (-2 - .125)) < .000001, 'The plinth top stays below site ground and lawns');
+assert(baseBox.min.x <= baseBounds.minX - 4.5 && baseBox.max.x >= baseBounds.maxX + 4.5);
+assert(baseBox.min.z <= baseBounds.minZ - 7.5 && baseBox.max.z >= baseBounds.maxZ + 2.5);
+assert.equal(baseLayer.stats.triangles, baseFullTriangles + 12); assert.equal(baseLayer.stats.drawCalls, 15);
+assert.equal(JSON.stringify(baseBounds), originalBounds, 'Presentation never mutates supplied site geometry');
+baseLayer.noteNavigation(); baseLayer.setSiteContext(true);
+assert.equal(timers.size, 0); assert.equal(baseScene.children[0].children.length, 0);
+baseLayer.noteNavigation(); baseLayer.setSettings({ palette: 'dusk' });
+assert.equal(baseScene.children[0].children.length, 0, 'Known site context suppresses the base and all demo geometry');
+baseLayer.setSiteContext(false); assert(baseScene.getObjectByName('surroundings-presentation-base'));
+baseLayer.setSettings({ presentation_base: false }); assert.equal(baseScene.getObjectByName('surroundings-presentation-base'), undefined);
+assert.equal(baseLayer.stats.triangles, baseFullTriangles); assert.equal(baseLayer.stats.drawCalls, 14);
+baseLayer.noteNavigation(); baseLayer.dispose(); assert.equal(timers.size, 0);
+baseLayer.noteNavigation(); baseLayer.setBounds({ ...baseBounds, maxX: 20 }); baseLayer.setSettings({ enabled: true });
+assert.equal(baseScene.children.length, 0); assert.equal(timers.size, 0);
 // Real context is conservative: unknown land is never synthesized around a map.
 // The model's manually placed tree is outside the disposable demo group.
 const realScene = new THREE.Scene(), manual = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
@@ -235,4 +302,4 @@ for (const features of [[], [{ kind: 'building' }]]) {
   const options = runInNewContext(createViewerEnvironment + '; environmentLayer', context);
   assert.equal(options.siteContext, features.length > 0);
 }
-console.log('Environment: lazy batching, obstacle-free seeded traffic on both road sides over repeated 30-minute runs, fixed actor/buffer counts, individual speeds/arrival gaps/colors, settings and bounds rebuilds, visibility/reduced-motion/lifecycle pause and disposal passed.');
+console.log('Environment: lazy batching, optional display-only base, navigation detail reuse and restoration, obstacle-free seeded traffic on both road sides over repeated 30-minute runs, fixed actor/buffer counts, individual speeds/arrival gaps/colors, settings and bounds rebuilds, visibility/reduced-motion/lifecycle pause and disposal passed.');
