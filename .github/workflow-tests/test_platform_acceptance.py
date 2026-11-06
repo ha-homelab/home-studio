@@ -100,7 +100,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
         expected = {
             'browser': ('acceptance-${{ matrix.os }}-${{ matrix.id }}', 'acceptance-artifacts/'),
             'native-browser': ('acceptance-${{ matrix.os }}-${{ matrix.id }}', '${{ env.NATIVE_BROWSER_DIAGNOSTICS_DIR }}'),
-            'safari': ('acceptance-macos-26-safari', 'acceptance-artifacts/safari/'),
+            'safari': ('acceptance-macos-15-safari', 'acceptance-artifacts/safari/'),
         }
         for name, job in jobs.items():
             self.assertNotIn('continue-on-error', job)
@@ -117,7 +117,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
                                                      'if-no-files-found': 'error', 'retention-days': '14'})
         rows = inventory()
         names = [f"acceptance-{row['os']}-{row['id']}" for group in rows.values() for row in group['include']]
-        names.append('acceptance-macos-26-safari')
+        names.append('acceptance-macos-15-safari')
         self.assertEqual(len(names), 74)
         self.assertEqual(len(set(names)), len(names))
         spec = importlib.util.spec_from_file_location('upload_inventory', ROOT / 'scripts/validate-site.py')
@@ -721,7 +721,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
 
     def test_safari_uses_the_actual_macos_browser(self):
         job = workflow('platform-acceptance.yml')['jobs']['safari']
-        self.assertEqual(job['runs-on'], 'macos-26')
+        self.assertEqual(job['runs-on'], 'macos-15')
         runs = '\n'.join(step.get('run', '') for step in job['steps'])
         self.assertIn('sudo /usr/bin/safaridriver --enable', runs)
         self.assertIn('scripts/test-safari-tooling.py', runs)

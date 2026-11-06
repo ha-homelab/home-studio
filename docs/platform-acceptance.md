@@ -518,15 +518,21 @@ disposable CI hosts. The Safari job enables remote automation only on its
 disposable runner. Local focused runs should use an existing browser or an
 isolated pinned download.
 
-Required Safari acceptance runs on the `macos-26` ARM runner. In the
+For the prospective 1.4 beta, required native Safari acceptance moves from the
+`macos-26` ARM runner to `macos-15`. All three cases, assertions, scene contents,
+and timing/resource budgets remain mandatory. This changes the tested host,
+not the criteria for passing, and does not authorize stable promotion.
+Safari remains rolling coverage: every result applies to its recorded browser,
+OS and runner image.
+
+The previous `macos-26` target has retained historical evidence. In the
 [October 30, 2026 runner control](https://github.com/ha-homelab/home-studio/actions/runs/41049097250),
 its installed Safari 26.6.2 on macOS 26.6.2 passed both viewers and the 256-item
 planner with the unchanged application and pixel, input, and recovery checks.
 This qualifies that recorded browser/OS combination; it does not establish
-Safari 27.2 compatibility. The runner remains rolling coverage and records its
-actual browser and OS identity on every run.
+Safari 27.2 compatibility.
 
-The `macos-15` ARM image with Safari 27.2 on macOS 15.8.2 currently has a
+The `macos-15` ARM image with Safari 27.2 on macOS 15.8.2 previously showed a
 [reproduced 2D canvas failure](https://github.com/ha-homelab/home-studio/actions/runs/41048491989):
 even a standalone 32-by-32 canvas throws `InvalidStateError` during pixel
 readback before the application loads. Its system log reports IOSurface
@@ -535,12 +541,28 @@ not resolve the failure. The precise image/WebKit cause remains unconfirmed.
 The same control's Intel runner used Safari 26.6 on macOS 15.7.9 and failed
 WebGL startup, so it is not a qualified substitute.
 
+The main 2D plan now requests a CPU-readable canvas. In the subsequent
+[Safari 27.2 control](https://github.com/ha-homelab/home-studio/actions/runs/42285873988),
+all three internal acceptance cases passed and the 2D plan was visible, but
+the retained viewer and preview PNGs still lacked the 3D geometry, including
+after recovery. **Hosted Safari 27.2 3D presentation remains unqualified.**
+The cause is unresolved; passing internal rendering assertions does not resolve
+the contradictory screenshots or establish full Safari recovery.
+
+A separate manual check in ordinary local Safari **27.0
+(21625.1.29.18.28)** on macOS **26.7.1 (25G241)** used the current production
+code. Screenshots showed the empty 2D editor and its grid, then the practice
+home in 3D. The rotate button changed the 3D view while retaining its geometry. This was a bounded
+manual check, not the 256-item stress scenario or automated acceptance, and
+does not qualify the hosted Safari 27.2 combination.
+
 `Safari macOS 15 compatibility observation` retains the unchanged Safari
 acceptance on `macos-15`, running weekly and on manual dispatch. It is separate
 from PR/release qualification, reports real failures without suppressing them,
 and preserves the normal browser diagnostics. It does not open issues
-automatically. A future image update must pass that complete observation before
-we claim this combination has recovered.
+automatically. A recovery claim requires the complete observation and visible
+3D geometry in the retained presentation evidence; the internal case status
+alone is insufficient.
 
 Every browser job uploads a distinct `acceptance-<OS>-<target>` artifact for
 14 days, including failed test runs. Playwright artifacts separate the small

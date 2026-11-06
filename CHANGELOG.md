@@ -21,8 +21,9 @@
 
 ### Fixed
 
-- Keep furniture thumbnails, photo preparation and media artwork working in
-  Safari when accelerated canvas readback or image encoding is unavailable.
+- Keep the 2D plan, furniture thumbnails, photo preparation and media artwork
+  working in Safari when accelerated canvas drawing, readback or image encoding
+  is unavailable.
 - Reduce decorative tree detail during camera navigation using existing GPU
   buffers, then restore it after input settles. Static surroundings remain idle;
   hidden views cancel pending restoration and shadow detail remains stable.
@@ -53,6 +54,12 @@
 
 ### Compatibility
 
+- Hosted Safari 27.2 3D presentation remains unqualified: internal checks passed
+  but captured viewer and preview geometry was blank. A bounded manual Safari
+  27.0/macOS 26.7.1 check displayed and rotated the practice home; it does not
+  replace automated or 256-item acceptance. The prospective beta host change
+  preserves every assertion and budget and does not authorize stable promotion.
+  See [platform acceptance](docs/platform-acceptance.md) for the exact scope.
 - Drawings can include optional `documentation` metadata for measurement sources,
   notes, finishes, and selected ceiling fixtures. Older strict editors or compilers
   may reject this field. Keep your original JSON backup as well as the documented
