@@ -118,6 +118,122 @@ raf=requestAnimationFrame(()=>{frames++;raf=requestAnimationFrame(()=>{frames++;
 
 CLEANUP = "if(window.__safariCanvasDiagnostic){window.__safariCanvasDiagnostic.cleanup();delete window.__safariCanvasDiagnostic;}return true;"
 
+# These probes follow both original 2D pages and precede any WebGL warmup.
+EXTENDED_SETUP = r"""
+const palettes=[[[255,0,0,255],[0,255,0,255],[0,0,255,255],[255,255,255,255]],
+  [[0,255,255,255],[255,0,255,255],[255,255,0,255],[0,0,0,255]]];
+const report={url:location.href,copies:[],encodings:[]},canvases=[];
+function errorValue(error){return {name:String(error?.name||'').slice(0,128),
+  message:String(error?.message||error).slice(0,2048),stack:String(error?.stack||'').slice(0,4096)};}
+function canvasFor(options){
+  const canvas=document.createElement('canvas');canvases.push(canvas);canvas.width=canvas.height=64;
+  const context=options?canvas.getContext('2d',options):canvas.getContext('2d');
+  if(!context)throw Error('Native 2D context unavailable');
+  return {canvas,context,attributes:typeof context.getContextAttributes==='function'?context.getContextAttributes():null};
+}
+function paint(context,palette){
+  for(let q=0;q<4;q++){
+    context.fillStyle='rgb('+palette[q].slice(0,3).join(',')+')';
+    context.fillRect((q%2)*32,Math.floor(q/2)*32,32,32);
+  }
+}
+function pixels(context,palette,jpeg=false){
+  const data=CanvasRenderingContext2D.prototype.getImageData.call(context,0,0,64,64).data;
+  if(data.length!==16384)throw Error('Incomplete native pixel readback');
+  let matchedPixels=0;
+  for(let y=0;y<64;y++)for(let x=0;x<64;x++){
+    const color=palette[(y>=32?2:0)+(x>=32?1:0)],offset=(y*64+x)*4;
+    if(color.every((v,c)=>data[offset+c]===v))matchedPixels++;
+  }
+  const result={status:'pixels-read',readbackBytes:data.length,matchedPixels};
+  if(jpeg){
+    let maxCenterError=0;const centerPixels=[];
+    for(let q=0;q<4;q++){
+      const offset=((Math.floor(q/2)*32+16)*64+(q%2)*32+16)*4;
+      const value=Array.from(data.slice(offset,offset+4));centerPixels.push(value);
+      for(let c=0;c<4;c++)maxCenterError=Math.max(maxCenterError,Math.abs(value[c]-palette[q][c]));
+    }
+    Object.assign(result,{centerPixels,maxCenterError,centerTolerance:8,centersWithinTolerance:maxCenterError<=8});
+  }
+  return result;
+}
+function cleanup(){for(const canvas of canvases){canvas.remove?.();canvas.width=canvas.height=0;}}
+const state=window.__safariCanvasExtended={report,canvases,palettes,paint,pixels,errorValue,cleanup,canvasFor};
+try{
+  const scratch=state.scratch=canvasFor({alpha:true,willReadFrequently:true});
+  paint(scratch.context,palettes[0]);
+  report.alphaTrueReadFrequently={attributes:scratch.attributes,...pixels(scratch.context,palettes[0])};
+  scratch.context.clearRect(0,0,64,64);
+  const transparent=CanvasRenderingContext2D.prototype.getImageData.call(scratch.context,0,0,1,1).data;
+  report.alphaTrueReadFrequently.transparentPixel=Array.from(transparent);
+  report.alphaTrueReadFrequently.preservesTransparency=transparent.length===4&&transparent.every(value=>value===0);
+}catch(error){report.alphaTrueReadFrequently={status:'failed',...errorValue(error)};}
+try{
+  const source=canvasFor({alpha:false});
+  (document.body||document.documentElement).appendChild(source.canvas);
+  report.sourceAttributes=source.attributes;
+  for(let pattern=0;pattern<2;pattern++){
+    const result={pattern:pattern===0?'primary':'changed',width:64,height:64};report.copies.push(result);
+    try{
+      paint(source.context,palettes[pattern]);
+      state.scratch.context.clearRect(0,0,64,64);
+      CanvasRenderingContext2D.prototype.drawImage.call(state.scratch.context,source.canvas,0,0);
+      Object.assign(result,pixels(state.scratch.context,palettes[pattern]));
+    }catch(error){Object.assign(result,{status:'failed',...errorValue(error)});}
+  }
+}catch(error){report.copySetupError=errorValue(error);}
+return report;
+"""
+
+ENCODINGS = r"""
+const done=arguments[arguments.length-1],state=window.__safariCanvasExtended;
+const {report,palettes,paint,pixels,errorValue,canvasFor}=state;
+const deadline=performance.now()+2500;
+function bounded(promise,onLate){
+  return new Promise((resolve,reject)=>{
+    let settled=false;
+    const timer=setTimeout(()=>{settled=true;reject(Error('Encoding diagnostic exceeded 2500 ms'));},Math.max(0,deadline-performance.now()));
+    Promise.resolve(promise).then(value=>{
+      if(settled){onLate?.(value);return;}settled=true;clearTimeout(timer);resolve(value);
+    },error=>{if(settled)return;settled=true;clearTimeout(timer);reject(error);});
+  });
+}
+(async()=>{
+  for(const [name,mime,quality] of [['canvas-png','image/png',undefined],['canvas-jpeg','image/jpeg',.8],['offscreen-jpeg','image/jpeg',.85]]){
+    const result={name,mime,quality:quality??null};report.encodings.push(result);let bitmap;
+    try{
+      if(performance.now()>=deadline)throw Error('Encoding diagnostic exceeded 2500 ms');
+      let blob;
+      if(name==='offscreen-jpeg'){
+        const canvas=new OffscreenCanvas(64,64);state.canvases.push(canvas);
+        const context=canvas.getContext('2d',{alpha:false});if(!context)throw Error('Native offscreen context unavailable');
+        result.contextAttributes=typeof context.getContextAttributes==='function'?context.getContextAttributes():null;
+        paint(context,palettes[0]);
+        blob=await bounded(OffscreenCanvas.prototype.convertToBlob.call(canvas,{type:mime,quality}));
+      }else{
+        const source=canvasFor();paint(source.context,palettes[0]);result.contextAttributes=source.attributes;
+        const uri=HTMLCanvasElement.prototype.toDataURL.call(source.canvas,mime,quality),prefix='data:'+mime+';base64,';
+        if(typeof uri!=='string'||!uri.startsWith(prefix)||uri.length>1048576)throw Error('Unexpected or oversized encoded canvas');
+        const bytes=Uint8Array.from(atob(uri.slice(prefix.length)),c=>c.charCodeAt(0));
+        blob=new Blob([bytes],{type:mime});
+      }
+      if(!(blob.size>0&&blob.size<=1048576)||blob.type!==mime)throw Error('Invalid encoded image type or size');
+      result.encodedBytes=blob.size;
+      bitmap=await bounded(createImageBitmap(blob),late=>late.close());
+      result.width=bitmap.width;result.height=bitmap.height;
+      result.dimensionsMatch=bitmap.width===64&&bitmap.height===64;
+      if(!result.dimensionsMatch)throw Error('Decoded dimensions differ from source');
+      state.scratch.context.clearRect(0,0,64,64);
+      CanvasRenderingContext2D.prototype.drawImage.call(state.scratch.context,bitmap,0,0);
+      Object.assign(result,pixels(state.scratch.context,palettes[0],mime==='image/jpeg'));
+    }catch(error){Object.assign(result,{status:'failed',...errorValue(error)});}
+    finally{bitmap?.close();}
+  }
+})().catch(error=>{report.encodingError=errorValue(error);}).finally(()=>{state.cleanup();done(report);});
+"""
+
+EXTENDED_CLEANUP = "if(window.__safariCanvasExtended){window.__safariCanvasExtended.cleanup();delete window.__safariCanvasExtended;}return true;"
+
 
 class BlankPage(BaseHTTPRequestHandler):
     def log_message(self, *_args):
@@ -182,13 +298,37 @@ def observe_page(client, url, record, save, deadline):
         save()
 
 
+def observe_extended_page(client, url, record, save, deadline):
+    page = {'url': url, 'status': 'running'}
+    record['extendedPages'].append(page)
+    save()
+    try:
+        remaining(deadline)
+        client.call('WebDriver:Navigate', {'url': url})
+        page['copies'] = client.execute(EXTENDED_SETUP)
+        save()
+        remaining(deadline)
+        response = client.call('WebDriver:ExecuteAsyncScript', {'script': ENCODINGS, 'args': []})
+        page['completed'] = response['value']
+        page['status'] = 'observed'
+    except Exception as error:
+        page.update(status='incomplete', error=error_record(error))
+    finally:
+        try:
+            remaining(deadline)
+            client.execute(EXTENDED_CLEANUP)
+        except Exception as error:
+            page['cleanupError'] = error_record(error)
+        save()
+
+
 def run(output, driver_path, prepare=False):
     output.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     deadline = started + BUDGET_SECONDS
     record = {'schema': 1, 'purpose': 'diagnostic-only', 'acceptanceEvidence': False,
               'status': 'running', 'budgetMs': BUDGET_SECONDS * 1000,
-              'sourceRevision': os.environ.get('GITHUB_SHA'), 'pages': [], 'cleanupErrors': [],
+              'sourceRevision': os.environ.get('GITHUB_SHA'), 'pages': [], 'extendedPages': [], 'cleanupErrors': [],
               'host': {'platform': sys.platform, 'release': platform.release(),
                        'machine': platform.machine(), 'cpuCount': os.cpu_count(),
                        'imageOS': os.environ.get('ImageOS'), 'imageVersion': os.environ.get('ImageVersion')}}
@@ -236,13 +376,16 @@ def run(output, driver_path, prepare=False):
             client.call('WebDriver:SetTimeouts', {'script': 5000, 'pageLoad': 15000, 'implicit': 0})
             client.call('WebDriver:SetWindowRect', {'width': 1440, 'height': 1000})
             record['windowFocus'] = client.select_current_window()
-            for url in ('about:blank', f'http://127.0.0.1:{server.server_port}/'):
+            urls = ('about:blank', f'http://127.0.0.1:{server.server_port}/')
+            for url in urls:
                 observe_page(client, url, record, save, deadline)
+            for url in urls:
+                observe_extended_page(client, url, record, save, deadline)
             remaining(deadline)
             record['webgl2'] = client.execute(WEBGL)
             save()
             remaining(deadline)
-            record['status'] = 'observed' if all(page['status'] == 'observed' and 'cleanupError' not in page for page in record['pages']) else 'incomplete'
+            record['status'] = 'observed' if all(page['status'] == 'observed' and 'cleanupError' not in page for page in record['pages'] + record['extendedPages']) else 'incomplete'
     except Exception as error:
         record.update(status='incomplete', error=error_record(error))
     finally:

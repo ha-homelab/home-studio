@@ -135,7 +135,94 @@ for(const mode of ['good','first-failure','no-frames','no-context']){
         self.assertEqual(sum(call.args[0] == diagnostic.CLEANUP for call in client.execute.call_args_list), 2)
         self.assertEqual([call.args[0] for call in client.execute.call_args_list],
                          [diagnostic.SETUP, diagnostic.CLEANUP, diagnostic.SETUP,
-                          diagnostic.CLEANUP, diagnostic.WEBGL])
+                          diagnostic.CLEANUP,
+                          diagnostic.EXTENDED_SETUP, diagnostic.EXTENDED_CLEANUP,
+                          diagnostic.EXTENDED_SETUP, diagnostic.EXTENDED_CLEANUP, diagnostic.WEBGL])
+        self.assertEqual(len(result['extendedPages']), 2)
+
+    def test_extended_native_copy_freshness_encoding_and_cleanup(self):
+        script = r"""
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const scripts=JSON.parse(fs.readFileSync(0,'utf8'));
+(async()=>{
+for(const mode of ['good','stale-copy','copy-error','jpeg-corruption','late-decode']){
+  const canvases=[],bitmaps=[];let stale;
+  class Context{
+    constructor(canvas,options){this.canvas=canvas;this.options=options||{};this.data=new Uint8ClampedArray(16384);}
+    getContextAttributes(){return {alpha:true,...this.options};}
+    fillRect(x,y,w,h){const rgb=this.fillStyle.match(/\d+/g).map(Number);
+      for(let row=y;row<y+h;row++)for(let col=x;col<x+w;col++)this.data.set([...rgb,255],(row*64+col)*4);}
+    clearRect(){this.data.fill(0);}
+    getImageData(x,y,w,h){assert.deepEqual([x,y],[0,0]);assert.ok(w===h&&(w===64||w===1));return {data:w===1?this.data.slice(0,4):this.data};}
+    drawImage(source,x,y){
+      assert.deepEqual([x,y],[0,0]);
+      let data=source.context?.data||source.data;
+      if(source.isConnected){
+        if(mode==='copy-error')throw Object.assign(new Error('native copy failed'),{name:'InvalidStateError'});
+        if(mode==='stale-copy'){stale||=data.slice();data=stale;}
+      }
+      this.data.set(data);
+    }
+  }
+  function encode(canvas,mime){return new Blob([JSON.stringify({width:64,height:64,data:Array.from(canvas.context.data)})],{type:mime});}
+  class Canvas{
+    constructor(){this.width=64;this.height=64;this.isConnected=false;canvases.push(this);}
+    getContext(kind,options){assert.equal(kind,'2d');return this.context||=new Context(this,options);}
+    remove(){this.removed=true;this.isConnected=false;}
+    toDataURL(mime,quality){
+      assert.ok(mime==='image/png'||mime==='image/jpeg');if(mime==='image/jpeg')assert.equal(quality,.8);
+      return 'data:'+mime+';base64,'+Buffer.from(JSON.stringify({width:64,height:64,data:Array.from(this.context.data)})).toString('base64');
+    }
+  }
+  class Offscreen extends Canvas{convertToBlob(options){assert.deepEqual({...options},{type:'image/jpeg',quality:.85});return Promise.resolve(encode(this,options.type));}}
+  const environment={window:{},location:{href:'http://127.0.0.1/'},Blob,Uint8Array,performance:{now:()=>Date.now()},
+    document:{createElement(name){assert.equal(name,'canvas');return new Canvas();},body:{appendChild(canvas){canvas.isConnected=true;}}},
+    CanvasRenderingContext2D:Context,HTMLCanvasElement:Canvas,OffscreenCanvas:Offscreen,
+    atob:value=>Buffer.from(value,'base64').toString('binary'),
+    setTimeout:(fn,ms)=>setTimeout(fn,mode==='late-decode'?0:ms),clearTimeout,
+    async createImageBitmap(blob){
+      const parsed=JSON.parse(await blob.text());
+      const bitmap={...parsed,data:new Uint8ClampedArray(parsed.data),closed:0,close(){this.closed++;}};
+      bitmaps.push(bitmap);
+      if(mode==='jpeg-corruption'&&blob.type==='image/jpeg')bitmap.data.fill(0);
+      if(mode==='late-decode')await new Promise(resolve=>setTimeout(resolve,10));
+      return bitmap;
+    }
+  };
+  const context=vm.createContext(environment);
+  const first=JSON.parse(JSON.stringify(vm.runInContext('(function(){'+scripts.setup+'})()',context)));
+  assert.deepEqual(first.alphaTrueReadFrequently.attributes,{alpha:true,willReadFrequently:true});
+  assert.equal(first.alphaTrueReadFrequently.matchedPixels,4096);
+  assert.deepEqual(first.alphaTrueReadFrequently.transparentPixel,[0,0,0,0]);
+  assert.equal(first.alphaTrueReadFrequently.preservesTransparency,true);
+  assert.equal(first.copies.length,2);
+  assert.deepEqual(first.copies.map(v=>v.pattern),['primary','changed']);
+  if(mode==='copy-error')assert.ok(first.copies.every(v=>v.status==='failed'&&v.name==='InvalidStateError'));
+  else{
+    assert.equal(first.copies[0].matchedPixels,4096);
+    assert.equal(first.copies[1].matchedPixels,mode==='stale-copy'?0:4096);
+    assert.ok(first.copies.every(v=>v.readbackBytes===16384));
+  }
+  const completed=await new Promise(resolve=>{environment.done=resolve;
+    vm.runInContext('(function(){'+scripts.encodings+'})(done)',context);});
+  assert.equal(completed.encodings.length,3);
+  assert.ok(!JSON.stringify(completed).includes('data:image/'),'Encoded image content is never reported');
+  for(const result of completed.encodings){
+    if(mode==='late-decode'){assert.equal(result.status,'failed');assert.match(result.message,/2500 ms/);continue;}
+    assert.equal(result.status,'pixels-read');assert.equal(result.dimensionsMatch,true);
+    assert.equal(result.readbackBytes,16384);assert.ok(result.encodedBytes>0);
+    if(result.mime==='image/png')assert.equal(result.matchedPixels,4096);
+    else assert.equal(result.centersWithinTolerance,mode!=='jpeg-corruption');
+  }
+  await new Promise(resolve=>setTimeout(resolve,20));
+  assert.ok(bitmaps.every(b=>b.closed===1),'Every decoded bitmap, including late results, is closed once');
+  assert.ok(canvases.every(c=>c.width===0&&c.height===0),'Every canvas backing store is released');
+}
+})().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+        result = subprocess.run(['node', '-e', script], input=json.dumps({'setup': diagnostic.EXTENDED_SETUP, 'encodings': diagnostic.ENCODINGS}),
+                                text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == '__main__':
