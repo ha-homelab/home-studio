@@ -26,12 +26,15 @@ reclassify the earlier package job cancelled at its 15-minute limit as passed.
 
 Language switching and project preservation run once in a separate required
 `i18n` job within `package.yml`, on a fresh `ubuntu-latest` runner (currently
-Ubuntu 26.04) with Node.js 22 and the locked Playwright Chromium. Setup has an
-8-minute limit, the unchanged `test-i18n-browser.cjs` command has 6 minutes, and
-the job has 15 minutes overall. Browser lifecycle diagnostics remain in its log.
-This boundary follows a successful isolated run; it does not establish why the
-earlier sequential run stalled. There are no retries or relaxed assertions:
-failure still fails the reusable workflow and the required `check-0` gate.
+Ubuntu 26.04) with Node.js 22 and the locked full Chromium browser in headless
+mode (`channel: chromium`). The separate headless shell stalled during preview
+reload in the recorded comparison; the same-version full browser passed both
+controls with identical application code, assertions and SwiftShader arguments.
+This identifies a working test configuration, not the underlying browser defect.
+Setup has an 8-minute limit, `test-i18n-browser.cjs` has 6 minutes, and the job has
+15 minutes overall. Browser lifecycle diagnostics remain in its log. There are no
+retries or relaxed assertions: failure still fails the reusable workflow and the
+required `check-0` gate.
 
 The reviewed inventory is `scripts/browser-matrix.json`, checked on
 2026-10-15. Its expansion produces **77 acceptance executions**, plus one

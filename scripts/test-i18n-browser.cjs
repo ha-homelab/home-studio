@@ -33,7 +33,8 @@ const served = new Map([
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     const url = origin + '/home-studio/planner/';
-    browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
+    // Use Chromium's full browser engine in headless mode, as in interactive use.
+    browser = await chromium.launch({ headless: true, channel: 'chromium', executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
       args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
     const browserVersion = browser.version(), traces = new WeakMap();
     function watchPage(target, name) {
