@@ -133,12 +133,151 @@ for(const mode of ['good','first-failure','no-frames','no-context']){
         client.close.assert_called_once()
         driver.kill.assert_called_once()
         self.assertEqual(sum(call.args[0] == diagnostic.CLEANUP for call in client.execute.call_args_list), 2)
-        self.assertEqual([call.args[0] for call in client.execute.call_args_list],
+        operations = [call.args[0] for call in client.execute.call_args_list]
+        self.assertEqual(operations[:8],
                          [diagnostic.SETUP, diagnostic.CLEANUP, diagnostic.SETUP,
                           diagnostic.CLEANUP,
                           diagnostic.EXTENDED_SETUP, diagnostic.EXTENDED_CLEANUP,
-                          diagnostic.EXTENDED_SETUP, diagnostic.EXTENDED_CLEANUP, diagnostic.WEBGL])
+                          diagnostic.EXTENDED_SETUP, diagnostic.EXTENDED_CLEANUP])
+        self.assertEqual(operations[8], diagnostic.PRESENTATION_SETUP)
+        self.assertEqual(operations[-2:], [diagnostic.PRESENTATION_CLEANUP, diagnostic.WEBGL])
+        self.assertEqual(len(result['presentation']['cases']), 8)
+        self.assertEqual(client.screenshot.call_count, 17)
         self.assertEqual(len(result['extendedPages']), 2)
+
+    def test_presentation_only_skips_prior_probes_and_preserves_capture_order(self):
+        client, driver = Mock(), Mock()
+        driver.poll.return_value = None
+        client.session_id = 'owned'
+        client.start.return_value = {'sessionId': 'owned'}
+        client.select_current_window.return_value = {'handle': 'owned-window'}
+        client.execute.return_value = {}
+        client.call.return_value = {'value': {}}
+        with tempfile.TemporaryDirectory() as temp, patch.object(diagnostic.sys, 'platform', 'darwin'), \
+                patch.object(diagnostic, 'command_observation', return_value={}), \
+                patch.object(diagnostic.subprocess, 'Popen', return_value=driver), \
+                patch.object(diagnostic.safari, 'SafariWebDriver', return_value=client), \
+                patch.object(diagnostic, 'observe_page') as original, \
+                patch.object(diagnostic, 'observe_extended_page') as extended:
+            result = diagnostic.run(Path(temp), '/mock/driver', presentation_only=True)
+        original.assert_not_called(); extended.assert_not_called()
+        self.assertEqual(result['status'], 'observed')
+        self.assertFalse(result['acceptanceEvidence'])
+        calls = [(call[0], call.args) for call in client.mock_calls]
+        first_context = next(i for i, (name, args) in enumerate(calls) if name == 'execute' and args[0] == diagnostic.PRESENTATION_START)
+        self.assertTrue(any(name == 'screenshot' for name, _ in calls[:first_context]))
+        for i, (name, args) in enumerate(calls):
+            if name == 'execute' and args[0] == diagnostic.PRESENTATION_PAINT:
+                self.assertEqual(calls[i + 1][0], 'screenshot')
+                self.assertEqual(calls[i + 2], ('execute', (diagnostic.PRESENTATION_READ,)))
+        executes = [call.args[0] for call in client.execute.call_args_list]
+        self.assertEqual(executes[-1], diagnostic.WEBGL)
+        self.assertEqual(executes.count(diagnostic.PRESENTATION_CLEAR), 8)
+
+    def test_presentation_capture_failure_keeps_paint_and_cleans_case(self):
+        client = Mock()
+        client.execute.return_value = {'paint': 'retained'}
+        client.call.return_value = {'value': {}}
+        screenshots = 0
+        def capture(_path):
+            nonlocal screenshots
+            screenshots += 1
+            if screenshots == 2:
+                raise RuntimeError('Native screenshot failed')
+        client.screenshot.side_effect = capture
+        record = {}
+        with tempfile.TemporaryDirectory() as temp:
+            diagnostic.observe_presentation(client, 'http://127.0.0.1/', Path(temp), record, lambda: None, time.monotonic() + 10)
+        self.assertEqual(record['presentation']['status'], 'incomplete')
+        first = record['presentation']['cases'][0]
+        self.assertEqual(first['status'], 'incomplete')
+        self.assertEqual(first['palettes'][0]['paint'], {'paint': 'retained'})
+        self.assertEqual(len(record['presentation']['cases']), 8)
+        client.execute.assert_any_call(diagnostic.PRESENTATION_CLEANUP)
+
+    def test_presentation_native_pixels_resize_and_cleanup(self):
+        script = r"""
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const scripts=JSON.parse(fs.readFileSync(0,'utf8'));
+for(const mode of ['good','stale-copy','no-context']){
+  const canvases=[],nodes=[],frames=[],timers=new Map();let stale;
+  class Element{
+    constructor(tag){this.tag=tag;this.style={};this.children=[];this.isConnected=false;nodes.push(this);}
+    appendChild(node){this.children.push(node);node.isConnected=true;}
+    remove(){this.isConnected=false;this.removed=true;}
+    contains(){return this.isConnected;}
+    getBoundingClientRect(){return {x:8,y:8,width:this.width||180,height:this.height||48};}
+  }
+  class Context{
+    constructor(canvas,options){this.canvas=canvas;this.options=options;this.reset();}
+    reset(){this.data=new Uint8ClampedArray(this.canvas.width*this.canvas.height*4);}
+    getContextAttributes(){return {alpha:true,...this.options};}
+    setTransform(...values){assert.deepEqual(values,[1,0,0,1,0,0]);this.identity=true;}
+    fillRect(x,y,w,h){const rgb=this.fillStyle.match(/\d+/g).map(Number);
+      for(let row=y;row<y+h;row++)for(let col=x;col<x+w;col++)this.data.set([...rgb,255],(row*this.canvas.width+col)*4);}
+    clearRect(){this.data.fill(0);}
+    drawImage(source){
+      let data=source.context.data;
+      if(mode==='stale-copy'){if(!stale||stale.length!==data.length)stale=data.slice();data=stale;}
+      this.data.set(data);
+    }
+    getImageData(){assert.equal(this.options.alpha,true,'Only transparent scratch is read');return {data:this.data};}
+  }
+  class Canvas extends Element{
+    constructor(){super('canvas');this.w=300;this.h=150;canvases.push(this);}
+    get width(){return this.w;}set width(value){this.w=value;this.context?.reset();}
+    get height(){return this.h;}set height(value){this.h=value;this.context?.reset();}
+    getContext(kind,options){assert.equal(kind,'2d');if(mode==='no-context')return null;
+      return this.context||=new Context(this,options);}
+  }
+  const body=new Element('body');body.isConnected=true;
+  const environment={window:{},document:{body,createElement:tag=>tag==='canvas'?new Canvas():new Element(tag),
+    hasFocus:()=>true,visibilityState:'visible',readyState:'complete',elementFromPoint:()=>body},
+    getComputedStyle:node=>({display:'block',visibility:'visible',opacity:'1',color:node.style.color||'black',backgroundColor:node.style.backgroundColor||'white'}),
+    CanvasRenderingContext2D:Context,innerWidth:1440,innerHeight:948,outerWidth:1440,outerHeight:1000,
+    screenX:0,screenY:0,devicePixelRatio:1,screen:{width:1440,height:1000,availWidth:1440,availHeight:1000},
+    performance:{now:()=>Date.now()},setTimeout:fn=>{timers.set(1,fn);return 1;},clearTimeout:id=>timers.delete(id),
+    requestAnimationFrame:fn=>{frames.push(fn);return frames.length;},cancelAnimationFrame(){}};
+  const context=vm.createContext(environment),run=(source,...args)=>{
+    environment.args=args;return vm.runInContext('(function(){'+source+'})(...args)',context);};
+  const initial=run(scripts.setup);
+  assert.equal(canvases.length,0,'DOM-only control must precede every canvas context');
+  assert.equal(initial.swatches.length,4);assert.equal(initial.swatches[0].background,'rgb(255,0,0)');
+  for(const [w,h] of [[64,64],[934,772]])for(const resize of ['fresh','planner'])for(const cpu of [false,true]){
+    stale=null;
+    if(mode==='no-context'){assert.throws(()=>run(scripts.start,w,h,resize,cpu),/context unavailable/);run(scripts.clear);continue;}
+    const setup=run(scripts.start,w,h,resize,cpu);
+    assert.equal(setup.contextAttributes.alpha,false);assert.equal(!!setup.contextAttributes.willReadFrequently,cpu);
+    assert.deepEqual(JSON.parse(JSON.stringify(setup.readbackAttributes)),{alpha:true,willReadFrequently:true});
+    if(resize==='planner')assert.deepEqual(JSON.parse(JSON.stringify(setup.resizeSteps)),[[300,150],[0,150],[0,h],[w,h]]);
+    const source=canvases.at(-2);assert.equal(source.context.identity,true);
+    for(const palette of [0,1]){
+      run(scripts.paint,palette);
+      const immediate=run(scripts.read);
+      assert.equal(immediate.pixelCount,w*h);assert.equal(immediate.readbackBytes,w*h*4);
+      assert.equal(immediate.matchedPixels,mode==='stale-copy'&&palette===1?0:w*h);
+      assert.equal(immediate.visiblePixels,w*h);
+      let settled;environment.done=value=>{settled=value;};
+      vm.runInContext('(function(){'+scripts.settle+'})(done)',context);
+      while(frames.length)frames.shift()();
+      assert.equal(settled.settle.frames,2);assert.equal(settled.settle.timedOut,false);
+      assert.equal(settled.readback.matchedPixels,immediate.matchedPixels);assert.equal(timers.size,0);
+    }
+    run(scripts.clear);
+    assert.ok(canvases.every(canvas=>canvas.removed&&canvas.width===0&&canvas.height===0));
+  }
+  run(scripts.cleanup);
+  assert.equal(environment.window.__safariPresentation,undefined);
+  assert.ok(canvases.every(canvas=>canvas.removed&&canvas.width===0&&canvas.height===0));
+  assert.ok(nodes.find(node=>node.id==='native-presentation-control').removed);
+}
+"""
+        result = subprocess.run(['node', '-e', script], input=json.dumps({
+            'setup': diagnostic.PRESENTATION_SETUP, 'start': diagnostic.PRESENTATION_START,
+            'paint': diagnostic.PRESENTATION_PAINT, 'read': diagnostic.PRESENTATION_READ,
+            'settle': diagnostic.PRESENTATION_SETTLE, 'clear': diagnostic.PRESENTATION_CLEAR,
+            'cleanup': diagnostic.PRESENTATION_CLEANUP}), text=True, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_extended_native_copy_freshness_encoding_and_cleanup(self):
         script = r"""

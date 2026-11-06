@@ -239,6 +239,109 @@ function bounded(promise,onLate){
 
 EXTENDED_CLEANUP = "if(window.__safariCanvasExtended){window.__safariCanvasExtended.cleanup();delete window.__safariCanvasExtended;}return true;"
 
+# A visible DOM control and one canvas pair at a time. No application hooks,
+# WebGL, image encoding, or browser preference changes precede these reads.
+PRESENTATION_SETUP = r"""
+const palettes=[[[255,0,0,255],[0,255,0,255],[0,0,255,255],[255,255,255,255]],
+  [[0,255,255,255],[255,0,255,255],[255,255,0,255],[0,0,0,255]]];
+const root=document.createElement('section');
+root.id='native-presentation-control';
+root.style.cssText='display:block;position:relative;background:white;color:black;padding:8px;width:960px;font:20px sans-serif;';
+const heading=document.createElement('div');heading.textContent='Native DOM presentation control';
+heading.style.cssText='display:block;background:black;color:white;height:30px;';root.appendChild(heading);
+const row=document.createElement('div');row.style.cssText='display:flex;height:48px;';root.appendChild(row);
+const swatches=palettes[0].map((_,index)=>{const node=document.createElement('div');
+  node.style.cssText='display:block;width:180px;height:48px;font:20px sans-serif;';
+  node.style.backgroundColor='rgb('+palettes[0][index].slice(0,3).join(',')+')';
+  node.textContent='DOM '+(index+1);row.appendChild(node);return node;});
+const slot=document.createElement('div');slot.style.cssText='display:block;margin-top:8px;';root.appendChild(slot);
+(document.body||document.documentElement).appendChild(root);
+let canvas=null,context=null,scratch=null,readback=null,paletteIndex=0,resizeSteps=[];
+const errorValue=error=>({name:String(error?.name||'').slice(0,128),message:String(error?.message||error).slice(0,2048)});
+function clearCase(){
+  for(const target of [canvas,scratch])if(target){target.remove();target.width=0;target.height=0;}
+  canvas=context=scratch=readback=null;
+}
+function geometry(node){const r=node.getBoundingClientRect(),s=getComputedStyle(node);
+  return {rect:{x:r.x,y:r.y,width:r.width,height:r.height},display:s.display,visibility:s.visibility,
+    opacity:s.opacity,color:s.color,background:s.backgroundColor,connected:node.isConnected,
+    centerHit:node.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))};}
+function facts(){return {focused:document.hasFocus(),visibility:document.visibilityState,readyState:document.readyState,
+  viewport:[innerWidth,innerHeight],outer:[outerWidth,outerHeight],windowPosition:[screenX,screenY],devicePixelRatio,
+  screen:{width:screen.width,height:screen.height,availableWidth:screen.availWidth,availableHeight:screen.availHeight},
+  heading:geometry(heading),swatches:swatches.map(geometry),canvas:canvas?geometry(canvas):null};}
+function start(width,height,resize,cpu){
+  clearCase();canvas=document.createElement('canvas');canvas.style.cssText='display:block;border:2px solid black;';
+  slot.appendChild(canvas);resizeSteps=[[canvas.width,canvas.height]];
+  const options={alpha:false,...(cpu?{willReadFrequently:true}:{})};
+  if(resize==='planner'){
+    context=canvas.getContext('2d',options);
+    canvas.width=0;resizeSteps.push([canvas.width,canvas.height]);
+    canvas.height=height;resizeSteps.push([canvas.width,canvas.height]);
+    canvas.width=width;resizeSteps.push([canvas.width,canvas.height]);
+  }else{canvas.width=width;canvas.height=height;resizeSteps.push([canvas.width,canvas.height]);context=canvas.getContext('2d',options);}
+  if(!context)throw Error('Native source context unavailable');
+  context.setTransform(1,0,0,1,0,0);
+  scratch=document.createElement('canvas');scratch.width=width;scratch.height=height;
+  readback=scratch.getContext('2d',{alpha:true,willReadFrequently:true});
+  if(!readback)throw Error('Native transparent readback context unavailable');
+  return {width,height,resize,requestedAttributes:options,resizeSteps,
+    contextAttributes:typeof context.getContextAttributes==='function'?context.getContextAttributes():null,
+    readbackAttributes:typeof readback.getContextAttributes==='function'?readback.getContextAttributes():null};
+}
+function read(){
+  const width=canvas.width,height=canvas.height,result={width,height,time:performance.now(),resizeSteps,facts:facts()};
+  try{
+    CanvasRenderingContext2D.prototype.clearRect.call(readback,0,0,width,height);
+    CanvasRenderingContext2D.prototype.drawImage.call(readback,canvas,0,0);
+    const pixels=CanvasRenderingContext2D.prototype.getImageData.call(readback,0,0,width,height).data;
+    if(pixels.length!==width*height*4)throw Error('Incomplete native bitmap copy');
+    let matchedPixels=0,visiblePixels=0;
+    for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+      const expected=palettes[paletteIndex][(y>=height/2?2:0)+(x>=width/2?1:0)],i=(y*width+x)*4;
+      if(pixels[i+3]>0)visiblePixels++;
+      if(expected.every((value,channel)=>pixels[i+channel]===value))matchedPixels++;
+    }
+    return {...result,status:'pixels-read',readbackBytes:pixels.length,pixelCount:width*height,
+      matchedPixels,visiblePixels,rgbaSamples:[0,1,2,3].map(q=>{
+        const i=(Math.floor(height*(q<2 ? .25 : .75))*width+Math.floor(width*(q%2 ? .75 : .25)))*4;
+        return Array.from(pixels.slice(i,i+4));})};
+  }catch(error){return {...result,status:'readback-failed',...errorValue(error)};}
+}
+function paint(index){
+  paletteIndex=index;heading.textContent='Native DOM control — '+(index?'changed':'primary');
+  context.fillStyle='rgb(255,255,255)';
+  CanvasRenderingContext2D.prototype.fillRect.call(context,0,0,canvas.width,canvas.height);
+  for(let q=0;q<4;q++){
+    const rgb='rgb('+palettes[index][q].slice(0,3).join(',')+')';
+    swatches[q].style.backgroundColor=rgb;swatches[q].style.color=q===3&&index?'white':'black';
+    context.fillStyle=rgb;
+    CanvasRenderingContext2D.prototype.fillRect.call(context,(q%2)*canvas.width/2,Math.floor(q/2)*canvas.height/2,canvas.width/2,canvas.height/2);
+  }
+  return {time:performance.now(),facts:facts()};
+}
+window.__safariPresentation={start,paint,read,facts,clearCase,cleanup(){clearCase();root.remove();}};
+return facts();
+"""
+
+PRESENTATION_START = "return window.__safariPresentation.start(...arguments);"
+PRESENTATION_PAINT = "return window.__safariPresentation.paint(arguments[0]);"
+PRESENTATION_READ = "return window.__safariPresentation.read();"
+PRESENTATION_SETTLE = r"""
+const done=arguments[arguments.length-1],state=window.__safariPresentation;
+let frames=0,finished=false,raf=null;const started=performance.now();
+function finish(timedOut){
+  if(finished)return;finished=true;clearTimeout(timer);if(raf!==null)cancelAnimationFrame(raf);
+  const settle={frames,timedOut,durationMs:performance.now()-started};
+  try{done({settle,readback:state.read()});}
+  catch(error){done({settle,error:{name:String(error?.name||''),message:String(error?.message||error).slice(0,2048)}});}
+}
+const timer=setTimeout(()=>finish(true),1500);
+raf=requestAnimationFrame(()=>{frames++;raf=requestAnimationFrame(()=>{frames++;finish(false);});});
+"""
+PRESENTATION_CLEAR = "if(window.__safariPresentation)window.__safariPresentation.clearCase();return true;"
+PRESENTATION_CLEANUP = "if(window.__safariPresentation){window.__safariPresentation.cleanup();delete window.__safariPresentation;}return true;"
+
 
 class BlankPage(BaseHTTPRequestHandler):
     def log_message(self, *_args):
@@ -327,12 +430,72 @@ def observe_extended_page(client, url, record, save, deadline):
         save()
 
 
-def run(output, driver_path, prepare=False):
+def observe_presentation(client, url, output, record, save, deadline):
+    page = record['presentation'] = {'url': url, 'status': 'running', 'cases': []}
+    save()
+    try:
+        remaining(deadline)
+        client.call('WebDriver:Navigate', {'url': url})
+        page['initialDOM'] = client.execute(PRESENTATION_SETUP)
+        remaining(deadline)
+        client.screenshot(output / 'presentation-dom-before-canvas.png')
+        page['initialDOMScreenshot'] = 'presentation-dom-before-canvas.png'
+        save()
+        for width, height in ((64, 64), (934, 772)):
+            for resize in ('fresh', 'planner'):
+                for cpu in (False, True):
+                    name = f'{width}x{height}-{resize}-{"cpu" if cpu else "default"}'
+                    case = {'name': name, 'status': 'running', 'palettes': []}
+                    page['cases'].append(case)
+                    try:
+                        remaining(deadline)
+                        case['setup'] = client.execute(PRESENTATION_START, width, height, resize, cpu)
+                        for index, palette in enumerate(('primary', 'changed')):
+                            remaining(deadline)
+                            observation = {'palette': palette, 'captureOrder': [
+                                'opaque-paint', 'native-screenshot', 'native-copy', 'two-rAF-native-copy']}
+                            case['palettes'].append(observation)
+                            observation['paint'] = client.execute(PRESENTATION_PAINT, index)
+                            remaining(deadline)
+                            screenshot = f'presentation-{name}-{palette}.png'
+                            client.screenshot(output / screenshot)
+                            observation['screenshot'] = screenshot
+                            remaining(deadline)
+                            observation['immediate'] = client.execute(PRESENTATION_READ)
+                            save()
+                            remaining(deadline)
+                            observation['afterTwoFrames'] = client.call('WebDriver:ExecuteAsyncScript',
+                                {'script': PRESENTATION_SETTLE, 'args': []})['value']
+                            save()
+                        case['status'] = 'observed'
+                    except Exception as error:
+                        case.update(status='incomplete', error=error_record(error))
+                    finally:
+                        try:
+                            remaining(deadline)
+                            client.execute(PRESENTATION_CLEAR)
+                        except Exception as error:
+                            case['cleanupError'] = error_record(error)
+                        save()
+        page['status'] = 'observed' if all(case['status'] == 'observed' and 'cleanupError' not in case for case in page['cases']) else 'incomplete'
+    except Exception as error:
+        page.update(status='incomplete', error=error_record(error))
+    finally:
+        try:
+            remaining(deadline)
+            client.execute(PRESENTATION_CLEANUP)
+        except Exception as error:
+            page['cleanupError'] = error_record(error)
+        save()
+
+
+def run(output, driver_path, prepare=False, presentation_only=False):
     output.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     deadline = started + BUDGET_SECONDS
     record = {'schema': 1, 'purpose': 'diagnostic-only', 'acceptanceEvidence': False,
               'status': 'running', 'budgetMs': BUDGET_SECONDS * 1000,
+              'presentationOnly': presentation_only,
               'sourceRevision': os.environ.get('GITHUB_SHA'), 'pages': [], 'extendedPages': [], 'cleanupErrors': [],
               'host': {'platform': sys.platform, 'release': platform.release(),
                        'machine': platform.machine(), 'cpuCount': os.cpu_count(),
@@ -379,18 +542,21 @@ def run(output, driver_path, prepare=False):
             record['sessionStartup'] = {}
             record['session'] = client.start(record['sessionStartup'])
             client.call('WebDriver:SetTimeouts', {'script': 5000, 'pageLoad': 15000, 'implicit': 0})
-            client.call('WebDriver:SetWindowRect', {'width': 1440, 'height': 1000})
+            record['windowRect'] = client.call('WebDriver:SetWindowRect', {'width': 1440, 'height': 1000})
             record['windowFocus'] = client.select_current_window()
             urls = ('about:blank', f'http://127.0.0.1:{server.server_port}/')
-            for url in urls:
-                observe_page(client, url, record, save, deadline)
-            for url in urls:
-                observe_extended_page(client, url, record, save, deadline)
+            if not presentation_only:
+                for url in urls:
+                    observe_page(client, url, record, save, deadline)
+                for url in urls:
+                    observe_extended_page(client, url, record, save, deadline)
+            observe_presentation(client, urls[1], output, record, save, deadline)
             remaining(deadline)
             record['webgl2'] = client.execute(WEBGL)
             save()
             remaining(deadline)
-            record['status'] = 'observed' if all(page['status'] == 'observed' and 'cleanupError' not in page for page in record['pages'] + record['extendedPages']) else 'incomplete'
+            observations = record['pages'] + record['extendedPages'] + [record['presentation']]
+            record['status'] = 'observed' if all(page['status'] == 'observed' and 'cleanupError' not in page for page in observations) else 'incomplete'
     except Exception as error:
         record.update(status='incomplete', error=error_record(error))
     finally:
@@ -427,8 +593,10 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--driver', default='/usr/bin/safaridriver')
     parser.add_argument('--prepare-hosted-safari', action='store_true')
+    parser.add_argument('--presentation-only', action='store_true',
+                        help='Skip earlier small-canvas/encoding matrices; observe DOM and realistic surfaces before final WebGL identity')
     args = parser.parse_args()
-    result = run(args.output.resolve(), args.driver, args.prepare_hosted_safari)
+    result = run(args.output.resolve(), args.driver, args.prepare_hosted_safari, args.presentation_only)
     print(f'Native Safari diagnostic: {result["status"]}; never acceptance evidence', flush=True)
     return int(result['status'] != 'observed')
 
