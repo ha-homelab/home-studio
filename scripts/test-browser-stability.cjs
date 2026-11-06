@@ -15,7 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
-const {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerDraw, waitForViewerLightState, assertViewerInteraction, bounded} = require('./browser-stability-diagnostics.cjs');
+const {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, installContextEventDiagnostics, attributeContextEvents, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerDraw, waitForViewerLightState, assertViewerInteraction, bounded} = require('./browser-stability-diagnostics.cjs');
 const {createStartupDiagnostics} = require('./browser-startup-diagnostics.cjs');
 const {inspectSceneScreenshot} = require('./browser-pixel-evidence.cjs');
 const {tapWithDiagnostics} = require('./browser-tap-diagnostics.cjs');
@@ -49,9 +49,54 @@ function fixture() {
   return { schema_version:1, id:'browser_stability', title:'Fictional browser stability fixture', floors:[floor] };
 }
 
-function instrumentation(installShaderChecks) {
+function instrumentation(installShaderChecks, installContextEvents) {
   const stats = window.__browserStability = { shaderErrors:[], errors:[], linkedPrograms:0, contexts:0, contextLosses:0,
     shaderTiming:{linkMs:0,statusMs:0,longestLink:null,longestStatus:null},shaderChecks:{pending:0,checked:0,discarded:0} };
+  // Hold only native viewer resize deliveries during the map-layout regression.
+  // All other phases retain the browser's normal observer behavior.
+  const NativeResizeObserver=window.ResizeObserver, pendingResize=new Map();
+  let holdResize=false, deferredResize=0, deliveredResize=0;
+  const resizeReceipt=()=>({holding:holdResize,deferred:deferredResize,delivered:deliveredResize,pending:pendingResize.size});
+  window.ResizeObserver=class extends NativeResizeObserver {
+    constructor(callback) {
+      super((entries,observer)=>{
+        const viewer=entries.some(entry=>['homeStage','view3d'].includes(entry.target.id));
+        if(viewer && holdResize) {
+          deferredResize++;
+          const pending=pendingResize.get(observer)||{callback,entries:new Map()};
+          for(const entry of entries)pending.entries.set(entry.target,entry);
+          pendingResize.set(observer,pending);
+        } else {
+          if(viewer)deliveredResize++;
+          callback.call(observer,entries,observer);
+        }
+      });
+    }
+    unobserve(target) {
+      super.unobserve(target);
+      const pending=pendingResize.get(this);
+      pending?.entries.delete(target);
+      if(pending && !pending.entries.size)pendingResize.delete(this);
+    }
+    disconnect() {super.disconnect();pendingResize.delete(this);}
+  };
+  window.__resizeObserverDelivery={
+    hold() {
+      if(holdResize)throw Error('Viewer resize delivery is already held');
+      holdResize=true;deferredResize=0;deliveredResize=0;
+    },
+    snapshot:resizeReceipt,
+    release() {
+      holdResize=false;
+      const deliveries=[...pendingResize];pendingResize.clear();
+      for(const [observer,{callback,entries}] of deliveries) {
+        deliveredResize++;
+        callback.call(observer,[...entries.values()],observer);
+      }
+    },
+  };
+  const contextEvents = installContextEvents();
+  stats.contextEventTrace = contextEvents.trace;
   const shaderOwners=[];
   window.__flushBrowserShaders=()=>{for(const owner of shaderOwners)owner.flush();return {...stats.shaderChecks};};
   window.addEventListener('error', event=>stats.errors.push(event.message || String(event.error)));
@@ -70,6 +115,7 @@ function instrumentation(installShaderChecks) {
     console.info('[home-studio-test-gpu]' + JSON.stringify(stats.gpu));
     this.addEventListener('webglcontextlost', () => stats.contextLosses++);
     shaderOwners.push(installShaderChecks(gl,this,stats));
+    contextEvents.watch(this, stats.contexts);
     return gl;
   };
 }
@@ -278,7 +324,7 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
       const loadMs = sample.loadMs;
       phases.start('initial-checks', {cycle});
       console.log(`${browserName}: first connected draw in ${sample.loadMs} ms`);
-      const snapshot = () => child.evaluate(() => {window.__flushBrowserShaders();return {...window.__browserStability,renderedLights:window.__browserRenderedLights,renderCount:window.floorplan.renderCount,homeMode:window.floorplan.homeMode,scene:window.__browserScene?.()};});
+      const snapshot = async () => attributeContextEvents(await child.evaluate(() => {window.__flushBrowserShaders();return {...window.__browserStability,renderedLights:window.__browserRenderedLights,renderCount:window.floorplan.renderCount,homeMode:window.floorplan.homeMode,scene:window.__browserScene?.()};}), record);
       let initial = await snapshot();
       record.gpu = initial.gpu;
       Object.assign(sample, initial);
@@ -445,20 +491,36 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
           captionHeight:document.querySelector('#homeMapCaption').getBoundingClientRect().height,
         }));
         const layoutBefore = await captureMapLayout();
-        await page.evaluate(() => {window.deferMapReply=true;});
-        await child.evaluate(() => document.querySelector('#homeMapRetry').click());
-        await page.waitForFunction(() => window.viewerMapRequests.length===2);
-        await page.evaluate(() => window.viewerPort.postMessage({type:'map_result',request_id:window.viewerMapRequests[1].request_id,success:false,error:'Simulated delayed map failure'}));
-        const mapLayout = await child.evaluate(waitForHomeViewport, {beforeRenderCount:restored.renderCount,beforeSceneDraws:restored.sceneDraws,captionVisible:true});
-        const layoutAfter = await captureMapLayout();
-        sample.mapLayoutRecovery = {before:restored,after:mapLayout,layoutBefore,layoutAfter};save();
-        assert.equal(layoutAfter.narrow,layoutBefore.narrow, 'A map status change must preserve the responsive layout');
-        assert(layoutAfter.captionHeight>0, 'The delayed map error occupies visible layout space');
-        assert.deepEqual(mapLayout.actual,mapLayout.expected, 'The restored canvas fits its stage after a late map error');
+        let mapLayout;
+        sample.mapLayoutRecovery = {before:restored,layoutBefore};
+        await child.evaluate(() => window.__resizeObserverDelivery.hold());
+        try {
+          await page.evaluate(() => {window.deferMapReply=true;});
+          await child.evaluate(() => document.querySelector('#homeMapRetry').click());
+          await page.waitForFunction(() => window.viewerMapRequests.length===2);
+          await page.evaluate(() => window.viewerPort.postMessage({type:'map_result',request_id:window.viewerMapRequests[1].request_id,success:false,error:'Simulated delayed map failure'}));
+          mapLayout = await child.evaluate(waitForHomeViewport, {beforeRenderCount:restored.renderCount,beforeSceneDraws:restored.sceneDraws,captionVisible:true});
+          const layoutAfter = await captureMapLayout();
+          const observerDelivery = await child.evaluate(() => window.__resizeObserverDelivery.snapshot());
+          Object.assign(sample.mapLayoutRecovery,{after:mapLayout,layoutAfter,observerDelivery});save();
+          assert(observerDelivery.holding && observerDelivery.delivered===0, 'Map layout is corrected before native resize delivery resumes');
+          assert.equal(layoutAfter.narrow,layoutBefore.narrow, 'A map status change must preserve the responsive layout');
+          assert(layoutAfter.captionHeight>0, 'The delayed map error occupies visible layout space');
+          assert.deepEqual(mapLayout.actual,mapLayout.expected, 'The restored canvas fits its stage after a late map error');
+          if(layoutBefore.narrow) {
+            assert.deepEqual(mapLayout.viewport,restored.viewport, 'A narrow layout preserves its fixed Home stage when the map caption appears');
+            assert(Math.abs(layoutAfter.sectionHeight-layoutBefore.sectionHeight-layoutAfter.captionHeight)<1,
+              'A narrow map section grows by the visible error caption height');
+          } else assert(mapLayout.viewport[1]<restored.viewport[1], 'The delayed map error must shrink the real desktop Home stage');
+        } catch(error) {
+          sample.mapLayoutRecovery.error=String(error);throw error;
+        } finally {
+          // Save the held outcome first. Delivery on release cannot rescue it.
+          try {
+            sample.mapLayoutRecovery.observerDelivery=await child.evaluate(() => window.__resizeObserverDelivery.snapshot());save();
+          } finally {await child.evaluate(() => window.__resizeObserverDelivery.release());}
+        }
         if(layoutBefore.narrow) {
-          assert.deepEqual(mapLayout.viewport,restored.viewport, 'A narrow layout preserves its fixed Home stage when the map caption appears');
-          assert(Math.abs(layoutAfter.sectionHeight-layoutBefore.sectionHeight-layoutAfter.captionHeight)<1,
-            'A narrow map section grows by the visible error caption height');
           // Exercise ResizeObserver separately where the caption cannot resize
           // the stage. No explicit render or resize API may satisfy this demand.
           const viewport=page.viewportSize();
@@ -467,7 +529,7 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
           sample.mapLayoutRecovery.resized=resized;save();
           assert.notDeepEqual(resized.viewport,mapLayout.viewport, 'The real narrow viewport change must resize the Home stage');
           assert.deepEqual(resized.actual,resized.expected, 'ResizeObserver redraws the narrow restored canvas at the new viewport');
-        } else assert(mapLayout.viewport[1]<restored.viewport[1], 'The delayed map error must shrink the real desktop Home stage');
+        }
         // Disposing outlines and revisiting cached wall geometry after restoration
         // must not delete handles from the lost generation. Keep the same case
         // deadline and existing per-operation limits; shader checks follow the actual draw.
@@ -481,7 +543,7 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
             await child.evaluate(changeRestoredViewerMode, mode);
             await child.waitForFunction(({beforeCount, home}) => window.floorplan.renderCount > beforeCount && window.floorplan.homeMode === home,
               {beforeCount, home:mode === 'home'});
-            transition.snapshot = await child.evaluate(captureRestoredViewerMode);
+            transition.snapshot = attributeContextEvents(await child.evaluate(captureRestoredViewerMode), record);
             save();
             assertRestoredViewerMode(beforeCount, transition.snapshot, mode, lights);
             transition.completed = true;
@@ -576,7 +638,7 @@ async function run(browserName, origin, project, sourceHash, loadInstrumentation
   const {html:instrumented, ...loadInstrumentation} = instrumentViewerLoadSource(html,
     {comparison:fs.realpathSync(root) !== fs.realpathSync(path.join(__dirname,'..'))});
   html = instrumented;
-  html = html.replace('<head>',`<head><script>window.__HOME_FLOORPLAN_EMBED__=true;(${installViewerLoadDiagnostics.toString()})({role:'frame',expectedLights:${project.floors[0].items.length}});(${instrumentation.toString()})(${deferViewerShaderChecks.toString()});</script>`);
+  html = html.replace('<head>',`<head><script>window.__HOME_FLOORPLAN_EMBED__=true;(${installViewerLoadDiagnostics.toString()})({role:'frame',expectedLights:${project.floors[0].items.length}});(${instrumentation.toString()})(${deferViewerShaderChecks.toString()},${installContextEventDiagnostics.toString()});</script>`);
   html = startup.checkpointSource(html, 'renderProfile=selectRenderProfile(renderer.getContext());', 'renderProfile');
   // Read the viewer's actual pending handles on every observation; missing
   // scheduler diagnostics must never be treated as an idle renderer.

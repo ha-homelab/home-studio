@@ -4,6 +4,9 @@
 
 ### Added
 
+- Optional static presentation base for garden surroundings, with translated
+  controls in the planner and Home view. It leaves saved dimensions and exports
+  unchanged and stays disabled for authored site or map contexts.
 - Drawings and materials: dimensioned floor plans, ceiling-fixture sheets,
   interior wall elevations, material schedules, and SVG/CSV/printable HTML
   export. Measurement records preserve source notes and flag changed geometry.
@@ -18,6 +21,9 @@
 
 ### Fixed
 
+- Reduce decorative tree detail during camera navigation using existing GPU
+  buffers, then restore it after input settles. Static surroundings remain idle;
+  hidden views cancel pending restoration and shadow detail remains stable.
 - Interior elevations and room-label placement no longer depend on polygon
   winding or the chosen first vertex. Partial-room exports report excluded
   interior partition surfaces and retain their in-scope opening schedules.

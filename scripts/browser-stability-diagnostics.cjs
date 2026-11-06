@@ -404,6 +404,35 @@ function createPhaseTimings(record, now = () => performance.now(), origin = now(
   };
 }
 
+// Serialized into the viewer. Observe events without querying GL, layout or
+// scheduling work; the existing loss counter and recovery handlers stay intact.
+function installContextEventDiagnostics() {
+  const trace = {kind:'context-event-trace-v1', timeOriginMs:performance.timeOrigin, events:[], dropped:0};
+  return {trace, watch(canvas, contextId) {
+    for (const type of ['webglcontextlost', 'webglcontextrestored']) canvas.addEventListener(type, () => {
+      const atMs = performance.now();
+      trace.events.push({type, contextId, atMs, epochMs:trace.timeOriginMs + atMs,
+        attached:canvas.isConnected === true});
+      if (trace.events.length > 64) { trace.events.shift(); trace.dropped++; }
+    }, {passive:true});
+  }};
+}
+
+// Correlate the browser's epoch-relative monotonic clock with the existing host
+// phase timeline. Unmatched events remain explicit; never guess from capture time.
+// Clock skew can shift attribution: these are intervals, not causal observations.
+function attributeContextEvents(value, record, observedEpochMs = performance.timeOrigin + performance.now()) {
+  const trace = value?.contextEventTrace;
+  if (trace?.kind !== 'context-event-trace-v1') return value;
+  return {...value, contextEventTrace:{...trace, phaseAttribution:'host-timestamp-correlation', hostObservedEpochMs:observedEpochMs, events:trace.events.map(event => {
+    const atMs = Number.isFinite(event.epochMs) && Number.isFinite(record.phaseEpochOriginMs)
+      ? event.epochMs - record.phaseEpochOriginMs : null;
+    const phase = atMs !== null && event.epochMs <= observedEpochMs ? record.phases.findLast(item => item.startedMs <= atMs &&
+      (item.completedMs === null || atMs < item.completedMs)) : null;
+    return {...event, hostPhaseElapsedMs:atMs, phase:phase?.name || null, cycle:phase?.cycle ?? null};
+  })}};
+}
+
 // This local allowance never renews or extends the enclosing scenario clock.
 const VIEWER_LOAD_BUDGET_MS = 60000;
 function createViewerLoadDeadline(sample, outerDeadlineAt, checkOuter) {
@@ -503,6 +532,7 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
     record.scenarioStartedMs = null;
     record.scenarioDurationMs = null;
     record.scenarioCompletedMs = null;
+    record.phaseEpochOriginMs = performance.timeOrigin + caseStarted;
     const phases = createPhaseTimings(record, undefined, caseStarted);
     const file = `${engine}.json`;
     const reference = {engine, file, status: record.status};
@@ -600,6 +630,7 @@ function createDiagnostics(name, prefix, sourceRoot, dependencies = {}) {
             viewerLoad: window.__viewerLoadDiagnostics?.snapshot() || null,
           };
         }))), 2500, 'Failure snapshot');
+        for (const frame of record.snapshot) frame.stats = attributeContextEvents(frame.stats, record);
         record.gpu ||= record.snapshot.find(frame => frame.stats?.gpu)?.stats.gpu || null;
       } catch (error) { record.diagnosticsErrors.push(errorDetails(error)); }
       if (screenshot) {
@@ -1028,4 +1059,4 @@ function assertViewerScenarioComplete(record) {
   record.viewerCompletion = {version: 1, cycles: 2, postRestoreModes: modes};
 }
 
-module.exports = {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, VIEWER_LOAD_BUDGET_MS, createViewerLoadDeadline, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerDraw, waitForViewerLightState, assertViewerInteraction, bounded};
+module.exports = {deferViewerShaderChecks, installViewerLoadDiagnostics, instrumentViewerLoadSource, installContextEventDiagnostics, attributeContextEvents, VIEWER_LOAD_BUDGET_MS, createViewerLoadDeadline, changeRestoredViewerMode, captureRestoredViewerMode, assertRestoredViewerMode, assertViewerScenarioComplete, createDiagnostics, createPhaseTimings, positiveInteger, selectedEngines, browserLaunchOptions, browserProfile, loadPlaywright, browserIdentity, createInputDriver, viewerInputOptions, captureViewerFrames, waitForViewerDraw, waitForViewerLightState, assertViewerInteraction, bounded};

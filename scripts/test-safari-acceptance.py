@@ -329,6 +329,45 @@ def fixture_server(name, log):
         raise
 
 
+# An independent native readback on a blank page, before application hooks.
+# This is preparation evidence, never a substitute for application pixel gates.
+GRAPHICS_PREPARATION = r"""
+const canvas=document.createElement('canvas');canvas.width=64;canvas.height=64;
+(document.body||document.documentElement).appendChild(canvas);
+const colors=[[255,0,0,255],[0,255,0,255],[0,0,255,255],[255,255,255,255]];
+try {
+  const context=canvas.getContext('2d',{alpha:false});
+  if(!context)throw Error('Native 2D context unavailable');
+  for(let q=0;q<4;q++) {
+    context.fillStyle='rgb('+colors[q].slice(0,3).join(',')+')';
+    context.fillRect((q%2)*32,Math.floor(q/2)*32,32,32);
+  }
+  const data=CanvasRenderingContext2D.prototype.getImageData.call(context,0,0,64,64).data;
+  let matchedPixels=0;
+  for(let y=0;y<64;y++)for(let x=0;x<64;x++) {
+    const expected=colors[(y>=32?2:0)+(x>=32?1:0)],offset=(y*64+x)*4;
+    if(expected.every((value,c)=>data[offset+c]===value))matchedPixels++;
+  }
+  return {status:'pixels-read',width:64,height:64,readbackBytes:data.length,matchedPixels};
+} catch(error) {
+  return {status:'readback-failed',width:64,height:64,name:String(error?.name||'').slice(0,128),
+    message:String(error?.message||error).slice(0,2048),stack:String(error?.stack||'').slice(0,4096)};
+}
+"""
+
+
+def prepare_graphics(client, record, save):
+    record['phase'] = 'preparation'
+    save()
+    client.call('WebDriver:Navigate', {'url': 'about:blank'})
+    result = record['graphicsPreparation'] = client.execute(GRAPHICS_PREPARATION)
+    save()
+    native.require(isinstance(result, dict) and result.get('status') == 'pixels-read'
+                   and result.get('readbackBytes') == 64 * 64 * 4
+                   and result.get('matchedPixels') == 64 * 64,
+                   'Independent native canvas preparation failed: ' + json.dumps(result))
+
+
 def run_case(output, name, driver_path):
     output.mkdir(parents=True, exist_ok=True)
     record = {'schema': 1, 'suite': name, 'status': 'running', 'product': 'Safari',
@@ -383,6 +422,7 @@ def run_case(output, name, driver_path):
             record['windowFocus'] = client.select_current_window()
             save()
             record['userAgent'] = client.execute('return navigator.userAgent;')
+            prepare_graphics(client, record, save)
             record['phase'] = 'application'
             save()
             (native.planner if name == 'planner-256' else native.viewer)(client, info['origin'], project, record, save)

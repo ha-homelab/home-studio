@@ -281,6 +281,11 @@ preferences, and represents no Home Assistant device or occupancy state.
 These surroundings settings last for the current page; the editable garden and
 placed objects are saved in your project. See the [garden guide](docs/environment.md).
 
+**Show presentation base** adds a shallow static plinth beneath these optional
+surroundings. Trees simplify during navigation and regain their detail when you
+stop, without a continuous render loop. Authored site and map context take
+precedence over generated scenery, including the presentation base.
+
 ![Fictional Garden Studio showing editable planting, pets, and optional geometric surroundings](docs/images/garden-surroundings.png)
 
 ## Make a camera tour

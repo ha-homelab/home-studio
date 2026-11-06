@@ -807,6 +807,39 @@ class BoundaryTests(unittest.TestCase):
                          {f"{name}: ${{{{ secrets.{name} }}}}" for name in names})
         self.assertNotIn("secrets: inherit", workflow)
 
+    def test_rebuild_protocol_selection_is_explicit_and_never_falls_back(self):
+        args, temporary = SimpleNamespace(action="rebuild"), Path("/unused")
+        for protocol, anchor, executor in (("v2", "", lambda *_: None),
+                                           ("v2", "configured", None),
+                                           ("v3", "configured", lambda *_: None)):
+            with self.subTest(protocol=protocol, anchor=anchor), \
+                 patch.dict(os.environ, {"CLOSED_REBUILD_PROTOCOL": protocol,
+                                         "CLOSED_RELEASE_LEDGER_ANCHOR": anchor}, clear=True), \
+                 patch.object(build, "gate_environment") as legacy_gate:
+                with self.assertRaises(build.UploadAdmissionUnavailable):
+                    build.execute(args, temporary, release_executor=executor)
+                legacy_gate.assert_not_called()
+        with patch.dict(os.environ, {"CLOSED_REBUILD_PROTOCOL": "v2",
+                                     "CLOSED_RELEASE_LEDGER_ANCHOR": "configured"}, clear=True), \
+             patch.object(build, "gate_environment") as legacy_gate:
+            calls = []
+            def executor(received, directory):
+                calls.append((received, directory))
+                raise RuntimeError("Selected executor failed")
+            with self.assertRaisesRegex(RuntimeError, "Selected executor failed"):
+                build.execute(args, temporary, release_executor=executor)
+            self.assertEqual(calls, [(args, temporary)])
+            legacy_gate.assert_not_called()
+        for protocol in ("", "v1"):
+            with self.subTest(protocol=protocol), \
+                 patch.dict(os.environ, {"CLOSED_REBUILD_PROTOCOL": protocol}, clear=True), \
+                 patch.object(build, "gate_environment", side_effect=RuntimeError("legacy selected")) as gate:
+                with self.assertRaisesRegex(RuntimeError, "legacy selected"):
+                    build.execute(args, temporary)
+                gate.assert_called_once_with(os.environ)
+        workflow = (build.ROOT / ".github/workflows/closed-build.yml").read_text()
+        self.assertIn("CLOSED_REBUILD_PROTOCOL: ${{ vars.CLOSED_REBUILD_PROTOCOL }}", workflow)
+
     def test_normal_releases_stop_before_environment_policy_or_transport(self):
         environment = {name: MARKER for name in (
             "CLOSED_INPUT_READ_URL", "CLOSED_OUTPUT_READ_URL", "CLOSED_OUTPUT_WRITE_URL",

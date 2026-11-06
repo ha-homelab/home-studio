@@ -315,7 +315,13 @@ homeView = (() => {
     mapLoading=true;
     try{configureMap(await window.homeMapRequest('get',{}));}
     catch(error){mapSettingsError=true;refreshMapControls();refreshMapStatus();}
-    finally{mapLoading=false;}
+    finally{
+      mapLoading=false;
+      // A settings reply can add or remove the in-flow status caption. Commit
+      // its final layout before requesting a bounded frame; ResizeObserver
+      // delivery may be delayed after the WebGL context has been restored.
+      if(active){window.resizeModel?.(false);window.requestModelRender?.();}
+    }
   }
   const mapFields={latitude:'homeMapLatitude',longitude:'homeMapLongitude',model_x:'homeMapX',model_z:'homeMapZ',north_deg:'homeMapNorth'};
   function fillMapForm(){
@@ -382,6 +388,7 @@ homeView = (() => {
       homeRotation=(homeRotation-dx*.006)%(Math.PI*2);
       homeTilt=Math.max(-.45,Math.min(.6,homeTilt+dy*.006));
     }
+    if(dx||dy)environmentLayer?.noteNavigation();
     notifyMapNavigation();window.requestModelRender?.(true);
   }
   for(const mode of ['rotate','move'])$('home'+(mode==='rotate'?'Rotate':'Move')).onclick=()=>{
@@ -394,7 +401,7 @@ homeView = (() => {
     $('homeZoomReset').textContent=zoom<.1?(zoom*100).toFixed(2)+'%':Math.round(zoom*100)+'%';
     $('homeZoomOut').disabled=zoom<=minimumZoom();$('homeZoomIn').disabled=zoom>=3;
     if(mapLoaded)refreshMapControls();
-    if(notify)notifyMapNavigation();window.renderModel?.();
+    if(notify){environmentLayer?.noteNavigation();notifyMapNavigation();}window.renderModel?.();
   }
   function zoomAt(next,clientX,clientY){
     if(!camera)return;
