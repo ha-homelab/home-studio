@@ -18,13 +18,17 @@ on:
         description: Run only the isolated Linux language browser diagnostic
         type: boolean
         default: false
+      i18n_lifecycle:
+        description: Diagnose Linux language browser lifecycle without claiming application acceptance
+        type: boolean
+        default: false
   schedule:
     - cron: '37 4 * * 2'
 permissions:
   contents: read
 jobs:
   safari:
-    if: ${{ inputs.linux_i18n != true }}
+    if: ${{ inputs.linux_i18n != true && inputs.i18n_lifecycle != true }}
     name: Safari (${{ inputs.runner || 'macos-15' }}, installed stable observation)
     runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 25
@@ -63,10 +67,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   linux-i18n:
-    if: ${{ inputs.linux_i18n == true }}
+    if: ${{ inputs.linux_i18n == true || inputs.i18n_lifecycle == true }}
     name: Isolated Linux language browser diagnostic
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: ${{ inputs.i18n_lifecycle && 18 || 12 }}
     steps:
       - name: Record bounded environment before setup
         timeout-minutes: 1
@@ -86,10 +90,25 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           npx playwright install --with-deps chromium
       - name: Diagnose language browser lifecycle in isolation
+        if: ${{ inputs.i18n_lifecycle != true }}
         timeout-minutes: 6
         env:
           DEBUG: pw:browser
         run: node scripts/test-i18n-browser.cjs
+      - name: Compare bounded language browser lifecycle observations
+        if: ${{ inputs.i18n_lifecycle == true }}
+        timeout-minutes: 6
+        run: |
+          node --test scripts/test-i18n-lifecycle-diagnostic.cjs
+          node scripts/diagnose-i18n-lifecycle.cjs --output acceptance-artifacts/i18n-lifecycle
+      - name: Preserve language browser lifecycle diagnostics
+        if: ${{ always() && inputs.i18n_lifecycle == true }}
+        uses: ./.github/actions/upload-acceptance-artifact
+        with:
+          name: i18n-lifecycle-diagnostic
+          path: acceptance-artifacts/i18n-lifecycle/
+          if-no-files-found: error
+          retention-days: 14
       - name: Record bounded environment after diagnostic
         if: ${{ always() }}
         timeout-minutes: 1
