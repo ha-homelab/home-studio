@@ -4,7 +4,7 @@ const { test } = require('node:test');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
-const { ORIGINAL, OPERATIONS, instrumentEditor, lifecycleMessage, runChild, caseSucceeded } = require('./diagnose-i18n-lifecycle.cjs');
+const { ORIGINAL, OPERATIONS, instrumentEditor, lifecycleMessage, parseArguments, diagnosticCases, launchOptions, runChild, caseSucceeded } = require('./diagnose-i18n-lifecycle.cjs');
 
 function execute(mode, { persisted = false, fail } = {}) {
   const calls = [], marks = [], handlers = {};
@@ -65,6 +65,25 @@ test('only bounded known marker fields can leave the page', () => {
     'HOME_STUDIO_LIFECYCLE ' + JSON.stringify({ ...good, stage: 'unknown' })]) assert.equal(lifecycleMessage(value), null);
 });
 
+test('channel comparison is explicit, keeps both full-browser controls, and rejects executable overrides', () => {
+  assert.equal(parseArguments(['--output', 'unused'], {}).compare, false);
+  assert.equal(parseArguments(['--compare-browser-channels', '--output', 'unused'], {}).compare, true);
+  assert.deepEqual(diagnosticCases(false), [['A1', 'baseline'], ['B', 'omit-force-context-loss'], ['A2', 'baseline']]);
+  assert.deepEqual(diagnosticCases(true), [['A', 'headless-shell'], ['B', 'chromium'], ['C', 'chromium']]);
+  assert.throws(() => parseArguments(['--output', 'unused', '--compare-browser-channels', '--compare-browser-channels'], {}), /Usage/);
+  for (const value of ['', '/not-a-browser'])
+    assert.throws(() => parseArguments(['--output', 'unused', '--compare-browser-channels'], { PLAYWRIGHT_CHROMIUM_EXECUTABLE: value }), /Unset PLAYWRIGHT/);
+  const options = { headless: true, executablePath: undefined,
+    args: ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] };
+  assert.equal(launchOptions(options, 'baseline'), options);
+  assert.equal(launchOptions(options, 'headless-shell'), options);
+  const full = launchOptions(options, 'chromium');
+  assert.deepEqual(full, { ...options, channel: 'chromium' });
+  assert.equal(full.args, options.args); assert.equal(options.channel, undefined);
+  for (const changed of [{ headless: false }, { executablePath: '/not-a-browser' }, { channel: 'chrome' }, { args: [] }])
+    assert.throws(() => launchOptions({ ...options, ...changed }, 'chromium'), /unchanged canonical/);
+});
+
 test('normal child output drains and an unsuccessful exit remains unsuccessful', { skip: process.platform === 'win32' }, async () => {
   const good = await runChild(['-e', "process.stdout.write('Browser i18n checks passed: synthetic\\n');"], { env: { ...process.env }, budgetMs: 2000, graceMs: 50, settleMs: 100 });
   assert.equal(good.exitCode, 0); assert.equal(good.assertionsPassed, true); assert.equal(good.timedOut, false);
@@ -106,6 +125,61 @@ test('preload changes only the served editor and forwards host and native-consol
   assert(result.events.some(event => event.kind === 'browser-disconnected'));
   assert(result.events.some(event => event.kind === 'owned-process' && event.detached));
   assert.deepEqual(result.remainingOwnedProcesses, []);
+});
+
+test('both channel preloads serve exact raw bytes and forward only the intended launch change', { skip: process.platform === 'win32' }, async () => {
+  for (const mode of ['headless-shell', 'chromium']) {
+    const script = `const assert=require('node:assert/strict'), fs=require('node:fs'), path=require('node:path');
+      const {EventEmitter}=require('node:events'), cp=require('node:child_process');
+      const playwright=require('playwright'), context=new EventEmitter(), browser=new EventEmitter();
+      const original=fs.readFileSync('planner/editor.js'), canonical=fs.readFileSync('scripts/test-i18n-browser.cjs');
+      const options={headless:true,executablePath:undefined,args:['--enable-webgl','--use-angle=swiftshader','--enable-unsafe-swiftshader']};
+      const mode=process.env.HOME_STUDIO_LIFECYCLE_MODE;
+      browser.version=()=> 'synthetic-channel-browser'; browser.newContext=async()=>context;
+      playwright.chromium.launch=async function(received) {
+        assert.equal(this,playwright.chromium); assert.equal(arguments.length,1);
+        assert.deepEqual(received,mode==='chromium'?{...options,channel:'chromium'}:options);
+        assert.equal(received.args,options.args); assert.equal(options.channel,undefined);
+        const helper=cp.spawn(process.execPath,['-e','process.exit(0)'],{detached:true,stdio:'ignore'});
+        await new Promise(resolve=>helper.once('exit',resolve));
+        return browser;
+      };
+      require('./scripts/diagnose-i18n-lifecycle.cjs');
+      assert.deepEqual(fs.readFileSync(path.resolve('planner/editor.js')),original);
+      assert.equal(fs.readFileSync(path.resolve('planner/editor.js'),'utf8'),original.toString('utf8'));
+      assert.deepEqual(fs.readFileSync('scripts/test-i18n-browser.cjs'),canonical);
+      (async()=>{
+        const observed=await playwright.chromium.launch(options); await observed.newContext();
+        const page=new EventEmitter(), failure=Error('synthetic channel reload');
+        page.goto=async()=>42; page.reload=async()=>{throw failure;}; context.emit('page',page);
+        assert.equal(await page.goto('http://127.0.0.1/'),42);
+        await assert.rejects(page.reload(),error=>error===failure);
+        page.emit('load'); browser.emit('disconnected');
+        console.log('Browser i18n checks passed: synthetic');
+      })().catch(error=>{console.error(error);process.exitCode=1;});`;
+    const env = { ...process.env, HOME_STUDIO_LIFECYCLE_CHILD: '1', HOME_STUDIO_LIFECYCLE_MODE: mode };
+    delete env.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
+    const result = await runChild(['-e', script], { env, budgetMs: 4000, graceMs: 100, settleMs: 200 });
+    assert.equal(result.exitCode, 0, result.stderr); assert.equal(result.assertionsPassed, true);
+    const source = result.events.find(event => event.kind === 'source');
+    assert.equal(source.original, source.served); assert.equal(source.instrumented, false);
+    const launch = result.events.find(event => event.kind === 'browser-launch');
+    assert.equal(launch.mode, mode); assert.equal(launch.headless, true);
+    assert.equal(launch.channel, mode === 'chromium' ? 'chromium' : null);
+    assert.deepEqual(launch.args, ['--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']);
+    assert(result.events.some(event => event.kind === 'owned-process' && event.executable === path.basename(process.execPath)));
+    assert(!result.events.some(event => event.kind === 'lifecycle'));
+    assert(result.events.some(event => event.kind === 'navigation-end' && event.method === 'reload' && !event.success));
+    assert(result.events.some(event => event.kind === 'browser-disconnected'));
+    assert.deepEqual(result.remainingOwnedProcesses, []);
+    const identity = { editor: source.original, canonicalTest: source.canonicalTest };
+    assert.equal(caseSucceeded({ ...result, mode }, identity), true);
+    for (const altered of [{ served: 'changed' }, { instrumented: true }]) {
+      const events = result.events.map(event => event === source ? { ...event, ...altered } : event);
+      assert.equal(caseSucceeded({ ...result, mode, events }, identity), false);
+    }
+    assert.equal(caseSucceeded({ ...result, mode, events: result.events.filter(event => event.kind !== 'browser-launch') }, identity), false);
+  }
 });
 
 test('deadline stops both the owned test and separately detached browser-shaped helper', { skip: process.platform === 'win32' }, async () => {
