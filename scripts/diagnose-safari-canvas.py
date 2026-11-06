@@ -6,11 +6,13 @@ The optional hosted preparation and WebDriver transport are shared with acceptan
 """
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import importlib.util
 import json
 import os
 import platform
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -24,6 +26,7 @@ spec = importlib.util.spec_from_file_location('safari_acceptance', Path(__file__
 safari = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(safari)
 BUDGET_SECONDS = 180
+DISPLAY_CAPTURE_MAX_BYTES = 16 * 1024 * 1024
 
 SETUP = r"""
 const report={page:{url:location.href,origin:location.origin,readyState:document.readyState,
@@ -512,7 +515,60 @@ def gpu_fault_observation(deadline):
     return summary
 
 
-def observe_task_boundary(client, url, output, record, save, deadline):
+def native_display_observation(output, deadline):
+    """Optional hosted-only WindowServer capture; never grants screen permissions."""
+    started = time.monotonic()
+    result = {'status': 'inconclusive', 'startedUTC': datetime.now(timezone.utc).isoformat(),
+              'interpretation': 'Uninterpreted display capture; denial or wallpaper alone is inconclusive; never acceptance evidence'}
+    directory = path = None
+    try:
+        if not (sys.platform == 'darwin' and os.environ.get('GITHUB_ACTIONS') == 'true'
+                and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted'):
+            raise RuntimeError('Display capture requires a disposable GitHub-hosted macOS runner')
+        if deadline - time.monotonic() <= 10:
+            raise TimeoutError('Insufficient remaining budget for optional display capture')
+        directory = Path(tempfile.mkdtemp(prefix='native-display-', dir=output))
+        path = directory / 'parser-dom.png'
+        if os.path.lexists(path):
+            raise FileExistsError('Display capture path must be new')
+        result['command'] = command_observation(['/usr/sbin/screencapture', '-x', '-m', '-t', 'png', str(path)], deadline)
+        if result['command'].get('returncode') != 0:
+            raise RuntimeError('Native display capture command did not succeed')
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or not 8 <= info.st_size <= DISPLAY_CAPTURE_MAX_BYTES:
+            raise ValueError('Display capture must be a regular PNG within 16 MiB')
+        # Reject links and replacement between lstat/open/read; never follow an untrusted output.
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, 'rb') as capture:
+            before = os.fstat(capture.fileno())
+            identity = lambda value: (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+            if not stat.S_ISREG(before.st_mode) or identity(before) != identity(info):
+                raise ValueError('Display capture identity changed before reading')
+            data = capture.read(DISPLAY_CAPTURE_MAX_BYTES + 1)
+            after = os.fstat(capture.fileno())
+            if identity(after) != identity(before) or identity(path.lstat()) != identity(before):
+                raise ValueError('Display capture changed while reading')
+        if len(data) != info.st_size or not data.startswith(b'\x89PNG\r\n\x1a\n'):
+            raise ValueError('Display capture size or PNG signature is invalid')
+        result.update(status='captured-uninterpreted', file=f'{directory.name}/{path.name}',
+                      bytes=len(data), sha256=hashlib.sha256(data).hexdigest(),
+                      fileIdentity={'device': info.st_dev, 'inode': info.st_ino, 'mode': stat.S_IMODE(info.st_mode)})
+    except Exception as error:
+        result['error'] = error_record(error)
+        if directory is not None:
+            try:
+                if path is not None:
+                    path.unlink(missing_ok=True)
+                directory.rmdir()
+            except OSError as cleanup_error:
+                result['cleanupErrorType'] = type(cleanup_error).__name__
+    finally:
+        result['endedUTC'] = datetime.now(timezone.utc).isoformat()
+        result['durationMs'] = round((time.monotonic() - started) * 1000)
+    return result
+
+
+def observe_task_boundary(client, url, output, record, save, deadline, *, native_display_capture=False):
     page = record['taskBoundaryComparison'] = {
         'url': url, 'status': 'running',
         'controlStartedUTC': datetime.now(timezone.utc).isoformat(),
@@ -521,6 +577,13 @@ def observe_task_boundary(client, url, output, record, save, deadline):
     try:
         remaining(deadline)
         client.call('WebDriver:Navigate', {'url': url})
+        if native_display_capture:
+            page['initialCaptureScope'] += '; WebDriver screenshot follows optional OS display capture intervention'
+            try:
+                page['nativeDisplayCapture'] = native_display_observation(output, deadline)
+            except Exception as error:
+                page['nativeDisplayCapture'] = {'status': 'inconclusive', 'error': error_record(error)}
+            save()
         remaining(deadline)
         # No execute/setup after navigation until the original parser DOM is captured.
         client.screenshot(output / 'task-boundary-parser-dom.png')
@@ -722,7 +785,7 @@ def observe_window_geometry(client, url, output, record, save, deadline, *, gui_
 
 
 def run(output, driver_path, prepare=False, presentation_only=False, window_geometry_comparison=False,
-        gui_health_executable=None, task_boundary_comparison=False):
+        gui_health_executable=None, task_boundary_comparison=False, native_display_capture=False):
     output.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     deadline = started + BUDGET_SECONDS
@@ -731,6 +794,7 @@ def run(output, driver_path, prepare=False, presentation_only=False, window_geom
               'presentationOnly': presentation_only,
               'windowGeometryComparison': window_geometry_comparison,
               'taskBoundaryComparisonRequested': task_boundary_comparison,
+              'nativeDisplayCaptureRequested': native_display_capture,
               'guiHealthRequested': gui_health_executable is not None,
               'preparation': {'requested': prepare, 'status': 'pending' if prepare else 'not-requested'},
               'sourceRevision': os.environ.get('GITHUB_SHA'), 'pages': [], 'extendedPages': [], 'cleanupErrors': [],
@@ -784,7 +848,8 @@ def run(output, driver_path, prepare=False, presentation_only=False, window_geom
             record['windowFocus'] = client.select_current_window()
             urls = ('about:blank', f'http://127.0.0.1:{server.server_port}/')
             if task_boundary_comparison:
-                observe_task_boundary(client, urls[1] + 'task-boundary', output, record, save, deadline)
+                observe_task_boundary(client, urls[1] + 'task-boundary', output, record, save, deadline,
+                                      native_display_capture=native_display_capture)
                 observations = [record['taskBoundaryComparison']]
             elif window_geometry_comparison:
                 observe_window_geometry(client, urls[1], output, record, save, deadline,
@@ -842,6 +907,8 @@ def main():
     parser.add_argument('--prepare-hosted-safari', action='store_true')
     parser.add_argument('--gui-health-executable', type=Path,
                         help='Previously compiled read-only native probe; observe once after the original DOM capture')
+    parser.add_argument('--native-display-capture', action='store_true',
+                        help='Hosted-only optional OS screenshot before the task-boundary WebDriver capture; no permission grant')
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--presentation-only', action='store_true',
                        help='Skip earlier small-canvas/encoding matrices; observe DOM and realistic surfaces before final WebGL identity')
@@ -850,8 +917,11 @@ def main():
     modes.add_argument('--task-boundary-comparison', action='store_true',
                        help='Capture parser-created DOM, then compare one 64x64 source across command, frame and screenshot boundaries')
     args = parser.parse_args()
+    if args.native_display_capture and not args.task_boundary_comparison:
+        parser.error('--native-display-capture requires --task-boundary-comparison')
     result = run(args.output.resolve(), args.driver, args.prepare_hosted_safari, args.presentation_only,
-                 args.window_geometry_comparison, args.gui_health_executable, args.task_boundary_comparison)
+                 args.window_geometry_comparison, args.gui_health_executable, args.task_boundary_comparison,
+                 args.native_display_capture)
     print(f'Native Safari diagnostic: {result["status"]}; never acceptance evidence', flush=True)
     return int(result['status'] != 'observed')
 

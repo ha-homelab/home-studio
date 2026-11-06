@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Check the diagnostic matrix and lifecycle without launching Safari."""
 import importlib.util
+import hashlib
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -18,6 +20,137 @@ spec.loader.exec_module(diagnostic)
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_native_display_capture_validates_owned_png_and_records_exact_bytes(self):
+        png = b'\x89PNG\r\n\x1a\n' + b'bounded-test-payload'
+        deadline = time.monotonic() + 60
+        captured = []
+        def command(argv, actual_deadline):
+            self.assertEqual(argv[:-1], ['/usr/sbin/screencapture', '-x', '-m', '-t', 'png'])
+            self.assertEqual(actual_deadline, deadline)
+            path = Path(argv[-1]); captured.append(path)
+            self.assertFalse(path.exists())
+            self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+            path.write_bytes(png)
+            return {'returncode': 0, 'output': '', 'truncated': False}
+        with tempfile.TemporaryDirectory() as temp, patch.object(diagnostic.sys, 'platform', 'darwin'), \
+                patch.dict(os.environ, {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted'}), \
+                patch.object(diagnostic, 'command_observation', side_effect=command) as observe:
+            result = diagnostic.native_display_observation(Path(temp), deadline)
+            self.assertEqual(result['status'], 'captured-uninterpreted')
+            self.assertEqual((Path(temp) / result['file']).read_bytes(), png)
+            self.assertEqual(result['bytes'], len(png))
+            self.assertEqual(result['sha256'], hashlib.sha256(png).hexdigest())
+            self.assertEqual(result['fileIdentity']['inode'], captured[0].stat().st_ino)
+            self.assertLessEqual(result['startedUTC'], result['endedUTC'])
+            self.assertGreaterEqual(result['durationMs'], 0)
+        observe.assert_called_once()
+
+    def test_native_display_capture_rejects_invalid_outputs_and_does_not_follow_links(self):
+        for kind in ('missing', 'empty', 'bad-signature', 'oversized', 'symlink', 'fifo', 'denied', 'timeout'):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temp:
+                output = Path(temp)
+                unrelated = output / 'unrelated.txt'; unrelated.write_text('unchanged')
+                captured = []
+                def command(argv, _deadline):
+                    path = Path(argv[-1]); captured.append(path)
+                    if kind == 'empty':
+                        path.touch()
+                    elif kind == 'bad-signature':
+                        path.write_bytes(b'not a png file')
+                    elif kind == 'oversized':
+                        with path.open('wb') as file:
+                            file.write(b'\x89PNG\r\n\x1a\n'); file.truncate(diagnostic.DISPLAY_CAPTURE_MAX_BYTES + 1)
+                    elif kind == 'symlink':
+                        path.symlink_to(unrelated)
+                    elif kind == 'fifo':
+                        os.mkfifo(path)
+                    elif kind == 'denied':
+                        return {'returncode': 1, 'output': 'permission denied', 'truncated': False}
+                    elif kind == 'timeout':
+                        return {'name': 'TimeoutExpired', 'message': 'capture timeout'}
+                    return {'returncode': 0, 'output': '', 'truncated': False}
+                with patch.object(diagnostic.sys, 'platform', 'darwin'), \
+                        patch.dict(os.environ, {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted'}), \
+                        patch.object(diagnostic, 'command_observation', side_effect=command) as observe:
+                    result = diagnostic.native_display_observation(output, time.monotonic() + 60)
+                self.assertEqual(result['status'], 'inconclusive')
+                self.assertNotIn('file', result)
+                self.assertFalse(os.path.lexists(captured[0]))
+                self.assertEqual(unrelated.read_text(), 'unchanged')
+                observe.assert_called_once()
+
+    def test_native_display_capture_rejects_replaced_output_identity(self):
+        original_open = os.open
+        def command(argv, _deadline):
+            Path(argv[-1]).write_bytes(b'\x89PNG\r\n\x1a\nfirst')
+            return {'returncode': 0, 'output': '', 'truncated': False}
+        def changed_open(path, flags, *args, **kwargs):
+            replacement = path.with_name('replacement.png')
+            replacement.write_bytes(b'\x89PNG\r\n\x1a\nother')
+            replacement.replace(path)
+            return original_open(path, flags, *args, **kwargs)
+        with tempfile.TemporaryDirectory() as temp, patch.object(diagnostic.sys, 'platform', 'darwin'), \
+                patch.dict(os.environ, {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted'}), \
+                patch.object(diagnostic, 'command_observation', side_effect=command), \
+                patch.object(diagnostic.os, 'open', side_effect=changed_open):
+            result = diagnostic.native_display_observation(Path(temp), time.monotonic() + 60)
+        self.assertEqual(result['status'], 'inconclusive')
+        self.assertIn('identity changed', result['error']['message'])
+
+    def test_native_display_capture_never_runs_outside_hosted_macos_or_with_short_budget(self):
+        for platform_name, hosted, seconds in (('linux', 'github-hosted', 60),
+                                               ('darwin', 'self-hosted', 60),
+                                               ('darwin', 'github-hosted', 5)):
+            with self.subTest(platform_name=platform_name, hosted=hosted, seconds=seconds), \
+                    tempfile.TemporaryDirectory() as temp, patch.object(diagnostic.sys, 'platform', platform_name), \
+                    patch.dict(os.environ, {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': hosted}), \
+                    patch.object(diagnostic, 'command_observation') as command:
+                result = diagnostic.native_display_observation(Path(temp), time.monotonic() + seconds)
+                self.assertEqual(list(Path(temp).iterdir()), [])
+            command.assert_not_called()
+            self.assertEqual(result['status'], 'inconclusive')
+
+    def test_optional_display_capture_precedes_webdriver_and_preserves_original_failure(self):
+        for webdriver_fails in (False, True):
+            with self.subTest(webdriver_fails=webdriver_fails):
+                events, record, client = [], {}, Mock()
+                deadline = time.monotonic() + 60
+                client.call.side_effect = lambda name, data: events.append(name) or {'value': {}}
+                client.execute.side_effect = lambda script: events.append(script) or {}
+                def screenshot(path):
+                    events.append(path.name)
+                    if webdriver_fails:
+                        raise RuntimeError('original WebDriver screenshot error')
+                def display(output, actual_deadline):
+                    self.assertEqual(actual_deadline, deadline)
+                    events.append('native-display')
+                    raise TimeoutError('optional capture timeout')
+                client.screenshot.side_effect = screenshot
+                with tempfile.TemporaryDirectory() as temp, \
+                        patch.object(diagnostic, 'native_display_observation', side_effect=display) as capture, \
+                        patch.object(diagnostic, 'gpu_fault_observation', return_value={}):
+                    diagnostic.observe_task_boundary(client, 'http://127.0.0.1/task-boundary', Path(temp),
+                                                     record, lambda: None, deadline, native_display_capture=True)
+                self.assertEqual(events[:3], ['WebDriver:Navigate', 'native-display', 'task-boundary-parser-dom.png'])
+                self.assertEqual(events[-1], diagnostic.TASK_BOUNDARY_CLEANUP)
+                capture.assert_called_once()
+                page = record['taskBoundaryComparison']
+                self.assertEqual(page['status'], 'incomplete' if webdriver_fails else 'observed')
+                self.assertEqual(page['nativeDisplayCapture']['status'], 'inconclusive')
+                self.assertIn('intervention', page['initialCaptureScope'])
+                if webdriver_fails:
+                    self.assertEqual(page['error']['message'], 'original WebDriver screenshot error')
+                else:
+                    self.assertNotIn('error', page)
+
+    def test_native_display_cli_requires_task_boundary_before_starting_browser(self):
+        with patch.object(diagnostic.sys, 'argv', ['diagnostic', '--output', '/unused', '--native-display-capture']), \
+                patch.object(diagnostic, 'run') as run, patch.object(diagnostic.sys, 'stderr'):
+            with self.assertRaises(SystemExit) as raised:
+                diagnostic.main()
+        self.assertEqual(raised.exception.code, 2)
+        run.assert_not_called()
+
     def test_parser_control_is_served_without_script_or_external_resource(self):
         server = diagnostic.ThreadingHTTPServer(('127.0.0.1', 0), diagnostic.BlankPage)
         thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .01})
@@ -134,12 +267,15 @@ class DiagnosticTests(unittest.TestCase):
         inputs = re.findall(r'^      (\w+):$', source, re.MULTILINE)
         self.assertLess(len(inputs), 10)
         self.assertEqual(inputs.count('canvas_task_boundary'), 1)
+        self.assertEqual(inputs.count('native_display_capture'), 1)
         self.assertRegex(source, r'canvas_task_boundary:\n        description:[^\n]+\n        type: boolean\n        default: false')
         self.assertIn('if: ${{ inputs.canvas_diagnostic != true && inputs.canvas_task_boundary != true }}', source)
         self.assertIn('if: ${{ inputs.canvas_diagnostic == true || inputs.canvas_task_boundary == true }}', source)
         self.assertIn('if: ${{ inputs.canvas_diagnostic == true && inputs.canvas_task_boundary != true }}', source)
         self.assertIn('if [[ "$COLD_CANVAS" != "true" ]]; then\n            preparation_args+=(--prepare-hosted-safari)', source)
         self.assertIn('if [[ "$CANVAS_TASK_BOUNDARY" == "true" ]]; then\n            mode_args=(--task-boundary-comparison)', source)
+        self.assertIn('if: ${{ inputs.native_display_capture == true && inputs.canvas_task_boundary != true }}', source)
+        self.assertIn('if [[ "$NATIVE_DISPLAY_CAPTURE" == "true" ]]; then\n              mode_args+=(--native-display-capture)', source)
         self.assertIn('"${preparation_args[@]}" "${mode_args[@]}" --output', source)
         self.assertNotIn('continue-on-error', source)
 
