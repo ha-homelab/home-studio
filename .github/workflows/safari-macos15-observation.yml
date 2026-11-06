@@ -14,6 +14,10 @@ on:
         description: Collect native canvas diagnostics without claiming application acceptance
         type: boolean
         default: false
+      cold_canvas:
+        description: Skip hosted preflight only for the independent canvas diagnostic
+        type: boolean
+        default: false
       linux_i18n:
         description: Run only the isolated Linux language browser diagnostic
         type: boolean
@@ -52,6 +56,13 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           python3 scripts/test-safari-tooling.py
+      - name: Compile read-only GUI probe before starting Safari
+        if: ${{ inputs.canvas_diagnostic == true }}
+        timeout-minutes: 1
+        run: |
+          python3 scripts/test-compile-macos-gui-health.py
+          mkdir -p acceptance-artifacts/safari
+          python3 scripts/compile-macos-gui-health.py --output "$RUNNER_TEMP/home-studio-gui-health" > acceptance-artifacts/safari/gui-health-build.json
       - name: Enable WebDriver on this disposable hosted runner
         run: sudo /usr/bin/safaridriver --enable
       - name: Test installed Safari with both viewers and the 256-item planner
@@ -59,9 +70,15 @@ jobs:
         run: python3 scripts/test-safari-acceptance.py --prepare-hosted-safari --output acceptance-artifacts/safari
       - name: Diagnose independent native canvas paths
         if: ${{ inputs.canvas_diagnostic == true }}
+        env:
+          COLD_CANVAS: ${{ inputs.cold_canvas }}
         run: |
           python3 scripts/test-safari-canvas-diagnostic.py
-          python3 scripts/diagnose-safari-canvas.py --prepare-hosted-safari --output acceptance-artifacts/safari --window-geometry-comparison
+          preparation_args=()
+          if [[ "$COLD_CANVAS" != "true" ]]; then
+            preparation_args+=(--prepare-hosted-safari)
+          fi
+          python3 scripts/diagnose-safari-canvas.py "${preparation_args[@]}" --output acceptance-artifacts/safari --window-geometry-comparison --gui-health-executable "$RUNNER_TEMP/home-studio-gui-health"
       - name: Preserve actual Safari identity and diagnostics
         if: ${{ always() }}
         uses: ./.github/actions/upload-acceptance-artifact

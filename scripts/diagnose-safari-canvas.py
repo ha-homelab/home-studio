@@ -430,7 +430,8 @@ def observe_extended_page(client, url, record, save, deadline):
         save()
 
 
-def observe_presentation(client, url, output, record, save, deadline, *, compact=False, prefix='presentation'):
+def observe_presentation(client, url, output, record, save, deadline, *, compact=False, prefix='presentation',
+                         gui_health_executable=None):
     page = record['presentation'] = {'url': url, 'status': 'running', 'cases': []}
     save()
     try:
@@ -438,8 +439,18 @@ def observe_presentation(client, url, output, record, save, deadline, *, compact
         client.call('WebDriver:Navigate', {'url': url})
         page['initialDOM'] = client.execute(PRESENTATION_SETUP)
         remaining(deadline)
-        client.screenshot(output / f'{prefix}-dom-before-canvas.png')
-        page['initialDOMScreenshot'] = f'{prefix}-dom-before-canvas.png'
+        try:
+            client.screenshot(output / f'{prefix}-dom-before-canvas.png')
+            page['initialDOMScreenshot'] = f'{prefix}-dom-before-canvas.png'
+        finally:
+            if gui_health_executable is not None:
+                # Compile in a separate setup step. Only the native five-second
+                # probe runs here, after original capture and before any canvas.
+                # Keep a capture failure even if metadata collection also fails.
+                try:
+                    page['guiHealth'] = command_observation([str(gui_health_executable)], deadline)
+                except Exception as error:
+                    page['guiHealth'] = error_record(error)
         save()
         for width, height in (((64, 64),) if compact else ((64, 64), (934, 772))):
             for resize in (('fresh',) if compact else ('fresh', 'planner')):
@@ -489,7 +500,7 @@ def observe_presentation(client, url, output, record, save, deadline, *, compact
         save()
 
 
-def observe_window_geometry(client, url, output, record, save, deadline):
+def observe_window_geometry(client, url, output, record, save, deadline, *, gui_health_executable=None):
     """Compare three window sizes without changing canvas or renderer settings."""
     comparison = record['geometryComparison'] = {'status': 'running', 'stages': []}
     restore = {'width': 1440, 'height': 1000}
@@ -508,7 +519,8 @@ def observe_window_geometry(client, url, output, record, save, deadline):
                 restored = name == 'restored'
                 save()
                 observe_presentation(client, url, output, stage, save, deadline,
-                                     compact=True, prefix=f'geometry-{name}')
+                                     compact=True, prefix=f'geometry-{name}',
+                                     gui_health_executable=gui_health_executable if name == 'baseline' else None)
                 page = stage['presentation']
                 stage['status'] = 'observed' if page['status'] == 'observed' and 'cleanupError' not in page else 'incomplete'
             except Exception as error:
@@ -530,7 +542,8 @@ def observe_window_geometry(client, url, output, record, save, deadline):
         save()
 
 
-def run(output, driver_path, prepare=False, presentation_only=False, window_geometry_comparison=False):
+def run(output, driver_path, prepare=False, presentation_only=False, window_geometry_comparison=False,
+        gui_health_executable=None):
     output.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     deadline = started + BUDGET_SECONDS
@@ -538,6 +551,8 @@ def run(output, driver_path, prepare=False, presentation_only=False, window_geom
               'status': 'running', 'budgetMs': BUDGET_SECONDS * 1000,
               'presentationOnly': presentation_only,
               'windowGeometryComparison': window_geometry_comparison,
+              'guiHealthRequested': gui_health_executable is not None,
+              'preparation': {'requested': prepare, 'status': 'pending' if prepare else 'not-requested'},
               'sourceRevision': os.environ.get('GITHUB_SHA'), 'pages': [], 'extendedPages': [], 'cleanupErrors': [],
               'host': {'platform': sys.platform, 'release': platform.release(),
                        'machine': platform.machine(), 'cpuCount': os.cpu_count(),
@@ -552,6 +567,7 @@ def run(output, driver_path, prepare=False, presentation_only=False, window_geom
         safari.native.require(sys.platform == 'darwin', 'Native Safari diagnostic requires macOS')
         if prepare:
             record['preparation'] = safari.prepare_hosted_safari(output, driver_path)
+            record['preparation']['requested'] = True
             safari.native.require(record['preparation']['status'] == 'passed', 'Hosted Safari preparation failed')
         record['host']['osVersion'] = command_observation(['sw_vers'], deadline)
         record['host']['displays'] = command_observation(['system_profiler', '-json', 'SPDisplaysDataType', '-detailLevel', 'mini'], deadline)
@@ -588,7 +604,8 @@ def run(output, driver_path, prepare=False, presentation_only=False, window_geom
             record['windowFocus'] = client.select_current_window()
             urls = ('about:blank', f'http://127.0.0.1:{server.server_port}/')
             if window_geometry_comparison:
-                observe_window_geometry(client, urls[1], output, record, save, deadline)
+                observe_window_geometry(client, urls[1], output, record, save, deadline,
+                                        gui_health_executable=gui_health_executable)
                 observations = [record['geometryComparison']]
             else:
                 if not presentation_only:
@@ -596,7 +613,8 @@ def run(output, driver_path, prepare=False, presentation_only=False, window_geom
                         observe_page(client, url, record, save, deadline)
                     for url in urls:
                         observe_extended_page(client, url, record, save, deadline)
-                observe_presentation(client, urls[1], output, record, save, deadline)
+                observe_presentation(client, urls[1], output, record, save, deadline,
+                                     gui_health_executable=gui_health_executable)
                 observations = record['pages'] + record['extendedPages'] + [record['presentation']]
             remaining(deadline)
             record['webgl2'] = client.execute(WEBGL)
@@ -639,6 +657,8 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--driver', default='/usr/bin/safaridriver')
     parser.add_argument('--prepare-hosted-safari', action='store_true')
+    parser.add_argument('--gui-health-executable', type=Path,
+                        help='Previously compiled read-only native probe; observe once after the original DOM capture')
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--presentation-only', action='store_true',
                        help='Skip earlier small-canvas/encoding matrices; observe DOM and realistic surfaces before final WebGL identity')
@@ -646,7 +666,7 @@ def main():
                        help='Compare DOM and 64x64 default/CPU canvases at large, inside-screen, and restored window sizes')
     args = parser.parse_args()
     result = run(args.output.resolve(), args.driver, args.prepare_hosted_safari, args.presentation_only,
-                 args.window_geometry_comparison)
+                 args.window_geometry_comparison, args.gui_health_executable)
     print(f'Native Safari diagnostic: {result["status"]}; never acceptance evidence', flush=True)
     return int(result['status'] != 'observed')
 

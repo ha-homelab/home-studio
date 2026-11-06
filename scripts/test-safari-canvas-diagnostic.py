@@ -124,8 +124,11 @@ for(const mode of ['good','first-failure','no-frames','no-context']){
         with tempfile.TemporaryDirectory() as temp, patch.object(diagnostic.sys, 'platform', 'darwin'), \
                 patch.object(diagnostic, 'command_observation', return_value={}), \
                 patch.object(diagnostic.subprocess, 'Popen', return_value=driver), \
+                patch.object(diagnostic.safari, 'prepare_hosted_safari') as preparation, \
                 patch.object(diagnostic.safari, 'SafariWebDriver', return_value=client):
             result = diagnostic.run(Path(temp), '/mock/driver')
+        preparation.assert_not_called()
+        self.assertEqual(result['preparation'], {'requested': False, 'status': 'not-requested'})
         self.assertEqual(result['status'], 'observed')
         self.assertFalse(result['acceptanceEvidence'])
         self.assertEqual(len(result['pages']), 2)
@@ -156,10 +159,13 @@ for(const mode of ['good','first-failure','no-frames','no-context']){
         with tempfile.TemporaryDirectory() as temp, patch.object(diagnostic.sys, 'platform', 'darwin'), \
                 patch.object(diagnostic, 'command_observation', return_value={}), \
                 patch.object(diagnostic.subprocess, 'Popen', return_value=driver), \
+                patch.object(diagnostic.safari, 'prepare_hosted_safari', return_value={'status': 'passed'}) as preparation, \
                 patch.object(diagnostic.safari, 'SafariWebDriver', return_value=client), \
                 patch.object(diagnostic, 'observe_page') as original, \
                 patch.object(diagnostic, 'observe_extended_page') as extended:
-            result = diagnostic.run(Path(temp), '/mock/driver', presentation_only=True)
+            result = diagnostic.run(Path(temp), '/mock/driver', prepare=True, presentation_only=True)
+        preparation.assert_called_once()
+        self.assertEqual(result['preparation'], {'requested': True, 'status': 'passed'})
         original.assert_not_called(); extended.assert_not_called()
         self.assertEqual(result['status'], 'observed')
         self.assertFalse(result['acceptanceEvidence'])
@@ -195,6 +201,53 @@ for(const mode of ['good','first-failure','no-frames','no-context']){
         self.assertEqual(len(record['presentation']['cases']), 8)
         client.execute.assert_any_call(diagnostic.PRESENTATION_CLEANUP)
 
+    def test_gui_probe_runs_after_original_dom_capture_before_canvas_with_same_deadline(self):
+        client, events, record = Mock(), [], {}
+        deadline = time.monotonic() + 10
+        client.execute.side_effect = lambda script, *_args: events.append(script) or {}
+        client.screenshot.side_effect = lambda path: events.append(path.name)
+        client.call.return_value = {'value': {}}
+        metadata = {'returncode': 0, 'output': '{"session":{"screenLocked":null}}', 'truncated': False}
+        def probe(command, actual_deadline):
+            self.assertEqual(command, ['/mock/gui-health'])
+            self.assertEqual(actual_deadline, deadline)
+            events.append('gui-probe')
+            return metadata
+        with tempfile.TemporaryDirectory() as temp, patch.object(diagnostic, 'command_observation', side_effect=probe) as observe:
+            diagnostic.observe_presentation(client, 'http://127.0.0.1/', Path(temp), record, lambda: None,
+                                            deadline, compact=True, gui_health_executable=Path('/mock/gui-health'))
+        observe.assert_called_once()
+        self.assertEqual(events[:4], [diagnostic.PRESENTATION_SETUP, 'presentation-dom-before-canvas.png',
+                                     'gui-probe', diagnostic.PRESENTATION_START])
+        self.assertEqual(record['presentation']['guiHealth'], metadata)
+        self.assertEqual(record['presentation']['status'], 'observed')
+        client.execute.assert_any_call(diagnostic.PRESENTATION_CLEANUP)
+
+    def test_gui_probe_failure_cannot_replace_original_capture_failure(self):
+        for probe_failure in (False, True):
+            with self.subTest(probe_failure=probe_failure):
+                client, record = Mock(), {}
+                client.execute.return_value = {'dom': 'retained'}
+                client.screenshot.side_effect = RuntimeError('original DOM capture failed')
+                failure = {'returncode': 9, 'output': '', 'truncated': False}
+                with tempfile.TemporaryDirectory() as temp, patch.object(diagnostic, 'command_observation',
+                        side_effect=TimeoutError('metadata timeout') if probe_failure else None,
+                        return_value=failure) as observe:
+                    diagnostic.observe_presentation(client, 'http://127.0.0.1/', Path(temp), record, lambda: None,
+                                                    time.monotonic() + 10, gui_health_executable=Path('/mock/gui-health'))
+                observe.assert_called_once()
+                page = record['presentation']
+                self.assertEqual(page['status'], 'incomplete')
+                self.assertEqual(page['error']['message'], 'original DOM capture failed')
+                self.assertEqual(page['initialDOM'], {'dom': 'retained'})
+                self.assertEqual(page['cases'], [])
+                self.assertNotIn('initialDOMScreenshot', page)
+                if probe_failure:
+                    self.assertEqual(page['guiHealth']['name'], 'TimeoutError')
+                else:
+                    self.assertEqual(page['guiHealth'], failure)
+                client.execute.assert_any_call(diagnostic.PRESENTATION_CLEANUP)
+
     def test_geometry_mode_uses_three_bounded_stages_in_one_session(self):
         client, driver = Mock(), Mock()
         driver.poll.return_value = None
@@ -208,23 +261,30 @@ for(const mode of ['good','first-failure','no-frames','no-context']){
             return {'value': {}}
         client.call.side_effect = call
         with tempfile.TemporaryDirectory() as temp, patch.object(diagnostic.sys, 'platform', 'darwin'), \
-                patch.object(diagnostic, 'command_observation', return_value={}), \
+                patch.object(diagnostic, 'command_observation', return_value={}) as host_observation, \
                 patch.object(diagnostic.subprocess, 'Popen', return_value=driver), \
                 patch.object(diagnostic.safari, 'SafariWebDriver', return_value=client), \
                 patch.object(diagnostic, 'observe_page') as original, \
                 patch.object(diagnostic, 'observe_extended_page') as extended:
-            result = diagnostic.run(Path(temp), '/mock/driver', window_geometry_comparison=True)
+            result = diagnostic.run(Path(temp), '/mock/driver', window_geometry_comparison=True,
+                                    gui_health_executable=Path('/mock/gui-health'))
         original.assert_not_called(); extended.assert_not_called()
         client.start.assert_called_once(); client.close.assert_called_once()
         self.assertEqual(result['status'], 'observed')
         self.assertFalse(result['acceptanceEvidence'])
         self.assertEqual(result['budgetMs'], 180000)
         self.assertTrue(result['windowGeometryComparison'])
+        self.assertTrue(result['guiHealthRequested'])
+        gui_calls = [call for call in host_observation.call_args_list if call.args[0] == ['/mock/gui-health']]
+        self.assertEqual(len(gui_calls), 1)
+        self.assertEqual(gui_calls[0].args[1], client._browser_deadline)
         self.assertNotIn('presentation', result)
         comparison = result['geometryComparison']
         self.assertTrue(comparison['restoreRequestCompleted'])
         self.assertNotIn('restoration', comparison)
         stages = comparison['stages']
+        self.assertEqual(stages[0]['presentation']['guiHealth'], {})
+        self.assertTrue(all('guiHealth' not in stage['presentation'] for stage in stages[1:]))
         self.assertEqual([stage['name'] for stage in stages], ['baseline', 'inside-screen', 'restored'])
         self.assertEqual([(stage['actualWindowRect']['width'], stage['actualWindowRect']['height'])
                           for stage in stages], [(1440, 1000), (960, 640), (1440, 1000)])
