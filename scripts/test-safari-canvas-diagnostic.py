@@ -145,7 +145,8 @@ for(const mode of ['good','first-failure','no-frames','no-context']){
 const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
 const scripts=JSON.parse(fs.readFileSync(0,'utf8'));
 (async()=>{
-for(const mode of ['good','stale-copy','copy-error','jpeg-corruption','late-decode']){
+for(const mode of ['good','stale-copy','copy-error','jpeg-corruption','late-decode',
+  'encoding-error','wrong-mime','oversized-uri','invalid-decode-size']){
   const canvases=[],bitmaps=[];let stale;
   class Context{
     constructor(canvas,options){this.canvas=canvas;this.options=options||{};this.data=new Uint8ClampedArray(16384);}
@@ -171,10 +172,20 @@ for(const mode of ['good','stale-copy','copy-error','jpeg-corruption','late-deco
     remove(){this.removed=true;this.isConnected=false;}
     toDataURL(mime,quality){
       assert.ok(mime==='image/png'||mime==='image/jpeg');if(mime==='image/jpeg')assert.equal(quality,.8);
+      if(!this.context.options.willReadFrequently){
+        if(mode==='encoding-error')return 'data:,';
+        if(mode==='wrong-mime')return 'data:text/plain;base64,AAAA';
+        if(mode==='oversized-uri')return 'data:'+mime+';base64,'+'A'.repeat(1048576);
+      }
       return 'data:'+mime+';base64,'+Buffer.from(JSON.stringify({width:64,height:64,data:Array.from(this.context.data)})).toString('base64');
     }
   }
-  class Offscreen extends Canvas{convertToBlob(options){assert.deepEqual({...options},{type:'image/jpeg',quality:.85});return Promise.resolve(encode(this,options.type));}}
+  class Offscreen extends Canvas{convertToBlob(options){
+    assert.deepEqual({...options},{type:'image/jpeg',quality:.85});
+    if(mode==='encoding-error'&&!this.context.options.willReadFrequently)
+      return Promise.reject(Object.assign(new Error('Native image encoding failed'),{name:'EncodingError'}));
+    return Promise.resolve(encode(this,options.type));
+  }}
   const environment={window:{},location:{href:'http://127.0.0.1/'},Blob,Uint8Array,performance:{now:()=>Date.now()},
     document:{createElement(name){assert.equal(name,'canvas');return new Canvas();},body:{appendChild(canvas){canvas.isConnected=true;}}},
     CanvasRenderingContext2D:Context,HTMLCanvasElement:Canvas,OffscreenCanvas:Offscreen,
@@ -184,6 +195,7 @@ for(const mode of ['good','stale-copy','copy-error','jpeg-corruption','late-deco
       const parsed=JSON.parse(await blob.text());
       const bitmap={...parsed,data:new Uint8ClampedArray(parsed.data),closed:0,close(){this.closed++;}};
       bitmaps.push(bitmap);
+      if(mode==='invalid-decode-size')bitmap.width=32;
       if(mode==='jpeg-corruption'&&blob.type==='image/jpeg')bitmap.data.fill(0);
       if(mode==='late-decode')await new Promise(resolve=>setTimeout(resolve,10));
       return bitmap;
@@ -205,12 +217,31 @@ for(const mode of ['good','stale-copy','copy-error','jpeg-corruption','late-deco
   }
   const completed=await new Promise(resolve=>{environment.done=resolve;
     vm.runInContext('(function(){'+scripts.encodings+'})(done)',context);});
-  assert.equal(completed.encodings.length,3);
+  assert.equal(completed.encodings.length,6);
+  assert.deepEqual(Array.from(completed.encodings,v=>v.name),[
+    'canvas-png','canvas-jpeg','offscreen-jpeg','canvas-png-cpu','canvas-jpeg-cpu','offscreen-jpeg-cpu']);
   assert.ok(!JSON.stringify(completed).includes('data:image/'),'Encoded image content is never reported');
   for(const result of completed.encodings){
     if(mode==='late-decode'){assert.equal(result.status,'failed');assert.match(result.message,/2500 ms/);continue;}
+    if(mode==='invalid-decode-size'){
+      assert.equal(result.status,'failed');assert.equal(result.dimensionsMatch,false);assert.match(result.message,/dimensions/);continue;
+    }
+    const cpu=result.name.endsWith('-cpu'),offscreen=result.name.startsWith('offscreen-');
+    assert.equal(result.willReadFrequentlyRequested,cpu);
+    if(mode==='encoding-error'&&!cpu){
+      assert.equal(result.status,'failed');
+      if(offscreen){assert.equal(result.errorName,'EncodingError');assert.match(result.message,/encoding failed/);}
+      else{assert.equal(result.dataURL.length,6);assert.equal(result.dataURL.mimePrefixMatches,false);assert.equal(result.dataURL.emptyImageSentinel,true);}
+      continue;
+    }
+    if(!cpu&&!offscreen&&['wrong-mime','oversized-uri'].includes(mode)){
+      assert.equal(result.status,'failed');assert.equal(result.dataURL.emptyImageSentinel,false);
+      assert.equal(result.dataURL.mimePrefixMatches,mode==='oversized-uri');
+      assert.equal(result.dataURL.length>1048576,mode==='oversized-uri');continue;
+    }
     assert.equal(result.status,'pixels-read');assert.equal(result.dimensionsMatch,true);
     assert.equal(result.readbackBytes,16384);assert.ok(result.encodedBytes>0);
+    if(!offscreen){assert.equal(result.dataURL.mimePrefixMatches,true);assert.equal(result.dataURL.emptyImageSentinel,false);}
     if(result.mime==='image/png')assert.equal(result.matchedPixels,4096);
     else assert.equal(result.centersWithinTolerance,mode!=='jpeg-corruption');
   }

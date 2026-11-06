@@ -199,20 +199,25 @@ function bounded(promise,onLate){
   });
 }
 (async()=>{
-  for(const [name,mime,quality] of [['canvas-png','image/png',undefined],['canvas-jpeg','image/jpeg',.8],['offscreen-jpeg','image/jpeg',.85]]){
-    const result={name,mime,quality:quality??null};report.encodings.push(result);let bitmap;
+  for(const [name,mime,quality,readFrequently] of [
+    ['canvas-png','image/png',undefined],['canvas-jpeg','image/jpeg',.8],['offscreen-jpeg','image/jpeg',.85],
+    ['canvas-png-cpu','image/png',undefined,true],['canvas-jpeg-cpu','image/jpeg',.8,true],['offscreen-jpeg-cpu','image/jpeg',.85,true]]){
+    const result={name,mime,quality:quality??null,willReadFrequentlyRequested:Boolean(readFrequently)};report.encodings.push(result);let bitmap;
     try{
       if(performance.now()>=deadline)throw Error('Encoding diagnostic exceeded 2500 ms');
       let blob;
-      if(name==='offscreen-jpeg'){
+      if(name.startsWith('offscreen-')){
         const canvas=new OffscreenCanvas(64,64);state.canvases.push(canvas);
-        const context=canvas.getContext('2d',{alpha:false});if(!context)throw Error('Native offscreen context unavailable');
+        const options=readFrequently?{alpha:false,willReadFrequently:true}:{alpha:false};
+        const context=canvas.getContext('2d',options);if(!context)throw Error('Native offscreen context unavailable');
         result.contextAttributes=typeof context.getContextAttributes==='function'?context.getContextAttributes():null;
         paint(context,palettes[0]);
         blob=await bounded(OffscreenCanvas.prototype.convertToBlob.call(canvas,{type:mime,quality}));
       }else{
-        const source=canvasFor();paint(source.context,palettes[0]);result.contextAttributes=source.attributes;
+        const source=canvasFor(readFrequently?{willReadFrequently:true}:undefined);paint(source.context,palettes[0]);result.contextAttributes=source.attributes;
         const uri=HTMLCanvasElement.prototype.toDataURL.call(source.canvas,mime,quality),prefix='data:'+mime+';base64,';
+        result.dataURL={type:typeof uri,length:typeof uri==='string'?uri.length:null,
+          mimePrefixMatches:typeof uri==='string'&&uri.startsWith(prefix),emptyImageSentinel:uri==='data:,'};
         if(typeof uri!=='string'||!uri.startsWith(prefix)||uri.length>1048576)throw Error('Unexpected or oversized encoded canvas');
         const bytes=Uint8Array.from(atob(uri.slice(prefix.length)),c=>c.charCodeAt(0));
         blob=new Blob([bytes],{type:mime});
@@ -226,7 +231,7 @@ function bounded(promise,onLate){
       state.scratch.context.clearRect(0,0,64,64);
       CanvasRenderingContext2D.prototype.drawImage.call(state.scratch.context,bitmap,0,0);
       Object.assign(result,pixels(state.scratch.context,palettes[0],mime==='image/jpeg'));
-    }catch(error){Object.assign(result,{status:'failed',...errorValue(error)});}
+    }catch(error){Object.assign(result,{status:'failed',...errorValue(error),name,errorName:String(error?.name||'').slice(0,128)});}
     finally{bitmap?.close();}
   }
 })().catch(error=>{report.encodingError=errorValue(error);}).finally(()=>{state.cleanup();done(report);});
