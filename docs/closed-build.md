@@ -1,5 +1,16 @@
 # Closed HA packages in public release orchestration
 
+The current `.release-policy.json` sets `closed_build.enabled` to `false`.
+Public releases use the pipeline's supported path with private build jobs
+skipped; all public validation and closed synthetic tests remain required.
+Public beta publication does not certify a private package or its installation.
+For the 1.4.0 delivery, the private package follows a separately authorized local
+build and qualification path, including exact-package Home Assistant and browser
+acceptance before installation. Re-enabling closed CI requires a reviewed policy
+change and the full closed-build, upload-admission and site-acceptance contracts
+below; a previous public beta or local result does not replace that acceptance.
+The following sections describe the closed CI path when enabled.
+
 `closed-build.yml` is a reusable **job of the public release pipeline**. Its
 inputs contain public release references and an optional opaque request ID.
 Private source, archives, and hashes stay in closed object storage. Detailed

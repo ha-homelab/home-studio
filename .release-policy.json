@@ -68,6 +68,6 @@
   "closed_build": {
     "workflow": "closed-build.yml",
     "environment": "closed-build",
-    "enabled": true
+    "enabled": false
   }
 }
