@@ -122,6 +122,15 @@ class TrustedReviewRoutesTests(unittest.TestCase):
             self.assertIn(event, self.merge["on"])
             self.assertTrue(evaluate(recovery["if"], self.data(event=event)))
             self.assertFalse(evaluate(recovery["if"], self.data(event=event, **{"github.ref": "refs/heads/topic"})))
+            groups = []
+            for run_id in (101, 102):
+                context = self.data(event=event, **{"github.run_id": run_id})
+                groups.append(re.sub(
+                    r"\$\{\{(.*?)\}\}",
+                    lambda match: str(evaluate(match[1], context)),
+                    self.merge["concurrency"]["group"],
+                ))
+            self.assertNotEqual(*groups)
         for job in (self.merge["jobs"]["auto-merge"], recovery):
             self.assertEqual(job["with"]["reviewed-single-pass"], "true")
             self.assertEqual(job["with"]["reviewed-merge"], "true")
