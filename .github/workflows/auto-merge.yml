@@ -17,7 +17,7 @@ on:
 # Withdrawal evidence must survive later events, including pending-run replacement.
 # Ordinary state evaluations still coalesce; metadata-only edits stay independent.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number }}-${{ ((github.event.action == 'unlabeled' && github.event.label.name == 'automerge') || github.event.action == 'converted_to_draft' || (github.event.action == 'edited' && github.event.changes.base && github.event.pull_request.base.ref != github.event.repository.default_branch)) && github.run_id || (github.event.action != 'edited' || github.event.changes.base) && 'state' || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number }}-${{ contains(fromJSON('["workflow_run","status","check_run","schedule","workflow_dispatch"]'), github.event_name) && github.run_id || ((github.event.action == 'unlabeled' && github.event.label.name == 'automerge') || github.event.action == 'converted_to_draft' || (github.event.action == 'edited' && github.event.changes.base && github.event.pull_request.base.ref != github.event.repository.default_branch)) && github.run_id || (github.event.action != 'edited' || github.event.changes.base) && 'state' || github.run_id }}
   cancel-in-progress: true
 
 permissions:
