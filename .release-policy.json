@@ -6,7 +6,8 @@
   "version_file": "custom_components/home_floorplan/manifest.json",
   "validation_workflows": [
     "package.yml",
-    "codeql.yml"
+    "codeql.yml",
+    "documentation.yml"
   ],
   "artifact_pattern": "release-assets*",
   "local_checks": [
@@ -19,7 +20,8 @@
   ],
   "notes": [
     "Release ZIPs contain only the reviewed public website/compiler inventory and fictional examples. Personal project.json, generated homes and credentials are excluded.",
-    "GitHub Pages remains an independent existing deployment workflow. Offline geometry fuzzing does not establish Home Assistant or physical device acceptance."
+    "GitHub Pages remains an independent existing deployment workflow. Offline geometry fuzzing does not establish Home Assistant or physical device acceptance.",
+    "The configured release-note file remains a full-validation input so its current release section, upgrade notes and security notes are checked."
   ],
   "release_notes": "CHANGELOG.md",
   "single_entry_ci": true,
@@ -69,5 +71,15 @@
     "workflow": "closed-build.yml",
     "environment": "closed-build",
     "enabled": false
+  },
+  "change_scope": {
+    "documentation_paths": [],
+    "required_paths": [
+      "CHANGELOG.md"
+    ],
+    "always_validate_workflows": [
+      "codeql.yml",
+      "documentation.yml"
+    ]
   }
 }
