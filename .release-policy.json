@@ -26,7 +26,7 @@
   "release_notes": "CHANGELOG.md",
   "single_entry_ci": true,
   "fuzzing": {
-    "toolkit_ref": "d4b21d156067ce58f89f89149bfad545e1889ae7"
+    "toolkit_ref": "8249b82b506af2e62c03e33ce0990327dd5f55c6"
   },
   "versioning": {
     "schema": 1,
