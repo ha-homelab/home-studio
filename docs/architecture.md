@@ -1017,3 +1017,31 @@ site-context fields. A saved viewer that predates site rendering rejects a
 nonempty site publication with rebuild instructions, while retaining the
 previous published generation. This capability check is separate from schema
 validation: saving a valid draft does not prove an old viewer can display it.
+
+### Optional native geographic overview
+
+The native panel lazy-imports `static/neighborhood.js` only after an explicit
+Neighborhood action. MapLibre6.17 and its module worker/CSS are vendored with an
+integrity and file-hash manifest. No external executable, style, glyph or sprite
+resource is loaded. The trusted host owns this optional surface; the opaque
+viewer keeps its existing CSP and receives only a typed visibility message over
+its authenticated MessagePort. Pause cancels draw scheduling/environment effects
+and dismisses overlays, while HA state delivery and the retained model continue.
+Closing the overview removes MapLibre, its marker and session, aborts queued
+requests, restores focus and resumes the existing home. One idle house context
+can remain allocated during the overview; we do not claim a single GPU context.
+
+A private `home-map://` protocol dispatches through the signed-in HA connection.
+Four requests per connection can be active; aborted in-flight WS calls retain
+their slots until settlement. The backend accepts only fixed-origin TileJSON and
+its validated versioned MVT template, rejects redirects/compressed responses,
+and limits bodies/cache/concurrency/rate. Authorization and enabled alignment
+are checked after upstream waits as well as before them. Account/connection
+changes retire the browser session. Public package installers include every
+static dependency; the source and model packages carry no downloaded tiles.
+
+MapLibre owns an independent geographic camera in this first integration. Its
+approximate alignment marker returns to the detailed home; it does not pretend
+to share depth, measured building heights or the home's room geometry. A future
+shared-context custom layer would require separate camera/picking/lifecycle
+qualification. See [map navigation](map-navigation.md#explore-the-neighborhood).

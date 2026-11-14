@@ -194,6 +194,8 @@ REPO_FILES = (
               'custom_components/home_floorplan/translations/en.json',
               'custom_components/home_floorplan/static/studio.js',
               'custom_components/home_floorplan/static/map-transport.js',
+              'custom_components/home_floorplan/static/neighborhood.js', 'custom_components/home_floorplan/static/vendor/maplibre-gl.mjs', 'custom_components/home_floorplan/static/vendor/maplibre-gl-worker.mjs', 'custom_components/home_floorplan/static/vendor/maplibre-gl.css', 'custom_components/home_floorplan/static/vendor/MAPLIBRE-LICENSE.txt', 'custom_components/home_floorplan/static/vendor/maplibre-manifest.json',
+              'scripts/test-ha-neighborhood.py', 'scripts/test-neighborhood.cjs', 'scripts/test-neighborhood-live.cjs', 'scripts/test-neighborhood-visibility.cjs',
               'hacs.json', 'requirements-ha-test.txt',
               'scripts/build-home-studio.py', 'scripts/test-ha-native.py', 'scripts/test-blender-export.py', 'scripts/test-blender-import.py',
               'scripts/test-ha-generated.py',

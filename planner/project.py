@@ -635,6 +635,7 @@ def package_ha(output, manifest):
             "__init__.py", "site.py", "validation.py", "curtains.py", "map.py",
             "manifest.json", "native.py", "generated.py", "site_frame.py", "site_calibration.py", "runtime_upgrade.py", "baseline_transaction.py", "permissions.py", "config_flow.py",
             "strings.json", "translations/en.json", "static/panel.js", "static/card.js",
+            'static/neighborhood.js', 'static/vendor/maplibre-gl.mjs', 'static/vendor/maplibre-gl-worker.mjs', 'static/vendor/maplibre-gl.css', 'static/vendor/MAPLIBRE-LICENSE.txt', 'static/vendor/maplibre-manifest.json',
         )]
         for source in sources:
             if source.is_symlink():

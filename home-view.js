@@ -5,7 +5,7 @@ homeView = (() => {
   const markerMotion=createMarkerMotion();
   let markerViewport='';
   const deviceEffects=createDeviceEffects(THREE,$('homeMarkers'),{
-    canDraw:()=>active&&!!camera&&!!renderer&&!failed3D&&!renderLost&&!renderSuspended&&!mapCoarse(),
+    canDraw:()=>active&&!!camera&&!!renderer&&!failed3D&&!renderLost&&!renderSuspended&&!hostViewSuspended&&!mapCoarse(),
     allowRotor:()=>!coalesceMotion,
     onGeometryChange:invalidateShadows,
     draw:()=>{
@@ -51,7 +51,7 @@ homeView = (() => {
   let activityDisposed=false;
   const motionTracks=new Map();
   const presenceView=Object.keys(model.presence_sources||{}).length||Object.keys(model.room_activity||{}).length?createPresenceView($('homeStage'),model.rooms,model.presence_sources,THREE,xm,zm,model.room_activity):null;
-  const showPresence=()=>!activityDisposed&&active&&!!renderer&&!failed3D&&!renderLost&&!renderSuspended&&!mapCoarse()&&!document.hidden;
+  const showPresence=()=>!activityDisposed&&active&&!!renderer&&!failed3D&&!renderLost&&!renderSuspended&&!hostViewSuspended&&!mapCoarse()&&!document.hidden;
   const vacuumView=Array.isArray(model.vacuum_sources)&&model.vacuum_sources.length?createVacuumView($('homeStage'),model.vacuum_sources,model.floor,THREE,{
     onInspect:entityId=>{if(bridge&&haConnected)bridge.postMessage({type:'more_info',entity_id:entityId});},
     onResume:()=>refreshControls()
@@ -469,7 +469,7 @@ homeView = (() => {
     hideMediaControls();cancelNativePress();
     markerMotion.reset();active = value;previewTV(null);if(typeof mapLayer!=='undefined')mapLayer?.setActive(value);
     if(typeof mapLoaded!=='undefined'&&mapLoaded)refreshMapControls();
-    environmentLayer?.setActive(!renderLost&&!renderSuspended);
+    environmentLayer?.setActive(!renderLost&&!renderSuspended&&!hostViewSuspended);
     if(lowerFloorContext)lowerFloorContext.visible=value&&showLowerFloor&&!selected;
     document.body.classList.toggle('home-mode', value); $('homeView').hidden = !value;
     syncViewerTours();
@@ -508,7 +508,7 @@ homeView = (() => {
   }
   function nativePressReady(press){
     const current=items.find(item=>item.id===press.item.id);
-    return active&&!document.hidden&&!renderLost&&!renderSuspended&&bridge&&haConnected&&
+    return active&&!document.hidden&&!renderLost&&!renderSuspended&&!hostViewSuspended&&bridge&&haConnected&&
       current===press.item&&current.entity_id===press.entityId&&current.room===press.room&&haStates[press.entityId]&&
       press.element.isConnected&&!press.element.disabled&&!press.element.hidden&&press.element.getClientRects().length>0;
   }
@@ -988,7 +988,7 @@ homeView = (() => {
     const coarse=mapOn&&(zoom<.22||!!mapDraft);
     if(typeof mapLayer!=='undefined'){
       $('homeStage').dataset.mapCoarse=String(coarse);$('homeStage').dataset.mapEditing=String(!!mapDraft);
-      if(coarse||mapCoarseState!==coarse)environmentLayer?.setActive(!coarse&&!renderLost&&!renderSuspended);
+      if(coarse||mapCoarseState!==coarse)environmentLayer?.setActive(!coarse&&!renderLost&&!renderSuspended&&!hostViewSuspended);
       if(mapCoarseState!==coarse){
         mapCoarseState=coarse;
         assumedZones?.setVisible(active&&!coarse&&$('homeSignalToggle').checked,$('homeSignals').open);
@@ -1118,12 +1118,12 @@ homeView = (() => {
     renderer.domElement.setAttribute('aria-label',vt('Interactive floor plan'));
     renderer.domElement.title='Arrow keys rotate · Shift+arrows move · Home resets';
     renderer.domElement.addEventListener('keydown',e=>{
-      if(!active||!camera||renderLost||renderSuspended||document.hidden||e.altKey||e.ctrlKey||e.metaKey)return;
+      if(!active||!camera||renderLost||renderSuspended||hostViewSuspended||document.hidden||e.altKey||e.ctrlKey||e.metaKey)return;
       if(e.key==='Home'){e.preventDefault();resetHomeView();return;}
       const delta={ArrowLeft:[-25,0],ArrowRight:[25,0],ArrowUp:[0,-25],ArrowDown:[0,25]}[e.key];
       if(delta){e.preventDefault();cancelHomeGesture();navigateHome(...delta,e.shiftKey||navigationMode==='move');}
     });
-    renderer.domElement.addEventListener('pointerdown',e=>{if(!active||![0,2].includes(e.button)||renderLost||renderSuspended||document.hidden)return;
+    renderer.domElement.addEventListener('pointerdown',e=>{if(!active||![0,2].includes(e.button)||renderLost||renderSuspended||hostViewSuspended||document.hidden)return;
       // A second contact never owns this gesture, and invalidates its device tap.
       if(homeGesture){
         homeGesture.tapAllowed=false;
@@ -1155,7 +1155,7 @@ homeView = (() => {
     for(const type of ['pointercancel','lostpointercapture'])renderer.domElement.addEventListener(type,e=>{if(homeGesture?.contacts?.has(e.pointerId)||homeGesture?.id===e.pointerId)cancelHomeGesture();});
     renderer.domElement.addEventListener('webglcontextlost',()=>cancelHomeGesture());
     renderer.domElement.addEventListener('wheel',event=>{
-      if(!active||!camera||renderLost||renderSuspended||document.hidden)return;
+      if(!active||!camera||renderLost||renderSuspended||hostViewSuspended||document.hidden)return;
       event.preventDefault();cancelHomeGesture();dismissOverlays();
       const delta=event.deltaY*(event.deltaMode===1?16:event.deltaMode===2?500:1);
       zoomAt(zoom*Math.exp(-Math.max(-250,Math.min(250,delta))*.003),event.clientX,event.clientY);

@@ -55,7 +55,7 @@ def identity(value):
     return value
 
 
-module("voluptuous", Required=lambda name: name)
+module("voluptuous", Required=lambda name: name, Optional=lambda name: name)
 module("homeassistant")
 module("homeassistant.components")
 module("homeassistant.components.websocket_api", websocket_command=lambda schema: identity,
@@ -162,7 +162,7 @@ class MapTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_registration_is_idempotent_and_reference_is_read_only(self):
         await maps.async_setup_map(self.hass, self.hass.data[maps.DOMAIN])
-        self.assertEqual(len(self.hass.registered), 3)
+        self.assertEqual(len(self.hass.registered), 4)
         family = Connection()
         maps.ws_map_get(self.hass, family, {"id": 1})
         self.assertEqual(family.results, [{"revision": 0, "configured": False, "config": None,

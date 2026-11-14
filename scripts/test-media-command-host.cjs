@@ -124,6 +124,7 @@ function stateFixture(){
   let Panel;const sent=[],writes=[];
   vm.runInNewContext(source,{Blob,HTMLElement:class{},customElements:{get(){},define(name,type){Panel=type;}},localStorage:{getItem(){return null;}}});
   const panel=Object.assign(Object.create(Panel.prototype),{generation:1,isConnected:true,started:true,dryRun:false,dryRunEpoch:0,
+    $(){return {disabled:true};},
     pending:0,failed:false,serverCanEdit:true,readableEntities:new Set(['media_player.speaker','light.unbound','sensor.room_activity']),controllableEntities:new Set(['media_player.speaker','light.unbound']),queue:Promise.resolve(),commands:new Set(),floor:'main',revision:1,tvFrameCache:{},viewPreferences:{language:'en'},
     savedItems:[{id:'speaker',entity_id:'media_player.speaker'}],curtains:{profiles:{},power:{},memory:{}},
     port:{postMessage(message){sent.push(plain(message));}},notice(){},noticeKey(){},notifySaveStatus(){},updateAccessUI(){},updateToolbarVisibility(){},

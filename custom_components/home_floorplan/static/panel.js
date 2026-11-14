@@ -324,7 +324,7 @@ class HomeFloorplanPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({mode: 'open'});
-    this.shadowRoot.innerHTML = `<style>:host{display:flex;flex-direction:column;height:100dvh;min-height:0;background:#11191f}header{flex-shrink:0;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;font:14px system-ui;color:#b8c8d0}button{padding:8px 10px;cursor:pointer;background:#202d35;color:#e9eeef;border:1px solid #44515a;border-radius:7px;min-height:40px}#notice{flex:1;min-width:160px;overflow-wrap:anywhere}#dry-run[aria-pressed="true"]{border-color:#e8c56c;color:#ffe6a2}iframe{border:0;flex:1;width:100%;min-height:0}.error{color:#ffd19b}#recovery,#local-recovery{padding:20px;color:#e9eeef;font:14px/1.5 system-ui;overflow:auto}#recovery-details{white-space:pre-wrap;overflow-wrap:anywhere}button:disabled{opacity:.5}#studio{display:inline-flex;align-items:center;min-height:44px;box-sizing:border-box;color:#a9e0ee;padding:8px 12px;border:1px solid #44515a;border-radius:7px;text-decoration:none}#studio:focus-visible,#map-attribution:focus-visible{outline:3px solid #e8c56c;outline-offset:3px}#map-attribution{color:#a9e0ee;font-size:12px;padding:8px 0}:host > #map-attribution{flex-shrink:0;padding:4px 12px;font-family:system-ui}[hidden]{display:none!important}</style><header><button id="menu" aria-label="Open sidebar">☰</button><span id="notice" role="status">Connecting to Home Assistant…</span><button id="dry-run" type="button" aria-pressed="false">Dry run: Off</button><button id="retry">Reload saved plan</button><a id="studio" href="/home-studio" lang="en" hidden>Edit home</a><a id="map-attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" hidden>© OpenStreetMap contributors</a></header><section id="local-recovery" hidden><h2>Unsaved layout edits</h2><p>The latest layout submitted by this card is retained in memory. Export it before reloading the saved plan. Keep this card open until you have saved the file.</p><button id="local-export">Export unsaved inventory JSON</button></section><section id="recovery" hidden><h2>Saved placements need repair</h2><p>Nothing has been overwritten. Export the original inventory, keep it as a backup, and edit a copy using the current floor and room IDs below. Importing the repaired copy replaces all saved floors only after validation.</p><pre id="recovery-details"></pre><button id="recovery-export">Export original inventory</button> <button id="recovery-import">Import repaired inventory</button><input id="recovery-file" type="file" accept="application/json,.json" hidden></section><iframe title="Private home floorplan" sandbox="allow-scripts allow-downloads allow-forms"></iframe>`;
+    this.shadowRoot.innerHTML = `<style>:host{position:relative;display:flex;flex-direction:column;height:100dvh;min-height:0;background:#11191f}header{flex-shrink:0;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;font:14px system-ui;color:#b8c8d0}button{padding:8px 10px;cursor:pointer;background:#202d35;color:#e9eeef;border:1px solid #44515a;border-radius:7px;min-height:40px}#notice{flex:1;min-width:160px;overflow-wrap:anywhere}#dry-run[aria-pressed="true"]{border-color:#e8c56c;color:#ffe6a2}iframe{border:0;flex:1;width:100%;min-height:0}.error{color:#ffd19b}#recovery,#local-recovery{padding:20px;color:#e9eeef;font:14px/1.5 system-ui;overflow:auto}#recovery-details{white-space:pre-wrap;overflow-wrap:anywhere}button:disabled{opacity:.5}#studio{display:inline-flex;align-items:center;min-height:44px;box-sizing:border-box;color:#a9e0ee;padding:8px 12px;border:1px solid #44515a;border-radius:7px;text-decoration:none}#studio:focus-visible,#map-attribution:focus-visible{outline:3px solid #e8c56c;outline-offset:3px}#map-attribution{color:#a9e0ee;font-size:12px;padding:8px 0}:host > #map-attribution{flex-shrink:0;padding:4px 12px;font-family:system-ui}[hidden]{display:none!important}</style><header><button id="menu" aria-label="Open sidebar">☰</button><span id="notice" role="status">Connecting to Home Assistant…</span><button id="dry-run" type="button" aria-pressed="false">Dry run: Off</button><button id="neighborhood" type="button" disabled hidden>Neighborhood</button><button id="retry">Reload saved plan</button><a id="studio" href="/home-studio" lang="en" hidden>Edit home</a><a id="map-attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" hidden>© OpenStreetMap contributors</a></header><section id="local-recovery" hidden><h2>Unsaved layout edits</h2><p>The latest layout submitted by this card is retained in memory. Export it before reloading the saved plan. Keep this card open until you have saved the file.</p><button id="local-export">Export unsaved inventory JSON</button></section><section id="recovery" hidden><h2>Saved placements need repair</h2><p>Nothing has been overwritten. Export the original inventory, keep it as a backup, and edit a copy using the current floor and room IDs below. Importing the repaired copy replaces all saved floors only after validation.</p><pre id="recovery-details"></pre><button id="recovery-export">Export original inventory</button> <button id="recovery-import">Import repaired inventory</button><input id="recovery-file" type="file" accept="application/json,.json" hidden></section><iframe title="Private home floorplan" sandbox="allow-scripts allow-downloads allow-forms"></iframe>`;
     this.serverCanEdit = false;
     this.editLocked = false;
     this.readableEntities = new Set();
@@ -365,6 +365,7 @@ class HomeFloorplanPanel extends HTMLElement {
       const iframe=this.$('iframe',false);
       if (event.target !== iframe && !event.composedPath?.().includes(iframe)) this.dismissViewerOverlays();
     };
+    this.$('neighborhood').onclick = () => this.openNeighborhood();
     this.$('dry-run').onclick = () => this.setDryRun(!this.dryRun);
     this.viewPreferences = {sidebarCollapsed:false,toolbarHidden:false};
     try { this.viewPreferences.sidebarCollapsed=localStorage.getItem('home-floorplan:sidebar-collapsed')==='true'; } catch {}
@@ -401,6 +402,29 @@ class HomeFloorplanPanel extends HTMLElement {
     };
   }
 
+  async openNeighborhood() {
+    if (this.neighborhoodOpening || this.neighborhood?.opened || !this.port || !this.modelConfigured || !['native','generated'].includes(this.runtimeMode)) return;
+    const hass=this._hass, generation=this.generation, port=this.port;
+    this.neighborhoodOpening=true;
+    try {
+      const {Neighborhood}=await import('./neighborhood.js');
+      if (!this.isConnected || this._hass?.user?.id!==hass?.user?.id || this._hass?.connection!==hass?.connection || generation!==this.generation || port!==this.port) return;
+      this.dismissViewerOverlays();
+      const iframe=this.$('iframe',false);
+      this.neighborhoodFrameHidden=iframe.hidden;
+      iframe.hidden=true;iframe.inert=true;
+      this.port?.postMessage({type:'viewer_visibility',hidden:true});
+      this.neighborhood ||= new Neighborhood(this);
+      await this.neighborhood.open();
+    } catch { this.neighborhoodClosed();this.notice('Neighborhood is unavailable. Try again.',true); }
+    finally {this.neighborhoodOpening=false;}
+  }
+  neighborhoodClosed() {
+    const iframe=this.$('iframe',false);
+    if (this.neighborhoodFrameHidden !== undefined) iframe.hidden=this.neighborhoodFrameHidden;
+    this.neighborhoodFrameHidden=undefined;iframe.inert=false;
+    this.port?.postMessage({type:'viewer_visibility',hidden:false});
+  }
   configureDashboard({floor, sidebarCollapsed = true, toolbarHidden = false, dryRun = false, editLocked = false, deviceFilter = 'all', roomLabels = false} = {}) {
     if (this.started) throw Error('Configure the dashboard before connecting its floorplan.');
     this.initialFloor = floor;
@@ -527,7 +551,10 @@ class HomeFloorplanPanel extends HTMLElement {
       this.mapView=null;
       this.disconnectedCallback();this.$('recovery').hidden=true;
     }
+    if (this._hass && (this._hass.user?.id!==value?.user?.id || this._hass.connection!==value?.connection || value?.connected===false)) this.neighborhood?.close(false);
     this._hass = value;
+    if (this.neighborhood?.opened && !this.neighborhood.current()) this.neighborhood.close(false);
+    this.neighborhood?.applyTheme?.();
     this.updateAccessUI();
     if (changedAccount && this.isConnected) this.connectedCallback();
     const requestedLanguage=value?.locale?.language || value?.language;
@@ -582,6 +609,7 @@ class HomeFloorplanPanel extends HTMLElement {
     state?.connection?.removeEventListener?.('ready', state.readyListener);
   }
   resetConnectionLoad() {
+    this.neighborhood?.close(false);
     // Disable the visible viewer before closing its channel, including when
     // a replacement connection arrives before hass.connected changes.
     this.port?.postMessage({type:'states', states:{}, connected:false});
@@ -600,6 +628,8 @@ class HomeFloorplanPanel extends HTMLElement {
     Promise.resolve().then(unsubscribe).catch(() => {});
   }
   invalidateViewerLoad() {
+    this.neighborhood?.close(false);
+    this.$('neighborhood').disabled=true;
     this.toolbarReady=false;
     this.generation = (this.generation || 0) + 1;
     this.clearMapRequests();
@@ -620,6 +650,7 @@ class HomeFloorplanPanel extends HTMLElement {
     this.syncConnection();
   }
   disconnectedCallback() {
+    this.neighborhood?.close(false);
     this.suspendedEdits ||= !!this.localEdits && !!(this.pending || this.failed);
     globalThis.removeEventListener?.('storage',this.onDryRunStorage);
     this.overlayDocument?.removeEventListener('keydown',this.onOverlayEscape,true);
@@ -1065,7 +1096,7 @@ class HomeFloorplanPanel extends HTMLElement {
       // A background tab or a large response may postpone the timer callback.
       if (Date.now() >= deadline) throw expire();
       this.serverCanEdit = result.can_edit === true;
-      this.runtimeMode = result.mode;this.hasEditor = result.has_editor === true;
+      this.runtimeMode = result.mode;this.$('neighborhood').hidden=!['native','generated'].includes(result.mode);this.hasEditor = result.has_editor === true;
       this.updateAccessUI();
       const bound = (result.items || []).map(item => item.entity_id).filter(id => typeof id === 'string');
       this.readableEntities = new Set(Array.isArray(result.readable_entities) ? result.readable_entities : bound);
@@ -1152,6 +1183,7 @@ class HomeFloorplanPanel extends HTMLElement {
     } else if (message.type === 'model_config') {
       if(this.modelConfigured)return;
       this.modelConfigured=true;
+      this.$('neighborhood').disabled=false;
       this.scopedStates=!this.canEdit || Array.isArray(message.state_entities);
       this.displayEntities=new Set((Array.isArray(message.state_entities)?message.state_entities:[]).slice(0,2000).filter(id=>typeof id==='string'&&/^[a-z_]+\.[a-z0-9_]{1,137}$/.test(id)&&this.readableEntities.has(id)));
       this.inventoryModel=typeof message.model_id==='string' && /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(message.model_id) ? message.model_id : null;

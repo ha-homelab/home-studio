@@ -114,11 +114,15 @@ const context = vm.createContext({
   renderProfile: {diffuseLighting: false}, coalesceMotion: false,
   interactionRenderer: null, interactionPointer: {moved: true}, THREE: {}, performance: {now: () => 0},
   createInteractionRenderer: () => ({draw: () => {calls.push('copy draw'); throw Error('GPU copy unavailable');}}),
-  renderSuspended: false, renderLost: false, document: {hidden: false},
+  renderSuspended: false, hostViewSuspended: false, renderLost: false, document: {hidden: false},
   wallSheenMotion: {beforeRender: () => calls.push('before'), afterRender: () => calls.push('after')},
   renderer: {render: () => { calls.push('draw'); throw Error('GPU context unavailable'); }},
 });
 vm.runInContext(draw, context);
+context.hostViewSuspended = true;
+context.drawScene({});
+assert.deepEqual(calls, [], 'Host suspension blocks GPU submission and sheen timing independently of page visibility');
+context.hostViewSuspended = false;
 assert.throws(() => context.drawScene({}), /GPU context unavailable/);
 assert.deepEqual(calls, ['before', 'draw', 'after'], 'Timing finishes even when drawing fails');
 calls.length = 0;
@@ -161,7 +165,7 @@ async function testHomeDrawPaths() {
     environmentLayer:null, roomLighting:null, lowerFloorContext:null, assumedZones:null, presenceView:null, vacuumView:null,
     reflectionEnvironment:null, contactShading:null, hemisphere:null,
     roomLabels:true, signalZone:'', showLowerFloor:true, labels:[], points:[], motionTracks:new Map(), refreshSignalStatus() {}, positionMediaPreviews() {},
-    scene:{children}, renderCount:0, renderSuspended:false, renderLost:false, document:{hidden:false},
+    scene:{children}, renderCount:0, renderSuspended:false,hostViewSuspended:false, renderLost:false, document:{hidden:false},
     coalesceMotion:false, interactionPointer:null, clearTimeout:id => clearedTimers.push(id),
     wallSheenMotion:{beforeRender:() => trace.push('before'),afterRender:() => trace.push('after')},
     renderer:{domElement:{dataset:{}},render:() => {trace.push('draw');masks.push(visibility());}},

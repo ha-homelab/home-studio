@@ -48,7 +48,9 @@ jobs:
       - name: Verify real storage, registries, permissions and publication
         run: python scripts/test-ha-core.py
       - name: Verify geographic map storage and bounded tile transport
-        run: python scripts/test-ha-map.py
+        run: |
+          python scripts/test-ha-map.py
+          python scripts/test-ha-neighborhood.py
       - name: Verify native AI authentication, session boundaries and cancellation
         run: python scripts/test-ha-ai.py
   platforms:
@@ -166,6 +168,11 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           npx playwright install --with-deps chromium firefox webkit
+      - name: Verify lazy neighborhood and retained-view lifecycle
+        run: |
+          node scripts/test-neighborhood-visibility.cjs
+          node scripts/test-neighborhood.cjs
+          node scripts/test-neighborhood-live.cjs
       - name: Test camera tours and local video in three browser engines
         run: |
           for engine in chromium firefox webkit; do

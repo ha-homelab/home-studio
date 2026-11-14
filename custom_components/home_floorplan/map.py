@@ -12,6 +12,8 @@ from collections import OrderedDict, deque
 import copy
 from email.utils import parsedate_to_datetime
 import math
+import json
+import re
 import struct
 import time
 import zlib
@@ -288,6 +290,122 @@ class RasterTiles:
         return value if isinstance(value, str) and len(value) <= 512 and "\r" not in value and "\n" not in value else None
 
 
+VECTOR_METADATA_URL = "https://tiles.openfreemap.org/planet"
+VECTOR_MAX_BYTES = 1024 * 1024
+VECTOR_METADATA_BYTES = 256 * 1024
+VECTOR_ATTRIBUTION = "OpenFreeMap · © OpenMapTiles · © OpenStreetMap contributors"
+VECTOR_ATTRIBUTION_URL = "https://openfreemap.org/"
+VECTOR_TEMPLATE = re.compile(
+    r"https://tiles\.openfreemap\.org/planet/[0-9]{8}_[0-9]{6}_pt/\{z\}/\{x\}/\{y\}\.pbf")
+
+
+class VectorTiles(RasterTiles):
+    """Private fixed-origin TileJSON and bounded MVT transport.
+
+    The cache key includes the validated planet version, so an older in-flight
+    tile cannot poison a newer metadata generation. No upstream markup or URLs
+    are returned to the browser. Binary bodies are never decompressed here.
+    """
+
+    async def metadata(self):
+        body = await self._get_resource("metadata")
+        return self._parse_metadata(body)
+
+    @staticmethod
+    def _parse_metadata(body):
+        document = json.loads(body)
+        if (not isinstance(document, dict)
+                or document.get("tilejson") not in ("2.0.0", "2.1.0", "2.2.0", "3.0.0")
+                or not isinstance(document.get("tiles"), list)
+                or len(document["tiles"]) != 1
+                or not isinstance(document["tiles"][0], str)
+                or not VECTOR_TEMPLATE.fullmatch(document["tiles"][0])
+                or type(document.get("minzoom")) is not int
+                or type(document.get("maxzoom")) is not int
+                or not 0 <= document["minzoom"] <= document["maxzoom"] <= 14):
+            raise ValueError("Invalid vector metadata")
+        return {"minzoom": document["minzoom"], "maxzoom": document["maxzoom"],
+                "template": document["tiles"][0]}
+
+    async def get(self, z, x, y):
+        validate_tile(z, x, y)
+        if z > 14:
+            raise MapError("invalid_tile", "The map tile coordinates are invalid.")
+        metadata = await self.metadata()
+        if not metadata["minzoom"] <= z <= metadata["maxzoom"]:
+            raise MapError("invalid_tile", "The map tile coordinates are invalid.")
+        return await self._get_resource((metadata["template"], z, x, y))
+
+    async def _get_resource(self, key):
+        now = time.monotonic()
+        while self.recent_requests and self.recent_requests[0] <= now - 60:
+            self.recent_requests.popleft()
+        if self.requests >= MAX_TILE_REQUESTS or len(self.recent_requests) >= MAX_REQUESTS_PER_MINUTE:
+            raise MapError("map_busy", "The map is busy. Try again shortly.")
+        self.recent_requests.append(now)
+        self.requests += 1
+        try:
+            previous = self.cache.get(key)
+            if previous and previous["expires"] > now:
+                self.cache.move_to_end(key)
+                return previous["body"]
+            if self.failures.get(key, 0) > now:
+                raise MapError("tile_unavailable", "The vector map is temporarily unavailable.")
+            task = self.pending.get(key)
+            if task is None:
+                if len(self.pending) >= MAX_TILE_REQUESTS:
+                    raise MapError("map_busy", "The map is busy. Try again shortly.")
+                task = asyncio.create_task(self._fetch(key, previous), name="home_floorplan vector map")
+                self.pending[key] = task
+                task.add_done_callback(lambda done: self._finished(key, done))
+            return await asyncio.shield(task)
+        finally:
+            self.requests -= 1
+
+    async def _fetch(self, key, previous):
+        from aiohttp import ClientError, ClientTimeout
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+        is_metadata = key == "metadata"
+        limit = VECTOR_METADATA_BYTES if is_metadata else VECTOR_MAX_BYTES
+        url = VECTOR_METADATA_URL if is_metadata else key[0].format(z=key[1], x=key[2], y=key[3])
+        accepted = ("application/json",) if is_metadata else (
+            "application/vnd.mapbox-vector-tile", "application/x-protobuf", "application/octet-stream")
+        headers = {**HEADERS, "Accept": ", ".join(accepted)}
+        try:
+            async with asyncio.timeout(25), self.semaphore:
+                session = async_get_clientsession(self.hass)
+                async with session.get(url, headers=headers, timeout=ClientTimeout(total=10),
+                                       allow_redirects=False, auto_decompress=False) as response:
+                    if (response.status != 200
+                            or response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() not in accepted
+                            or response.headers.get("Content-Encoding", "identity").lower() != "identity"
+                            or response.content_length is not None and response.content_length > limit):
+                        raise ValueError("Invalid vector response")
+                    body = bytearray()
+                    async for chunk in response.content.iter_chunked(32 * 1024):
+                        body.extend(chunk)
+                        if len(body) > limit:
+                            raise ValueError("Invalid vector response")
+                    body = bytes(body)
+                    if is_metadata:
+                        self._parse_metadata(body)
+                    ttl, cacheable = _cache_policy(response.headers)
+                    ttl = min(ttl, 3600 if is_metadata else 7 * 24 * 3600)
+                    if cacheable:
+                        self._store(key, {"body": body, "expires": time.monotonic() + ttl})
+                    elif key in self.cache:
+                        self.cache_bytes -= len(self.cache.pop(key)["body"])
+                    self.failures.pop(key, None)
+                    return body
+        except (ClientError, TimeoutError, ValueError, UnicodeError, RecursionError):
+            self.failures[key] = time.monotonic() + FAILURE_TTL
+            self.failures.move_to_end(key)
+            while len(self.failures) > MAX_CACHE_TILES:
+                self.failures.popitem(last=False)
+            raise MapError("tile_unavailable", "The vector map is temporarily unavailable.") from None
+
+
 class MapStore(Store):
     """Require completed durable storage, including on HA write failures."""
 
@@ -315,6 +433,7 @@ class HomeMap:
         self.lock = asyncio.Lock()
         self.load_failed = False
         self.tiles = RasterTiles(hass)
+        self.vector_tiles = VectorTiles(hass)
 
     async def load(self):
         try:
@@ -411,12 +530,42 @@ async def ws_map_tile(hass, connection, msg):
         connection.send_error(msg["id"], error.code, str(error))
 
 
+@websocket_api.websocket_command({vol.Required("type"): "home_floorplan/map_vector",
+                                 vol.Required("resource"): str,
+                                 vol.Optional("z"): int, vol.Optional("x"): int,
+                                 vol.Optional("y"): int})
+@websocket_api.async_response
+async def ws_map_vector(hass, connection, msg):
+    """Authenticated map-only resources; no caller-supplied URLs or styles."""
+    try:
+        manager = _manager(hass, connection)
+        config = manager.snapshot()["config"]
+        if (not config or not config["enabled"]) and not connection.user.is_admin:
+            raise MapError("map_disabled", "The geographic map is disabled.")
+        if msg.get("resource") == "metadata" and not any(key in msg for key in ("z", "x", "y")):
+            metadata = await manager.vector_tiles.metadata()
+            result = {key: metadata[key] for key in ("minzoom", "maxzoom")}
+            result.update(attribution=VECTOR_ATTRIBUTION, attribution_url=VECTOR_ATTRIBUTION_URL)
+        elif msg.get("resource") == "tile" and all(key in msg for key in ("z", "x", "y")):
+            body = await manager.vector_tiles.get(msg["z"], msg["x"], msg["y"])
+            result = {"data": base64.b64encode(body).decode("ascii")}
+        else:
+            raise MapError("invalid_tile", "The vector map request is invalid.")
+        manager = _manager(hass, connection)
+        config = manager.snapshot()["config"]
+        if (not config or not config["enabled"]) and not connection.user.is_admin:
+            raise MapError("map_disabled", "The geographic map is disabled.")
+        connection.send_result(msg["id"], result)
+    except MapError as error:
+        connection.send_error(msg["id"], error.code, str(error))
+
+
 async def async_setup_map(hass, state):
     if "map" not in state:
         manager = HomeMap(hass)
         await manager.load()
         state["map"] = manager
     if not state.get("map_registered"):
-        for handler in (ws_map_get, ws_map_save, ws_map_tile):
+        for handler in (ws_map_get, ws_map_save, ws_map_tile, ws_map_vector):
             websocket_api.async_register_command(hass, handler)
         state["map_registered"] = True

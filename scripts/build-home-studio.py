@@ -16,6 +16,7 @@ COMPONENT_FILES = (
     "__init__.py", "site.py", "validation.py", "curtains.py", "native.py", "generated.py", "permissions.py",
     "ai.py", "map.py", "site_frame.py", "site_calibration.py", "runtime_upgrade.py", "baseline_transaction.py", "config_flow.py", "manifest.json", "strings.json", "translations/en.json",
     "static/panel.js", "static/card.js", "static/studio.js", "static/map-transport.js",
+    'static/neighborhood.js', 'static/vendor/maplibre-gl.mjs', 'static/vendor/maplibre-gl-worker.mjs', 'static/vendor/maplibre-gl.css', 'static/vendor/MAPLIBRE-LICENSE.txt', 'static/vendor/maplibre-manifest.json',
 )
 RUNTIME_FILES = (
     'camera-tour.js', 'camera-tour-panel.js', 'camera-tour-recording.js', 'camera-tour-session.js', 'camera-tour.css', 'camera-tour-viewer.js',

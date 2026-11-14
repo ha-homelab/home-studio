@@ -80,6 +80,17 @@ not load the drawing-package interface or export renderer.
 
 [Create your drawing package](docs/drawing-package.md)
 
+## Neighborhood map — next release
+
+The native **3D Home → Neighborhood** view adds an optional OpenFreeMap vector
+overview with approximate surrounding 3D buildings. Save **Align map** once,
+then pan, rotate and zoom around the neighborhood. Select the home marker or
+**Home** to return to your detailed floor and device controls. It follows HA's
+theme and loads its locally installed map engine only when opened; no map API
+key is needed. The current lightweight map remains available.
+
+[Neighborhood setup, privacy and troubleshooting](docs/map-navigation.md#explore-the-neighborhood)
+
 ## Make it your home
 
 Draw measured rooms, add doors and windows, furnish them from **206 designs**,
