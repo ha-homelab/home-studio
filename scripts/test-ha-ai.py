@@ -16,6 +16,7 @@ from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 from homeassistant import auth
 from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_USER
+from homeassistant.config_entries import ConfigEntries
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.http import request_handler_factory
 from homeassistant.helpers import area_registry, device_registry, entity_registry, floor_registry
@@ -80,6 +81,8 @@ class NativeAITests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='studio-ai-config-')
         self.hass = HomeAssistant(self.temp.name)
+        self.hass.config_entries = ConfigEntries(self.hass, {})
+        await self.hass.config_entries.async_initialize()
         device_registry.async_setup(self.hass)
         await asyncio.gather(*(registry.async_load(self.hass) for registry in
                                (area_registry, device_registry, entity_registry, floor_registry)))

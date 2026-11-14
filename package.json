@@ -7,6 +7,6 @@
   },
   "devDependencies": {
     "home-assistant-js-websocket": "9.8.1",
-    "playwright": "1.65.1"
+    "playwright": "1.64.0"
   }
 }

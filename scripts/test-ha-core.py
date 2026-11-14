@@ -31,6 +31,7 @@ from homeassistant.components import frontend
 from homeassistant.components.lovelace import LovelaceData
 from homeassistant.components.lovelace.dashboard import LovelaceStorage
 from homeassistant.components.lovelace.resources import ResourceStorageCollection, ResourceYAMLCollection
+from homeassistant.config_entries import ConfigEntries
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry, device_registry, entity_registry, floor_registry
 from homeassistant.util.file import WriteError
@@ -91,6 +92,8 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='studio-core-config-')
         self.hass = HomeAssistant(self.temp.name)
+        self.hass.config_entries = ConfigEntries(self.hass, {})
+        await self.hass.config_entries.async_initialize()
         device_registry.async_setup(self.hass)
         await asyncio.gather(*(registry.async_load(self.hass) for registry in
                                (area_registry, device_registry, entity_registry, floor_registry)))
