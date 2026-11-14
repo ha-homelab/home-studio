@@ -31,7 +31,7 @@ async function homeHost({ embedded = false, canEdit = true, mode = 'home' } = {}
     model: { id: 'main', rooms: [{ id: 'living' }, { id: 'study' }] },
     selected: 'living', signalZone: '', zoom: 1, panX: 0, panY: 0, homeRotation: 0, homeTilt: 0.2,
     mapDraft: null, mapLayer: null, mapLoaded: false, mapFraming: null,
-    renderer: { domElement: element() }, failed3D: false, renderLost: false, renderSuspended: false,
+    renderer: { domElement: element() }, failed3D: false, renderLost: false, renderSuspended: false, hostViewSuspended: false,
     tourSessions: new Map(), vt: text => text,
     $: id => { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); },
     document: { hidden: false, addEventListener() {}, createElement: element, body: { append() {} } },
@@ -132,7 +132,10 @@ test('Home host rejects unavailable modes and wrong scope before changing camera
   assert.throws(() => callbacks.capture(), /Open this view/);
   context.homeView.active = true; context.document.hidden = true;
   assert.throws(() => callbacks.apply(homePose()), /Open this view/);
-  context.document.hidden = false;
+  context.document.hidden = false; context.hostViewSuspended = true;
+  assert.throws(() => callbacks.apply(homePose()), /Open this view/);
+  assert.throws(() => callbacks.capture(), /Open this view/);
+  context.hostViewSuspended = false;
   assert.deepEqual(plain(callbacks.capture()), before); assert.equal(counts.renders, 0); assert.equal(counts.requests, 0);
   context.zoom = 0.1; assert.throws(() => callbacks.capture(), /house view/);
 });

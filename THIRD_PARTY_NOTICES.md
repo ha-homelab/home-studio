@@ -30,3 +30,15 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Geographic neighborhood viewer
+
+MapLibre GL JS 6.17.0 is distributed locally under BSD-3-Clause in
+`custom_components/home_floorplan/static/vendor/`. Its complete upstream notice
+is `MAPLIBRE-LICENSE.txt`; `maplibre-manifest.json` records the registry integrity
+and shipped production asset hashes. It loads only when Neighborhood is opened.
+
+OpenFreeMap vector data follows the OpenMapTiles schema and derives from
+OpenStreetMap. Keep the visible OpenMapTiles and OpenStreetMap contributor
+attribution links. The service and its data are separate from this project's
+MIT license. No map tiles are bundled in the source or installation package.

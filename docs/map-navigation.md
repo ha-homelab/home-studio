@@ -2,6 +2,66 @@
 
 The Home controls view can zoom from the 3D floor into an OpenStreetMap background. The map shares the existing scene and renderer. An administrator must align and enable the home before other signed-in viewers can use its geographic context.
 
+## Explore the neighborhood
+
+In the native Home Assistant **3D Home** panel, choose **Neighborhood** to open
+an optional vector map with streets, water, parks and approximate surrounding
+buildings. The existing detailed home stays in memory. Choose **Home**, press
+**Escape**, or select the orange home marker to return to the same floor and
+view. This does not move devices or change your saved plan.
+
+First enable and save the alignment using **Align map** in the Home controls.
+Neighborhood uses that same private saved geographic point; no second location
+setup or API key is needed. The orange marker is the configured alignment point,
+not a surveyed house outline. Buildings come from OpenStreetMap via OpenFreeMap;
+their heights are estimates, not measurements of your home or neighbors. This
+view does not provide satellite imagery, indoor rooms or solar/shadow analysis.
+Street, place and address labels are not included in this first vector overview.
+
+Drag to pan, scroll or pinch to zoom, and use right-drag or two fingers to rotate.
+The **+ / −**, **Reset north**, **Locate home** and **Theme** buttons provide
+equivalent basic controls. Auto theme follows Home Assistant's dark/light mode.
+Opening the overview stops an active camera tour before pausing the detailed
+view. The detailed house and the editor retain their existing rendering and controls.
+The geographic overview is currently a native HA feature; the standalone
+browser editor keeps its existing lightweight raster underlay.
+
+MapLibre loads from the locally installed integration only when requested. Its
+worker and CSS are local too; no CDN script, external style, sprite or font is
+loaded. While the map is open, the detailed viewer is hidden and its drawing and
+environment animation are paused; its WebGL context can remain allocated. On
+return, map removal releases the overview resources. Hiding the page, changing
+account/connection or detaching the panel closes the overview. A failed tile or
+lost graphics context exposes **Try again** and **Home**. The existing raster
+map remains available, and the home controls do not depend on OpenFreeMap.
+
+The overview does not continuously animate the camera. It limits pitch to 60°,
+view zoom to 19, pixel ratio to 1.5, cached tiles to 64 and active bridge calls to four. Building
+extrusions start at neighborhood scale. These are resource limits, not a claim
+of better speed or battery life; target-device measurements remain necessary.
+
+### Vector resources and privacy
+
+The authenticated `home_floorplan/map_vector` command accepts metadata or
+numeric tile coordinates only. HA resolves one fixed OpenFreeMap TileJSON URL,
+validates its dated same-origin tile template, and returns bounded binary data.
+The browser cannot supply an upstream URL. Neither this endpoint nor MapLibre
+receives a HA token, device state, photograph or exported model payload.
+
+The provider sees HA's outbound network address and the requested area through
+tile coordinates. Local libraries do not make online maps private or offline.
+OpenFreeMap's public service currently requires no registration or API key and
+does not provide an SLA. Its [privacy policy](https://openfreemap.org/privacy/)
+allows limited error/security logging; see its [terms](https://openfreemap.org/tos/).
+There is no bulk downloader or persistent offline-area cache in this feature.
+Keep the visible OpenMapTiles and OpenStreetMap attribution in shared captures.
+
+If Neighborhood cannot open, confirm **Align map → Enable map → Save alignment**,
+then check HA connectivity and choose **Try again**. Older installations need
+the complete integration update, including its Python backend and local vendor
+assets; replacing only `panel.js` is insufficient. Return **Home** to keep using
+the existing plan while the external service is unavailable.
+
 ## Align a home
 
 1. Open **Home controls** in the native Home Assistant panel as an administrator and select **Align map**. Opening alignment immediately requests map tiles around the saved alignment, or HA's configured location if no alignment is saved. **Cancel** discards settings changes but cannot undo those requests.
@@ -46,9 +106,9 @@ The map displays **© OpenStreetMap contributors**. The native HA panel also sho
 
 While the map layer is enabled, authored street and landscape polygons remain visible at detailed, transition and overview scales, at their exact local coordinates and ground elevation. They do not acquire generated lanes or traffic. Coarse home/building solids retain their existing zoom behavior. The map layer remains controlled by map visibility; hiding it does not turn the generic demo garden back on. If no street polygon exists, street shape comes from the calibrated raster, not a guessed offset from the house. In the planner, **Site Preview** renders authored site geometry without a map configuration. In the native or exported **Home** view, these surfaces retain the existing requirement for an enabled map layer.
 
-## Scope and recovery
+## Lightweight raster view: scope and recovery
 
-This is raster map context for one aligned home. It does not provide address search, directions, traffic, satellite imagery, terrain elevation, 3D buildings, or a globe. The local alignment uses a Mercator map with scale set at the home latitude; it is intended for home and surrounding-area context, not survey measurements or accurate continent-scale model placement. Map availability and street/building detail depend on the upstream provider.
+The existing Home view uses raster map context for one aligned home. It does not provide address search, directions, traffic, satellite imagery, terrain elevation, 3D buildings, or a globe. The local alignment uses a Mercator map with scale set at the home latitude; it is intended for home and surrounding-area context, not survey measurements or accurate continent-scale model placement. Map availability and street/building detail depend on the upstream provider.
 
 An unavailable tile or map service leaves the home controls usable. **Retry map** retries failed map loading; **Home** returns to model scale. A successful alignment save is confirmed only by HA. A save error does not overwrite the previously saved alignment. Corrupt or unreadable map storage is preserved and reported as unavailable rather than silently replaced.
 

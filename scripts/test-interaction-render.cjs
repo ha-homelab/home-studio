@@ -83,7 +83,7 @@ assert.throws(()=>createInteractionRenderer(THREE,renderer(),0),/pixel budget/);
 // Exercise real pointer bookkeeping without a DOM or a graphics driver.
 const text=fs.readFileSync(path.join(root,'viewer.js'),'utf8');
 const block=text.slice(text.indexOf('if(coalesceMotion){\nrenderer.domElement.addEventListener'),text.indexOf('let drag=null;'));
-function input(enabled){const handlers={};const context={coalesceMotion:enabled,renderLost:false,renderSuspended:false,interactionPointer:null,renderer:{domElement:{addEventListener:(name,fn)=>handlers[name]=fn}},renders:0,requestRender(){context.renders++;}};vm.createContext(context);vm.runInContext(block,context);return {context,handlers};}
+function input(enabled){const handlers={};const context={coalesceMotion:enabled,renderLost:false,renderSuspended:false,hostViewSuspended:false,interactionPointer:null,renderer:{domElement:{addEventListener:(name,fn)=>handlers[name]=fn}},renders:0,requestRender(){context.renders++;}};vm.createContext(context);vm.runInContext(block,context);return {context,handlers};}
 for(const button of [0,2]) {
   const {context,handlers}=input(true);
   handlers.pointerdown({button,pointerId:1,clientX:20,clientY:20});
@@ -94,6 +94,10 @@ for(const button of [0,2]) {
   assert.equal(context.renders,1,'Release schedules one direct full-quality frame');
   handlers.lostpointercapture({pointerId:1});assert.equal(context.renders,1,'Duplicate capture release adds no frame');
 }
+const suspended=input(true);suspended.context.hostViewSuspended=true;
+suspended.handlers.pointerdown({button:0,pointerId:1,clientX:20,clientY:20});
+assert.equal(suspended.context.interactionPointer,null,'The hidden detailed viewer cannot begin a motion gesture');
+assert.equal(suspended.context.renders,0);
 assert.deepEqual(Object.keys(input(false).handlers),[],'Normal GPUs have no interaction hooks');
 const lifecycleHandlers={}, lifecycleOrder=[];
 const lifecycle={renderLost:false,renderSuspended:false,interactionPointer:{moved:true},interactionRenderer:{dispose(){lifecycleOrder.push('dispose');}},cancelRender(){lifecycleOrder.push('cancel');},observer:{disconnect(){lifecycleOrder.push('disconnect');}},renderer:{domElement:{addEventListener:(name,fn)=>lifecycleHandlers[name]=fn},dispose(){lifecycleOrder.push('renderer-dispose');},forceContextLoss(){lifecycleOrder.push('force-loss');}},window:{addEventListener:(name,fn)=>lifecycleHandlers[name]=fn}};
@@ -117,7 +121,7 @@ lifecycleOrder.length=0;lifecycleHandlers.pagehide({persisted:false});assert.equ
 for (const diffuse of [false,true]) {
 const hooks={}, history=[];
 let created=0;
-const c={editorFloorMaterials:null,homeView:null,environmentLayer:null,coalesceMotion:true,renderProfile:{diffuseLighting:diffuse},renderSuspended:false,renderLost:false,renderCount:0,
+const c={editorFloorMaterials:null,homeView:null,environmentLayer:null,coalesceMotion:true,renderProfile:{diffuseLighting:diffuse},renderSuspended:false,hostViewSuspended:false,renderLost:false,renderCount:0,
  reflectionEnvironment:null,contactShading:null,hemisphere:null,inventoryTextures:{dispose(){}},$:()=>({dataset:{}}),
  interactionRenderer:null,interactionPointer:{moved:true},scene:{},THREE:{},document:{hidden:false},performance:{now:()=>0},
  wallSheenMotion:{beforeRender(){},afterRender(){}},cancelRender(){},invalidateShadows(){},
@@ -129,6 +133,8 @@ const c={editorFloorMaterials:null,homeView:null,environmentLayer:null,coalesceM
 vm.createContext(c);
 for(const prefix of ['function drawScene(',"renderer.domElement.addEventListener('webglcontextlost'", "renderer.domElement.addEventListener('webglcontextrestored'", "window.addEventListener('pagehide'", "window.addEventListener('pageshow'"])
  vm.runInContext(text.split('\n').find(line=>line.startsWith(prefix)),c);
+c.hostViewSuspended=true;c.drawScene({});assert.equal(created,0,'A paused host cannot allocate its interaction renderer');
+c.hostViewSuspended=false;
 c.drawScene({});assert.deepEqual(history.at(-1),{id:1,moving:true});
 hooks.webglcontextlost({preventDefault(){}});c.drawScene({});assert.equal(created,1,'Lost contexts cannot allocate or render');
 hooks.webglcontextrestored();c.drawScene({});assert.equal(created,2);assert.deepEqual(history.at(-1),{id:2,moving:false},'Restoration recreates the helper and draws full quality');

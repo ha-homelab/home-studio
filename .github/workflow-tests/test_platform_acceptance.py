@@ -237,12 +237,28 @@ class PlatformAcceptanceTests(unittest.TestCase):
         runs = [step['run'] for step in steps if 'run' in step]
         self.assertEqual(runs, ['python -m pip install -r requirements-ha-test.txt',
                                 'python scripts/test-ha-core.py', 'python scripts/test-ha-map.py',
-                                'python scripts/test-ha-ai.py'])
+                                'python scripts/test-ha-neighborhood.py', 'python scripts/test-ha-ai.py'])
         self.assertEqual((ROOT / 'requirements-ha-test.txt').read_text().splitlines()[-1],
                          'homeassistant==2026.11.1')
         for step in steps:
             self.assertNotIn('if', step)
             self.assertNotIn('continue-on-error', step)
+
+    def test_neighborhood_checks_follow_browser_install_and_keep_all_engines(self):
+        steps = workflow('package.yml')['jobs']['package']['steps']
+        install = next(i for i, step in enumerate(steps) if step.get('name') == 'Install browser test tools')
+        selected = [(i, step) for i, step in enumerate(steps)
+                    if step.get('name') == 'Verify lazy neighborhood and retained-view lifecycle']
+        self.assertEqual(len(selected), 1)
+        index, step = selected[0]
+        self.assertGreater(index, install)
+        self.assertNotIn('if', step)
+        self.assertNotIn('continue-on-error', step)
+        run = step['run']
+        self.assertIn('node scripts/test-neighborhood-visibility.cjs', run)
+        self.assertIn('node scripts/test-neighborhood.cjs', run)
+        self.assertIn('for engine in chromium firefox webkit; do', run)
+        self.assertIn('NEIGHBORHOOD_ENGINE="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-neighborhood-live.cjs || exit 1', run)
 
     def test_first_session_runs_in_each_installed_engine(self):
         steps = workflow('package.yml')['jobs']['package']['steps']

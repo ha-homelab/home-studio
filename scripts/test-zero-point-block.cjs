@@ -124,7 +124,7 @@ vm.runInContext(source, code);
   const draw = vm.createContext({THREE,active:true,renderer:{domElement:{dataset:{}}},mapCoarse:()=>false,camera:new THREE.OrthographicCamera(-1,1,1,-1,.1,150),
     cameraFit:undefined, houseFitBounds: undefined, root: new THREE.Group(),selected:'',zoom:1,panX:0,panY:0,homeRotation:0,homeTilt:0,
     markerViewport:'',markerMotion:{reset(){},target(){}},deviceEffects:{project(){}},
-    homeGesture:null,renderRequest:0,renderDelay:0,failed3D:false,renderLost:false,renderSuspended:false,coalesceMotion:false,
+    homeGesture:null,renderRequest:0,renderDelay:0,failed3D:false,renderLost:false,renderSuspended:false,hostViewSuspended:false,coalesceMotion:false,
     invalidateShadows(){},createDeviceEffects(_three,_container,options){rotor=options;return {};},report3DError(error){throw error;},
     planRadius:10,planBounds:true,xm:x=>x,zm:z=>z,
     model:{rooms,ceiling_height_m:3},points,labels:[],motionTracks:new Map(),roomLighting:state.lighting,
@@ -158,7 +158,7 @@ vm.runInContext(source, code);
     draw[key]=key==='homeGesture'?null:0;
   }
   assert.equal(rotor.canDraw(),true);assert.equal(rotor.allowRotor(),true);
-  for(const key of ['failed3D','renderLost','renderSuspended']){draw[key]=true;assert.equal(rotor.canDraw(),false,key+' disables rotor scene work');draw[key]=false;}
+  for(const key of ['failed3D','renderLost','renderSuspended','hostViewSuspended']){draw[key]=true;assert.equal(rotor.canDraw(),false,key+' disables rotor scene work');draw[key]=false;assert.equal(rotor.canDraw(),true,key+' recovery restores eligible rotor scene work');}
   draw.active=false;assert.equal(rotor.canDraw(),false);draw.active=true;
   draw.coalesceMotion=true;assert.equal(rotor.allowRotor(),false,'Reduced-capacity rendering keeps the rotor static');draw.coalesceMotion=false;
   for(const value of [state,replacement,fallback]) value.group.traverse(mesh=>{mesh.material?.dispose();mesh.geometry?.dispose();});

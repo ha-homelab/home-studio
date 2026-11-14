@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../viewer.js'), 'utf8');
 
-function exercise(embedded, {hidden = false, initialRoom = null, failRender = false, homeAvailable = true} = {}) {
+function exercise(embedded, {hidden = false, hostSuspended = false, initialRoom = null, failRender = false, homeAvailable = true} = {}) {
   const errors = [], calls = [], sizes = [], frames = [];
   const loadError = {style: {}};
   const box = {width: hidden ? 0 : 800, height: hidden ? 0 : 600};
@@ -13,7 +13,7 @@ function exercise(embedded, {hidden = false, initialRoom = null, failRender = fa
     embedded, window: {}, homeView: null, environmentLayer: null, renderCount: 0, scene: {},
     reflectionEnvironment: null, contactShading: null, hemisphere: null,
     viewerI18n: {locale: 'en'}, items: [], root: null, objectGroup: null,
-    document: {hidden: false}, renderSuspended: false, renderLost: false, devicePixelRatio: 1, renderProfile: {pixels: 2000000},
+    document: {hidden: false}, renderSuspended: false, hostViewSuspended: hostSuspended, renderLost: false, devicePixelRatio: 1, renderProfile: {pixels: 2000000},
     requestRender() {}, initialMapPending: false, renderRequest: 0, renderDelay: 0, renderFallback: 0, renderEpoch: 0, interactionPointer: null, coalesceMotion: false, cancelAnimationFrame() {}, clearTimeout() {},
     model: {initial_room: initialRoom}, camera: {updateProjectionMatrix() {}},
     console: {error(error) { errors.push(error.message); }},
@@ -100,6 +100,19 @@ hidden.box.width = 800;
 hidden.box.height = 600;
 hidden.c.window.resizeModel();
 assert.equal(hidden.calls[0].mode, 'home', 'A hidden panel draws once it becomes visible');
+const hostSuspended = exercise(true, {hostSuspended: true});
+hostSuspended.c.latestState = 'state received during neighborhood view';
+hostSuspended.flushFrames();
+hostSuspended.c.window.renderModel();
+hostSuspended.c.window.resizeModel();
+assert.deepEqual(hostSuspended.calls, [], 'Host suspension blocks startup and explicit rendering');
+assert.deepEqual(hostSuspended.sizes, [], 'Host suspension does not consume the initial resize');
+assert.deepEqual(hostSuspended.errors, []);
+hostSuspended.c.hostViewSuspended = false;
+hostSuspended.c.window.resizeModel();
+assert.deepEqual(hostSuspended.calls, [{mode: 'home', published: true, state: 'state received during neighborhood view'}],
+  'Resuming the host permits the retained Home view to draw its latest state');
+assert.deepEqual(hostSuspended.sizes, [[800, 600]]);
 const failed = exercise(true, {failRender: true});
 failed.flushFrames();
 assert.deepEqual(failed.errors, ['first draw failed']);
@@ -226,7 +239,7 @@ function exerciseInitialMap({changed = false, hidden = false, failed = false, lo
   }, (c, calls) => {
     Object.assign(c, {
       embedded: true, initialViewReady: true, failed3D: failed, renderLost: lost,
-      renderSuspended: suspended, renderCount: bootDraws, renderRequest: 0,
+      renderSuspended: suspended, hostViewSuspended: false, renderCount: bootDraws, renderRequest: 0,
       renderDelay: 0, renderFallback: 0, renderEpoch: 0, coalesceMotion: false, interactionPointer: null,
       reflectionEnvironment: null, contactShading: null, environmentLayer: null,
       editorFloorMaterials: null, interactionRenderer: null, scene: {}, camera: {},

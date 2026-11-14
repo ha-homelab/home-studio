@@ -52,7 +52,7 @@ function fixture(homeMode, navigationMode = 'rotate') {
   const c = vm.createContext({
     active: homeMode, canEdit: true, camera: {left: -10, right: 10, top: 10, bottom: -10},
     renderer: {domElement: canvas}, document, window, requestAnimationFrame() {},
-    renderLost: false, renderSuspended: false, interactionPointer: null, coalesceMotion: true,
+    renderLost: false, renderSuspended: false, hostViewSuspended: false, interactionPointer: null, coalesceMotion: true,
     panX: 0, panY: 0, zoom: 1, radius: 10, planRadius: 10, target: {x: 0, z: 0}, azimuth: .5, polar: .5,
     requestRender: motion => renders.push(motion),
     THREE: {Color: class {}, Vector2: class {}, Raycaster: class {
@@ -228,6 +228,14 @@ assert.equal(modeSwitch.canvas.captures.size, 0);
 assert.equal(modeSwitch.getNode('homeMove').attributes['aria-pressed'], 'true');
 assert.equal(modeSwitch.getNode('homeRotate').attributes['aria-pressed'], 'false');
 const keyboard = fixture(true);
+keyboard.c.hostViewSuspended = true;
+const hostPausedPosition = keyboard.position();
+keyboard.pointer('pointerdown');keyboard.pointer('pointermove', 1, 140, 125);keyboard.pointer('pointerup', 1, 140, 125);
+assert.equal(keyboard.key('ArrowRight').prevented, false);
+assert.deepEqual(keyboard.position(), hostPausedPosition, 'Host suspension blocks Home pointer and keyboard navigation with the document still visible');
+assert.deepEqual(keyboard.actions, [], 'Host suspension prevents a new pointer from activating a device');
+assert.equal(keyboard.canvas.captures.size, 0, 'Host suspension never captures a new Home pointer');
+keyboard.c.hostViewSuspended = false;
 assert(keyboard.key('ArrowRight').prevented);assert(keyboard.key('ArrowDown').prevented);
 assert.notDeepEqual(keyboard.rotation(), [0, 0], 'Home arrow keys change camera heading and tilt');
 const rotated = keyboard.rotation();
