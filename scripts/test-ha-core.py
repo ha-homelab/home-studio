@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import copy
+from contextlib import contextmanager
 import errno
 import importlib.util
 import json
@@ -33,7 +34,7 @@ from homeassistant.components.lovelace.dashboard import LovelaceStorage
 from homeassistant.components.lovelace.resources import ResourceStorageCollection, ResourceYAMLCollection
 from homeassistant.config_entries import ConfigEntries
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import area_registry, device_registry, entity_registry, floor_registry
+from homeassistant.helpers import area_registry, device_registry, entity_registry, floor_registry, storage
 from homeassistant.util.file import WriteError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +75,26 @@ class Connection:
 
     def send_event(self, message_id, result):
         pass
+
+
+@contextmanager
+def fail_atomic_store_write(store, failure):
+    """Fail the actual durable I/O for this Store across HA storage layouts."""
+    expected_path = Path(store.path)
+    original_write = storage.write_utf8_file_atomic
+    reached = False
+
+    def write(path, *args, **kwargs):
+        nonlocal reached
+        if Path(path) == expected_path:
+            reached = True
+            raise failure
+        return original_write(path, *args, **kwargs)
+
+    with patch.object(storage, 'write_utf8_file_atomic', side_effect=write):
+        yield
+    if not reached:
+        raise AssertionError('The target Store atomic write failure was not exercised')
 
 
 class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
@@ -237,7 +258,7 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
 
         failure = WriteError(OSError(errno.ENOSPC, 'No space left on device'))
         baseline_dirs = set((adapter.root / 'baselines').iterdir())
-        with patch.object(adapter.store, '_write_prepared_data', side_effect=failure):
+        with fail_atomic_store_write(adapter.store, failure):
             with self.assertRaisesRegex(ValueError, 'save_failed'):
                 await self.request('site_frame_apply', revision=1, token=preview['token'])
         self.assertEqual(adapter.document, previous)
@@ -328,7 +349,7 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(preview['source_file_count'], len(active_hashes))
         self.assertEqual(store_path.read_bytes(), previous_bytes)
         failure = WriteError(OSError(errno.ENOSPC, 'No space left on device'))
-        with patch.object(adapter.store, '_write_prepared_data', side_effect=failure):
+        with fail_atomic_store_write(adapter.store, failure):
             with self.assertRaisesRegex(ValueError, 'save_failed'):
                 await self.request('project_runtime_upgrade_apply', revision=1, token=preview['token'])
         self.assertEqual(adapter.document, previous)
@@ -386,7 +407,7 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
         store_path = Path(manager.store.path)
         previous_bytes = store_path.read_bytes()
         failure = WriteError(OSError(errno.ENOSPC, 'No space left on device'))
-        with patch.object(manager.store, '_write_prepared_data', side_effect=failure):
+        with fail_atomic_store_write(manager.store, failure):
             with self.assertRaisesRegex(ValueError, 'save_failed'):
                 await self.request('map_save', revision=1, config={**config, 'north_deg': 90})
         self.assertEqual(manager.document, previous)
@@ -525,7 +546,7 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
         changed['title'] = 'A draft that must not be lost'
         failure = WriteError(OSError(errno.ENOSPC, 'No space left on device'))
 
-        with patch.object(native.store, '_write_prepared_data', side_effect=failure):
+        with fail_atomic_store_write(native.store, failure):
             for _ in range(2):
                 with self.assertRaisesRegex(ValueError, 'save_failed'):
                     await self.request('project_save', revision=1, project=changed)
@@ -540,7 +561,7 @@ class CoreCompatibility(unittest.IsolatedAsyncioTestCase):
         await self.request('project_save', revision=1, project=changed)
         previous = copy.deepcopy(native.document)
         previous_bytes = store_path.read_bytes()
-        with patch.object(native.store, '_write_prepared_data', side_effect=failure):
+        with fail_atomic_store_write(native.store, failure):
             for _ in range(2):
                 with self.assertRaisesRegex(ValueError, 'save_failed'):
                     await self.request('project_publish', revision=2)
@@ -850,7 +871,9 @@ class PortablePackageCompatibility(unittest.IsolatedAsyncioTestCase):
             config = root / 'config'
             config.mkdir()
             hass = HomeAssistant(str(config))
+            hass.config_entries = ConfigEntries(hass, {})
             try:
+                await hass.config_entries.async_initialize()
                 device_registry.async_setup(hass)
                 await asyncio.gather(*(registry.async_load(hass) for registry in
                                        (area_registry, device_registry, entity_registry, floor_registry)))
