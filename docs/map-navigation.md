@@ -16,6 +16,7 @@ setup or API key is needed. The orange marker is the configured alignment point,
 not a surveyed house outline. Buildings come from OpenStreetMap via OpenFreeMap;
 their heights are estimates, not measurements of your home or neighbors. This
 view does not provide satellite imagery, indoor rooms or solar/shadow analysis.
+Street, place and address labels are not included in this first vector overview.
 
 Drag to pan, scroll or pinch to zoom, and use right-drag or two fingers to rotate.
 The **+ / −**, **Reset north**, **Locate home** and **Theme** buttons provide
@@ -105,9 +106,9 @@ The map displays **© OpenStreetMap contributors**. The native HA panel also sho
 
 While the map layer is enabled, authored street and landscape polygons remain visible at detailed, transition and overview scales, at their exact local coordinates and ground elevation. They do not acquire generated lanes or traffic. Coarse home/building solids retain their existing zoom behavior. The map layer remains controlled by map visibility; hiding it does not turn the generic demo garden back on. If no street polygon exists, street shape comes from the calibrated raster, not a guessed offset from the house. In the planner, **Site Preview** renders authored site geometry without a map configuration. In the native or exported **Home** view, these surfaces retain the existing requirement for an enabled map layer.
 
-## Scope and recovery
+## Lightweight raster view: scope and recovery
 
-This is raster map context for one aligned home. It does not provide address search, directions, traffic, satellite imagery, terrain elevation, 3D buildings, or a globe. The local alignment uses a Mercator map with scale set at the home latitude; it is intended for home and surrounding-area context, not survey measurements or accurate continent-scale model placement. Map availability and street/building detail depend on the upstream provider.
+The existing Home view uses raster map context for one aligned home. It does not provide address search, directions, traffic, satellite imagery, terrain elevation, 3D buildings, or a globe. The local alignment uses a Mercator map with scale set at the home latitude; it is intended for home and surrounding-area context, not survey measurements or accurate continent-scale model placement. Map availability and street/building detail depend on the upstream provider.
 
 An unavailable tile or map service leaves the home controls usable. **Retry map** retries failed map loading; **Home** returns to model scale. A successful alignment save is confirmed only by HA. A save error does not overwrite the previously saved alignment. Corrupt or unreadable map storage is preserved and reported as unavailable rather than silently replaced.
 
