@@ -3,7 +3,10 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const http=require('node:http');
-const {chromium}=require('playwright');
+const engines=require('playwright');
+const {browserLaunchOptions}=require('./browser-stability-diagnostics.cjs');
+const engine=process.env.NEIGHBORHOOD_ENGINE||'chromium';
+assert.ok(['chromium','firefox','webkit'].includes(engine));
 const root=path.resolve(__dirname,'..');
 const crypto=require('node:crypto');
 const vendor=path.join(root,'custom_components/home_floorplan/static/vendor');
@@ -52,7 +55,7 @@ async function assertEventually(predicate,message){const deadline=Date.now()+500
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   let browser;
   try{
-    browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||undefined,args:['--use-angle=swiftshader','--enable-webgl']});
+    browser=await engines[engine].launch(browserLaunchOptions(engine,true));
     const page=await browser.newPage({viewport:{width:1100,height:760},deviceScaleFactor:2});
     const errors=[],external=[];page.on('pageerror',e=>errors.push(e.message));page.on('request',req=>{if(!req.url().startsWith(`http://127.0.0.1:${server.address().port}/`))external.push(req.url());});
     await page.goto(`http://127.0.0.1:${server.address().port}/fixture`);
@@ -71,6 +74,6 @@ async function assertEventually(predicate,message){const deadline=Date.now()+500
     assert.equal(await page.evaluate(()=>view.map),null);
     assert.equal(await page.locator('canvas').count(),0);
     await assertEventually(()=>page.workers().length===0,'Map workers must stop after returning Home');
-    console.log('PASS: real MapLibre module/worker decodes local vector tiles, renders buildings, changes theme and releases map without external requests.',JSON.stringify(data));
+    console.log('PASS ('+engine+'): real MapLibre module/worker decodes local vector tiles, renders buildings, changes theme and releases map without external requests.',JSON.stringify(data));
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1;});

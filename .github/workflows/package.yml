@@ -48,9 +48,9 @@ jobs:
       - name: Verify real storage, registries, permissions and publication
         run: python scripts/test-ha-core.py
       - name: Verify geographic map storage and bounded tile transport
-        run: |
-          python scripts/test-ha-map.py
-          python scripts/test-ha-neighborhood.py
+        run: python scripts/test-ha-map.py
+      - name: Verify bounded vector metadata and tile transport
+        run: python scripts/test-ha-neighborhood.py
       - name: Verify native AI authentication, session boundaries and cancellation
         run: python scripts/test-ha-ai.py
   platforms:
@@ -172,7 +172,9 @@ jobs:
         run: |
           node scripts/test-neighborhood-visibility.cjs
           node scripts/test-neighborhood.cjs
-          node scripts/test-neighborhood-live.cjs
+          for engine in chromium firefox webkit; do
+            NEIGHBORHOOD_ENGINE="$engine" LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/test-neighborhood-live.cjs || exit 1
+          done
       - name: Test camera tours and local video in three browser engines
         run: |
           for engine in chromium firefox webkit; do
