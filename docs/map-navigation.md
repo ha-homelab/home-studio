@@ -20,7 +20,8 @@ view does not provide satellite imagery, indoor rooms or solar/shadow analysis.
 Drag to pan, scroll or pinch to zoom, and use right-drag or two fingers to rotate.
 The **+ / −**, **Reset north**, **Locate home** and **Theme** buttons provide
 equivalent basic controls. Auto theme follows Home Assistant's dark/light mode.
-The detailed house and the editor retain their existing rendering and controls.
+Opening the overview stops an active camera tour before pausing the detailed
+view. The detailed house and the editor retain their existing rendering and controls.
 The geographic overview is currently a native HA feature; the standalone
 browser editor keeps its existing lightweight raster underlay.
 

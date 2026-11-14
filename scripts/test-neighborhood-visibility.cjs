@@ -6,14 +6,14 @@ const source=fs.readFileSync(path.join(__dirname,'../viewer.js'),'utf8');
 const actual=source.slice(source.indexOf('function setHostViewVisibility('),source.indexOf('function cancelRender('));
 const calls=[];
 const context=vm.createContext({renderSuspended:false,hostViewSuspended:false,renderLost:false,interactionPointer:{moved:true},
-  cancelRender:()=>calls.push('cancel'),requestRender:()=>calls.push('draw'),
+  syncViewerTours:()=>calls.push('stop-tours'),cancelRender:()=>calls.push('cancel'),requestRender:()=>calls.push('draw'),
   environmentLayer:{setActive:value=>calls.push(['environment',value])},
   homeView:{dismissOverlays:()=>calls.push('dismiss')},window:{resizeModel:value=>calls.push(['resize',value])}});
 vm.runInContext(actual,context);
 context.setHostViewVisibility('false');assert.deepEqual(calls,[]);
 context.setHostViewVisibility(true);
 assert.equal(context.hostViewSuspended,true);assert.equal(context.interactionPointer,null);
-assert.deepEqual(calls,['cancel',['environment',false],'dismiss']);
+assert.deepEqual(calls,['cancel',['environment',false],'dismiss','stop-tours']);
 calls.length=0;context.setHostViewVisibility(false);
 assert.equal(context.hostViewSuspended,false);
 assert.deepEqual(calls,['cancel',['environment',true],['resize',false],'draw']);

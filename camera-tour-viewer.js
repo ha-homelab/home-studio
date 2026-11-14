@@ -1,7 +1,7 @@
 // Included in the generated viewer closure. The optional tools parse on demand.
 let tourModulePromise = null, tourDisposed = false;
 function tourModeAvailable(mode) {
-  return !!renderer && !failed3D && !renderLost && !renderSuspended && !document.hidden &&
+  return !!renderer && !failed3D && !renderLost && !renderSuspended && !hostViewSuspended && !document.hidden &&
     (mode === 'home' ? homeView?.active : !homeView?.active && $('view3d').style.display !== 'none');
 }
 function syncViewerTourPermissions() {
@@ -38,7 +38,7 @@ async function openViewerTour() {
         canExport: !embedded || canEdit,
         canvas: () => renderer?.domElement, render: () => window.renderModel?.(),
         capture() {
-          if ((homeView?.active ? 'home' : 'editor') !== mode) throw Error(vt('Open this view before playing its tour.'));
+          if (!tourModeAvailable(mode)) throw Error(vt('Open this view before playing its tour.'));
           if (mode === 'home') return homeView.captureTourPose();
           return { type: 'perspective', floorId: 'viewer:' + model.id,
             yaw: Math.PI / 2 - azimuth, pitch: Math.PI / 2 - polar, radius,
