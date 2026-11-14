@@ -21,5 +21,18 @@
     "managerFilePatterns": [
       "/(^|/)([^/]*[-_])?requirements[^/]*\\.(txt|pip)$/"
     ]
-  }
+  },
+  "packageRules": [
+    {
+      "description": "Browser versions and package integrity are qualified together in scripts/browser-matrix.json; update that reviewed matrix before changing the current Playwright lock.",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "playwright",
+        "playwright-core"
+      ],
+      "enabled": false
+    }
+  ]
 }

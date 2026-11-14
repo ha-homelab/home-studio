@@ -239,7 +239,7 @@ class PlatformAcceptanceTests(unittest.TestCase):
                                 'python scripts/test-ha-core.py', 'python scripts/test-ha-map.py',
                                 'python scripts/test-ha-ai.py'])
         self.assertEqual((ROOT / 'requirements-ha-test.txt').read_text().splitlines()[-1],
-                         'homeassistant==2026.10.2')
+                         'homeassistant==2026.11.1')
         for step in steps:
             self.assertNotIn('if', step)
             self.assertNotIn('continue-on-error', step)

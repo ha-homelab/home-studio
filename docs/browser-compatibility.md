@@ -403,3 +403,7 @@ Downloaded source packages contain the same planner files; serve their root
 directory locally and open `/planner/` to test the packaged drawing tool.
 See [the release workflow](release-workflow.md) and
 [version plans](VERSIONING.md) for publication and promotion requirements.
+
+## Updating the current browser toolchain
+
+The root Playwright version and lock integrity must match the qualified current entry in `scripts/browser-matrix.json`. Renovate leaves those packages unchanged so a dependency-only update cannot bypass the reviewed browser inventory. Change the package lock and matrix together in a dedicated qualification PR, then pass `python scripts/test-browser-matrix.py` and the full required platform matrix. Other application dependencies continue to update normally.

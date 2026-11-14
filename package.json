@@ -6,7 +6,7 @@
     "test:planner": "node scripts/test-furniture-editor.cjs"
   },
   "devDependencies": {
-    "home-assistant-js-websocket": "9.7.0",
+    "home-assistant-js-websocket": "9.8.1",
     "playwright": "1.64.0"
   }
 }

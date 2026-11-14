@@ -1,2 +1,2 @@
 # Optional exact certificate-key checks; Intel macOS uses Security.framework.
-cryptography==50.0.1; sys_platform != "darwin" or platform_machine != "x86_64"
+cryptography==50.0.2; sys_platform != "darwin" or platform_machine != "x86_64"
