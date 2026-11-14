@@ -7,7 +7,7 @@ const binding={entity_id:'vacuum.fixture',position_entity_id:'sensor.fixture_pos
 const sample={x:125,y:-70,observed_at:'2026-10-22T10:00:00.123456+00:00',map_id:0};
 
 function fixture(){
-  let Panel;const messages=[],events=[];
+  let Panel;const messages=[],events=[],neighborhoodButton={disabled:true};
   const context=vm.createContext({HTMLElement:class{},customElements:{get(){},define(name,type){Panel=type;}},
     localStorage:{getItem(){return null;}},CustomEvent:class{constructor(type,options){Object.assign(this,{type},options);}}});
   vm.runInContext(source,context);
@@ -16,6 +16,7 @@ function fixture(){
     savedItems:[],vacuumSources:[binding],displayEntities:new Set(['sensor.unrelated']),scopedStates:true,tvFrameCache:{},
     curtains:{profiles:{},power:{},memory:{}},port:{postMessage(message){messages.push(plain(message));}},
     dispatchEvent(event){events.push(plain(event));},noticeKey(){},t:key=>key,
+    $(id){assert.equal(id,'neighborhood');return neighborhoodButton;},
     refreshTVFrame(){},refreshCameraFrames(){},refreshMediaArtwork(){},updateToolbarVisibility(){},
     _hass:{connected:true,user:{id:'fixture_reader',is_admin:false},states:{
       'vacuum.fixture':{state:'cleaning',attributes:{battery_level:43,token:'SECRET'}},
@@ -23,7 +24,7 @@ function fixture(){
       'sensor.unrelated':{state:'available',attributes:{...sample,battery_level:99}},
     }},
   });
-  return {panel,messages,events,context,publish(){panel.publishEntityStates();return messages.at(-1);},
+  return {panel,messages,events,context,neighborhoodButton,publish(){panel.publishEntityStates();return messages.at(-1);},
     project(state='available',attributes=sample){return plain(context.projectVacuumPosition(state,attributes));}};
 }
 
@@ -129,8 +130,11 @@ test('permission changes revoke the pair and an iframe cannot authorize another 
     assert.equal(states['vacuum.fixture']?.battery_level,undefined);
   }
   const f=fixture();f.panel.resetModelConfig();
+  f.panel.handleViewerMessage({type:'model_config',state_entities:[]},0);
+  assert.equal(f.neighborhoodButton.disabled,true,'a stale viewer cannot enable the neighborhood launcher');
   f.panel.handleViewerMessage({type:'model_config',state_entities:['vacuum.fixture','sensor.unrelated'],
     vacuum_sources:[{entity_id:'vacuum.fixture',position_entity_id:'sensor.unrelated'}]},1);
+  assert.equal(f.neighborhoodButton.disabled,false,'current model readiness enables the neighborhood launcher');
   const states=f.messages.at(-1).states;
   assert.equal(states['sensor.unrelated'].vacuum_position,undefined);
   assert.equal(states['vacuum.fixture'].battery_level,undefined);
