@@ -224,3 +224,16 @@ list, for example `{"suffixes": [".apk", ".aab"], "reason": "Android publication
 The renderer embeds these reviewed restrictions in the release engine. It rejects
 matching suffixes case-insensitively before staging any bytes and before any
 publication API call, including promotion of an older RC.
+
+## Package identity across reruns
+
+Keep a package's source, workflow run, run attempt and payload hashes together
+when evaluating release evidence. Re-running failed jobs does not recreate the
+artifacts produced by successful jobs in an earlier attempt. Their successful
+results remain earlier-attempt evidence; do not relabel them as a new build.
+
+Before publication, recreate all inputs required by the selected publisher's
+provenance checks in one coherent attempt. Use a full workflow rerun only when
+the allocator and release policy permit reuse of its reservation. Once assets
+have been published, inspect their identity and follow the documented recovery
+procedure; do not overwrite them or bypass provenance checks to finish a retry.
