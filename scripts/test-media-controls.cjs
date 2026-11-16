@@ -131,6 +131,11 @@ assert.ok(['chromium','firefox','webkit'].includes(engine));
       await assertCompact();const before=await count();await launcher.tap();await popup.waitFor({state:'visible'});assert.equal(await count(),before,tvKind+' opening does not turn on the TV');
       for(const name of ['Previous track','Play','Pause','Stop','Next track'])assert.equal(await action(name).isVisible(),false);
       assert.equal(await popup.locator('input').isVisible(),false);assert.equal(await action('Turn on Studio speaker').isEnabled(),true);
+      assert.equal(await action('Turn on Studio speaker').innerText(),'Turn on','power button describes an action, not the current state');
+      await page.evaluate(()=>{entry.state='on';entry.media.state='playing';refresh();});
+      assert.equal(await action('Turn off Studio speaker').innerText(),'Turn off');
+      assert.equal(await popup.locator('.media-controls-status').innerText(),'Playing','TV playback state remains separate from the power action');
+      await page.evaluate(()=>{entry.state='off';entry.media.state='off';refresh();});
       await action('Turn on Studio speaker').click();assert.equal(await count(),before+1);assert.equal(await page.evaluate(()=>commands.at(-1).action),'turn_on');
       for(const scenario of ['unavailable','restored','disconnected','disabled','busy']){
         await page.evaluate(scenario=>{entry.state=scenario==='unavailable'?'unavailable':'off';entry.media.state=entry.state;entry.media.restored=scenario==='restored';haConnected=scenario!=='disconnected';entry.enabled=scenario!=='disabled';entry.busy=scenario==='busy';refresh();},scenario);

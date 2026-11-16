@@ -91,7 +91,9 @@ test('TV cards reuse frames, show truthful off/unknown states and disable pendin
  c.tvFrames.set('tv',{image:'data:image/jpeg;base64,frame'});update('on');
  const card=nodes.get('homeTVs').children[0],[image,status,caption]=card.children;
  assert.equal(image.src,'data:image/jpeg;base64,frame');assert.equal(status.hidden,true);
+ assert.equal(caption.children[1].title,'Turn off');assert.equal(caption.children[1].attributes['aria-label'],'Turn off Study TV');
  update('off');assert.equal(image.hidden,true);assert.equal(image.src,undefined);assert.equal(status.textContent,'TV is off');assert.equal(caption.children[1].disabled,false);
+ assert.equal(caption.children[1].title,'Turn on');
  update('off',{busy:true});assert.equal(caption.children[1].disabled,true);assert.match(status.textContent,/Waiting/);
  update('disconnected',{enabled:false});assert.equal(caption.children[0].disabled,true);assert.equal(caption.children[1].disabled,true);
  update('on');assert.equal(nodes.get('homeTVs').children.length,1);

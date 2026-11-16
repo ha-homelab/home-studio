@@ -96,7 +96,7 @@ function updateMediaControls(){
   ui.track.textContent=entry.enabled&&haConnected&&!restored&&['on','playing','paused','idle','buffering'].includes(state)?[entry.media?.title,entry.media?.artist,entry.media?.album].filter(value=>typeof value==='string'&&value.trim()).map(value=>value.trim().slice(0,200)).join(' · '):'';
   ui.track.hidden=!ui.track.textContent;
   ui.power.hidden=!hasMediaPower(entry);ui.power.disabled=!mediaPowerReady(entry);
-  ui.power.textContent=mediaText(entry.state==='on'?'Power off':entry.state==='off'?'Power on':'Power');
+  ui.power.textContent=mediaText(entry.state==='on'?'Turn off':entry.state==='off'?'Turn on':'Power');
   ui.power.title=ui.power.textContent;ui.power.setAttribute('aria-label',(entry.state==='on'?mediaText('Turn off'):entry.state==='off'?mediaText('Turn on'):mediaText('Power'))+' '+entry.item.name);ui.power.setAttribute('aria-busy',String(pending||!!entry.busy));
   for(const [action,button] of ui.buttons){button.hidden=!(flags&mediaControlFeatures[action]);button.disabled=!ready;}
   ui.actions.hidden=![...ui.buttons.values()].some(button=>!button.hidden);
@@ -293,7 +293,7 @@ function updateTVPreviews(entries){
     entry.button.disabled=!enabled||busy||!['on','off'].includes(state);
     entry.button.setAttribute('aria-label',(state==='on'?'Turn off ':'Turn on ')+item.name);
     entry.button.setAttribute('aria-busy',String(busy));
-    entry.button.title=state==='on'?'Power off':'Power on';
+    entry.button.title=mediaText(state==='on'?'Turn off':'Turn on');
     if(hasAudioMediaControls(entry)){
       if(!entry.remote){
         const remote=document.createElement('button');remote.type='button';remote.className='tv-preview-controls';remote.textContent=mediaText('Controls');entry.caption.append(remote);entry.remote=remote;
