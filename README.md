@@ -43,6 +43,8 @@ build, YAML entry, or pasted access token**.
 [Full setup, updates, and troubleshooting](docs/home-assistant-editor.md) ·
 [Check device bindings with Dry run](docs/dry-run.md)
 
+Docs index: [docs/README.md](docs/README.md).
+
 ## Watch the Home Assistant workflow
 
 [![Watch Home Studio: room photo, AI draft, manual editing, entity linking, and publishing inside Home Assistant](docs/media/native-ha-workflow-preview.gif)](https://ha-homelab.github.io/home-studio/#native-ha-demo)
