@@ -446,6 +446,7 @@ homeView = (() => {
     const changed=sidebar.hidden!==collapsed;
     sidebar.hidden=collapsed;
     document.querySelector('.home-layout').classList.toggle('controls-collapsed',collapsed);
+    $('homeBackToPlan').toggleAttribute('data-temporary',sidebarOpenedForSearch);
     $('homeToggleControls').textContent=vt(collapsed?'Show controls':'Hide controls');
     $('homeToggleControls').setAttribute('aria-expanded',String(!collapsed));
     if(changed)requestAnimationFrame(()=>window.resizeModel?.());
@@ -470,7 +471,9 @@ homeView = (() => {
   };
   $('homeBackToPlan').onclick=()=>{
     if(sidebarOpenedForSearch){sidebarOpenedForSearch=false;updateSidebar();}
-    (toolbarHidden?$('homeShowMenus'):$('homeFindDevice')).focus();
+    if(toolbarHidden){$('homeShowMenus').focus();return;}
+    const find=$('homeFindDevice');
+    (find.getClientRects().length?find:$('homeToggleControls')).focus();
   };
   $('homeHideMenus').onclick=()=>applyViewPreferences({toolbarHidden:true});
   $('homeShowMenus').onclick=()=>applyViewPreferences({toolbarHidden:false});
@@ -482,6 +485,7 @@ homeView = (() => {
 
   function setActive(value) {
     if(!value&&!canEdit)return;
+    if(!value&&sidebarOpenedForSearch){sidebarOpenedForSearch=false;updateSidebar();}
     cancelHomeGesture();cancelEditorGesture();
     hideMediaControls();cancelNativePress();
     markerMotion.reset();active = value;previewTV(null);if(typeof mapLayer!=='undefined')mapLayer?.setActive(value);

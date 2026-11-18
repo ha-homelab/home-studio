@@ -145,6 +145,7 @@
 .home-device-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px;align-items:stretch}
 .home-device-row[hidden]{display:none}
 #homeView .home-sidebar-jump{display:none}
+#homeView #homeBackToPlan[data-temporary]{display:inline-flex;align-items:center;min-height:44px}
 .home-device-search{margin-block:10px 14px}
 .home-device-search label{display:block;margin-block-end:5px;font-size:12px}
 .home-device-query{display:flex;flex-wrap:wrap;gap:6px}
