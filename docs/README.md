@@ -78,8 +78,10 @@ draw a first room, start with the [wiki getting-started page](wiki/Getting-start
 
 Shared repository policy (`release-workflow.md`, `quality.md`, `fuzzing.md`,
 `rc-fuzzing.md`, `runner-preflight.md`, `release-read-safety.md`,
-`release-github-cli.md`, `VERSIONING.md`) comes from the shared release toolkit;
-those files are maintained centrally and are not repeated here.
+`VERSIONING.md`) comes from the shared release toolkit;
+those files are maintained centrally and are not repeated here. The generated
+release jobs pin their own toolchain, documented in
+[Qualified GitHub CLI for release operations](release-github-cli.md).
 
 Dated acceptance numbers and screenshots belong to the release that produced
 them. They are not a live status report for your installation.
