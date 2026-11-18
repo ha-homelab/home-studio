@@ -20,7 +20,7 @@ import { roomBounds, roomMoveGroup, moveRoom, resizeRoom } from './room-transfor
 import { t, LOCALES, initI18n, setLocale, getLocale, onLocaleChange, translateStatic } from './i18n.js';
 
 import * as THREE from '../vendor/three.module.min.js';
-import { LIMITS, ITEM_TYPES, clone, round, distance, signedArea, pointInPolygon, projectOnWall, nextId, newFloor, blankProject, outlineRoom, validateProject, wallPieces, floorBounds } from './model.js';
+import { LIMITS, ITEM_TYPES, clone, round, distance, signedArea, pointInPolygon, projectOnWall, nearestOpeningOffset, nextId, newFloor, blankProject, outlineRoom, validateProject, wallPieces, floorBounds } from './model.js';
 import { CATALOG } from './catalog.js';
 import { getCatalogModel, getCatalogStyle, buildFurnitureAsset, PATTERNS, supportsFurniturePattern, supportsCurtain } from './furniture.js';
 
@@ -624,8 +624,9 @@ function buildInspector(parent) {
       parent.append(node('p', 'field-note', 'Outlines use 0.15 m walls. Moving a room carries its outline, openings, and assigned items. Unsupported junction changes are rejected without changing the plan.'));
     }
     parent.append(button(t('Place item at room center'), () => {
-      const center = object.polygon.reduce((sum, p) => [sum[0] + p[0] / object.polygon.length, sum[1] + p[1] / object.polygon.length], [0, 0]);
-      addItem(center, object.id);
+      const position = roomItemPosition(object.polygon);
+      if (!position) return status(() => t('Could not find a position inside this room. Place the item on the plan.'), true);
+      addItem(position, object);
     }));
     parent.append(node('p', 'field-note', t('Places {item}. Choose another design in the Item library, then select this room again.', { item: placementName() })));
     section(parent, t('Polygon points'));
@@ -637,7 +638,9 @@ function buildInspector(parent) {
     const length = distance(object.start, object.end); const metric = node('div', 'metric-strip'); metric.append(node('strong', '', length.toFixed(2)), node('span', '', t('m segment length'))); parent.append(metric);
     for (const endpoint of ['start', 'end']) { section(parent, t(`${endpoint} point`)); const r = row(parent); ['x', 'z'].forEach((axis, index) => field(r, t(`${endpoint} ${axis} (m)`), object[endpoint][index], v => editObject(o => { o[endpoint][index] = v; }), { type: 'number', min: -100, max: 100 })); }
     field(parent, t('Thickness (m)'), object.thickness_m, v => editObject(o => { o.thickness_m = v; }), { type: 'number', min: .04, max: 2, step: '.01' });
-    const r = row(parent); r.append(button(t('Add door'), () => addOpening(object, length / 2, 'door')), button(t('Add window'), () => addOpening(object, length / 2, 'window')));
+    const r = row(parent);
+    r.append(button(t('Add door'), () => addOpening(object, length / 2, 'door', { findSpace: true })),
+      button(t('Add window'), () => addOpening(object, length / 2, 'window', { findSpace: true })));
     section(parent, t('Create a junction'));
     const split = field(parent, t('Split distance from start (m)'), round(length / 2), null, { type: 'number', min: .05, max: round(length - .05), help: t('Split this segment so another wall can meet at an endpoint. A split cannot pass through an opening.') });
     parent.append(button(t('Split wall'), () => editObject((o, d) => {
@@ -795,24 +798,43 @@ function setView(next) {
   siteEditor?.cancel(); siteEditor?.updateUI();
   resizeCanvases(rect); updateZoom();
 }
-function addOpening(wall, offset, type, precise = false) {
+function addOpening(wall, offset, type, { precise = false, findSpace = false } = {}) {
   const len = distance(wall.start, wall.end), width = round(Math.min(type === 'window' ? 1.2 : .9, Math.max(.05, len - .1)));
-  const start = round(Math.max(0, Math.min(len - width, snap(offset - width / 2, precise))));
+  const preferred = offset - width / 2;
+  const snapped = round(Math.max(0, Math.min(len - width, snap(preferred, precise))));
+  const start = findSpace ? nearestOpeningOffset(wall, floor().openings, width, preferred, snapped) : snapped;
+  if (start === null) return status(() => t('This wall has no space for a {width} m opening. Choose another wall or adjust an existing opening.', { width }), true);
   const height = floor().height_m;
   transact((_p, f) => {
     const id = nextId(f, type), head = round(Math.min(type === 'window' ? 2.2 : 2.1, height));
     f.openings.push({ id, wall_id: wall.id, type, offset_m: start, width_m: width, sill_m: type === 'window' ? round(Math.min(.9, head / 2)) : 0, head_m: head }); selection = { kind: 'openings', id };
   }, () => t(type === 'window' ? 'Window opening added. Adjust its dimensions in the inspector.' : 'Door opening added. Adjust its dimensions in the inspector.'));
 }
-function addItem(point, roomId, precise = false) {
-  if (!floor().rooms.length) return status(() => t('Add a room before placing items. Each item belongs to a room.'), true);
+function roomItemPosition(polygon) {
+  const centerOf = points => [0, 1].map(axis => points.reduce((sum, point) => sum + point[axis], 0) / points.length);
+  const interior = point => [point.map(value => snap(value)), point.map(round), point]
+    .find(candidate => pointInPolygon(candidate, polygon, false));
+  const center = interior(centerOf(polygon));
+  if (center) return center;
+  // A concave room can surround an empty point. Try the room's largest
+  // triangles first, keeping the exact point when snapping would leave it.
+  const triangles = THREE.ShapeUtils.triangulateShape(polygon.map(([x, z]) => new THREE.Vector2(x, z)), [])
+    .map(indices => indices.map(index => polygon[index]))
+    .sort((a, b) => Math.abs(signedArea(b)) - Math.abs(signedArea(a)));
+  for (const triangle of triangles) {
+    const position = interior(centerOf(triangle));
+    if (position) return position;
+  }
+}
+function addItem([x, z], room = floor().rooms[0]) {
+  if (!room) return status(() => t('Add a room before placing items. Each item belongs to a room.'), true);
   const model = placementModelId ? getCatalogModel(placementModelId) : null, type = model ? model.type : $('place-type').value;
   const defaults = { furniture: [1.5, .75, .75, 0], lamp: [.3, .3, 1.4, 0], chandelier: [.55, .55, .35, Math.max(0, floor().height_m - .55)], tv: [1.3, .1, .8, .85], appliance: [.6, .65, .9, 0], switch: [.1, .05, .1, 1.2], outlet: [.1, .05, .1, .3], sensor: [.12, .08, .12, 1.8] };
   const [w, d, h, y] = defaults[type]; const safeHeight = Math.min(h, floor().height_m), safeY = Math.min(y, floor().height_m - safeHeight);
   const catalogDefaults = model ? modelDimensions(model, floor().height_m) : null;
   transact((_p, f) => {
-    const id = nextId(f, type), room = f.rooms.find(r => r.id === roomId) || f.rooms.find(r => pointInPolygon(point, r.polygon)) || f.rooms[0];
-    f.items.push({ id, name: model?.label || LABELS[type], type, room: room.id, position_m: { x: snap(point[0], precise), y: catalogDefaults?.elevation ?? round(safeY), z: snap(point[1], precise) }, dimensions_m: catalogDefaults?.dimensions || { width: w, depth: d, height: round(safeHeight) }, rotation_deg: 0, entity_id: '', notes: '', ...(model ? { model_id: model.id, style_id: model.default_style } : {}) }); selection = { kind: 'items', id };
+    const id = nextId(f, type);
+    f.items.push({ id, name: model?.label || LABELS[type], type, room: room.id, position_m: { x, y: catalogDefaults?.elevation ?? round(safeY), z }, dimensions_m: catalogDefaults?.dimensions || { width: w, depth: d, height: round(safeHeight) }, rotation_deg: 0, entity_id: '', notes: '', ...(model ? { model_id: model.id, style_id: model.default_style } : {}) }); selection = { kind: 'items', id };
   }, () => t('{item} placed. Change its finish, color, or size in Item details.', { item: model ? t(`model.${model.id}`) : t(LABELS[type]) }));
 }
 
@@ -864,8 +886,10 @@ function renderPlan() {
     path([w.start, w.end]); ctx.strokeStyle = active ? planColors.wallSelection : planColors.wall; ctx.lineWidth = Math.max(3, w.thickness_m * map.scale); ctx.lineCap = 'butt'; ctx.stroke();
     if (active) { for (const [i, p] of [w.start, w.end].entries()) { const [x, y] = toScreen(p); ctx.fillStyle = planColors.handle; ctx.strokeStyle = planColors.wallSelection; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.fillStyle = planColors.wallSelection; ctx.font = '9px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(t(i ? 'end' : 'start'), x + 7, y - 7); } }
   }
+  const wallsById = new Map();
+  if (f.openings.length) for (const wall of f.walls) wallsById.set(wall.id, wall);
   for (const o of f.openings) {
-    const w = f.walls.find(wall => wall.id === o.wall_id); if (!w) continue;
+    const w = wallsById.get(o.wall_id); if (!w) continue;
     const len = distance(w.start, w.end), ux = (w.end[0] - w.start[0]) / len, uz = (w.end[1] - w.start[1]) / len;
     const start = [w.start[0] + ux * o.offset_m, w.start[1] + uz * o.offset_m], end = [start[0] + ux * o.width_m, start[1] + uz * o.width_m];
     const active = selection?.kind === 'openings' && selection.id === o.id;
@@ -961,8 +985,11 @@ planCanvas.addEventListener('pointerdown', event => {
   event.preventDefault(); planCanvas.focus(); const screen = localPoint(event), world = toWorld(screen); planCanvas.setPointerCapture(event.pointerId);
   if (spaceHeld || event.shiftKey || event.button === 1) { drag = { kind: 'pan', pointerId: event.pointerId, screen, map: { ...map } }; planCanvas.style.cursor = 'grabbing'; return; }
   if (tool === 'room' || tool === 'wall') { const p = world.map(value => snap(value, event.altKey)); drag = { kind: 'draw', pointerId: event.pointerId, startWorld: p, endWorld: p, screen }; return; }
-  if (tool === 'door' || tool === 'window') { const near = wallAt(world); if (near) addOpening(near.wall, near.hit.offset, tool, event.altKey); else status(() => t('Click directly on an existing wall to add an opening.'), true); return; }
-  if (tool === 'item') { addItem(world, undefined, event.altKey); return; }
+  if (tool === 'door' || tool === 'window') { const near = wallAt(world); if (near) addOpening(near.wall, near.hit.offset, tool, { precise: event.altKey }); else status(() => t('Click directly on an existing wall to add an opening.'), true); return; }
+  if (tool === 'item') {
+    const room = floor().rooms.find(room => pointInPolygon(world, room.polygon));
+    addItem(world.map(value => snap(value, event.altKey)), room); return;
+  }
   const corner = roomHandleAt(screen);
   if (corner >= 0) {
     drag = { kind: 'resize', pointerId: event.pointerId, startWorld: world, original: project, selection: { ...selection }, corner, moved: false, offset: [0, 0] };
@@ -1205,6 +1232,12 @@ function rebuildPreview() {
     const mesh = new THREE.Mesh(geometry, material); mesh.position.set(...position); mesh.rotation.y = rotation; mesh.castShadow = opacity >= 1; mesh.receiveShadow = true; worldGroup.add(mesh); return mesh;
   };
   for (const f of previewFloors()) {
+    const openingsByWall = new Map(), noOpenings = [];
+    for (const opening of f.openings) {
+      const wallId = opening.wall_id, openings = openingsByWall.get(wallId);
+      if (openings) openings.push(opening);
+      else openingsByWall.set(wallId, [opening]);
+    }
     for (const r of f.rooms) {
       const shape = new THREE.Shape(); r.polygon.forEach((p, i) => { if (i) shape.lineTo(p[0], -p[1]); else shape.moveTo(p[0], -p[1]); }); shape.closePath();
       const geo = new THREE.ExtrudeGeometry(shape, { depth: .08, bevelEnabled: false }); geo.rotateX(-Math.PI / 2);
@@ -1212,11 +1245,12 @@ function rebuildPreview() {
     }
     for (const wall of f.walls) {
       const len = distance(wall.start, wall.end), dx = (wall.end[0] - wall.start[0]) / len, dz = (wall.end[1] - wall.start[1]) / len, angle = -Math.atan2(dz, dx);
-      for (const piece of wallPieces(wall, f.openings, f.height_m)) {
+      const openings = openingsByWall.get(wall.id) ?? noOpenings;
+      for (const piece of wallPieces(wall, openings, f.height_m)) {
         const center = piece.offset + piece.width / 2;
         box(piece.width, piece.height, wall.thickness_m, [wall.start[0] + dx * center, f.elevation_m + piece.bottom + piece.height / 2, wall.start[1] + dz * center], '#f5f2e8', angle); wallMeshCount++;
       }
-      for (const o of f.openings.filter(o => o.wall_id === wall.id)) {
+      for (const o of openings) {
         openingCount++;
         if (o.type === 'window') {
           const mid = o.offset_m + o.width_m / 2;

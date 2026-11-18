@@ -39,6 +39,7 @@ homeView = (() => {
   const commandError=message=>typeof message.error_key==='string' ? {key:message.error_key,params:message.error_params || {}} : message.error || {key:'The command could not be sent.'};
   let countdownTimer, moduleItem;
   let sequence = 0, zoom = 1, panX = 0, panY = 0, controlsCollapsed = false, toolbarHidden = false;
+  let sidebarOpenedForSearch = false;
   let navigationMode='rotate', homeRotation=0, homeTilt=0, mapLayer=null, mapConfig=null, mapDraft=null, mapReference=null, mapRevision=0, mapLoaded=false, mapLoading=false, mapSaving=false, mapBeforeEdit=null, pendingMapNavigation=null, mapFraming=null, mapBeforeRoom='', mapCoarseState=false;
   let mapSettingsError=false, mapTileStatus='', mapTileRetry=false;
   const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6m-5 3h4M8.5 14.5a6 6 0 1 1 7 0L15 16H9z"/></svg>';
@@ -437,11 +438,18 @@ homeView = (() => {
     refreshControls();
     if(typeof value.sidebarCollapsed!=='boolean')return;
     controlsCollapsed=value.sidebarCollapsed;
-    $('homeControls').hidden=controlsCollapsed;
-    document.querySelector('.home-layout').classList.toggle('controls-collapsed',controlsCollapsed);
-    $('homeToggleControls').textContent=vt(controlsCollapsed?'Show controls':'Hide controls');
-    $('homeToggleControls').setAttribute('aria-expanded',String(!controlsCollapsed));
-    requestAnimationFrame(()=>window.resizeModel?.());
+    sidebarOpenedForSearch=false;
+    updateSidebar();
+  }
+  function updateSidebar(){
+    const sidebar=$('homeControls'), collapsed=controlsCollapsed&&!sidebarOpenedForSearch;
+    const changed=sidebar.hidden!==collapsed;
+    sidebar.hidden=collapsed;
+    document.querySelector('.home-layout').classList.toggle('controls-collapsed',collapsed);
+    $('homeBackToPlan').toggleAttribute('data-temporary',sidebarOpenedForSearch);
+    $('homeToggleControls').textContent=vt(collapsed?'Show controls':'Hide controls');
+    $('homeToggleControls').setAttribute('aria-expanded',String(!collapsed));
+    if(changed)requestAnimationFrame(()=>window.resizeModel?.());
   }
   $('homeRoomLabels').onclick=()=>{
     applyViewPreferences({roomLabels:!roomLabels});
@@ -452,8 +460,20 @@ homeView = (() => {
     bridge?.postMessage({type:'view_preferences',deviceFilter});
   };
   $('homeToggleControls').onclick=()=>{
-    applyViewPreferences({sidebarCollapsed:!controlsCollapsed});
+    controlsCollapsed=!$('homeControls').hidden;
+    sidebarOpenedForSearch=false;
+    updateSidebar();
     bridge?.postMessage({type:'view_preferences',sidebarCollapsed:controlsCollapsed});
+  };
+  $('homeFindDevice').onclick=()=>{
+    if($('homeControls').hidden){sidebarOpenedForSearch=true;updateSidebar();}
+    $('homeDeviceSearch').focus();
+  };
+  $('homeBackToPlan').onclick=()=>{
+    if(sidebarOpenedForSearch){sidebarOpenedForSearch=false;updateSidebar();}
+    if(toolbarHidden){$('homeShowMenus').focus();return;}
+    const find=$('homeFindDevice');
+    (find.getClientRects().length?find:$('homeToggleControls')).focus();
   };
   $('homeHideMenus').onclick=()=>applyViewPreferences({toolbarHidden:true});
   $('homeShowMenus').onclick=()=>applyViewPreferences({toolbarHidden:false});
@@ -465,6 +485,7 @@ homeView = (() => {
 
   function setActive(value) {
     if(!value&&!canEdit)return;
+    if(!value&&sidebarOpenedForSearch){sidebarOpenedForSearch=false;updateSidebar();}
     cancelHomeGesture();cancelEditorGesture();
     hideMediaControls();cancelNativePress();
     markerMotion.reset();active = value;previewTV(null);if(typeof mapLayer!=='undefined')mapLayer?.setActive(value);
@@ -566,6 +587,39 @@ homeView = (() => {
   window.addEventListener('blur',()=>{cancelNativePress();nativePressPointers.clear();});
   window.addEventListener('pagehide',()=>{presenceView?.setVisible(false);clearMotion();cancelHomeGesture();cancelNativePress();nativePressPointers.clear();discardMediaControls();});
   document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelHomeGesture();cancelNativePress();nativePressPointers.clear();}refreshControls();});
+  const deviceSearch=$('homeDeviceSearch'), clearDeviceSearch=$('homeDeviceClear');
+  const normalizeDeviceSearch=text=>text.normalize('NFD').replace(/(\p{Script=Latin})\p{M}+/gu,'$1').normalize('NFC').toLowerCase();
+  let deviceSearchTerms=[];
+  function updateDeviceRows(){
+    let matches=0;
+    for(const point of points){
+      const visible=point.inDeviceList&&point.matchesSearch;
+      if(visible)matches++;
+      if(point.card.hidden===visible)point.card.hidden=!visible;
+      if(point.row!==point.card&&point.row.hidden===visible)point.row.hidden=!visible;
+    }
+    const status=$('homeDeviceSearchStatus');
+    const text=deviceSearchTerms.length?(matches?vt('{count} found',{count:matches}):vt('No matching devices in this view.')):'';
+    if(status.textContent!==text)status.textContent=text;
+    if(nativePress&&!nativePressReady(nativePress))cancelNativePress();
+  }
+  function searchDevices(){
+    deviceSearchTerms=normalizeDeviceSearch(deviceSearch.value).trim().split(/\s+/).filter(Boolean);
+    clearDeviceSearch.disabled=!deviceSearch.value;
+    for(const point of points)point.matchesSearch=deviceSearchTerms.every(term=>point.searchText.includes(term));
+    updateDeviceRows();
+  }
+  function resetDeviceSearch(){
+    deviceSearch.value='';
+    searchDevices();
+    deviceSearch.focus();
+  }
+  deviceSearch.addEventListener('input',searchDevices);
+  deviceSearch.addEventListener('keydown',event=>{
+    if(event.key!=='Escape'||!deviceSearch.value||event.isComposing)return;
+    event.preventDefault();event.stopPropagation();resetDeviceSearch();
+  });
+  clearDeviceSearch.onclick=resetDeviceSearch;
   function rebuildControls() {
     markerMotion.reset();deviceEffects.clear();
     hideMediaControls();cancelNativePress();
@@ -596,15 +650,17 @@ homeView = (() => {
       const text = document.createElement('span'), name = document.createElement('span'), detail = document.createElement('span');
       name.className = 'home-device-name'; name.textContent = item.name; detail.className = 'home-device-detail'; text.append(name,detail); card.append(symbol,text);
       if(!isAudio(item)){marker.onclick = () => activateDevice(item);card.onclick = () => activateDevice(item,false);}
-      let details;
+      let details,row=card;
       if(!isAudio(item)){
-        const row=document.createElement('div');row.className='home-device-row';
+        row=document.createElement('div');row.className='home-device-row';
         details=document.createElement('button');details.className='home-device-details';details.dataset.homeDetails=item.id;
-        details.onclick=()=>openEntityDetails(item);row.append(card,details);$('homeDeviceList').append(row);
-      }else $('homeDeviceList').append(card);
+        details.onclick=()=>openEntityDetails(item);row.append(card,details);
+      }
+      $('homeDeviceList').append(row);
       $('homeMarkers').append(marker);
       const position = new THREE.Vector3(item.position_m.x,item.position_m.y + item.dimensions_m.height / 2,item.position_m.z);
-      const point = {item,marker,card,detail,details,position,object:objectsById.get(item.id),original:model.inventory.find(i=>i.id===item.id),duplicateControl:isCover(item)&&points.some(p=>p.item.entity_id===item.entity_id)}; points.push(point);
+      const searchText=normalizeDeviceSearch(`${item.name} ${roomName(item.room)} ${item.entity_id||''}`);
+      const point = {item,marker,card,row,detail,details,position,searchText,matchesSearch:deviceSearchTerms.every(term=>searchText.includes(term)),object:objectsById.get(item.id),original:model.inventory.find(i=>i.id===item.id),duplicateControl:isCover(item)&&points.some(p=>p.item.entity_id===item.entity_id)}; points.push(point);
       if(isClimate(item)){
         point.climateReading=document.createElement('span');point.climateReading.className='climate-reading';marker.append(point.climateReading);
       }
@@ -704,8 +760,8 @@ homeView = (() => {
       }
       const passive=['sensor','binary_sensor','sun','weather','device_tracker','person','zone','event'].includes(item.entity_id?.split('.')[0]);
       const visible=(!selected || selected===item.room) && (deviceFilter==='all'||!passive);
-      card.hidden = marker.hidden = !visible || point.duplicateControl;
-      if(point.details)point.details.parentElement.hidden=card.hidden;
+      point.inDeviceList=visible&&!point.duplicateControl;
+      marker.hidden=!point.inDeviceList;
       marker.dataset.label=item.name;
       if((isMotion(item)||presenceSpec(item)) && !selected && state!=='on')marker.hidden=true;
       const enabled=isGeneric(item)?!unavailableStates.includes(state):isLock(item)?lockStates.includes(state):['on','off','open','closed','opening','closing'].includes(state);
@@ -772,7 +828,7 @@ homeView = (() => {
       if (visible && !counted.has(item.entity_id)) { counted.add(item.entity_id);total++; if(state==='on'){if(isMotion(item)||presenceSpec(item))motion++;else on++;} if(!enabled)unavailable++; }
     }
     refreshMotion();
-    if(nativePress&&!nativePressReady(nativePress))cancelNativePress();
+    updateDeviceRows();
     deviceEffects.sync();
     refreshTVPreviews();
     updateTelemetryPreviews(haStates,haConnected);
@@ -1010,8 +1066,9 @@ homeView = (() => {
     }
     assumedZones?.render(selected,signalZone);roomLighting?.update(points,camera);
     drawScene(camera);renderCount++;
-    for(const label of labels) label.el.textContent=(rect.width<600 ? roomCode(label.room) : roomName(label.room))+(label.power?' · '+label.power:'');
     for(const label of labels){
+      const caption=(rect.width<600?roomCode(label.room):roomName(label.room))+(label.power?' · '+label.power:'');
+      if(label.el.textContent!==caption)label.el.textContent=caption;
       const p=projectedPosition.copy(label.position).project(camera);
       label.el.style.left=((p.x+1)*rect.width/2)+'px';label.el.style.top=((1-p.y)*rect.height/2)+'px';
     }
@@ -1235,7 +1292,7 @@ homeView = (() => {
     window.addEventListener('pagehide',event=>{if(!event.persisted)assumedZones?.dispose();});
   }
   function refreshLanguage(){
-    $('homeToggleControls').textContent=vt(controlsCollapsed?'Show controls':'Hide controls');
+    $('homeToggleControls').textContent=vt($('homeControls').hidden?'Show controls':'Hide controls');
     for(const label of labels)label.el.setAttribute('aria-label',vt('Focus room')+': '+roomName(label.room));
   }
   return {get active(){return active},get mapStats(){return mapLayer?.stats;},configureMap,loadMap,exportNavigationState,applyNavigationState,captureTourPose,applyTourPose,releaseGPU(){presenceView?.setVisible(false);clearMotion();markerMotion.reset();deviceEffects.sync();roomLighting?.releaseGPU();mapLayer?.releaseGPU();},dispose(){activityDisposed=true;clearMotion();markerMotion.dispose();deviceEffects.dispose();cancelNativePress();roomLighting?.dispose();presenceView?.dispose();vacuumView?.dispose();mapLayer?.dispose();},dismissOverlays,refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,

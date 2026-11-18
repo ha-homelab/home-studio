@@ -154,6 +154,12 @@ changes. The handle also accepts Up/Down arrow keys in 5 cm steps, or 1 cm with
 Alt. Height is measured from the selected floor, and the whole item must fit
 between that floor and its ceiling.
 
+Select a wall and use **Add door** or **Add window** to place an opening without
+clicking the drawing. The editor finds the nearest gap wide enough for the
+opening when the middle of the wall is occupied. In Room details, **Place item
+at room center** puts the item's anchor inside the room, including in an
+L-shaped room. You can adjust both placements afterward in the inspector.
+
 Select a room to edit **Width (m)** and **Depth (m)**, or drag one of its four
 corner handles in 2D. Numeric dimensions scale the room from its minimum x/z
 corner; dragging keeps the opposite corner fixed. The walls and their openings

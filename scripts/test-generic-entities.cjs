@@ -6,7 +6,9 @@ const {browserLaunchOptions}=require('./browser-stability-diagnostics.cjs');
 const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tmpdir(),'home-generic-'));
 const screenshotDir=process.env.INDICATOR_QA_DIR;
 if(screenshotDir)fs.mkdirSync(screenshotDir,{recursive:true});
-const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_sensor.entry',thermostat:'climate.zone',vacuum:'vacuum.cleaner',action:'button.example',future:'custom_thing.future',fan:'fan.study',light:'light.fixture',missing:'sensor.missing',injected:'sensor.injected',range:'binary_sensor.cooktop',alarm:'binary_sensor.smoke',presence:'binary_sensor.presence',receiver1:'binary_sensor.receiver1',receiver2:'binary_sensor.receiver2'};
+const sharedEntityPrefix='binary_sensor.'+'fixture_'.repeat(16)+'side_';
+const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_sensor.entry',thermostat:'climate.zone',vacuum:'vacuum.cleaner',action:'button.example',future:'custom_thing.future',fan:'fan.study',light:'light.fixture',missing:'sensor.missing',injected:'sensor.injected',range:'binary_sensor.cooktop',alarm:'binary_sensor.smoke',presence:'binary_sensor.presence',receiver1:'binary_sensor.receiver1',receiver2:'binary_sensor.receiver2',
+ longIdOne:sharedEntityPrefix+'one',longIdTwo:sharedEntityPrefix+'two'};
 (async()=>{
  let browser,server;
  try{
@@ -65,6 +67,7 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   await page.waitForFunction(()=>messages.some(m=>m.type==='model_config'));
   await page.evaluate(()=>publish());
   const card=id=>frame.locator(`[data-home-device="${id}"]`);
+  const view=await (await page.locator('iframe').elementHandle()).contentFrame();
   async function holdForDetails(id){
    const before=await page.evaluate(()=>messages.filter(message=>message.type==='more_info').length);
    await card(id).hover();await page.mouse.down();
@@ -75,6 +78,44 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   }
   await card('cold').filter({hasText:'Temperature: -12.5 °C'}).waitFor();
   assert.equal(await frame.locator('[data-home-device]').count(),Object.keys(bindings).length,'every bound domain remains visible');
+  const search=frame.getByRole('searchbox',{name:'Search devices'});
+  const searchStatus=frame.locator('#homeDeviceSearchStatus');
+  await search.focus();
+  await view.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  const renderCount=await view.evaluate(()=>window.floorplan.renderCount);
+  const messagesBeforeSearch=await page.evaluate(()=>messages.length);
+  const summary=await frame.locator('#homeSummary').textContent();
+  await search.fill(' FAN  study ');
+  assert.equal(await searchStatus.textContent(),'1 found');
+  assert.equal(await card('fan').isVisible(),true);
+  assert.equal(await frame.locator('[data-home-device]:visible').count(),1);
+  assert.equal(await frame.locator('[data-home-details="light"]').isVisible(),false);
+  assert.equal(await frame.locator('[data-home-item="light"]').isVisible(),true,'search leaves the plan markers alone');
+  await search.fill(bindings.longIdTwo);
+  assert.equal(await search.inputValue(),bindings.longIdTwo,'the search box accepts a full 150-character entity ID');
+  assert.equal(await searchStatus.textContent(),'1 found');
+  assert.equal(await card('longIdOne').isVisible(),false,'search excludes the other device with the same prefix');
+  assert.equal(await card('longIdTwo').isVisible(),true);
+  await search.fill('unmatched device');
+  assert.equal(await searchStatus.textContent(),'No matching devices in this view.');
+  assert.equal(await frame.locator('#homeEmpty').isVisible(),false,'a search miss does not imply an empty plan');
+  await search.press('Escape');
+  assert.equal(await search.inputValue(),'');
+  assert.equal(await frame.locator('#homeSummary').textContent(),summary);
+  await view.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  assert.equal(await view.evaluate(()=>window.floorplan.renderCount),renderCount,'search does not ask WebGL to draw');
+  assert.equal(await page.evaluate(()=>messages.length),messagesBeforeSearch,'search never sends a host message');
+  await search.fill('sensor.cold');
+  await page.evaluate(()=>{states['sensor.cold'].state='-10';publish();});
+  await card('cold').filter({hasText:'Temperature: -10 °C'}).waitFor();
+  assert.equal(await frame.locator('[data-home-device]:visible').count(),1,'live readings do not clear the search');
+  await frame.locator('#homeDeviceFilter').selectOption('controls');
+  assert.equal(await card('cold').isVisible(),false,'search respects the device filter');
+  await frame.locator('#homeDeviceFilter').selectOption('all');
+  await frame.getByRole('button',{name:'Clear search'}).click();
+  assert.equal(await search.evaluate(input=>input===document.activeElement),true,'clearing restores keyboard focus');
+  await page.evaluate(()=>{states['sensor.cold'].state='-12.5';publish();});
+  await card('cold').filter({hasText:'Temperature: -12.5 °C'}).waitFor();
   assert.match(await card('entry').textContent(),/Door: Open/);
   assert.equal(await card('motion').getAttribute('data-kind'),'motion','late capability projection preserves specialized motion presentation');
   assert.match(await card('thermostat').textContent(),/Current: 18.2 °C.*Target: 20 °C.*Heating/);
@@ -104,7 +145,6 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   assert.equal(await frame.locator('.cooktop-flames').isVisible(),false);
   assert.equal(await frame.locator('.oven-glow').getAttribute('hidden'),null,'oven does not depend on cooktop state');
 
-  const view=await (await page.locator('iframe').elementHandle()).contentFrame();
   // Separate room presence from per-source movement, using the shipped viewer.
   const glow=frame.locator('.home-presence-indicator'),trails=frame.locator('[data-motion-trail]');
   const channelValue=(presence,motion)=>({presence,motion,coverage:'unverified'});
@@ -212,9 +252,15 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   }
   await page.waitForFunction(()=>messages.filter(m=>m.type==='toggle').length===2);
   assert.deepEqual(await page.evaluate(()=>messages.filter(m=>m.type==='toggle').map(m=>m.entity_id).sort()),['fan.study','light.fixture']);
+  const roomName=await frame.locator(`#homeRoom option[value="${template.room}"]`).textContent();
+  await search.fill(`${roomName} study`);
+  assert.equal(await searchStatus.textContent(),'1 found','a search can combine a room name with an entity ID');
   await frame.locator('#homeRoom').selectOption('living');
   assert.equal(await frame.locator('[data-home-details="fan"]').isVisible(),false,'Details follows room filtering');
+  assert.equal(await searchStatus.textContent(),'No matching devices in this view.');
   await frame.locator('#homeRoom').selectOption('');
+  assert.equal(await searchStatus.textContent(),'1 found','returning to the whole floor restores the active match');
+  await frame.getByRole('button',{name:'Clear search'}).click();
   for(const [state,label] of [['unknown','Unknown'],['unavailable','Unavailable']]){
    await page.evaluate(state=>{states['sensor.cold'].state=state;publish();},state);
    await card('cold').filter({hasText:label}).waitFor();

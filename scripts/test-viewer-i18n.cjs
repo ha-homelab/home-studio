@@ -19,7 +19,16 @@ const data = { locales, dictionaries }, english = dictionaries.en;
 const screenshotDir = process.env.VIEWER_I18N_QA_DIR || process.env.PLANNER_SCREENSHOT_DIR;
 const placeholders = value => [...value.matchAll(/\{([A-Za-z][A-Za-z0-9_]*)\}/g)].map(match => match[1]).sort();
 assert.equal(locales.length, 24);
-assert.ok(Object.keys(english).length <= 154, 'the viewer catalog stays scoped, including nine surroundings and ten indicator labels');
+const sidebarKeys = new Set([
+  'Find a device',
+  'Back to plan',
+  'Search devices',
+  'Clear search',
+  '{count} found',
+  'No matching devices in this view.',
+]);
+for (const key of sidebarKeys) assert.ok(Object.hasOwn(english, key), `missing sidebar translation: ${key}`);
+assert.ok(Object.keys(english).filter(key => !sidebarKeys.has(key)).length <= 154, 'the earlier viewer catalog stays scoped, including nine surroundings and ten indicator labels');
 for (const { code } of locales) {
   assert.deepEqual(Object.keys(dictionaries[code]).sort(), Object.keys(english).sort(), code);
   for (const key of Object.keys(english)) {
