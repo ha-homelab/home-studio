@@ -505,7 +505,7 @@ function modeScheduler(legacy=false,diffuse=false,canEdit=true) {
       getBoundingClientRect:()=>({width,height:600})});
     return elements.get(id);
   };
-  Object.assign(c,{active:true,canEdit,previewTV(){},lowerFloorContext:null,showLowerFloor:false,selected:null,
+  Object.assign(c,{active:true,canEdit,sidebarOpenedForSearch:false,updateSidebar(){},previewTV(){},lowerFloorContext:null,showLowerFloor:false,selected:null,
     cancelHomeGesture(){},cancelEditorGesture(){},syncViewerTours(){},
     hideMediaControls(){cleanups.push({kind:'media',active:c.active});},
     cancelNativePress(){cleanups.push({kind:'native',active:c.active});},
