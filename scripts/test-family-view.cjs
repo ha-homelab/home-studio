@@ -94,7 +94,7 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
   await page.evaluate(()=>channel.postMessage({type:'view_preferences',toolbarHidden:'true'}));
   assert.equal(await frame.locator('#homeToolbar').isVisible(),true,'nonboolean preference cannot hide controls');
   await page.setViewportSize({width:390,height:640});
-  const sidebarWrites=()=>page.evaluate(()=>messages.filter(message=>message.type==='view_preferences'&&'sidebarCollapsed' in message).length);
+  const sidebarWrites=()=>page.evaluate(()=>messages.filter(message => message.type === 'view_preferences' && ('sidebarCollapsed' in message)).length);
   const beforeJump=await sidebarWrites();
   await frame.getByRole('button',{name:'Find a device',exact:true}).click();
   assert.equal(await frame.locator('#homeControls').isVisible(),true,'mobile search can reopen a collapsed sidebar');
@@ -111,7 +111,7 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
   assert.equal(await sidebarWrites(),beforeJump);
   await frame.getByRole('button',{name:'Show controls',exact:true}).click();
   await page.waitForFunction(before=>{
-   const writes=messages.filter(message=>message.type==='view_preferences'&&'sidebarCollapsed' in message);
+   const writes=messages.filter(message => message.type === 'view_preferences' && ('sidebarCollapsed' in message));
    return writes.length===before+1&&writes.at(-1).sidebarCollapsed===false;
   },beforeJump);
   assert.equal(await frame.locator('#editLayout').isVisible(),false);
