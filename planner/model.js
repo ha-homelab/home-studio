@@ -53,13 +53,14 @@ export function projectOnWall(point, wall) {
   const nearest = [wall.start[0] + clamped * (wall.end[0] - wall.start[0]), wall.start[1] + clamped * (wall.end[1] - wall.start[1])];
   return { point: nearest, distance: distance(point, nearest), offset: clamped * len, length: len };
 }
-export function nearestOpeningOffset(wall, openings, width, preferred) {
+export function nearestOpeningOffset(wall, openings, width, preferred, snapped) {
   const cuts = openings.filter(opening => opening.wall_id === wall.id).sort((a, b) => a.offset_m - b.offset_m);
   cuts.push({ offset_m: distance(wall.start, wall.end), width_m: 0 });
   let gapStart = 0, nearest = null;
   for (const opening of cuts) {
     const latestStart = opening.offset_m - width;
     if (gapStart <= latestStart + EPS) {
+      if (snapped >= gapStart - EPS && snapped <= latestStart + EPS) return snapped;
       const offset = Math.max(gapStart, Math.min(latestStart, preferred));
       const rounded = round(offset);
       const candidate = rounded >= gapStart - EPS && rounded <= latestStart + EPS ? rounded : offset;

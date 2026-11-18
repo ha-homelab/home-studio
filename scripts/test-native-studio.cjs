@@ -53,10 +53,13 @@ async function testInspectorPlacement(context, origin, errors) {
       walls: [
         { id: 'shared_wall', start: [0, 0], end: [6, 0], thickness_m: .15 },
         { id: 'full_wall', start: [0, 7], end: [6, 7], thickness_m: .15 },
+        { id: 'asymmetric_wall', start: [0, 8], end: [6, 8], thickness_m: .15 },
+        { id: 'empty_wall', start: [0, 9], end: [6, 9], thickness_m: .15 },
       ],
       openings: [
         { id: 'central_window', wall_id: 'shared_wall', type: 'window', offset_m: 2.4, width_m: 1.2, sill_m: .7, head_m: 2.1 },
         { id: 'full_passage', wall_id: 'full_wall', type: 'passage', offset_m: 0, width_m: 6, sill_m: 0, head_m: 2.1 },
+        { id: 'asymmetric_passage', wall_id: 'asymmetric_wall', type: 'passage', offset_m: 2.65, width_m: .71, sill_m: 0, head_m: 2.1 },
       ], items: [],
     }] };
     await frame.locator('#file-input').setInputFiles({ name: 'placement.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(baseline)) });
@@ -65,18 +68,37 @@ async function testInspectorPlacement(context, origin, errors) {
     const selectObject = id => frame.locator(`#object-list [data-object-id="${id}"]`).press('Enter');
     const inspector = frame.locator('#inspector-body');
     const addDoor = inspector.getByRole('button', { name: 'Add door', exact: true });
+    const addWindow = inspector.getByRole('button', { name: 'Add window', exact: true });
+    assert(await frame.locator('#snap').isChecked());
     await selectObject('shared_wall'); await addDoor.press('Enter');
     const placed = await project();
-    const [existingWindow, existingPassage, newDoor] = placed.floors[0].openings;
-    assert.deepEqual([existingWindow, existingPassage], baseline.floors[0].openings);
+    const newDoor = placed.floors[0].openings.at(-1);
+    assert.deepEqual(placed.floors[0].openings.slice(0, -1), baseline.floors[0].openings);
     assert.deepEqual([newDoor.wall_id, newDoor.type, newDoor.width_m, newDoor.offset_m], ['shared_wall', 'door', .9, 1.5]);
     await frame.locator('#undo').press('Enter'); assert.deepEqual(await project(), baseline);
     await frame.locator('#redo').press('Enter'); assert.deepEqual(await project(), placed);
     await frame.locator('#undo').press('Enter'); assert.deepEqual(await project(), baseline);
 
+    await selectObject('asymmetric_wall'); await addWindow.press('Enter');
+    const nearestWindow = (await project()).floors[0].openings.at(-1);
+    assert.deepEqual([nearestWindow.wall_id, nearestWindow.width_m, nearestWindow.offset_m],
+      ['asymmetric_wall', 1.2, 1.45], 'Occupied wall falls back to the gap nearest its actual midpoint');
+    await frame.locator('#undo').press('Enter'); assert.deepEqual(await project(), baseline);
+
+    await selectObject('empty_wall'); await addWindow.press('Enter');
+    const snappedWindow = (await project()).floors[0].openings.at(-1);
+    assert.deepEqual([snappedWindow.wall_id, snappedWindow.width_m, snappedWindow.offset_m],
+      ['empty_wall', 1.2, 2.5], 'A clear wall preserves the regular snapped offset');
+    await frame.locator('#undo').press('Enter'); assert.deepEqual(await project(), baseline);
+
     await selectObject('full_wall'); await addDoor.press('Enter');
     assert.match(await frame.locator('#status').innerText(), /no space for a 0.9 m opening/);
     assert.deepEqual(await project(), baseline);
+    const language = frame.locator('#language-select');
+    await language.selectOption('de');
+    await frame.waitForFunction(() => document.querySelector('#status').textContent.includes('0.9 m breite Öffnung'));
+    await language.selectOption('en');
+    await frame.waitForFunction(() => document.documentElement.lang === 'en');
     await frame.locator('[data-tool="door"]').click();
     const [x, y] = await frame.evaluate(() => planner.worldToScreen([3, 0]));
     await frame.locator('#plan-canvas').click({ position: { x, y } });
@@ -95,7 +117,6 @@ async function testInspectorPlacement(context, origin, errors) {
     assert(insideRoom, 'The concave room receives the item inside the room');
     await frame.locator('#undo').press('Enter'); assert.deepEqual(await project(), baseline);
 
-    assert(await frame.locator('#snap').isChecked());
     await selectObject('narrow'); await placeAtCenter.press('Enter');
     const narrow = (await project()).floors[0].items[0];
     assert.equal(narrow.room, 'narrow');

@@ -800,9 +800,9 @@ function setView(next) {
 }
 function addOpening(wall, offset, type, { precise = false, findSpace = false } = {}) {
   const len = distance(wall.start, wall.end), width = round(Math.min(type === 'window' ? 1.2 : .9, Math.max(.05, len - .1)));
-  const preferred = snap(offset - width / 2, precise);
-  const start = findSpace ? nearestOpeningOffset(wall, floor().openings, width, preferred)
-    : round(Math.max(0, Math.min(len - width, preferred)));
+  const preferred = offset - width / 2;
+  const snapped = round(Math.max(0, Math.min(len - width, snap(preferred, precise))));
+  const start = findSpace ? nearestOpeningOffset(wall, floor().openings, width, preferred, snapped) : snapped;
   if (start === null) return status(() => t('This wall has no space for a {width} m opening. Choose another wall or adjust an existing opening.', { width }), true);
   const height = floor().height_m;
   transact((_p, f) => {

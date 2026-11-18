@@ -39,6 +39,7 @@ homeView = (() => {
   const commandError=message=>typeof message.error_key==='string' ? {key:message.error_key,params:message.error_params || {}} : message.error || {key:'The command could not be sent.'};
   let countdownTimer, moduleItem;
   let sequence = 0, zoom = 1, panX = 0, panY = 0, controlsCollapsed = false, toolbarHidden = false;
+  let sidebarOpenedForSearch = false;
   let navigationMode='rotate', homeRotation=0, homeTilt=0, mapLayer=null, mapConfig=null, mapDraft=null, mapReference=null, mapRevision=0, mapLoaded=false, mapLoading=false, mapSaving=false, mapBeforeEdit=null, pendingMapNavigation=null, mapFraming=null, mapBeforeRoom='', mapCoarseState=false;
   let mapSettingsError=false, mapTileStatus='', mapTileRetry=false;
   const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6m-5 3h4M8.5 14.5a6 6 0 1 1 7 0L15 16H9z"/></svg>';
@@ -437,11 +438,17 @@ homeView = (() => {
     refreshControls();
     if(typeof value.sidebarCollapsed!=='boolean')return;
     controlsCollapsed=value.sidebarCollapsed;
-    $('homeControls').hidden=controlsCollapsed;
-    document.querySelector('.home-layout').classList.toggle('controls-collapsed',controlsCollapsed);
-    $('homeToggleControls').textContent=vt(controlsCollapsed?'Show controls':'Hide controls');
-    $('homeToggleControls').setAttribute('aria-expanded',String(!controlsCollapsed));
-    requestAnimationFrame(()=>window.resizeModel?.());
+    sidebarOpenedForSearch=false;
+    updateSidebar();
+  }
+  function updateSidebar(){
+    const sidebar=$('homeControls'), collapsed=controlsCollapsed&&!sidebarOpenedForSearch;
+    const changed=sidebar.hidden!==collapsed;
+    sidebar.hidden=collapsed;
+    document.querySelector('.home-layout').classList.toggle('controls-collapsed',collapsed);
+    $('homeToggleControls').textContent=vt(collapsed?'Show controls':'Hide controls');
+    $('homeToggleControls').setAttribute('aria-expanded',String(!collapsed));
+    if(changed)requestAnimationFrame(()=>window.resizeModel?.());
   }
   $('homeRoomLabels').onclick=()=>{
     applyViewPreferences({roomLabels:!roomLabels});
@@ -451,16 +458,20 @@ homeView = (() => {
     applyViewPreferences({deviceFilter:$('homeDeviceFilter').value});
     bridge?.postMessage({type:'view_preferences',deviceFilter});
   };
-  function setSidebarCollapsed(sidebarCollapsed){
-    applyViewPreferences({sidebarCollapsed});
+  $('homeToggleControls').onclick=()=>{
+    controlsCollapsed=!$('homeControls').hidden;
+    sidebarOpenedForSearch=false;
+    updateSidebar();
     bridge?.postMessage({type:'view_preferences',sidebarCollapsed:controlsCollapsed});
-  }
-  $('homeToggleControls').onclick=()=>setSidebarCollapsed(!controlsCollapsed);
+  };
   $('homeFindDevice').onclick=()=>{
-    if(controlsCollapsed)setSidebarCollapsed(false);
+    if($('homeControls').hidden){sidebarOpenedForSearch=true;updateSidebar();}
     $('homeDeviceSearch').focus();
   };
-  $('homeBackToPlan').onclick=()=>(toolbarHidden?$('homeShowMenus'):$('homeFindDevice')).focus();
+  $('homeBackToPlan').onclick=()=>{
+    if(sidebarOpenedForSearch){sidebarOpenedForSearch=false;updateSidebar();}
+    (toolbarHidden?$('homeShowMenus'):$('homeFindDevice')).focus();
+  };
   $('homeHideMenus').onclick=()=>applyViewPreferences({toolbarHidden:true});
   $('homeShowMenus').onclick=()=>applyViewPreferences({toolbarHidden:false});
 
@@ -1277,7 +1288,7 @@ homeView = (() => {
     window.addEventListener('pagehide',event=>{if(!event.persisted)assumedZones?.dispose();});
   }
   function refreshLanguage(){
-    $('homeToggleControls').textContent=vt(controlsCollapsed?'Show controls':'Hide controls');
+    $('homeToggleControls').textContent=vt($('homeControls').hidden?'Show controls':'Hide controls');
     for(const label of labels)label.el.setAttribute('aria-label',vt('Focus room')+': '+roomName(label.room));
   }
   return {get active(){return active},get mapStats(){return mapLayer?.stats;},configureMap,loadMap,exportNavigationState,applyNavigationState,captureTourPose,applyTourPose,releaseGPU(){presenceView?.setVisible(false);clearMotion();markerMotion.reset();deviceEffects.sync();roomLighting?.releaseGPU();mapLayer?.releaseGPU();},dispose(){activityDisposed=true;clearMotion();markerMotion.dispose();deviceEffects.dispose();cancelNativePress();roomLighting?.dispose();presenceView?.dispose();vacuumView?.dispose();mapLayer?.dispose();},dismissOverlays,refreshLanguage,rebuildControls,refreshControls,refreshTVPreviews,render,handleCommandResult,setActive,applyViewPreferences,

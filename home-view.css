@@ -150,6 +150,7 @@
 .home-device-query{display:flex;flex-wrap:wrap;gap:6px}
 .home-device-query input{flex:1 1 9em;min-width:0;min-height:44px;padding-inline:10px;border:1px solid var(--line);border-radius:8px;background:#1b272f;color:inherit;font:inherit;font-size:16px}
 .home-device-query input:focus-visible{outline:3px solid #8ad4ef;outline-offset:3px}
+.home-device-query input::-webkit-search-cancel-button{display:none}
 #homeView .home-device-query button{min-height:44px}
 #homeDeviceSearchStatus{margin:4px 0 0}
 #homeDeviceSearchStatus:empty{margin:0}

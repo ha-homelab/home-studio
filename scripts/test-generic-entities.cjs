@@ -6,7 +6,9 @@ const {browserLaunchOptions}=require('./browser-stability-diagnostics.cjs');
 const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tmpdir(),'home-generic-'));
 const screenshotDir=process.env.INDICATOR_QA_DIR;
 if(screenshotDir)fs.mkdirSync(screenshotDir,{recursive:true});
-const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_sensor.entry',thermostat:'climate.zone',vacuum:'vacuum.cleaner',action:'button.example',future:'custom_thing.future',fan:'fan.study',light:'light.fixture',missing:'sensor.missing',injected:'sensor.injected',range:'binary_sensor.cooktop',alarm:'binary_sensor.smoke',presence:'binary_sensor.presence',receiver1:'binary_sensor.receiver1',receiver2:'binary_sensor.receiver2'};
+const sharedEntityPrefix='binary_sensor.'+'fixture_'.repeat(16)+'side_';
+const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_sensor.entry',thermostat:'climate.zone',vacuum:'vacuum.cleaner',action:'button.example',future:'custom_thing.future',fan:'fan.study',light:'light.fixture',missing:'sensor.missing',injected:'sensor.injected',range:'binary_sensor.cooktop',alarm:'binary_sensor.smoke',presence:'binary_sensor.presence',receiver1:'binary_sensor.receiver1',receiver2:'binary_sensor.receiver2',
+ longIdOne:sharedEntityPrefix+'one',longIdTwo:sharedEntityPrefix+'two'};
 (async()=>{
  let browser,server;
  try{
@@ -89,6 +91,11 @@ const bindings={cold:'sensor.cold',motion:'binary_sensor.motion',entry:'binary_s
   assert.equal(await frame.locator('[data-home-device]:visible').count(),1);
   assert.equal(await frame.locator('[data-home-details="light"]').isVisible(),false);
   assert.equal(await frame.locator('[data-home-item="light"]').isVisible(),true,'search leaves the plan markers alone');
+  await search.fill(bindings.longIdTwo);
+  assert.equal(await search.inputValue(),bindings.longIdTwo,'the search box accepts a full 150-character entity ID');
+  assert.equal(await searchStatus.textContent(),'1 found');
+  assert.equal(await card('longIdOne').isVisible(),false,'search excludes the other device with the same prefix');
+  assert.equal(await card('longIdTwo').isVisible(),true);
   await search.fill('unmatched device');
   assert.equal(await searchStatus.textContent(),'No matching devices in this view.');
   assert.equal(await frame.locator('#homeEmpty').isVisible(),false,'a search miss does not imply an empty plan');
