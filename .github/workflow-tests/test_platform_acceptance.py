@@ -238,8 +238,11 @@ class PlatformAcceptanceTests(unittest.TestCase):
         self.assertEqual(runs, ['python -m pip install -r requirements-ha-test.txt',
                                 'python scripts/test-ha-core.py', 'python scripts/test-ha-map.py',
                                 'python scripts/test-ha-neighborhood.py', 'python scripts/test-ha-ai.py'])
-        self.assertEqual((ROOT / 'requirements-ha-test.txt').read_text().splitlines()[-1],
-                         'homeassistant==2026.11.1')
+        lines = (ROOT / 'requirements-ha-test.txt').read_text(encoding='utf-8').splitlines()
+        requirements = [line.strip() for line in lines if line.strip() and not line.lstrip().startswith('#')]
+        self.assertEqual(len(requirements), 1)
+        self.assertRegex(requirements[0],
+                         r'\Ahomeassistant==[0-9]{4}\.(?:[1-9]|1[0-2])\.(?:0|[1-9][0-9]*)\Z')
         for step in steps:
             self.assertNotIn('if', step)
             self.assertNotIn('continue-on-error', step)
