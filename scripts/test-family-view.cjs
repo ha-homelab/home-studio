@@ -93,7 +93,13 @@ const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tm
   assert.equal(await frame.locator('#homeHideMenus').evaluate(node=>node===document.activeElement),true);
   await page.evaluate(()=>channel.postMessage({type:'view_preferences',toolbarHidden:'true'}));
   assert.equal(await frame.locator('#homeToolbar').isVisible(),true,'nonboolean preference cannot hide controls');
-  await frame.locator('#homeToggleControls').click();
+  await page.setViewportSize({width:390,height:640});
+  await frame.getByRole('button',{name:'Find a device',exact:true}).click();
+  assert.equal(await frame.locator('#homeControls').isVisible(),true,'mobile search can reopen a collapsed sidebar');
+  await frame.locator('#homeDeviceSearch:focus').waitFor();
+  await frame.getByRole('button',{name:'Back to plan',exact:true}).click();
+  await frame.locator('#homeFindDevice:focus').waitFor();
+  await page.setViewportSize({width:1200,height:850});
   assert.equal(await frame.locator('#editLayout').isVisible(),false);
   assert.equal(await frame.locator('aside').isVisible(),false);
   assert.equal(await frame.locator('aside').evaluate(node=>node.inert),true);

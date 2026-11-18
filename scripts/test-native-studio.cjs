@@ -38,6 +38,70 @@ document.getElementById('publication').textContent=saved?.published_project?.flo
 window.viewer=document.querySelector('home-floorplan-panel');
 viewer.hass={user:{id:'test-user',is_admin:true},states:{},callWS:async()=>({mode:saved?.mode||'native',has_editor:true,can_edit:true,site_features:false,floor:'ground',floors:['ground'],revision:1,items:[],readable_entities:[],controllable_entities:[],html:'<html><body>Published viewer navigation fixture</body></html>'})};
 </script></body></html>`;
+async function testInspectorPlacement(context, origin, errors) {
+  const page = await context.newPage(); page.setDefaultTimeout(15000);
+  page.on('pageerror', error => errors.push(String(error)));
+  try {
+    await page.goto(origin + '/fixture'); await page.waitForFunction(() => window.host?._ready);
+    const frame = page.frames().find(frame => frame.url().includes('embed='));
+    const baseline = { schema_version: 1, id: 'inspector_placement', title: 'Inspector placement', floors: [{
+      id: 'ground', name: 'Ground', elevation_m: 0, height_m: 2.8,
+      rooms: [
+        { id: 'concave', name: 'L-shaped room', polygon: [[0, 0], [6, 0], [6, 1], [1, 1], [1, 6], [0, 6]], material: 'floor' },
+        { id: 'narrow', name: 'Narrow room', polygon: [[8.025, 0], [8.105, 0], [8.105, 1], [8.025, 1]], material: 'floor' },
+      ],
+      walls: [
+        { id: 'shared_wall', start: [0, 0], end: [6, 0], thickness_m: .15 },
+        { id: 'full_wall', start: [0, 7], end: [6, 7], thickness_m: .15 },
+      ],
+      openings: [
+        { id: 'central_window', wall_id: 'shared_wall', type: 'window', offset_m: 2.4, width_m: 1.2, sill_m: .7, head_m: 2.1 },
+        { id: 'full_passage', wall_id: 'full_wall', type: 'passage', offset_m: 0, width_m: 6, sill_m: 0, head_m: 2.1 },
+      ], items: [],
+    }] };
+    await frame.locator('#file-input').setInputFiles({ name: 'placement.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(baseline)) });
+    await frame.waitForFunction(() => planner.getProject().id === 'inspector_placement');
+    const project = () => frame.evaluate(() => planner.getProject());
+    const selectObject = id => frame.locator(`#object-list [data-object-id="${id}"]`).press('Enter');
+    const inspector = frame.locator('#inspector-body');
+    const addDoor = inspector.getByRole('button', { name: 'Add door', exact: true });
+    await selectObject('shared_wall'); await addDoor.press('Enter');
+    const placed = await project();
+    const [existingWindow, existingPassage, newDoor] = placed.floors[0].openings;
+    assert.deepEqual([existingWindow, existingPassage], baseline.floors[0].openings);
+    assert.deepEqual([newDoor.wall_id, newDoor.type, newDoor.width_m, newDoor.offset_m], ['shared_wall', 'door', .9, 1.5]);
+    await frame.locator('#undo').press('Enter'); assert.deepEqual(await project(), baseline);
+    await frame.locator('#redo').press('Enter'); assert.deepEqual(await project(), placed);
+    await frame.locator('#undo').press('Enter'); assert.deepEqual(await project(), baseline);
+
+    await selectObject('full_wall'); await addDoor.press('Enter');
+    assert.match(await frame.locator('#status').innerText(), /no space for a 0.9 m opening/);
+    assert.deepEqual(await project(), baseline);
+    await frame.locator('[data-tool="door"]').click();
+    const [x, y] = await frame.evaluate(() => planner.worldToScreen([3, 0]));
+    await frame.locator('#plan-canvas').click({ position: { x, y } });
+    assert.match(await frame.locator('#status').innerText(), /Openings on the same wall cannot overlap/);
+    assert.deepEqual(await project(), baseline, 'Clicking a wall still uses the pointed position');
+
+    const placeAtCenter = inspector.getByRole('button', { name: 'Place item at room center', exact: true });
+    await selectObject('concave'); await placeAtCenter.press('Enter');
+    const item = (await project()).floors[0].items[0];
+    assert.equal(item.room, 'concave');
+    const insideRoom = await frame.evaluate(async item => {
+      const { pointInPolygon } = await import('./model.js');
+      const room = planner.getProject().floors[0].rooms.find(room => room.id === item.room);
+      return pointInPolygon([item.position_m.x, item.position_m.z], room.polygon, false);
+    }, item);
+    assert(insideRoom, 'The concave room receives the item inside the room');
+    await frame.locator('#undo').press('Enter'); assert.deepEqual(await project(), baseline);
+
+    assert(await frame.locator('#snap').isChecked());
+    await selectObject('narrow'); await placeAtCenter.press('Enter');
+    const narrow = (await project()).floors[0].items[0];
+    assert.equal(narrow.room, 'narrow');
+    assert.equal(narrow.position_m.x, 8.065, 'The room center stays inside even when the 25 cm grid cannot fit');
+  } finally { await page.close(); }
+}
 async function testGestureRecovery(context, origin, errors) {
   const page = await context.newPage(); page.setDefaultTimeout(15000);
   page.on('pageerror', error => errors.push(String(error))); page.on('dialog', dialog => dialog.accept());
@@ -1210,6 +1274,7 @@ if (require.main === module) (async()=>{
   await checkMobileWidths();
   await mobileContext.close();
   await testGestureRecovery(context, origin, errors);
+  await testInspectorPlacement(context, origin, errors);
   await testModelExportAndConnection(context, origin, project, errors);
   await require('./device-onboarding-browser-check.cjs')(context, origin, errors);
   assert.deepEqual(errors,[]);

@@ -53,6 +53,22 @@ export function projectOnWall(point, wall) {
   const nearest = [wall.start[0] + clamped * (wall.end[0] - wall.start[0]), wall.start[1] + clamped * (wall.end[1] - wall.start[1])];
   return { point: nearest, distance: distance(point, nearest), offset: clamped * len, length: len };
 }
+export function nearestOpeningOffset(wall, openings, width, preferred) {
+  const cuts = openings.filter(opening => opening.wall_id === wall.id).sort((a, b) => a.offset_m - b.offset_m);
+  cuts.push({ offset_m: distance(wall.start, wall.end), width_m: 0 });
+  let gapStart = 0, nearest = null;
+  for (const opening of cuts) {
+    const latestStart = opening.offset_m - width;
+    if (gapStart <= latestStart + EPS) {
+      const offset = Math.max(gapStart, Math.min(latestStart, preferred));
+      const rounded = round(offset);
+      const candidate = rounded >= gapStart - EPS && rounded <= latestStart + EPS ? rounded : offset;
+      if (nearest === null || Math.abs(candidate - preferred) < Math.abs(nearest - preferred)) nearest = candidate;
+    }
+    gapStart = opening.offset_m + opening.width_m;
+  }
+  return nearest;
+}
 export function nextId(floor, prefix) {
   const ids = new Set(['rooms', 'walls', 'openings', 'items'].flatMap(key => floor[key].map(item => item.id)));
   let i = 1; while (ids.has(`${prefix}_${i}`)) i++;

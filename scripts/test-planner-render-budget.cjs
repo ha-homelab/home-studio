@@ -80,6 +80,42 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   const model = await import('../planner/model.js');
   const { moveRoom } = await import('../planner/room-transform.js');
   const { createEnvironmentLayer } = await import('../planner/environment.js');
+  const denseProject = model.blankProject(), denseFloor = denseProject.floors[0];
+  for (let i = 0; i < model.LIMITS.walls; i++) {
+    const z = i / 2 - 64;
+    denseFloor.walls.push({id: `wall_${i}`, start: [0, z], end: [8, z], thickness_m: .15});
+  }
+  for (let i = 0; i < model.LIMITS.openings; i++) {
+    // Keep the last wall bare and place two windows in reverse offset order on its neighbor.
+    const sharedWall = denseFloor.walls.length - 2, type = i >= sharedWall ? 'window' : ['door', 'window', 'passage'][i % 3];
+    denseFloor.openings.push({id: `opening_${i}`, wall_id: `wall_${Math.min(i, sharedWall)}`, type,
+      offset_m: i === sharedWall ? 4 : 1, width_m: .9, sill_m: type === 'window' ? 1 : 0, head_m: 2});
+  }
+  model.validateProject(denseProject);
+  let wallIdReads = 0, openingWallReads = 0;
+  const trackedFloor = {...denseFloor,
+    walls: denseFloor.walls.map(({id, ...wall}) => ({...wall, get id() { wallIdReads++; return id; }})),
+    openings: denseFloor.openings.map(({wall_id, ...opening}) => ({...opening, get wall_id() { openingWallReads++; return wall_id; }}))};
+  const wallsById = new Map(denseFloor.walls.map(wall => [wall.id, wall]));
+  const gapPaths = [];
+  let pathPoints = [];
+  const context2D = vm.createContext({
+    view: 'plan', canvasSuspended: false, document: {hidden: false}, cancelCanvasRender() {},
+    size: {width: 1000, height: 700}, map: {x: 0, y: 0, scale: 20}, planColors: {background: '#fff'},
+    siteEditor: null, displayedFloor: () => trackedFloor, selection: null, drag: null, candidatePreview: null,
+    t: value => value, distance: model.distance,
+    ctx: {clearRect() {}, fillRect() {}, fillText() {}, setLineDash() {}, arc() {},
+      beginPath() { pathPoints = []; }, moveTo(x, y) { pathPoints.push([x, y]); }, lineTo(x, y) { pathPoints.push([x, y]); },
+      stroke() { if (this.strokeStyle === '#fff') gapPaths.push(pathPoints); }},
+  });
+  vm.runInContext(section('const toScreen =', 'function wallAt('), context2D);
+  context2D.renderPlan();
+  assert(wallIdReads <= denseFloor.walls.length, `Plan read ${wallIdReads} wall IDs for ${denseFloor.walls.length} walls`);
+  assert(openingWallReads <= denseFloor.openings.length, `Plan read ${openingWallReads} wall references for ${denseFloor.openings.length} openings`);
+  assert.deepEqual(gapPaths, denseFloor.openings.map(opening => {
+    const z = wallsById.get(opening.wall_id).start[1], x = opening.offset_m;
+    return [[x * 20, z * 20], [(x + opening.width_m) * 20, z * 20]];
+  }), 'Plan draws every opening at the original location and in the original order');
   const project = model.blankProject(), f = project.floors[0];
   f.rooms.push({id: 'room', name: 'Room', polygon: [[0, 0], [8, 0], [8, 6], [0, 6]], material: 'floor'});
   f.walls.push({id: 'wall', start: [0, 0], end: [8, 0], thickness_m: .15});
@@ -280,6 +316,22 @@ const scheduler = section('let canvasFrame =', 'let startupMessage =');
   assert([...oldMaterials.values()].every(count => count === 1), 'Every material is disposed exactly once');
   sharedWorld.traverse(object => { if (object.geometry) assert(!oldGeometry.has(object.geometry), 'A rebuild never reuses a disposed GPU resource'); });
   shared.disposePreviewGeometry(); assert.equal(sharedWorld.children.length, 0);
+
+  shared.previewFloors = () => [trackedFloor];
+  openingWallReads = 0;
+  shared.rebuildPreview();
+  assert(openingWallReads <= 2 * denseFloor.openings.length,
+    `Preview read ${openingWallReads} wall references for ${denseFloor.openings.length} openings`);
+  const windows = denseFloor.openings.filter(opening => opening.type === 'window');
+  const solidPieces = denseFloor.walls.length + 2 * denseFloor.openings.length + windows.length;
+  assert.equal(shared.previewMetadata.wallSolidPieces, solidPieces);
+  assert.equal(shared.previewMetadata.openings, denseFloor.openings.length);
+  const glazing = sharedWorld.children.filter(mesh => mesh.material.opacity === .22);
+  assert.deepEqual(glazing.map(mesh => mesh.position.toArray()), windows.map(opening => [
+    opening.offset_m + opening.width_m / 2, (opening.sill_m + opening.head_m) / 2, wallsById.get(opening.wall_id).start[1],
+  ]), 'Preview retains window placement and per-wall drawing order');
+  shared.disposePreviewGeometry();
+  shared.previewFloors = () => catalogProject.floors;
 
   // Software batching retains expanded geometry, colors and world transforms.
   // Intersecting items and transparent architecture keep their original order.

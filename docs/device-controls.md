@@ -103,6 +103,12 @@ version of HA. This feature does not install a separate remote-control dashboard
 or promise buttons the device does not support.
 
 Keyboard and touch users can select the explicit **Details** button.
+Use **Search devices** in the sidebar to find a device by its name, room, or
+Home Assistant entity ID. Results respect the selected room and device filter.
+On a phone, **Find a device** jumps from the toolbar to the search box, and
+**Back to plan** takes you back to the toolbar. **Clear search** or Escape in
+the search box restores the list for the current view.
+
 Audio controls also have an explicit **Controls** button in the artwork preview.
 Escape or a click outside dismisses the compact audio remote. Full HA dialogs use
 HA's normal close behavior. Quick toggles remain deliberate clicks.

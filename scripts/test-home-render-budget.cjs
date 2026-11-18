@@ -360,7 +360,9 @@ const root = path.resolve(__dirname, '..');
   let allocations = 0;
   class TrackedVector extends THREE.Vector3 { constructor(...args) { super(...args); allocations++; } }
   const rect = {width: 1200, height: 700};
-  const label = {room: 'A', position: new THREE.Vector3(2, .06, 2), el: {style: {}}};
+  let labelText='', labelWrites=0;
+  const label = {room: 'A', position: new THREE.Vector3(2, .06, 2), el: {style: {},
+    get textContent() { return labelText; }, set textContent(text) { labelText=text; labelWrites++; }}};
   const context = vm.createContext({
     THREE: {...THREE, Vector3: TrackedVector}, active: true, renderProfile: {pointShadows:8, pointShadowSize:512}, renderer: {}, camera: undefined, cameraFit: undefined, houseFitBounds: undefined, root: new THREE.Group(),
     projectedPosition: new THREE.Vector3(), projectedForward: new THREE.Vector3(),
@@ -372,7 +374,7 @@ const root = path.resolve(__dirname, '..');
     ]},
     xm: x => x, zm: z => z, $: id => id === 'homeStage' ? {getBoundingClientRect: () => rect} : {},
     roomLighting: null, lowerFloorContext: null, assumedZones: null, presenceView: null, vacuumView: null, signalZone: '', showLowerFloor: true,
-    labels: [label], points: [], motionTracks: new Map(), roomCode: id => id, roomName: id => id,
+    labels: [label], points: [], motionTracks: new Map(), roomCode: id => id, roomName: id => `Room ${id}`,
     refreshSignalStatus() {}, drawScene() {}, positionMediaPreviews() {}, renderCount: 0,
   });
   const home = fs.readFileSync(path.join(root, 'home-view.js'), 'utf8');
@@ -417,6 +419,10 @@ const root = path.resolve(__dirname, '..');
   assert.equal(allocations, initialAllocations, 'Repeated state/media frames allocate no room or label vectors');
   assert.equal(context.cameraFit, firstFit, 'Repeated frames retain the room fit');
   assert.deepEqual(label.el.style, initialLabel, 'Marker projection is unchanged');
+  assert.equal(labelWrites,1,'Unchanged captions do not replace text nodes as the plan is drawn');
+  label.power='12 W';context.render();
+  assert.equal(labelText,'Room A · 12 W');
+  assert.equal(labelWrites,2,'A new reading updates the caption');
   context.panX = 2; context.panY = -1; context.render();
   assert.equal(context.camera.left, initialLeft + 2);
   assert.equal(context.camera.top, initialTop - 1);
@@ -451,6 +457,8 @@ const root = path.resolve(__dirname, '..');
   const selectedFit = context.cameraFit;
   rect.width = 390; rect.height = 844; context.render();
   assert.notEqual(context.cameraFit, selectedFit, 'Portrait orientation refreshes the fit');
+  assert.equal(labelText,'A · 12 W','Portrait mode still abbreviates the room caption');
+  assert.equal(labelWrites,3,'Camera movement leaves the caption alone until the text actually changes');
   fitInsideView();
   const portraitFit = context.cameraFit;
   rect.width = 430; context.render();

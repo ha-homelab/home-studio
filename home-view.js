@@ -451,10 +451,16 @@ homeView = (() => {
     applyViewPreferences({deviceFilter:$('homeDeviceFilter').value});
     bridge?.postMessage({type:'view_preferences',deviceFilter});
   };
-  $('homeToggleControls').onclick=()=>{
-    applyViewPreferences({sidebarCollapsed:!controlsCollapsed});
+  function setSidebarCollapsed(sidebarCollapsed){
+    applyViewPreferences({sidebarCollapsed});
     bridge?.postMessage({type:'view_preferences',sidebarCollapsed:controlsCollapsed});
+  }
+  $('homeToggleControls').onclick=()=>setSidebarCollapsed(!controlsCollapsed);
+  $('homeFindDevice').onclick=()=>{
+    if(controlsCollapsed)setSidebarCollapsed(false);
+    $('homeDeviceSearch').focus();
   };
+  $('homeBackToPlan').onclick=()=>(toolbarHidden?$('homeShowMenus'):$('homeFindDevice')).focus();
   $('homeHideMenus').onclick=()=>applyViewPreferences({toolbarHidden:true});
   $('homeShowMenus').onclick=()=>applyViewPreferences({toolbarHidden:false});
 
@@ -566,6 +572,39 @@ homeView = (() => {
   window.addEventListener('blur',()=>{cancelNativePress();nativePressPointers.clear();});
   window.addEventListener('pagehide',()=>{presenceView?.setVisible(false);clearMotion();cancelHomeGesture();cancelNativePress();nativePressPointers.clear();discardMediaControls();});
   document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelHomeGesture();cancelNativePress();nativePressPointers.clear();}refreshControls();});
+  const deviceSearch=$('homeDeviceSearch'), clearDeviceSearch=$('homeDeviceClear');
+  const normalizeDeviceSearch=text=>text.normalize('NFD').replace(/(\p{Script=Latin})\p{M}+/gu,'$1').normalize('NFC').toLowerCase();
+  let deviceSearchTerms=[];
+  function updateDeviceRows(){
+    let matches=0;
+    for(const point of points){
+      const visible=point.inDeviceList&&point.matchesSearch;
+      if(visible)matches++;
+      if(point.card.hidden===visible)point.card.hidden=!visible;
+      if(point.row!==point.card&&point.row.hidden===visible)point.row.hidden=!visible;
+    }
+    const status=$('homeDeviceSearchStatus');
+    const text=deviceSearchTerms.length?(matches?vt('{count} found',{count:matches}):vt('No matching devices in this view.')):'';
+    if(status.textContent!==text)status.textContent=text;
+    if(nativePress&&!nativePressReady(nativePress))cancelNativePress();
+  }
+  function searchDevices(){
+    deviceSearchTerms=normalizeDeviceSearch(deviceSearch.value).trim().split(/\s+/).filter(Boolean);
+    clearDeviceSearch.disabled=!deviceSearch.value;
+    for(const point of points)point.matchesSearch=deviceSearchTerms.every(term=>point.searchText.includes(term));
+    updateDeviceRows();
+  }
+  function resetDeviceSearch(){
+    deviceSearch.value='';
+    searchDevices();
+    deviceSearch.focus();
+  }
+  deviceSearch.addEventListener('input',searchDevices);
+  deviceSearch.addEventListener('keydown',event=>{
+    if(event.key!=='Escape'||!deviceSearch.value||event.isComposing)return;
+    event.preventDefault();event.stopPropagation();resetDeviceSearch();
+  });
+  clearDeviceSearch.onclick=resetDeviceSearch;
   function rebuildControls() {
     markerMotion.reset();deviceEffects.clear();
     hideMediaControls();cancelNativePress();
@@ -596,15 +635,17 @@ homeView = (() => {
       const text = document.createElement('span'), name = document.createElement('span'), detail = document.createElement('span');
       name.className = 'home-device-name'; name.textContent = item.name; detail.className = 'home-device-detail'; text.append(name,detail); card.append(symbol,text);
       if(!isAudio(item)){marker.onclick = () => activateDevice(item);card.onclick = () => activateDevice(item,false);}
-      let details;
+      let details,row=card;
       if(!isAudio(item)){
-        const row=document.createElement('div');row.className='home-device-row';
+        row=document.createElement('div');row.className='home-device-row';
         details=document.createElement('button');details.className='home-device-details';details.dataset.homeDetails=item.id;
-        details.onclick=()=>openEntityDetails(item);row.append(card,details);$('homeDeviceList').append(row);
-      }else $('homeDeviceList').append(card);
+        details.onclick=()=>openEntityDetails(item);row.append(card,details);
+      }
+      $('homeDeviceList').append(row);
       $('homeMarkers').append(marker);
       const position = new THREE.Vector3(item.position_m.x,item.position_m.y + item.dimensions_m.height / 2,item.position_m.z);
-      const point = {item,marker,card,detail,details,position,object:objectsById.get(item.id),original:model.inventory.find(i=>i.id===item.id),duplicateControl:isCover(item)&&points.some(p=>p.item.entity_id===item.entity_id)}; points.push(point);
+      const searchText=normalizeDeviceSearch(`${item.name} ${roomName(item.room)} ${item.entity_id||''}`);
+      const point = {item,marker,card,row,detail,details,position,searchText,matchesSearch:deviceSearchTerms.every(term=>searchText.includes(term)),object:objectsById.get(item.id),original:model.inventory.find(i=>i.id===item.id),duplicateControl:isCover(item)&&points.some(p=>p.item.entity_id===item.entity_id)}; points.push(point);
       if(isClimate(item)){
         point.climateReading=document.createElement('span');point.climateReading.className='climate-reading';marker.append(point.climateReading);
       }
@@ -704,8 +745,8 @@ homeView = (() => {
       }
       const passive=['sensor','binary_sensor','sun','weather','device_tracker','person','zone','event'].includes(item.entity_id?.split('.')[0]);
       const visible=(!selected || selected===item.room) && (deviceFilter==='all'||!passive);
-      card.hidden = marker.hidden = !visible || point.duplicateControl;
-      if(point.details)point.details.parentElement.hidden=card.hidden;
+      point.inDeviceList=visible&&!point.duplicateControl;
+      marker.hidden=!point.inDeviceList;
       marker.dataset.label=item.name;
       if((isMotion(item)||presenceSpec(item)) && !selected && state!=='on')marker.hidden=true;
       const enabled=isGeneric(item)?!unavailableStates.includes(state):isLock(item)?lockStates.includes(state):['on','off','open','closed','opening','closing'].includes(state);
@@ -772,7 +813,7 @@ homeView = (() => {
       if (visible && !counted.has(item.entity_id)) { counted.add(item.entity_id);total++; if(state==='on'){if(isMotion(item)||presenceSpec(item))motion++;else on++;} if(!enabled)unavailable++; }
     }
     refreshMotion();
-    if(nativePress&&!nativePressReady(nativePress))cancelNativePress();
+    updateDeviceRows();
     deviceEffects.sync();
     refreshTVPreviews();
     updateTelemetryPreviews(haStates,haConnected);
@@ -1010,8 +1051,9 @@ homeView = (() => {
     }
     assumedZones?.render(selected,signalZone);roomLighting?.update(points,camera);
     drawScene(camera);renderCount++;
-    for(const label of labels) label.el.textContent=(rect.width<600 ? roomCode(label.room) : roomName(label.room))+(label.power?' · '+label.power:'');
     for(const label of labels){
+      const caption=(rect.width<600?roomCode(label.room):roomName(label.room))+(label.power?' · '+label.power:'');
+      if(label.el.textContent!==caption)label.el.textContent=caption;
       const p=projectedPosition.copy(label.position).project(camera);
       label.el.style.left=((p.x+1)*rect.width/2)+'px';label.el.style.top=((1-p.y)*rect.height/2)+'px';
     }

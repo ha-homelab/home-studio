@@ -144,6 +144,16 @@
 /* Keep full controls reachable without turning the entire row into a nested button. */
 .home-device-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px;align-items:stretch}
 .home-device-row[hidden]{display:none}
+#homeView .home-sidebar-jump{display:none}
+.home-device-search{margin-block:10px 14px}
+.home-device-search label{display:block;margin-block-end:5px;font-size:12px}
+.home-device-query{display:flex;flex-wrap:wrap;gap:6px}
+.home-device-query input{flex:1 1 9em;min-width:0;min-height:44px;padding-inline:10px;border:1px solid var(--line);border-radius:8px;background:#1b272f;color:inherit;font:inherit;font-size:16px}
+.home-device-query input:focus-visible{outline:3px solid #8ad4ef;outline-offset:3px}
+#homeView .home-device-query button{min-height:44px}
+#homeDeviceSearchStatus{margin:4px 0 0}
+#homeDeviceSearchStatus:empty{margin:0}
+@media(max-width:950px){#homeView .home-sidebar-jump{display:inline-flex;align-items:center;min-height:44px}}
 .home-device-details{font-size:11px;padding:5px;border:1px solid #427386;border-radius:9px;background:#1c303a;color:#d1f1fb}
 .home-device-details:focus-visible{outline:2px solid #5de1ff;outline-offset:2px}
 
