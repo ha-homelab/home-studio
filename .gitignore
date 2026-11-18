@@ -24,3 +24,4 @@ acceptance-artifacts/
 
 # Optional local environment for rendering documentation charts.
 .venv-docs/
+A*S.md
