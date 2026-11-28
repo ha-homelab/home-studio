@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self'; font-src 'self'; connect-src 'self' https://api.github.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self'; font-src 'self'; connect-src 'self' https://api.github.com https://cloudflareinsights.com; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Draw your home inside Home Assistant. Start with measurements or a photo-assisted AI draft, refine it by hand, link devices, and publish an interactive 3D dashboard.">
@@ -10,6 +10,10 @@
   <link rel="stylesheet" href="./planner/guide.css">
   <link rel="stylesheet" href="./site.css">
   <script type="module" src="./site-experience.js"></script>
+<!-- page-counter -->
+<script type='module'
+        src='https://static.cloudflareinsights.com/beacon.min.js'
+        data-cf-beacon='{"token": "7a8f3862c39c4752b180365c562f5d56"}'></script>
 </head>
 <body class="home-landing">
   <a class="skip-link" href="#start">Skip to the introduction</a>

@@ -292,6 +292,10 @@ def validate(root):
         for tag, key, link in parser.links:
             parsed = urlsplit(link)
             if parsed.scheme or parsed.netloc:
+                # Cloudflare Web Analytics is the single reviewed remote script:
+                # cookieless aggregate counts, disclosed in privacy.html.
+                if parsed.netloc == 'static.cloudflareinsights.com':
+                    continue
                 if tag != 'a' or parsed.scheme not in ('https', 'http'):
                     raise ValueError(f'External executable/resource or unsafe URL in {relative}: {link}')
                 continue
